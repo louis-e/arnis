@@ -13,8 +13,9 @@ use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
     scale_to_minecraft,
 };
-use provider::ElevationProvider;
+use provider::{ElevationProvider, RawElevationGrid};
 use selector::select_provider;
+pub use selector::SourceMode;
 
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
@@ -43,23 +44,8 @@ pub struct ElevationData {
 }
 
 /// Maximum elevation grid dimension requested from providers per axis.
-///
-/// This is the *stitched* ceiling — internally each single-request
-/// provider (USGS 3DEP, IGN France, IGN Spain) splits the bbox into
-/// sub-tiles that respect its own documented per-request cap and stitches
-/// the results. Tile-based providers (AWS Terrain Tiles, Japan GSI)
-/// already fetch at their native tile granularity and ignore this cap
-/// structurally.
-///
-/// Per-provider single-request caps (defined in `providers::regional`
-/// as `USGS_MAX_SINGLE` / `IGN_*_MAX_SINGLE` — see those constants for
-/// the empirical measurements behind each value):
-///   - USGS 3DEP (ArcGIS ImageServer): 2048 × 2048 per request
-///     (documented cap is 8000, but the server returns HTTP 500 past
-///     ~3000 even though the LiDAR is 1 m native; 2048 is the reliable
-///     sweet spot)
-///   - IGN France (WMS 1.3.0): 4096 × 4096 per request
-///   - IGN Spain (WCS 2.0.1): 4096 × 4096 per request
+/// Providers fetch at their own tile granularity and resample onto the
+/// requested grid, so this cap only bounds the output grid itself.
 ///
 /// Chosen value 16384 covers bboxes up to ~256 km² at the default
 /// `--scale 1.0` without losing native resolution. The precision
@@ -97,8 +83,8 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
 
 /// Fetch elevation data for the given bounding box.
 ///
-/// Automatically selects the best available elevation provider for the region,
-/// falling back to AWS Terrain Tiles for global coverage.
+/// Selects the best provider for the region, with a fetch-time fallback
+/// chain: regional provider, then Mapterhorn, then AWS Terrain Tiles.
 ///
 /// If `land_cover` is provided, applies land-cover-aware artifact repair
 /// (water leveling, built-up smoothing) before scaling. This fixes LiDAR
@@ -114,67 +100,25 @@ pub fn fetch_elevation_data(
     disable_height_limit: bool,
     extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
-    aws_only: bool,
+    source_mode: SourceMode,
     benchmark: bool,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
-    // Select the best provider for this region. When `aws_only` is set the
-    // user opted out of the regional high-res providers in favor of a faster
-    // run, so we skip straight to AWS Terrain Tiles.
-    let provider = select_provider(bbox, aws_only);
-    let provider_name = provider.name();
-    let is_fallback = provider_name == "aws";
+    // Fallback chain: selected provider, then Mapterhorn, then AWS.
+    let provider = select_provider(bbox, source_mode);
+    let mut chain: Vec<Box<dyn ElevationProvider>> = vec![provider];
+    if chain[0].name() != "mapterhorn" && chain[0].name() != "aws" {
+        chain.push(Box::new(providers::mapterhorn::Mapterhorn));
+    }
+    if chain[0].name() != "aws" {
+        chain.push(Box::new(providers::aws_terrain::AwsTerrain));
+    }
 
     emit_gui_progress_update(10.0, "Downloading data...");
 
-    // Fetch raw elevation data in meters, falling back to AWS on regional provider failure
-    let raw = match provider.fetch_raw(bbox, grid_width, grid_height) {
-        Ok(raw) if !is_fallback => {
-            // Check if the regional provider returned mostly empty data (out-of-coverage area).
-            // This catches cases where the provider's rectangular bbox over-claims coverage
-            // (e.g., IGN France bbox covers Belgium, but returns no data for Belgian coordinates).
-            let nan_ratio = compute_nan_ratio(&raw.heights_meters);
-            if nan_ratio > 0.5 {
-                eprintln!(
-                    "Warning: Regional provider '{}' returned {:.0}% empty data. Falling back to AWS Terrain Tiles.",
-                    provider_name, nan_ratio * 100.0
-                );
-                #[cfg(feature = "gui")]
-                crate::telemetry::send_log(
-                    crate::telemetry::LogLevel::Warning,
-                    &format!(
-                        "Regional provider '{}' returned mostly empty data, using AWS fallback.",
-                        provider_name
-                    ),
-                );
-                let fallback = providers::aws_terrain::AwsTerrain;
-                fallback.fetch_raw(bbox, grid_width, grid_height)?
-            } else {
-                raw
-            }
-        }
-        Ok(raw) => raw,
-        Err(e) if !is_fallback => {
-            eprintln!(
-                "Warning: Regional provider '{}' failed: {}. Falling back to AWS Terrain Tiles.",
-                provider_name, e
-            );
-            #[cfg(feature = "gui")]
-            crate::telemetry::send_log(
-                crate::telemetry::LogLevel::Warning,
-                &format!(
-                    "Regional elevation provider '{}' failed, using AWS fallback.",
-                    provider_name
-                ),
-            );
-            let fallback = providers::aws_terrain::AwsTerrain;
-            emit_gui_progress_update(10.0, "Downloading data...");
-            fallback.fetch_raw(bbox, grid_width, grid_height)?
-        }
-        Err(e) => return Err(e),
-    };
+    let raw = fetch_raw_with_fallback(&chain, bbox, grid_width, grid_height)?;
 
     bench.mark("elev_raw_fetch");
     emit_gui_progress_update(12.0, "Processing elevation...");
@@ -283,6 +227,67 @@ pub fn fetch_elevation_data(
 /// Clean up old cached elevation tiles in the background, at most once per day.
 pub fn cleanup_old_cached_tiles() {
     cache::spawn_throttled_cleanup();
+}
+
+/// Try each provider in `chain` until one delivers usable data. Non-final
+/// providers are skipped on error or mostly empty data (over-claiming bboxes).
+fn fetch_raw_with_fallback(
+    chain: &[Box<dyn ElevationProvider>],
+    bbox: &LLBBox,
+    grid_width: usize,
+    grid_height: usize,
+) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
+    let last = chain.len() - 1;
+    for (i, provider) in chain.iter().enumerate() {
+        let name = provider.name();
+        match provider.fetch_raw(bbox, grid_width, grid_height) {
+            Ok(raw) => {
+                if i < last {
+                    let nan_ratio = compute_nan_ratio(&raw.heights_meters);
+                    if nan_ratio > 0.5 {
+                        eprintln!(
+                            "Warning: Elevation provider '{}' returned {:.0}% empty data. Falling back to '{}'.",
+                            name,
+                            nan_ratio * 100.0,
+                            chain[i + 1].name()
+                        );
+                        #[cfg(feature = "gui")]
+                        crate::telemetry::send_log(
+                            crate::telemetry::LogLevel::Warning,
+                            &format!(
+                                "Elevation provider '{}' returned mostly empty data, falling back to '{}'.",
+                                name,
+                                chain[i + 1].name()
+                            ),
+                        );
+                        emit_gui_progress_update(10.0, "Downloading data...");
+                        continue;
+                    }
+                }
+                return Ok(raw);
+            }
+            Err(e) if i < last => {
+                eprintln!(
+                    "Warning: Elevation provider '{}' failed: {}. Falling back to '{}'.",
+                    name,
+                    e,
+                    chain[i + 1].name()
+                );
+                #[cfg(feature = "gui")]
+                crate::telemetry::send_log(
+                    crate::telemetry::LogLevel::Warning,
+                    &format!(
+                        "Elevation provider '{}' failed, falling back to '{}'.",
+                        name,
+                        chain[i + 1].name()
+                    ),
+                );
+                emit_gui_progress_update(10.0, "Downloading data...");
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("provider chain is never empty")
 }
 
 /// Compute the fraction of NaN/non-finite values in a height grid (0.0 to 1.0).

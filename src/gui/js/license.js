@@ -23,28 +23,16 @@ export const licenseText = `
 <b>OpenFreeMap:</b><br> Vector tiles © <a href="https://openfreemap.org" style="color: inherit;" target="_blank">OpenFreeMap</a>, "Liberty" style © <a href="https://www.openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a>, map data © OpenStreetMap contributors
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
+<b>Mapterhorn Terrain Tiles:</b><br>
+Elevation data &copy; <a href="https://mapterhorn.com/" style="color: inherit;" target="_blank">Mapterhorn</a>, aggregating open elevation datasets including Copernicus GLO-30 (&copy; DLR/ESA) and national terrain models from mapping agencies (GeoBasis-DE, IGN France, IGN Espa&ntilde;a, GSI Japan, swisstopo and others) under CC-BY-4.0-family licenses. Full source list: <a href="https://mapterhorn.com/attribution/" style="color: inherit;" target="_blank">mapterhorn.com/attribution</a>.
+<br><br>
+
 <b>AWS Terrain Tiles:</b><br>
-Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset (global fallback).
+Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset (legacy fallback).
 <br><br>
 
 <b>USGS 3D Elevation Program (3DEP):</b><br>
 Elevation data provided by the <a href="https://www.usgs.gov/3d-elevation-program" style="color: inherit;" target="_blank">U.S. Geological Survey, 3D Elevation Program</a>. Public Domain.
-<br><br>
-
-<b>IGN France RGE ALTI:</b><br>
-Elevation data &copy; <a href="https://geoservices.ign.fr/" style="color: inherit;" target="_blank">IGN France</a>, RGE ALTI. Licensed under <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" style="color: inherit;" target="_blank">Licence Ouverte 2.0</a>.
-<br><br>
-
-<b>IGN España MDT:</b><br>
-Elevation data &copy; <a href="https://www.ign.es/" style="color: inherit;" target="_blank">Instituto Geogr&aacute;fico Nacional de Espa&ntilde;a</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
-<br><br>
-
-<b>Germany DGM1 (hoehendaten.de):</b><br>
-Elevation data &copy; GeoBasis-DE / state surveying offices of the German federal states (Digitale Gel&auml;ndemodelle, DGM1), provided via <a href="https://hoehendaten.de/" style="color: inherit;" target="_blank">hoehendaten.de</a>. Licensed under <a href="https://www.govdata.de/dl-de/by-2-0" style="color: inherit;" target="_blank">dl-de/by-2-0</a> and <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a> (per state).
-<br><br>
-
-<b>GSI Japan Elevation Tiles:</b><br>
-Elevation data provided by the <a href="https://maps.gsi.go.jp/" style="color: inherit;" target="_blank">Geospatial Information Authority of Japan</a>.
 <br><br>
 
 <b>ESA WorldCover 2021:</b><br>

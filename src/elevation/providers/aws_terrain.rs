@@ -205,12 +205,29 @@ fn sample_tile_pixel(
     Some(height)
 }
 
+/// Tile budget; as the outage fallback AWS can now serve arbitrarily
+/// large bboxes, and a 1x1 degree area at z15 would be ~8000 tiles.
+const MAX_TILES_PER_FETCH: usize = 2048;
+
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
     let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();
     let lng_diff: f64 = (bbox.max().lng() - bbox.min().lng()).abs();
     let max_diff: f64 = lat_diff.max(lng_diff);
     let zoom: u8 = (-max_diff.log2() + 20.0) as u8;
-    zoom.clamp(MIN_ZOOM, MAX_ZOOM)
+    let mut zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+    while zoom > MIN_ZOOM && count_tiles(bbox, zoom) > MAX_TILES_PER_FETCH {
+        zoom -= 1;
+    }
+    zoom
+}
+
+// Tile count from the range only; avoids allocating the coordinate list.
+fn count_tiles(bbox: &LLBBox, zoom: u8) -> usize {
+    let (x1, y1) = lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
+    let (x2, y2) = lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);
+    let cols = (x1.max(x2) - x1.min(x2) + 1) as usize;
+    let rows = (y1.max(y2) - y1.min(y2) + 1) as usize;
+    cols * rows
 }
 
 fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
@@ -300,11 +317,11 @@ fn download_tile_once(
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    // Write-then-rename so a concurrent reader (a 3D preview fetch running
-    // alongside a generation) can never observe a half-written tile.
+    // Write-then-rename so a concurrent reader never sees a partial tile;
+    // the pid suffix keeps separate processes from clobbering tmp files.
     static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp_path = tile_path.with_extension(format!("tmp{unique}"));
+    let tmp_path = tile_path.with_extension(format!("tmp{}-{}", std::process::id(), unique));
     std::fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
     if let Err(e) = std::fs::rename(&tmp_path, tile_path) {
         let _ = std::fs::remove_file(&tmp_path);

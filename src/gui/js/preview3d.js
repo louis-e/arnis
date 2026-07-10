@@ -10,8 +10,7 @@
   const TILE_SIZE = 256;
   const PROTOCOL = "arnisdem";
   // Mirrors TERRAIN_PREVIEW_MAX_AREA_M2 in bbox.js. Generous because previews
-  // always use AWS Terrain Tiles at a resolution-capped grid, so fetch cost
-  // stays roughly constant regardless of bbox size.
+  // fetch global tiles at a resolution-capped grid, so cost stays constant.
   const MINI_MAX_AREA_M2 = 500000000;
   // Mirrors BUILDINGS_MAX_AREA_M2 in preview_3d.rs.
   const BUILDINGS_MAX_AREA_M2 = 10000000;
@@ -307,16 +306,23 @@
   }
 
   async function fetchTerrain(bboxText) {
-    if (payloadCache.key === bboxText && payloadCache.data) return payloadCache.data;
+    // Follow the Legacy terrain toggle for the AWS-vs-global choice; the
+    // preview uses global-only tiles and skips regional providers, so it
+    // approximates rather than exactly matches generation. The toggle is
+    // part of the cache key so flipping it refetches.
+    const legacyToggle = document.getElementById("aws-only-elevation-toggle");
+    const awsOnly = !!(legacyToggle && legacyToggle.checked);
+    const cacheKey = bboxText + "|" + awsOnly;
+    if (payloadCache.key === cacheKey && payloadCache.data) return payloadCache.data;
     const buffer = await window.__TAURI__.core.invoke("gui_get_terrain_preview", {
       bboxText: bboxText,
-      awsOnly: true,
+      awsOnly: awsOnly,
     });
     const d = parsePayload(buffer);
     d.gen = nextGen++;
     d.bboxText = bboxText;
     datasets.set(d.gen, d);
-    payloadCache = { key: bboxText, data: d };
+    payloadCache = { key: cacheKey, data: d };
     gcDatasets();
     return d;
   }

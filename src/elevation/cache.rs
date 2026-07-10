@@ -4,9 +4,8 @@ use std::path::PathBuf;
 const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 
 /// Maximum age for cached tiles in days before they are cleaned up.
-/// Elevation sources update on multi-year cycles, so a month of caching is
-/// still conservative; it cuts refetch traffic for repeatedly generated areas
-/// and spares the rate-limited community providers (hoehendaten.de).
+/// Elevation sources update on multi-year cycles, so a month is conservative.
+/// Also bounds the staleness of Mapterhorn's negative 404 markers.
 const TILE_CACHE_MAX_AGE_DAYS: u64 = 30;
 
 /// Returns the tile cache directory path for a specific provider.

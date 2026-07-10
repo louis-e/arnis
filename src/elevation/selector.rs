@@ -1,11 +1,19 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
-use crate::elevation::providers::germany_dgm1::GermanyDgm1;
-use crate::elevation::providers::ign_france::IgnFrance;
-use crate::elevation::providers::ign_spain::IgnSpain;
-use crate::elevation::providers::regional::JapanGsi;
+use crate::elevation::providers::mapterhorn::Mapterhorn;
 use crate::elevation::providers::usgs_3dep::Usgs3dep;
+
+/// How the caller wants the elevation source chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceMode {
+    /// Regional high-res providers first, then Mapterhorn. Used for generation.
+    Auto,
+    /// Mapterhorn only; used by the 3D preview to skip regional services.
+    GlobalOnly,
+    /// Legacy AWS tiles only (--aws-only-elevation / "Legacy terrain" toggle).
+    AwsOnly,
+}
 
 /// Check if two EPSG:4326 bounding boxes overlap.
 pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
@@ -16,25 +24,21 @@ pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
 }
 
 /// Select the best elevation provider for the given bounding box.
-///
-/// Iterates providers ordered by resolution (finest first), returns the first
-/// whose coverage overlaps the user's bbox and whose `accepts()` check passes
-/// (rate-limited providers use it to decline oversized or uncovered areas).
-/// Falls back to AWS Terrain Tiles.
-///
-/// When `force_aws` is true the regional providers are skipped entirely and
-/// AWS Terrain Tiles is used regardless of coverage. Surfaced as the
-/// `--aws-only-elevation` CLI flag / "Fast elevation (AWS only)" GUI toggle
-/// for users who'd rather have a faster pipeline at the cost of detail.
-pub fn select_provider(bbox: &LLBBox, force_aws: bool) -> Box<dyn ElevationProvider> {
-    if force_aws {
-        println!("Using AWS Terrain Tiles only (high-res providers disabled, ~30m resolution)");
-        return Box::new(AwsTerrain);
+/// The caller chains fetch-time fallbacks: regional, then Mapterhorn, then AWS.
+pub fn select_provider(bbox: &LLBBox, mode: SourceMode) -> Box<dyn ElevationProvider> {
+    match mode {
+        SourceMode::AwsOnly => {
+            println!("Using AWS Terrain Tiles only (legacy mode, ~30m resolution)");
+            return Box::new(AwsTerrain);
+        }
+        SourceMode::GlobalOnly => {
+            println!("Using Mapterhorn terrain tiles (global)");
+            return Box::new(Mapterhorn);
+        }
+        SourceMode::Auto => {}
     }
 
-    let candidates: Vec<Box<dyn ElevationProvider>> = build_provider_list();
-
-    for provider in candidates {
+    for provider in build_provider_list() {
         if let Some(coverages) = provider.coverage_bboxes() {
             if coverages.iter().any(|c| bboxes_overlap(c, bbox)) && provider.accepts(bbox) {
                 println!(
@@ -47,25 +51,14 @@ pub fn select_provider(bbox: &LLBBox, force_aws: bool) -> Box<dyn ElevationProvi
         }
     }
 
-    // Global fallback
-    println!("Using AWS Terrain Tiles (global fallback, ~30m resolution)");
-    Box::new(AwsTerrain)
+    println!("Using Mapterhorn terrain tiles (global; high-res where available)");
+    Box::new(Mapterhorn)
 }
 
-/// Build the list of available providers, ordered by resolution (finest first).
-/// AWS Terrain Tiles is NOT included here -- it's the fallback.
+/// Regional providers that beat Mapterhorn in their coverage area, finest first.
 fn build_provider_list() -> Vec<Box<dyn ElevationProvider>> {
-    // Ordered by resolution (finest first). First match wins.
-    // Only providers verified to return raw elevation data are enabled.
-    // GermanyDgm1 sits before IgnFrance: the France coverage rectangle spills
-    // over western Germany, and Germany's accepts() probe hands non-German
-    // bboxes back to the next candidate.
     vec![
-        Box::new(Usgs3dep),    // 1.0m — ArcGIS REST, verified float32
-        Box::new(GermanyDgm1), // 1.0m — hoehendaten.de UTM tiles, small areas only
-        Box::new(IgnFrance),   // 1.0m — WMS GeoTIFF, verified float32
-        Box::new(IgnSpain),    // 5.0m — WCS, verified int16
-        Box::new(JapanGsi),    // 5.0m — XYZ PNG tiles, custom encoding
+        Box::new(Usgs3dep), // 1m 3DEP; Mapterhorn only has 10m for most of the US
     ]
 }
 
@@ -92,18 +85,34 @@ mod tests {
     }
 
     #[test]
-    fn test_select_provider_fallback() {
-        // Bbox outside all regional coverage should fall back to AWS
+    fn test_select_provider_global_default() {
+        // Bbox outside all regional coverage gets the global provider
         let bbox = LLBBox::new(-33.86, 151.20, -33.85, 151.22).unwrap();
-        let provider = select_provider(&bbox, false);
-        assert_eq!(provider.name(), "aws");
+        let provider = select_provider(&bbox, SourceMode::Auto);
+        assert_eq!(provider.name(), "mapterhorn");
+    }
+
+    #[test]
+    fn test_select_provider_regional_beats_global() {
+        // A US bbox keeps the 1m USGS 3DEP provider
+        let bbox = LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap();
+        let provider = select_provider(&bbox, SourceMode::Auto);
+        assert_eq!(provider.name(), "usgs_3dep");
+    }
+
+    #[test]
+    fn test_select_provider_global_only_skips_regional() {
+        // Even bboxes inside regional coverage come back as Mapterhorn
+        let bbox = LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap();
+        let provider = select_provider(&bbox, SourceMode::GlobalOnly);
+        assert_eq!(provider.name(), "mapterhorn");
     }
 
     #[test]
     fn test_select_provider_force_aws() {
-        // Even bboxes inside regional coverage must come back as AWS when forced
+        // Legacy mode always returns AWS regardless of coverage
         let bbox = LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap();
-        let provider = select_provider(&bbox, true);
+        let provider = select_provider(&bbox, SourceMode::AwsOnly);
         assert_eq!(provider.name(), "aws");
     }
 }
