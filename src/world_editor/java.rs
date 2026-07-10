@@ -254,7 +254,7 @@ fn write_region_to_disk(
                 x_pos: abs_chunk_x,
                 z_pos: abs_chunk_z,
                 is_light_on: 0,
-                other: chunk_to_modify.other.clone(),
+                other: strip_orphan_block_entities(chunk_to_modify),
             };
 
             let biome_value =
@@ -342,9 +342,8 @@ impl RegionWriteCtx {
 }
 
 /// Helper function to get entity coordinates
-/// Note: Currently unused since we write directly without merging, but kept for potential future use
+/// Extracts a block entity or entity position for coordinate dedup.
 #[inline]
-#[allow(dead_code)]
 fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)> {
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
@@ -844,11 +843,76 @@ fn create_chunk_nbt(
 
     // Merge extra chunk data (block_entities, entities, etc.)
     // This overwrites the empty defaults above when actual data exists.
+    // Dedup entity lists by coordinate; tile halos process boundary buildings twice.
     for (key, value) in &chunk.other {
+        if key == "block_entities" || key == "entities" {
+            if let Value::List(list) = value {
+                root.insert(key.clone(), Value::List(dedup_compound_list(list)));
+                continue;
+            }
+        }
         root.insert(key.clone(), value.clone());
     }
 
     root
+}
+
+/// Returns the chunk's `other` map with block entities whose block does not own their type dropped.
+/// Cross-tile halos and set_if_absent races can leave a block entity on a plain block; MC 26.2
+/// crashes on the mismatch (older versions silently discarded it).
+fn strip_orphan_block_entities(chunk: &ChunkToModify) -> FnvHashMap<String, Value> {
+    let mut other = chunk.other.clone();
+    if let Some(Value::List(list)) = other.get_mut("block_entities") {
+        list.retain(|be| block_entity_owned_by_block(chunk, be));
+    }
+    other
+}
+
+fn block_entity_owned_by_block(chunk: &ChunkToModify, be: &Value) -> bool {
+    let Value::Compound(map) = be else {
+        return true;
+    };
+    let Some(Value::String(id)) = map.get("id") else {
+        return true;
+    };
+    let (Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Int(z))) =
+        (map.get("x"), map.get("y"), map.get("z"))
+    else {
+        return true;
+    };
+    let Some(block) = chunk.get_block((x & 15) as u8, *y, (z & 15) as u8) else {
+        return false;
+    };
+    let name = block.name();
+    match id.as_str() {
+        "minecraft:banner" => name.ends_with("_banner"),
+        "minecraft:chest" | "minecraft:trapped_chest" => name.ends_with("chest"),
+        "minecraft:bed" => name.ends_with("_bed"),
+        "minecraft:barrel" => name == "barrel",
+        "minecraft:sign" | "minecraft:hanging_sign" => name.ends_with("sign"),
+        _ => true,
+    }
+}
+
+/// Deduplicates a compound list by entity coordinate, keeping the last occurrence.
+fn dedup_compound_list(values: &[Value]) -> Vec<Value> {
+    let mut coord_index: HashMap<(i32, i32, i32), usize> = HashMap::new();
+    let mut deduped: Vec<Value> = Vec::with_capacity(values.len());
+
+    for value in values {
+        if let Value::Compound(map) = value {
+            if let Some(coords) = get_entity_coords(map) {
+                if let Some(idx) = coord_index.get(&coords).copied() {
+                    deduped[idx] = value.clone();
+                    continue;
+                }
+                coord_index.insert(coords, deduped.len());
+            }
+        }
+        deduped.push(value.clone());
+    }
+
+    deduped
 }
 
 /// Build a section Value from a Section struct.
@@ -1068,8 +1132,6 @@ fn merge_compound_list(chunk: &mut Chunk, chunk_to_modify: &ChunkToModify, key: 
 }
 
 /// Convert NBT Value to i32
-/// Note: Currently unused since we write directly without merging, but kept for potential future use
-#[allow(dead_code)]
 fn value_to_i32(value: &Value) -> Option<i32> {
     match value {
         Value::Byte(v) => Some(i32::from(*v)),

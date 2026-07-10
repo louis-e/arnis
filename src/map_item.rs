@@ -11,8 +11,35 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 const MAP_SIZE: i32 = 128;
-// Match the chunk writer so all world data files carry the same version.
+// Fallback when the world DataVersion cannot be read.
 const DATA_VERSION: i32 = crate::world_editor::java::DATA_VERSION;
+
+// The map must carry the same DataVersion as the world so a newer client upgrades it
+// with the rest of the save rather than treating it as a stale file.
+fn world_data_version(world_path: &Path) -> i32 {
+    if let Ok(Value::Compound(root)) = read_gzip_nbt(&world_path.join("level.dat")) {
+        if let Some(Value::Compound(data)) = root.get("Data") {
+            if let Some(Value::Int(v)) = data.get("DataVersion") {
+                return *v;
+            }
+        }
+    }
+    DATA_VERSION
+}
+
+/// Reads the world spawn XZ from level.dat so callers can align features with it.
+pub fn read_spawn_xz(world_path: &Path) -> Option<(i32, i32)> {
+    if let Ok(Value::Compound(root)) = read_gzip_nbt(&world_path.join("level.dat")) {
+        if let Some(Value::Compound(data)) = root.get("Data") {
+            if let (Some(Value::Int(x)), Some(Value::Int(z))) =
+                (data.get("SpawnX"), data.get("SpawnZ"))
+            {
+                return Some((*x, *z));
+            }
+        }
+    }
+    None
+}
 
 fn read_gzip_nbt(path: &Path) -> Result<Value, String> {
     let raw = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
@@ -103,27 +130,29 @@ fn build_colors(
     colors
 }
 
-// Next free map id; respects an existing idcounts.dat so user maps are never clobbered.
+// Next free map id; respects existing counter files so user maps are never clobbered.
+// 26.1 renamed idcounts.dat to last_id.dat, so check both.
 fn next_map_id(data_dir: &Path) -> i32 {
-    let path = data_dir.join("idcounts.dat");
-    if let Ok(Value::Compound(root)) = read_gzip_nbt(&path) {
-        if let Some(Value::Compound(data)) = root.get("data") {
-            if let Some(Value::Int(n)) = data.get("map") {
-                return n + 1;
+    for name in ["idcounts.dat", "last_id.dat"] {
+        if let Ok(Value::Compound(root)) = read_gzip_nbt(&data_dir.join(name)) {
+            if let Some(Value::Compound(data)) = root.get("data") {
+                if let Some(Value::Int(n)) = data.get("map") {
+                    return n + 1;
+                }
             }
         }
     }
     0
 }
 
-fn write_map_dat(
-    path: &Path,
+fn build_map_dat(
     colors: Vec<i8>,
     scale: i8,
     tracking: bool,
     x_center: i32,
     z_center: i32,
-) -> Result<(), String> {
+    data_version: i32,
+) -> Value {
     let mut data = HashMap::new();
     data.insert("scale".to_string(), Value::Byte(scale));
     data.insert(
@@ -140,18 +169,18 @@ fn write_map_dat(
         Value::ByteArray(ByteArray::new(colors)),
     );
     let mut root = HashMap::new();
-    root.insert("DataVersion".to_string(), Value::Int(DATA_VERSION));
+    root.insert("DataVersion".to_string(), Value::Int(data_version));
     root.insert("data".to_string(), Value::Compound(data));
-    write_gzip_nbt(path, &Value::Compound(root))
+    Value::Compound(root)
 }
 
-fn write_idcounts(path: &Path, map_id: i32) -> Result<(), String> {
+fn build_idcounts(map_id: i32, data_version: i32) -> Value {
     let mut data = HashMap::new();
     data.insert("map".to_string(), Value::Int(map_id));
     let mut root = HashMap::new();
-    root.insert("DataVersion".to_string(), Value::Int(DATA_VERSION));
+    root.insert("DataVersion".to_string(), Value::Int(data_version));
     root.insert("data".to_string(), Value::Compound(data));
-    write_gzip_nbt(path, &Value::Compound(root))
+    Value::Compound(root)
 }
 
 fn map_item_entry(map_id: i32, slot: i8) -> Value {
@@ -246,18 +275,21 @@ pub fn write_map_item(
         z_center,
     );
 
+    let data_version = world_data_version(world_path);
     let data_dir = world_path.join("data");
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
     let map_id = next_map_id(&data_dir);
-    write_map_dat(
-        &data_dir.join(format!("map_{map_id}.dat")),
-        colors,
-        scale,
-        tracking,
-        x_center,
-        z_center,
-    )?;
-    write_idcounts(&data_dir.join("idcounts.dat"), map_id)?;
+
+    // 26.1 renamed map storage from data/map_N.dat to data/N.dat and idcounts.dat to
+    // last_id.dat. Write both names so the map resolves on old and new clients alike.
+    let map_dat = build_map_dat(colors, scale, tracking, x_center, z_center, data_version);
+    write_gzip_nbt(&data_dir.join(format!("map_{map_id}.dat")), &map_dat)?;
+    write_gzip_nbt(&data_dir.join(format!("{map_id}.dat")), &map_dat)?;
+
+    let idcounts = build_idcounts(map_id, data_version);
+    write_gzip_nbt(&data_dir.join("idcounts.dat"), &idcounts)?;
+    write_gzip_nbt(&data_dir.join("last_id.dat"), &idcounts)?;
+
     insert_into_inventory(world_path, map_id)
 }
 
@@ -405,7 +437,11 @@ mod tests {
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
         let data_dir = world.join("data");
         std::fs::create_dir_all(&data_dir).unwrap();
-        write_idcounts(&data_dir.join("idcounts.dat"), 5).unwrap();
+        write_gzip_nbt(
+            &data_dir.join("idcounts.dat"),
+            &build_idcounts(5, DATA_VERSION),
+        )
+        .unwrap();
 
         let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
