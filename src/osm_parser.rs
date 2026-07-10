@@ -265,7 +265,7 @@ pub fn parse_osm_data(
         println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
 
-    let outline_suppression = compute_outline_suppression(&data.relations);
+    let outline_suppression = compute_outline_suppression(&data.relations, &data.ways, &data.nodes);
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
@@ -455,23 +455,97 @@ pub fn parse_osm_data(
     (processed_elements, xzbbox, outline_suppression)
 }
 
-fn compute_outline_suppression(relations: &[OsmElement]) -> OutlineSuppression {
+// Parts replace the outline only when they cover at least this much of it.
+const MIN_PART_COVERAGE: f64 = 0.5;
+
+fn compute_outline_suppression(
+    relations: &[OsmElement],
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+) -> OutlineSuppression {
+    let is_outline = |r: &str| r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer");
+
+    let mut needed_ways: HashSet<u64> = HashSet::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        if tags.get("type").map(|t| t.as_str()) != Some("building") {
+            continue;
+        }
+        for m in &rel.members {
+            let r = m.role.trim();
+            if m.r#type == "way" && (r.eq_ignore_ascii_case("part") || is_outline(r)) {
+                needed_ways.insert(m.r#ref);
+            }
+        }
+    }
+    if needed_ways.is_empty() {
+        return HashSet::new();
+    }
+
+    let way_nodes: HashMap<u64, &Vec<u64>> = ways
+        .iter()
+        .filter(|w| needed_ways.contains(&w.id))
+        .filter_map(|w| w.nodes.as_ref().map(|ns| (w.id, ns)))
+        .collect();
+    let mut needed_nodes: HashSet<u64> = HashSet::new();
+    for ns in way_nodes.values() {
+        needed_nodes.extend(ns.iter().copied());
+    }
+    let node_ll: HashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| needed_nodes.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+
+    // Shoelace area of a closed ring; lon scaled by cos(lat) so only the ratio matters.
+    let way_area = |way_ref: u64| -> Option<f64> {
+        let ids = way_nodes.get(&way_ref)?;
+        let pts: Vec<(f64, f64)> = ids
+            .iter()
+            .filter_map(|id| node_ll.get(id).copied())
+            .collect();
+        if pts.len() < 3 {
+            return None;
+        }
+        let lon_scale = pts[0].0.to_radians().cos();
+        let mut area = 0.0;
+        for i in 0..pts.len() {
+            let (lat_a, lon_a) = pts[i];
+            let (lat_b, lon_b) = pts[(i + 1) % pts.len()];
+            area += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
+        }
+        Some((area / 2.0).abs())
+    };
+
     let mut suppressed: OutlineSuppression = HashSet::new();
     for rel in relations {
         let Some(tags) = &rel.tags else { continue };
         if tags.get("type").map(|t| t.as_str()) != Some("building") {
             continue;
         }
-        let has_parts = rel
-            .members
-            .iter()
-            .any(|m| m.role.trim().eq_ignore_ascii_case("part"));
-        if !has_parts {
+
+        // Sub-relation parts carry no way geometry here, so they skip the coverage gate.
+        let mut has_part = false;
+        let mut has_relation_part = false;
+        let mut part_area = 0.0;
+        for m in &rel.members {
+            if !m.role.trim().eq_ignore_ascii_case("part") {
+                continue;
+            }
+            has_part = true;
+            match m.r#type.as_str() {
+                "relation" => has_relation_part = true,
+                "way" => part_area += way_area(m.r#ref).unwrap_or(0.0),
+                _ => {}
+            }
+        }
+        if !has_part {
             continue;
         }
+
         for m in &rel.members {
             let r = m.role.trim();
-            if !(r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer")) {
+            if !is_outline(r) {
                 continue;
             }
             let kind: &'static str = match m.r#type.as_str() {
@@ -479,6 +553,16 @@ fn compute_outline_suppression(relations: &[OsmElement]) -> OutlineSuppression {
                 "relation" => "relation",
                 _ => continue,
             };
+
+            // Keep the outline when the parts are too sparse to stand in for it.
+            if kind == "way" && !has_relation_part {
+                if let Some(outline_area) = way_area(m.r#ref) {
+                    if outline_area > 0.0 && part_area / outline_area < MIN_PART_COVERAGE {
+                        continue;
+                    }
+                }
+            }
+
             suppressed.insert((kind, m.r#ref));
         }
     }
@@ -523,4 +607,123 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
+}
+
+#[cfg(test)]
+mod outline_suppression_tests {
+    use super::*;
+
+    fn node(id: u64, lat: f64, lon: f64) -> OsmElement {
+        OsmElement {
+            r#type: "node".into(),
+            id,
+            lat: Some(lat),
+            lon: Some(lon),
+            nodes: None,
+            tags: None,
+            members: Vec::new(),
+        }
+    }
+
+    // Axis-aligned square way with corner (0,0) and the given side length.
+    fn square_way(id: u64, first_node_id: u64, side: f64) -> (OsmElement, Vec<OsmElement>) {
+        let corners = [(0.0, 0.0), (0.0, side), (side, side), (side, 0.0)];
+        let nodes: Vec<OsmElement> = corners
+            .iter()
+            .enumerate()
+            .map(|(i, &(lat, lon))| node(first_node_id + i as u64, lat, lon))
+            .collect();
+        let mut ids: Vec<u64> = nodes.iter().map(|n| n.id).collect();
+        ids.push(first_node_id);
+        let way = OsmElement {
+            r#type: "way".into(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: Some(ids),
+            tags: None,
+            members: Vec::new(),
+        };
+        (way, nodes)
+    }
+
+    fn member(kind: &str, r#ref: u64, role: &str) -> OsmMember {
+        OsmMember {
+            r#type: kind.into(),
+            r#ref,
+            r#role: role.into(),
+        }
+    }
+
+    fn building_relation(members: Vec<OsmMember>) -> OsmElement {
+        OsmElement {
+            r#type: "relation".into(),
+            id: 1,
+            lat: None,
+            lon: None,
+            nodes: None,
+            tags: Some(HashMap::from([(
+                "type".to_string(),
+                "building".to_string(),
+            )])),
+            members,
+        }
+    }
+
+    // Therme Erding: parts cover ~24% of the outline, so the outline must survive.
+    #[test]
+    fn sparse_way_parts_keep_the_outline() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let (part, part_nodes) = square_way(200, 2000, 0.5);
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
+
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let suppressed = compute_outline_suppression(&[rel], &[outline, part], &nodes);
+
+        assert!(!suppressed.contains(&("way", 100)));
+    }
+
+    // Well-tiled parts (64% coverage) stand in for the outline, so it is dropped.
+    #[test]
+    fn covering_way_parts_suppress_the_outline() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let (part, part_nodes) = square_way(200, 2000, 0.8);
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
+
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let suppressed = compute_outline_suppression(&[rel], &[outline, part], &nodes);
+
+        assert!(suppressed.contains(&("way", 100)));
+    }
+
+    // Sub-relation parts carry no way geometry, so fall back to always suppressing.
+    #[test]
+    fn relation_parts_suppress_the_outline() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("relation", 300, "part"),
+        ]);
+
+        let suppressed = compute_outline_suppression(&[rel], &[outline], &outline_nodes);
+
+        assert!(suppressed.contains(&("way", 100)));
+    }
+
+    // No parts at all: nothing is ever suppressed.
+    #[test]
+    fn outline_without_parts_is_kept() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let rel = building_relation(vec![member("way", 100, "outline")]);
+
+        let suppressed = compute_outline_suppression(&[rel], &[outline], &outline_nodes);
+
+        assert!(suppressed.is_empty());
+    }
 }

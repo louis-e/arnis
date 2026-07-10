@@ -58,10 +58,6 @@ pub struct Args {
     #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub interior: bool,
 
-    /// Enable roof generation (optional)
-    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
-    pub roof: bool,
-
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false)]
     pub fillground: bool,
@@ -71,9 +67,10 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
 
-    /// ESA WorldCover land cover classification, always on (no CLI flag).
-    #[arg(skip = true)]
-    pub land_cover: bool,
+    /// Add building footprints from Overture Maps that are missing in OpenStreetMap.
+    /// Helps sparsely mapped areas; may occasionally add a satellite-detected false positive.
+    #[arg(long = "overture", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub overture: bool,
 
     /// Disable both external 3D models (3DMR + Wikimedia) and bundled schematic
     /// props (cars, boats, cranes, ...) with a single toggle.
@@ -289,10 +286,9 @@ mod tests {
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
         assert!(!args.map_preview);
-        // interior, roof, land_cover default to true
+        // interior and overture default to true
         assert!(args.interior);
-        assert!(args.roof);
-        assert!(args.land_cover);
+        assert!(args.overture);
     }
 
     #[test]
@@ -300,7 +296,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
-        // Test disabling interior/roof with =false
+        // Test disabling interior/overture with =false
         let cmd = [
             "arnis",
             "--output-dir",
@@ -308,13 +304,11 @@ mod tests {
             "--bbox",
             "1,2,3,4",
             "--interior=false",
-            "--roof=false",
+            "--overture=false",
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.interior);
-        assert!(!args.roof);
-        // land cover is always on (no flag)
-        assert!(args.land_cover);
+        assert!(!args.overture);
 
         // Test enabling with bare flag (no value)
         let cmd = [
@@ -324,11 +318,11 @@ mod tests {
             "--bbox",
             "1,2,3,4",
             "--interior",
-            "--roof",
+            "--overture",
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(args.interior);
-        assert!(args.roof);
+        assert!(args.overture);
     }
 
     #[test]

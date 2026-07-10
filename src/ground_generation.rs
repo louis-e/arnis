@@ -23,6 +23,7 @@ use crate::block_definitions::{
     TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
@@ -118,6 +119,7 @@ pub fn generate_ground_layer(
     xzbbox: &XZBBox,
     building_footprints: &BuildingFootprintBitmap,
     tunnel_footprint: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) -> Result<(), String> {
     generate_ground_region(
         editor,
@@ -126,6 +128,7 @@ pub fn generate_ground_layer(
         xzbbox,
         building_footprints,
         tunnel_footprint,
+        bridge_surface,
         xzbbox.min_x(),
         xzbbox.max_x(),
         xzbbox.min_z(),
@@ -145,6 +148,7 @@ pub fn generate_ground_region(
     xzbbox: &XZBBox,
     building_footprints: &BuildingFootprintBitmap,
     tunnel_footprint: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     iter_min_x: i32,
     iter_max_x: i32,
     iter_min_z: i32,
@@ -834,6 +838,7 @@ pub fn generate_ground_region(
                                                 editor,
                                                 (x, 1, z),
                                                 Some(building_footprints),
+                                                Some(bridge_surface),
                                             );
                                         } else if ground_is_natural {
                                             // Undergrowth only on natural surfaces

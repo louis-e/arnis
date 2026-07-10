@@ -108,25 +108,14 @@
           </div>
         </div>
 
-        <!-- Roof Toggle Button -->
+        <!-- Additional Buildings Toggle (Overture Maps ML-derived footprints) -->
         <div class="settings-row">
-          <label for="roof-toggle">
-            <span data-localize="roof">Roof Generation</span>
-            <span class="tooltip-icon" data-tooltip="Generate roofs on buildings">?</span>
+          <label for="overture-toggle">
+            <span data-localize="overture">Additional Buildings</span>
+            <span class="tooltip-icon" data-tooltip="Adds buildings that are missing from OpenStreetMap, using footprints from Overture Maps. Most useful in rural areas with little mapping. Since these are detected from satellite imagery, a few buildings may be placed where none exist.">?</span>
           </label>
           <div class="settings-control">
-            <input type="checkbox" id="roof-toggle" name="roof-toggle" checked>
-          </div>
-        </div>
-
-        <!-- Land Cover Toggle Button -->
-        <div class="settings-row">
-          <label for="land-cover-toggle">
-            <span data-localize="land_cover">Land Cover</span>
-            <span class="tooltip-icon" data-tooltip="Fetch satellite land cover data to classify terrain type. Requires terrain to be enabled.">?</span>
-          </label>
-          <div class="settings-control">
-            <input type="checkbox" id="land-cover-toggle" name="land-cover-toggle" checked>
+            <input type="checkbox" id="overture-toggle" name="overture-toggle" checked>
           </div>
         </div>
 
@@ -145,7 +134,7 @@
         <div class="settings-row">
           <label for="interior-toggle">
             <span data-localize="interior">Interior Generation</span>
-            <span class="tooltip-icon" data-tooltip="Generate interior details inside buildings (experimental)">?</span>
+            <span class="tooltip-icon" data-tooltip="Adds rooms and furniture inside buildings. Experimental and slows generation.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="interior-toggle" name="interior-toggle">
@@ -156,7 +145,7 @@
         <div class="settings-row">
           <label for="fillground-toggle">
             <span data-localize="fillground">Fill Ground</span>
-            <span class="tooltip-icon" data-tooltip="Fill the ground below the surface">?</span>
+            <span class="tooltip-icon" data-tooltip="Fills stone and ore veins under the surface for survival mining. Slower to generate, larger worlds.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
@@ -167,7 +156,7 @@
         <div class="settings-row">
           <label for="legacy-trees-toggle">
             <span data-localize="legacy_trees">Legacy trees</span>
-            <span class="tooltip-icon" data-tooltip="Use the simple procedural trees instead of the detailed region-aware schematic tree models (on by default).">?</span>
+            <span class="tooltip-icon" data-tooltip="Use the simple procedural trees instead of the detailed region-aware schematic tree models.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="legacy-trees-toggle" name="legacy-trees-toggle">
@@ -196,7 +185,7 @@
         <div class="settings-row">
           <label for="world-time-slider">
             <span data-localize="world_time">World Time</span>
-            <span class="tooltip-icon" data-tooltip="Initial time of day in the generated world (0 = dawn, 6000 = noon, 18000 = midnight)">?</span>
+            <span class="tooltip-icon" data-tooltip="Time of day the world starts at.">?</span>
           </label>
           <div class="settings-control">
             <input type="range" id="world-time-slider" name="world-time-slider" min="0" max="1440" step="10" value="720">

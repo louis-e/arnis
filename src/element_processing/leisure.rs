@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
@@ -15,6 +16,7 @@ pub fn generate_leisure(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -116,7 +118,12 @@ pub fn generate_leisure(
                         }
                         105..120 => {
                             // Tree
-                            Tree::create(editor, (x, 1, z), Some(building_footprints));
+                            Tree::create(
+                                editor,
+                                (x, 1, z),
+                                Some(building_footprints),
+                                Some(bridge_surface),
+                            );
                         }
                         _ => {}
                     }
@@ -159,6 +166,7 @@ pub fn generate_leisure_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     if rel.tags.get("leisure") == Some(&"park".to_string()) {
         // Process each outer member way individually using cached flood fill.
@@ -179,6 +187,7 @@ pub fn generate_leisure_from_relation(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    bridge_surface,
                 );
             }
         }

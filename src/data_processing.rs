@@ -112,6 +112,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                     road_mask,
+                    bridge_surface,
                 );
             } else if way.tags.contains_key("natural")
                 && way.tags.get("amenity").map(String::as_str) != Some("fountain")
@@ -123,11 +124,19 @@ fn process_element(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    bridge_surface,
                 );
             } else if way.tags.contains_key("amenity") {
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
             } else if way.tags.contains_key("leisure") {
-                leisure::generate_leisure(editor, way, args, flood_fill_cache, building_footprints);
+                leisure::generate_leisure(
+                    editor,
+                    way,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                    bridge_surface,
+                );
             } else if way.tags.contains_key("barrier") {
                 barriers::generate_barriers(editor, element, bridge_surface);
             } else if let Some(val) = way.tags.get("waterway") {
@@ -186,6 +195,7 @@ fn process_element(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    bridge_surface,
                 );
             } else if node.tags.contains_key("amenity") {
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
@@ -254,6 +264,7 @@ fn process_element(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    bridge_surface,
                 );
             } else if rel.tags.contains_key("landuse") {
                 landuse::generate_landuse_from_relation(
@@ -263,6 +274,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                     road_mask,
+                    bridge_surface,
                 );
             } else if rel.tags.get("leisure").map(String::as_str) == Some("park") {
                 leisure::generate_leisure_from_relation(
@@ -271,6 +283,7 @@ fn process_element(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    bridge_surface,
                 );
             } else if rel.tags.contains_key("man_made") {
                 man_made::generate_man_made(editor, element, args);
@@ -624,6 +637,7 @@ pub fn generate_world_with_options(
                         &xzbbox,
                         &building_footprints,
                         &tunnel_footprint,
+                        &bridge_surface,
                         g_min_x,
                         g_max_x,
                         g_min_z,
@@ -874,6 +888,7 @@ pub fn generate_world_with_options(
             &xzbbox,
             &building_footprints,
             &tunnel_footprint,
+            &bridge_surface,
         )?;
     }
     bench.mark("ground_gen");

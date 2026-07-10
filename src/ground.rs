@@ -77,6 +77,7 @@ fn snow_threshold_for(ed: &ElevationData, lat_deg: f64, ground_level: i32) -> i3
 }
 
 impl Ground {
+    #[cfg(test)]
     pub fn new_flat(ground_level: i32) -> Self {
         Self {
             elevation_enabled: false,
@@ -176,7 +177,6 @@ impl Ground {
         bbox: &LLBBox,
         scale: f64,
         ground_level: i32,
-        fetch_land_cover: bool,
         disable_height_limit: bool,
         extended_max_y: i32,
         aws_only_elevation: bool,
@@ -188,7 +188,7 @@ impl Ground {
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
         let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
-        let mut land_cover = if fetch_land_cover {
+        let mut land_cover = {
             let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
             if lc.is_some() {
                 println!("Land cover data loaded successfully");
@@ -196,8 +196,6 @@ impl Ground {
                 eprintln!("Warning: Land cover data unavailable, using default ground blocks");
             }
             lc
-        } else {
-            None
         };
         bench.mark("elev_landcover_fetch");
 
@@ -774,7 +772,6 @@ pub fn generate_ground_data(args: &Args) -> Ground {
             &args.bbox,
             args.scale,
             args.ground_level,
-            args.land_cover,
             args.disable_height_limit,
             extended_max_y_for(args),
             args.aws_only_elevation,
@@ -786,11 +783,8 @@ pub fn generate_ground_data(args: &Args) -> Ground {
         }
         return ground;
     }
-    if args.land_cover {
-        println!("{} Fetching land cover...", "[3/7]".bold());
-        return Ground::new_flat_with_land_cover(&args.bbox, args.scale, args.ground_level);
-    }
-    Ground::new_flat(args.ground_level)
+    println!("{} Fetching land cover...", "[3/7]".bold());
+    Ground::new_flat_with_land_cover(&args.bbox, args.scale, args.ground_level)
 }
 
 /// Per-format build-height cap when the user opts into extended build height:

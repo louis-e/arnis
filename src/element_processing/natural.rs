@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -14,6 +15,7 @@ pub fn generate_natural(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
@@ -87,7 +89,13 @@ pub fn generate_natural(
                     .choose(&mut rng)
                     .unwrap_or(&TreeType::Oak);
 
-                Tree::create_of_type(editor, (x, 1, z), tree_type, Some(building_footprints));
+                Tree::create_of_type(
+                    editor,
+                    (x, 1, z),
+                    tree_type,
+                    Some(building_footprints),
+                    Some(bridge_surface),
+                );
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -304,7 +312,12 @@ pub fn generate_natural(
                             }
                             let random_choice = rng.random_range(0..500);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z), Some(building_footprints));
+                                Tree::create(
+                                    editor,
+                                    (x, 1, z),
+                                    Some(building_footprints),
+                                    Some(bridge_surface),
+                                );
                             } else if random_choice == 1 {
                                 let flower_block = match rng.random_range(1..=4) {
                                     1 => RED_FLOWER,
@@ -344,6 +357,7 @@ pub fn generate_natural(
                                     (x, 1, z),
                                     tree_type,
                                     Some(building_footprints),
+                                    Some(bridge_surface),
                                 );
                             } else if random_choice == 1 {
                                 let flower_block = match rng.random_range(1..=4) {
@@ -434,6 +448,7 @@ pub fn generate_natural(
                                             (x, 1, z),
                                             tree_type,
                                             Some(building_footprints),
+                                            Some(bridge_surface),
                                         );
                                     } else if r < 15 {
                                         place_grass_or_tall(editor, &mut rng, x, z);
@@ -500,6 +515,7 @@ pub fn generate_natural(
                                                             editor,
                                                             (cluster_x, 1, cluster_z),
                                                             Some(building_footprints),
+                                                            Some(bridge_surface),
                                                         );
                                                     } else if vegetation_chance < 15 {
                                                         // 15% chance for grass
@@ -612,7 +628,12 @@ pub fn generate_natural(
                             let hill_chance = rng.random_range(0..1000);
                             if hill_chance == 0 {
                                 // 0.1% chance for rare trees
-                                Tree::create(editor, (x, 1, z), Some(building_footprints));
+                                Tree::create(
+                                    editor,
+                                    (x, 1, z),
+                                    Some(building_footprints),
+                                    Some(bridge_surface),
+                                );
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
                                 let flower_block = match rng.random_range(1..=4) {
@@ -738,6 +759,7 @@ pub fn generate_natural_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     if rel.tags.contains_key("natural") {
         // Process each outer member way individually using cached flood fill.
@@ -758,6 +780,7 @@ pub fn generate_natural_from_relation(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    bridge_surface,
                 );
             }
         }
