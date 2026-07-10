@@ -37,7 +37,7 @@ gltf = { version = "1", default-features = false, features = ["import", "names",
 image = "0.25"
 include_dir = "0.7"
 indicatif = "0.18.4"
-itertools = "0.14.0"
+itertools = "0.15.0"
 jsonwebtoken = "10.3.0"
 log = "0.4.27"
 mimalloc = "0.1"

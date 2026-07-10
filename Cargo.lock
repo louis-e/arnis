@@ -212,7 +212,7 @@ dependencies = [
  "image 0.25.10",
  "include_dir",
  "indicatif",
- "itertools",
+ "itertools 0.15.0",
  "jsonwebtoken 10.4.0",
  "log",
  "mimalloc",
@@ -2741,6 +2741,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4263,7 +4272,7 @@ dependencies = [
  "built",
  "cfg-if 1.0.4",
  "interpolate_name",
- "itertools",
+ "itertools 0.14.0",
  "libc",
  "libfuzzer-sys",
  "log",
