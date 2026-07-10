@@ -114,9 +114,9 @@ async function applyLocalization(localization) {
     "option[data-localize='mode_terrain_only']": "mode_terrain_only",
     "span[data-localize='terrain']": "terrain",
     "span[data-localize='interior']": "interior",
-    "span[data-localize='roof']": "roof",
     "span[data-localize='fillground']": "fillground",
-    "span[data-localize='land_cover']": "land_cover",
+    "span[data-localize='legacy_trees']": "legacy_trees",
+    "span[data-localize='overture']": "overture",
     "span[data-localize='three_dmr']": "three_dmr",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
@@ -1610,10 +1610,9 @@ async function startGeneration() {
     var skipOsmObjects = (generationMode === "terrain-only");
 
     var interior = document.getElementById("interior-toggle").checked;
-    var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
-    var land_cover = document.getElementById("land-cover-toggle").checked;
+    var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
@@ -1648,10 +1647,9 @@ async function startGeneration() {
         terrainEnabled: terrain,
         skipOsmObjects: skipOsmObjects,
         interiorEnabled: interior,
-        roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         legacyTreesEnabled: legacy_trees,
-        landCoverEnabled: land_cover,
+        overtureEnabled: overture,
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,

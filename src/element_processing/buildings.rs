@@ -2851,8 +2851,12 @@ fn generate_residential_window_decorations(
                                         None,
                                     );
                                 }
-                            } else if decoration_roll < 23 && mod6 == 1 {
+                            } else if decoration_roll < 23
+                                && mod6 == 1
+                                && (!config.is_ground_level || h >= config.start_y_offset + 6)
+                            {
                                 // ── Balcony (placed once from centre col) ──
+                                // Never on the ground floor; elevated parts keep their base row.
                                 // A small 3-wide × 2-deep platform with
                                 // open-trapdoor railing around the outer
                                 // edge and occasional furniture.
@@ -4298,7 +4302,6 @@ fn generate_floors_and_ceilings(
     editor: &mut WorldEditor,
     cached_floor_area: &[(i32, i32)],
     config: &BuildingConfig,
-    args: &Args,
     generate_non_flat_roof: bool,
     building_passages: &CoordinateBitmap,
 ) -> HashSet<(i32, i32)> {
@@ -4377,7 +4380,7 @@ fn generate_floors_and_ceilings(
         // may be generated for residential buildings without a roof:shape tag.
         //
         // Construction sites and ruins stay open at the top.
-        let has_flat_roof = !args.roof || !generate_non_flat_roof;
+        let has_flat_roof = !generate_non_flat_roof;
         let skip_top = matches!(
             config.condition,
             BuildingCondition::Construction | BuildingCondition::Ruined
@@ -4784,8 +4787,7 @@ pub fn generate_buildings(
     };
 
     // Generate walls, pass whether this building will have a sloped roof.
-    let has_sloped_roof = args.roof
-        && style.generate_roof
+    let has_sloped_roof = style.generate_roof
         && style.roof_type != RoofType::Flat
         && !matches!(
             config.condition,
@@ -4868,7 +4870,6 @@ pub fn generate_buildings(
             editor,
             &cached_floor_area,
             &config,
-            args,
             style.generate_roof,
             effective_passages,
         );
@@ -4937,7 +4938,7 @@ pub fn generate_buildings(
         config.condition,
         BuildingCondition::Construction | BuildingCondition::Ruined
     );
-    if args.roof && style.generate_roof && !skip_roof {
+    if style.generate_roof && !skip_roof {
         generate_building_roof(
             editor, element, &config, &style, &bounds, &roof_area, category,
         );

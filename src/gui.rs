@@ -917,10 +917,9 @@ fn gui_start_generation(
     terrain_enabled: bool,
     skip_osm_objects: bool,
     interior_enabled: bool,
-    roof_enabled: bool,
     fillground_enabled: bool,
     legacy_trees_enabled: bool,
-    land_cover_enabled: bool, // renamed from city_boundaries_enabled
+    overture_enabled: bool,
     use_3d_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
@@ -1189,10 +1188,9 @@ fn gui_start_generation(
                 ground_level,
                 terrain: terrain_enabled,
                 interior: interior_enabled,
-                roof: roof_enabled,
                 fillground: fillground_enabled,
                 legacy_trees: legacy_trees_enabled,
-                land_cover: land_cover_enabled,
+                overture: overture_enabled,
                 use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
@@ -1246,7 +1244,11 @@ fn gui_start_generation(
             // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
             let (fetch_result, overture_elements, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
-                    overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+                    if args.overture {
+                        overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+                    } else {
+                        Vec::new()
+                    }
                 });
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args));
                 let fetch_result = retrieve_data::fetch_data_from_overpass(

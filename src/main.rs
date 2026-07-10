@@ -211,12 +211,18 @@ fn run_cli() {
     let mut bench = bench::Bench::new(args.benchmark);
 
     // OSM, Overture and elevation/land-cover fetches only need the bbox, so run them in parallel.
-    println!("{} Fetching Overture Maps data...", "  [+]".bold());
+    if args.overture {
+        println!("{} Fetching Overture Maps data...", "  [+]".bold());
+    }
     let fetch_start = std::time::Instant::now();
     let (raw_data, overture_elements, mut ground) = std::thread::scope(|s| {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let elements = overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+            let elements = if args.overture {
+                overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+            } else {
+                Vec::new()
+            };
             (elements, t.elapsed())
         });
         let ground_handle = s.spawn(|| {
@@ -265,7 +271,7 @@ fn run_cli() {
             "  Added {} buildings from Overture Maps",
             added.to_string().bright_white().bold()
         );
-    } else {
+    } else if args.overture {
         println!("  No additional buildings from Overture Maps for this area");
     }
 

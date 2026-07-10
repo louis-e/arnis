@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -16,6 +17,7 @@ pub fn generate_landuse(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
@@ -173,7 +175,12 @@ pub fn generate_landuse(
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     }
                 } else if (30..33).contains(&random_choice) {
-                    Tree::create(editor, (x, 1, z), Some(building_footprints));
+                    Tree::create(
+                        editor,
+                        (x, 1, z),
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
                 } else if !is_protected && (33..35).contains(&random_choice) {
                     editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                 } else if !is_protected && (35..37).contains(&random_choice) {
@@ -191,7 +198,13 @@ pub fn generate_landuse(
                     let tree_type = *trees_ok_to_generate
                         .choose(&mut rng)
                         .unwrap_or(&TreeType::Oak);
-                    Tree::create_of_type(editor, (x, 1, z), tree_type, Some(building_footprints));
+                    Tree::create_of_type(
+                        editor,
+                        (x, 1, z),
+                        tree_type,
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
                 } else {
                     let random_choice: i32 = rng.random_range(0..30);
                     if random_choice == 2 {
@@ -323,7 +336,12 @@ pub fn generate_landuse(
             "meadow" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 let random_choice: i32 = rng.random_range(0..1001);
                 if random_choice < 5 {
-                    Tree::create(editor, (x, 1, z), Some(building_footprints));
+                    Tree::create(
+                        editor,
+                        (x, 1, z),
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
                 } else if random_choice < 6 {
                     editor.set_block(RED_FLOWER, x, 1, z, None, None);
                 } else if random_choice < 9 {
@@ -339,7 +357,12 @@ pub fn generate_landuse(
             }
             "orchard" => {
                 if x % 18 == 0 && z % 10 == 0 {
-                    Tree::create(editor, (x, 1, z), Some(building_footprints));
+                    Tree::create(
+                        editor,
+                        (x, 1, z),
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
                 } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.random_range(0..100) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
@@ -433,6 +456,7 @@ pub fn generate_landuse_from_relation(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     if rel.tags.contains_key("landuse") {
         // Process each outer member way individually using cached flood fill.
@@ -454,6 +478,7 @@ pub fn generate_landuse_from_relation(
                     flood_fill_cache,
                     building_footprints,
                     road_mask,
+                    bridge_surface,
                 );
             }
         }

@@ -677,7 +677,6 @@ input[type="range"] {
 .terrain-toggle-container,
 .fillground-toggle-container,
 .interior-toggle-container,
-.roof-toggle-container,
 .scale-slider-container {
   margin: 15px 0;
 }

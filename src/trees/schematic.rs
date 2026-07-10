@@ -289,14 +289,41 @@ pub fn place_schematic_tree(
     let cx = (fw - 1) / 2;
     let cz = (fl - 1) / 2;
     let min_log_vy = schem.min_log_vy;
+
+    // Building top per column, sampled before stamping so the model cannot occlude itself.
+    // Only built when the footprint actually overlaps a building, so distant trees pay nothing.
+    let top_probe_y = base_y + schem.height;
+    let roof_tops: Option<Vec<i32>> = footprints
+        .filter(|fp| {
+            (0..fw).any(|rx| (0..fl).any(|rz| fp.contains(anchor_x + rx - cx, anchor_z + rz - cz)))
+        })
+        .map(|fp| {
+            let mut tops = vec![i32::MIN; (fw * fl).max(0) as usize];
+            for rx in 0..fw {
+                for rz in 0..fl {
+                    let (wx, wz) = (anchor_x + rx - cx, anchor_z + rz - cz);
+                    if fp.contains(wx, wz) {
+                        // Nothing stamped in a footprint column: cull the whole column.
+                        tops[(rx * fl + rz) as usize] = editor
+                            .highest_block_between(wx, wz, base_y, top_probe_y)
+                            .unwrap_or(top_probe_y);
+                    }
+                }
+            }
+            tops
+        });
+
     let mut trunk_bottom: HashMap<(i32, i32), (i32, Block)> =
         HashMap::with_capacity((schem.width * schem.length).max(0) as usize);
     for &(vx, vy, vz, block) in &schem.voxels {
         let (rx, rz) = rotate_xz(vx, vz, schem.width, schem.length, rot);
         let wx = anchor_x + rx - cx;
         let wz = anchor_z + rz - cz;
-        if footprints.is_some_and(|f| f.contains(wx, wz)) {
-            continue;
+        // Cull only at or below the building top so canopies drape over low roofs.
+        if let Some(tops) = &roof_tops {
+            if base_y + vy <= tops[(rx * fl + rz) as usize] {
+                continue;
+            }
         }
         // Logs over water are skipped (only root-level logs for predicted ESA water); leaves overhang.
         if is_log(block) {
