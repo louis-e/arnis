@@ -4344,14 +4344,14 @@ fn generate_floors_and_ceilings(
                     continue;
                 }
 
-                let block = if x % 5 == 0 && z % 5 == 0 {
+                let block = if x % 3 == 0 && z % 3 == 0 {
                     ceiling_light_block
                 } else {
                     config.floor_block
                 };
                 editor.set_block_absolute(block, x, h + config.abs_terrain_offset, z, None, None);
             }
-        } else if x % 5 == 0 && z % 5 == 0 && !is_passage {
+        } else if x % 3 == 0 && z % 3 == 0 && !is_passage {
             // Single floor building with ceiling light (skip in passage)
             editor.set_block_absolute(
                 ceiling_light_block,

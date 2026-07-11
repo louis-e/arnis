@@ -173,6 +173,8 @@ pub struct WorldEditor<'a> {
     preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
     game_mode: crate::args::GameMode,
     world_time: i64,
+    /// Bedrock only: give the player a starting map that reveals the world as they explore.
+    start_with_map: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -207,6 +209,7 @@ impl<'a> WorldEditor<'a> {
             preview: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
+            start_with_map: false,
         }
     }
 
@@ -247,6 +250,7 @@ impl<'a> WorldEditor<'a> {
             preview: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
+            start_with_map: false,
         }
     }
 
@@ -287,6 +291,7 @@ impl<'a> WorldEditor<'a> {
             preview: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
+            start_with_map: false,
         }
     }
 
@@ -351,6 +356,11 @@ impl<'a> WorldEditor<'a> {
     pub fn set_game_settings(&mut self, mode: crate::args::GameMode, world_time: i64) {
         self.game_mode = mode;
         self.world_time = world_time;
+    }
+
+    /// Bedrock only: enable the starting map that reveals the world as the player explores.
+    pub fn set_start_with_map(&mut self, enabled: bool) {
+        self.start_with_map = enabled;
     }
 
     /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
@@ -573,6 +583,11 @@ impl<'a> WorldEditor<'a> {
         let absolute_y = self.get_absolute_y(x, y, z);
         self.world.get_block(x, absolute_y, z).is_some()
     }
+
+    #[inline]
+    pub fn get_block_absolute(&self, x: i32, absolute_y: i32, z: i32) -> Option<Block> {
+        self.world.get_block(x, absolute_y, z)
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn place_wall_banner(
         &mut self,
@@ -631,6 +646,79 @@ impl<'a> WorldEditor<'a> {
                 entry.insert(Value::List(vec![Value::Compound(be)]));
             }
         }
+    }
+
+    /// Writes a minecraft:bed block entity; beds have no baked model and render only when present.
+    pub fn set_bed_block_entity_absolute(&mut self, x: i32, absolute_y: i32, z: i32) {
+        let mut be = HashMap::new();
+        be.insert("id".to_string(), Value::String("minecraft:bed".to_string()));
+        be.insert("x".to_string(), Value::Int(x));
+        be.insert("y".to_string(), Value::Int(absolute_y));
+        be.insert("z".to_string(), Value::Int(z));
+        be.insert("keepPacked".to_string(), Value::Byte(0));
+        self.insert_block_entity(x, z, be);
+    }
+
+    /// Puts the world map in an item frame on a small post just in front of spawn.
+    /// 26.2 no longer reads the inventory from level.dat, so this makes the map reachable
+    /// there while the hotbar copy still works on older clients.
+    pub fn place_map_item_frame(&mut self, spawn_x: i32, spawn_z: i32, map_id: i32) {
+        // Player spawns facing south (+Z), so the display sits a couple blocks that way.
+        let ground = self.get_absolute_y(spawn_x, 0, spawn_z);
+        let eye_y = ground + 2;
+        let frame_z = spawn_z + 2;
+        let post_z = spawn_z + 3;
+
+        self.set_block_absolute(SMOOTH_STONE, spawn_x, ground + 1, post_z, None, Some(&[]));
+        self.set_block_absolute(SMOOTH_STONE, spawn_x, eye_y, post_z, None, Some(&[]));
+        self.set_block_absolute(AIR, spawn_x, eye_y, frame_z, None, Some(&[]));
+
+        let mut components = HashMap::new();
+        components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
+        let mut item = HashMap::new();
+        item.insert(
+            "id".to_string(),
+            Value::String("minecraft:filled_map".to_string()),
+        );
+        item.insert("count".to_string(), Value::Int(1));
+        item.insert("components".to_string(), Value::Compound(components));
+
+        let mut extra = HashMap::new();
+        extra.insert("Facing".to_string(), Value::Byte(2)); // faces north, toward the player
+        extra.insert("ItemRotation".to_string(), Value::Byte(0));
+        extra.insert("Item".to_string(), Value::Compound(item));
+        extra.insert("ItemDropChance".to_string(), Value::Float(1.0));
+        extra.insert("Fixed".to_string(), Value::Byte(0));
+        extra.insert("TileX".to_string(), Value::Int(spawn_x));
+        extra.insert("TileY".to_string(), Value::Int(eye_y));
+        extra.insert("TileZ".to_string(), Value::Int(frame_z));
+        extra.insert(
+            "block_pos".to_string(),
+            Value::List(vec![
+                Value::Int(spawn_x),
+                Value::Int(eye_y),
+                Value::Int(frame_z),
+            ]),
+        );
+
+        let rel_y = eye_y - self.get_absolute_y(spawn_x, 0, frame_z);
+        self.add_entity("minecraft:item_frame", spawn_x, rel_y, frame_z, Some(extra));
+
+        // A chest below holds a takeable copy: breaking a frame in creative destroys the item
+        // instead of dropping it, and 26.2 does not read the hotbar map from level.dat.
+        let chest_y = ground + 1;
+        self.set_block_absolute(AIR, spawn_x, chest_y, frame_z, None, Some(&[]));
+        let mut chest_components = HashMap::new();
+        chest_components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
+        let mut chest_map = HashMap::new();
+        chest_map.insert("Slot".to_string(), Value::Byte(13));
+        chest_map.insert(
+            "id".to_string(),
+            Value::String("minecraft:filled_map".to_string()),
+        );
+        chest_map.insert("count".to_string(), Value::Int(1));
+        chest_map.insert("components".to_string(), Value::Compound(chest_components));
+        self.set_chest_with_items_absolute(spawn_x, chest_y, frame_z, vec![chest_map]);
     }
 
     /// Places a banner block entity at the given coordinates (absolute Y).
@@ -1468,6 +1556,7 @@ impl<'a> WorldEditor<'a> {
             self.scale,
             self.game_mode,
             self.world_time,
+            self.start_with_map,
         )
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
