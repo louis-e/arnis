@@ -89,12 +89,14 @@ pub fn generate_natural(
                     .choose(&mut rng)
                     .unwrap_or(&TreeType::Oak);
 
+                // Deliberately-mapped street tree: allow it to stand on paving.
                 Tree::create_of_type(
                     editor,
                     (x, 1, z),
                     tree_type,
                     Some(building_footprints),
                     Some(bridge_surface),
+                    true,
                 );
             }
         } else {
@@ -358,6 +360,7 @@ pub fn generate_natural(
                                     tree_type,
                                     Some(building_footprints),
                                     Some(bridge_surface),
+                                    false,
                                 );
                             } else if random_choice == 1 {
                                 let flower_block = match rng.random_range(1..=4) {
@@ -449,6 +452,7 @@ pub fn generate_natural(
                                             tree_type,
                                             Some(building_footprints),
                                             Some(bridge_surface),
+                                            false,
                                         );
                                     } else if r < 15 {
                                         place_grass_or_tall(editor, &mut rng, x, z);

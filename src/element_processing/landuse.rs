@@ -205,6 +205,7 @@ pub fn generate_landuse(
                         tree_type,
                         Some(building_footprints),
                         Some(bridge_surface),
+                        false,
                     );
                 } else {
                     let random_choice: i32 = rng.random_range(0..30);
