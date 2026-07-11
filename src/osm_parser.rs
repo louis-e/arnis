@@ -97,6 +97,17 @@ pub struct OsmData {
 }
 
 impl OsmData {
+    // ... existing methods ...
+
+    /// Returns true if there are no elements and the remark is empty or absent.
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty() && self.remark.as_ref().map_or(true, |r| r.is_empty())
+    }
+}
+
+
+
+impl OsmData {
     /// Returns true if there are no elements in the OSM data
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
@@ -725,5 +736,70 @@ mod outline_suppression_tests {
         let suppressed = compute_outline_suppression(&[rel], &[outline], &outline_nodes);
 
         assert!(suppressed.is_empty());
+    }
+}
+  #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_osm_data_is_empty() {
+        // Truly empty
+        let empty = OsmData {
+            elements: vec![],
+            remark: None,
+        };
+        assert!(empty.is_empty());
+
+        // With a remark (not empty)
+        let with_remark = OsmData {
+            elements: vec![],
+            remark: Some("test".to_string()),
+        };
+        assert!(!with_remark.is_empty());
+
+        // With elements (not empty)
+        let populated = OsmData {
+            elements: vec![OsmElement {
+                r#type: "node".to_string(),
+                id: 1,
+                lat: Some(0.0),
+                lon: Some(0.0),
+                nodes: None,
+                tags: None,
+                members: vec![],
+            }],
+            remark: None,
+        };
+        assert!(!populated.is_empty());
+    }
+}
+  #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_osm_data_is_empty() {
+        // Empty elements
+        let empty = OsmData {
+            elements: vec![],
+            remark: None,
+        };
+        assert!(empty.is_empty());
+
+        // Populated elements
+        let populated = OsmData {
+            elements: vec![OsmElement {
+                r#type: "node".to_string(),
+                id: 1,
+                lat: Some(0.0),
+                lon: Some(0.0),
+                nodes: None,
+                tags: None,
+                members: vec![],
+            }],
+            remark: Some("dummy".to_string()), // remark doesn't affect is_empty
+        };
+        assert!(!populated.is_empty());
     }
 }
