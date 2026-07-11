@@ -497,6 +497,7 @@ pub fn generate_world_with_options(
     editor.set_bake_lighting(args.bake_lighting);
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
+    editor.set_start_with_map(args.map_item);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
 
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
@@ -1114,6 +1115,14 @@ pub fn generate_world_with_options(
             editor.content_hash()
         };
         eprintln!("[BENCHMARK] block_hash={:016x}", h);
+    }
+
+    // Fresh worlds always use map id 0; place the display frame at the real spawn before flush.
+    if wants_map_item {
+        let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
+            .or(options.spawn_point)
+            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+        editor.place_map_item_frame(sx, sz, 0);
     }
 
     // Save world
