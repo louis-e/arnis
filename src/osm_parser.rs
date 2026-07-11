@@ -474,10 +474,30 @@ pub fn parse_osm_data(
     let mut part_groups = PartGroups::new();
     let mut outline_suppression =
         compute_outline_suppression(&data.relations, &data.ways, &data.nodes, &mut part_groups);
+    // Ways owned by a type=building relation are handled above; the spatial pass must
+    // not re-judge them against unrelated parts that merely fall inside their footprint.
+    let relation_ways: HashSet<u64> = data
+        .relations
+        .iter()
+        .filter(|r| {
+            r.tags
+                .as_ref()
+                .and_then(|t| t.get("type"))
+                .map(|t| t == "building")
+                .unwrap_or(false)
+        })
+        .flat_map(|r| {
+            r.members
+                .iter()
+                .filter(|m| m.r#type == "way")
+                .map(|m| m.r#ref)
+        })
+        .collect();
     // also catch S3DB outlines mapped without a relation
     outline_suppression.extend(compute_spatial_part_suppression(
         &data.ways,
         &data.nodes,
+        &relation_ways,
         &mut part_groups,
     ));
 
@@ -672,6 +692,31 @@ pub fn parse_osm_data(
 // Parts replace the outline only when they cover at least this much of it.
 const MIN_PART_COVERAGE: f64 = 0.5;
 
+// A part covers the outline's ground footprint only if it starts at ground level.
+// Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
+// that float above the ground (e.g. S3DB churches), so they can't stand in for the outline.
+fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
+    // Leading number only: sign at position 0, one decimal point. So "54-60" → 54, not a parse fail.
+    let leading_f64 = |s: &str| {
+        let t = s.trim();
+        let mut end = 0;
+        let mut seen_dot = false;
+        for (i, c) in t.char_indices() {
+            let ok =
+                c.is_ascii_digit() || (c == '.' && !seen_dot) || ((c == '-' || c == '+') && i == 0);
+            if !ok {
+                break;
+            }
+            seen_dot |= c == '.';
+            end = i + c.len_utf8();
+        }
+        t[..end].parse::<f64>().ok()
+    };
+    let min_h = tags.get("min_height").and_then(|s| leading_f64(s));
+    let min_lvl = tags.get("building:min_level").and_then(|s| leading_f64(s));
+    min_h.unwrap_or(0.0) <= 0.0 && min_lvl.unwrap_or(0.0) <= 0.0
+}
+
 fn compute_outline_suppression(
     relations: &[OsmElement],
     ways: &[OsmElement],
@@ -701,12 +746,14 @@ fn compute_outline_suppression(
     // so the group seed carries the building's decision).
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
+    let mut way_ground: HashMap<u64, bool> = HashMap::new();
     for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
         }
         if let Some(t) = w.tags.as_ref() {
             way_hint.insert(w.id, building_style_hint(t));
+            way_ground.insert(w.id, part_covers_ground(t));
         }
     }
     let mut needed_nodes: HashSet<u64> = HashSet::new();
@@ -769,7 +816,9 @@ fn compute_outline_suppression(
             match m.r#type.as_str() {
                 "relation" => has_relation_part = true,
                 "way" => {
-                    part_area += way_area(m.r#ref).unwrap_or(0.0);
+                    if way_ground.get(&m.r#ref).copied().unwrap_or(true) {
+                        part_area += way_area(m.r#ref).unwrap_or(0.0);
+                    }
                     part_group.insert(
                         m.r#ref,
                         seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
@@ -809,9 +858,11 @@ fn compute_outline_suppression(
 }
 
 /// Suppresses relation-less S3DB outlines: a building polygon that spatially contains building:part polygons.
+/// Ways in `relation_ways` belong to a type=building relation and are judged by the relation pass instead.
 fn compute_spatial_part_suppression(
     ways: &[OsmElement],
     nodes: &[OsmElement],
+    relation_ways: &HashSet<u64>,
     part_group: &mut PartGroups,
 ) -> OutlineSuppression {
     let is_part = |tags: &HashMap<String, String>| {
@@ -824,8 +875,12 @@ fn compute_spatial_part_suppression(
     let mut part_ids: Vec<u64> = Vec::new();
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
+    let mut way_ground: HashMap<u64, bool> = HashMap::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for w in ways {
+        if relation_ways.contains(&w.id) {
+            continue;
+        }
         let (Some(tags), Some(ns)) = (&w.tags, &w.nodes) else {
             continue;
         };
@@ -842,6 +897,7 @@ fn compute_spatial_part_suppression(
         }
         way_nodes.insert(w.id, ns);
         way_hint.insert(w.id, building_style_hint(tags));
+        way_ground.insert(w.id, part_covers_ground(tags));
         needed_nodes.extend(ns.iter().copied());
     }
     if outline_ids.is_empty() || part_ids.is_empty() {
@@ -952,11 +1008,14 @@ fn compute_spatial_part_suppression(
         let Some(cands) = grid.get(&cell(cla, clo)) else {
             continue;
         };
+        let ground = way_ground.get(&pid).copied().unwrap_or(true);
         // smallest containing outline (tie-break min id) is the part's building
         let mut best: Option<usize> = None;
         for &gi in cands {
             if point_in_ring(cla, clo, &geoms[gi].ring) {
-                *covered.entry(gi).or_insert(0.0) += pa;
+                if ground {
+                    *covered.entry(gi).or_insert(0.0) += pa;
+                }
                 best = Some(match best {
                     Some(b) if (geoms[b].area, geoms[b].id) <= (geoms[gi].area, geoms[gi].id) => b,
                     _ => gi,
@@ -1121,6 +1180,32 @@ mod outline_suppression_tests {
         assert!(suppressed.contains(&("way", 100)));
     }
 
+    fn with_tag(mut w: OsmElement, k: &str, v: &str) -> OsmElement {
+        w.tags
+            .get_or_insert_with(HashMap::new)
+            .insert(k.to_string(), v.to_string());
+        w
+    }
+
+    // S3DB churches (e.g. St. Peter's): parts model the raised roof/dome and float on
+    // min_height, so they don't cover the ground footprint and can't drop the outline.
+    #[test]
+    fn elevated_way_parts_keep_the_outline() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let (part, part_nodes) = square_way(200, 2000, 0.8);
+        let part = with_tag(part, "min_height", "54");
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
+
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let suppressed =
+            compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut PartGroups::new());
+
+        assert!(!suppressed.contains(&("way", 100)));
+    }
+
     // Sub-relation parts carry no way geometry, so fall back to always suppressing.
     #[test]
     fn relation_parts_suppress_the_outline() {
@@ -1163,8 +1248,47 @@ mod outline_suppression_tests {
             tagged(p, "building:part", "yes"),
         ];
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
-        let s = compute_spatial_part_suppression(&ways, &nodes, &mut PartGroups::new());
+        let s = compute_spatial_part_suppression(
+            &ways,
+            &nodes,
+            &HashSet::new(),
+            &mut PartGroups::new(),
+        );
         assert!(s.contains(&("way", 100)));
+    }
+
+    // A relation-less S3DB outline whose only parts float on min_height survives.
+    #[test]
+    fn spatial_elevated_part_keeps_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.8);
+        let p = with_tag(tagged(p, "building:part", "yes"), "min_height", "54");
+        let ways = [tagged(o, "building", "yes"), p];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let s = compute_spatial_part_suppression(
+            &ways,
+            &nodes,
+            &HashSet::new(),
+            &mut PartGroups::new(),
+        );
+        assert!(!s.contains(&("way", 100)));
+    }
+
+    // Therme Erding: a relation-owned outline must be left to the relation pass, not
+    // suppressed by the spatial pass counting unrelated parts that fall inside its footprint.
+    #[test]
+    fn spatial_skips_relation_owned_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.8);
+        let ways = [
+            tagged(o, "building", "yes"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let relation_ways = HashSet::from([100u64]);
+        let s =
+            compute_spatial_part_suppression(&ways, &nodes, &relation_ways, &mut PartGroups::new());
+        assert!(!s.contains(&("way", 100)));
     }
 
     // An open (unclosed) part ring is ignored, so it can't suppress the outline.
@@ -1179,7 +1303,12 @@ mod outline_suppression_tests {
             tagged(p, "building:part", "yes"),
         ];
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
-        let s = compute_spatial_part_suppression(&ways, &nodes, &mut PartGroups::new());
+        let s = compute_spatial_part_suppression(
+            &ways,
+            &nodes,
+            &HashSet::new(),
+            &mut PartGroups::new(),
+        );
         assert!(!s.contains(&("way", 100)));
     }
 
@@ -1193,7 +1322,12 @@ mod outline_suppression_tests {
             tagged(p, "building:part", "yes"),
         ];
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
-        let s = compute_spatial_part_suppression(&ways, &nodes, &mut PartGroups::new());
+        let s = compute_spatial_part_suppression(
+            &ways,
+            &nodes,
+            &HashSet::new(),
+            &mut PartGroups::new(),
+        );
         assert!(!s.contains(&("way", 100)));
     }
 
@@ -1202,7 +1336,8 @@ mod outline_suppression_tests {
     fn spatial_outline_without_parts_is_kept() {
         let (o, on) = square_way(100, 1000, 1.0);
         let ways = [tagged(o, "building", "commercial")];
-        let s = compute_spatial_part_suppression(&ways, &on, &mut PartGroups::new());
+        let s =
+            compute_spatial_part_suppression(&ways, &on, &HashSet::new(), &mut PartGroups::new());
         assert!(s.is_empty());
     }
 
@@ -1217,7 +1352,7 @@ mod outline_suppression_tests {
         ];
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
         let mut groups = PartGroups::new();
-        compute_spatial_part_suppression(&ways, &nodes, &mut groups);
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
         assert_eq!(groups.get(&200), Some(&100));
     }
 
