@@ -8,8 +8,8 @@ use crate::ground_generation;
 use crate::map_preview;
 use crate::map_renderer::PreviewAccumulator;
 use crate::osm_parser::{
-    OutlineSuppression, ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation,
-    ProcessedWay,
+    OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole, ProcessedNode,
+    ProcessedRelation, ProcessedWay,
 };
 use crate::progress::{
     emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
@@ -207,6 +207,7 @@ fn process_element(
     subway_points: &mut Vec<(i32, i32)>,
     tunnel_internal_endpoints: &highways::TunnelInternalEndpoints,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
+    part_groups: &PartGroups,
 ) {
     match element {
         ProcessedElement::Way(way) => {
@@ -225,6 +226,8 @@ fn process_element(
             }
 
             if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                // parts of one building share a style seed so untagged parts match
+                let group_seed = part_groups.get(&way.id).copied().unwrap_or(way.id);
                 buildings::generate_buildings(
                     editor,
                     way,
@@ -233,6 +236,7 @@ fn process_element(
                     None,
                     flood_fill_cache,
                     building_passages,
+                    group_seed,
                 );
             } else if way.tags.contains_key("highway") {
                 highways::generate_highways(
@@ -457,6 +461,7 @@ fn should_stream_to_disk(num_regions: usize) -> bool {
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
+#[allow(clippy::too_many_arguments)]
 pub fn generate_world_with_options(
     mut elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
@@ -465,6 +470,7 @@ pub fn generate_world_with_options(
     args: &Args,
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
+    part_groups: PartGroups,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
@@ -608,6 +614,14 @@ pub fn generate_world_with_options(
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
     // Background writer for eviction; None unless eviction is active.
     let mut flush_worker: Option<FlushWorker> = None;
+    // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
+    // real ground. Resolved exactly like the finalize call; spawn doesn't change during generation.
+    let spawn_region: Option<(i32, i32)> = wants_map_item.then(|| {
+        let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
+            .or(options.spawn_point)
+            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+        (sx >> 9, sz >> 9)
+    });
 
     // Decide between sequential and parallel processing based on world size.
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
@@ -768,6 +782,7 @@ pub fn generate_world_with_options(
                             &mut tile_subway_points,
                             &tunnel_internal_endpoints,
                             &mut tile_tunnel_cells,
+                            &part_groups,
                         );
                     }
 
@@ -884,6 +899,7 @@ pub fn generate_world_with_options(
                                 if *c == 0
                                     && !evicted_regions.contains(&d)
                                     && !model_regions.contains(&d)
+                                    && Some(d) != spawn_region
                                 {
                                     if hash_check {
                                         hash_acc = hash_acc
@@ -996,6 +1012,7 @@ pub fn generate_world_with_options(
                 &mut subway_points,
                 &tunnel_internal_endpoints,
                 &mut tunnel_cells,
+                &part_groups,
             );
 
             // Release flood fill cache entries for memory optimization.
@@ -1084,8 +1101,12 @@ pub fn generate_world_with_options(
 
     if eviction_active {
         // Flush deferred (subway-touched) regions now the global carve has run on them.
-        let mut leftover: Vec<(i32, i32)> =
-            real_regions.difference(&evicted_regions).copied().collect();
+        // The spawn region stays resident so the map-item still lands on real ground.
+        let mut leftover: Vec<(i32, i32)> = real_regions
+            .difference(&evicted_regions)
+            .copied()
+            .filter(|r| Some(*r) != spawn_region)
+            .collect();
         leftover.sort_unstable();
         for (rx, rz) in leftover {
             if hash_check {

@@ -273,27 +273,52 @@ pub enum BuildingCategory {
     Religious, // Churches, mosques, temples, etc.
 
     // Special types
-    TallBuilding,     // Tall buildings (>7 floors or >28m)
-    GlassySkyscraper, // Glass-facade skyscrapers (50% of true skyscrapers)
-    ModernSkyscraper, // Horizontal-window skyscrapers with stone bands (35%)
-    Historic,         // Castles, ruins, historic buildings
-    Tower,            // man_made=tower or building=tower (stone towers)
-    Garage,           // Garages and carports
-    Shed,             // Sheds, huts, simple storage
-    Greenhouse,       // Greenhouses and glasshouses
+    TallBuilding,           // Tall buildings (>7 floors or >28m)
+    GlassySkyscraper,       // Glass-facade skyscrapers
+    GlassCornerSkyscraper,  // Glass facade with concrete corner pillars
+    GridSkyscraper,         // Large glass panes in a concrete grid
+    ContemporarySkyscraper, // Concrete/light-stone frame with wide glass windows
+    ModernSkyscraper,       // Horizontal-window skyscrapers with stone bands
+    MasonrySkyscraper,      // Stone/art-deco towers, from historic/material OSM tags
+    Historic,               // Castles, ruins, historic buildings
+    Tower,                  // man_made=tower or building=tower (stone towers)
+    Garage,                 // Garages and carports
+    Shed,                   // Sheds, huts, simple storage
+    Greenhouse,             // Greenhouses and glasshouses
 
     Default, // Unknown or generic buildings
 }
 
 impl BuildingCategory {
     /// Determines the building category from OSM tags and calculated properties
-    fn from_element(element: &ProcessedWay, is_tall_building: bool, building_height: i32) -> Self {
+    fn from_element(
+        element: &ProcessedWay,
+        is_tall_building: bool,
+        building_height: i32,
+        group_seed: u64,
+    ) -> Self {
         // Check for man_made=tower before anything else
         if element.tags.get("man_made").map(|s| s.as_str()) == Some("tower") {
             return BuildingCategory::Tower;
         }
 
         if is_tall_building {
+            // OSM tags can pin the facade style. The seed carries the building's decision to all
+            // its S3DB parts; the element's own tags cover standalone buildings.
+            use crate::osm_parser::StyleHint;
+            let mut hint = crate::osm_parser::style_hint_from_seed(group_seed);
+            if hint == StyleHint::None {
+                hint = crate::osm_parser::building_style_hint(&element.tags);
+            }
+            let clean_seed = crate::osm_parser::seed_without_hint(group_seed);
+            match hint {
+                // Tagged glass towers stay glass, but vary the treatment for a livelier skyline.
+                StyleHint::Glass => return Self::glass_family_variant(clean_seed),
+                StyleHint::Masonry => return BuildingCategory::MasonrySkyscraper,
+                StyleHint::Contemporary => return BuildingCategory::ContemporarySkyscraper,
+                StyleHint::None => {}
+            }
+
             // Check if this qualifies as a true skyscraper:
             // Must be significantly tall AND have skyscraper proportions
             // (taller than twice its longest side dimension)
@@ -301,16 +326,15 @@ impl BuildingCategory {
                 && Self::has_skyscraper_proportions(element, building_height);
 
             if is_true_skyscraper {
-                // Deterministic variant selection based on element ID
-                let hash = element.id.wrapping_mul(2654435761); // Knuth multiplicative hash
-                let roll = hash % 100;
-                return if roll < 50 {
-                    BuildingCategory::GlassySkyscraper
-                } else if roll < 85 {
-                    BuildingCategory::ModernSkyscraper
-                } else {
-                    // 15% use the standard TallBuilding preset
-                    BuildingCategory::TallBuilding
+                // shared seed so parts of one tower pick the same variant
+                let hash = clean_seed.wrapping_mul(2654435761); // Knuth multiplicative hash
+                return match hash % 100 {
+                    0..=17 => BuildingCategory::GlassySkyscraper,
+                    18..=29 => BuildingCategory::GlassCornerSkyscraper,
+                    30..=44 => BuildingCategory::GridSkyscraper,
+                    45..=69 => BuildingCategory::ContemporarySkyscraper,
+                    70..=84 => BuildingCategory::ModernSkyscraper,
+                    _ => BuildingCategory::TallBuilding,
                 };
             }
 
@@ -407,6 +431,16 @@ impl BuildingCategory {
 
     /// Checks if a tall building has skyscraper proportions:
     /// building height >= 40 blocks AND height >= 2× the longest side of its bounding box.
+    /// Picks a glass-family treatment (pure curtain, concrete corners, or grid) from the shared seed.
+    fn glass_family_variant(seed: u64) -> BuildingCategory {
+        // Even split so a formerly all-glass tower is usually a grid or corner variant.
+        match (seed ^ 0x6C07_A55E).wrapping_mul(2654435761) % 3 {
+            0 => BuildingCategory::GlassySkyscraper,
+            1 => BuildingCategory::GridSkyscraper,
+            _ => BuildingCategory::GlassCornerSkyscraper,
+        }
+    }
+
     fn has_skyscraper_proportions(element: &ProcessedWay, building_height: i32) -> bool {
         if building_height < 40 {
             return false;
@@ -515,6 +549,83 @@ impl BuildingStylePreset {
             generate_roof: Some(true),
             has_chimney: Some(false),
             wall_depth_style: Some(WallDepthStyle::GlassCurtain),
+            has_parapet: Some(true),
+            ..Default::default()
+        }
+    }
+
+    /// Glass tower with concrete corner pillars (GlassCurtain places accent_block at the corners).
+    pub fn glass_corner_skyscraper() -> Self {
+        Self {
+            accent_block: Some(LIGHT_GRAY_CONCRETE),
+            has_windows: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::GlassCurtain),
+            has_parapet: Some(true),
+            ..Default::default()
+        }
+    }
+
+    /// Large glass panes in a concrete grid (mullions at floor lines and every few columns).
+    pub fn grid_skyscraper() -> Self {
+        Self {
+            window_block: Some(LIGHT_BLUE_STAINED_GLASS),
+            has_windows: Some(true),
+            use_vertical_windows: Some(false),
+            use_horizontal_windows: Some(false),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            has_garage_door: Some(false),
+            has_single_door: Some(false),
+            wall_depth_style: Some(WallDepthStyle::None),
+            has_parapet: Some(true),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for contemporary towers: concrete/light-stone piers with wide glass windows.
+    pub fn contemporary_skyscraper() -> Self {
+        Self {
+            window_block: Some(LIGHT_BLUE_STAINED_GLASS),
+            has_windows: Some(true),
+            use_vertical_windows: Some(false),
+            use_horizontal_windows: Some(false),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            has_garage_door: Some(false),
+            has_single_door: Some(false),
+            wall_depth_style: Some(WallDepthStyle::ModernPillars),
+            has_parapet: Some(true),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for stone/art-deco towers (historic + masonry-tagged tall buildings).
+    pub fn masonry_skyscraper() -> Self {
+        Self {
+            // wall_block None so building:material / building:colour still win; palette from category.
+            floor_block: Some(SMOOTH_STONE), // stops the setback crown capping tiers in oak planks
+            window_block: Some(LIGHT_GRAY_STAINED_GLASS),
+            accent_block: Some(SMOOTH_STONE),
+            has_windows: Some(true),
+            use_vertical_windows: Some(false),
+            use_horizontal_windows: Some(false),
+            use_accent_lines: Some(true),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            has_garage_door: Some(false),
+            has_single_door: Some(false),
+            wall_depth_style: Some(WallDepthStyle::HistoricOrnate),
             has_parapet: Some(true),
             ..Default::default()
         }
@@ -743,7 +854,11 @@ impl BuildingStylePreset {
             BuildingCategory::Greenhouse => Self::greenhouse(),
             BuildingCategory::TallBuilding => Self::tall_building(),
             BuildingCategory::GlassySkyscraper => Self::glassy_skyscraper(),
+            BuildingCategory::GlassCornerSkyscraper => Self::glass_corner_skyscraper(),
+            BuildingCategory::GridSkyscraper => Self::grid_skyscraper(),
+            BuildingCategory::ContemporarySkyscraper => Self::contemporary_skyscraper(),
             BuildingCategory::ModernSkyscraper => Self::modern_skyscraper(),
+            BuildingCategory::MasonrySkyscraper => Self::masonry_skyscraper(),
             BuildingCategory::Default => Self::empty(),
         }
     }
@@ -828,7 +943,7 @@ impl BuildingStyle {
             }
         });
 
-        // Window block: from preset or random based on building type
+        // Window block: from preset or random based on building type (tint coordinated below).
         let window_block = preset
             .window_block
             .unwrap_or_else(|| get_window_block_for_building_type_with_rng(building_type, rng));
@@ -853,6 +968,19 @@ impl BuildingStyle {
                 ACCENT_BLOCK_OPTIONS[rng.random_range(0..ACCENT_BLOCK_OPTIONS.len())]
             }
         });
+
+        // Concrete/modern towers tint their glass dark when the wall or the accent bands are
+        // dark, so a blackstone-banded tower reads with dark glass instead of bright blue.
+        let window_block = if matches!(
+            category,
+            BuildingCategory::ContemporarySkyscraper
+                | BuildingCategory::GridSkyscraper
+                | BuildingCategory::ModernSkyscraper
+        ) {
+            coordinated_window_block(wall_block, accent_block, window_block)
+        } else {
+            window_block
+        };
 
         // === Window Style ===
 
@@ -1065,6 +1193,8 @@ struct BuildingConfig {
     has_lobby_base: bool,
     condition: BuildingCondition,
     element_id: u64,
+    // shared across all parts of one building for coherent roof style
+    style_seed: u64,
     /// Per-building offset of the window rhythm so facades don't align citywide.
     window_phase: i32,
     /// Darker plinth block for the bottom wall rows, None to skip.
@@ -1319,6 +1449,25 @@ fn calculate_start_y_offset(
 }
 
 /// Wall block from an OSM material/colour tag, or None if no tag is set.
+/// Tints a tower's glass to match a dark wall or dark accent band; else keeps the light default.
+fn coordinated_window_block(wall_block: Block, accent_block: Block, light_default: Block) -> Block {
+    const DARK: &[Block] = &[
+        BLACK_CONCRETE,
+        GRAY_CONCRETE,
+        BLACKSTONE,
+        POLISHED_BLACKSTONE,
+        DEEPSLATE_BRICKS,
+        NETHER_BRICK,
+        BLACK_TERRACOTTA,
+        GRAY_TERRACOTTA,
+    ];
+    if DARK.contains(&wall_block) || DARK.contains(&accent_block) {
+        GRAY_STAINED_GLASS
+    } else {
+        light_default
+    }
+}
+
 fn determine_wall_block_from_tags(
     element: &ProcessedWay,
     category: BuildingCategory,
@@ -1464,7 +1613,33 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
             MODERN_SKYSCRAPER_WALL_OPTIONS
                 [rng.random_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
         }
-        BuildingCategory::GlassySkyscraper => {
+        BuildingCategory::ContemporarySkyscraper | BuildingCategory::GridSkyscraper => {
+            // Light modern concrete/stone frame.
+            const CONTEMPORARY: [Block; 5] = [
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                GRAY_CONCRETE,
+                QUARTZ_BLOCK,
+                SMOOTH_STONE,
+            ];
+            CONTEMPORARY[rng.random_range(0..CONTEMPORARY.len())]
+        }
+        BuildingCategory::MasonrySkyscraper => {
+            // One warm (buff sandstone) or grey (limestone/granite) palette per building.
+            if rng.random_bool(0.5) {
+                const WARM: [Block; 3] = [SMOOTH_SANDSTONE, SANDSTONE, END_STONE_BRICKS];
+                WARM[rng.random_range(0..WARM.len())]
+            } else {
+                const GREY: [Block; 4] = [
+                    STONE_BRICKS,
+                    SMOOTH_STONE,
+                    POLISHED_ANDESITE,
+                    POLISHED_DIORITE,
+                ];
+                GREY[rng.random_range(0..GREY.len())]
+            }
+        }
+        BuildingCategory::GlassySkyscraper | BuildingCategory::GlassCornerSkyscraper => {
             // Glass-facade skyscrapers use stained glass as wall material
             const GLASSY_WALL_OPTIONS: [Block; 4] = [
                 GRAY_STAINED_GLASS,
@@ -1680,6 +1855,7 @@ fn generate_roof_only_structure(
     element: &ProcessedWay,
     cached_floor_area: &[(i32, i32)],
     args: &Args,
+    group_seed: u64,
 ) {
     let scale_factor = args.scale;
     let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
@@ -1743,7 +1919,7 @@ fn generate_roof_only_structure(
 
     // Pick a block for the roof surface.
     // Priority: roof:material > roof:colour > building/colour > default.
-    let mut rng = element_rng(element.id);
+    let mut rng = element_rng(group_seed);
     let roof_block = element
         .tags
         .get("roof:material")
@@ -2485,6 +2661,15 @@ fn determine_wall_block_at_position_pristine(
                 config.wall_block
             }
         }
+    } else if config.category == BuildingCategory::GridSkyscraper {
+        // Big glass panes separated by concrete mullions at floor lines and every 5th column.
+        let mullion =
+            !above_floor || floor_row == 0 || (bx + bz + config.window_phase).rem_euclid(5) == 0;
+        if mullion {
+            config.wall_block
+        } else {
+            config.window_block
+        }
     } else if config.is_tall_building && config.use_vertical_windows {
         // Tall building pattern, vertical window strips alternating with wall columns
         if above_floor && (bx + bz + config.window_phase).rem_euclid(2) == 0 {
@@ -2506,7 +2691,13 @@ fn determine_wall_block_at_position_pristine(
             return GLASS;
         }
 
-        let is_window_position = above_floor && floor_row != 0 && window_col < 3;
+        // Window width across the 6-block cycle: masonry narrow, contemporary wide, else default.
+        let window_width = match config.category {
+            BuildingCategory::MasonrySkyscraper => 2,
+            BuildingCategory::ContemporarySkyscraper => 4,
+            _ => 3,
+        };
+        let is_window_position = above_floor && floor_row != 0 && window_col < window_width;
 
         if is_window_position {
             config.window_block
@@ -4481,6 +4672,7 @@ fn qualifies_for_auto_gabled_roof(building_type: &str) -> bool {
 // ============================================================================
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn generate_buildings(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -4489,6 +4681,7 @@ pub fn generate_buildings(
     hole_polygons: Option<&[HolePolygon]>,
     flood_fill_cache: &FloodFillCache,
     building_passages: &CoordinateBitmap,
+    group_seed: u64,
 ) {
     // Early return for underground buildings
     if should_skip_underground_building(element) {
@@ -4608,7 +4801,7 @@ pub fn generate_buildings(
     // with building:part="roof" (but no "building" tag) would otherwise fall
     // through to the full building pipeline and render as small boxy buildings.
     if element.tags.get("building:part").map(|v| v.as_str()) == Some("roof") {
-        generate_roof_only_structure(editor, element, &cached_floor_area, args);
+        generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
         return;
     }
 
@@ -4626,7 +4819,7 @@ pub fn generate_buildings(
                 return;
             }
             "roof" => {
-                generate_roof_only_structure(editor, element, &cached_floor_area, args);
+                generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
                 return;
             }
             "bridge" => {
@@ -4655,11 +4848,12 @@ pub fn generate_buildings(
     building_height = adjust_height_for_building_type(building_type, building_height, scale_factor);
 
     // Determine building category and get appropriate style preset
-    let category = BuildingCategory::from_element(element, is_tall_building, building_height);
+    let category =
+        BuildingCategory::from_element(element, is_tall_building, building_height, group_seed);
     let preset = BuildingStylePreset::for_category(category);
 
     // Resolve style with deterministic RNG
-    let mut rng = element_rng(element.id);
+    let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > 6;
     let style = BuildingStyle::resolve(
         &preset,
@@ -4728,19 +4922,20 @@ pub fn generate_buildings(
         wall_depth_style: style.wall_depth_style,
         has_parapet: style.has_parapet
             || short_flat_parapet_for(
-                element.id,
+                group_seed,
                 style.roof_type,
                 effective_building_height,
                 category,
                 condition,
             ),
         has_lobby_base: if category == BuildingCategory::ModernSkyscraper {
-            element_rng(element.id.wrapping_add(6143)).random_bool(0.70)
+            element_rng(group_seed.wrapping_add(6143)).random_bool(0.70)
         } else {
             false
         },
         condition,
         element_id: element.id,
+        style_seed: group_seed,
         // Parts of one building must share a phase, so they stay world-coord aligned.
         window_phase: if element.tags.contains_key("building:part") {
             0
@@ -4761,7 +4956,7 @@ pub fn generate_buildings(
             let base = base_course_for_wall(wall_block);
             (eligible
                 && base != wall_block
-                && element_rng(element.id ^ 0xBA5E_C0A2_5E11_0001).random_bool(0.70))
+                && element_rng(group_seed ^ 0xBA5E_C0A2_5E11_0001).random_bool(0.70))
             .then_some(base)
         },
         has_storefront: matches!(
@@ -4770,9 +4965,9 @@ pub fn generate_buildings(
         ) && has_windows
             && condition == BuildingCondition::Normal
             && min_level_offset == 0
-            && element_rng(element.id ^ 0x5709_EF90_0000_0002).random_bool(0.60),
+            && element_rng(group_seed ^ 0x5709_EF90_0000_0002).random_bool(0.60),
         window_frame: (has_windows && condition == BuildingCondition::Normal && !is_tall_building)
-            .then(|| pick_window_frame(category, element.id))
+            .then(|| pick_window_frame(category, group_seed))
             .flatten(),
     };
 
@@ -5093,6 +5288,7 @@ fn generate_building_roof(
         roof_area,
         config.abs_terrain_offset,
         add_dormers,
+        config.style_seed,
     );
 
     // Add parapet on flat-roofed buildings
@@ -7524,6 +7720,7 @@ fn generate_roof(
     roof_area: &[(i32, i32)],
     abs_terrain_offset: i32,
     add_dormers: bool,
+    style_seed: u64,
 ) {
     if roof_area.is_empty() {
         return;
@@ -7531,7 +7728,7 @@ fn generate_roof(
 
     let mut config = RoofConfig::from_roof_area(
         roof_area,
-        element.id,
+        style_seed,
         start_y_offset,
         building_height,
         wall_block,
@@ -7539,7 +7736,7 @@ fn generate_roof(
     );
 
     // OSM roof:material / roof:colour override the preset.
-    let mut roof_rng = element_rng(element.id ^ 0xF00F_C010_BA5E_F00D);
+    let mut roof_rng = element_rng(style_seed ^ 0xF00F_C010_BA5E_F00D);
     let osm_roof_block = element
         .tags
         .get("roof:material")
@@ -7809,6 +8006,7 @@ pub fn generate_building_from_relation(
                 hole_polygons.as_deref(),
                 flood_fill_cache,
                 building_passages,
+                merged_way.id,
             );
         }
     }
@@ -7885,5 +8083,52 @@ fn generate_bridge(
     // Place floor blocks
     for &(x, z) in bridge_area.iter() {
         editor.set_block_absolute(floor_block, x, floor_y, z, None, None);
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn dark_wall_or_dark_accent_gets_dark_glass() {
+        // dark wall
+        assert_eq!(
+            coordinated_window_block(BLACK_CONCRETE, SMOOTH_STONE, LIGHT_BLUE_STAINED_GLASS),
+            GRAY_STAINED_GLASS
+        );
+        // light wall but dark accent band (the blackstone-line modern tower)
+        assert_eq!(
+            coordinated_window_block(WHITE_CONCRETE, BLACKSTONE, LIGHT_BLUE_STAINED_GLASS),
+            GRAY_STAINED_GLASS
+        );
+        assert_eq!(
+            coordinated_window_block(GRAY_CONCRETE, SMOOTH_STONE, LIGHT_BLUE_STAINED_GLASS),
+            GRAY_STAINED_GLASS
+        );
+    }
+
+    #[test]
+    fn light_wall_and_light_accent_keep_the_light_window() {
+        assert_eq!(
+            coordinated_window_block(WHITE_CONCRETE, SMOOTH_STONE, LIGHT_BLUE_STAINED_GLASS),
+            LIGHT_BLUE_STAINED_GLASS
+        );
+        assert_eq!(
+            coordinated_window_block(QUARTZ_BLOCK, POLISHED_ANDESITE, LIGHT_BLUE_STAINED_GLASS),
+            LIGHT_BLUE_STAINED_GLASS
+        );
+    }
+
+    #[test]
+    fn glass_family_variant_is_always_glass_family() {
+        for seed in 0u64..300 {
+            assert!(matches!(
+                BuildingCategory::glass_family_variant(seed),
+                BuildingCategory::GlassySkyscraper
+                    | BuildingCategory::GridSkyscraper
+                    | BuildingCategory::GlassCornerSkyscraper
+            ));
+        }
     }
 }
