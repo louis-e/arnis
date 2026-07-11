@@ -89,7 +89,7 @@ pub fn generate_natural(
                     .choose(&mut rng)
                     .unwrap_or(&TreeType::Oak);
 
-                // Deliberately-mapped street tree: allow it to stand on paving.
+                // Deliberately-mapped `natural=tree` node: allow it to stand on paving.
                 Tree::create_of_type(
                     editor,
                     (x, 1, z),

@@ -513,7 +513,8 @@ impl Tree {
             return;
         }
 
-        // Water is always off-limits; road/path surfaces only for scattered trees.
+        // Water is always off-limits; road/path surfaces are allowed only when
+        // `allow_on_paved` is set (deliberately-mapped trees). Scattered trees keep skipping them.
         let forbidden_ground: &[Block] = if allow_on_paved {
             &[WATER]
         } else {
@@ -1438,6 +1439,42 @@ mod tests {
         assert!(
             !placer.blocked(30, roof_y - 5, 30),
             "columns outside the footprint are never culled"
+        );
+    }
+
+    // allow_on_paved lets a deliberately-mapped tree stand on paving, but water is
+    // always rejected regardless of the flag.
+    #[test]
+    fn allow_on_paved_lets_dedicated_trees_stand_on_paving_but_never_on_water() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let has_trunk = |editor: &WorldEditor| editor.check_for_block(30, 2, 30, Some(&[OAK_LOG]));
+
+        // Scattered tree (allow_on_paved = false) on a paved block: rejected.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block(SMOOTH_STONE, 30, 0, 30, None, None);
+        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, false);
+        assert!(
+            !has_trunk(&editor),
+            "a scattered tree must not grow on a paved surface"
+        );
+
+        // Deliberately-mapped tree (allow_on_paved = true) on the same paved block: allowed.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block(SMOOTH_STONE, 30, 0, 30, None, None);
+        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, true);
+        assert!(
+            has_trunk(&editor),
+            "a dedicated natural=tree node must stand on paving"
+        );
+
+        // Water is off-limits even with allow_on_paved = true.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block(WATER, 30, 0, 30, None, None);
+        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, true);
+        assert!(
+            !has_trunk(&editor),
+            "trees must never stand on water, even when paving is allowed"
         );
     }
 }
