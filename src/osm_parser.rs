@@ -310,13 +310,13 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
         return StyleHint::Glass;
     }
 
-    // Masonry / historic.
-    if tags.contains_key("historic")
-        || tags.contains_key("heritage")
+    // Masonry / historic. `no` on these keys is an explicit negation, not a signal.
+    let present_and_not_no =
+        |key: &str| tags.get(key).is_some_and(|v| !v.eq_ignore_ascii_case("no"));
+    if present_and_not_no("historic")
+        || present_and_not_no("heritage")
         || tags.contains_key("ref:nrhp")
-        || tags
-            .get("listed_status")
-            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+        || present_and_not_no("listed_status")
     {
         return StyleHint::Masonry;
     }
@@ -697,17 +697,18 @@ fn compute_outline_suppression(
         return HashSet::new();
     }
 
-    let way_nodes: HashMap<u64, &Vec<u64>> = ways
-        .iter()
-        .filter(|w| needed_ways.contains(&w.id))
-        .filter_map(|w| w.nodes.as_ref().map(|ns| (w.id, ns)))
-        .collect();
-    // member ways' style hints, so the group seed carries the building's decision
-    let way_hint: HashMap<u64, StyleHint> = ways
-        .iter()
-        .filter(|w| needed_ways.contains(&w.id))
-        .filter_map(|w| w.tags.as_ref().map(|t| (w.id, building_style_hint(t))))
-        .collect();
+    // Single pass over member ways: geometry (way_nodes) plus style hint (way_hint,
+    // so the group seed carries the building's decision).
+    let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
+    let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
+    for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
+        if let Some(ns) = w.nodes.as_ref() {
+            way_nodes.insert(w.id, ns);
+        }
+        if let Some(t) = w.tags.as_ref() {
+            way_hint.insert(w.id, building_style_hint(t));
+        }
+    }
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for ns in way_nodes.values() {
         needed_nodes.extend(ns.iter().copied());
