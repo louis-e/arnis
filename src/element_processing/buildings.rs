@@ -433,9 +433,10 @@ impl BuildingCategory {
     /// building height >= 40 blocks AND height >= 2× the longest side of its bounding box.
     /// Picks a glass-family treatment (pure curtain, concrete corners, or grid) from the shared seed.
     fn glass_family_variant(seed: u64) -> BuildingCategory {
-        match (seed ^ 0x6C07_A55E).wrapping_mul(2654435761) % 100 {
-            0..=54 => BuildingCategory::GlassySkyscraper,
-            55..=79 => BuildingCategory::GridSkyscraper,
+        // Even split so a formerly all-glass tower is usually a grid or corner variant.
+        match (seed ^ 0x6C07_A55E).wrapping_mul(2654435761) % 3 {
+            0 => BuildingCategory::GlassySkyscraper,
+            1 => BuildingCategory::GridSkyscraper,
             _ => BuildingCategory::GlassCornerSkyscraper,
         }
     }
@@ -942,17 +943,10 @@ impl BuildingStyle {
             }
         });
 
-        // Window block: from preset or random based on building type
-        let mut window_block = preset
+        // Window block: from preset or random based on building type (tint coordinated below).
+        let window_block = preset
             .window_block
             .unwrap_or_else(|| get_window_block_for_building_type_with_rng(building_type, rng));
-        // Concrete towers tint their glass to the wall (e.g. a black-concrete tower gets dark glass).
-        if matches!(
-            category,
-            BuildingCategory::ContemporarySkyscraper | BuildingCategory::GridSkyscraper
-        ) {
-            window_block = coordinated_window_block(wall_block, window_block);
-        }
 
         // Accent block: from preset or random
         // For glassy skyscrapers, use white stained glass or blackstone
@@ -974,6 +968,19 @@ impl BuildingStyle {
                 ACCENT_BLOCK_OPTIONS[rng.random_range(0..ACCENT_BLOCK_OPTIONS.len())]
             }
         });
+
+        // Concrete/modern towers tint their glass dark when the wall or the accent bands are
+        // dark, so a blackstone-banded tower reads with dark glass instead of bright blue.
+        let window_block = if matches!(
+            category,
+            BuildingCategory::ContemporarySkyscraper
+                | BuildingCategory::GridSkyscraper
+                | BuildingCategory::ModernSkyscraper
+        ) {
+            coordinated_window_block(wall_block, accent_block, window_block)
+        } else {
+            window_block
+        };
 
         // === Window Style ===
 
@@ -1442,9 +1449,9 @@ fn calculate_start_y_offset(
 }
 
 /// Wall block from an OSM material/colour tag, or None if no tag is set.
-/// Tints a concrete tower's glass to match its wall: dark walls get dark glass, else keep the light default.
-fn coordinated_window_block(wall_block: Block, light_default: Block) -> Block {
-    const DARK_WALLS: &[Block] = &[
+/// Tints a tower's glass to match a dark wall or dark accent band; else keeps the light default.
+fn coordinated_window_block(wall_block: Block, accent_block: Block, light_default: Block) -> Block {
+    const DARK: &[Block] = &[
         BLACK_CONCRETE,
         GRAY_CONCRETE,
         BLACKSTONE,
@@ -1454,7 +1461,7 @@ fn coordinated_window_block(wall_block: Block, light_default: Block) -> Block {
         BLACK_TERRACOTTA,
         GRAY_TERRACOTTA,
     ];
-    if DARK_WALLS.contains(&wall_block) {
+    if DARK.contains(&wall_block) || DARK.contains(&accent_block) {
         GRAY_STAINED_GLASS
     } else {
         light_default
@@ -8084,25 +8091,31 @@ mod style_tests {
     use super::*;
 
     #[test]
-    fn dark_concrete_walls_get_dark_glass() {
+    fn dark_wall_or_dark_accent_gets_dark_glass() {
+        // dark wall
         assert_eq!(
-            coordinated_window_block(BLACK_CONCRETE, LIGHT_BLUE_STAINED_GLASS),
+            coordinated_window_block(BLACK_CONCRETE, SMOOTH_STONE, LIGHT_BLUE_STAINED_GLASS),
+            GRAY_STAINED_GLASS
+        );
+        // light wall but dark accent band (the blackstone-line modern tower)
+        assert_eq!(
+            coordinated_window_block(WHITE_CONCRETE, BLACKSTONE, LIGHT_BLUE_STAINED_GLASS),
             GRAY_STAINED_GLASS
         );
         assert_eq!(
-            coordinated_window_block(GRAY_CONCRETE, LIGHT_BLUE_STAINED_GLASS),
+            coordinated_window_block(GRAY_CONCRETE, SMOOTH_STONE, LIGHT_BLUE_STAINED_GLASS),
             GRAY_STAINED_GLASS
         );
     }
 
     #[test]
-    fn light_walls_keep_the_light_window() {
+    fn light_wall_and_light_accent_keep_the_light_window() {
         assert_eq!(
-            coordinated_window_block(WHITE_CONCRETE, LIGHT_BLUE_STAINED_GLASS),
+            coordinated_window_block(WHITE_CONCRETE, SMOOTH_STONE, LIGHT_BLUE_STAINED_GLASS),
             LIGHT_BLUE_STAINED_GLASS
         );
         assert_eq!(
-            coordinated_window_block(QUARTZ_BLOCK, LIGHT_BLUE_STAINED_GLASS),
+            coordinated_window_block(QUARTZ_BLOCK, POLISHED_ANDESITE, LIGHT_BLUE_STAINED_GLASS),
             LIGHT_BLUE_STAINED_GLASS
         );
     }
