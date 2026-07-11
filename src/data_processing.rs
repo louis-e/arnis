@@ -614,6 +614,14 @@ pub fn generate_world_with_options(
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
     // Background writer for eviction; None unless eviction is active.
     let mut flush_worker: Option<FlushWorker> = None;
+    // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
+    // real ground. Resolved exactly like the finalize call; spawn doesn't change during generation.
+    let spawn_region: Option<(i32, i32)> = wants_map_item.then(|| {
+        let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
+            .or(options.spawn_point)
+            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+        (sx >> 9, sz >> 9)
+    });
 
     // Decide between sequential and parallel processing based on world size.
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
@@ -891,6 +899,7 @@ pub fn generate_world_with_options(
                                 if *c == 0
                                     && !evicted_regions.contains(&d)
                                     && !model_regions.contains(&d)
+                                    && Some(d) != spawn_region
                                 {
                                     if hash_check {
                                         hash_acc = hash_acc
@@ -1092,8 +1101,12 @@ pub fn generate_world_with_options(
 
     if eviction_active {
         // Flush deferred (subway-touched) regions now the global carve has run on them.
-        let mut leftover: Vec<(i32, i32)> =
-            real_regions.difference(&evicted_regions).copied().collect();
+        // The spawn region stays resident so the map-item still lands on real ground.
+        let mut leftover: Vec<(i32, i32)> = real_regions
+            .difference(&evicted_regions)
+            .copied()
+            .filter(|r| Some(*r) != spawn_region)
+            .collect();
         leftover.sort_unstable();
         for (rx, rz) in leftover {
             if hash_check {
