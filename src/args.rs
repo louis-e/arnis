@@ -54,8 +54,8 @@ pub struct Args {
     #[arg(long)]
     pub terrain: bool,
 
-    /// Enable interior generation (optional)
-    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    /// Enable interior generation (optional, off unless requested)
+    #[arg(long, default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub interior: bool,
 
     /// Enable filling ground (optional)
@@ -286,8 +286,8 @@ mod tests {
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
         assert!(!args.map_preview);
-        // interior and overture default to true
-        assert!(args.interior);
+        // interior is opt-in (off by default); overture defaults to true
+        assert!(!args.interior);
         assert!(args.overture);
     }
 

@@ -18,7 +18,7 @@ const MAX_Y: i32 = 2031;
 /// below this; raise it if block_definitions ever allocates an id this high.
 pub(crate) const MAX_BLOCK_ID: usize = 512;
 use fastnbt::{LongArray, Value};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -767,6 +767,38 @@ impl WorldToModify {
     /// (auth tile only overwrites where it placed non-AIR). Without this,
     /// e.g. tree canopies that cross tile boundaries would be clobbered when
     /// the receiving tile happens to have a chunk in the same column.
+    /// Position key for a block entity (x/y/z ints) or entity (floored Pos doubles).
+    fn entity_coords(value: &Value) -> Option<(i32, i32, i32)> {
+        let Value::Compound(map) = value else {
+            return None;
+        };
+        if let (Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Int(z))) =
+            (map.get("x"), map.get("y"), map.get("z"))
+        {
+            return Some((*x, *y, *z));
+        }
+        if let Some(Value::List(pos)) = map.get("Pos") {
+            if let [Value::Double(x), Value::Double(y), Value::Double(z)] = pos.as_slice() {
+                return Some((x.floor() as i32, y.floor() as i32, z.floor() as i32));
+            }
+        }
+        None
+    }
+
+    /// Appends `other_list` into `self_list`, skipping entries already present at a coordinate.
+    /// Tile halos process boundary features twice, so this drops the duplicate copies instead of
+    /// retaining both (which also spared the save path from stripping them later).
+    fn dedup_extend(self_list: &mut Vec<Value>, other_list: &[Value]) {
+        let mut seen: FnvHashSet<(i32, i32, i32)> =
+            self_list.iter().filter_map(Self::entity_coords).collect();
+        for entry in other_list {
+            match Self::entity_coords(entry) {
+                Some(coords) if !seen.insert(coords) => {}
+                _ => self_list.push(entry.clone()),
+            }
+        }
+    }
+
     pub fn merge(
         &mut self,
         other: WorldToModify,
@@ -815,7 +847,7 @@ impl WorldToModify {
                                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                                             if let Value::List(self_list) = entry.get_mut() {
                                                 if let Value::List(other_list) = &value {
-                                                    self_list.extend(other_list.iter().cloned());
+                                                    Self::dedup_extend(self_list, other_list);
                                                 }
                                             }
                                         }
@@ -883,7 +915,7 @@ impl WorldToModify {
                                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                                             if let Value::List(self_list) = entry.get_mut() {
                                                 if let Value::List(other_list) = &value {
-                                                    self_list.extend(other_list.iter().cloned());
+                                                    Self::dedup_extend(self_list, other_list);
                                                 }
                                             }
                                         }
@@ -937,7 +969,7 @@ impl WorldToModify {
                             std::collections::hash_map::Entry::Occupied(mut entry) => {
                                 if let Value::List(self_list) = entry.get_mut() {
                                     if let Value::List(other_list) = &value {
-                                        self_list.extend(other_list.iter().cloned());
+                                        Self::dedup_extend(self_list, other_list);
                                     }
                                 }
                             }
@@ -970,7 +1002,7 @@ impl WorldToModify {
                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                             if let Value::List(self_list) = entry.get_mut() {
                                 if let Value::List(other_list) = &value {
-                                    self_list.extend(other_list.iter().cloned());
+                                    Self::dedup_extend(self_list, other_list);
                                 }
                             }
                         }
