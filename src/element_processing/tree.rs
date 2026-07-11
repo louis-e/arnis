@@ -484,16 +484,23 @@ impl Tree {
             tree_type,
             building_footprints,
             bridge_surface,
+            false,
         );
     }
 
     /// Creates a tree of a specific type at the specified coordinates.
+    ///
+    /// `allow_on_paved` is set only for deliberately-mapped `natural=tree` nodes:
+    /// street trees are tagged on top of paved plazas and sidewalks, so they may
+    /// stand on road/path surfaces. Scattered trees (forests, parks, land cover)
+    /// pass `false` and keep skipping paving so they never sprout in a road.
     pub fn create_of_type(
         editor: &mut WorldEditor,
         (x, y, z): Coord,
         tree_type: TreeType,
         building_footprints: Option<&BuildingFootprintBitmap>,
         bridge_surface: Option<&BridgeSurfaceMap>,
+        allow_on_paved: bool,
     ) {
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
@@ -506,12 +513,12 @@ impl Tree {
             return;
         }
 
-        // Skip road/path/water surfaces.
-        if editor.check_for_block(
-            x,
-            0,
-            z,
-            Some(&[
+        // Water is always off-limits; road/path surfaces are allowed only when
+        // `allow_on_paved` is set (deliberately-mapped trees). Scattered trees keep skipping them.
+        let forbidden_ground: &[Block] = if allow_on_paved {
+            &[WATER]
+        } else {
+            &[
                 BLACK_CONCRETE,
                 GRAY_CONCRETE_POWDER,
                 CYAN_TERRACOTTA,
@@ -520,8 +527,9 @@ impl Tree {
                 DIRT_PATH,
                 SMOOTH_STONE,
                 WATER,
-            ]),
-        ) {
+            ]
+        };
+        if editor.check_for_block(x, 0, z, Some(forbidden_ground)) {
             return;
         }
 
@@ -545,22 +553,27 @@ impl Tree {
 
         // Schematic pack active: stamp a model instead of the procedural tree (checks above still apply).
         if let Some(region) = editor.tree_pack() {
-            let road_water = [
-                BLACK_CONCRETE,
-                GRAY_CONCRETE_POWDER,
-                CYAN_TERRACOTTA,
-                GRAY_CONCRETE,
-                LIGHT_GRAY_CONCRETE,
-                DIRT_PATH,
-                SMOOTH_STONE,
-                WATER,
-            ];
+            // Same paving rule as above; is_lc_water still keeps every tree off water.
+            let road_water: &[Block] = if allow_on_paved {
+                &[WATER]
+            } else {
+                &[
+                    BLACK_CONCRETE,
+                    GRAY_CONCRETE_POWDER,
+                    CYAN_TERRACOTTA,
+                    GRAY_CONCRETE,
+                    LIGHT_GRAY_CONCRETE,
+                    DIRT_PATH,
+                    SMOOTH_STONE,
+                    WATER,
+                ]
+            };
             let hint = habitat_for_tree_type(tree_type);
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
             if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y) {
                 // The slot can be a few blocks off (x,z); re-check it isn't road/water/bridge.
                 if editor.is_lc_water(sx, sz)
-                    || editor.check_for_block(sx, 0, sz, Some(&road_water))
+                    || editor.check_for_block(sx, 0, sz, Some(road_water))
                     || bridge_surface.is_some_and(|b| b.contains(sx, sz))
                 {
                     return;
@@ -1426,6 +1439,42 @@ mod tests {
         assert!(
             !placer.blocked(30, roof_y - 5, 30),
             "columns outside the footprint are never culled"
+        );
+    }
+
+    // allow_on_paved lets a deliberately-mapped tree stand on paving, but water is
+    // always rejected regardless of the flag.
+    #[test]
+    fn allow_on_paved_lets_dedicated_trees_stand_on_paving_but_never_on_water() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let has_trunk = |editor: &WorldEditor| editor.check_for_block(30, 2, 30, Some(&[OAK_LOG]));
+
+        // Scattered tree (allow_on_paved = false) on a paved block: rejected.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block(SMOOTH_STONE, 30, 0, 30, None, None);
+        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, false);
+        assert!(
+            !has_trunk(&editor),
+            "a scattered tree must not grow on a paved surface"
+        );
+
+        // Deliberately-mapped tree (allow_on_paved = true) on the same paved block: allowed.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block(SMOOTH_STONE, 30, 0, 30, None, None);
+        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, true);
+        assert!(
+            has_trunk(&editor),
+            "a dedicated natural=tree node must stand on paving"
+        );
+
+        // Water is off-limits even with allow_on_paved = true.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block(WATER, 30, 0, 30, None, None);
+        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, true);
+        assert!(
+            !has_trunk(&editor),
+            "trees must never stand on water, even when paving is allowed"
         );
     }
 }
