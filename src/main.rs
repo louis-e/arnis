@@ -256,7 +256,7 @@ fn run_cli() {
     bench.reset();
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox, outline_suppression) =
+    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.projection);
     bench.mark("parse_osm");
 
@@ -404,6 +404,7 @@ fn run_cli() {
         &args,
         generation_options,
         outline_suppression,
+        part_groups,
     ) {
         Ok(_) => {
             if args.bedrock {

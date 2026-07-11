@@ -230,13 +230,24 @@ impl ProcessedElement {
 
 pub type OutlineSuppression = HashSet<(&'static str, u64)>;
 
+// building:part way id -> shared style seed (containing outline id, or salted relation id)
+pub type PartGroups = HashMap<u64, u64>;
+
+// keeps relation-derived seeds out of the way-id namespace
+const RELATION_SEED_BIT: u64 = 1 << 63;
+
 pub fn parse_osm_data(
     osm_data: OsmData,
     bbox: LLBBox,
     scale: f64,
     debug: bool,
     projection: crate::projection::ProjectionKind,
-) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
+) -> (
+    Vec<ProcessedElement>,
+    XZBBox,
+    OutlineSuppression,
+    PartGroups,
+) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
 
@@ -265,10 +276,15 @@ pub fn parse_osm_data(
         println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
 
+    let mut part_groups = PartGroups::new();
     let mut outline_suppression =
-        compute_outline_suppression(&data.relations, &data.ways, &data.nodes);
+        compute_outline_suppression(&data.relations, &data.ways, &data.nodes, &mut part_groups);
     // also catch S3DB outlines mapped without a relation
-    outline_suppression.extend(compute_spatial_part_suppression(&data.ways, &data.nodes));
+    outline_suppression.extend(compute_spatial_part_suppression(
+        &data.ways,
+        &data.nodes,
+        &mut part_groups,
+    ));
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
@@ -455,7 +471,7 @@ pub fn parse_osm_data(
     drop(nodes_map);
     drop(ways_map);
 
-    (processed_elements, xzbbox, outline_suppression)
+    (processed_elements, xzbbox, outline_suppression, part_groups)
 }
 
 // Parts replace the outline only when they cover at least this much of it.
@@ -465,6 +481,7 @@ fn compute_outline_suppression(
     relations: &[OsmElement],
     ways: &[OsmElement],
     nodes: &[OsmElement],
+    part_group: &mut PartGroups,
 ) -> OutlineSuppression {
     let is_outline = |r: &str| r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer");
 
@@ -538,7 +555,10 @@ fn compute_outline_suppression(
             has_part = true;
             match m.r#type.as_str() {
                 "relation" => has_relation_part = true,
-                "way" => part_area += way_area(m.r#ref).unwrap_or(0.0),
+                "way" => {
+                    part_area += way_area(m.r#ref).unwrap_or(0.0);
+                    part_group.insert(m.r#ref, RELATION_SEED_BIT | rel.id);
+                }
                 _ => {}
             }
         }
@@ -576,6 +596,7 @@ fn compute_outline_suppression(
 fn compute_spatial_part_suppression(
     ways: &[OsmElement],
     nodes: &[OsmElement],
+    part_group: &mut PartGroups,
 ) -> OutlineSuppression {
     let is_part = |tags: &HashMap<String, String>| {
         tags.get("building:part")
@@ -591,8 +612,9 @@ fn compute_spatial_part_suppression(
         let (Some(tags), Some(ns)) = (&w.tags, &w.nodes) else {
             continue;
         };
-        if ns.len() < 4 {
-            continue; // not a usable closed ring
+        // need a closed ring (first node repeated as last)
+        if ns.len() < 4 || ns.first() != ns.last() {
+            continue;
         }
         if is_part(tags) {
             part_ids.push(w.id);
@@ -712,10 +734,19 @@ fn compute_spatial_part_suppression(
         let Some(cands) = grid.get(&cell(cla, clo)) else {
             continue;
         };
+        // smallest containing outline (tie-break min id) is the part's building
+        let mut best: Option<usize> = None;
         for &gi in cands {
             if point_in_ring(cla, clo, &geoms[gi].ring) {
                 *covered.entry(gi).or_insert(0.0) += pa;
+                best = Some(match best {
+                    Some(b) if (geoms[b].area, geoms[b].id) <= (geoms[gi].area, geoms[gi].id) => b,
+                    _ => gi,
+                });
             }
+        }
+        if let Some(gi) = best {
+            part_group.insert(pid, geoms[gi].id);
         }
     }
 
@@ -841,7 +872,8 @@ mod outline_suppression_tests {
         ]);
 
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
-        let suppressed = compute_outline_suppression(&[rel], &[outline, part], &nodes);
+        let suppressed =
+            compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut PartGroups::new());
 
         assert!(!suppressed.contains(&("way", 100)));
     }
@@ -857,7 +889,8 @@ mod outline_suppression_tests {
         ]);
 
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
-        let suppressed = compute_outline_suppression(&[rel], &[outline, part], &nodes);
+        let suppressed =
+            compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut PartGroups::new());
 
         assert!(suppressed.contains(&("way", 100)));
     }
@@ -871,7 +904,8 @@ mod outline_suppression_tests {
             member("relation", 300, "part"),
         ]);
 
-        let suppressed = compute_outline_suppression(&[rel], &[outline], &outline_nodes);
+        let suppressed =
+            compute_outline_suppression(&[rel], &[outline], &outline_nodes, &mut PartGroups::new());
 
         assert!(suppressed.contains(&("way", 100)));
     }
@@ -882,7 +916,8 @@ mod outline_suppression_tests {
         let (outline, outline_nodes) = square_way(100, 1000, 1.0);
         let rel = building_relation(vec![member("way", 100, "outline")]);
 
-        let suppressed = compute_outline_suppression(&[rel], &[outline], &outline_nodes);
+        let suppressed =
+            compute_outline_suppression(&[rel], &[outline], &outline_nodes, &mut PartGroups::new());
 
         assert!(suppressed.is_empty());
     }
@@ -902,8 +937,24 @@ mod outline_suppression_tests {
             tagged(p, "building:part", "yes"),
         ];
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
-        let s = compute_spatial_part_suppression(&ways, &nodes);
+        let s = compute_spatial_part_suppression(&ways, &nodes, &mut PartGroups::new());
         assert!(s.contains(&("way", 100)));
+    }
+
+    // An open (unclosed) part ring is ignored, so it can't suppress the outline.
+    #[test]
+    fn spatial_open_part_is_ignored() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (mut p, pn) = square_way(200, 2000, 0.8);
+        // drop the closing node so first != last
+        p.nodes.as_mut().unwrap().pop();
+        let ways = [
+            tagged(o, "building", "yes"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let s = compute_spatial_part_suppression(&ways, &nodes, &mut PartGroups::new());
+        assert!(!s.contains(&("way", 100)));
     }
 
     // A sparse part (25% coverage) leaves the outline in place.
@@ -916,7 +967,7 @@ mod outline_suppression_tests {
             tagged(p, "building:part", "yes"),
         ];
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
-        let s = compute_spatial_part_suppression(&ways, &nodes);
+        let s = compute_spatial_part_suppression(&ways, &nodes, &mut PartGroups::new());
         assert!(!s.contains(&("way", 100)));
     }
 
@@ -925,7 +976,37 @@ mod outline_suppression_tests {
     fn spatial_outline_without_parts_is_kept() {
         let (o, on) = square_way(100, 1000, 1.0);
         let ways = [tagged(o, "building", "commercial")];
-        let s = compute_spatial_part_suppression(&ways, &on);
+        let s = compute_spatial_part_suppression(&ways, &on, &mut PartGroups::new());
         assert!(s.is_empty());
+    }
+
+    // A contained part is grouped under its outline way id (shared style seed).
+    #[test]
+    fn spatial_part_is_grouped_under_its_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let ways = [
+            tagged(o, "building", "yes"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &mut groups);
+        assert_eq!(groups.get(&200), Some(&100));
+    }
+
+    // A relation part is grouped under the salted relation id.
+    #[test]
+    fn relation_part_is_grouped_under_salted_relation_id() {
+        let (outline, on) = square_way(100, 1000, 1.0);
+        let (part, pn) = square_way(200, 2000, 0.8);
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let mut groups = PartGroups::new();
+        compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut groups);
+        assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
     }
 }
