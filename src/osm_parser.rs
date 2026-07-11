@@ -265,7 +265,10 @@ pub fn parse_osm_data(
         println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
 
-    let outline_suppression = compute_outline_suppression(&data.relations, &data.ways, &data.nodes);
+    let mut outline_suppression =
+        compute_outline_suppression(&data.relations, &data.ways, &data.nodes);
+    // also catch S3DB outlines mapped without a relation
+    outline_suppression.extend(compute_spatial_part_suppression(&data.ways, &data.nodes));
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
@@ -569,6 +572,163 @@ fn compute_outline_suppression(
     suppressed
 }
 
+/// Suppresses relation-less S3DB outlines: a building polygon that spatially contains building:part polygons.
+fn compute_spatial_part_suppression(
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+) -> OutlineSuppression {
+    let is_part = |tags: &HashMap<String, String>| {
+        tags.get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+    };
+
+    // split building ways into candidate outlines and parts
+    let mut outline_ids: Vec<u64> = Vec::new();
+    let mut part_ids: Vec<u64> = Vec::new();
+    let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
+    let mut needed_nodes: HashSet<u64> = HashSet::new();
+    for w in ways {
+        let (Some(tags), Some(ns)) = (&w.tags, &w.nodes) else {
+            continue;
+        };
+        if ns.len() < 4 {
+            continue; // not a usable closed ring
+        }
+        if is_part(tags) {
+            part_ids.push(w.id);
+        } else if tags.contains_key("building") {
+            outline_ids.push(w.id);
+        } else {
+            continue;
+        }
+        way_nodes.insert(w.id, ns);
+        needed_nodes.extend(ns.iter().copied());
+    }
+    if outline_ids.is_empty() || part_ids.is_empty() {
+        return HashSet::new();
+    }
+
+    let node_ll: HashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| needed_nodes.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+
+    let ring = |id: u64| -> Vec<(f64, f64)> {
+        way_nodes
+            .get(&id)
+            .map(|ids| ids.iter().filter_map(|i| node_ll.get(i).copied()).collect())
+            .unwrap_or_default()
+    };
+
+    // shoelace area, lon scaled by cos(lat)
+    let area = |r: &[(f64, f64)]| -> f64 {
+        if r.len() < 3 {
+            return 0.0;
+        }
+        let lon_scale = r[0].0.to_radians().cos();
+        let mut a = 0.0;
+        for i in 0..r.len() {
+            let (lat_a, lon_a) = r[i];
+            let (lat_b, lon_b) = r[(i + 1) % r.len()];
+            a += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
+        }
+        (a / 2.0).abs()
+    };
+
+    let point_in_ring = |lat: f64, lon: f64, r: &[(f64, f64)]| -> bool {
+        let n = r.len();
+        if n < 3 {
+            return false;
+        }
+        let mut inside = false;
+        let mut j = n - 1;
+        for i in 0..n {
+            let (yi, xi) = r[i];
+            let (yj, xj) = r[j];
+            if (yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    };
+
+    struct OutlineGeom {
+        id: u64,
+        ring: Vec<(f64, f64)>,
+        area: f64,
+    }
+
+    // grid of outline bboxes so each part only tests nearby outlines
+    const CELL: f64 = 0.0005;
+    let cell = |lat: f64, lon: f64| ((lat / CELL).floor() as i64, (lon / CELL).floor() as i64);
+
+    let mut geoms: Vec<OutlineGeom> = Vec::new();
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for id in outline_ids {
+        let r = ring(id);
+        let a = area(&r);
+        if a <= 0.0 {
+            continue;
+        }
+        let (mut min_la, mut min_lo, mut max_la, mut max_lo) =
+            (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for &(la, lo) in &r {
+            min_la = min_la.min(la);
+            max_la = max_la.max(la);
+            min_lo = min_lo.min(lo);
+            max_lo = max_lo.max(lo);
+        }
+        let gi = geoms.len();
+        let (c0a, c0o) = cell(min_la, min_lo);
+        let (c1a, c1o) = cell(max_la, max_lo);
+        for ca in c0a..=c1a {
+            for co in c0o..=c1o {
+                grid.entry((ca, co)).or_default().push(gi);
+            }
+        }
+        geoms.push(OutlineGeom {
+            id,
+            ring: r,
+            area: a,
+        });
+    }
+
+    // add each part area to every outline containing its centroid
+    let mut covered: HashMap<usize, f64> = HashMap::new();
+    for pid in part_ids {
+        let r = ring(pid);
+        let pa = area(&r);
+        if pa <= 0.0 {
+            continue;
+        }
+        let (mut sla, mut slo) = (0.0, 0.0);
+        for &(la, lo) in &r {
+            sla += la;
+            slo += lo;
+        }
+        let (cla, clo) = (sla / r.len() as f64, slo / r.len() as f64);
+        let Some(cands) = grid.get(&cell(cla, clo)) else {
+            continue;
+        };
+        for &gi in cands {
+            if point_in_ring(cla, clo, &geoms[gi].ring) {
+                *covered.entry(gi).or_insert(0.0) += pa;
+            }
+        }
+    }
+
+    let mut suppressed: OutlineSuppression = HashSet::new();
+    for (gi, cov) in covered {
+        let g = &geoms[gi];
+        if cov / g.area >= MIN_PART_COVERAGE {
+            suppressed.insert(("way", g.id));
+        }
+    }
+    suppressed
+}
+
 /// Returns true if tags indicate a water element handled by water_areas.rs.
 fn is_water_element(tags: &HashMap<String, String>) -> bool {
     // Check for explicit water tag
@@ -725,5 +885,47 @@ mod outline_suppression_tests {
         let suppressed = compute_outline_suppression(&[rel], &[outline], &outline_nodes);
 
         assert!(suppressed.is_empty());
+    }
+
+    fn tagged(mut w: OsmElement, k: &str, v: &str) -> OsmElement {
+        w.tags = Some(HashMap::from([(k.to_string(), v.to_string())]));
+        w
+    }
+
+    // A building:part covering >=50% of a relation-less outline suppresses it.
+    #[test]
+    fn spatial_part_covering_outline_suppresses_it() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.8);
+        let ways = [
+            tagged(o, "building", "yes"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let s = compute_spatial_part_suppression(&ways, &nodes);
+        assert!(s.contains(&("way", 100)));
+    }
+
+    // A sparse part (25% coverage) leaves the outline in place.
+    #[test]
+    fn spatial_sparse_part_keeps_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let ways = [
+            tagged(o, "building", "yes"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let s = compute_spatial_part_suppression(&ways, &nodes);
+        assert!(!s.contains(&("way", 100)));
+    }
+
+    // building:part=no marks the outline, not a part, so nothing suppresses it.
+    #[test]
+    fn spatial_outline_without_parts_is_kept() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let ways = [tagged(o, "building", "commercial")];
+        let s = compute_spatial_part_suppression(&ways, &on);
+        assert!(s.is_empty());
     }
 }

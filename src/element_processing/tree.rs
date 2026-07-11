@@ -488,12 +488,7 @@ impl Tree {
         );
     }
 
-    /// Creates a tree of a specific type at the specified coordinates.
-    ///
-    /// `allow_on_paved` is set only for deliberately-mapped `natural=tree` nodes:
-    /// street trees are tagged on top of paved plazas and sidewalks, so they may
-    /// stand on road/path surfaces. Scattered trees (forests, parks, land cover)
-    /// pass `false` and keep skipping paving so they never sprout in a road.
+    /// Creates a tree of a specific type. allow_on_paved is true only for natural=tree nodes.
     pub fn create_of_type(
         editor: &mut WorldEditor,
         (x, y, z): Coord,
@@ -513,8 +508,7 @@ impl Tree {
             return;
         }
 
-        // Water is always off-limits; road/path surfaces are allowed only when
-        // `allow_on_paved` is set (deliberately-mapped trees). Scattered trees keep skipping them.
+        // water always blocked; paved blocked unless allow_on_paved
         let forbidden_ground: &[Block] = if allow_on_paved {
             &[WATER]
         } else {
@@ -553,7 +547,7 @@ impl Tree {
 
         // Schematic pack active: stamp a model instead of the procedural tree (checks above still apply).
         if let Some(region) = editor.tree_pack() {
-            // Same paving rule as above; is_lc_water still keeps every tree off water.
+            // same paving rule as above; is_lc_water still blocks water
             let road_water: &[Block] = if allow_on_paved {
                 &[WATER]
             } else {
@@ -1442,8 +1436,7 @@ mod tests {
         );
     }
 
-    // allow_on_paved lets a deliberately-mapped tree stand on paving, but water is
-    // always rejected regardless of the flag.
+    // allow_on_paved lets a mapped tree stand on paving, water always rejected
     #[test]
     fn allow_on_paved_lets_dedicated_trees_stand_on_paving_but_never_on_water() {
         let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
