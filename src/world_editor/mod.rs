@@ -626,6 +626,9 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        if self.is_region_flushed(x, z) {
+            return;
+        }
         let chunk_x = x >> 4;
         let chunk_z = z >> 4;
         let region_x = chunk_x >> 5;
@@ -893,6 +896,9 @@ impl<'a> WorldEditor<'a> {
         z: i32,
         _rotation: i8,
     ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return;
+        }
         let absolute_y = self.get_absolute_y(x, y, z);
         let chunk_x = x >> 4;
         let chunk_z = z >> 4;
@@ -952,6 +958,10 @@ impl<'a> WorldEditor<'a> {
         extra_data: Option<HashMap<String, Value>>,
     ) {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        // Entities must respect eviction too, or they resurrect a flushed region.
+        if self.is_region_flushed(x, z) {
             return;
         }
 
@@ -1040,6 +1050,9 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        if self.is_region_flushed(x, z) {
+            return;
+        }
 
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
@@ -1111,6 +1124,9 @@ impl<'a> WorldEditor<'a> {
         items: Vec<HashMap<String, Value>>,
     ) {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        if self.is_region_flushed(x, z) {
             return;
         }
 
@@ -1202,6 +1218,14 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
+    /// True if the region at these block coords was already streamed to disk and evicted.
+    /// Writers must drop such writes, or they resurrect the region and the final save
+    /// truncates the real on-disk data. Short-circuits when nothing has been evicted.
+    #[inline]
+    fn is_region_flushed(&self, x: i32, z: i32) -> bool {
+        !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9))
+    }
+
     /// Sets a block with properties at the given coordinates with absolute Y value.
     #[inline]
     pub fn set_block_with_properties_absolute(
@@ -1218,7 +1242,7 @@ impl<'a> WorldEditor<'a> {
             return;
         }
         // Drop writes to regions already flushed to disk (stream-to-disk eviction).
-        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+        if self.is_region_flushed(x, z) {
             return;
         }
 
@@ -1387,7 +1411,7 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
-        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+        if self.is_region_flushed(x, z) {
             return;
         }
         self.world.set_block_if_absent(x, absolute_y, z, block);
@@ -1423,7 +1447,7 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
-        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+        if self.is_region_flushed(x, z) {
             return;
         }
         self.world
@@ -1438,6 +1462,10 @@ impl<'a> WorldEditor<'a> {
         section_y_max: i8,
         block: Block,
     ) -> bool {
+        // chunk coords -> block coords for the region check (chunk << 4).
+        if self.is_region_flushed(chunk_x << 4, chunk_z << 4) {
+            return false;
+        }
         self.world
             .bulk_fill_chunk_sections_below(chunk_x, chunk_z, section_y_max, block)
     }
@@ -1714,4 +1742,40 @@ fn single_item(id: &str, slot: i8, count: i8) -> HashMap<String, Value> {
     item.insert("Slot".to_string(), Value::Byte(slot));
     item.insert("Count".to_string(), Value::Byte(count));
     item
+}
+
+#[cfg(test)]
+mod eviction_guard_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+
+    // Writing an entity or chest to an already-evicted region must NOT resurrect it,
+    // or the truncating final save wipes the region's real ground (the empty-spawn-chunk bug).
+    #[test]
+    fn writes_to_a_flushed_region_do_not_resurrect_it() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 1023, 1023).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+
+        // Mark region (0,0) (blocks 0..511) as already streamed to disk.
+        editor.flushed_regions.insert((0, 0));
+
+        // All of these target region (0,0) and must be dropped.
+        editor.add_entity("minecraft:item_frame", 100, 5, 100, None);
+        editor.set_chest_with_items_absolute(100, 5, 100, vec![]);
+        editor.set_block_absolute(SMOOTH_STONE, 100, 5, 100, None, None);
+
+        assert!(
+            !editor.world.regions.contains_key(&(0, 0)),
+            "a flushed region must not be resurrected by entity/chest/block writes"
+        );
+
+        // A write to a non-flushed region still works.
+        editor.add_entity("minecraft:item_frame", 600, 5, 600, None);
+        assert!(
+            editor.world.regions.contains_key(&(1, 1)),
+            "writes to a resident region still land"
+        );
+    }
 }
