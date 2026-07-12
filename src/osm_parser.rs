@@ -106,6 +106,14 @@ impl OsmData {
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
     }
+
+    /// Object-free dataset, used by terrain-only runs that never query Overpass.
+    pub fn empty() -> Self {
+        OsmData {
+            elements: Vec::new(),
+            remark: None,
+        }
+    }
 }
 
 struct SplitOsmData {
