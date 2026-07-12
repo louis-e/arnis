@@ -1,3 +1,4 @@
+use crate::land_cover::*;
 //! Climate axis: a bundled Koppen grid, sampled once per generation, drives arid/polar surfaces and biomes; temperate is unchanged.
 
 use crate::block_definitions::*;

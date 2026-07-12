@@ -1,3 +1,4 @@
+use crate::land_cover::*;
 //! Land-cover-driven biome assignment for Java Anvil chunks (1.18+).
 
 use crate::climate::Climate;
