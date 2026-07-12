@@ -1186,7 +1186,14 @@ fn gui_start_generation(
                 scale: world_scale,
                 projection: crate::projection::ProjectionKind::Local,
                 ground_level,
-                terrain: terrain_enabled,
+                mode: if skip_osm_objects {
+                    crate::args::GenerationMode::TerrainOnly
+                } else if terrain_enabled {
+                    crate::args::GenerationMode::GeoTerrain
+                } else {
+                    crate::args::GenerationMode::GeoOnly
+                },
+                legacy_terrain: false,
                 interior: interior_enabled,
                 fillground: fillground_enabled,
                 legacy_trees: legacy_trees_enabled,

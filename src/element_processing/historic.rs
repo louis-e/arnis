@@ -236,7 +236,7 @@ pub fn generate_pyramid(
     // Determine base Y from terrain or ground level
     // Use the MINIMUM ground level so the pyramid sits on the lowest point
     // and doesn't float in areas with elevation differences
-    let base_y = if args.terrain {
+    let base_y = if args.terrain() {
         footprint
             .iter()
             .map(|&(x, z)| editor.get_ground_level(x, z))

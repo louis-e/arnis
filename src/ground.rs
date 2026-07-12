@@ -766,7 +766,7 @@ impl Ground {
 }
 
 pub fn generate_ground_data(args: &Args) -> Ground {
-    if args.terrain {
+    if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
         let ground = Ground::new_enabled(
             &args.bbox,
