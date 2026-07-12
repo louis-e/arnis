@@ -1,0 +1,59 @@
+name: Feature Request
+description: Suggest an idea for Arnis
+title: "[FEATURE] "
+labels: ["enhancement", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! 🚀
+        Help us understand your idea by filling out this form.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use Case
+      description: Describe the problem this feature would solve
+      placeholder: "I want to be able to... because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this feature work?
+      placeholder: "The feature should work by..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Any other approaches you've considered?
+      placeholder: "Another way could be..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other information?
+      placeholder: "I saw this feature in..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - label: "High - Blocks me from using Arnis"
+        - label: "Medium - Would improve my workflow"
+        - label: "Low - Nice to have"
+    validations:
+      required: true
