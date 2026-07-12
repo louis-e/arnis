@@ -229,7 +229,7 @@ fn run_cli() {
     let skip_objects = args.skip_objects();
     if skip_objects {
         println!(
-            "{} Terrain-only mode: skipping OpenStreetMap objects",
+            "{} Terrain-only mode: skipping OpenStreetMap and Overture objects",
             "[1/7]".bold()
         );
     }

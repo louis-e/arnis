@@ -53,7 +53,7 @@ pub struct Args {
     /// What to generate, mirroring the GUI's generation mode dropdown:
     /// geo-terrain: OSM objects on real elevation terrain (default)
     /// geo-only: OSM objects on flat ground
-    /// terrain-only: real elevation terrain, no OSM objects
+    /// terrain-only: real elevation terrain, no OSM or Overture objects (--overture has no effect)
     #[arg(long, value_enum, default_value_t = GenerationMode::GeoTerrain)]
     pub mode: GenerationMode,
 
@@ -149,7 +149,7 @@ pub enum GenerationMode {
     GeoTerrain,
     /// OSM objects on flat ground
     GeoOnly,
-    /// Real elevation terrain without any OSM objects
+    /// Real elevation terrain without any OSM or Overture objects
     TerrainOnly,
 }
 
