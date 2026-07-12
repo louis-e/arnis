@@ -117,6 +117,21 @@ fn run_cli() {
         std::process::exit(1);
     }
 
+    if args.legacy_terrain {
+        eprintln!(
+            "{} --terrain is deprecated: terrain is now on by default. \
+             Use --mode geo-only for flat ground.",
+            "Note:".yellow().bold()
+        );
+    }
+    // Terrain-only never touches Overpass, so the OSM in/out file args have nothing to act on.
+    if args.skip_objects() && (args.file.is_some() || args.save_json_file.is_some()) {
+        eprintln!(
+            "{} --mode terrain-only skips OpenStreetMap objects; --file/--save-json-file are ignored.",
+            "Note:".yellow().bold()
+        );
+    }
+
     // Heads-up for very large areas: generation is long and memory-heavy, and big
     // requests load the public OpenStreetMap / elevation servers. Non-blocking.
     {
@@ -210,15 +225,24 @@ fn run_cli() {
     // its own internal Bench for the block-placement phases.
     let mut bench = bench::Bench::new(args.benchmark);
 
+    // Terrain-only skips every object source: no Overpass query, no Overture footprints.
+    let skip_objects = args.skip_objects();
+    if skip_objects {
+        println!(
+            "{} Terrain-only mode: skipping OpenStreetMap objects",
+            "[1/7]".bold()
+        );
+    }
+
     // OSM, Overture and elevation/land-cover fetches only need the bbox, so run them in parallel.
-    if args.overture {
+    if args.overture && !skip_objects {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
     }
     let fetch_start = std::time::Instant::now();
     let (raw_data, overture_elements, mut ground) = std::thread::scope(|s| {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let elements = if args.overture {
+            let elements = if args.overture && !skip_objects {
                 overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
             } else {
                 Vec::new()
@@ -232,16 +256,20 @@ fn run_cli() {
         });
 
         let t = std::time::Instant::now();
-        let raw_data = match &args.file {
-            Some(file) => retrieve_data::fetch_data_from_file(file),
-            None => retrieve_data::fetch_data_from_overpass(
-                args.bbox,
-                args.debug,
-                args.downloader.as_str(),
-                args.save_json_file.as_deref(),
-            ),
-        }
-        .expect("Failed to fetch data");
+        let raw_data = if skip_objects {
+            osm_parser::OsmData::empty()
+        } else {
+            match &args.file {
+                Some(file) => retrieve_data::fetch_data_from_file(file),
+                None => retrieve_data::fetch_data_from_overpass(
+                    args.bbox,
+                    args.debug,
+                    args.downloader.as_str(),
+                    args.save_json_file.as_deref(),
+                ),
+            }
+            .expect("Failed to fetch data")
+        };
         bench.report("osm_fetch", t.elapsed());
 
         let (overture_elements, overture_dur) =
@@ -271,7 +299,7 @@ fn run_cli() {
             "  Added {} buildings from Overture Maps",
             added.to_string().bright_white().bold()
         );
-    } else if args.overture {
+    } else if args.overture && !skip_objects {
         println!("  No additional buildings from Overture Maps for this area");
     }
 
