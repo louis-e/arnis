@@ -353,7 +353,6 @@ button:hover {
   font-size: 0.9em;
   font-weight: 500;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
   cursor: pointer;
   transition: all 0.25s ease;
   margin-top: 0;
@@ -363,11 +362,11 @@ button:hover {
 }
 
 .format-toggle-btn:first-child {
-  border-radius: 0 0 0 8px;
+  border-radius: 8px 0 0 0;
 }
 
 .format-toggle-btn.format-toggle-btn--rightmost {
-  border-radius: 0 0 8px 0;
+  border-radius: 0 8px 0 0;
   border-left: 1px solid rgba(255, 255, 255, 0.15);
 }
 
@@ -385,7 +384,6 @@ button:hover {
   background-color: var(--primary-accent);
   color: #0f0f0f;
   font-weight: 600;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .format-toggle-btn.format-active:hover {
@@ -1158,7 +1156,8 @@ input[type="range"] {
   flex: 1;
   padding: 14px 20px;
   border: none;
-  border-radius: 8px 0 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0 0 0 8px;
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
@@ -1176,7 +1175,8 @@ input[type="range"] {
   min-width: 44px;
   height: auto;
   align-self: stretch;
-  border-radius: 0 8px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0 0 8px 0;
   display: flex;
   justify-content: center;
   align-items: center;
