@@ -512,6 +512,8 @@ pub fn generate_world_with_options(
     // Without the PNG the map item only needs 128px, so a small frame suffices
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil;
+    // Branding map ships on every Java world.
+    let place_branding = world_format == WorldFormat::JavaAnvil;
     let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
     let preview = (wants_png || wants_map_item).then(|| {
         Arc::new(if wants_png {
@@ -616,7 +618,7 @@ pub fn generate_world_with_options(
     let mut flush_worker: Option<FlushWorker> = None;
     // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
     // real ground. Resolved exactly like the finalize call; spawn doesn't change during generation.
-    let spawn_region: Option<(i32, i32)> = wants_map_item.then(|| {
+    let spawn_region: Option<(i32, i32)> = place_branding.then(|| {
         let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
             .or(options.spawn_point)
             .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
@@ -1138,12 +1140,16 @@ pub fn generate_world_with_options(
         eprintln!("[BENCHMARK] block_hash={:016x}", h);
     }
 
-    // Fresh worlds always use map id 0; place the display frame at the real spawn before flush.
-    if wants_map_item {
+    // Map id 0 is the first map; branding is id 1 with the preview on, else id 0.
+    if place_branding {
         let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
             .or(options.spawn_point)
             .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
-        editor.place_map_item_frame(sx, sz, 0);
+        if wants_map_item {
+            editor.place_map_item_frame(sx, sz, 0, 1);
+        } else {
+            editor.place_branding_map_only(sx, sz, 0);
+        }
     }
 
     // Save world
@@ -1158,6 +1164,10 @@ pub fn generate_world_with_options(
                 Ok(()) => println!("World map item added to the player inventory."),
                 Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
             }
+        }
+    } else if place_branding {
+        if let Err(e) = crate::map_item::write_branding_map_only(&output_path) {
+            eprintln!("Warning: Failed to create arnismc.com map: {e}");
         }
     }
 
