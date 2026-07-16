@@ -175,7 +175,7 @@ pub struct WorldEditor<'a> {
     world_time: i64,
     /// Bedrock only: give the player a starting map that reveals the world as they explore.
     start_with_map: bool,
-    /// Place bundled image decals (bus stop, recycling) as map item frames. Java only.
+    /// Place bundled map image decals as map item frames. Java only.
     map_decals: bool,
 }
 
@@ -368,7 +368,7 @@ impl<'a> WorldEditor<'a> {
         self.start_with_map = enabled;
     }
 
-    /// Enable bus-stop / recycling image decals (Java only).
+    /// Enable map image decals (Java only).
     pub fn set_map_decals(&mut self, enabled: bool) {
         self.map_decals = enabled;
     }

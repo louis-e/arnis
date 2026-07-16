@@ -17,7 +17,7 @@ const DATA_VERSION: i32 = crate::world_editor::java::DATA_VERSION;
 /// arnismc.com branding image, placed as a locked map at spawn.
 static BRANDING_MAP_PNG: &[u8] = include_bytes!("../assets/branding/arnismc_map.png");
 
-/// Fixed decal map ids, reserved after the preview (0) and branding (1) maps.
+/// Fixed decal map ids, reserved after the preview (0), branding (1), and decal maps.
 pub const BUS_STOP_MAP_ID: i32 = 2;
 pub const RECYCLING_MAP_ID: i32 = 3;
 pub const HYDRANT_MAP_ID: i32 = 4;
@@ -372,7 +372,7 @@ pub fn write_branding_map_only(world_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Writes the fixed decal maps (bus stop, recycling) so their in-world frames resolve.
+/// Writes the fixed decal maps so their in-world frames resolve.
 pub fn write_decoration_maps(world_path: &Path) -> Result<(), String> {
     let data_version = world_data_version(world_path);
     let data_dir = world_path.join("data");
