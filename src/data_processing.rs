@@ -504,6 +504,7 @@ pub fn generate_world_with_options(
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
+    editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
 
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
@@ -747,6 +748,7 @@ pub fn generate_world_with_options(
                     tile_editor.set_ground(Arc::clone(&ground));
                     tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
                     tile_editor.set_place_schematics(args.use_3d);
+                    tile_editor.set_map_decals(place_branding);
                     if let Some(ref tp) = tree_pack {
                         tile_editor.set_tree_pack(Arc::clone(tp));
                     }
@@ -1168,6 +1170,12 @@ pub fn generate_world_with_options(
     } else if place_branding {
         if let Err(e) = crate::map_item::write_branding_map_only(&output_path) {
             eprintln!("Warning: Failed to create arnismc.com map: {e}");
+        }
+    }
+
+    if place_branding {
+        if let Err(e) = crate::map_item::write_decoration_maps(&output_path) {
+            eprintln!("Warning: Failed to create decoration maps: {e}");
         }
     }
 

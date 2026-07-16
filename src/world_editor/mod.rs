@@ -175,6 +175,8 @@ pub struct WorldEditor<'a> {
     world_time: i64,
     /// Bedrock only: give the player a starting map that reveals the world as they explore.
     start_with_map: bool,
+    /// Place bundled image decals (bus stop, recycling) as map item frames. Java only.
+    map_decals: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -210,6 +212,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            map_decals: false,
         }
     }
 
@@ -251,6 +254,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            map_decals: false,
         }
     }
 
@@ -292,6 +296,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            map_decals: false,
         }
     }
 
@@ -361,6 +366,62 @@ impl<'a> WorldEditor<'a> {
     /// Bedrock only: enable the starting map that reveals the world as the player explores.
     pub fn set_start_with_map(&mut self, enabled: bool) {
         self.start_with_map = enabled;
+    }
+
+    /// Enable bus-stop / recycling image decals (Java only).
+    pub fn set_map_decals(&mut self, enabled: bool) {
+        self.map_decals = enabled;
+    }
+
+    /// True if image decals should be placed.
+    pub fn map_decals_enabled(&self) -> bool {
+        self.map_decals
+    }
+
+    /// Places an invisible fixed item frame holding a locked map on one face of a block.
+    /// facing: 2=north, 3=south, 4=west, 5=east. Absolute Y.
+    pub fn place_map_decal(&mut self, bx: i32, abs_y: i32, bz: i32, facing: i8, map_id: i32) {
+        let (dx, dz) = match facing {
+            3 => (0, 1),
+            4 => (-1, 0),
+            5 => (1, 0),
+            _ => (0, -1),
+        };
+        let fx = bx + dx;
+        let fz = bz + dz;
+
+        // Skip a face whose cell sits in the terrain; that frame would be culled on load.
+        let rel_y = abs_y - self.get_absolute_y(fx, 0, fz);
+        if rel_y < 1 {
+            return;
+        }
+
+        let mut components = HashMap::new();
+        components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
+        let mut item = HashMap::new();
+        item.insert(
+            "id".to_string(),
+            Value::String("minecraft:filled_map".to_string()),
+        );
+        item.insert("count".to_string(), Value::Int(1));
+        item.insert("components".to_string(), Value::Compound(components));
+
+        let mut extra = HashMap::new();
+        extra.insert("Facing".to_string(), Value::Byte(facing));
+        extra.insert("ItemRotation".to_string(), Value::Byte(0));
+        extra.insert("Item".to_string(), Value::Compound(item));
+        extra.insert("ItemDropChance".to_string(), Value::Float(0.0));
+        extra.insert("Fixed".to_string(), Value::Byte(1));
+        extra.insert("Invisible".to_string(), Value::Byte(1));
+        extra.insert("TileX".to_string(), Value::Int(fx));
+        extra.insert("TileY".to_string(), Value::Int(abs_y));
+        extra.insert("TileZ".to_string(), Value::Int(fz));
+        extra.insert(
+            "block_pos".to_string(),
+            Value::List(vec![Value::Int(fx), Value::Int(abs_y), Value::Int(fz)]),
+        );
+
+        self.add_entity("minecraft:item_frame", fx, rel_y, fz, Some(extra));
     }
 
     /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
@@ -713,7 +774,8 @@ impl<'a> WorldEditor<'a> {
         self.add_filled_map_frame(spawn_x, display_y, frame_z, branding_map_id);
     }
 
-    /// Places a fixed item frame holding a locked filled map, facing north toward spawn.
+    /// Places an item frame holding a locked filled map, facing the player at spawn.
+    /// Left breakable (Fixed:0) on purpose; the chest below holds a takeable copy.
     fn add_filled_map_frame(&mut self, x: i32, absolute_y: i32, frame_z: i32, map_id: i32) {
         let mut components = HashMap::new();
         components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
