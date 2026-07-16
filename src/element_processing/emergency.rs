@@ -49,12 +49,20 @@ fn generate_fire_hydrant(editor: &mut WorldEditor, node: &ProcessedNode) {
         return;
     }
 
-    // Simple hydrant: brick wall with redstone block on top
-    editor.set_block(BRICK_WALL, x, 1, z, None, None);
-    editor.set_block(REDSTONE_BLOCK, x, 2, z, None, None);
+    // Simple hydrant: a single redstone block at ground level.
+    editor.set_block(REDSTONE_BLOCK, x, 1, z, None, None);
 
-    // Red banners with orange flame-like pattern on all four sides
-    let abs_y = editor.get_absolute_y(x, 2, z);
+    let abs_y = editor.get_absolute_y(x, 1, z);
+
+    if editor.map_decals_enabled() {
+        // Hydrant sign on all four sides.
+        for facing in [2i8, 3, 4, 5] {
+            editor.place_map_decal(x, abs_y, z, facing, crate::map_item::HYDRANT_MAP_ID);
+        }
+        return;
+    }
+
+    // Non-Java fallback: red banners with an orange flame-like pattern on all four sides.
     const HYDRANT_PATTERNS: &[(&str, &str)] = &[
         ("orange", "minecraft:triangle_top"),
         ("yellow", "minecraft:triangle_bottom"),
