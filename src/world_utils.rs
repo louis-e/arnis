@@ -84,9 +84,56 @@ pub fn sanitize_for_filename(name: &str) -> String {
     }
 }
 
+/// Returns a trimmed custom name, or None if the input is missing or blank.
+fn normalize_custom_name(custom_name: Option<&str>) -> Option<&str> {
+    custom_name.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Returns a world name that doesn't collide with an existing entry in
+/// `base_dir` by appending an increasing counter (`Name`, `Name 2`, `Name 3`, ...).
+pub fn unique_world_name(base_dir: &Path, desired: &str) -> String {
+    if !base_dir.join(desired).exists() {
+        return desired.to_string();
+    }
+    let mut counter = 2;
+    loop {
+        let candidate = format!("{desired} {counter}");
+        if !base_dir.join(&candidate).exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
+/// Picks the Luanti world directory name: the sanitized custom name if given,
+/// otherwise the next free "Arnis Luanti World N".
+pub fn luanti_world_name(worlds_dir: &Path, custom_name: Option<&str>) -> String {
+    if let Some(name) = normalize_custom_name(custom_name) {
+        return unique_world_name(worlds_dir, &sanitize_for_filename(name));
+    }
+    let mut counter = 1;
+    loop {
+        let candidate = format!("Arnis Luanti World {counter}");
+        if !worlds_dir.join(&candidate).exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
 /// Builds the Bedrock output path and level name for a given bounding box.
-/// Combines area name lookup, sanitization, and path construction.
-pub fn build_bedrock_output(bbox: &LLBBox, output_dir: PathBuf) -> (PathBuf, String) {
+/// Uses the custom name if given, otherwise combines area name lookup,
+/// sanitization, and path construction.
+pub fn build_bedrock_output(
+    bbox: &LLBBox,
+    output_dir: PathBuf,
+    custom_name: Option<&str>,
+) -> (PathBuf, String) {
+    if let Some(name) = normalize_custom_name(custom_name) {
+        let safe_name = sanitize_for_filename(name);
+        let filename = format!("{safe_name}.mcworld");
+        return (output_dir.join(&filename), name.to_string());
+    }
     let area_name = get_area_name_for_bedrock(bbox);
     let safe_name = sanitize_for_filename(&area_name);
     let filename = format!("Arnis {safe_name}.mcworld");
@@ -96,37 +143,43 @@ pub fn build_bedrock_output(bbox: &LLBBox, output_dir: PathBuf) -> (PathBuf, Str
 
 /// Creates a new Java Edition world in the given base directory.
 ///
-/// Generates a unique "Arnis World N" name, creates the directory structure
-/// (with a `region/` subdirectory), writes the region template, level.dat
-/// (with updated name, timestamp, and spawn position), and icon.png.
+/// Uses the sanitized custom name if given (with a counter suffix on
+/// collision), otherwise generates a unique "Arnis World N" name. Creates the
+/// directory structure (with a `region/` subdirectory), writes the region
+/// template, level.dat (with updated name, timestamp, and spawn position),
+/// and icon.png.
 ///
 /// Returns the full path to the newly created world directory.
-pub fn create_new_world(base_path: &Path) -> Result<String, String> {
-    // Generate a unique world name with proper counter
-    // Check for both "Arnis World X" and "Arnis World X: Location" patterns
-    let mut counter: i32 = 1;
-    let unique_name: String = loop {
-        let candidate_name: String = format!("Arnis World {counter}");
-        let candidate_path: PathBuf = base_path.join(&candidate_name);
+pub fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
+    let unique_name: String = if let Some(name) = normalize_custom_name(custom_name) {
+        unique_world_name(base_path, &sanitize_for_filename(name))
+    } else {
+        // Generate a unique world name with proper counter
+        // Check for both "Arnis World X" and "Arnis World X: Location" patterns
+        let mut counter: i32 = 1;
+        loop {
+            let candidate_name: String = format!("Arnis World {counter}");
+            let candidate_path: PathBuf = base_path.join(&candidate_name);
 
-        // Check for exact match (no location suffix)
-        let exact_match_exists = candidate_path.exists();
+            // Check for exact match (no location suffix)
+            let exact_match_exists = candidate_path.exists();
 
-        // Check for worlds with location suffix (Arnis World X: Location)
-        let location_pattern = format!("Arnis World {counter}: ");
-        let location_match_exists = fs::read_dir(base_path)
-            .map(|entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .any(|name| name.starts_with(&location_pattern))
-            })
-            .unwrap_or(false);
+            // Check for worlds with location suffix (Arnis World X: Location)
+            let location_pattern = format!("Arnis World {counter}: ");
+            let location_match_exists = fs::read_dir(base_path)
+                .map(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .filter_map(|entry| entry.file_name().into_string().ok())
+                        .any(|name| name.starts_with(&location_pattern))
+                })
+                .unwrap_or(false);
 
-        if !exact_match_exists && !location_match_exists {
-            break candidate_name;
+            if !exact_match_exists && !location_match_exists {
+                break candidate_name;
+            }
+            counter += 1;
         }
-        counter += 1;
     };
 
     let new_world_path: PathBuf = base_path.join(&unique_name);
@@ -488,9 +541,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn create_new_world_uses_custom_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path(), Some("My City")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "My City");
+
+        // A second world with the same name gets a counter suffix
+        let world2 = PathBuf::from(create_new_world(tmp.path(), Some("My City")).unwrap());
+        assert_eq!(world2.file_name().unwrap(), "My City 2");
+
+        // Blank names fall back to the default naming scheme
+        let world3 = PathBuf::from(create_new_world(tmp.path(), Some("   ")).unwrap());
+        assert_eq!(world3.file_name().unwrap(), "Arnis World 1");
+    }
+
+    #[test]
+    fn custom_name_is_sanitized_for_filesystem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path(), Some("Berlin: Mitte")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "Berlin_ Mitte");
+    }
+
+    #[test]
+    fn luanti_world_name_prefers_custom_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(luanti_world_name(tmp.path(), Some("My City")), "My City");
+        assert_eq!(luanti_world_name(tmp.path(), None), "Arnis Luanti World 1");
+        assert_eq!(
+            luanti_world_name(tmp.path(), Some("  ")),
+            "Arnis Luanti World 1"
+        );
+    }
+
+    #[test]
     fn apply_java_world_settings_writes_gametype_and_daytime() {
         let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let world = PathBuf::from(create_new_world(tmp.path(), None).unwrap());
         apply_java_world_settings(&world, crate::args::GameMode::Survival, 13000).unwrap();
 
         let raw = fs::read(world.join("level.dat")).unwrap();

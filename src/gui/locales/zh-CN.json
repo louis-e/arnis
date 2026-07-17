@@ -9,6 +9,7 @@
   "generation_process_started": "生成过程已开始。",
   "winter_mode": "冬季模式",
   "world_scale": "世界比例",
+  "world_name": "世界名称",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "填充超时（秒）",
   "ground_level": "地面高度",

@@ -9,6 +9,7 @@
   "generation_process_started": "بدأت عملية البناء.",
   "winter_mode": "وضع الشتاء",
   "world_scale": "مقياس العالم",
+  "world_name": "اسم العالم",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "مهلة ملء الفيضان (ثواني)",
   "ground_level": "مستوى الأرض",

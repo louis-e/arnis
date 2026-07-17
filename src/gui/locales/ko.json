@@ -9,6 +9,7 @@
   "generation_process_started": "생성 프로세스가 시작되었습니다.",
   "winter_mode": "겨울 모드",
   "world_scale": "세계 규모",
+  "world_name": "월드 이름",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "채우기 시간 초과 (초)",
   "ground_level": "지면 레벨",
