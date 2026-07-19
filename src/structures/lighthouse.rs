@@ -46,8 +46,13 @@ fn place_water_foundation(
     base_z: i32,
     rot: u8,
 ) {
-    let (anchor_x, anchor_z) =
-        rotate_xz(schem.anchor_x, schem.anchor_z, schem.width, schem.length, rot);
+    let (anchor_x, anchor_z) = rotate_xz(
+        schem.anchor_x,
+        schem.anchor_z,
+        schem.width,
+        schem.length,
+        rot,
+    );
     let footprint: HashSet<(i32, i32)> = schem
         .voxels
         .iter()
@@ -69,14 +74,7 @@ fn place_water_foundation(
             ) {
                 continue;
             }
-            editor.set_block_absolute(
-                OAK_PLANKS,
-                x,
-                water_y,
-                z,
-                None,
-                Some(&[]),
-            );
+            editor.set_block_absolute(OAK_PLANKS, x, water_y, z, None, Some(&[]));
         }
     }
 }
