@@ -636,6 +636,8 @@ pub fn generate_world_with_options(
     // the sequential path (correct, just not tile-parallel).
     let use_parallel_tiles = tiles.len() >= 3 && matches!(world_format, WorldFormat::JavaAnvil);
 
+    let mut post_water_lighthouses = Vec::new();
+
     if use_parallel_tiles {
         // Large area: process tiles in parallel using rayon.
         // Each tile gets its own WorldEditor with an expanded bounding box (64-block
@@ -833,6 +835,19 @@ pub fn generate_world_with_options(
                         g_max_z,
                     );
 
+                    for &elem_idx in &tile_assignments[tile_idx] {
+                        let element = &elements[elem_idx];
+                        let suppression_key = (element.kind(), element.id());
+                        if models_3d_suppressed.contains(&suppression_key)
+                            || outline_suppression.contains(&suppression_key)
+                        {
+                            continue;
+                        }
+                        if let Some((x, z)) = man_made::lighthouse_position(element) {
+                            crate::structures::lighthouse::place(&mut tile_editor, x, z);
+                        }
+                    }
+
                     // Under eviction the post-merge subway carve can't run (regions get freed),
                     // so carve in-tile now, after ground/fill so the interior isn't refilled.
                     if eviction_active {
@@ -975,6 +990,9 @@ pub fn generate_world_with_options(
             {
                 continue;
             }
+            if let Some(position) = man_made::lighthouse_position(&element) {
+                post_water_lighthouses.push(position);
+            }
             if element_counter.is_multiple_of(pb_batch_size) {
                 process_pb.inc(pb_batch_size);
             }
@@ -1074,6 +1092,9 @@ pub fn generate_world_with_options(
             &road_mask,
             &tunnel_footprint,
         );
+        for (x, z) in post_water_lighthouses.drain(..) {
+            crate::structures::lighthouse::place(&mut editor, x, z);
+        }
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.

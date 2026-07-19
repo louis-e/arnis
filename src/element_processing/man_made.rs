@@ -29,25 +29,35 @@ pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, a
                 generate_tank_structure(editor, element, args);
             }
             "mast" => generate_antenna(editor, element),
-            "lighthouse" => place_lighthouse_way(editor, element),
+            "lighthouse" => place_lighthouse(editor, element),
             _ => {} // Unknown man_made type, ignore
         }
     }
 }
 
-/// Stamp the bundled lighthouse at the centroid of a lighthouse way/footprint.
-fn place_lighthouse_way(editor: &mut WorldEditor, element: &ProcessedElement) {
-    if let ProcessedElement::Way(way) = element {
-        if way.nodes.is_empty() {
-            return;
+/// Return the lighthouse anchor for a node or footprint, if applicable.
+pub fn lighthouse_position(element: &ProcessedElement) -> Option<(i32, i32)> {
+    if element.tags().get("man_made").map(String::as_str) != Some("lighthouse") {
+        return None;
+    }
+
+    match element {
+        ProcessedElement::Node(node) => Some((node.x, node.z)),
+        ProcessedElement::Way(way) if !way.nodes.is_empty() => {
+            let (sx, sz) = way.nodes.iter().fold((0i64, 0i64), |(sx, sz), node| {
+                (sx + i64::from(node.x), sz + i64::from(node.z))
+            });
+            let count = way.nodes.len() as i64;
+            Some(((sx / count) as i32, (sz / count) as i32))
         }
-        let (mut sx, mut sz) = (0i64, 0i64);
-        for nd in &way.nodes {
-            sx += nd.x as i64;
-            sz += nd.z as i64;
-        }
-        let n = way.nodes.len() as i64;
-        crate::structures::lighthouse::place(editor, (sx / n) as i32, (sz / n) as i32);
+        _ => None,
+    }
+}
+
+/// Stamp the bundled lighthouse at its node or footprint centroid.
+fn place_lighthouse(editor: &mut WorldEditor, element: &ProcessedElement) {
+    if let Some((x, z)) = lighthouse_position(element) {
+        crate::structures::lighthouse::place(editor, x, z);
     }
 }
 
@@ -535,7 +545,7 @@ pub fn generate_man_made_nodes(editor: &mut WorldEditor, node: &ProcessedNode, a
                 generate_tank_structure(editor, &element, args);
             }
             "mast" => generate_antenna(editor, &element),
-            "lighthouse" => crate::structures::lighthouse::place(editor, node.x, node.z),
+            "lighthouse" => place_lighthouse(editor, &element),
             _ => {} // Unknown man_made type, ignore
         }
     }
