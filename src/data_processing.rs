@@ -576,7 +576,8 @@ pub fn generate_world_with_options(
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
     // Tunnel bore footprints, so the water depth-carve and vegetation stay off them.
-    let tunnel_footprint = highways::collect_tunnel_footprint(&elements, &xzbbox, args.scale);
+    let mut tunnel_footprint = highways::collect_tunnel_footprint(&elements, &xzbbox, args.scale);
+    railways::add_tunnel_footprint(&elements, &xzbbox, &mut tunnel_footprint);
 
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);

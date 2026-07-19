@@ -25,6 +25,19 @@ const RAIL_BRIDGE_RAMP_FRACTION: f32 = 0.25;
 
 pub type RailBridgeInternalEndpoints = HashSet<(i32, i32)>;
 
+const RAIL_TRACK_TYPES: &[&str] = &[
+    "rail",
+    "light_rail",
+    "subway",
+    "tram",
+    "narrow_gauge",
+    "monorail",
+    "funicular",
+    "miniature",
+    "preserved",
+    "disused",
+];
+
 /// Half-width of the outer stone shell (total footprint = 2 * WALL_RADIUS + 1 = 5).
 const WALL_RADIUS: i32 = 2;
 
@@ -70,14 +83,17 @@ pub fn generate_railways(
         return;
     };
 
-    let is_subway = railway_type == "subway"
+    let requests_tunnel = railway_type == "subway"
         || element
             .tags
             .get("subway")
             .map(|v| v == "yes")
-            .unwrap_or(false);
-    if is_subway {
-        generate_rail_tunnel_shell(editor, element, rail_tunnel_points);
+            .unwrap_or(false)
+        || element.tags.get("tunnel").map(String::as_str) == Some("yes");
+    if requests_tunnel {
+        if renders_as_rail_tunnel(element) {
+            generate_rail_tunnel_shell(editor, element, rail_tunnel_points);
+        }
         return;
     }
 
@@ -90,11 +106,6 @@ pub fn generate_railways(
     ]
     .contains(&railway_type.as_str())
     {
-        return;
-    }
-
-    if element.tags.get("tunnel").map(String::as_str) == Some("yes") {
-        generate_rail_tunnel_shell(editor, element, rail_tunnel_points);
         return;
     }
 
@@ -114,6 +125,21 @@ pub fn generate_railways(
             }
         }
     }
+}
+
+fn renders_as_rail_tunnel(way: &ProcessedWay) -> bool {
+    let Some(railway_type) = way.tags.get("railway").map(String::as_str) else {
+        return false;
+    };
+    if way.nodes.len() < 2
+        || !RAIL_TRACK_TYPES.contains(&railway_type)
+        || way.tags.get("area").map(String::as_str) == Some("yes")
+    {
+        return false;
+    }
+    railway_type == "subway"
+        || way.tags.get("subway").map(String::as_str) == Some("yes")
+        || way.tags.get("tunnel").map(String::as_str) == Some("yes")
 }
 
 fn is_rail_bridge(way: &ProcessedWay) -> bool {
@@ -430,6 +456,38 @@ pub fn collect_at_grade_rail_mask(
         }
     }
     bitmap
+}
+
+/// Adds every rendered rail-tunnel shell coordinate to the shared tunnel footprint.
+pub fn add_tunnel_footprint(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    footprint: &mut CoordinateBitmap,
+) {
+    if !elements
+        .iter()
+        .any(|e| matches!(e, ProcessedElement::Way(w) if renders_as_rail_tunnel(w)))
+    {
+        return;
+    }
+    if footprint.is_empty() {
+        *footprint = CoordinateBitmap::new(xzbbox);
+    }
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        if !renders_as_rail_tunnel(way) {
+            continue;
+        }
+        for (bx, bz) in build_smoothed_centerline(way) {
+            for dx in -WALL_RADIUS..=WALL_RADIUS {
+                for dz in -WALL_RADIUS..=WALL_RADIUS {
+                    footprint.set(bx + dx, bz + dz);
+                }
+            }
+        }
+    }
 }
 
 fn generate_rail_bridge(
@@ -1134,6 +1192,83 @@ mod tests {
         assert!(
             !editor.check_for_block(24, 1, 50, Some(&[RAIL_EAST_WEST])),
             "tunnel rail is not rendered at grade"
+        );
+    }
+
+    #[test]
+    fn rail_tunnel_routing_accepts_only_track_ways() {
+        assert!(renders_as_rail_tunnel(&straight_rail(&[
+            ("railway", "rail"),
+            ("tunnel", "yes"),
+        ])));
+        assert!(renders_as_rail_tunnel(&straight_rail(&[(
+            "railway", "subway"
+        )])));
+        assert!(!renders_as_rail_tunnel(&straight_rail(&[
+            ("railway", "rail"),
+            ("tunnel", "yes"),
+            ("area", "yes"),
+        ])));
+        assert!(!renders_as_rail_tunnel(&straight_rail(&[
+            ("railway", "platform"),
+            ("tunnel", "yes"),
+        ])));
+        assert!(!renders_as_rail_tunnel(&straight_rail(&[
+            ("railway", "station"),
+            ("subway", "yes"),
+        ])));
+    }
+
+    #[test]
+    fn non_track_tunnel_ways_do_not_generate_rails() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        for way in [
+            straight_rail(&[("railway", "rail"), ("tunnel", "yes"), ("area", "yes")]),
+            straight_rail(&[("railway", "platform"), ("tunnel", "yes")]),
+            straight_rail(&[("railway", "station"), ("subway", "yes")]),
+        ] {
+            let mut editor = test_editor(&xzbbox);
+            let points =
+                run_collecting_tunnel_points(&mut editor, &way, &CoordinateBitmap::new(&xzbbox));
+            assert!(points.is_empty(), "non-track way must not become a tunnel");
+            assert!(
+                !editor.check_for_block(20, 1, 50, Some(&[RAIL_EAST_WEST])),
+                "non-track way must not fall through to at-grade rail rendering"
+            );
+        }
+    }
+
+    #[test]
+    fn rail_tunnel_footprint_covers_the_full_shell_only_for_tracks() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let non_tracks = vec![
+            ProcessedElement::Way(straight_rail(&[("railway", "platform"), ("tunnel", "yes")])),
+            ProcessedElement::Way(straight_rail(&[("railway", "station"), ("subway", "yes")])),
+        ];
+        let mut footprint = CoordinateBitmap::new_empty();
+        add_tunnel_footprint(&non_tracks, &xzbbox, &mut footprint);
+        assert!(
+            footprint.is_empty(),
+            "platform and station ways do not allocate a tunnel footprint"
+        );
+
+        footprint = CoordinateBitmap::new(&xzbbox);
+        footprint.set(10, 10);
+        let track = vec![ProcessedElement::Way(straight_rail(&[
+            ("railway", "rail"),
+            ("tunnel", "yes"),
+        ]))];
+        add_tunnel_footprint(&track, &xzbbox, &mut footprint);
+
+        assert!(
+            footprint.contains(10, 10),
+            "existing footprint is preserved"
+        );
+        assert!(footprint.contains(40, 50), "track centerline is protected");
+        assert!(footprint.contains(40, 52), "outer tunnel wall is protected");
+        assert!(
+            !footprint.contains(40, 53),
+            "footprint stops outside the 5x5 shell"
         );
     }
 
