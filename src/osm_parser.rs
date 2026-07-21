@@ -114,6 +114,266 @@ impl OsmData {
             remark: None,
         }
     }
+
+    /// Bounding box spanning every node with coordinates, or None when the data has no
+    /// locatable nodes (or they are collinear/degenerate). Used as the fallback bbox for
+    /// local `.osm` files that omit the `<bounds>` element.
+    pub fn bounds(&self) -> Option<LLBBox> {
+        let mut min_lat = f64::INFINITY;
+        let mut min_lng = f64::INFINITY;
+        let mut max_lat = f64::NEG_INFINITY;
+        let mut max_lng = f64::NEG_INFINITY;
+        let mut found = false;
+        for element in &self.elements {
+            if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
+                min_lat = min_lat.min(lat);
+                max_lat = max_lat.max(lat);
+                min_lng = min_lng.min(lon);
+                max_lng = max_lng.max(lon);
+                found = true;
+            }
+        }
+        if !found {
+            return None;
+        }
+        // LLBBox::new rejects a zero-area (min == max) box; treat that as "no usable bounds".
+        LLBBox::new(min_lat, min_lng, max_lat, max_lng).ok()
+    }
+}
+
+/// Parses a raw OSM XML (`.osm`) document into the same [`OsmData`] shape produced by the
+/// Overpass `[out:json]` path, so the entire downstream pipeline is reused unchanged.
+///
+/// Returns the parsed data plus the `<bounds>` element as an [`LLBBox`] when the document
+/// carries one. The caller decides bbox precedence via [`resolve_bbox`]; surfacing the
+/// explicit `<bounds>` here keeps it from being silently replaced by the node-extent fallback.
+pub fn parse_osm_xml(
+    reader: impl std::io::BufRead,
+) -> Result<(OsmData, Option<LLBBox>), Box<dyn std::error::Error>> {
+    use quick_xml::events::{BytesStart, Event};
+    use quick_xml::reader::Reader;
+
+    // Single-attribute lookup, decoding XML entities in the value. Element attribute
+    // counts are tiny, re-scan is cheap.
+    fn attr_string(
+        e: &BytesStart,
+        key: &[u8],
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        for attr in e.attributes() {
+            let attr = attr?;
+            if attr.key.into_inner() == key {
+                // normalized_value resolves predefined entities (&amp; -> & etc.); Implicit1_0
+                // applies XML 1.0 attribute-value normalization for OSM files.
+                return Ok(Some(
+                    attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
+                        .into_owned(),
+                ));
+            }
+        }
+        Ok(None)
+    }
+    fn attr_u64(e: &BytesStart, key: &[u8]) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+        match attr_string(e, key)? {
+            Some(s) => Ok(Some(s.trim().parse()?)),
+            None => Ok(None),
+        }
+    }
+    fn attr_f64(e: &BytesStart, key: &[u8]) -> Result<Option<f64>, Box<dyn std::error::Error>> {
+        match attr_string(e, key)? {
+            Some(s) => Ok(Some(s.trim().parse()?)),
+            None => Ok(None),
+        }
+    }
+
+    // The node/way/relation currently being assembled from its child events.
+    enum Building {
+        Node {
+            id: u64,
+            lat: Option<f64>,
+            lon: Option<f64>,
+            tags: HashMap<String, String>,
+        },
+        Way {
+            id: u64,
+            nodes: Vec<u64>,
+            tags: HashMap<String, String>,
+        },
+        Relation {
+            id: u64,
+            members: Vec<OsmMember>,
+            tags: HashMap<String, String>,
+        },
+    }
+
+    // Mirror Overpass JSON: an element with no tags deserializes to `None`, not an empty map.
+    fn finish(b: Building) -> OsmElement {
+        let opt = |t: HashMap<String, String>| if t.is_empty() { None } else { Some(t) };
+        match b {
+            Building::Node { id, lat, lon, tags } => OsmElement {
+                r#type: "node".to_string(),
+                id,
+                lat,
+                lon,
+                nodes: None,
+                tags: opt(tags),
+                members: Vec::new(),
+            },
+            Building::Way { id, nodes, tags } => OsmElement {
+                r#type: "way".to_string(),
+                id,
+                lat: None,
+                lon: None,
+                nodes: Some(nodes),
+                tags: opt(tags),
+                members: Vec::new(),
+            },
+            Building::Relation { id, members, tags } => OsmElement {
+                r#type: "relation".to_string(),
+                id,
+                lat: None,
+                lon: None,
+                nodes: None,
+                tags: opt(tags),
+                members,
+            },
+        }
+    }
+
+    // Handles a start/empty tag. `is_empty` is true for self-closing tags (no child events,
+    // so node/way/relation are finalized immediately rather than on a matching end tag).
+    fn on_open(
+        e: &BytesStart,
+        is_empty: bool,
+        elements: &mut Vec<OsmElement>,
+        bounds: &mut Option<LLBBox>,
+        building: &mut Option<Building>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match e.name().into_inner() {
+            b"bounds" => {
+                if let (Some(minlat), Some(minlon), Some(maxlat), Some(maxlon)) = (
+                    attr_f64(e, b"minlat")?,
+                    attr_f64(e, b"minlon")?,
+                    attr_f64(e, b"maxlat")?,
+                    attr_f64(e, b"maxlon")?,
+                ) {
+                    // Propagate LLBBox::new's validation error
+                    *bounds = Some(LLBBox::new(minlat, minlon, maxlat, maxlon)?);
+                }
+            }
+            b"node" => {
+                let id = attr_u64(e, b"id")?.ok_or("OSM node missing required id attribute")?;
+                let node = Building::Node {
+                    id,
+                    lat: attr_f64(e, b"lat")?,
+                    lon: attr_f64(e, b"lon")?,
+                    tags: HashMap::new(),
+                };
+                if is_empty {
+                    elements.push(finish(node));
+                } else {
+                    *building = Some(node);
+                }
+            }
+            b"way" => {
+                let id = attr_u64(e, b"id")?.ok_or("OSM way missing required id attribute")?;
+                let way = Building::Way {
+                    id,
+                    nodes: Vec::new(),
+                    tags: HashMap::new(),
+                };
+                if is_empty {
+                    elements.push(finish(way));
+                } else {
+                    *building = Some(way);
+                }
+            }
+            b"relation" => {
+                let id = attr_u64(e, b"id")?.ok_or("OSM relation missing required id attribute")?;
+                let relation = Building::Relation {
+                    id,
+                    members: Vec::new(),
+                    tags: HashMap::new(),
+                };
+                if is_empty {
+                    elements.push(finish(relation));
+                } else {
+                    *building = Some(relation);
+                }
+            }
+            b"tag" => {
+                if let Some(b) = building.as_mut() {
+                    if let (Some(k), Some(v)) = (attr_string(e, b"k")?, attr_string(e, b"v")?) {
+                        match b {
+                            Building::Node { tags, .. }
+                            | Building::Way { tags, .. }
+                            | Building::Relation { tags, .. } => {
+                                tags.insert(k, v);
+                            }
+                        }
+                    }
+                }
+            }
+            b"nd" => {
+                if let Some(Building::Way { nodes, .. }) = building.as_mut() {
+                    if let Some(node_ref) = attr_u64(e, b"ref")? {
+                        nodes.push(node_ref);
+                    }
+                }
+            }
+            b"member" => {
+                if let Some(Building::Relation { members, .. }) = building.as_mut() {
+                    members.push(OsmMember {
+                        r#type: attr_string(e, b"type")?.unwrap_or_default(),
+                        r#ref: attr_u64(e, b"ref")?.unwrap_or_default(),
+                        r#role: attr_string(e, b"role")?.unwrap_or_default(),
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    let mut xml = Reader::from_reader(reader);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut elements: Vec<OsmElement> = Vec::new();
+    let mut bounds: Option<LLBBox> = None;
+    let mut building: Option<Building> = None;
+
+    loop {
+        match xml.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) => on_open(&e, false, &mut elements, &mut bounds, &mut building)?,
+            Event::Empty(e) => on_open(&e, true, &mut elements, &mut bounds, &mut building)?,
+            Event::End(e) => {
+                if matches!(e.name().into_inner(), b"node" | b"way" | b"relation") {
+                    if let Some(b) = building.take() {
+                        elements.push(finish(b));
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok((
+        OsmData {
+            elements,
+            remark: None,
+        },
+        bounds,
+    ))
+}
+
+/// Resolves the effective bounding box with precedence: explicit `--bbox` > file `<bounds>`
+/// element > node-coordinate extent. Returns None only when no source yields a usable box.
+pub fn resolve_bbox(
+    explicit: Option<LLBBox>,
+    file_bounds: Option<LLBBox>,
+    data: &OsmData,
+) -> Option<LLBBox> {
+    explicit.or(file_bounds).or_else(|| data.bounds())
 }
 
 struct SplitOsmData {
@@ -1442,5 +1702,146 @@ mod outline_suppression_tests {
         let mut groups = PartGroups::new();
         compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut groups);
         assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
+    }
+}
+
+#[cfg(test)]
+mod osm_xml_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn parse(xml: &str) -> (OsmData, Option<LLBBox>) {
+        parse_osm_xml(Cursor::new(xml.as_bytes())).expect("valid OSM XML")
+    }
+
+    fn find<'a>(data: &'a OsmData, kind: &str, id: u64) -> &'a OsmElement {
+        data.elements
+            .iter()
+            .find(|e| e.r#type == kind && e.id == id)
+            .unwrap_or_else(|| panic!("missing {kind} {id}"))
+    }
+
+    // Testing every element kind: tagged node, bare node, way (nd refs + tags),
+    // relation (member + tags), and a <bounds> element.
+    const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <bounds minlat="1.0" minlon="2.0" maxlat="3.0" maxlon="4.0"/>
+  <node id="10" lat="1.5" lon="2.5"><tag k="amenity" v="cafe"/></node>
+  <node id="11" lat="1.6" lon="2.6"/>
+  <way id="20">
+    <nd ref="10"/>
+    <nd ref="11"/>
+    <tag k="building" v="yes"/>
+    <tag k="name" v="Ben &amp; Jerry"/>
+  </way>
+  <relation id="30">
+    <member type="way" ref="20" role="outer"/>
+    <tag k="type" v="multipolygon"/>
+  </relation>
+</osm>"#;
+
+    #[test]
+    fn parses_bounds_into_llbbox() {
+        let (_, bounds) = parse(SAMPLE);
+        assert_eq!(bounds, Some(LLBBox::new(1.0, 2.0, 3.0, 4.0).unwrap()));
+    }
+
+    #[test]
+    fn parses_expected_element_count() {
+        let (data, _) = parse(SAMPLE);
+        // 2 nodes + 1 way + 1 relation; <bounds> is not an element.
+        assert_eq!(data.elements.len(), 4);
+    }
+
+    #[test]
+    fn parses_node_with_and_without_tags() {
+        let (data, _) = parse(SAMPLE);
+
+        let tagged = find(&data, "node", 10);
+        assert_eq!(tagged.lat, Some(1.5));
+        assert_eq!(tagged.lon, Some(2.5));
+        assert_eq!(
+            tagged.tags.as_ref().unwrap().get("amenity"),
+            Some(&"cafe".to_string())
+        );
+
+        // A node with no <tag> children mirrors Overpass JSON: tags is None, not an empty map.
+        let bare = find(&data, "node", 11);
+        assert_eq!(bare.lat, Some(1.6));
+        assert!(bare.tags.is_none());
+    }
+
+    #[test]
+    fn parses_way_node_refs_and_tags() {
+        let (data, _) = parse(SAMPLE);
+        let way = find(&data, "way", 20);
+        assert_eq!(way.nodes, Some(vec![10, 11]));
+        let tags = way.tags.as_ref().unwrap();
+        assert_eq!(tags.get("building"), Some(&"yes".to_string()));
+        // XML entities in attribute values are unescaped.
+        assert_eq!(tags.get("name"), Some(&"Ben & Jerry".to_string()));
+    }
+
+    #[test]
+    fn parses_relation_members_and_tags() {
+        let (data, _) = parse(SAMPLE);
+        let relation = find(&data, "relation", 30);
+        assert_eq!(relation.members.len(), 1);
+        let member = &relation.members[0];
+        assert_eq!(member.r#type, "way");
+        assert_eq!(member.r#ref, 20);
+        assert_eq!(member.r#role, "outer");
+        assert_eq!(
+            relation.tags.as_ref().unwrap().get("type"),
+            Some(&"multipolygon".to_string())
+        );
+    }
+
+    // Without a <bounds> element, the parser returns None and OsmData::bounds() derives the
+    // node-coordinate extent instead.
+    const NO_BOUNDS: &str = r#"<osm version="0.6">
+  <node id="1" lat="10.0" lon="20.0"/>
+  <node id="2" lat="12.0" lon="24.0"/>
+  <node id="3" lat="11.0" lon="22.0"/>
+</osm>"#;
+
+    #[test]
+    fn missing_bounds_falls_back_to_node_extent() {
+        let (data, bounds) = parse(NO_BOUNDS);
+        assert!(bounds.is_none());
+        assert_eq!(
+            data.bounds(),
+            Some(LLBBox::new(10.0, 20.0, 12.0, 24.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn bounds_is_none_without_located_nodes() {
+        let data = OsmData::empty();
+        assert!(data.bounds().is_none());
+    }
+
+    #[test]
+    fn resolve_bbox_precedence() {
+        let explicit = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let file = LLBBox::new(5.0, 5.0, 6.0, 6.0).unwrap();
+        let (data_with_bounds, _) = parse(SAMPLE);
+        let (data_no_bounds, _) = parse(NO_BOUNDS);
+        let node_extent = data_no_bounds.bounds().unwrap();
+
+        // 1--bbox wins over a file <bounds>
+        assert_eq!(
+            resolve_bbox(Some(explicit), Some(file), &data_with_bounds),
+            Some(explicit)
+        );
+        // file <bounds> used when --bbox is absent
+        assert_eq!(
+            resolve_bbox(None, Some(file), &data_with_bounds),
+            Some(file)
+        );
+        // node-extent fallback when neither --bbox nor <bounds> is present
+        assert_eq!(resolve_bbox(None, None, &data_no_bounds), Some(node_extent));
+        // nothing resolvable -> None
+        assert_eq!(resolve_bbox(None, None, &OsmData::empty()), None);
     }
 }

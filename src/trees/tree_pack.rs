@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use include_dir::{include_dir, Dir};
 
 use crate::args::Args;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::trees::region::RegionLibrary;
 use crate::trees::tree_library::SizeFilter;
 
@@ -68,13 +69,13 @@ pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
 }
 
 /// Load the region tree pack (realm from bbox center), or None for legacy procedural trees.
-pub fn load(args: &Args, scale: f64, ground_level: i32) -> Option<RegionLibrary> {
+pub fn load(args: &Args, bbox: LLBBox, scale: f64, ground_level: i32) -> Option<RegionLibrary> {
     if args.legacy_trees {
         return None;
     }
     let sizes = SizeFilter::default();
-    let lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
-    let lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
+    let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+    let lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
     let realm = realm_for_latlon(lat, lon);
     let source = TreePackSource::embedded(realm);
     // No palms outside the subtropics (the wide ena realm also spans the Caribbean).
