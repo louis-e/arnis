@@ -1435,7 +1435,7 @@ fn calculate_start_y_offset(
     args: &Args,
     min_level_offset: i32,
 ) -> i32 {
-    if args.terrain {
+    if args.terrain() {
         let mut max_ground_level = args.ground_level;
         for node in &element.nodes {
             if let Some(level) = editor.terrain_level(node.x, node.z) {
@@ -1858,7 +1858,11 @@ fn generate_roof_only_structure(
     group_seed: u64,
 ) {
     let scale_factor = args.scale;
-    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
+    let abs_terrain_offset = if !args.terrain() {
+        args.ground_level
+    } else {
+        0
+    };
 
     // Determine where the roof structure starts vertically.
     // Priority: min_height → building:min_level → layer hint → default.
@@ -2006,7 +2010,7 @@ fn generate_roof_only_structure(
                 // slab_y.  When terrain is enabled, both values are absolute
                 // world coordinates.  When terrain is disabled, both are
                 // relative to ground (abs_terrain_offset is added separately).
-                let pillar_base = if args.terrain {
+                let pillar_base = if args.terrain() {
                     editor.get_ground_level(x, z)
                 } else {
                     0
@@ -2082,7 +2086,7 @@ fn build_wall_ring(
                 let is_passage = building_passages.contains(bx, bz);
 
                 // Foundation pillars below terrain. Skipped in passage zones.
-                if args.terrain && config.is_ground_level && !is_passage {
+                if args.terrain() && config.is_ground_level && !is_passage {
                     let local_ground_level =
                         editor.terrain_level(bx, bz).unwrap_or(args.ground_level);
 
@@ -4719,7 +4723,11 @@ pub fn generate_buildings(
         .unwrap_or(0);
 
     let scale_factor = args.scale;
-    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
+    let abs_terrain_offset = if !args.terrain() {
+        args.ground_level
+    } else {
+        0
+    };
 
     let min_level_offset = if let Some(mh) = element.tags.get("min_height") {
         mh.trim_end_matches('m')
