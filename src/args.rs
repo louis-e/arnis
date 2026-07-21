@@ -7,9 +7,11 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng) (required)
+    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng).
+    /// Required unless --file supplies a local .osm/.xml file to derive it from
+    /// (terrain-only mode ignores --file, so it always requires --bbox).
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
-    pub bbox: LLBBox,
+    pub bbox: Option<LLBBox>,
 
     /// JSON file containing OSM data (optional)
     #[arg(long, group = "location")]
@@ -231,6 +233,23 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
     }
 
+    // A bounding box is required unless a local --file supplies one to derive it from.
+    // Terrain-only mode ignores --file (it never loads OSM objects), so it always needs --bbox.
+    if args.bbox.is_none() {
+        if args.skip_objects() {
+            return Err(
+                "--mode terrain-only requires --bbox (a local --file is ignored in terrain-only mode)."
+                    .to_string(),
+            );
+        }
+        if args.file.is_none() {
+            return Err(
+                "Provide --bbox, or --file with a local .osm/.xml file to derive the bounding box from."
+                    .to_string(),
+            );
+        }
+    }
+
     if args.bedrock {
         // Bedrock: path is optional; if provided, it must be an existing directory
         if let Some(ref path) = args.path {
@@ -284,12 +303,15 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             let llpoint =
                 LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
 
-            // Validate that spawn point is within the bounding box
-            if !args.bbox.contains(&llpoint) {
-                return Err(
-                    "Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box."
-                        .to_string(),
-                );
+            // Validate that spawn point is within the bounding box. Only enforceable when the
+            // bbox is known up front; a file-derived bbox isn't available until the file is parsed.
+            if let Some(bbox) = args.bbox {
+                if !bbox.contains(&llpoint) {
+                    return Err(
+                        "Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box."
+                            .to_string(),
+                    );
+                }
             }
         }
         _ => {}
@@ -518,8 +540,11 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
+        // `arnis` alone now parses (--bbox is optional at the CLI layer), but validation
+        // rejects it: no output dir, and neither --bbox nor --file.
         let cmd = ["arnis"];
-        assert!(Args::try_parse_from(cmd.iter()).is_err());
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_err());
 
         let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
         let args = Args::try_parse_from(cmd.iter()).unwrap();
@@ -530,12 +555,51 @@ mod tests {
         let args = Args::try_parse_from(cmd.iter()).unwrap();
         assert!(validate_args(&args).is_ok());
 
-        let cmd = ["arnis", "--output-dir", tmp_path, "--file", ""];
-        assert!(Args::try_parse_from(cmd.iter()).is_err());
+        // #881: --file without --bbox is accepted; the bbox is derived from the file later.
+        let cmd = ["arnis", "--output-dir", tmp_path, "--file", "area.osm"];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_ok());
+
+        // Neither --bbox nor --file (even with an output dir) is a validation error.
+        let cmd = ["arnis", "--output-dir", tmp_path];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_err());
 
         // The --gui flag isn't used here, ugh. TODO clean up main.rs and its argparse usage.
         // let cmd = ["arnis", "--gui"];
         // assert!(Args::try_parse_from(cmd.iter()).is_ok());
+    }
+
+    #[test]
+    fn test_terrain_only_requires_bbox_even_with_file() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        // terrain-only ignores --file, so a bbox is still required.
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--file",
+            "area.osm",
+            "--mode",
+            "terrain-only",
+        ];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_err());
+
+        // With --bbox it validates.
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "terrain-only",
+        ];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_ok());
     }
 
     #[test]

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="arnis-test-fixture">
+  <bounds minlat="54.6300000" minlon="9.9300000" maxlat="54.6320000" maxlon="9.9330000"/>
+  <!-- Building footprint corners -->
+  <node id="1001" lat="54.6308000" lon="9.9308000"/>
+  <node id="1002" lat="54.6308000" lon="9.9314000"/>
+  <node id="1003" lat="54.6313000" lon="9.9314000"/>
+  <node id="1004" lat="54.6313000" lon="9.9308000"/>
+  <!-- Highway nodes -->
+  <node id="2001" lat="54.6302000" lon="9.9302000"/>
+  <node id="2002" lat="54.6310000" lon="9.9311000"/>
+  <node id="2003" lat="54.6318000" lon="9.9325000"/>
+  <!-- A tagged point of interest -->
+  <node id="3001" lat="54.6310000" lon="9.9310000">
+    <tag k="amenity" v="bench"/>
+  </node>
+  <way id="100">
+    <nd ref="1001"/>
+    <nd ref="1002"/>
+    <nd ref="1003"/>
+    <nd ref="1004"/>
+    <nd ref="1001"/>
+    <tag k="building" v="yes"/>
+    <tag k="name" v="Test Hall"/>
+  </way>
+  <way id="200">
+    <nd ref="2001"/>
+    <nd ref="2002"/>
+    <nd ref="2003"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Test Street"/>
+  </way>
+</osm>

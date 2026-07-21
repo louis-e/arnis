@@ -132,11 +132,69 @@ fn run_cli() {
         );
     }
 
+    // Resolve the effective bounding box ONCE, up front, and thread the concrete value to every
+    // consumer below (the CLI bbox is now optional). Precedence: explicit --bbox > file <bounds>
+    // element > node-coordinate extent.
+    //
+    // A local .osm/.xml file is the only bbox source when --bbox is omitted, so it must be loaded
+    // BEFORE the parallel fetch scope (Overture + land cover need the bbox) and before the bedrock
+    // world-name / area-size steps below. The parsed data is kept in `preloaded_osm` so the file
+    // isn't read twice. The Overpass and terrain-only paths already know the bbox from --bbox.
+    let skip_objects = args.skip_objects();
+    let (mut preloaded_osm, effective_bbox) = match (skip_objects, args.file.as_deref()) {
+        (false, Some(file)) => {
+            let (data, file_bounds) = match retrieve_data::fetch_data_from_file(file) {
+                Ok(loaded) => loaded,
+                Err(e) => {
+                    eprintln!("{} Failed to load OSM file: {}", "Error:".red().bold(), e);
+                    std::process::exit(1);
+                }
+            };
+            let bbox = match osm_parser::resolve_bbox(args.bbox, file_bounds, &data) {
+                Some(bbox) => bbox,
+                None => {
+                    eprintln!(
+                        "{} could not derive a bounding box from '{file}' (no <bounds> element and no usable node extent); pass --bbox explicitly.",
+                        "Error:".red().bold()
+                    );
+                    std::process::exit(1);
+                }
+            };
+            // Report where a derived bbox came from (an explicit --bbox is echoed by the parse step).
+            if args.bbox.is_none() {
+                let source = if file_bounds.is_some() {
+                    "file <bounds> element"
+                } else {
+                    "node coordinate extent"
+                };
+                println!(
+                    "Derived bounding box from {source}: {},{},{},{}",
+                    bbox.min().lat(),
+                    bbox.min().lng(),
+                    bbox.max().lat(),
+                    bbox.max().lng()
+                );
+            }
+            (Some(data), bbox)
+        }
+        _ => {
+            // Overpass or terrain-only: --bbox is required (enforced by validate_args above).
+            let bbox = args.bbox.unwrap_or_else(|| {
+                eprintln!(
+                    "{} A bounding box is required. Provide --bbox, or --file with a local .osm/.xml file.",
+                    "Error:".red().bold()
+                );
+                std::process::exit(1);
+            });
+            (None, bbox)
+        }
+    };
+
     // Heads-up for very large areas: generation is long and memory-heavy, and big
     // requests load the public OpenStreetMap / elevation servers. Non-blocking.
     {
         const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
-        let b = &args.bbox;
+        let b = &effective_bbox;
         let mid_lat = ((b.min().lat() + b.max().lat()) / 2.0).to_radians();
         let width_m = (b.max().lng() - b.min().lng()) * 111_320.0 * mid_lat.cos();
         let height_m = (b.max().lat() - b.min().lat()) * 111_320.0;
@@ -168,7 +226,8 @@ fn run_cli() {
             .path
             .clone()
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
-        let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
+        let (output_path, lvl_name) =
+            world_utils::build_bedrock_output(&effective_bbox, output_dir);
         (output_path, Some(lvl_name))
     } else if args.luanti {
         let base_dir = args
@@ -226,7 +285,6 @@ fn run_cli() {
     let mut bench = bench::Bench::new(args.benchmark);
 
     // Terrain-only skips every object source: no Overpass query, no Overture footprints.
-    let skip_objects = args.skip_objects();
     if skip_objects {
         println!(
             "{} Terrain-only mode: skipping OpenStreetMap and Overture objects",
@@ -243,7 +301,7 @@ fn run_cli() {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
             let elements = if args.overture && !skip_objects {
-                overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+                overture::fetch_overture_buildings(&effective_bbox, args.scale, args.debug)
             } else {
                 Vec::new()
             };
@@ -251,23 +309,25 @@ fn run_cli() {
         });
         let ground_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let ground = ground::generate_ground_data(&args);
+            let ground = ground::generate_ground_data(&args, effective_bbox);
             (ground, t.elapsed())
         });
 
         let t = std::time::Instant::now();
+        // A local file was already parsed up front (to derive the bbox), so reuse that data.
+        // Terrain-only carries no objects. Otherwise fetch from Overpass, in parallel with the
+        // Overture and land-cover fetches spawned above.
         let raw_data = if skip_objects {
             osm_parser::OsmData::empty()
+        } else if let Some(data) = preloaded_osm.take() {
+            data
         } else {
-            match &args.file {
-                Some(file) => retrieve_data::fetch_data_from_file(file),
-                None => retrieve_data::fetch_data_from_overpass(
-                    args.bbox,
-                    args.debug,
-                    args.downloader.as_str(),
-                    args.save_json_file.as_deref(),
-                ),
-            }
+            retrieve_data::fetch_data_from_overpass(
+                effective_bbox,
+                args.debug,
+                args.downloader.as_str(),
+                args.save_json_file.as_deref(),
+            )
             .expect("Failed to fetch data")
         };
         bench.report("osm_fetch", t.elapsed());
@@ -285,7 +345,13 @@ fn run_cli() {
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.projection);
+        osm_parser::parse_osm_data(
+            raw_data,
+            effective_bbox,
+            args.scale,
+            args.debug,
+            args.projection,
+        );
     bench.mark("parse_osm");
 
     // Merge the Overture buildings now that the OSM elements are parsed.
@@ -365,14 +431,16 @@ fn run_cli() {
 
             let (transformer, pre_rot_bbox) = match args.projection {
                 projection::ProjectionKind::WebMercator => {
-                    let origin_lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
-                    let origin_lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
+                    let origin_lat =
+                        (effective_bbox.min().lat() + effective_bbox.max().lat()) / 2.0;
+                    let origin_lon =
+                        (effective_bbox.min().lng() + effective_bbox.max().lng()) / 2.0;
                     let proj =
                         projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
-                    CoordTransformer::with_projection(&args.bbox, args.scale, &proj)
+                    CoordTransformer::with_projection(&effective_bbox, args.scale, &proj)
                 }
                 projection::ProjectionKind::Local => {
-                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                    CoordTransformer::llbbox_to_xzbbox(&effective_bbox, args.scale)
                 }
             }
             .unwrap_or_else(|e| {
@@ -427,7 +495,7 @@ fn run_cli() {
     match data_processing::generate_world_with_options(
         parsed_elements,
         xzbbox,
-        args.bbox,
+        effective_bbox,
         ground,
         &args,
         generation_options,

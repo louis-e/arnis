@@ -765,11 +765,11 @@ impl Ground {
     }
 }
 
-pub fn generate_ground_data(args: &Args) -> Ground {
+pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
     if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
         let ground = Ground::new_enabled(
-            &args.bbox,
+            &bbox,
             args.scale,
             args.ground_level,
             args.disable_height_limit,
@@ -784,7 +784,7 @@ pub fn generate_ground_data(args: &Args) -> Ground {
         return ground;
     }
     println!("{} Fetching land cover...", "[3/7]".bold());
-    Ground::new_flat_with_land_cover(&args.bbox, args.scale, args.ground_level)
+    Ground::new_flat_with_land_cover(&bbox, args.scale, args.ground_level)
 }
 
 /// Per-format build-height cap when the user opts into extended build height:

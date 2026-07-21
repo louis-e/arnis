@@ -532,7 +532,7 @@ pub fn generate_world_with_options(
     ground.warm_water_blend();
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     let tree_pack =
-        crate::trees::tree_pack::load(args, args.scale, args.ground_level).map(Arc::new);
+        crate::trees::tree_pack::load(args, llbbox, args.scale, args.ground_level).map(Arc::new);
     let mut bench = crate::bench::Bench::new(args.benchmark);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
@@ -1184,10 +1184,10 @@ pub fn generate_world_with_options(
         let png_path = map_preview::preview_output_path(&output_path, world_format);
         let result = map_preview::PreviewResult {
             png_path: png_path.clone(),
-            min_lat: args.bbox.min().lat(),
-            max_lat: args.bbox.max().lat(),
-            min_lon: args.bbox.min().lng(),
-            max_lon: args.bbox.max().lng(),
+            min_lat: llbbox.min().lat(),
+            max_lat: llbbox.max().lat(),
+            min_lon: llbbox.min().lng(),
+            max_lon: llbbox.max().lng(),
             min_mc_x: xzbbox.min_x(),
             max_mc_x: xzbbox.max_x(),
             min_mc_z: xzbbox.min_z(),
@@ -1241,10 +1241,10 @@ pub fn generate_world_with_options(
         // This ensures LLBBox::from_str() can parse it correctly.
         let bbox_string = format!(
             "{},{},{},{}",
-            args.bbox.min().lat(),
-            args.bbox.min().lng(),
-            args.bbox.max().lat(),
-            args.bbox.max().lng()
+            llbbox.min().lat(),
+            llbbox.min().lng(),
+            llbbox.max().lat(),
+            llbbox.max().lng()
         );
 
         // Always update spawn Y since we now always set a spawn point (user-selected or default).
