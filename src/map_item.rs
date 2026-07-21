@@ -14,6 +14,17 @@ const MAP_SIZE: i32 = 128;
 // Fallback when the world DataVersion cannot be read.
 const DATA_VERSION: i32 = crate::world_editor::java::DATA_VERSION;
 
+/// arnismc.com branding image, placed as a locked map at spawn.
+static BRANDING_MAP_PNG: &[u8] = include_bytes!("../assets/branding/arnismc_map.png");
+
+/// Fixed decal map ids, reserved after the preview (0), branding (1), and decal maps.
+pub const BUS_STOP_MAP_ID: i32 = 2;
+pub const RECYCLING_MAP_ID: i32 = 3;
+pub const HYDRANT_MAP_ID: i32 = 4;
+static BUS_STOP_PNG: &[u8] = include_bytes!("../assets/decorations/bus_stop.png");
+static RECYCLING_PNG: &[u8] = include_bytes!("../assets/decorations/recycling.png");
+static HYDRANT_PNG: &[u8] = include_bytes!("../assets/decorations/hydrant.png");
+
 // The map must carry the same DataVersion as the world so a newer client upgrades it
 // with the rest of the save rather than treating it as a stale file.
 fn world_data_version(world_path: &Path) -> i32 {
@@ -249,6 +260,54 @@ fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
     write_gzip_nbt(&level_path, &root)
 }
 
+// Write the map .dat under both the pre- and post-26.1 filenames.
+fn write_map_dat_files(data_dir: &Path, map_id: i32, map_dat: &Value) -> Result<(), String> {
+    write_gzip_nbt(&data_dir.join(format!("map_{map_id}.dat")), map_dat)?;
+    write_gzip_nbt(&data_dir.join(format!("{map_id}.dat")), map_dat)
+}
+
+// Quantize a bundled PNG to a locked 128x128 map.
+fn image_map_dat(png: &[u8], data_version: i32) -> Result<Value, String> {
+    let img = image::load_from_memory(png)
+        .map_err(|e| format!("decode image: {e}"))?
+        .to_rgb8();
+    let img = if img.width() == MAP_SIZE as u32 && img.height() == MAP_SIZE as u32 {
+        img
+    } else {
+        image::imageops::resize(
+            &img,
+            MAP_SIZE as u32,
+            MAP_SIZE as u32,
+            image::imageops::FilterType::Triangle,
+        )
+    };
+
+    let mut colors = vec![TRANSPARENT as i8; (MAP_SIZE * MAP_SIZE) as usize];
+    for j in 0..MAP_SIZE {
+        for i in 0..MAP_SIZE {
+            let p = img.get_pixel(i as u32, j as u32);
+            colors[(j * MAP_SIZE + i) as usize] = nearest_map_color(p.0[0], p.0[1], p.0[2]) as i8;
+        }
+    }
+    Ok(build_map_dat(colors, 0, false, 0, 0, data_version))
+}
+
+// Like image_map_dat but infallible: a decode error yields a blank map so a reserved id
+// always has a file and its item frame can't point at a missing map.
+fn image_map_dat_or_blank(png: &[u8], data_version: i32) -> Value {
+    image_map_dat(png, data_version).unwrap_or_else(|e| {
+        eprintln!("Warning: map image decode failed ({e}); using a blank map");
+        build_map_dat(
+            vec![TRANSPARENT as i8; (MAP_SIZE * MAP_SIZE) as usize],
+            0,
+            false,
+            0,
+            0,
+            data_version,
+        )
+    })
+}
+
 // Renders the preview into a locked map covering the entire world and hands it to the player.
 pub fn write_map_item(
     world_path: &Path,
@@ -281,17 +340,58 @@ pub fn write_map_item(
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
     let map_id = next_map_id(&data_dir);
 
-    // 26.1 renamed map storage from data/map_N.dat to data/N.dat and idcounts.dat to
-    // last_id.dat. Write both names so the map resolves on old and new clients alike.
     let map_dat = build_map_dat(colors, scale, tracking, x_center, z_center, data_version);
-    write_gzip_nbt(&data_dir.join(format!("map_{map_id}.dat")), &map_dat)?;
-    write_gzip_nbt(&data_dir.join(format!("{map_id}.dat")), &map_dat)?;
+    write_map_dat_files(&data_dir, map_id, &map_dat)?;
+
+    // Branding map is id+1; a decode failure yields a blank map so the frame never breaks.
+    let branding_id = map_id + 1;
+    let branding_dat = image_map_dat_or_blank(BRANDING_MAP_PNG, data_version);
+    write_map_dat_files(&data_dir, branding_id, &branding_dat)?;
+
+    let idcounts = build_idcounts(branding_id, data_version);
+    write_gzip_nbt(&data_dir.join("idcounts.dat"), &idcounts)?;
+    write_gzip_nbt(&data_dir.join("last_id.dat"), &idcounts)?;
+
+    // Only the preview goes in the hotbar; branding is world-only.
+    insert_into_inventory(world_path, map_id)
+}
+
+/// Writes only the arnismc.com branding map (the world's first map) when the preview map is off.
+pub fn write_branding_map_only(world_path: &Path) -> Result<(), String> {
+    let data_version = world_data_version(world_path);
+    let data_dir = world_path.join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
+    let map_id = next_map_id(&data_dir);
+
+    let branding_dat = image_map_dat_or_blank(BRANDING_MAP_PNG, data_version);
+    write_map_dat_files(&data_dir, map_id, &branding_dat)?;
 
     let idcounts = build_idcounts(map_id, data_version);
     write_gzip_nbt(&data_dir.join("idcounts.dat"), &idcounts)?;
     write_gzip_nbt(&data_dir.join("last_id.dat"), &idcounts)?;
+    Ok(())
+}
 
-    insert_into_inventory(world_path, map_id)
+/// Writes the fixed decal maps so their in-world frames resolve.
+pub fn write_decoration_maps(world_path: &Path) -> Result<(), String> {
+    let data_version = world_data_version(world_path);
+    let data_dir = world_path.join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
+
+    let mut highest = next_map_id(&data_dir) - 1;
+    for (id, png) in [
+        (BUS_STOP_MAP_ID, BUS_STOP_PNG),
+        (RECYCLING_MAP_ID, RECYCLING_PNG),
+        (HYDRANT_MAP_ID, HYDRANT_PNG),
+    ] {
+        write_map_dat_files(&data_dir, id, &image_map_dat_or_blank(png, data_version))?;
+        highest = highest.max(id);
+    }
+
+    let idcounts = build_idcounts(highest, data_version);
+    write_gzip_nbt(&data_dir.join("idcounts.dat"), &idcounts)?;
+    write_gzip_nbt(&data_dir.join("last_id.dat"), &idcounts)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -340,7 +440,8 @@ mod tests {
         let Some(Value::Compound(iddata)) = idroot.get("data") else {
             panic!("idcounts data");
         };
-        assert_eq!(iddata.get("map"), Some(&Value::Int(0)));
+        // Preview is map 0; the branding map reserves id 1, so the counter ends at 1.
+        assert_eq!(iddata.get("map"), Some(&Value::Int(1)));
 
         let Value::Compound(level) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
             panic!("level root");
@@ -355,6 +456,126 @@ mod tests {
             panic!("inventory");
         };
         assert!(items.iter().any(is_filled_map));
+    }
+
+    #[test]
+    fn writes_branding_map_beside_preview_but_world_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let preview = PreviewAccumulator::new(&xzbbox);
+        write_map_item(&world, &preview, &xzbbox).unwrap();
+
+        // Preview is map 0; the arnismc.com branding map is the next id, 1.
+        let Value::Compound(root) = read_gzip_nbt(&world.join("data/map_1.dat")).unwrap() else {
+            panic!("branding map root");
+        };
+        let Some(Value::Compound(data)) = root.get("data") else {
+            panic!("branding data");
+        };
+        assert_eq!(data.get("locked"), Some(&Value::Byte(1)));
+        // Fixed art, not terrain: the player marker is disabled.
+        assert_eq!(data.get("trackingPosition"), Some(&Value::Byte(0)));
+        let Some(Value::ByteArray(colors)) = data.get("colors") else {
+            panic!("branding colors");
+        };
+        assert_eq!(colors.len(), 16384);
+        // The bundled art is not blank, so at least some pixels are opaque.
+        assert!(colors.iter().any(|&c| c != TRANSPARENT as i8));
+
+        // Branding stays out of the hotbar: only the preview map (id 0) is held.
+        let items = inventory_items(&world);
+        assert_eq!(items.iter().filter(|e| is_filled_map(e)).count(), 1);
+    }
+
+    #[test]
+    fn branding_only_writes_map_zero_and_no_inventory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        write_branding_map_only(&world).unwrap();
+
+        // With the preview off, the branding map is the world's first map (id 0).
+        let Value::Compound(root) = read_gzip_nbt(&world.join("data/map_0.dat")).unwrap() else {
+            panic!("branding map root");
+        };
+        let Some(Value::Compound(data)) = root.get("data") else {
+            panic!("branding data");
+        };
+        assert_eq!(data.get("locked"), Some(&Value::Byte(1)));
+        let Some(Value::ByteArray(colors)) = data.get("colors") else {
+            panic!("branding colors");
+        };
+        assert_eq!(colors.len(), 16384);
+
+        let Value::Compound(idroot) = read_gzip_nbt(&world.join("data/idcounts.dat")).unwrap()
+        else {
+            panic!("idcounts root");
+        };
+        let Some(Value::Compound(iddata)) = idroot.get("data") else {
+            panic!("idcounts data");
+        };
+        assert_eq!(iddata.get("map"), Some(&Value::Int(0)));
+
+        // Preview-off path never touches the hotbar.
+        assert_eq!(
+            inventory_items(&world)
+                .iter()
+                .filter(|e| is_filled_map(e))
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn writes_decoration_maps_with_reserved_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        write_decoration_maps(&world).unwrap();
+
+        for id in [BUS_STOP_MAP_ID, RECYCLING_MAP_ID, HYDRANT_MAP_ID] {
+            let Value::Compound(root) =
+                read_gzip_nbt(&world.join(format!("data/map_{id}.dat"))).unwrap()
+            else {
+                panic!("decal map {id} root");
+            };
+            let Some(Value::Compound(data)) = root.get("data") else {
+                panic!("decal map {id} data");
+            };
+            assert_eq!(data.get("locked"), Some(&Value::Byte(1)));
+            let Some(Value::ByteArray(colors)) = data.get("colors") else {
+                panic!("decal map {id} colors");
+            };
+            assert_eq!(colors.len(), 16384);
+        }
+
+        // idcounts must reach the highest reserved id so user maps never overwrite the decals.
+        let Value::Compound(idroot) = read_gzip_nbt(&world.join("data/idcounts.dat")).unwrap()
+        else {
+            panic!("idcounts root");
+        };
+        let Some(Value::Compound(iddata)) = idroot.get("data") else {
+            panic!("idcounts data");
+        };
+        assert_eq!(iddata.get("map"), Some(&Value::Int(HYDRANT_MAP_ID)));
+    }
+
+    fn inventory_items(world: &std::path::Path) -> Vec<Value> {
+        let Value::Compound(level) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
+            panic!("level root");
+        };
+        let Some(Value::Compound(ldata)) = level.get("Data") else {
+            panic!("level data");
+        };
+        let Some(Value::Compound(player)) = ldata.get("Player") else {
+            panic!("player");
+        };
+        match player.get("Inventory") {
+            Some(Value::List(items)) => items.clone(),
+            _ => Vec::new(),
+        }
     }
 
     #[test]

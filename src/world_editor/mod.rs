@@ -175,6 +175,8 @@ pub struct WorldEditor<'a> {
     world_time: i64,
     /// Bedrock only: give the player a starting map that reveals the world as they explore.
     start_with_map: bool,
+    /// Place bundled map image decals as map item frames. Java only.
+    map_decals: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -210,6 +212,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            map_decals: false,
         }
     }
 
@@ -251,6 +254,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            map_decals: false,
         }
     }
 
@@ -292,6 +296,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            map_decals: false,
         }
     }
 
@@ -361,6 +366,62 @@ impl<'a> WorldEditor<'a> {
     /// Bedrock only: enable the starting map that reveals the world as the player explores.
     pub fn set_start_with_map(&mut self, enabled: bool) {
         self.start_with_map = enabled;
+    }
+
+    /// Enable map image decals (Java only).
+    pub fn set_map_decals(&mut self, enabled: bool) {
+        self.map_decals = enabled;
+    }
+
+    /// True if image decals should be placed.
+    pub fn map_decals_enabled(&self) -> bool {
+        self.map_decals
+    }
+
+    /// Places an invisible fixed item frame holding a locked map on one face of a block.
+    /// facing: 2=north, 3=south, 4=west, 5=east. Absolute Y.
+    pub fn place_map_decal(&mut self, bx: i32, abs_y: i32, bz: i32, facing: i8, map_id: i32) {
+        let (dx, dz) = match facing {
+            3 => (0, 1),
+            4 => (-1, 0),
+            5 => (1, 0),
+            _ => (0, -1),
+        };
+        let fx = bx + dx;
+        let fz = bz + dz;
+
+        // Skip a face whose cell sits in the terrain; that frame would be culled on load.
+        let rel_y = abs_y - self.get_absolute_y(fx, 0, fz);
+        if rel_y < 1 {
+            return;
+        }
+
+        let mut components = HashMap::new();
+        components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
+        let mut item = HashMap::new();
+        item.insert(
+            "id".to_string(),
+            Value::String("minecraft:filled_map".to_string()),
+        );
+        item.insert("count".to_string(), Value::Int(1));
+        item.insert("components".to_string(), Value::Compound(components));
+
+        let mut extra = HashMap::new();
+        extra.insert("Facing".to_string(), Value::Byte(facing));
+        extra.insert("ItemRotation".to_string(), Value::Byte(0));
+        extra.insert("Item".to_string(), Value::Compound(item));
+        extra.insert("ItemDropChance".to_string(), Value::Float(0.0));
+        extra.insert("Fixed".to_string(), Value::Byte(1));
+        extra.insert("Invisible".to_string(), Value::Byte(1));
+        extra.insert("TileX".to_string(), Value::Int(fx));
+        extra.insert("TileY".to_string(), Value::Int(abs_y));
+        extra.insert("TileZ".to_string(), Value::Int(fz));
+        extra.insert(
+            "block_pos".to_string(),
+            Value::List(vec![Value::Int(fx), Value::Int(abs_y), Value::Int(fz)]),
+        );
+
+        self.add_entity("minecraft:item_frame", fx, rel_y, fz, Some(extra));
     }
 
     /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
@@ -662,20 +723,60 @@ impl<'a> WorldEditor<'a> {
         self.insert_block_entity(x, z, be);
     }
 
-    /// Puts the world map in an item frame on a small post just in front of spawn.
-    /// 26.2 no longer reads the inventory from level.dat, so this makes the map reachable
-    /// there while the hotbar copy still works on older clients.
-    pub fn place_map_item_frame(&mut self, spawn_x: i32, spawn_z: i32, map_id: i32) {
+    /// Preview map in a frame at spawn, with the arnismc.com map one block below.
+    pub fn place_map_item_frame(
+        &mut self,
+        spawn_x: i32,
+        spawn_z: i32,
+        map_id: i32,
+        branding_map_id: i32,
+    ) {
         // Player spawns facing south (+Z), so the display sits a couple blocks that way.
         let ground = self.get_absolute_y(spawn_x, 0, spawn_z);
+        let lower_y = ground + 1;
         let eye_y = ground + 2;
         let frame_z = spawn_z + 2;
         let post_z = spawn_z + 3;
 
-        self.set_block_absolute(SMOOTH_STONE, spawn_x, ground + 1, post_z, None, Some(&[]));
-        self.set_block_absolute(SMOOTH_STONE, spawn_x, eye_y, post_z, None, Some(&[]));
-        self.set_block_absolute(AIR, spawn_x, eye_y, frame_z, None, Some(&[]));
+        // Solid block behind the lower map; chest behind the upper one.
+        self.set_block_absolute(SMOOTH_STONE, spawn_x, lower_y, post_z, None, Some(&[]));
 
+        self.set_block_absolute(AIR, spawn_x, eye_y, frame_z, None, Some(&[]));
+        self.set_block_absolute(AIR, spawn_x, lower_y, frame_z, None, Some(&[]));
+
+        // Preview on top, branding one block below.
+        self.add_filled_map_frame(spawn_x, eye_y, frame_z, map_id);
+        self.add_filled_map_frame(spawn_x, lower_y, frame_z, branding_map_id);
+
+        // Chest holds a takeable copy of the preview map.
+        let mut chest_components = HashMap::new();
+        chest_components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
+        let mut chest_map = HashMap::new();
+        chest_map.insert("Slot".to_string(), Value::Byte(13));
+        chest_map.insert(
+            "id".to_string(),
+            Value::String("minecraft:filled_map".to_string()),
+        );
+        chest_map.insert("count".to_string(), Value::Int(1));
+        chest_map.insert("components".to_string(), Value::Compound(chest_components));
+        self.set_chest_with_items_absolute(spawn_x, eye_y, post_z, vec![chest_map]);
+    }
+
+    /// arnismc.com map at spawn on a floating block, used when the preview map is off.
+    pub fn place_branding_map_only(&mut self, spawn_x: i32, spawn_z: i32, branding_map_id: i32) {
+        let display_y = self.get_absolute_y(spawn_x, 0, spawn_z) + 2;
+        let frame_z = spawn_z + 2;
+        let post_z = spawn_z + 3;
+
+        // Floating block with the map on its front.
+        self.set_block_absolute(SMOOTH_STONE, spawn_x, display_y, post_z, None, Some(&[]));
+        self.set_block_absolute(AIR, spawn_x, display_y, frame_z, None, Some(&[]));
+        self.add_filled_map_frame(spawn_x, display_y, frame_z, branding_map_id);
+    }
+
+    /// Places an item frame holding a locked filled map, facing the player at spawn.
+    /// Left breakable (Fixed:0) on purpose; the chest below holds a takeable copy.
+    fn add_filled_map_frame(&mut self, x: i32, absolute_y: i32, frame_z: i32, map_id: i32) {
         let mut components = HashMap::new();
         components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
         let mut item = HashMap::new();
@@ -692,36 +793,20 @@ impl<'a> WorldEditor<'a> {
         extra.insert("Item".to_string(), Value::Compound(item));
         extra.insert("ItemDropChance".to_string(), Value::Float(1.0));
         extra.insert("Fixed".to_string(), Value::Byte(0));
-        extra.insert("TileX".to_string(), Value::Int(spawn_x));
-        extra.insert("TileY".to_string(), Value::Int(eye_y));
+        extra.insert("TileX".to_string(), Value::Int(x));
+        extra.insert("TileY".to_string(), Value::Int(absolute_y));
         extra.insert("TileZ".to_string(), Value::Int(frame_z));
         extra.insert(
             "block_pos".to_string(),
             Value::List(vec![
-                Value::Int(spawn_x),
-                Value::Int(eye_y),
+                Value::Int(x),
+                Value::Int(absolute_y),
                 Value::Int(frame_z),
             ]),
         );
 
-        let rel_y = eye_y - self.get_absolute_y(spawn_x, 0, frame_z);
-        self.add_entity("minecraft:item_frame", spawn_x, rel_y, frame_z, Some(extra));
-
-        // A chest below holds a takeable copy: breaking a frame in creative destroys the item
-        // instead of dropping it, and 26.2 does not read the hotbar map from level.dat.
-        let chest_y = ground + 1;
-        self.set_block_absolute(AIR, spawn_x, chest_y, frame_z, None, Some(&[]));
-        let mut chest_components = HashMap::new();
-        chest_components.insert("minecraft:map_id".to_string(), Value::Int(map_id));
-        let mut chest_map = HashMap::new();
-        chest_map.insert("Slot".to_string(), Value::Byte(13));
-        chest_map.insert(
-            "id".to_string(),
-            Value::String("minecraft:filled_map".to_string()),
-        );
-        chest_map.insert("count".to_string(), Value::Int(1));
-        chest_map.insert("components".to_string(), Value::Compound(chest_components));
-        self.set_chest_with_items_absolute(spawn_x, chest_y, frame_z, vec![chest_map]);
+        let rel_y = absolute_y - self.get_absolute_y(x, 0, frame_z);
+        self.add_entity("minecraft:item_frame", x, rel_y, frame_z, Some(extra));
     }
 
     /// Places a banner block entity at the given coordinates (absolute Y).
