@@ -110,15 +110,41 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
-pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::Error>> {
+/// File extensions (case-insensitive) that select the raw OSM XML path instead of
+/// Arnis's own JSON dump.
+const OSM_XML_EXTENSIONS: &[&str] = &["osm", "xml"];
+
+/// Loads OSM data from a local file. `.osm`/`.xml` files are parsed as raw OSM XML (offline,
+/// avoiding Overpass size limits) and their `<bounds>` element, if present, is returned so the
+/// caller can auto-derive the bounding box. Any other extension keeps the original behavior:
+/// deserializing Arnis's own JSON dump (`{"elements":[...],"remark":...}`), which carries no
+/// bounds (returned as None).
+pub fn fetch_data_from_file(
+    file: &str,
+) -> Result<(OsmData, Option<LLBBox>), Box<dyn std::error::Error>> {
     println!("{} Loading data from file...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Loading data from file...");
 
-    let file: File = File::open(file)?;
-    let reader: BufReader<File> = BufReader::new(file);
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
-    let data: OsmData = OsmData::deserialize(&mut deserializer)?;
-    Ok(data)
+    let is_xml = std::path::Path::new(file)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            OSM_XML_EXTENSIONS
+                .iter()
+                .any(|x| ext.eq_ignore_ascii_case(x))
+        })
+        .unwrap_or(false);
+
+    let f: File = File::open(file)?;
+    let reader: BufReader<File> = BufReader::new(f);
+
+    if is_xml {
+        crate::osm_parser::parse_osm_xml(reader)
+    } else {
+        let mut deserializer = serde_json::Deserializer::from_reader(reader);
+        let data: OsmData = OsmData::deserialize(&mut deserializer)?;
+        Ok((data, None))
+    }
 }
 
 /// Main function to fetch data
@@ -397,4 +423,54 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod fetch_from_file_tests {
+    use super::*;
+
+    // A `.osm` file must route to the raw-XML parser, which surfaces the document's <bounds>
+    // element; the JSON path returns None, so a Some result here proves the extension routing.
+    #[test]
+    fn osm_extension_routes_to_xml_parser_and_returns_bounds() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.osm");
+        let (data, bounds) = fetch_data_from_file(path).expect("fixture .osm should load");
+
+        // Exactly the fixture's <bounds minlat=.. minlon=.. maxlat=.. maxlon=..> element.
+        assert_eq!(
+            bounds,
+            Some(LLBBox::new(54.63, 9.93, 54.632, 9.933).unwrap())
+        );
+
+        // The fixture's 8 nodes + 2 ways were parsed. Element internals are private to
+        // osm_parser (exact-count / tag assertions live in its osm_xml_tests), so the parse
+        // is asserted here through the public surface.
+        assert!(!data.is_empty());
+
+        // The returned box is the explicit <bounds>, not the node-coordinate extent: the 8
+        // nodes span a strictly smaller box, so this confirms <bounds> was surfaced instead of
+        // the OsmData::bounds() fallback.
+        assert_eq!(
+            data.bounds(),
+            Some(LLBBox::new(54.6302, 9.9302, 54.6318, 9.9325).unwrap())
+        );
+    }
+
+    // Any non-.osm/.xml extension keeps the original Arnis JSON-dump path, which carries no
+    // <bounds> (None). Paired with the .osm case above, this proves routing keys off the extension.
+    #[test]
+    fn json_extension_keeps_json_path_and_has_no_bounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dump.json");
+        std::fs::write(
+            &path,
+            r#"{"elements":[{"type":"node","id":1,"lat":1.0,"lon":2.0}],"remark":null}"#,
+        )
+        .unwrap();
+
+        let (data, bounds) =
+            fetch_data_from_file(path.to_str().unwrap()).expect("JSON dump should load");
+        assert!(bounds.is_none());
+        assert!(!data.is_empty());
+    }
 }
