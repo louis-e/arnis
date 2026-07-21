@@ -922,6 +922,13 @@ fn generate_highways_internal(
                 let neighbor_base =
                     node_feature_base_y(editor, bridge_surface, x + 1, z, layer_boost, 1);
                 editor.set_block_absolute(WHITE_WOOL, x + 1, neighbor_base + 4, z, None, None);
+
+                // Bus sign on both broad faces of the overhanging wool.
+                if editor.map_decals_enabled() {
+                    let sign_y = neighbor_base + 4;
+                    editor.place_map_decal(x + 1, sign_y, z, 2, crate::map_item::BUS_STOP_MAP_ID);
+                    editor.place_map_decal(x + 1, sign_y, z, 3, crate::map_item::BUS_STOP_MAP_ID);
+                }
             }
         } else if element
             .tags()

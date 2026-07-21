@@ -69,7 +69,9 @@ pub fn generate_amenities(
                         items,
                     );
 
-                    if let Some(category) = single_loot_category(&loot_pool) {
+                    if editor.map_decals_enabled() {
+                        place_recycling_decals(editor, pt.x, absolute_y, pt.z);
+                    } else if let Some(category) = single_loot_category(&loot_pool) {
                         if let Some(display_item) =
                             build_display_item_for_category(category, &mut rng)
                         {
@@ -88,6 +90,10 @@ pub fn generate_amenities(
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(pt) = first_node {
                     editor.set_block(CAULDRON, pt.x, 1, pt.z, None, None);
+                    if editor.map_decals_enabled() {
+                        let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                        place_recycling_decals(editor, pt.x, abs_y, pt.z);
+                    }
                 }
             }
             "vending_machine" | "atm" => {
@@ -634,6 +640,13 @@ fn build_display_item_for_category(
             let choice = options.choose(rng)?;
             Some(make_display_item(choice, rng.random_range(1..=3)))
         }
+    }
+}
+
+/// Places the recycling sign on all four sides of a bin block (Java decals).
+fn place_recycling_decals(editor: &mut WorldEditor, x: i32, abs_y: i32, z: i32) {
+    for facing in [2i8, 3, 4, 5] {
+        editor.place_map_decal(x, abs_y, z, facing, crate::map_item::RECYCLING_MAP_ID);
     }
 }
 
