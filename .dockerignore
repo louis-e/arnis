@@ -1,0 +1,8 @@
+target/
+.git/
+.gitignore
+README.md
+.vscode/
+.devcontainer/
+*.md
+.github/
