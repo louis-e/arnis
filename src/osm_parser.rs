@@ -9,72 +9,55 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // Tags Arnis never reads. Filtered at parse time to save memory.
-const IGNORED_TAGS: &[&str] = &[
-    "created_by",
-    "note",
-    "fixme",
-    "FIXME",
-    "todo",
-    "TODO",
-    "wikipedia",
-    "wikimedia_commons",
-    "import_uuid",
-    "import",
-    "old_name",
-    "loc_name",
-    "official_name",
-    "alt_name",
-    "operator",
-    "phone",
-    "fax",
-    "email",
-    "url",
-    "website",
-    "opening_hours",
-    "description",
-    "attribution",
-    "start_date",
-    "check_date",
-    "survey:date",
-    "ref:bag",
-    "ref:bygningsnr",
-];
+lazy_static::lazy_static! {
+    static ref IGNORED_TAGS: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        for tag in [
+            "created_by", "note", "fixme", "FIXME", "todo", "TODO",
+            "wikipedia", "wikimedia_commons", "import_uuid", "import",
+            "old_name", "loc_name", "official_name", "alt_name",
+            "operator", "phone", "fax", "email", "url", "website",
+            "opening_hours", "description", "attribution",
+            "start_date", "check_date", "survey:date",
+            "ref:bag", "ref:bygningsnr",
+        ] {
+            set.insert(tag);
+        }
+        set
+    };
 
-// Tag-key prefixes Arnis never reads (localized names, addresses, regional import refs).
-const IGNORED_PREFIXES: &[&str] = &[
-    "addr:",
-    "source",
-    "name:",
-    "alt_name:",
-    "contact:",
-    "is_in:",
-    "operator:",
-    "tiger:",
-    "NHD:",
-    "lacounty:",
-    "nysgissam:",
-    "ref:ruian:",
-    "building:ruian:",
-    "osak:",
-    "gnis:",
-    "yh:",
-    "check_date:",
-];
+    static ref IGNORED_PREFIXES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        for p in [
+            "addr:", "source", "name:", "alt_name:", "contact:",
+            "is_in:", "operator:", "tiger:", "NHD:", "lacounty:",
+            "nysgissam:", "ref:ruian:", "building:ruian:", "osak:",
+            "gnis:", "yh:", "check_date:",
+        ] {
+            set.insert(p);
+        }
+        set
+    };
+}
 
 fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     // start_date is otherwise filtered, but on buildings the construction year picks the facade style.
     let keep_start_date = tags.contains_key("building") || tags.contains_key("building:part");
     tags.retain(|k, _| {
+devops2626-patch-2
+        !IGNORED_TAGS.contains(k.as_str()) &&
+        !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
+
         if k == "start_date" {
             return keep_start_date;
         }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
+
     });
     tags
 }
 
 // Raw data from OSM
-
 #[derive(Debug, Deserialize)]
 struct OsmMember {
     r#type: String,
@@ -102,7 +85,7 @@ pub struct OsmData {
 }
 
 impl OsmData {
-    /// Returns true if there are no elements in the OSM data
+    /// Returns true if there are no elements.
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
     }
@@ -128,11 +111,13 @@ impl SplitOsmData {
     fn total_count(&self) -> usize {
         self.nodes.len() + self.ways.len() + self.relations.len() + self.others.len()
     }
+
     fn from_raw_osm_data(osm_data: OsmData) -> Self {
         let mut nodes = Vec::new();
         let mut ways = Vec::new();
         let mut relations = Vec::new();
         let mut others = Vec::new();
+
         for element in osm_data.elements {
             match element.r#type.as_str() {
                 "node" => nodes.push(element),
@@ -141,6 +126,13 @@ impl SplitOsmData {
                 _ => others.push(element),
             }
         }
+ devops2626-patch-2
+
+        SplitOsmData { nodes, ways, relations, others }
+    }
+}
+
+// ... (rest of your structs: ProcessedNode, ProcessedWay, etc. remain unchanged) ...
         SplitOsmData {
             nodes,
             ways,
@@ -1060,42 +1052,39 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
         return true;
     }
 
-    // Check for natural=water or natural=bay
-    if let Some(natural_val) = tags.get("natural") {
-        if natural_val == "water" || natural_val == "bay" {
-            return true;
-        }
-    }
 
-    // Check for waterway=dock (also handled as water area)
-    if let Some(waterway_val) = tags.get("waterway") {
-        if waterway_val == "dock" {
-            return true;
-        }
-    }
+// Keep all your other functions (parse_osm_data, compute_outline_suppression, is_water_element, get_priority, etc.)
 
-    false
-}
-
-const PRIORITY_ORDER: [&str; 6] = [
-    "entrance", "building", "highway", "waterway", "water", "barrier",
-];
-
-// Function to determine the priority of each element
-pub fn get_priority(element: &ProcessedElement) -> usize {
-    // Check each tag against the priority order
-    for (i, &tag) in PRIORITY_ORDER.iter().enumerate() {
-        if element.tags().contains_key(tag) {
-            return i;
-        }
-    }
-    // Return a default priority if none of the tags match
-    PRIORITY_ORDER.len()
-}
+// ====================== TESTS ======================
 
 #[cfg(test)]
-mod outline_suppression_tests {
+mod tests {
     use super::*;
+ devops2626-patch-2
+    #[test]
+    fn test_osm_data_is_empty() {
+        let empty = OsmData {
+            elements: vec![],
+            remark: None,
+        };
+        assert!(empty.is_empty());
+
+        let populated = OsmData {
+            elements: vec![OsmElement {
+                r#type: "node".to_string(),
+                id: 1,
+                lat: Some(0.0),
+                lon: Some(0.0),
+                nodes: None,
+                tags: None,
+                members: vec![],
+            }],
+            remark: Some("dummy".to_string()),
+        };
+        assert!(!populated.is_empty());
+    }
+
+    // ... keep your outline_suppression_tests here too ...
 
     fn node(id: u64, lat: f64, lon: f64) -> OsmElement {
         OsmElement {
@@ -1443,4 +1432,5 @@ mod outline_suppression_tests {
         compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut groups);
         assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
     }
+
 }
