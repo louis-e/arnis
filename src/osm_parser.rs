@@ -508,6 +508,15 @@ pub fn parse_osm_data(
         &relation_ways,
         &mut part_groups,
     ));
+    // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
+    // separate building:part relations) are invisible to both passes above: the membership
+    // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
+    // Judge them spatially so a relation outline covered by part relations is dropped.
+    outline_suppression.extend(compute_spatial_relation_part_suppression(
+        &data.relations,
+        &data.ways,
+        &data.nodes,
+    ));
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
@@ -700,6 +709,9 @@ pub fn parse_osm_data(
 // Parts replace the outline only when they cover at least this much of it.
 const MIN_PART_COVERAGE: f64 = 0.5;
 
+// Grid cell size (degrees) for the spatial index that buckets nearby outline bboxes.
+const SUPPRESSION_GRID_CELL_DEG: f64 = 0.0005;
+
 // A part covers the outline's ground footprint only if it starts at ground level.
 // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
 // that float above the ground (e.g. S3DB churches), so they can't stand in for the outline.
@@ -865,6 +877,103 @@ fn compute_outline_suppression(
     suppressed
 }
 
+// Shoelace area of a closed lat/lon ring; lon scaled by cos(lat) so only the ratio matters.
+fn ring_area(r: &[(f64, f64)]) -> f64 {
+    if r.len() < 3 {
+        return 0.0;
+    }
+    let lon_scale = r[0].0.to_radians().cos();
+    let mut a = 0.0;
+    for i in 0..r.len() {
+        let (lat_a, lon_a) = r[i];
+        let (lat_b, lon_b) = r[(i + 1) % r.len()];
+        a += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
+    }
+    (a / 2.0).abs()
+}
+
+// Ray-cast point-in-polygon test on a lat/lon ring.
+fn point_in_ring(lat: f64, lon: f64, r: &[(f64, f64)]) -> bool {
+    let n = r.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (yi, xi) = r[i];
+        let (yj, xj) = r[j];
+        if (yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Stitches way segments (each a node-id sequence) into closed rings of (lat,lon) points by
+/// matching shared endpoint node ids. A multipolygon outer boundary is frequently split across
+/// several member ways (e.g. an ellipse mapped as 4 arcs), so segments must be joined before
+/// their area/containment can be measured. Segments that never close into a ring, or whose
+/// nodes lack coordinates, are dropped (degenerate geometry is skipped, never panics).
+fn stitch_rings(
+    segments: Vec<Vec<u64>>,
+    node_ll: &HashMap<u64, (f64, f64)>,
+) -> Vec<Vec<(f64, f64)>> {
+    let mut open: Vec<Vec<u64>> = segments.into_iter().filter(|s| s.len() >= 2).collect();
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+
+    while let Some(mut ring) = open.pop() {
+        // Grow this ring by attaching segments at either end until it closes or stalls.
+        // `ring` is never empty here, so the pattern always binds; we exit via the breaks below.
+        while let (Some(&head), Some(&tail)) = (ring.first(), ring.last()) {
+            if ring.len() >= 4 && head == tail {
+                break; // closed ring
+            }
+            // Find a remaining segment that shares an endpoint node with either ring end.
+            let Some(i) = open.iter().position(|seg| match (seg.first(), seg.last()) {
+                (Some(&sf), Some(&sl)) => sf == tail || sl == tail || sf == head || sl == head,
+                _ => false,
+            }) else {
+                break; // nothing connects: leave this ring open (it will be discarded)
+            };
+            let seg = open.swap_remove(i);
+            let (sf, sl) = (seg[0], seg[seg.len() - 1]);
+            if sf == tail {
+                ring.extend(seg.into_iter().skip(1)); // drop the shared node
+            } else if sl == tail {
+                let mut s = seg;
+                s.reverse();
+                ring.extend(s.into_iter().skip(1));
+            } else if sl == head {
+                let mut s = seg;
+                s.pop(); // drop the shared node
+                s.extend(ring);
+                ring = s;
+            } else {
+                // sf == head
+                let mut s = seg;
+                s.reverse();
+                s.pop();
+                s.extend(ring);
+                ring = s;
+            }
+        }
+
+        if ring.len() >= 4 && ring.first() == ring.last() {
+            let pts: Vec<(f64, f64)> = ring
+                .iter()
+                .filter_map(|id| node_ll.get(id).copied())
+                .collect();
+            // A closed node ring may still lose points if some node lacked coordinates.
+            if pts.len() >= 4 {
+                rings.push(pts);
+            }
+        }
+    }
+    rings
+}
+
 /// Suppresses relation-less S3DB outlines: a building polygon that spatially contains building:part polygons.
 /// Ways in `relation_ways` belong to a type=building relation and are judged by the relation pass instead.
 fn compute_spatial_part_suppression(
@@ -925,38 +1034,7 @@ fn compute_spatial_part_suppression(
             .unwrap_or_default()
     };
 
-    // shoelace area, lon scaled by cos(lat)
-    let area = |r: &[(f64, f64)]| -> f64 {
-        if r.len() < 3 {
-            return 0.0;
-        }
-        let lon_scale = r[0].0.to_radians().cos();
-        let mut a = 0.0;
-        for i in 0..r.len() {
-            let (lat_a, lon_a) = r[i];
-            let (lat_b, lon_b) = r[(i + 1) % r.len()];
-            a += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
-        }
-        (a / 2.0).abs()
-    };
-
-    let point_in_ring = |lat: f64, lon: f64, r: &[(f64, f64)]| -> bool {
-        let n = r.len();
-        if n < 3 {
-            return false;
-        }
-        let mut inside = false;
-        let mut j = n - 1;
-        for i in 0..n {
-            let (yi, xi) = r[i];
-            let (yj, xj) = r[j];
-            if (yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi {
-                inside = !inside;
-            }
-            j = i;
-        }
-        inside
-    };
+    // area (shoelace) and point_in_ring are shared module-level helpers (see above).
 
     struct OutlineGeom {
         id: u64,
@@ -965,14 +1043,18 @@ fn compute_spatial_part_suppression(
     }
 
     // grid of outline bboxes so each part only tests nearby outlines
-    const CELL: f64 = 0.0005;
-    let cell = |lat: f64, lon: f64| ((lat / CELL).floor() as i64, (lon / CELL).floor() as i64);
+    let cell = |lat: f64, lon: f64| {
+        (
+            (lat / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+            (lon / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+        )
+    };
 
     let mut geoms: Vec<OutlineGeom> = Vec::new();
     let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
     for id in outline_ids {
         let r = ring(id);
-        let a = area(&r);
+        let a = ring_area(&r);
         if a <= 0.0 {
             continue;
         }
@@ -1003,7 +1085,7 @@ fn compute_spatial_part_suppression(
     let mut covered: HashMap<usize, f64> = HashMap::new();
     for pid in part_ids {
         let r = ring(pid);
-        let pa = area(&r);
+        let pa = ring_area(&r);
         if pa <= 0.0 {
             continue;
         }
@@ -1048,6 +1130,203 @@ fn compute_spatial_part_suppression(
         let g = &geoms[gi];
         if cov / g.area >= MIN_PART_COVERAGE {
             suppressed.insert(("way", g.id));
+        }
+    }
+    suppressed
+}
+
+/// Suppresses S3DB outlines expressed as MULTIPOLYGON RELATIONS: a building relation whose
+/// ground footprint is spatially covered (>= MIN_PART_COVERAGE) by independent building:part
+/// RELATIONS, each of which still renders on its own via the relation path. Mirrors
+/// `compute_spatial_part_suppression` but sources footprints from relations rather than
+/// closed ways.
+///
+/// Two relation specifics drive the extra work here:
+///   * A relation's outer boundary is frequently SPLIT across several member ways (the
+///     Colosseum ellipse = 4 outer arcs, #1191), so the segments are stitched into closed rings
+///     before area/containment (see `stitch_rings`). Inner rings are ignored: gross outer
+///     area biases safely toward suppressing a genuinely covered outline, matching the
+///     way-based pass.
+///   * Association is SPATIAL (part centroid inside the outline footprint), never membership:
+///     the parts are separate relations, not members of the outline relation, so the
+///     membership pass (`compute_outline_suppression`) never links them.
+fn compute_spatial_relation_part_suppression(
+    relations: &[OsmElement],
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+) -> OutlineSuppression {
+    let is_part = |tags: &HashMap<String, String>| {
+        tags.get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+    };
+    // A relation's footprint is bounded by its outer/outline member ways; inner rings (holes)
+    // and non-boundary roles are excluded.
+    let is_outer_role =
+        |r: &str| r.eq_ignore_ascii_case("outer") || r.eq_ignore_ascii_case("outline");
+
+    // Resolve only the geometry we need: the outer member ways of every building /
+    // building:part relation, plus the nodes those ways reference.
+    let mut needed_ways: HashSet<u64> = HashSet::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        if !(tags.contains_key("building") || is_part(tags)) {
+            continue;
+        }
+        for m in &rel.members {
+            if m.r#type == "way" && is_outer_role(m.role.trim()) {
+                needed_ways.insert(m.r#ref);
+            }
+        }
+    }
+    if needed_ways.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
+    let mut needed_nodes: HashSet<u64> = HashSet::new();
+    for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
+        if let Some(ns) = w.nodes.as_ref() {
+            way_nodes.insert(w.id, ns);
+            needed_nodes.extend(ns.iter().copied());
+        }
+    }
+    let node_ll: HashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| needed_nodes.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+
+    // Stitch a relation's outer member ways into closed rings of (lat,lon).
+    let rel_rings = |rel: &OsmElement| -> Vec<Vec<(f64, f64)>> {
+        let segments: Vec<Vec<u64>> = rel
+            .members
+            .iter()
+            .filter(|m| m.r#type == "way" && is_outer_role(m.role.trim()))
+            .filter_map(|m| way_nodes.get(&m.r#ref).map(|ns| (*ns).clone()))
+            .collect();
+        stitch_rings(segments, &node_ll)
+    };
+
+    struct RelOutline {
+        id: u64,
+        rings: Vec<Vec<(f64, f64)>>,
+        area: f64,
+    }
+    struct RelPart {
+        area: f64,
+        centroid: (f64, f64),
+        ground: bool,
+    }
+
+    // Classify each relation and assemble its footprint. building:part=no marks the OUTLINE
+    // (not a part, e.g. the Colosseum outline); an outline candidate carries `building` and is
+    // not itself a part.
+    let mut outlines: Vec<RelOutline> = Vec::new();
+    let mut parts: Vec<RelPart> = Vec::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        let part = is_part(tags);
+        let outline = !part && tags.contains_key("building");
+        if !part && !outline {
+            continue;
+        }
+        let rings = rel_rings(rel);
+        let area: f64 = rings.iter().map(|r| ring_area(r)).sum();
+        if area <= 0.0 {
+            continue; // no closed ring could be assembled (degenerate/open geometry): skip
+        }
+        if outline {
+            outlines.push(RelOutline {
+                id: rel.id,
+                rings,
+                area,
+            });
+        } else {
+            // Gross outer area; centroid = vertex average over all assembled rings. The
+            // closing node is counted (first == last), matching the way-based pass exactly.
+            let (mut sla, mut slo, mut cnt) = (0.0, 0.0, 0usize);
+            for ring in &rings {
+                for &(la, lo) in ring {
+                    sla += la;
+                    slo += lo;
+                    cnt += 1;
+                }
+            }
+            if cnt == 0 {
+                continue;
+            }
+            parts.push(RelPart {
+                area,
+                centroid: (sla / cnt as f64, slo / cnt as f64),
+                ground: part_covers_ground(tags),
+            });
+        }
+    }
+    if outlines.is_empty() || parts.is_empty() {
+        return HashSet::new();
+    }
+
+    // grid of outline bboxes so each part only tests nearby outlines
+    let cell = |lat: f64, lon: f64| {
+        (
+            (lat / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+            (lon / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+        )
+    };
+
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (gi, g) in outlines.iter().enumerate() {
+        let (mut min_la, mut min_lo, mut max_la, mut max_lo) =
+            (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for ring in &g.rings {
+            for &(la, lo) in ring {
+                min_la = min_la.min(la);
+                max_la = max_la.max(la);
+                min_lo = min_lo.min(lo);
+                max_lo = max_lo.max(lo);
+            }
+        }
+        let (c0a, c0o) = cell(min_la, min_lo);
+        let (c1a, c1o) = cell(max_la, max_lo);
+        for ca in c0a..=c1a {
+            for co in c0o..=c1o {
+                grid.entry((ca, co)).or_default().push(gi);
+            }
+        }
+    }
+
+    // Add each ground-level part's gross area to every outline whose footprint contains the
+    // part centroid (matches the way-based pass, which credits every containing outline).
+    let mut covered: HashMap<usize, f64> = HashMap::new();
+    for p in &parts {
+        // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
+        // that float above the ground, so they can't stand in for the ground footprint.
+        if !p.ground {
+            continue;
+        }
+        let (cla, clo) = p.centroid;
+        let Some(cands) = grid.get(&cell(cla, clo)) else {
+            continue;
+        };
+        for &gi in cands {
+            if outlines[gi]
+                .rings
+                .iter()
+                .any(|r| point_in_ring(cla, clo, r))
+            {
+                *covered.entry(gi).or_insert(0.0) += p.area;
+            }
+        }
+    }
+
+    // PartGroups (building:part WAY id -> shared style seed) is intentionally left unchanged:
+    // it is consumed only in the Way render arm, whereas a building:part RELATION renders via
+    // the relation arm and carries its own tags, so a relation-keyed seed would have no consumer.
+    let mut suppressed: OutlineSuppression = HashSet::new();
+    for (gi, cov) in covered {
+        let g = &outlines[gi];
+        if cov / g.area >= MIN_PART_COVERAGE {
+            suppressed.insert(("relation", g.id));
         }
     }
     suppressed
@@ -1442,5 +1721,150 @@ mod outline_suppression_tests {
         let mut groups = PartGroups::new();
         compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut groups);
         assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
+    }
+
+    // --- compute_spatial_relation_part_suppression (multipolygon-relation outlines) ---
+
+    // An axis-aligned square footprint (corner at origin, side `side`) built as FOUR OPEN outer
+    // ways sharing endpoint node ids, plus the four corner nodes. Exercises the ring stitcher.
+    fn split_square(
+        way_ids: [u64; 4],
+        node_ids: [u64; 4],
+        side: f64,
+    ) -> (Vec<OsmElement>, Vec<OsmElement>) {
+        let corners = [(0.0, 0.0), (0.0, side), (side, side), (side, 0.0)];
+        let nodes: Vec<OsmElement> = node_ids
+            .iter()
+            .zip(corners.iter())
+            .map(|(&id, &(lat, lon))| node(id, lat, lon))
+            .collect();
+        let ways: Vec<OsmElement> = (0..4)
+            .map(|i| OsmElement {
+                r#type: "way".into(),
+                id: way_ids[i],
+                lat: None,
+                lon: None,
+                nodes: Some(vec![node_ids[i], node_ids[(i + 1) % 4]]),
+                tags: None,
+                members: Vec::new(),
+            })
+            .collect();
+        (ways, nodes)
+    }
+
+    fn relation_el(id: u64, tags: &[(&str, &str)], members: Vec<OsmMember>) -> OsmElement {
+        OsmElement {
+            r#type: "relation".into(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: None,
+            tags: Some(tagmap(tags)),
+            members,
+        }
+    }
+
+    fn outer_members(way_ids: &[u64]) -> Vec<OsmMember> {
+        way_ids
+            .iter()
+            .map(|&id| member("way", id, "outer"))
+            .collect()
+    }
+
+    // The Colosseum case: a multipolygon building outline (building=amphitheatre, building:part=no)
+    // whose ellipse is SPLIT across four outer ways, spatially covered by an independent
+    // building:part RELATION. The outline relation is suppressed; the part relation survives.
+    #[test]
+    fn suppresses_outline_covered_by_part_relations() {
+        // Small footprints keep the outline-bbox grid tiny; only the coverage ratio matters.
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0016); // 0.0016^2 / 0.002^2 = 0.64
+        assert!((0.0016_f64 / 0.002).powi(2) >= MIN_PART_COVERAGE);
+
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre"), ("building:part", "no")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        let part = relation_el(2, &[("building:part", "yes")], outer_members(&[200]));
+
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+        let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+        assert!(s.contains(&("relation", 1)));
+        assert!(!s.contains(&("relation", 2)));
+    }
+
+    // Same stitched multi-way outline, but the only part covers ~36% (< MIN_PART_COVERAGE),
+    // so the outline relation must survive.
+    #[test]
+    fn does_not_suppress_outline_with_insufficient_part_coverage() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0012); // 0.0012^2 / 0.002^2 = 0.36
+        assert!((0.0012_f64 / 0.002).powi(2) < MIN_PART_COVERAGE);
+
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        let part = relation_el(2, &[("building:part", "yes")], outer_members(&[200]));
+
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+        let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+        assert!(!s.contains(&("relation", 1)));
+    }
+
+    // A plain building outline relation with NO building:part relations is never suppressed.
+    #[test]
+    fn plain_outline_relation_without_parts_is_kept() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+
+        let s =
+            compute_spatial_relation_part_suppression(&[outline], &outline_ways, &outline_nodes);
+        assert!(s.is_empty());
+    }
+
+    // An amphitheatre whose only cover is an ELEVATED part relation (min_height > 0): that raised
+    // volume floats above the ground, so it can't stand in for the footprint. The outline is kept
+    // even though the part's geometric coverage (~64%) clears MIN_PART_COVERAGE.
+    #[test]
+    fn relation_outline_covered_only_by_elevated_part_is_kept() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0016); // 0.0016^2 / 0.002^2 = 0.64
+        assert!((0.0016_f64 / 0.002).powi(2) >= MIN_PART_COVERAGE);
+
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre"), ("building:part", "no")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        // min_height marks the part as elevated, so part_covers_ground() returns false.
+        let part = relation_el(
+            2,
+            &[("building:part", "yes"), ("min_height", "54")],
+            outer_members(&[200]),
+        );
+
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+        let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+        assert!(!s.contains(&("relation", 1)));
     }
 }
