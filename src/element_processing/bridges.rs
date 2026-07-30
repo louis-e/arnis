@@ -15,6 +15,13 @@ const DUAL_CARRIAGEWAY_MAX_DISTANCE_BLOCKS: f32 = 12.0;
 const DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG: f32 = 20.0;
 const CENTERLINE_SAMPLE_LIMIT: usize = 5;
 
+fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
+    matches!(
+        highway,
+        "footway" | "pedestrian" | "path" | "cycleway" | "bridleway" | "steps"
+    )
+}
+
 #[derive(Clone, Copy)]
 pub struct BridgeMemberInfo {
     pub deck_y: i32,
@@ -337,7 +344,18 @@ impl BridgeStructureMap {
                     1.0,
                 )
             };
+            let group_has_vehicular_member = group_indices.iter().any(|&i| {
+                let way = bridge_ways[i];
+                let highway = way
+                    .tags
+                    .get("highway")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                !is_non_vehicular_bridge_highway(highway)
+            });
+
             let structure_has_module = group_style == BridgeStyle::Beam
+                && group_has_vehicular_member
                 && group_indices.iter().any(|&i| {
                     crate::element_processing::bridge_modules::pick_module_index(
                         member_range(i),
@@ -913,6 +931,87 @@ fn midpoint(way: &ProcessedWay) -> (i32, i32) {
 struct UnionFind {
     parent: Vec<usize>,
     rank: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::osm_parser::ProcessedNode;
+    use crate::world_editor::WorldEditor;
+    use std::collections::HashMap as StdMap;
+    use std::path::PathBuf;
+
+    fn test_editor(xzbbox: &XZBBox) -> WorldEditor<'_> {
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        WorldEditor::new(PathBuf::from("/dev/null/unused"), xzbbox, llbbox)
+    }
+
+    fn straight_bridge_way(id: u64, highway: &str, x1: i32, z1: i32, x2: i32, z2: i32) -> ProcessedWay {
+        let mut tags = StdMap::new();
+        tags.insert("highway".to_string(), highway.to_string());
+        tags.insert("bridge".to_string(), "yes".to_string());
+        ProcessedWay {
+            id,
+            nodes: vec![
+                ProcessedNode {
+                    id: id * 10 + 1,
+                    tags: StdMap::new(),
+                    x: x1,
+                    z: z1,
+                },
+                ProcessedNode {
+                    id: id * 10 + 2,
+                    tags: StdMap::new(),
+                    x: x2,
+                    z: z2,
+                },
+            ],
+            tags,
+        }
+    }
+
+    #[test]
+    fn pedestrian_only_bridge_structure_does_not_use_module_deck() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let ways = vec![ProcessedElement::Way(straight_bridge_way(1, "footway", 10, 40, 60, 40))];
+        let outlines = BridgeOutlineIndex::build(&ways);
+
+        let structures = BridgeStructureMap::build(&ways, &editor, &outlines);
+        let member = structures.lookup_member(1).expect("member exists");
+
+        assert!(
+            !member.structure_has_module,
+            "pedestrian-only bridges should keep non-modular bridge rendering"
+        );
+        assert!(
+            member.module_idx.is_none(),
+            "pedestrian-only bridges should not receive a road-style bridge module"
+        );
+    }
+
+    #[test]
+    fn vehicular_bridge_structure_still_uses_module_deck() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let ways = vec![ProcessedElement::Way(straight_bridge_way(
+            2,
+            "primary",
+            10,
+            40,
+            60,
+            40,
+        ))];
+        let outlines = BridgeOutlineIndex::build(&ways);
+
+        let structures = BridgeStructureMap::build(&ways, &editor, &outlines);
+        let member = structures.lookup_member(2).expect("member exists");
+
+        assert!(member.structure_has_module);
+        assert!(member.module_idx.is_some());
+    }
 }
 
 impl UnionFind {
