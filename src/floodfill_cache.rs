@@ -438,6 +438,12 @@ impl FloodFillCache {
                 for_relation_ring_cells(rel, ProcessedMemberRole::Outer, xzbbox, |x, z| {
                     footprints.set(x, z)
                 });
+                // type=building relations frequently carry geometry as role=part
+                // members with no outer/inner shell; include those rings so
+                // vegetation blockers see the full building footprint.
+                for_relation_ring_cells(rel, ProcessedMemberRole::Part, xzbbox, |x, z| {
+                    footprints.set(x, z)
+                });
                 for_relation_ring_cells(rel, ProcessedMemberRole::Inner, xzbbox, |x, z| {
                     footprints.clear(x, z)
                 });
@@ -515,6 +521,60 @@ fn for_relation_ring_cells(
         for (x, z) in flood_fill_area(&coords, None) {
             apply(x, z);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::osm_parser::{ProcessedMember, ProcessedNode, ProcessedRelation};
+    use std::collections::HashMap;
+
+    fn node(id: u64, x: i32, z: i32) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        }
+    }
+
+    fn closed_square_way(id: u64, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> ProcessedWay {
+        ProcessedWay {
+            id,
+            tags: HashMap::new(),
+            nodes: vec![
+                node(id * 10 + 1, min_x, min_z),
+                node(id * 10 + 2, max_x, min_z),
+                node(id * 10 + 3, max_x, max_z),
+                node(id * 10 + 4, min_x, max_z),
+                node(id * 10 + 5, min_x, min_z),
+            ],
+        }
+    }
+
+    #[test]
+    fn building_relation_part_members_contribute_footprints() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 40, 40).unwrap();
+        let part_way = Arc::new(closed_square_way(11, 10, 10, 20, 20));
+
+        let relation = ProcessedRelation {
+            id: 1,
+            tags: HashMap::from([("type".to_string(), "building".to_string())]),
+            members: vec![ProcessedMember {
+                role: ProcessedMemberRole::Part,
+                way: part_way,
+            }],
+        };
+
+        let elements = vec![ProcessedElement::Relation(relation)];
+        let cache = FloodFillCache::new();
+        let footprints = cache.collect_building_footprints(&elements, &xzbbox);
+
+        assert!(
+            footprints.contains(15, 15),
+            "role=part geometry in type=building relations must mark building footprint"
+        );
     }
 }
 
