@@ -5,7 +5,9 @@
 //! on a separate CPU core.
 
 use crate::coordinate_system::cartesian::XZBBox;
-use crate::osm_parser::{ProcessedElement, ProcessedRelation, ProcessedWay};
+#[cfg(test)]
+use crate::osm_parser::ProcessedRelation;
+use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use std::collections::HashMap;
 
 /// Bounds of a single tile within the world.
@@ -111,22 +113,6 @@ fn way_aabb(way: &ProcessedWay) -> Option<(i32, i32, i32, i32)> {
     Some((min_x, max_x, min_z, max_z))
 }
 
-/// Union AABB over a relation's member ways. None when no member has nodes.
-fn relation_aabb(rel: &ProcessedRelation) -> Option<(i32, i32, i32, i32)> {
-    let mut acc: Option<(i32, i32, i32, i32)> = None;
-    for member in &rel.members {
-        if let Some((nx, xx, nz, xz)) = way_aabb(&member.way) {
-            acc = Some(match acc {
-                None => (nx, xx, nz, xz),
-                Some((mn_x, mx_x, mn_z, mx_z)) => {
-                    (mn_x.min(nx), mx_x.max(xx), mn_z.min(nz), mx_z.max(xz))
-                }
-            });
-        }
-    }
-    acc
-}
-
 /// AABB-vs-bounds intersection (bounds' max edges are exclusive).
 #[inline]
 fn aabb_intersects(aabb: (i32, i32, i32, i32), bounds: &TileBounds) -> bool {
@@ -151,6 +137,7 @@ fn region_range(aabb: (i32, i32, i32, i32), halo: i32) -> (i32, i32, i32, i32) {
 }
 
 /// Check if any of a relation's member ways intersect the given bounds.
+#[cfg(test)]
 fn relation_intersects_bounds(rel: &ProcessedRelation, bounds: &TileBounds) -> bool {
     rel.members
         .iter()
@@ -258,17 +245,30 @@ pub fn assign_elements_to_tiles(
             ProcessedElement::Relation(rel) => {
                 // Every tile any member way's AABB+halo overlaps, restricted to the
                 // region cells the union AABB+halo can reach.
-                let Some(aabb) = relation_aabb(rel) else {
+                // Cache member AABBs once: relation_intersects_bounds used to walk
+                // every member's nodes again for every candidate tile.
+                let member_aabbs: Vec<(i32, i32, i32, i32)> = rel
+                    .members
+                    .iter()
+                    .filter_map(|member| way_aabb(&member.way))
+                    .collect();
+                let Some(aabb) = member_aabbs.iter().copied().reduce(
+                    |(mn_x, mx_x, mn_z, mx_z), (nx, xx, nz, xz)| {
+                        (mn_x.min(nx), mx_x.max(xx), mn_z.min(nz), mx_z.max(xz))
+                    },
+                ) else {
                     continue;
                 };
                 let (rx0, rx1, rz0, rz1) = region_range(aabb, TILE_EDITOR_HALO);
                 for rx in rx0..=rx1 {
                     for rz in rz0..=rz1 {
                         if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
-                            if relation_intersects_bounds(
-                                rel,
-                                &tiles[tile_idx].expanded(TILE_EDITOR_HALO),
-                            ) {
+                            let expanded = tiles[tile_idx].expanded(TILE_EDITOR_HALO);
+                            if member_aabbs
+                                .iter()
+                                .copied()
+                                .any(|member_aabb| aabb_intersects(member_aabb, &expanded))
+                            {
                                 tile_elements[tile_idx].push(elem_idx);
                             }
                         }

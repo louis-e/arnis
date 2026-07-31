@@ -168,7 +168,7 @@ pub fn generate_leisure_from_relation(
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
 ) {
-    if rel.tags.get("leisure") == Some(&"park".to_string()) {
+    if rel.tags.get("leisure").map(String::as_str) == Some("park") {
         // Process each outer member way individually using cached flood fill.
         // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation

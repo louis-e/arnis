@@ -592,6 +592,48 @@ impl WorldToModify {
         )
     }
 
+    /// Finds the highest non-AIR block in one column and Y range.
+    ///
+    /// Column probes are used while placing tree canopies over buildings. The
+    /// old caller performed one region/chunk/section HashMap lookup per Y level;
+    /// walking the already-resolved chunk sections from the top avoids repeated
+    /// hash probes for each canopy column.
+    #[inline]
+    pub fn highest_block_between(&self, x: i32, z: i32, min_y: i32, max_y: i32) -> Option<i32> {
+        if min_y > max_y {
+            return None;
+        }
+        let min_y = min_y.clamp(MIN_Y, MAX_Y);
+        let max_y = max_y.clamp(MIN_Y, MAX_Y);
+        if min_y > max_y {
+            return None;
+        }
+
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region = self.get_region(chunk_x >> 5, chunk_z >> 5)?;
+        let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
+        let local_x = (x & 15) as u8;
+        let local_z = (z & 15) as u8;
+        let min_section = (min_y >> 4) as i8;
+        let max_section = (max_y >> 4) as i8;
+
+        for section_y in (min_section..=max_section).rev() {
+            let Some(section) = chunk.sections.get(&section_y) else {
+                continue;
+            };
+            let section_min_y = min_y.max(i32::from(section_y) << 4);
+            let section_max_y = max_y.min((i32::from(section_y) << 4) + 15);
+            for y in (section_min_y..=section_max_y).rev() {
+                let index = SectionToModify::index(local_x, (y & 15) as u8, local_z);
+                if section.storage.get(index) != AIR {
+                    return Some(y);
+                }
+            }
+        }
+        None
+    }
+
     #[inline]
     pub fn set_block_with_properties(
         &mut self,
@@ -1362,5 +1404,16 @@ mod tests {
                 .contains_key(&SectionToModify::index(1, local_y, 0)),
             "block written without properties should leave none"
         );
+    }
+
+    #[test]
+    fn highest_block_between_uses_section_order() {
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(3, 64, 5, STONE);
+        world.set_block_if_absent(3, 80, 5, COBBLESTONE);
+
+        assert_eq!(world.highest_block_between(3, 5, 60, 90), Some(80));
+        assert_eq!(world.highest_block_between(3, 5, 65, 79), None);
+        assert_eq!(world.highest_block_between(3, 5, 81, 90), None);
     }
 }

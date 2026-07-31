@@ -954,6 +954,18 @@ pub fn generate_world_with_options(
     } else {
         // Small area: sequential processing along the original code path.
         let elements_count: usize = elements.len();
+        // Relations are parsed after ways and their handlers reuse member-way
+        // flood fills.  Keep those entries alive until the relation is handled;
+        // evicting them as soon as the standalone way runs turns every relation
+        // member into an avoidable second polygon fill.
+        let mut relation_way_uses: HashMap<u64, usize> = HashMap::new();
+        for element in &elements {
+            if let ProcessedElement::Relation(rel) = element {
+                for member in &rel.members {
+                    *relation_way_uses.entry(member.way.id).or_default() += 1;
+                }
+            }
+        }
         let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
         process_pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
@@ -1023,11 +1035,26 @@ pub fn generate_world_with_options(
             // (Skipped in the parallel path where the cache is shared immutably.)
             match &element {
                 ProcessedElement::Way(way) => {
-                    flood_fill_cache.remove_way(way.id);
+                    if !relation_way_uses.contains_key(&way.id) {
+                        flood_fill_cache.remove_way(way.id);
+                    }
                 }
                 ProcessedElement::Relation(rel) => {
-                    let way_ids: Vec<u64> = rel.members.iter().map(|m| m.way.id).collect();
-                    flood_fill_cache.remove_relation_ways(&way_ids);
+                    // A member way can belong to multiple relations.  Release
+                    // its cached fill only after the last relation has consumed
+                    // it; otherwise later relations silently recompute it.
+                    let mut finished_way_ids = Vec::with_capacity(rel.members.len());
+                    for member in &rel.members {
+                        let Some(uses) = relation_way_uses.get_mut(&member.way.id) else {
+                            continue;
+                        };
+                        *uses -= 1;
+                        if *uses == 0 {
+                            relation_way_uses.remove(&member.way.id);
+                            finished_way_ids.push(member.way.id);
+                        }
+                    }
+                    flood_fill_cache.remove_relation_ways(&finished_way_ids);
                 }
                 _ => {}
             }

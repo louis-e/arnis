@@ -1509,10 +1509,9 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Highest non-AIR block in `min_y..=max_y` at (x, z), or None when the column is clear.
+    #[inline]
     pub fn highest_block_between(&self, x: i32, z: i32, min_y: i32, max_y: i32) -> Option<i32> {
-        (min_y..=max_y)
-            .rev()
-            .find(|&y| self.block_exists_absolute(x, y, z))
+        self.world.highest_block_between(x, z, min_y, max_y)
     }
 
     /// Fills an entire column from y_min to y_max with one block type.
