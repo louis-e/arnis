@@ -193,7 +193,7 @@ dependencies = [
 name = "arnis"
 version = "3.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.0",
  "bedrockrs_level",
  "bedrockrs_shared",
  "byteorder",
@@ -375,6 +375,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
 
 [[package]]
 name = "bedrockrs_core"
@@ -6213,7 +6219,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.4",
  "static_assertions",
 ]
 
