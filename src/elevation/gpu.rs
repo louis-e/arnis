@@ -32,6 +32,11 @@ struct GpuCtx {
 }
 
 fn init_gpu() -> Option<GpuCtx> {
+    // Guard against driver bugs / incompatible adapters that may panic.
+    std::panic::catch_unwind(try_init_gpu).ok().flatten()
+}
+
+fn try_init_gpu() -> Option<GpuCtx> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
