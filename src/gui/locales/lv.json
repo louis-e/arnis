@@ -68,5 +68,6 @@
   "gamemode_creative": "Radošais",
   "gamemode_spectator": "Skatītājs",
   "world_time": "Pasaules laiks",
-  "map_item": "Pasaules kartes priekšmets"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Pasaules kartes priekšmets"
 }

@@ -68,5 +68,6 @@
   "gamemode_creative": "Creativo",
   "gamemode_spectator": "Espectador",
   "world_time": "Hora del mundo",
-  "map_item": "Objeto de mapa del mundo"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Objeto de mapa del mundo"
 }

@@ -68,5 +68,6 @@
   "gamemode_creative": "Ustvarjalni",
   "gamemode_spectator": "Gledalec",
   "world_time": "Čas sveta",
-  "map_item": "Predmet zemljevida sveta"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Predmet zemljevida sveta"
 }

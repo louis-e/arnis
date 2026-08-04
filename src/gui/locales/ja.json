@@ -68,5 +68,6 @@
   "gamemode_creative": "クリエイティブ",
   "gamemode_spectator": "スペクテイター",
   "world_time": "ワールド時間",
-  "map_item": "ワールド地図アイテム"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "ワールド地図アイテム"
 }

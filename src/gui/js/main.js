@@ -120,6 +120,8 @@ async function applyLocalization(localization) {
     "span[data-localize='three_dmr']": "three_dmr",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
+    "span[data-localize='tianditu_elevation']": "tianditu_elevation",
+    "span[data-localize='tianditu_token']": "tianditu_token",
     "span[data-localize='bake_lighting']": "bake_lighting",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
@@ -782,6 +784,9 @@ function initSettings() {
   // Save path setting
   initSavePathSetting();
 
+  // Tianditu elevation toggle + token
+  initTiandituSettings();
+
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
@@ -1314,6 +1319,39 @@ function initSavePathSetting() {
   }
 }
 
+function initTiandituSettings() {
+  const toggle = document.getElementById("tianditu-elevation-toggle");
+  const tokenRow = document.getElementById("tianditu-token-row");
+  const tokenInput = document.getElementById("tianditu-token-input");
+
+  // Load saved token
+  const savedToken = localStorage.getItem('arnis-tianditu-token');
+  if (savedToken && tokenInput) {
+    tokenInput.value = savedToken;
+  }
+
+  // Show/hide token input based on toggle
+  if (toggle && tokenRow) {
+    function updateTokenVisibility() {
+      tokenRow.style.display = toggle.checked ? "" : "none";
+    }
+    toggle.addEventListener("change", updateTokenVisibility);
+    updateTokenVisibility();
+  }
+
+  // Save token on change
+  if (tokenInput) {
+    tokenInput.addEventListener("change", () => {
+      const val = tokenInput.value.trim();
+      if (val) {
+        localStorage.setItem('arnis-tianditu-token', val);
+      } else {
+        localStorage.removeItem('arnis-tianditu-token');
+      }
+    });
+  }
+}
+
 /**
  * Validates and processes bounding box coordinates input
  * Supports both comma and space-separated formats
@@ -1616,6 +1654,8 @@ async function startGeneration() {
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
+    var tianditu_elevation = document.getElementById("tianditu-elevation-toggle").checked;
+    var tianditu_token = document.getElementById("tianditu-token-input").value.trim();
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
@@ -1653,6 +1693,8 @@ async function startGeneration() {
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
+        tiandituElevation: tianditu_elevation,
+        tiandituToken: tianditu_token,
         bakeLightingEnabled: bake_lighting,
         isNewWorld: true,
         spawnPoint: spawnPoint,

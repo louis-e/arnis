@@ -68,5 +68,6 @@
   "gamemode_creative": "الإبداع",
   "gamemode_spectator": "المتفرج",
   "world_time": "وقت العالم",
-  "map_item": "عنصر خريطة العالم"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "عنصر خريطة العالم"
 }

@@ -52,6 +52,8 @@
   "three_dmr": "3D Models & Props",
   "disable_height_limit": "Extend build height",
   "aws_only_elevation": "Legacy terrain",
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",
   "bake_lighting": "Bake lighting",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path",

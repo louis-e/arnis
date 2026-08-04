@@ -68,5 +68,6 @@
   "gamemode_creative": "Kūrybinis",
   "gamemode_spectator": "Stebėtojas",
   "world_time": "Pasaulio laikas",
-  "map_item": "Pasaulio žemėlapio daiktas"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Pasaulio žemėlapio daiktas"
 }

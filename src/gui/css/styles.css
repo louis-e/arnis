@@ -947,6 +947,16 @@ input[type="range"] {
   border-right: none !important;
 }
 
+.tianditu-token-input {
+  width: 180px;
+  padding: 3px 6px;
+  background: #444;
+  color: #ececec;
+  border: 1px solid var(--primary-accent);
+  border-radius: 3px;
+  font-size: 0.8em;
+}
+
 .save-path-browse {
   background: none;
   border: 1px solid #fecc44;

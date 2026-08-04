@@ -68,5 +68,6 @@
   "gamemode_creative": "Kreatív",
   "gamemode_spectator": "Néző",
   "world_time": "Világidő",
-  "map_item": "Világtérkép-tárgy"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Világtérkép-tárgy"
 }

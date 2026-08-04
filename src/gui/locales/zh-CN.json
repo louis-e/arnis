@@ -68,5 +68,7 @@
   "gamemode_creative": "创造",
   "gamemode_spectator": "旁观",
   "world_time": "世界时间",
+  "tianditu_elevation": "天地图高程",
+  "tianditu_token": "天地图令牌",
   "map_item": "世界地图物品"
 }

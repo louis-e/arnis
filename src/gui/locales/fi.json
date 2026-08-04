@@ -68,5 +68,6 @@
   "gamemode_creative": "Luova",
   "gamemode_spectator": "Katselija",
   "world_time": "Maailman aika",
-  "map_item": "Maailmankarttaesine"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Maailmankarttaesine"
 }

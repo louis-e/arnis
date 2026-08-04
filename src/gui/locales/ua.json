@@ -68,5 +68,6 @@
   "gamemode_creative": "Творчість",
   "gamemode_spectator": "Спостерігач",
   "world_time": "Час світу",
-  "map_item": "Предмет карти світу"
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "map_item": "Предмет карти світу"
 }

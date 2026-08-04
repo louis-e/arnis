@@ -923,6 +923,8 @@ fn gui_start_generation(
     use_3d_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
+    tianditu_elevation: bool,
+    tianditu_token: String,
     bake_lighting_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
@@ -943,6 +945,14 @@ fn gui_start_generation(
 
     // Send generation click telemetry
     telemetry::send_generation_click();
+
+    // Pass Tianditu token to the elevation subsystem if provided
+    if tianditu_elevation && !tianditu_token.is_empty() {
+        std::env::set_var("TIANDITU_TOKEN", &tianditu_token);
+    } else {
+        // If toggle is off, unset any stale token so Tianditu is skipped
+        std::env::remove_var("TIANDITU_TOKEN");
+    }
 
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
