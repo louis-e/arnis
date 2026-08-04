@@ -20,7 +20,7 @@ gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "tauri
 tauri-build = {version = "2", optional = true}
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.0"
 bytes = "1"
 byteorder = "1.5"
 clap = { version = "4.6.0", features = ["derive", "env"] }
