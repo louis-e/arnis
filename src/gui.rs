@@ -1380,10 +1380,10 @@ fn gui_start_generation(
 mod locale_tests {
     use std::collections::BTreeSet;
 
-    // en-US is the source of truth, every other locale must match its key set
+    // en-US is the source of truth, every other locale must match its key set.
+    // en.json is not a real locale — it redirects the JS fallback to en-US.
     const LOCALES: &[(&str, &str)] = &[
         ("en-US", include_str!("gui/locales/en-US.json")),
-        ("en", include_str!("gui/locales/en.json")),
         ("ar", include_str!("gui/locales/ar.json")),
         ("de", include_str!("gui/locales/de.json")),
         ("es", include_str!("gui/locales/es.json")),
