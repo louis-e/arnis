@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Create dummy Minecraft world directory
         shell: bash
@@ -38,7 +38,7 @@ jobs:
           start=$(date +%s)
           /usr/bin/time -v ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="${{ matrix.scenario.bbox }}" 2> benchmark_log.txt
           duration=$(($(date +%s) - start))
-          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "0")
+          gen_time_ms=$(perl -nle 'print $1 if /generation_time_ms=(\d+)/' benchmark_log.txt || echo "0")
           gen_time=$(( (gen_time_ms + 500) / 1000 ))
           peak_kb=$(grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}')
           peak_mb=$((peak_kb / 1024))
@@ -54,7 +54,7 @@ jobs:
           start=$(date +%s)
           /usr/bin/time -l ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="${{ matrix.scenario.bbox }}" 2> benchmark_log.txt
           duration=$(($(date +%s) - start))
-          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "0")
+          gen_time_ms=$(perl -nle 'print $1 if /generation_time_ms=(\d+)/' benchmark_log.txt || echo "0")
           gen_time=$(( (gen_time_ms + 500) / 1000 ))
           echo "duration=${duration}" >> $GITHUB_OUTPUT
           echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT

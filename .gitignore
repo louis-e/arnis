@@ -20,6 +20,7 @@
 *.njsproj
 *.sln
 *.ps1
+!/bench_gpu.ps1
 
 # System files
 .DS_Store
