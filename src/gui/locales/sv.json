@@ -69,5 +69,6 @@
   "gamemode_spectator": "Åskådare",
   "world_time": "Världstid",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "Världskartsföremål"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Världskartsföremål"
 }

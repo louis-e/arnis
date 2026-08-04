@@ -925,6 +925,7 @@ fn gui_start_generation(
     aws_only_elevation: bool,
     tianditu_elevation: bool,
     tianditu_token: String,
+    gpu_accel: bool,
     bake_lighting_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
@@ -950,8 +951,14 @@ fn gui_start_generation(
     if tianditu_elevation && !tianditu_token.is_empty() {
         std::env::set_var("TIANDITU_TOKEN", &tianditu_token);
     } else {
-        // If toggle is off, unset any stale token so Tianditu is skipped
         std::env::remove_var("TIANDITU_TOKEN");
+    }
+
+    // Signal GPU-accelerated path when requested by the user.
+    if gpu_accel {
+        std::env::set_var("ARNIS_GPU", "1");
+    } else {
+        std::env::remove_var("ARNIS_GPU");
     }
 
     // For new Java worlds, set the spawn point in level.dat

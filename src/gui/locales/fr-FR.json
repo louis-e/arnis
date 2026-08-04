@@ -69,5 +69,6 @@
   "gamemode_spectator": "Spectateur",
   "world_time": "Heure du monde",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "Objet carte du monde"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Objet carte du monde"
 }

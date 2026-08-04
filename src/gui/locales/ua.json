@@ -69,5 +69,6 @@
   "gamemode_spectator": "Спостерігач",
   "world_time": "Час світу",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "Предмет карти світу"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Предмет карти світу"
 }

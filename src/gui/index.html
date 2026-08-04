@@ -69,6 +69,7 @@
           <div class="progress-section">
             <img src="" alt="" class="secret-parrot" id="secret-parrot">
             <span id="progress-info" class="progress-info-text"></span>
+            <span id="gpu-indicator" class="gpu-indicator" style="display:none;" data-localize="gpu_active">(using GPU acceleration)</span>
             <div class="progress-row">
               <div class="progress-bar-container">
                 <div class="progress-bar" id="progress-bar"></div>
@@ -254,6 +255,17 @@
           </label>
           <div class="settings-control">
             <input type="checkbox" id="bake-lighting-toggle" name="bake-lighting-toggle">
+          </div>
+        </div>
+
+        <!-- GPU Acceleration Toggle -->
+        <div class="settings-row">
+          <label for="gpu-accel-toggle">
+            <span data-localize="gpu_acceleration">GPU Acceleration</span>
+            <span class="tooltip-icon" data-tooltip="Use GPU compute shaders (wgpu) to accelerate elevation post-processing. Requires a compatible GPU with Vulkan, Metal, or DX12 support. Falls back to CPU automatically if unavailable.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="gpu-accel-toggle" name="gpu-accel-toggle">
           </div>
         </div>
 
