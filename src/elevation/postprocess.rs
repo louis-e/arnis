@@ -928,11 +928,17 @@ pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>>
     #[cfg(feature = "gpu")]
     {
         if std::env::var("ARNIS_GPU").as_deref() == Ok("1") {
+            eprintln!("[GPU] attempting gaussian_blur ({}x{})", grid.len(), grid[0].len());
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma)
             }));
-            if let Ok(Some(r)) = result {
-                return r;
+            match result {
+                Ok(Some(r)) => {
+                    eprintln!("[GPU] gaussian_blur succeeded");
+                    return r;
+                }
+                Ok(None) => eprintln!("[GPU] gaussian_blur returned None, falling back to CPU"),
+                Err(_) => eprintln!("[GPU] gaussian_blur panicked, falling back to CPU"),
             }
         }
     }
@@ -957,9 +963,13 @@ fn gaussian_blur_grid_reported(
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma)
             }));
-            if let Ok(Some(r)) = result {
-                report(1.0);
-                return r;
+            match result {
+                Ok(Some(r)) => {
+                    report(1.0);
+                    return r;
+                }
+                Ok(None) => {}
+                Err(_) => {}
             }
         }
     }
