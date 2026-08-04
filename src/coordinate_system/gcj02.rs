@@ -14,7 +14,7 @@ use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 /// Earth semi-major axis (WGS-84 / CGCS 2000), metres.
 const A: f64 = 6_378_245.0;
 /// Eccentricity squared.
-const EE: f64 = 0.00669342162296594323;
+const EE: f64 = 0.006_693_421_622_965_943;
 
 // ─── Out-of-China guard ─────────────────────────────────────────────────
 

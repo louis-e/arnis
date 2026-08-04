@@ -390,9 +390,9 @@ fn download_tile(
     let status = resp.status();
     if status == 418 {
         // Tianditu WAF block — not an image; don't cache, fail fast.
-        return Err(format!(
-            "HTTP 418 (WAF blocked; check token permissions or add Referer header)"
-        ));
+        return Err(
+            "HTTP 418 (WAF blocked; check token permissions or add Referer header)".to_string(),
+        );
     }
     if status.is_client_error() {
         return Err(format!("HTTP {status}"));
@@ -416,8 +416,8 @@ mod tests {
 
     #[test]
     fn terrain_rgb_decoding() {
-        // Sea-level pixel: R=0, G=0, B=0 → height = -10000
-        assert!(((0u16 * 256 * 256 + 0 * 256 + 0) as f64 * 0.1 - 10000.0 + 10000.0).abs() < 1e-6);
+        // Sea-level: R=0, G=0, B=0 → raw=0 → height = -10000
+        assert!((0.0_f64 * 0.1 - 10000.0 + 10000.0).abs() < 1e-6);
 
         // 1000 m pixel: calculated from formula
         let h = 1000.0;
@@ -434,7 +434,7 @@ mod tests {
     fn zoom_selection_stays_in_range() {
         let bbox = LLBBox::new(39.9, 116.3, 40.0, 116.5).unwrap();
         let z = select_zoom(&bbox);
-        assert!(z >= ZOOM_MIN && z <= ZOOM_MAX);
+        assert!((ZOOM_MIN..=ZOOM_MAX).contains(&z));
     }
 
     #[test]
