@@ -1,36 +1,27 @@
-name: PR Benchmark
+name: Benchmark
 
 permissions:
   contents: read
-  pull-requests: write
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-  issue_comment:
-    types: [created]
   push:
-    branches: [master, main]
+    branches: [master, main, gpu-accel]
   workflow_dispatch:
 
 jobs:
   benchmark:
-    if: |
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request != null &&
-       contains(github.event.comment.body, 'retrigger-benchmark'))
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        scenario:
+          - name: small
+            bbox: "48.125768 11.552296 48.148565 11.593838"
+          - name: medium
+            bbox: "48.09 11.49 48.18 11.65"
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number || github.event.issue.number) || github.ref }}
 
       - name: Create dummy Minecraft world directory
         shell: bash
@@ -39,22 +30,69 @@ jobs:
       - name: Build for release
         run: cargo build --release --no-default-features
 
-      - name: Run benchmark (Linux / macOS)
-        if: runner.os != 'Windows'
+      - name: Run benchmark (Linux)
+        id: bench_linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           start=$(date +%s)
-          ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="${{ matrix.scenario.bbox }}" 2> benchmark_log.txt
           duration=$(($(date +%s) - start))
+          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "0")
+          gen_time=$(( (gen_time_ms + 500) / 1000 ))
+          peak_kb=$(grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}')
+          peak_mb=$((peak_kb / 1024))
           echo "duration=${duration}" >> $GITHUB_OUTPUT
-          echo "os_label=${{ matrix.os }}" >> $GITHUB_OUTPUT
+          echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT
+          echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
+
+      - name: Run benchmark (macOS)
+        id: bench_macos
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          start=$(date +%s)
+          /usr/bin/time -l ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="${{ matrix.scenario.bbox }}" 2> benchmark_log.txt
+          duration=$(($(date +%s) - start))
+          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "0")
+          gen_time=$(( (gen_time_ms + 500) / 1000 ))
+          echo "duration=${duration}" >> $GITHUB_OUTPUT
+          echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT
+          echo "peak_memory=0" >> $GITHUB_OUTPUT
 
       - name: Run benchmark (Windows)
+        id: bench_windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $start = Get-Date
-          ./target/release/arnis.exe --path="./world" --mode=geo-terrain --benchmark --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
+          ./target/release/arnis.exe --path="./world" --mode=geo-terrain --benchmark --bbox="${{ matrix.scenario.bbox }}" 2> benchmark_log.txt
           $duration = [math]::Round(((Get-Date) - $start).TotalSeconds)
+          $log = Get-Content benchmark_log.txt -Raw
+          $genMs = if ($log -match 'generation_time_ms=(\d+)') { $Matches[1] } else { "0" }
+          $genTime = [math]::Round([int]$genMs / 1000)
           echo "duration=$duration" >> $env:GITHUB_OUTPUT
-          echo "os_label=windows-latest" >> $env:GITHUB_OUTPUT
+          echo "gen_time=$genTime" >> $env:GITHUB_OUTPUT
+          echo "peak_memory=0" >> $env:GITHUB_OUTPUT
+
+      - name: Print summary
+        shell: bash
+        run: |
+          DUR="${bench_linux_duration:-${bench_macos_duration:-${bench_windows_duration:-0}}}"
+          GEN="${bench_linux_gen_time:-${bench_macos_gen_time:-${bench_windows_gen_time:-0}}}"
+          MEM="${bench_linux_peak_memory:-${bench_macos_peak_memory:-${bench_windows_peak_memory:-0}}}"
+          echo "::group::Benchmark (${{ matrix.os }} / ${{ matrix.scenario.name }})"
+          echo "  Time  : ${DUR}s"
+          echo "  Gen   : ${GEN}s"
+          echo "  Memory: ${MEM} MB"
+          echo "::endgroup::"
+        env:
+          bench_linux_duration: ${{ steps.bench_linux.outputs.duration }}
+          bench_linux_gen_time: ${{ steps.bench_linux.outputs.gen_time }}
+          bench_linux_peak_memory: ${{ steps.bench_linux.outputs.peak_memory }}
+          bench_macos_duration: ${{ steps.bench_macos.outputs.duration }}
+          bench_macos_gen_time: ${{ steps.bench_macos.outputs.gen_time }}
+          bench_macos_peak_memory: ${{ steps.bench_macos.outputs.peak_memory }}
+          bench_windows_duration: ${{ steps.bench_windows.outputs.duration }}
+          bench_windows_gen_time: ${{ steps.bench_windows.outputs.gen_time }}
+          bench_windows_peak_memory: ${{ steps.bench_windows.outputs.peak_memory }}
