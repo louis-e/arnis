@@ -1,4 +1,6 @@
 pub mod cache;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod postprocess;
 pub mod provider;
 pub mod providers;

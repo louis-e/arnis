@@ -925,6 +925,13 @@ fn smooth_built_up_gaussian(
 /// Edges are handled by renormalizing weights over the valid samples so the
 /// blur doesn't darken the border of the grid.
 pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+    // Try GPU-accelerated path first; transparently falls back to CPU.
+    #[cfg(feature = "gpu")]
+    {
+        if let Some(result) = crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma) {
+            return result;
+        }
+    }
     gaussian_blur_grid_reported(grid, sigma, &|_| {})
 }
 
@@ -939,6 +946,14 @@ fn gaussian_blur_grid_reported(
     sigma: f64,
     report: &dyn Fn(f64),
 ) -> Vec<Vec<f64>> {
+    // Try GPU-accelerated path first.
+    #[cfg(feature = "gpu")]
+    {
+        if let Some(result) = crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma) {
+            report(1.0);
+            return result;
+        }
+    }
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel = create_gaussian_kernel(kernel_size, sigma);
     let half = kernel_size as i32 / 2;
