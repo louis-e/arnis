@@ -49,19 +49,13 @@ fn _delta(lng: f64, lat: f64) -> (f64, f64) {
         + (20.0 * sin_deg(d) + 40.0 * sin_deg(d / 3.0)) * 2.0 / 3.0
         + (150.0 * sin_deg(d / 12.0) + 300.0 * sin_deg(d / 30.0)) * 2.0 / 3.0;
 
-    let dlat = (-100.0
-        + 2.0 * d
-        + 3.0 * e
-        + 0.2 * e * e
-        + 0.1 * d * e
-        + 0.2 * d.abs().sqrt())
+    let dlat = (-100.0 + 2.0 * d + 3.0 * e + 0.2 * e * e + 0.1 * d * e + 0.2 * d.abs().sqrt())
         + (20.0 * sin_deg(6.0 * d) + 20.0 * sin_deg(2.0 * d)) * 2.0 / 3.0
         + (20.0 * sin_deg(e) + 40.0 * sin_deg(e / 3.0)) * 2.0 / 3.0
         + (160.0 * sin_deg(e / 12.0) + 320.0 * sin_deg(e / 30.0)) * 2.0 / 3.0;
 
     let lng_off = dlng * 180.0 / (a_mul * std::f64::consts::PI);
-    let lat_off = -dlat * 180.0
-        / ((A * (1.0 - EE)) / (magic * sqrt_magic) * std::f64::consts::PI);
+    let lat_off = -dlat * 180.0 / ((A * (1.0 - EE)) / (magic * sqrt_magic) * std::f64::consts::PI);
     (lng_off, lat_off)
 }
 
@@ -141,8 +135,7 @@ pub fn wgs84_bbox_to_gcj02(bbox: &LLBBox, margin_deg: f64) -> LLBBox {
     let max_lat = (max_lat + m).min(90.0);
     let min_lng = (min_lng - m).max(-180.0);
     let max_lng = (max_lng + m).min(180.0);
-    LLBBox::new(min_lat, min_lng, max_lat, max_lng)
-        .expect("GCJ-02 bbox construction failed")
+    LLBBox::new(min_lat, min_lng, max_lat, max_lng).expect("GCJ-02 bbox construction failed")
 }
 
 /// Convert an LLPoint from WGS-84 to GCJ-02.
@@ -183,19 +176,25 @@ mod tests {
         let offset_deg = dlng.hypot(dlat);
         let offset_m = offset_deg * 111_000.0;
         eprintln!("GCJ-02 offset: {dlng:.6}°, {dlat:.6}° ({offset_m:.0} m)");
-        assert!(offset_m > 100.0, "expected GCJ-02 offset but got {offset_m:.0} m");
-        assert!(offset_m < 2000.0, "GCJ-02 offset {offset_m:.0} m is implausibly large");
+        assert!(
+            offset_m > 100.0,
+            "expected GCJ-02 offset but got {offset_m:.0} m"
+        );
+        assert!(
+            offset_m < 2000.0,
+            "GCJ-02 offset {offset_m:.0} m is implausibly large"
+        );
     }
 
     /// Round-trip: WGS-84 → GCJ-02 → WGS-84 should recover the original.
     #[test]
     fn round_trip_within_tolerance() {
         let test_cases = [
-            (116.397, 39.907),  // Beijing
-            (121.473, 31.230),  // Shanghai
-            (104.065, 30.572),  // Chengdu
-            (113.264, 23.129),  // Guangzhou
-            (91.132, 29.659),   // Lhasa
+            (116.397, 39.907), // Beijing
+            (121.473, 31.230), // Shanghai
+            (104.065, 30.572), // Chengdu
+            (113.264, 23.129), // Guangzhou
+            (91.132, 29.659),  // Lhasa
         ];
         for (lng, lat) in test_cases {
             let (g_lng, g_lat) = wgs84_to_gcj02(lng, lat);

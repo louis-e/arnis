@@ -91,8 +91,7 @@ impl ElevationProvider for Tianditu {
         grid_width: usize,
         grid_height: usize,
     ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
-        let token =
-            resolve_token().ok_or("TIANDITU_TOKEN environment variable is not set")?;
+        let token = resolve_token().ok_or("TIANDITU_TOKEN environment variable is not set")?;
 
         if grid_width == 0 || grid_height == 0 {
             return Err("Zero-dimensioned grid request".into());
@@ -139,8 +138,7 @@ impl ElevationProvider for Tianditu {
             tile_keys
                 .par_iter()
                 .map(|&(tx, ty)| {
-                    let cache_path =
-                        tile_cache_path(&cache_dir, tx, ty, zoom);
+                    let cache_path = tile_cache_path(&cache_dir, tx, ty, zoom);
                     let img = fetch_or_load(&client, tx, ty, zoom, &cache_path, token);
                     ((tx, ty, zoom), img)
                 })
@@ -214,16 +212,13 @@ impl ElevationProvider for Tianditu {
 
                     let fx = (g_lng + 180.0) / 360.0 * n * TILE_SIZE as f64;
                     let lat_rad = g_lat.to_radians();
-                    let fy = (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI)
-                        / 2.0
+                    let fy = (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0
                         * n
                         * TILE_SIZE as f64;
 
                     let n_tiles = n as i64;
-                    let tx = ((fx / TILE_SIZE as f64).floor() as i64)
-                        .clamp(0, n_tiles - 1) as u32;
-                    let ty = ((fy / TILE_SIZE as f64).floor() as i64)
-                        .clamp(0, n_tiles - 1) as u32;
+                    let tx = ((fx / TILE_SIZE as f64).floor() as i64).clamp(0, n_tiles - 1) as u32;
+                    let ty = ((fy / TILE_SIZE as f64).floor() as i64).clamp(0, n_tiles - 1) as u32;
                     let px = fx - tx as f64 * TILE_SIZE as f64;
                     let py = fy - ty as f64 * TILE_SIZE as f64;
 
@@ -237,9 +232,7 @@ impl ElevationProvider for Tianditu {
                     let v01 = sample_pixel(&tile_map, tx, ty, zoom, x0, y0 + 1);
                     let v11 = sample_pixel(&tile_map, tx, ty, zoom, x0 + 1, y0 + 1);
 
-                    if let (Some(v00), Some(v10), Some(v01), Some(v11)) =
-                        (v00, v10, v01, v11)
-                    {
+                    if let (Some(v00), Some(v10), Some(v01), Some(v11)) = (v00, v10, v01, v11) {
                         let top = v00 + (v10 - v00) * dx;
                         let bot = v01 + (v11 - v01) * dx;
                         *cell = top + (bot - top) * dy;
@@ -348,8 +341,7 @@ fn sample_pixel(
         return None;
     }
     let p = tile.get_pixel(x, y);
-    let raw =
-        p[0] as f64 * 256.0 * 256.0 + p[1] as f64 * 256.0 + p[2] as f64;
+    let raw = p[0] as f64 * 256.0 * 256.0 + p[1] as f64 * 256.0 + p[2] as f64;
     Some(raw * TERRAIN_RGB_SCALE - TERRAIN_RGB_OFFSET)
 }
 
@@ -398,7 +390,9 @@ fn download_tile(
     let status = resp.status();
     if status == 418 {
         // Tianditu WAF block — not an image; don't cache, fail fast.
-        return Err(format!("HTTP 418 (WAF blocked; check token permissions or add Referer header)"));
+        return Err(format!(
+            "HTTP 418 (WAF blocked; check token permissions or add Referer header)"
+        ));
     }
     if status.is_client_error() {
         return Err(format!("HTTP {status}"));
@@ -406,8 +400,7 @@ fn download_tile(
     resp.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = resp.bytes().map_err(|e| e.to_string())?;
     // Validate image before caching so broken tiles don't poison the cache.
-    let img = image::load_from_memory(&bytes)
-        .map_err(|e| format!("decode tile: {e}"))?;
+    let img = image::load_from_memory(&bytes).map_err(|e| format!("decode tile: {e}"))?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -424,12 +417,7 @@ mod tests {
     #[test]
     fn terrain_rgb_decoding() {
         // Sea-level pixel: R=0, G=0, B=0 → height = -10000
-        assert!(
-            ((0u16 * 256 * 256 + 0 * 256 + 0) as f64 * 0.1 - 10000.0
-                + 10000.0)
-                .abs()
-                < 1e-6
-        );
+        assert!(((0u16 * 256 * 256 + 0 * 256 + 0) as f64 * 0.1 - 10000.0 + 10000.0).abs() < 1e-6);
 
         // 1000 m pixel: calculated from formula
         let h = 1000.0;
@@ -437,9 +425,8 @@ mod tests {
         let r = (raw >> 16) as u8;
         let g = ((raw >> 8) & 0xFF) as u8;
         let b = (raw & 0xFF) as u8;
-        let decoded =
-            (r as f64 * 65536.0 + g as f64 * 256.0 + b as f64) * TERRAIN_RGB_SCALE
-                - TERRAIN_RGB_OFFSET;
+        let decoded = (r as f64 * 65536.0 + g as f64 * 256.0 + b as f64) * TERRAIN_RGB_SCALE
+            - TERRAIN_RGB_OFFSET;
         assert!((decoded - 1000.0).abs() < 1.0);
     }
 
