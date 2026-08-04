@@ -1677,6 +1677,28 @@ async function startGeneration() {
     var tianditu_elevation = document.getElementById("tianditu-elevation-toggle").checked;
     var tianditu_token = document.getElementById("tianditu-token-input").value.trim();
     var gpu_accel = document.getElementById("gpu-accel-toggle").checked;
+
+    // GPU acceleration is only beneficial for larger areas
+    if (gpu_accel) {
+      const parts = selectedBBox.split(" ").map(Number);
+      if (parts.length === 4) {
+        const areaSqM = calculateBBoxSize(parts[0], parts[1], parts[2], parts[3]);
+        const GPU_AREA_THRESHOLD_M2 = 25000000; // ~5km x 5km
+        if (areaSqM < GPU_AREA_THRESHOLD_M2) {
+          const proceed = confirm(
+            "GPU acceleration may be slower than CPU for small areas.\n\n" +
+            "This area is relatively small — GPU initialization overhead may outweigh compute savings.\n\n" +
+            "Continue with GPU anyway?"
+          );
+          if (!proceed) {
+            gpu_accel = false;
+            document.getElementById("gpu-accel-toggle").checked = false;
+            localStorage.setItem('arnis-gpu-enabled', 'false');
+            document.getElementById("gpu-indicator").style.display = "none";
+          }
+        }
+      }
+    }
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
