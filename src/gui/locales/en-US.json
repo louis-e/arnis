@@ -54,6 +54,8 @@
   "aws_only_elevation": "Legacy terrain",
   "tianditu_elevation": "Tianditu Elevation",
   "tianditu_token": "Tianditu Token",
+  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",
   "bake_lighting": "Bake lighting",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path",

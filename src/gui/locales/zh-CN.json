@@ -70,5 +70,7 @@
   "world_time": "世界时间",
   "tianditu_elevation": "天地图高程",
   "tianditu_token": "天地图令牌",
+  "gpu_acceleration": "GPU 加速",
+  "gpu_active": "（正在使用 GPU 加速）",
   "map_item": "世界地图物品"
 }

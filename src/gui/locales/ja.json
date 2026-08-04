@@ -69,5 +69,6 @@
   "gamemode_spectator": "スペクテイター",
   "world_time": "ワールド時間",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "ワールド地図アイテム"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "ワールド地図アイテム"
 }

@@ -69,5 +69,6 @@
   "gamemode_spectator": "المتفرج",
   "world_time": "وقت العالم",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "عنصر خريطة العالم"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "عنصر خريطة العالم"
 }

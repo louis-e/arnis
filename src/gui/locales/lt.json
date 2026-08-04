@@ -69,5 +69,6 @@
   "gamemode_spectator": "Stebėtojas",
   "world_time": "Pasaulio laikas",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "Pasaulio žemėlapio daiktas"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Pasaulio žemėlapio daiktas"
 }

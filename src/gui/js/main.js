@@ -122,6 +122,8 @@ async function applyLocalization(localization) {
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
     "span[data-localize='tianditu_elevation']": "tianditu_elevation",
     "span[data-localize='tianditu_token']": "tianditu_token",
+    "span[data-localize='gpu_acceleration']": "gpu_acceleration",
+    "span[data-localize='gpu_active']": "gpu_active",
     "span[data-localize='bake_lighting']": "bake_lighting",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
@@ -787,6 +789,9 @@ function initSettings() {
   // Tianditu elevation toggle + token
   initTiandituSettings();
 
+  // GPU acceleration toggle
+  initGpuSettings();
+
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
@@ -1319,6 +1324,21 @@ function initSavePathSetting() {
   }
 }
 
+function initGpuSettings() {
+  const toggle = document.getElementById("gpu-accel-toggle");
+  // GPU is disabled by default; persisted in localStorage.
+  const saved = localStorage.getItem('arnis-gpu-enabled');
+  if (saved === 'true' && toggle) {
+    toggle.checked = true;
+  }
+
+  if (toggle) {
+    toggle.addEventListener("change", () => {
+      localStorage.setItem('arnis-gpu-enabled', toggle.checked ? 'true' : 'false');
+    });
+  }
+}
+
 function initTiandituSettings() {
   const toggle = document.getElementById("tianditu-elevation-toggle");
   const tokenRow = document.getElementById("tianditu-token-row");
@@ -1656,6 +1676,29 @@ async function startGeneration() {
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var tianditu_elevation = document.getElementById("tianditu-elevation-toggle").checked;
     var tianditu_token = document.getElementById("tianditu-token-input").value.trim();
+    var gpu_accel = document.getElementById("gpu-accel-toggle").checked;
+
+    // GPU acceleration is only beneficial for larger areas
+    if (gpu_accel) {
+      const parts = selectedBBox.split(" ").map(Number);
+      if (parts.length === 4) {
+        const areaSqM = calculateBBoxSize(parts[0], parts[1], parts[2], parts[3]);
+        const GPU_AREA_THRESHOLD_M2 = 25000000; // ~5km x 5km
+        if (areaSqM < GPU_AREA_THRESHOLD_M2) {
+          const proceed = confirm(
+            "GPU acceleration may be slower than CPU for small areas.\n\n" +
+            "This area is relatively small — GPU initialization overhead may outweigh compute savings.\n\n" +
+            "Continue with GPU anyway?"
+          );
+          if (!proceed) {
+            gpu_accel = false;
+            document.getElementById("gpu-accel-toggle").checked = false;
+            localStorage.setItem('arnis-gpu-enabled', 'false');
+            document.getElementById("gpu-indicator").style.display = "none";
+          }
+        }
+      }
+    }
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
@@ -1695,6 +1738,7 @@ async function startGeneration() {
         awsOnlyElevation: aws_only_elevation,
         tiandituElevation: tianditu_elevation,
         tiandituToken: tianditu_token,
+        gpuAccel: gpu_accel,
         bakeLightingEnabled: bake_lighting,
         isNewWorld: true,
         spawnPoint: spawnPoint,
@@ -1707,6 +1751,8 @@ async function startGeneration() {
     });
 
     console.log("Generation process started.");
+    // Show GPU indicator if enabled
+    document.getElementById("gpu-indicator").style.display = gpu_accel ? "" : "none";
     resetEta();
     generationButtonEnabled = false;
     window.arnisPreview3D?.setGenerationRunning(true);

@@ -69,5 +69,6 @@
   "gamemode_spectator": "Skatītājs",
   "world_time": "Pasaules laiks",
   "tianditu_elevation": "Tianditu Elevation",
-  "tianditu_token": "Tianditu Token",  "map_item": "Pasaules kartes priekšmets"
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Pasaules kartes priekšmets"
 }
