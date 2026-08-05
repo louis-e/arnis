@@ -108,6 +108,13 @@ pub fn fetch_elevation_data(
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
+    // Warm up the GPU device on a background thread while the (network-bound)
+    // raw fetch runs, so adapter init doesn't land inside a timed phase.
+    #[cfg(feature = "gpu")]
+    if std::env::var("ARNIS_GPU").as_deref() == Ok("1") {
+        gpu::init_in_background();
+    }
+
     // Fallback chain: selected provider, then Mapterhorn, then AWS.
     let provider = select_provider(bbox, source_mode);
     let mut chain: Vec<Box<dyn ElevationProvider>> = vec![provider];
@@ -129,12 +136,32 @@ pub fn fetch_elevation_data(
     let mut height_grid = raw.heights_meters;
     filter_elevation_outliers(&mut height_grid);
     bench.mark("elev_filter_outliers");
-    repair_terrain_anomalies(&mut height_grid);
-    bench.mark("elev_repair_anomalies");
-    emit_gui_progress_update(14.0, "Processing elevation...");
-    // Safety net: fill any remaining NaN from tile gaps or partial provider coverage
-    fill_nan_values(&mut height_grid);
-    bench.mark("elev_fill_nan");
+
+    // GPU-resident core: anomaly repair + NaN fill run back-to-back on one
+    // upload/download. Falls back to the sequential CPU passes when the GPU
+    // is disabled, unavailable, or the grid exceeds device buffer limits.
+    #[cfg(feature = "gpu")]
+    let gpu_core_done = std::env::var("ARNIS_GPU").as_deref() == Ok("1")
+        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gpu::gpu_anomaly_repair_and_nan_fill(&mut height_grid)
+        }))
+        .unwrap_or(false);
+    #[cfg(not(feature = "gpu"))]
+    let gpu_core_done = false;
+
+    if gpu_core_done {
+        // Both phases happened inside the GPU call; report them separately
+        // with a zero-length NaN mark so benchmark tooling keeps its columns.
+        bench.mark("elev_repair_anomalies");
+        bench.mark("elev_fill_nan");
+    } else {
+        repair_terrain_anomalies(&mut height_grid);
+        bench.mark("elev_repair_anomalies");
+        emit_gui_progress_update(14.0, "Processing elevation...");
+        // Safety net: fill any remaining NaN from tile gaps or partial provider coverage
+        fill_nan_values(&mut height_grid);
+        bench.mark("elev_fill_nan");
+    }
 
     // Land-cover-aware repair: built-up Gaussian smoothing targets urban
     // LiDAR/DSM classification errors, coastal pull-down flattens the

@@ -1,2 +1,2 @@
 scenario,wall_cpu_s,wall_gpu_s,gen_cpu_ms,gen_gpu_ms,repair_cpu_ms,repair_gpu_ms,speedup
-large,230.6,115.6,41284,40579,29367,25823,1.02
+large,94.1,59.3,42884,38759,23643,4949,1.11

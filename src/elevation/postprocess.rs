@@ -842,9 +842,6 @@ fn smooth_built_up_gaussian(
         return;
     }
 
-    let h = heights.len();
-    let w = heights[0].len();
-
     // Early out: if there are no built-up cells, nothing to do.
     let built_up_count: usize = lc_grid
         .iter()
@@ -895,25 +892,31 @@ fn smooth_built_up_gaussian(
 
     // Blend through the feathered mask. Water-surface cells are skipped so
     // the leveled water surface from the previous pass survives intact.
-    let mut total_influenced = 0usize;
-    for y in 0..h {
-        for x in 0..w {
-            if is_water_surface[y][x] {
-                continue;
+    // Rows are independent — parallelise (this is a full-grid pass).
+    let total_influenced: usize = heights
+        .par_iter_mut()
+        .enumerate()
+        .map(|(y, row)| {
+            let mut row_influenced = 0usize;
+            for (x, cell) in row.iter_mut().enumerate() {
+                if is_water_surface[y][x] {
+                    continue;
+                }
+                let m = feathered_mask[y][x].clamp(0.0, 1.0);
+                if m <= 1.0e-4 {
+                    continue;
+                }
+                let orig = *cell;
+                let blur = blurred_heights[y][x];
+                if !orig.is_finite() || !blur.is_finite() {
+                    continue;
+                }
+                *cell = (1.0 - m) * orig + m * blur;
+                row_influenced += 1;
             }
-            let m = feathered_mask[y][x].clamp(0.0, 1.0);
-            if m <= 1.0e-4 {
-                continue;
-            }
-            let orig = heights[y][x];
-            let blur = blurred_heights[y][x];
-            if !orig.is_finite() || !blur.is_finite() {
-                continue;
-            }
-            heights[y][x] = (1.0 - m) * orig + m * blur;
-            total_influenced += 1;
-        }
-    }
+            row_influenced
+        })
+        .sum();
 
     eprintln!(
         "Land cover repair: built-up Gaussian smoothing σ={:.2} cells applied to {} built-up + feathered cells ({} core built-up cells)",
