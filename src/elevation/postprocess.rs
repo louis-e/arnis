@@ -928,7 +928,11 @@ pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>>
     #[cfg(feature = "gpu")]
     {
         if std::env::var("ARNIS_GPU").as_deref() == Ok("1") {
-            eprintln!("[GPU] attempting gaussian_blur ({}x{})", grid.len(), grid[0].len());
+            eprintln!(
+                "[GPU] attempting gaussian_blur ({}x{})",
+                grid.len(),
+                grid[0].len()
+            );
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma)
             }));
