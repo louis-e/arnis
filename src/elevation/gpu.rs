@@ -209,6 +209,7 @@ fn ctx() -> Option<&'static GpuCtx> {
 
 /// Whether a GPU device is available for compute.
 #[inline]
+#[allow(dead_code)] // diagnostic probe; kept for GUI/CLI status reporting
 pub fn gpu_available() -> bool {
     ctx().is_some()
 }
