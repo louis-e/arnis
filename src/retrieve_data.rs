@@ -110,6 +110,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
+/// Loads a user-provided OSM JSON data file locally
 pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Loading data from file...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Loading data from file...");
