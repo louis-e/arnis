@@ -36,6 +36,14 @@ pub fn apply_osm_water_override(
     if width < 2 || height < 2 || world_width < 2 || world_height < 2 {
         return;
     }
+    // Early out when nothing could ever touch the grid: building the water
+    // context runs a connected-component analysis over the whole land-cover
+    // grid (tens of seconds on large areas), and with no water elements it
+    // would only feed guards that no fill ever consults. Mirrors the
+    // bridge-shadow early out in `bridge_repair`.
+    if !has_water_override_candidates(elements) {
+        return;
+    }
     let scale_to_grid_x = (width as f64 - 1.0) / (world_width as f64 - 1.0);
     let scale_to_grid_z = (height as f64 - 1.0) / (world_height as f64 - 1.0);
     let min_x = xzbbox.min_x();
@@ -179,6 +187,23 @@ fn is_water_polygon_way(way: &ProcessedWay) -> bool {
         return false;
     }
     has_water_polygon_tags(&way.tags)
+}
+
+/// Whether any element could trigger a water-override fill: a water polygon
+/// way, a waterway line, or a water relation. Conservative on purpose — a
+/// false positive only means the context is built and then unused, while a
+/// false negative would silently drop real water.
+fn has_water_override_candidates(elements: &[ProcessedElement]) -> bool {
+    elements.iter().any(|elem| match elem {
+        // Note: the main loop's `else if` keeps a closed-ring water polygon
+        // from also rasterizing as a waterway, but for candidacy either arm
+        // is enough to justify the water context.
+        ProcessedElement::Way(way) => {
+            is_water_polygon_way(way) || way.tags.contains_key("waterway")
+        }
+        ProcessedElement::Relation(rel) => is_water_relation(rel),
+        ProcessedElement::Node(_) => false,
+    })
 }
 
 fn is_water_relation(rel: &ProcessedRelation) -> bool {
@@ -814,5 +839,92 @@ mod tests {
         assert!(n > 0);
         assert_eq!(row[3], LC_WATER);
         assert_ne!(row[8], LC_WATER);
+    }
+
+    fn way(id: u64, nodes: Vec<ProcessedNode>, tags: &[(&str, &str)]) -> ProcessedWay {
+        ProcessedWay {
+            id,
+            nodes,
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    fn land_cover_16x16() -> LandCoverData {
+        LandCoverData {
+            grid: vec![vec![0u8; 16]; 16],
+            water_distance: vec![vec![0u8; 16]; 16],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width: 16,
+            height: 16,
+        }
+    }
+
+    #[test]
+    fn no_water_elements_leaves_grid_untouched() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let mut lc = land_cover_16x16();
+        let heights = vec![vec![0.0f32; 16]; 16];
+        let elements: Vec<ProcessedElement> = Vec::new();
+        apply_osm_water_override(&mut lc, &heights, 16, 16, &elements, &bbox);
+        assert!(lc.grid.iter().flatten().all(|&c| c == 0));
+        // Non-water elements must not count as candidates either.
+        let building = ProcessedElement::Way(way(
+            1,
+            vec![
+                node(1, 2, 2),
+                node(2, 6, 2),
+                node(3, 6, 6),
+                node(4, 2, 6),
+                node(1, 2, 2),
+            ],
+            &[("building", "yes")],
+        ));
+        assert!(!has_water_override_candidates(&[building.clone()]));
+        apply_osm_water_override(&mut lc, &heights, 16, 16, &[building], &bbox);
+        assert!(lc.grid.iter().flatten().all(|&c| c == 0));
+    }
+
+    #[test]
+    fn water_polygon_fills_through_public_entry() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let mut lc = land_cover_16x16();
+        let heights = vec![vec![0.0f32; 16]; 16];
+        let ring = way(
+            1,
+            vec![
+                node(1, 4, 4),
+                node(2, 11, 4),
+                node(3, 11, 11),
+                node(4, 4, 11),
+                node(1, 4, 4),
+            ],
+            &[("natural", "water")],
+        );
+        let elements = vec![ProcessedElement::Way(ring)];
+        assert!(has_water_override_candidates(&elements));
+        apply_osm_water_override(&mut lc, &heights, 16, 16, &elements, &bbox);
+        assert_eq!(lc.grid[7][7], LC_WATER);
+        assert_ne!(lc.grid[0][0], LC_WATER);
+    }
+
+    #[test]
+    fn waterway_line_rasterizes_through_public_entry() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let mut lc = land_cover_16x16();
+        let heights = vec![vec![0.0f32; 16]; 16];
+        let river = way(
+            1,
+            vec![node(1, 2, 8), node(2, 13, 8)],
+            &[("waterway", "river")],
+        );
+        let elements = vec![ProcessedElement::Way(river)];
+        assert!(has_water_override_candidates(&elements));
+        apply_osm_water_override(&mut lc, &heights, 16, 16, &elements, &bbox);
+        assert_eq!(lc.grid[8][7], LC_WATER);
+        // river half-width is 4, so a cell far off the line stays untouched.
+        assert_ne!(lc.grid[15][7], LC_WATER);
     }
 }
