@@ -882,7 +882,9 @@ mod tests {
             ],
             &[("building", "yes")],
         ));
-        assert!(!has_water_override_candidates(&[building.clone()]));
+        assert!(!has_water_override_candidates(std::slice::from_ref(
+            &building
+        )));
         apply_osm_water_override(&mut lc, &heights, 16, 16, &[building], &bbox);
         assert!(lc.grid.iter().flatten().all(|&c| c == 0));
     }

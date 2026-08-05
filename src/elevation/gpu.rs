@@ -659,9 +659,9 @@ mod tests {
         let grid = sample_grid(97, 63);
         // NaN holes must be skipped + renormalised exactly like the CPU path.
         let mut with_nan = grid.clone();
-        for y in 20..25 {
-            for x in 30..36 {
-                with_nan[y][x] = f64::NAN;
+        for row in with_nan.iter_mut().take(25).skip(20) {
+            for cell in row.iter_mut().take(36).skip(30) {
+                *cell = f64::NAN;
             }
         }
         let cpu = crate::elevation::postprocess::gaussian_blur_grid(&with_nan, 3.0);
@@ -677,9 +677,9 @@ mod tests {
         let mut grid = sample_grid(64, 64);
         grid[30][30] += 500.0; // isolated spike -> anomaly repair
         grid[31][30] += 500.0;
-        for y in 10..13 {
-            for x in 10..14 {
-                grid[y][x] = f64::NAN; // small NaN hole -> NaN fill
+        for row in grid.iter_mut().take(13).skip(10) {
+            for cell in row.iter_mut().take(14).skip(10) {
+                *cell = f64::NAN; // small NaN hole -> NaN fill
             }
         }
         let mut cpu_grid = grid.clone();
@@ -709,9 +709,9 @@ mod tests {
             "too many CPU/GPU mismatches: {mismatches}/{total}"
         );
         // The NaN hole must be fully filled by both paths.
-        for y in 10..13 {
-            for x in 10..14 {
-                assert!(gpu_grid[y][x].is_finite());
+        for row in gpu_grid.iter().take(13).skip(10) {
+            for &cell in row.iter().take(14).skip(10) {
+                assert!(cell.is_finite());
             }
         }
     }
