@@ -110,7 +110,6 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
-/// Loads a user-provided OSM JSON data file locally
 pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Loading data from file...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Loading data from file...");
@@ -121,7 +120,16 @@ pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::E
     let data: OsmData = OsmData::deserialize(&mut deserializer)?;
     Ok(data)
 }
-
+/// Loads a user-provided OSM JSON data file locally
+pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::Error>> {
+    println!("{} Loading data from file...", "[1/7]".bold());
+    emit_gui_progress_update(1.0, "Loading data from file...");
+    let file: File = File::open(file)?;
+    let reader: BufReader<File> = BufReader::new(file);
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let data: OsmData = OsmData::deserialize(&mut deserializer)?;
+    Ok(data)
+}
 /// Main function to fetch data
 pub fn fetch_data_from_overpass(
     bbox: LLBBox,
