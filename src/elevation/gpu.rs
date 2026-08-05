@@ -147,10 +147,7 @@ fn try_init_gpu() -> Option<GpuCtx> {
         push_constant_ranges: &[],
     });
 
-    let make_pipeline = |source: &str,
-                         label: &str,
-                         entry: &str,
-                         layout: &wgpu::PipelineLayout| {
+    let make_pipeline = |source: &str, label: &str, entry: &str, layout: &wgpu::PipelineLayout| {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -239,7 +236,12 @@ pub fn gpu_gaussian_blur_2d(grid: &[Vec<f64>], sigma: f64) -> Option<Vec<Vec<f64
     // Same kernel formula as the CPU path, downcast to f32.
     let kernel_size = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel = create_gaussian_kernel_f32(kernel_size, sigma);
-    let params = [w as u32, h as u32, (kernel_size / 2) as u32, kernel_size as u32];
+    let params = [
+        w as u32,
+        h as u32,
+        (kernel_size / 2) as u32,
+        kernel_size as u32,
+    ];
 
     let flat = flatten_grid(grid);
     let buf_a = create_storage_buffer_init(&ctx.device, &flat, "blur_a");
@@ -247,8 +249,28 @@ pub fn gpu_gaussian_blur_2d(grid: &[Vec<f64>], sigma: f64) -> Option<Vec<Vec<f64
     let weights = create_storage_buffer_init(&ctx.device, &kernel, "weights");
     let params_buf = create_uniform_buffer(&ctx.device, &params);
 
-    run_pass(ctx, &ctx.blur_h, &ctx.blur_layout, &buf_a, &buf_b, &params_buf, &weights, w, h);
-    run_pass(ctx, &ctx.blur_v, &ctx.blur_layout, &buf_b, &buf_a, &params_buf, &weights, w, h);
+    run_pass(
+        ctx,
+        &ctx.blur_h,
+        &ctx.blur_layout,
+        &buf_a,
+        &buf_b,
+        &params_buf,
+        &weights,
+        w,
+        h,
+    );
+    run_pass(
+        ctx,
+        &ctx.blur_v,
+        &ctx.blur_layout,
+        &buf_b,
+        &buf_a,
+        &params_buf,
+        &weights,
+        w,
+        h,
+    );
 
     let flat_out = read_buffer_f32(&ctx.device, &ctx.queue, &buf_a, total);
     Some(reshape_grid(&flat_out, w, h))
@@ -298,7 +320,17 @@ pub fn gpu_anomaly_repair_and_nan_fill(grid: &mut Vec<Vec<f64>>) -> bool {
      -> PassOutcome {
         for _pass in 0..max_passes {
             ctx.queue.write_buffer(&counter, 0, &0u32.to_le_bytes());
-            run_pass(ctx, pipeline, &ctx.iter_layout, buf_a, buf_b, &params_buf, &counter, w, h);
+            run_pass(
+                ctx,
+                pipeline,
+                &ctx.iter_layout,
+                buf_a,
+                buf_b,
+                &params_buf,
+                &counter,
+                w,
+                h,
+            );
             let changed = read_counter(ctx, &counter);
             std::mem::swap(buf_a, buf_b);
             if changed == 0 {
@@ -408,7 +440,9 @@ fn run_pass(
     });
     let mut encoder = ctx
         .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpu_pass") });
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("gpu_pass"),
+        });
     {
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("gpu_pass"),
@@ -434,7 +468,9 @@ fn read_counter(ctx: &GpuCtx, counter: &wgpu::Buffer) -> u32 {
     });
     let mut encoder = ctx
         .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("counter_copy") });
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("counter_copy"),
+        });
     encoder.copy_buffer_to_buffer(counter, 0, &staging, 0, 4);
     ctx.queue.submit(Some(encoder.finish()));
 
