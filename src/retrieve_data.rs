@@ -118,6 +118,7 @@ pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::E
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
     let data: OsmData = OsmData::deserialize(&mut deserializer)?;
     Ok(data)
+}
 /// Main function to fetch data
 pub fn fetch_data_from_overpass(
     bbox: LLBBox,
