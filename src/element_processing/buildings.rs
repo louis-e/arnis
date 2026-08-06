@@ -8211,7 +8211,7 @@ mod height_tests {
         assert_eq!(h, 8);
     }
 
-    // layer=-1 is stacking order, only location decides underground
+    // layer=-1 is treated as underground unless an explicit surface/overground/roof location is set
     #[test]
     fn surface_location_overrides_negative_layer() {
         let way = way_with_tags(&[("building", "office"), ("layer", "-1")]);
