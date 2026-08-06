@@ -125,6 +125,7 @@ async function applyLocalization(localization) {
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
+    "span[data-localize='world_name']": "world_name",
     "span[data-localize='gamemode']": "gamemode",
     "button[data-localize='gamemode_survival']": "gamemode_survival",
     "button[data-localize='gamemode_creative']": "gamemode_creative",
@@ -750,6 +751,21 @@ function initSettings() {
   timeSlider.addEventListener("dblclick", () => {
     timeSlider.value = 720;
     timeValue.textContent = formatClock(720);
+  });
+
+  // World name input: preview the upcoming name under the Start button so
+  // it's visible that the custom name applies without a save step
+  const worldNameInput = document.getElementById("world-name-input");
+  worldNameInput.addEventListener("input", () => {
+    const custom = worldNameInput.value.trim();
+    const label = document.getElementById("world-name-label");
+    if (!label) return;
+    if (custom) {
+      label.removeAttribute("data-placeholder");
+      label.textContent = custom;
+    } else {
+      setWorldNameLabel(lastGeneratedWorldName);
+    }
   });
 
   // Rotation angle input
@@ -1513,8 +1529,10 @@ function displayBboxInfoText(bboxText) {
 }
 
 let worldPath = "";
+let lastGeneratedWorldName = "";
 
 function setWorldNameLabel(text) {
+  lastGeneratedWorldName = text || "";
   const label = document.getElementById('world-name-label');
   if (!label) return;
   if (text) {
@@ -1571,6 +1589,9 @@ async function startGeneration() {
       return;
     }
 
+    // Custom world name (empty input means auto-generated name)
+    const customWorldName = (document.getElementById('world-name-input')?.value || '').trim() || null;
+
     // Auto-create world for Java format
     if (selectedWorldFormat === 'java') {
       if (!savePath) {
@@ -1578,7 +1599,7 @@ async function startGeneration() {
         return;
       }
       try {
-        const worldName = await invoke('gui_create_world', { savePath: savePath });
+        const worldName = await invoke('gui_create_world', { savePath: savePath, worldName: customWorldName });
         if (worldName) {
           worldPath = worldName;
           setWorldNameLabel(basenameFromPath(worldName));
@@ -1661,7 +1682,8 @@ async function startGeneration() {
         rotationAngle: rotationAngle,
         gamemode: gamemode,
         worldTime: worldTime,
-        mapItem: mapItem
+        mapItem: mapItem,
+        worldName: customWorldName
     });
 
     console.log("Generation process started.");

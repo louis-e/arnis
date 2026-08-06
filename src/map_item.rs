@@ -410,8 +410,9 @@ mod tests {
     #[test]
     fn writes_map_files_and_inventory_item() {
         let tmp = tempfile::tempdir().unwrap();
-        let world =
-            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        let world = std::path::PathBuf::from(
+            crate::world_utils::create_new_world(tmp.path(), None).unwrap(),
+        );
         let xzbbox = XZBBox::rect_from_xz_lengths(300.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
         write_map_item(&world, &preview, &xzbbox).unwrap();
@@ -581,8 +582,9 @@ mod tests {
     #[test]
     fn oversized_world_disables_the_player_marker() {
         let tmp = tempfile::tempdir().unwrap();
-        let world =
-            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        let world = std::path::PathBuf::from(
+            crate::world_utils::create_new_world(tmp.path(), None).unwrap(),
+        );
         let xzbbox = XZBBox::rect_from_xz_lengths(3000.0, 3000.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
         write_map_item(&world, &preview, &xzbbox).unwrap();
@@ -600,8 +602,9 @@ mod tests {
     #[test]
     fn preserves_user_items_and_dodges_occupied_slot_zero() {
         let tmp = tempfile::tempdir().unwrap();
-        let world =
-            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        let world = std::path::PathBuf::from(
+            crate::world_utils::create_new_world(tmp.path(), None).unwrap(),
+        );
 
         // Seed: a sword in slot 0 and the user's own map in slot 5.
         let mut root = read_gzip_nbt(&world.join("level.dat")).unwrap();
@@ -655,8 +658,9 @@ mod tests {
     #[test]
     fn respects_existing_idcounts_and_replaces_old_item() {
         let tmp = tempfile::tempdir().unwrap();
-        let world =
-            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        let world = std::path::PathBuf::from(
+            crate::world_utils::create_new_world(tmp.path(), None).unwrap(),
+        );
         let data_dir = world.join("data");
         std::fs::create_dir_all(&data_dir).unwrap();
         write_gzip_nbt(

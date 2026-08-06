@@ -24,6 +24,11 @@ pub struct Args {
     #[arg(long = "output-dir", alias = "path")]
     pub path: Option<PathBuf>,
 
+    /// Custom name for the generated world (optional, default: auto-generated).
+    /// A counter suffix is appended if a world with that name already exists.
+    #[arg(long)]
+    pub world_name: Option<String>,
+
     /// Generate a Bedrock Edition world (.mcworld) instead of Java Edition
     #[arg(long)]
     pub bedrock: bool,

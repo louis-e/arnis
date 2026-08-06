@@ -9,6 +9,7 @@
   "generation_process_started": "Postopek generiranja se je začel.",
   "winter_mode": "Zimski način",
   "world_scale": "Merilo sveta",
+  "world_name": "Ime sveta",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Časovna omejitev zapolnjevanja (sek)",
   "ground_level": "Nivo tal",

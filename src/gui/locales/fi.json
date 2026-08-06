@@ -9,6 +9,7 @@
   "generation_process_started": "Luontiprosessi aloitettu.",
   "winter_mode": "Talvitila",
   "world_scale": "Maailmanskaalaus",
+  "world_name": "Maailman nimi",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Täytön aikakatkaisu (sec)",
   "ground_level": "Maataso",

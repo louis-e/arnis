@@ -9,6 +9,7 @@
   "generation_process_started": "Процесс генерации начат",
   "winter_mode": "Зимний режим",
   "world_scale": "Масштаб мира",
+  "world_name": "Название мира",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Тайм-аут заливки (сек)",
   "ground_level": "Уровень земли",

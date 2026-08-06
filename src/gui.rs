@@ -279,7 +279,7 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
 /// Creates a new Java Edition world in the given base save directory.
 /// Called when the user clicks "Create World".
 #[tauri::command]
-fn gui_create_world(save_path: String) -> Result<String, i32> {
+fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<String, i32> {
     let trimmed = save_path.trim();
     if trimmed.is_empty() {
         return Err(3);
@@ -288,11 +288,11 @@ fn gui_create_world(save_path: String) -> Result<String, i32> {
     if !base.is_dir() {
         return Err(3); // Error code 3: Failed to create new world
     }
-    create_new_world(&base).map_err(|_| 3)
+    create_new_world(&base, world_name.as_deref()).map_err(|_| 3)
 }
 
-fn create_new_world(base_path: &Path) -> Result<String, String> {
-    crate::world_utils::create_new_world(base_path)
+fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
+    crate::world_utils::create_new_world(base_path, custom_name)
 }
 
 /// Adds localized area name to the world name in level.dat
@@ -932,6 +932,7 @@ fn gui_start_generation(
     gamemode: String,
     world_time: i64,
     map_item: bool,
+    world_name: Option<String>,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -1107,24 +1108,21 @@ fn gui_start_generation(
                     (updated_path, None)
                 }
                 WorldFormat::BedrockMcWorld => {
-                    // Bedrock: generate .mcworld on Desktop with location-based name
+                    // Bedrock: generate .mcworld on Desktop with custom or location-based name
                     let output_dir = crate::world_utils::get_bedrock_output_directory();
-                    let (output_path, lvl_name) =
-                        crate::world_utils::build_bedrock_output(&bbox, output_dir);
+                    let (output_path, lvl_name) = crate::world_utils::build_bedrock_output(
+                        &bbox,
+                        output_dir,
+                        world_name.as_deref(),
+                    );
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }
                 WorldFormat::LuantiWorld => {
                     let worlds_dir = crate::world_utils::get_luanti_worlds_directory();
                     let _ = std::fs::create_dir_all(&worlds_dir);
-                    let mut counter = 1;
-                    let world_name = loop {
-                        let candidate = format!("Arnis Luanti World {counter}");
-                        if !worlds_dir.join(&candidate).exists() {
-                            break candidate;
-                        }
-                        counter += 1;
-                    };
+                    let world_name =
+                        crate::world_utils::luanti_world_name(&worlds_dir, world_name.as_deref());
                     let luanti_path = worlds_dir.join(&world_name);
                     println!(
                         "Creating Luanti world at: {}",
@@ -1180,6 +1178,9 @@ fn gui_start_generation(
                 } else {
                     world_path
                 }),
+                // World naming is already resolved above (create_new_world /
+                // build_bedrock_output / luanti_world_name), so Args doesn't need it.
+                world_name: None,
                 bedrock: world_format == WorldFormat::BedrockMcWorld,
                 luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),

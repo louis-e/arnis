@@ -9,6 +9,7 @@
   "generation_process_started": "Processus de génération commencé.",
   "winter_mode": "Mode hiver",
   "world_scale": "Échelle du monde",
+  "world_name": "Nom du monde",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Expiration du délai de remplissage (en secondes)",
   "ground_level": "Niveau du sol",
