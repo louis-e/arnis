@@ -217,11 +217,10 @@ pub fn generate_power_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
             "tower" => generate_power_tower_from_node(editor, node),
             "pole" => generate_power_pole_from_node(editor, node),
             "generator"
-                if node.tags.get("generator:source").map(|s| s.as_str()) == Some("wind") =>
+                if node.tags.get("generator:source").map(|s| s.as_str()) == Some("wind")
+                    && !is_mounted_or_micro_turbine(&node.tags) =>
             {
-                if !is_mounted_or_micro_turbine(&node.tags) {
-                    crate::structures::windturbine::place(editor, node.x, node.z);
-                }
+                crate::structures::windturbine::place(editor, node.x, node.z);
             }
             _ => {}
         }
