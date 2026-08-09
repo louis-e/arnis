@@ -68,5 +68,9 @@
   "gamemode_creative": "Kūrybinis",
   "gamemode_spectator": "Stebėtojas",
   "world_time": "Pasaulio laikas",
-  "map_item": "Pasaulio žemėlapio daiktas"
+  "map_item": "Pasaulio žemėlapio daiktas",
+  "reset_to_default": "Atkurti numatytąją reikšmę",
+  "reset_all_settings": "Atkurti visus nustatymus",
+  "reset_all_settings_button": "Atkurti",
+  "reset_all_settings_confirm": "Patvirtinti?"
 }

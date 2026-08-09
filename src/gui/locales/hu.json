@@ -68,5 +68,9 @@
   "gamemode_creative": "Kreatív",
   "gamemode_spectator": "Néző",
   "world_time": "Világidő",
-  "map_item": "Világtérkép-tárgy"
+  "map_item": "Világtérkép-tárgy",
+  "reset_to_default": "Visszaállítás alapértelmezettre",
+  "reset_all_settings": "Összes beállítás visszaállítása",
+  "reset_all_settings_button": "Visszaállítás",
+  "reset_all_settings_confirm": "Megerősíti?"
 }

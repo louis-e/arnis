@@ -512,14 +512,13 @@ fn set_player_spawn_in_level_dat(
 
 // Function to update player spawn Y coordinate based on terrain height after generation
 // This updates the spawn Y coordinate to be at terrain height + 3 blocks
+// `xzbbox` must be the box the world was generated from, post-rotation when a
+// rotation was applied, since `ground` is indexed against it.
 pub fn update_player_spawn_y_after_generation(
     world_path: &Path,
-    bbox_text: String,
-    scale: f64,
+    xzbbox: &XZBBox,
     ground: &Ground,
 ) -> Result<(), String> {
-    use crate::coordinate_system::transformation::CoordTransformer;
-
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
     if !level_path.exists() {
@@ -577,13 +576,8 @@ pub fn update_player_spawn_y_after_generation(
 
     // Calculate terrain-based Y coordinate
     let spawn_y = if ground.elevation_enabled {
-        // Parse coordinates for terrain lookup
-        let llbbox = LLBBox::from_str(&bbox_text)
-            .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{e}"))?;
-        let (_, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
-            .map_err(|e| format!("Failed to build transformation:\n{e}"))?;
-
-        // Calculate relative coordinates for ground system
+        // Deriving the bbox from lat/lng here would give the pre-rotation
+        // extents and sample the wrong point on rotated worlds.
         let relative_x = existing_spawn_x - xzbbox.min_x();
         let relative_z = existing_spawn_z - xzbbox.min_z();
         let terrain_point = XZPoint::new(relative_x, relative_z);
@@ -1219,13 +1213,27 @@ fn gui_start_generation(
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
             if skip_osm_objects {
                 // Generate ground data (terrain) for terrain-only mode
-                let ground = ground::generate_ground_data(&args);
+                let mut ground = ground::generate_ground_data(&args);
 
                 // Create empty parsed_elements and xzbbox for terrain-only mode
-                let parsed_elements = Vec::new();
-                let (_coord_transformer, xzbbox) =
+                let mut parsed_elements = Vec::new();
+                let (_coord_transformer, mut xzbbox) =
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+
+                // The spawn point is rotated above, so skipping the world
+                // rotation here would drop the player outside the terrain.
+                map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
+
+                if rotation_angle.abs() > f64::EPSILON {
+                    map_transformation::rotate::rotate_world(
+                        rotation_angle.clamp(-90.0, 90.0),
+                        &mut parsed_elements,
+                        &mut xzbbox,
+                        &mut ground,
+                    )
+                    .map_err(|e| format!("Rotation failed: {e}"))?;
+                }
 
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,

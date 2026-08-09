@@ -68,5 +68,9 @@
   "gamemode_creative": "Творческий",
   "gamemode_spectator": "Наблюдатель",
   "world_time": "Время мира",
-  "map_item": "Предмет карты мира"
+  "map_item": "Предмет карты мира",
+  "reset_to_default": "Сбросить до значения по умолчанию",
+  "reset_all_settings": "Сбросить все настройки",
+  "reset_all_settings_button": "Сбросить",
+  "reset_all_settings_confirm": "Подтвердить?"
 }

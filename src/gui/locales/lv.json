@@ -68,5 +68,9 @@
   "gamemode_creative": "Radošais",
   "gamemode_spectator": "Skatītājs",
   "world_time": "Pasaules laiks",
-  "map_item": "Pasaules kartes priekšmets"
+  "map_item": "Pasaules kartes priekšmets",
+  "reset_to_default": "Atiestatīt uz noklusējumu",
+  "reset_all_settings": "Atiestatīt visus iestatījumus",
+  "reset_all_settings_button": "Atiestatīt",
+  "reset_all_settings_confirm": "Apstiprināt?"
 }

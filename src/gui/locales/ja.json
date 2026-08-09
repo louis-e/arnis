@@ -68,5 +68,9 @@
   "gamemode_creative": "クリエイティブ",
   "gamemode_spectator": "スペクテイター",
   "world_time": "ワールド時間",
-  "map_item": "ワールド地図アイテム"
+  "map_item": "ワールド地図アイテム",
+  "reset_to_default": "デフォルトに戻す",
+  "reset_all_settings": "すべての設定をリセット",
+  "reset_all_settings_button": "リセット",
+  "reset_all_settings_confirm": "確定?"
 }

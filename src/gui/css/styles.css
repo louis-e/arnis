@@ -978,7 +978,8 @@ input[type="range"] {
    brief class-driven background flash rather than a separate status
    label — keeps the row visually consistent with the checkbox and
    slider rows next to it. */
-.clear-cache-button {
+.clear-cache-button,
+.settings-reset-button {
   background: none;
   border: 1px solid #fecc44;
   border-radius: 4px;
@@ -995,7 +996,8 @@ input[type="range"] {
               border-color 0.4s ease, opacity 0.2s ease;
 }
 
-.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error) {
+.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error),
+.settings-reset-button:hover:not(:disabled):not(.is-confirming) {
   background: rgba(254, 204, 68, 0.15);
 }
 
@@ -1017,6 +1019,72 @@ input[type="range"] {
   background: rgba(207, 102, 121, 0.85);
   color: #ffffff;
   border-color: #cf6679;
+}
+
+/* Per-setting revert button, inside the row label after the tooltip icon. */
+/* Same 16px box and round hover target as .tooltip-icon so they read as a pair. */
+/* The resets undo the global button rule, like .save-path-browse does. */
+/* No border: this is content-box in some engines and it would shrink the glyph. */
+/* Hidden with visibility, not display, so the label cannot shift mid-drag. */
+.setting-revert {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.settings-row.is-modified .setting-revert {
+  visibility: visible;
+  opacity: 1;
+}
+
+.setting-revert:hover {
+  background: rgba(254, 204, 68, 0.3);
+}
+
+.setting-revert:focus-visible {
+  outline: 1px solid #fecc44;
+  outline-offset: 1px;
+}
+
+/* Fills the button, so with the cropped viewBox the glyph matches the tooltip icon. */
+.setting-revert svg {
+  width: 100%;
+  height: 100%;
+  fill: #fecc44;
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setting-revert {
+    transition: none;
+  }
+}
+
+/* Disabled while nothing differs from the defaults. */
+.settings-reset-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  border-color: rgba(254, 204, 68, 0.35);
+}
+
+/* Awaiting the second click. Same warm red as .clear-cache-button.is-error. */
+.settings-reset-button.is-confirming {
+  background: rgba(207, 102, 121, 0.85);
+  border-color: #cf6679;
+  color: #ffffff;
 }
 
 .license-button-row {

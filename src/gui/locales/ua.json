@@ -68,5 +68,9 @@
   "gamemode_creative": "Творчість",
   "gamemode_spectator": "Спостерігач",
   "world_time": "Час світу",
-  "map_item": "Предмет карти світу"
+  "map_item": "Предмет карти світу",
+  "reset_to_default": "Скинути до типового значення",
+  "reset_all_settings": "Скинути всі налаштування",
+  "reset_all_settings_button": "Скинути",
+  "reset_all_settings_confirm": "Підтвердити?"
 }
