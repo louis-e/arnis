@@ -1059,12 +1059,18 @@ input[type="range"] {
   outline-offset: 1px;
 }
 
-/* Fills the button, so with the cropped viewBox the glyph matches the tooltip icon. */
+/* Slightly inset in the 16px box and softened, to sit at the same visual
+   weight as the tooltip icon's translucent disc rather than outshine it. */
 .setting-revert svg {
-  width: 100%;
-  height: 100%;
-  fill: #fecc44;
+  width: 13px;
+  height: 13px;
+  fill: rgba(254, 204, 68, 0.75);
   display: block;
+  transition: fill 0.15s ease;
+}
+
+.setting-revert:hover svg {
+  fill: #fecc44;
 }
 
 @media (prefers-reduced-motion: reduce) {
