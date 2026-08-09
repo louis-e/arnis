@@ -593,16 +593,22 @@ pub fn generate_world_with_options(
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements);
 
+    // Resolved before the 3D archetypes so they never claim a landmark's element.
+    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, args);
+
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
-    let models_3d_pipeline = args
-        .use_3d
-        .then(|| crate::models_3d::Models3dPipeline::prescan(&elements, args));
+    let models_3d_pipeline = args.use_3d.then(|| {
+        crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
+    });
     let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
     let models_3d_suppressed: &HashSet<(&'static str, u64)> = models_3d_pipeline
         .as_ref()
         .map(|p| p.suppressed())
         .unwrap_or(&empty_suppressed);
+    // Still honoured without a 3D pipeline; the flag keeps this a bool test.
+    let landmark_suppressed: &HashSet<(&'static str, u64)> = landmarks.suppressed();
+    let has_landmarks = !landmark_suppressed.is_empty();
 
     bench.mark("precompute");
 
@@ -665,10 +671,12 @@ pub fn generate_world_with_options(
         // Regions any 3D placement may write to: kept resident (not evicted in-loop)
         // so the post-merge placement pass lands in RAM, then flushed at finalize.
         let model_regions: HashSet<(i32, i32)> = if eviction_active {
-            models_3d_pipeline
+            let mut regions: HashSet<(i32, i32)> = models_3d_pipeline
                 .as_ref()
                 .map(|p| p.deferred_region_keys(args.scale))
-                .unwrap_or_default()
+                .unwrap_or_default();
+            regions.extend(landmarks.deferred_region_keys(args.scale));
+            regions
         } else {
             HashSet::new()
         };
@@ -760,6 +768,7 @@ pub fn generate_world_with_options(
                         let element = &elements[elem_idx];
                         let suppression_key = (element.kind(), element.id());
                         if models_3d_suppressed.contains(&suppression_key)
+                            || (has_landmarks && landmark_suppressed.contains(&suppression_key))
                             || outline_suppression.contains(&suppression_key)
                         {
                             continue;
@@ -971,6 +980,7 @@ pub fn generate_world_with_options(
             element_counter += 1;
             let suppression_key = (element.kind(), element.id());
             if models_3d_suppressed.contains(&suppression_key)
+                || (has_landmarks && landmark_suppressed.contains(&suppression_key))
                 || outline_suppression.contains(&suppression_key)
             {
                 continue;
@@ -1100,6 +1110,12 @@ pub fn generate_world_with_options(
     // Run after ground generation so anchor Y reflects the final terrain.
     if let Some(p) = models_3d_pipeline.as_ref() {
         p.place(&mut editor, args);
+    }
+    // Last, because they clear their own footprint.
+    let landmarks_start = args.benchmark.then(std::time::Instant::now);
+    landmarks.place(&mut editor, args);
+    if let Some(t) = landmarks_start {
+        bench.report("landmark_place", t.elapsed());
     }
     bench.mark("post_passes");
 

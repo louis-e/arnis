@@ -341,6 +341,25 @@ impl<'a> WorldEditor<'a> {
         })
     }
 
+    /// Whether land cover backs a speculative tree at (x, z), one no tag claims.
+    /// Tags that do assert trees, like `landuse=forest`, are authoritative and
+    /// must not consult this. True without land cover, so those worlds are unchanged.
+    pub fn land_cover_backs_trees(&self, x: i32, z: i32) -> bool {
+        let Some(ground) = self.ground.as_ref() else {
+            return true;
+        };
+        if !ground.has_land_cover() {
+            return true;
+        }
+        matches!(
+            ground.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            )),
+            crate::land_cover::LC_TREE_COVER | crate::land_cover::LC_SHRUBLAND
+        )
+    }
+
     /// ESA distance-to-shore (BFS capped at 15): 0 = non-water or open water past the
     /// cap, 1 = shore, 2..=15 = inward. So `is_lc_water && distance == 0` is the deep
     /// interior of a large body, never a narrow river.
