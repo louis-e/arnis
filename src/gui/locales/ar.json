@@ -68,5 +68,9 @@
   "gamemode_creative": "الإبداع",
   "gamemode_spectator": "المتفرج",
   "world_time": "وقت العالم",
-  "map_item": "عنصر خريطة العالم"
+  "map_item": "عنصر خريطة العالم",
+  "reset_to_default": "إعادة التعيين إلى الوضع الافتراضي",
+  "reset_all_settings": "إعادة تعيين جميع الإعدادات",
+  "reset_all_settings_button": "إعادة تعيين",
+  "reset_all_settings_confirm": "تأكيد؟"
 }

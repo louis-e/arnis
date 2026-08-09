@@ -68,5 +68,9 @@
   "gamemode_creative": "Kreativ",
   "gamemode_spectator": "Zuschauer",
   "world_time": "Weltzeit",
-  "map_item": "Weltkarte im Inventar"
+  "map_item": "Weltkarte im Inventar",
+  "reset_to_default": "Auf Standard zurücksetzen",
+  "reset_all_settings": "Alle Einstellungen zurücksetzen",
+  "reset_all_settings_button": "Zurücksetzen",
+  "reset_all_settings_confirm": "Bestätigen?"
 }

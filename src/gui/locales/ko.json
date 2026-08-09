@@ -68,5 +68,9 @@
   "gamemode_creative": "크리에이티브",
   "gamemode_spectator": "관전자",
   "world_time": "월드 시간",
-  "map_item": "월드 지도 아이템"
+  "map_item": "월드 지도 아이템",
+  "reset_to_default": "기본값으로 되돌리기",
+  "reset_all_settings": "모든 설정 초기화",
+  "reset_all_settings_button": "초기화",
+  "reset_all_settings_confirm": "확인?"
 }

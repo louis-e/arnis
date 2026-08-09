@@ -68,5 +68,9 @@
   "gamemode_creative": "Ustvarjalni",
   "gamemode_spectator": "Gledalec",
   "world_time": "Čas sveta",
-  "map_item": "Predmet zemljevida sveta"
+  "map_item": "Predmet zemljevida sveta",
+  "reset_to_default": "Ponastavi na privzeto",
+  "reset_all_settings": "Ponastavi vse nastavitve",
+  "reset_all_settings_button": "Ponastavi",
+  "reset_all_settings_confirm": "Potrdi?"
 }

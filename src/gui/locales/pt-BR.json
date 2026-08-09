@@ -68,5 +68,9 @@
   "gamemode_creative": "Criativo",
   "gamemode_spectator": "Espectador",
   "world_time": "Hora do mundo",
-  "map_item": "Item do mapa do mundo"
+  "map_item": "Item do mapa do mundo",
+  "reset_to_default": "Redefinir para o padrão",
+  "reset_all_settings": "Redefinir todas as configurações",
+  "reset_all_settings_button": "Redefinir",
+  "reset_all_settings_confirm": "Confirmar?"
 }

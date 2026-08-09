@@ -68,5 +68,9 @@
   "gamemode_creative": "Kreativ",
   "gamemode_spectator": "Åskådare",
   "world_time": "Världstid",
-  "map_item": "Världskartsföremål"
+  "map_item": "Världskartsföremål",
+  "reset_to_default": "Återställ till standard",
+  "reset_all_settings": "Återställ alla inställningar",
+  "reset_all_settings_button": "Återställ",
+  "reset_all_settings_confirm": "Bekräfta?"
 }

@@ -1,6 +1,14 @@
 import { licenseText } from './license.js';
 import { fetchLanguage, invalidJSON } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
+import {
+  initSettingsStore,
+  setDynamicDefault,
+  refreshSettingsState,
+  localizeSettingsStore,
+  cancelSettingsResetConfirm,
+  flushSettingsStore,
+} from './settings-store.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -39,6 +47,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  // After initSettings(), so the slider label and rotation handlers exist
+  // before restored values are applied. Labels get localized a few lines below.
+  initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
   initTooltips();
@@ -137,6 +149,8 @@ async function applyLocalization(localization) {
     "div[data-localize='settings_section_application']": "settings_section_application",
     "span[data-localize='clear_tile_cache']": "clear_tile_cache",
     "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
+    // Row label only; settings-store.js owns the button text.
+    "span[data-localize='reset_all_settings']": "reset_all_settings",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -155,6 +169,9 @@ async function applyLocalization(localization) {
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
+
+  // settings-store.js creates these buttons and owns their text.
+  localizeSettingsStore(localization);
 
   // Re-apply current bbox selection info text with new language
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
@@ -676,6 +693,30 @@ function initEasterEggs() {
   });
 }
 
+// Language implied by the browser, ignoring any stored preference.
+function detectBrowserLanguage(availableOptions) {
+  const currentLang = navigator.language || 'en';
+  if (availableOptions.includes(currentLang)) return currentLang;
+  const base = currentLang.split('-')[0];
+  if (availableOptions.includes(base)) return base;
+  return 'en';
+}
+
+// Gives the settings store the save path default. Not awaited, since startup
+// must not block on a filesystem probe; on failure the revert stays hidden.
+function resolveDefaultSavePath() {
+  Promise.resolve()
+    .then(() => invoke('gui_get_default_save_path'))
+    .then((detected) => {
+      if (typeof detected === 'string' && detected) {
+        setDynamicDefault('savePath', detected);
+      }
+    })
+    .catch(() => {
+      // No detectable default, so that row keeps no revert button.
+    });
+}
+
 function initSettings() {
   // Settings
   const settingsModal = document.getElementById("settings-modal");
@@ -692,6 +733,9 @@ function initSettings() {
   // Close settings modal
   function closeSettings() {
     settingsModal.style.display = "none";
+    // Webview teardown events are not guaranteed, so commit here.
+    flushSettingsStore();
+    cancelSettingsResetConfirm();
   }
 
   // Close settings and license modals on escape key
@@ -720,10 +764,12 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
-  // Double-click to reset world scale to default (1.00)
+  // Double-click to reset world scale to default (1.00).
+  // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
     slider.value = 1;
-    sliderValue.textContent = "1.00";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    slider.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   // Game mode segmented control
@@ -749,7 +795,8 @@ function initSettings() {
   });
   timeSlider.addEventListener("dblclick", () => {
     timeSlider.value = 720;
-    timeValue.textContent = formatClock(720);
+    timeSlider.dispatchEvent(new Event("input", { bubbles: true }));
+    timeSlider.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   // Rotation angle input
@@ -759,6 +806,8 @@ function initSettings() {
     if (isNaN(val)) val = 0;
     val = Math.min(Math.max(val, -90), 90);
     rotationInput.value = val.toFixed(2);
+    // The bbox handlers set this from code, which fires no input event.
+    refreshSettingsState();
     // Tell the map iframe to update the rotation mask overlay
     const mapFrame = document.querySelector('.map-container');
     if (mapFrame && mapFrame.contentWindow) {
@@ -785,29 +834,22 @@ function initSettings() {
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
-  
+
+  // The default here is the browser language, not an HTML attribute.
+  setDynamicDefault('language', detectBrowserLanguage(availableOptions));
+
   // Check for saved language preference first
   const savedLanguage = localStorage.getItem('arnis-language');
-  let languageToSet = 'en'; // Default to English
-  
+  let languageToSet;
+
   if (savedLanguage && availableOptions.includes(savedLanguage)) {
     // Use saved language if it exists and is available
     languageToSet = savedLanguage;
   } else {
     // Otherwise use browser language
-    const currentLang = navigator.language;
-    
-    // Try to match the exact language code first
-    if (availableOptions.includes(currentLang)) {
-      languageToSet = currentLang;
-    }
-    // Try to match just the base language code
-    else if (availableOptions.includes(currentLang.split('-')[0])) {
-      languageToSet = currentLang.split('-')[0];
-    }
-    // languageToSet remains 'en' as default
+    languageToSet = detectBrowserLanguage(availableOptions);
   }
-  
+
   languageSelect.value = languageToSet;
 
   // Handle language change
@@ -1032,6 +1074,8 @@ function initTelemetryConsent() {
     if (telemetryToggle) {
       telemetryToggle.checked = true;
     }
+    // Set from code, so no change event fired.
+    refreshSettingsState();
   };
 
   window.rejectTelemetry = () => {
@@ -1042,6 +1086,7 @@ function initTelemetryConsent() {
     if (telemetryToggle) {
       telemetryToggle.checked = false;
     }
+    refreshSettingsState();
   };
 
   // Utility for other scripts to read consent

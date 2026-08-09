@@ -1237,25 +1237,14 @@ pub fn generate_world_with_options(
     #[cfg(feature = "gui")]
     if world_format == WorldFormat::JavaAnvil {
         use crate::gui::update_player_spawn_y_after_generation;
-        // Reconstruct bbox string to match the format that GUI originally provided.
-        // This ensures LLBBox::from_str() can parse it correctly.
-        let bbox_string = format!(
-            "{},{},{},{}",
-            args.bbox.min().lat(),
-            args.bbox.min().lng(),
-            args.bbox.max().lat(),
-            args.bbox.max().lng()
-        );
 
         // Always update spawn Y since we now always set a spawn point (user-selected or default).
         // Use output_path (the actual "Arnis World N" folder holding level.dat), not args.path —
         // for CLI runs args.path is the parent --output-dir, so level.dat sits one level deeper.
-        if let Err(e) = update_player_spawn_y_after_generation(
-            &output_path,
-            bbox_string,
-            args.scale,
-            ground.as_ref(),
-        ) {
+        // `xzbbox` is post-rotation, which is what `ground` is indexed against.
+        if let Err(e) =
+            update_player_spawn_y_after_generation(&output_path, &xzbbox, ground.as_ref())
+        {
             let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
             eprintln!("Warning: {}", warning_msg);
             #[cfg(feature = "gui")]

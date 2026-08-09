@@ -68,5 +68,9 @@
   "gamemode_creative": "Luova",
   "gamemode_spectator": "Katselija",
   "world_time": "Maailman aika",
-  "map_item": "Maailmankarttaesine"
+  "map_item": "Maailmankarttaesine",
+  "reset_to_default": "Palauta oletusarvo",
+  "reset_all_settings": "Palauta kaikki asetukset",
+  "reset_all_settings_button": "Palauta",
+  "reset_all_settings_confirm": "Vahvista?"
 }
