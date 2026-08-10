@@ -13,7 +13,7 @@ use crate::block_definitions::{
     WHITE_CONCRETE,
 };
 use crate::coordinate_system::cartesian::XZBBox;
-use crate::coordinate_system::geographic::LLPoint;
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::osm_parser::ProcessedElement;
 use crate::structures::schematic::{load_palettized, rotate_props};
@@ -171,7 +171,12 @@ impl LandmarkPrescan {
 }
 
 /// Resolve the landmarks inside this world and collect what they replace.
-pub fn prescan(elements: &[ProcessedElement], xzbbox: &XZBBox, args: &Args) -> LandmarkPrescan {
+pub fn prescan(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    llbbox: LLBBox,
+    args: &Args,
+) -> LandmarkPrescan {
     let mut placements: Vec<LandmarkPlacement> = Vec::new();
     let mut suppressed: HashSet<(&'static str, u64)> = HashSet::new();
 
@@ -184,7 +189,8 @@ pub fn prescan(elements: &[ProcessedElement], xzbbox: &XZBBox, args: &Args) -> L
     }
 
     for landmark in LANDMARKS {
-        let Some((world_x, world_z)) = world_anchor(landmark.lat, landmark.lon, args) else {
+        let Some((world_x, world_z)) = world_anchor(landmark.lat, landmark.lon, llbbox, args)
+        else {
             continue;
         };
         // The model only matters if its reach overlaps the world.
@@ -213,18 +219,18 @@ pub fn prescan(elements: &[ProcessedElement], xzbbox: &XZBBox, args: &Args) -> L
 }
 
 /// Project an anchor into world XZ the way the parser projects node coords.
-fn world_anchor(lat: f64, lon: f64, args: &Args) -> Option<(i32, i32)> {
+fn world_anchor(lat: f64, lon: f64, llbbox: LLBBox, args: &Args) -> Option<(i32, i32)> {
     let llpoint = LLPoint::new(lat, lon).ok()?;
     let (transformer, pre_rotation_bbox) = match args.projection {
         crate::projection::ProjectionKind::WebMercator => {
-            let origin_lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
-            let origin_lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
+            let origin_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
+            let origin_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
             let proj =
                 crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
-            CoordTransformer::with_projection(&args.bbox, args.scale, &proj)
+            CoordTransformer::with_projection(&llbbox, args.scale, &proj)
         }
         crate::projection::ProjectionKind::Local => {
-            CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+            CoordTransformer::llbbox_to_xzbbox(&llbbox, args.scale)
         }
     }
     .ok()?;

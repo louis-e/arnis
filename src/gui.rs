@@ -1169,7 +1169,7 @@ fn gui_start_generation(
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
-                bbox,
+                bbox: Some(bbox),
                 file: None,
                 save_json_file: None,
                 path: Some(if world_format == WorldFormat::JavaAnvil {
@@ -1218,12 +1218,12 @@ fn gui_start_generation(
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
             if skip_osm_objects {
                 // Generate ground data (terrain) for terrain-only mode
-                let mut ground = ground::generate_ground_data(&args);
+                let mut ground = ground::generate_ground_data(&args, bbox);
 
                 // Create empty parsed_elements and xzbbox for terrain-only mode
                 let mut parsed_elements = Vec::new();
                 let (_coord_transformer, mut xzbbox) =
-                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                    CoordTransformer::llbbox_to_xzbbox(&bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
 
                 // The spawn point is rotated above, so skipping the world
@@ -1243,7 +1243,7 @@ fn gui_start_generation(
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,
                     xzbbox,
-                    args.bbox,
+                    bbox,
                     ground,
                     &args,
                     generation_options.clone(),
@@ -1266,15 +1266,14 @@ fn gui_start_generation(
             let (fetch_result, overture_elements, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
                     if args.overture {
-                        overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+                        overture::fetch_overture_buildings(&bbox, args.scale, args.debug)
                     } else {
                         Vec::new()
                     }
                 });
-                let ground_handle = s.spawn(|| ground::generate_ground_data(&args));
-                let fetch_result = retrieve_data::fetch_data_from_overpass(
-                    args.bbox, args.debug, "requests", None,
-                );
+                let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
+                let fetch_result =
+                    retrieve_data::fetch_data_from_overpass(bbox, args.debug, "requests", None);
                 (
                     fetch_result,
                     overture_handle.join().expect("Overture fetch panicked"),
@@ -1288,7 +1287,7 @@ fn gui_start_generation(
                     let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
                         osm_parser::parse_osm_data(
                             raw_data,
-                            args.bbox,
+                            bbox,
                             args.scale,
                             args.debug,
                             crate::projection::ProjectionKind::Local,
@@ -1341,7 +1340,7 @@ fn gui_start_generation(
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,
                         xzbbox,
-                        args.bbox,
+                        bbox,
                         ground,
                         &args,
                         generation_options.clone(),
