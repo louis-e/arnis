@@ -41,6 +41,13 @@
   "interior": "توليد الداخلية",
   "fillground": "ملء الأرض",
   "legacy_trees": "الأشجار الكلاسيكية",
+  "canopy_height": "غطاء الأشجار الواقعي",
+  "max_tree_size": "أقصى حجم للشجرة",
+  "tree_size_small": "صغير",
+  "tree_size_medium": "متوسط",
+  "tree_size_big": "كبير",
+  "tree_size_tall": "مرتفع",
+  "tree_size_giant": "عملاق",
   "overture": "مبانٍ إضافية",
   "three_dmr": "استخدام نماذج ثلاثية الأبعاد",
   "disable_height_limit": "توسيع ارتفاع البناء",
@@ -68,5 +75,9 @@
   "gamemode_creative": "الإبداع",
   "gamemode_spectator": "المتفرج",
   "world_time": "وقت العالم",
-  "map_item": "عنصر خريطة العالم"
+  "map_item": "عنصر خريطة العالم",
+  "reset_to_default": "إعادة التعيين إلى الوضع الافتراضي",
+  "reset_all_settings": "إعادة تعيين جميع الإعدادات",
+  "reset_all_settings_button": "إعادة تعيين",
+  "reset_all_settings_confirm": "تأكيد؟"
 }

@@ -41,6 +41,13 @@
   "interior": "Belső generálás",
   "fillground": "Talaj feltöltése",
   "legacy_trees": "Klasszikus fák",
+  "canopy_height": "Valós fakorona-borítás",
+  "max_tree_size": "Max. faméret",
+  "tree_size_small": "Kicsi",
+  "tree_size_medium": "Közepes",
+  "tree_size_big": "Nagy",
+  "tree_size_tall": "Magas",
+  "tree_size_giant": "Óriási",
   "overture": "További épületek",
   "three_dmr": "3D modellek használata",
   "disable_height_limit": "Építési magasság kiterjesztése",
@@ -68,5 +75,9 @@
   "gamemode_creative": "Kreatív",
   "gamemode_spectator": "Néző",
   "world_time": "Világidő",
-  "map_item": "Világtérkép-tárgy"
+  "map_item": "Világtérkép-tárgy",
+  "reset_to_default": "Visszaállítás alapértelmezettre",
+  "reset_all_settings": "Összes beállítás visszaállítása",
+  "reset_all_settings_button": "Visszaállítás",
+  "reset_all_settings_confirm": "Megerősíti?"
 }

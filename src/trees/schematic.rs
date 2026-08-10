@@ -6,9 +6,10 @@ use std::io::Read;
 use fastnbt::Value;
 
 use crate::block_definitions::{
-    Block, ACACIA_LEAVES, ACACIA_LOG, AZALEA_LEAVES, BIRCH_LEAVES, BIRCH_LOG, CHERRY_LEAVES,
-    CHERRY_LOG, DARK_OAK_LEAVES, DARK_OAK_LOG, JUNGLE_LEAVES, JUNGLE_LOG, MANGROVE_LEAVES,
-    MANGROVE_LOG, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
+    Block, ACACIA_LEAVES, ACACIA_LOG, AZALEA_LEAVES, BIRCH_LEAVES, BIRCH_LOG, BLACK_CONCRETE,
+    CHERRY_LEAVES, CHERRY_LOG, CYAN_TERRACOTTA, DARK_OAK_LEAVES, DARK_OAK_LOG, DIRT_PATH,
+    GRAY_CONCRETE, GRAY_CONCRETE_POWDER, JUNGLE_LEAVES, JUNGLE_LOG, LIGHT_GRAY_CONCRETE,
+    MANGROVE_LEAVES, MANGROVE_LOG, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
 };
 use crate::world_editor::WorldEditor;
 
@@ -164,6 +165,19 @@ pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
         _ => return Err("schem: missing BlockData".into()),
     };
     let indices = decode_varints(&data_bytes);
+
+    // Sponge requires exactly Width*Height*Length entries. A stream that runs long
+    // or short is corrupt, and would otherwise fold into out-of-range coordinates.
+    let volume = i64::from(width) * i64::from(height) * i64::from(length);
+    if volume > i64::from(i32::MAX) {
+        return Err("schem: volume exceeds the supported range".into());
+    }
+    if indices.len() as i64 != volume {
+        return Err(format!(
+            "schem: BlockData has {} entries, expected {volume}",
+            indices.len()
+        ));
+    }
 
     let wl = width * length;
     let mut voxels = Vec::new();
@@ -353,6 +367,18 @@ pub fn place_schematic_tree(
         .map(|(top, _)| top - base_y)
         .min()
         .unwrap_or(0);
+    // Root flare must not eat paving. Blacklisting the road surfaces stops the
+    // flare at the plaza instead of replacing it, which is also what a street
+    // tree standing on paving wants.
+    let mut root_blacklist: Vec<Block> = blacklist.to_vec();
+    root_blacklist.extend_from_slice(&[
+        BLACK_CONCRETE,
+        GRAY_CONCRETE_POWDER,
+        CYAN_TERRACOTTA,
+        GRAY_CONCRETE,
+        LIGHT_GRAY_CONCRETE,
+        DIRT_PATH,
+    ]);
     for ((wx, wz), (top, log)) in trunk_bottom {
         if top - base_y > min_log_vy + ROOT_BASE_VY {
             continue;
@@ -364,7 +390,7 @@ pub fn place_schematic_tree(
         let from = (top - 1 - ROOT_MAX).max(gy);
         let to = top - 1;
         for wy in from..=to {
-            editor.set_block_absolute(log, wx, wy, wz, None, Some(blacklist));
+            editor.set_block_absolute(log, wx, wy, wz, None, Some(&root_blacklist));
         }
     }
 }

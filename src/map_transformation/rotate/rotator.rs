@@ -216,9 +216,9 @@ fn rotate_ground_data(
     sin_r: f64,
     cos_r: f64,
 ) {
-    // Nothing to rotate without elevation or land cover; bail before cloning.
+    // Nothing to rotate without elevation, land cover or canopy; bail before cloning.
     // Flat land-cover mode still needs its grid rotated so the sea stays aligned.
-    if !ground.elevation_enabled && !ground.has_land_cover() {
+    if !ground.elevation_enabled && !ground.has_land_cover() && !ground.has_canopy() {
         return;
     }
 
@@ -247,6 +247,10 @@ fn rotate_ground_data(
     let has_land_cover = original_ground.has_land_cover();
     let mut new_cover: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
     let mut new_water: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
+    // Canopy shares the land-cover grid, so it rides the same samples.
+    let has_canopy = original_ground.has_canopy();
+    let mut new_canopy: Option<Vec<u8>> =
+        has_canopy.then(|| Vec::with_capacity(new_w.saturating_mul(new_h)));
 
     for z_idx in 0..new_h {
         let mut height_row: Option<Vec<f64>> = elevation_enabled.then(|| Vec::with_capacity(new_w));
@@ -291,6 +295,13 @@ fn rotate_ground_data(
             }
             if let Some(ref mut wr) = water_row {
                 wr.push(original_ground.water_distance(coord));
+            }
+            if let Some(ref mut ch) = new_canopy {
+                ch.push(
+                    original_ground
+                        .canopy_height_m(coord)
+                        .unwrap_or(crate::canopy::CANOPY_NODATA),
+                );
             }
         }
         if let Some(hr) = height_row {
@@ -358,6 +369,9 @@ fn rotate_ground_data(
     // Update land cover with rotated data
     if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {
         ground.set_land_cover_data(cover_grid, water_dist, new_w, new_h);
+    }
+    if let Some(canopy_grid) = new_canopy {
+        ground.set_canopy_data(canopy_grid, new_w, new_h);
     }
 }
 

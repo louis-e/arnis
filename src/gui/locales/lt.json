@@ -41,6 +41,13 @@
   "interior": "Interjero generavimas",
   "fillground": "Užpildyti pagrindą",
   "legacy_trees": "Klasikiniai medžiai",
+  "canopy_height": "Tikra medžių danga",
+  "max_tree_size": "Maks. medžio dydis",
+  "tree_size_small": "Maži",
+  "tree_size_medium": "Vidutiniai",
+  "tree_size_big": "Dideli",
+  "tree_size_tall": "Aukšti",
+  "tree_size_giant": "Milžiniški",
   "overture": "Papildomi pastatai",
   "three_dmr": "Naudoti 3D modelius",
   "disable_height_limit": "Praplėsti statybos aukštį",
@@ -68,5 +75,9 @@
   "gamemode_creative": "Kūrybinis",
   "gamemode_spectator": "Stebėtojas",
   "world_time": "Pasaulio laikas",
-  "map_item": "Pasaulio žemėlapio daiktas"
+  "map_item": "Pasaulio žemėlapio daiktas",
+  "reset_to_default": "Atkurti numatytąją reikšmę",
+  "reset_all_settings": "Atkurti visus nustatymus",
+  "reset_all_settings_button": "Atkurti",
+  "reset_all_settings_confirm": "Patvirtinti?"
 }

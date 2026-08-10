@@ -89,9 +89,11 @@ pub fn generate_leisure(
             for &(x, z) in filled_area.iter() {
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
-                // Add decorative elements for parks and gardens
+                // Land-cover water is skipped because a park often spans its
+                // own lake, and the carve after this leaves plants floating.
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    && !editor.is_lc_water(x, z)
                 {
                     let random_choice: i32 = rng.random_range(0..1000);
 
@@ -117,13 +119,18 @@ pub fn generate_leisure(
                             editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                         }
                         105..120 => {
-                            // Tree
-                            Tree::create(
-                                editor,
-                                (x, 1, z),
-                                Some(building_footprints),
-                                Some(bridge_surface),
-                            );
+                            // Only where land cover says woody, else a park
+                            // canopies its own meadows. 1/1000 for specimens.
+                            if random_choice == 105 || editor.land_cover_backs_trees(x, z) {
+                                Tree::create(
+                                    editor,
+                                    (x, 1, z),
+                                    Some(building_footprints),
+                                    Some(bridge_surface),
+                                );
+                            } else {
+                                editor.set_block(GRASS, x, 1, z, None, None);
+                            }
                         }
                         _ => {}
                     }
