@@ -75,6 +75,17 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
 
+    /// Largest schematic tree to place: small (<=6 blocks), medium (<=12),
+    /// big (<=20), tall (<=28) or giant. Oversized picks fall back to a smaller
+    /// species in the same community where there is one.
+    #[arg(long, value_enum, default_value_t = crate::trees::tree_library::TreeSize::Giant)]
+    pub max_tree_size: crate::trees::tree_library::TreeSize,
+
+    /// Place trees from the Meta/WRI global canopy height map instead of assuming
+    /// every tree-cover cell is forest. Land cover still decides the surface.
+    #[arg(long = "canopy-height", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub canopy_height: bool,
+
     /// Add building footprints from Overture Maps that are missing in OpenStreetMap.
     /// Helps sparsely mapped areas; may occasionally add a satellite-detected false positive.
     #[arg(long = "overture", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]

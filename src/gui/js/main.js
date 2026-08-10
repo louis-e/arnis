@@ -137,6 +137,13 @@ async function applyLocalization(localization) {
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
+    "span[data-localize='canopy_height']": "canopy_height",
+    "span[data-localize='max_tree_size']": "max_tree_size",
+    "button[data-localize='tree_size_small']": "tree_size_small",
+    "button[data-localize='tree_size_medium']": "tree_size_medium",
+    "button[data-localize='tree_size_big']": "tree_size_big",
+    "button[data-localize='tree_size_tall']": "tree_size_tall",
+    "button[data-localize='tree_size_giant']": "tree_size_giant",
     "span[data-localize='gamemode']": "gamemode",
     "button[data-localize='gamemode_survival']": "gamemode_survival",
     "button[data-localize='gamemode_creative']": "gamemode_creative",
@@ -777,6 +784,15 @@ function initSettings() {
   gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // Max tree size segmented control
+  const maxTreeSizeGroup = document.getElementById("max-tree-size-group");
+  maxTreeSizeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      maxTreeSizeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -1657,6 +1673,9 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
+    var canopy_height = document.getElementById("canopy-height-toggle").checked;
+    var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
+    var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
     var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
@@ -1694,6 +1713,8 @@ async function startGeneration() {
         interiorEnabled: interior,
         fillgroundEnabled: fill_ground,
         legacyTreesEnabled: legacy_trees,
+        maxTreeSize: maxTreeSize,
+        canopyHeightEnabled: canopy_height,
         overtureEnabled: overture,
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,

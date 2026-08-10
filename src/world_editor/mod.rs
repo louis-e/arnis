@@ -348,16 +348,45 @@ impl<'a> WorldEditor<'a> {
         let Some(ground) = self.ground.as_ref() else {
             return true;
         };
+        let coord = self.ground_point(x, z);
+        // A measured crown settles it. The tree-cover class is roughly twice as
+        // wide as reality, so it only answers where nothing was measured.
+        if ground.has_canopy() {
+            if let Some(h) = ground.canopy_height_m(coord) {
+                return h >= crate::canopy::CANOPY_MIN_M;
+            }
+        }
         if !ground.has_land_cover() {
             return true;
         }
         matches!(
-            ground.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
-                x - self.ground_origin_x,
-                z - self.ground_origin_z,
-            )),
+            ground.cover_class(coord),
             crate::land_cover::LC_TREE_COVER | crate::land_cover::LC_SHRUBLAND
         )
+    }
+
+    /// World (x, z) as a point on the shared `Ground` grid.
+    #[inline(always)]
+    fn ground_point(&self, x: i32, z: i32) -> crate::coordinate_system::cartesian::XZPoint {
+        crate::coordinate_system::cartesian::XZPoint::new(
+            x - self.ground_origin_x,
+            z - self.ground_origin_z,
+        )
+    }
+
+    /// Side of the lattice cell that holds at most one trunk.
+    #[inline(always)]
+    pub fn tree_slot_spacing(&self) -> i32 {
+        self.tree_pack.as_ref().map_or(5, |p| p.base_spacing())
+    }
+
+    /// Size tier the measured canopy asks for at this column, if it was measured.
+    pub fn canopy_size_hint(&self, x: i32, z: i32) -> Option<crate::trees::tree_library::TreeSize> {
+        let h = self
+            .ground
+            .as_ref()?
+            .canopy_height_m(self.ground_point(x, z))?;
+        (h >= crate::canopy::CANOPY_MIN_M).then(|| crate::trees::tree_library::size_for_canopy_m(h))
     }
 
     /// ESA distance-to-shore (BFS capped at 15): 0 = non-water or open water past the

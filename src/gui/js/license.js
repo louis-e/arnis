@@ -39,6 +39,10 @@ Elevation data provided by the <a href="https://www.usgs.gov/3d-elevation-progra
 Land cover classification data provided by the <a href="https://esa-worldcover.org/en" style="color: inherit;" target="_blank">ESA WorldCover</a> project (10m resolution, v200). Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC-BY 4.0</a>. &copy; ESA WorldCover project 2021.
 <br><br>
 
+<b>Meta / WRI Canopy Height Maps:</b><br>
+The "Real Tree Cover" setting places trees from the <a href="https://registry.opendata.aws/dataforgood-fb-forests/" style="color: inherit;" target="_blank">High Resolution Canopy Height Maps</a> (1m resolution), &copy; Meta and the <a href="https://www.wri.org/" style="color: inherit;" target="_blank">World Resources Institute</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
+<br><br>
+
 <b>Koppen-Geiger Climate Data:</b><br>
 Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" style="color: inherit;" target="_blank">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
 <br><br>

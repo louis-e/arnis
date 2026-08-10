@@ -487,6 +487,59 @@ fn clear_stranded_vegetation(editor: &mut WorldEditor, x: i32, z: i32, water_y: 
             editor.set_block_absolute(AIR, x, y, z, Some(SURFACE_VEGETATION), None);
         }
     }
+    // A trunk rooted on the new surface has to go whole. Trees are placed
+    // before the polygon that floods them, and the land-cover water mask is
+    // coarser than the carve, so the guards on the tree paths can miss it.
+    if editor
+        .get_block_absolute(x, water_y + 1, z)
+        .is_some_and(is_trunk)
+    {
+        clear_tree_from(editor, x, water_y + 1, z);
+    }
+}
+
+fn is_trunk(block: Block) -> bool {
+    let name = block.name();
+    name.ends_with("_log") || name.ends_with("_stem")
+}
+
+fn is_tree_part(block: Block) -> bool {
+    is_trunk(block) || block.name().ends_with("_leaves")
+}
+
+/// Largest tree the flood will take out. A giant schematic is well under this,
+/// and the cap stops a canopy that touches its neighbour from unzipping a wood.
+const MAX_TREE_BLOCKS: usize = 4096;
+
+/// Erase the tree connected to (x, y, z). Clearing only the two plant layers
+/// would leave the canopy hanging in the air over the water. Blocks are set to
+/// air as they are visited, so a revisit sees air and stops; no visited set.
+fn clear_tree_from(editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+    let mut stack = vec![(x, y, z)];
+    let mut cleared = 0usize;
+    while let Some((cx, cy, cz)) = stack.pop() {
+        if cleared >= MAX_TREE_BLOCKS {
+            break;
+        }
+        if !editor
+            .get_block_absolute(cx, cy, cz)
+            .is_some_and(is_tree_part)
+        {
+            continue;
+        }
+        editor.set_block_absolute(AIR, cx, cy, cz, None, Some(&[]));
+        cleared += 1;
+        for (dx, dy, dz) in [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ] {
+            stack.push((cx + dx, cy + dy, cz + dz));
+        }
+    }
 }
 
 /// True if any cell in the 5x5 area around (x, z), center excluded, carries a road/bridge.

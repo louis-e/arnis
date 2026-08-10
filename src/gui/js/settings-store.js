@@ -25,10 +25,12 @@ const SETTINGS = [
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
   { id: 'interior-toggle', kind: 'checkbox', store: OWN },
   { id: 'fillground-toggle', kind: 'checkbox', store: OWN },
+  { id: 'canopy-height-toggle', kind: 'checkbox', store: OWN },
+  { id: 'max-tree-size-group', kind: 'segmented', store: OWN, valueAttr: 'data-max-tree-size' },
   { id: 'legacy-trees-toggle', kind: 'checkbox', store: OWN },
 
   // World
-  { id: 'gamemode-group', kind: 'segmented', store: OWN },
+  { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'disable-height-limit-toggle', kind: 'checkbox', store: OWN },
@@ -49,10 +51,10 @@ const SETTINGS = [
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },
   { id: 'language-select', kind: 'select', store: EXTERNAL, dynamicDefault: 'language' },
 
-  // Consent record, not a preference. Its default is off, so revert and reset
-  // can only ever withdraw it. Reset writes 'false' instead of deleting the
-  // key so the first-run dialog does not come back.
-  { id: 'telemetry-toggle', kind: 'checkbox', store: EXTERNAL },
+  // Consent record, not a preference. The user answered it on first run and the
+  // HTML default is off, so a revert or reset could only withdraw consent, which
+  // is not their initial choice. No revert button, and reset leaves it alone.
+  { id: 'telemetry-toggle', kind: 'checkbox', store: EXTERNAL, revertable: false },
 ];
 
 // Defaults the host resolves at runtime rather than from a DOM attribute.
@@ -150,7 +152,7 @@ function currentValue(entry) {
     }
     case 'segmented': {
       const active = el.querySelector('.segment.active');
-      return active ? active.dataset.gamemode : undefined;
+      return active ? active.getAttribute(entry.valueAttr) : undefined;
     }
     default:
       return el.value;
@@ -179,7 +181,7 @@ function defaultValue(entry) {
       const marked = el.querySelector('.segment[data-default]');
       const fallback = el.querySelector('.segment');
       const seg = marked || fallback;
-      return seg ? seg.dataset.gamemode : undefined;
+      return seg ? seg.getAttribute(entry.valueAttr) : undefined;
     }
     case 'select': {
       const selected = Array.from(el.options).find((o) => o.defaultSelected);
@@ -237,7 +239,7 @@ function writeValue(entry, value) {
   if (entry.kind === 'segmented') {
     // The group's click handler owns the active class, so click it.
     const seg = el.querySelector(
-      `.segment[data-gamemode="${CSS.escape(String(value))}"]`
+      `.segment[${entry.valueAttr}="${CSS.escape(String(value))}"]`
     );
     if (seg && !seg.classList.contains('active')) seg.click();
     return;
@@ -340,6 +342,7 @@ function resetAll() {
   applying = true;
   try {
     for (const entry of SETTINGS) {
+      if (entry.revertable === false) continue;
       const def = defaultValue(entry);
       if (def === undefined) continue;
       writeValue(entry, def);
@@ -379,6 +382,7 @@ const REVERT_ICON =
 // behaviour for interactive descendants, so this does not toggle the checkbox.
 function injectRevertButtons(localization) {
   for (const entry of SETTINGS) {
+    if (entry.revertable === false) continue;
     const el = elementFor(entry);
     if (!el) continue;
 
@@ -426,6 +430,7 @@ function refresh() {
   let anyModified = false;
 
   for (const entry of SETTINGS) {
+    if (entry.revertable === false) continue;
     const el = elementFor(entry);
     if (!el) continue;
     const row = el.closest('.settings-row');
