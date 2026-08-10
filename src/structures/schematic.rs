@@ -487,10 +487,23 @@ pub fn load_palettized(gz_bytes: &[u8]) -> Result<PalettizedSchematic, String> {
         return Err("schem: missing BlockData".into());
     };
 
+    // Sponge requires exactly Width*Height*Length entries. A stream that runs long
+    // or short is corrupt, and would otherwise fold into out-of-range coordinates.
+    let volume = i64::from(width) * i64::from(height) * i64::from(length);
+    if volume > i64::from(i32::MAX) {
+        return Err("schem: volume exceeds the supported range".into());
+    }
+    let volume = volume as usize;
+
     let wl = width * length;
     let mut voxels: Vec<(i16, i16, i16, u8)> = Vec::new();
     let mut min_y = i32::MAX;
+    let mut seen = 0usize;
     for (i, idx) in varint_indices(data.iter().as_slice()).enumerate() {
+        if i >= volume {
+            return Err("schem: BlockData longer than Width*Height*Length".into());
+        }
+        seen = i + 1;
         if let Some(&slot) = idx_to_slot.get(&idx) {
             let i = i as i32;
             let y = i / wl;
@@ -502,6 +515,11 @@ pub fn load_palettized(gz_bytes: &[u8]) -> Result<PalettizedSchematic, String> {
                 slot,
             ));
         }
+    }
+    if seen != volume {
+        return Err(format!(
+            "schem: BlockData has {seen} entries, expected {volume}"
+        ));
     }
 
     // Drop empty layers below so the model's lowest block sits at y=0.
@@ -706,5 +724,46 @@ mod tests {
         assert!(map_structure_block("minecraft:iron_bars[north=true]").is_some());
         assert!(map_structure_block("minecraft:air").is_none());
         assert!(map_structure_block("minecraft:diamond_block").is_none());
+    }
+
+    /// Gzipped Sponge v2 with `entries` single-byte indices, all sandstone.
+    fn schem_bytes(width: i16, height: i16, length: i16, entries: usize) -> Vec<u8> {
+        use std::io::Write;
+        let mut palette = HashMap::new();
+        palette.insert("minecraft:sandstone".to_string(), Value::Int(0));
+        let mut root = HashMap::new();
+        root.insert("Width".to_string(), Value::Short(width));
+        root.insert("Height".to_string(), Value::Short(height));
+        root.insert("Length".to_string(), Value::Short(length));
+        root.insert("Palette".to_string(), Value::Compound(palette));
+        root.insert(
+            "BlockData".to_string(),
+            Value::ByteArray(fastnbt::ByteArray::new(vec![0i8; entries])),
+        );
+        let nbt = fastnbt::to_bytes(&Value::Compound(root)).unwrap();
+        let mut out = Vec::new();
+        let mut enc = flate2::write::GzEncoder::new(&mut out, flate2::Compression::fast());
+        enc.write_all(&nbt).unwrap();
+        enc.finish().unwrap();
+        out
+    }
+
+    // BlockData must match the declared volume. A stream that runs long or short
+    // would otherwise fold into out-of-range Y instead of failing.
+    #[test]
+    fn block_data_length_must_match_the_volume() {
+        let p = load_palettized(&schem_bytes(2, 3, 2, 12)).expect("exact volume loads");
+        assert_eq!(p.voxels.len(), 12);
+        for &(_, y, _, _) in &p.voxels {
+            assert!((0..3).contains(&y), "y {y} outside the declared height");
+        }
+        assert!(
+            load_palettized(&schem_bytes(2, 3, 2, 13)).is_err(),
+            "too long"
+        );
+        assert!(
+            load_palettized(&schem_bytes(2, 3, 2, 11)).is_err(),
+            "too short"
+        );
     }
 }

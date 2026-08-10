@@ -166,6 +166,19 @@ pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
     };
     let indices = decode_varints(&data_bytes);
 
+    // Sponge requires exactly Width*Height*Length entries. A stream that runs long
+    // or short is corrupt, and would otherwise fold into out-of-range coordinates.
+    let volume = i64::from(width) * i64::from(height) * i64::from(length);
+    if volume > i64::from(i32::MAX) {
+        return Err("schem: volume exceeds the supported range".into());
+    }
+    if indices.len() as i64 != volume {
+        return Err(format!(
+            "schem: BlockData has {} entries, expected {volume}",
+            indices.len()
+        ));
+    }
+
     let wl = width * length;
     let mut voxels = Vec::new();
     for (i, &idx) in indices.iter().enumerate() {
