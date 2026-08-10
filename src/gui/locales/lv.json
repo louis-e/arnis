@@ -41,6 +41,13 @@
   "interior": "Interjera ģenerēšana",
   "fillground": "Aizpildīt zemi",
   "legacy_trees": "Klasiskie koki",
+  "canopy_height": "Reālais koku segums",
+  "max_tree_size": "Maks. koka izmērs",
+  "tree_size_small": "Mazi",
+  "tree_size_medium": "Vidēji",
+  "tree_size_big": "Lieli",
+  "tree_size_tall": "Augsti",
+  "tree_size_giant": "Milzīgi",
   "overture": "Papildu ēkas",
   "three_dmr": "Lietot 3D modeļus",
   "disable_height_limit": "Paplašināt būvniecības augstumu",
@@ -68,5 +75,9 @@
   "gamemode_creative": "Radošais",
   "gamemode_spectator": "Skatītājs",
   "world_time": "Pasaules laiks",
-  "map_item": "Pasaules kartes priekšmets"
+  "map_item": "Pasaules kartes priekšmets",
+  "reset_to_default": "Atiestatīt uz noklusējumu",
+  "reset_all_settings": "Atiestatīt visus iestatījumus",
+  "reset_all_settings_button": "Atiestatīt",
+  "reset_all_settings_confirm": "Apstiprināt?"
 }

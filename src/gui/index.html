@@ -152,6 +152,35 @@
           </div>
         </div>
 
+        <!-- Real Tree Cover Toggle (Meta/WRI global canopy height map) -->
+        <div class="settings-row">
+          <label for="canopy-height-toggle">
+            <span data-localize="canopy_height">Real Tree Cover</span>
+            <span class="tooltip-icon" data-tooltip="Uses a global canopy height map so trees stand where real ones do, at roughly their real height. Off falls back to land cover, which treats every wooded cell as full forest.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="canopy-height-toggle" name="canopy-height-toggle" checked>
+          </div>
+        </div>
+
+        <!-- Max Tree Size -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="max_tree_size">Max Tree Size</span>
+            <span class="tooltip-icon" data-tooltip="Tallest tree allowed, in blocks: Small 6, Medium 12, Big 20, Tall 28, Giant above. Anything over the cap drops to a smaller species where its group has one.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control is-compact" id="max-tree-size-group">
+              <button type="button" class="segment" data-max-tree-size="small" data-localize="tree_size_small">Small</button>
+              <button type="button" class="segment" data-max-tree-size="medium" data-localize="tree_size_medium">Medium</button>
+              <button type="button" class="segment" data-max-tree-size="big" data-localize="tree_size_big">Big</button>
+              <button type="button" class="segment" data-max-tree-size="tall" data-localize="tree_size_tall">Tall</button>
+              <!-- data-default marks the shipped default; the active class is moved by JS -->
+              <button type="button" class="segment active" data-default data-max-tree-size="giant" data-localize="tree_size_giant">Giant</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Legacy Trees Toggle -->
         <div class="settings-row">
           <label for="legacy-trees-toggle">
@@ -175,7 +204,8 @@
           <div class="settings-control">
             <div class="segmented-control" id="gamemode-group">
               <button type="button" class="segment" data-gamemode="survival" data-localize="gamemode_survival">Survival</button>
-              <button type="button" class="segment active" data-gamemode="creative" data-localize="gamemode_creative">Creative</button>
+              <!-- data-default marks the shipped default; the active class is moved by JS -->
+              <button type="button" class="segment active" data-default data-gamemode="creative" data-localize="gamemode_creative">Creative</button>
               <button type="button" class="segment" data-gamemode="spectator" data-localize="gamemode_spectator">Spectator</button>
             </div>
           </div>
@@ -370,6 +400,18 @@
           </label>
           <div class="settings-control">
             <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
+          </div>
+        </div>
+
+        <!-- Mirrors the Clear Tile Cache row above. Button text is owned by
+             settings-store.js, which swaps in a confirm label on the first click. -->
+        <div class="settings-row">
+          <label for="reset-settings-button">
+            <span data-localize="reset_all_settings">Reset all settings</span>
+            <span class="tooltip-icon" data-tooltip="Restore every setting on this page to its default. Worlds you already generated are not affected.">?</span>
+          </label>
+          <div class="settings-control">
+            <button type="button" id="reset-settings-button" class="settings-reset-button" disabled>Reset</button>
           </div>
         </div>
 

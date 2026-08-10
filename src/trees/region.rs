@@ -101,6 +101,15 @@ impl Pack {
     }
 }
 
+/// What a caller already knows about the slot it is asking for.
+#[derive(Clone, Copy, Default)]
+pub struct SlotRequest {
+    /// Size tier from a measured canopy height, when there is one.
+    pub want_size: Option<TreeSize>,
+    /// The caller fixed the density itself, so skip the pack's grove noise.
+    pub density_decided: bool,
+}
+
 pub struct RegionLibrary {
     realm: String,
     entries: Vec<(Schematic, TreeSize, u8)>,
@@ -294,10 +303,35 @@ impl RegionLibrary {
     }
 
     /// Pick one variant from a community, honoring the size filter (falls back to any size if none fit).
-    fn pick_in_community(&self, c: &Community, x: i32, z: i32) -> Option<usize> {
+    /// `want` overrides the scale-band size roll, so a measured canopy height can ask for its own tier.
+    fn pick_in_community(
+        &self,
+        c: &Community,
+        x: i32,
+        z: i32,
+        want: Option<TreeSize>,
+    ) -> Option<usize> {
+        // Tier a hint resolves to here, stepping down when the cap or the 1:1
+        // giant gate rules the wanted one out. Species without it drop out of
+        // the pick below, else the hint loses to the species roll.
+        let tier: Option<TreeSize> = want.and_then(|w| {
+            let sizes = || {
+                c.species
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .filter(|&i| self.size_allowed(self.entries[i].1))
+                    .map(|i| self.entries[i].1)
+            };
+            sizes().filter(|&s| s <= w).max().or_else(|| sizes().min())
+        });
+        let in_tier = |i: usize| match tier {
+            Some(t) => self.entries[i].1 == t,
+            None => true,
+        };
         let allowed_count = |sp: &Vec<usize>| {
             sp.iter()
-                .filter(|&&i| self.size_allowed(self.entries[i].1))
+                .filter(|&&i| self.size_allowed(self.entries[i].1) && in_tier(i))
                 .count()
         };
         let total: usize = c.species.iter().map(&allowed_count).sum();
@@ -326,11 +360,13 @@ impl RegionLibrary {
             }
             r -= w;
         }
-        let want = self.size_pick(x, z);
+        let want = tier.unwrap_or_else(|| self.size_pick(x, z));
+        // The tier filters before the width walk, since a measured height beats
+        // a look. Without a hint `in_tier` passes everything.
         let allowed: Vec<usize> = chosen
             .iter()
             .copied()
-            .filter(|&i| self.size_allowed(self.entries[i].1))
+            .filter(|&i| self.size_allowed(self.entries[i].1) && in_tier(i))
             .collect();
         if allowed.is_empty() {
             return None;
@@ -400,7 +436,8 @@ impl RegionLibrary {
         &pack.communities[idx]
     }
 
-    fn base_spacing(&self) -> i32 {
+    /// Side of the lattice cell that holds at most one trunk.
+    pub fn base_spacing(&self) -> i32 {
         // Wider schem-pack canopies need more spacing to avoid overcrowded forests.
         if self.scale < 0.3 {
             7
@@ -425,6 +462,7 @@ impl RegionLibrary {
         z: i32,
         hint: Habitat,
         elev_y: i32,
+        req: SlotRequest,
     ) -> Option<(i32, i32, usize, u8)> {
         let s = self.base_spacing();
         let (sx, sz) = crate::trees::schematic::trunk_slot_s(x, z, s);
@@ -438,18 +476,22 @@ impl RegionLibrary {
             }
             let ci = (coord_hash(sx + 5, sz + 9) % n as u64) as usize;
             let c = &self.realm_pack.communities[ci];
-            (c, self.pick_in_community(c, sx, sz))
+            (c, self.pick_in_community(c, sx, sz, req.want_size))
         } else if blend >= 67 && !self.vanilla_pack.is_empty() {
             let c = self.pick_community(&self.vanilla_pack, hint, sx, sz, montane);
-            (c, self.pick_in_community(c, sx, sz))
+            (c, self.pick_in_community(c, sx, sz, req.want_size))
         } else {
             let c = self.pick_community(&self.realm_pack, hint, sx, sz, montane);
-            (c, self.pick_in_community(c, sx, sz))
+            (c, self.pick_in_community(c, sx, sz, req.want_size))
         };
-        let grove = crate::ground_generation::value_noise_01(sx, sz, Self::GROVE_PERIOD);
-        let jitter = (coord_hash(sx ^ 0x71c3, sz ^ 0x2d9b) % 1000) as f64 / 1000.0;
-        if grove * 0.82 + jitter * 0.18 >= Self::keep_prob(community.density) {
-            return None;
+        // The grove noise invents clearings, which would thin the same trees
+        // twice when the caller already measured the density.
+        if !req.density_decided {
+            let grove = crate::ground_generation::value_noise_01(sx, sz, Self::GROVE_PERIOD);
+            let jitter = (coord_hash(sx ^ 0x71c3, sz ^ 0x2d9b) % 1000) as f64 / 1000.0;
+            if grove * 0.82 + jitter * 0.18 >= Self::keep_prob(community.density) {
+                return None;
+            }
         }
         let idx = idx?;
         let rot = (coord_hash(sx ^ 0x5bd1, sz ^ 0x9e37) % 4) as u8;
@@ -524,9 +566,104 @@ mod tests {
             RegionLibrary::load(&src, 1.0, -62, SizeFilter::default(), false).expect("load eur");
         assert!(lib.total_realm > 0);
         for k in 0..200 {
-            if let Some((_, _, idx, _)) = lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0) {
+            if let Some((_, _, idx, _)) =
+                lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0, SlotRequest::default())
+            {
                 assert!(idx < lib.entries.len());
             }
         }
+    }
+
+    // A canopy height hint should steer the pick toward that tier, and must never
+    // exceed it: a 5 m crown cannot become a 30 m tree.
+    #[test]
+    fn canopy_size_hint_steers_the_pick() {
+        let src = TreePackSource::embedded("eur");
+        let lib =
+            RegionLibrary::load(&src, 1.0, -62, SizeFilter::default(), false).expect("load eur");
+        let tally = |hint: Option<TreeSize>| {
+            let req = SlotRequest {
+                want_size: hint,
+                density_decided: false,
+            };
+            let mut counts = [0u32; 5];
+            for k in 0..2000 {
+                if let Some((_, _, idx, _)) = lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0, req)
+                {
+                    counts[lib.entries[idx].1 as usize] += 1;
+                }
+            }
+            counts
+        };
+        let small = tally(Some(TreeSize::Small));
+        let medium = tally(Some(TreeSize::Medium));
+        let tall = tally(Some(TreeSize::Tall));
+        assert!(small.iter().sum::<u32>() > 100, "some slots must fill");
+
+        // A hint never overshoots except where a community has nothing that
+        // small, in which case its own smallest stands in.
+        assert_eq!((small[3], small[4]), (0, 0), "{small:?}");
+        assert!(small[2] * 100 < small.iter().sum::<u32>(), "{small:?}");
+        assert_eq!((medium[0], medium[3], medium[4]), (0, 0, 0), "{medium:?}");
+        assert_eq!((tall[0], tall[4]), (0, 0), "{tall:?}");
+
+        // And it binds: the wanted tier dominates what the pack can offer.
+        assert!(
+            medium[1] * 10 > medium.iter().sum::<u32>() * 9,
+            "{medium:?}"
+        );
+        assert!(tall[3] * 2 > tall.iter().sum::<u32>(), "{tall:?}");
+        let mean = |c: &[u32; 5]| -> f64 {
+            let n: u32 = c.iter().sum();
+            c.iter()
+                .enumerate()
+                .map(|(i, &v)| (i * v as usize) as f64)
+                .sum::<f64>()
+                / f64::from(n)
+        };
+        assert!(mean(&small) < mean(&medium), "{small:?} {medium:?}");
+        assert!(mean(&medium) < mean(&tall), "{medium:?} {tall:?}");
+
+        // The slot count is the canopy fraction's job, not the height's, so the
+        // hint must not change how many trees stand.
+        let plain: u32 = tally(None).iter().sum();
+        assert_eq!(plain, small.iter().sum::<u32>());
+        assert_eq!(plain, tall.iter().sum::<u32>());
+    }
+
+    // The user's cap outranks the canopy: asking for a 30 m crown under a Small
+    // cap must not grow a single tree past what the cap alone would have placed.
+    // Communities with nothing that small still fall back to their own smallest,
+    // which is the pack's long-standing "a tree beats a hole" rule.
+    #[test]
+    fn max_tree_size_clamps_the_canopy_hint() {
+        let src = TreePackSource::embedded("eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, SizeFilter::up_to(TreeSize::Small), false)
+            .expect("load eur");
+        let tally = |want_size| {
+            let req = SlotRequest {
+                want_size,
+                density_decided: true,
+            };
+            let mut counts = [0u32; 5];
+            for k in 0..2000 {
+                if let Some((_, _, idx, _)) = lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0, req)
+                {
+                    counts[lib.entries[idx].1 as usize] += 1;
+                }
+            }
+            counts
+        };
+        let capped = tally(None);
+        let hinted = tally(Some(TreeSize::Giant));
+        assert!(
+            capped.iter().sum::<u32>() > 100,
+            "the cap must not empty the pack"
+        );
+        assert_eq!(hinted, capped, "a Giant hint must not beat a Small cap");
+        assert!(
+            hinted[0] > hinted[1..].iter().copied().max().unwrap_or(0),
+            "the cap should still dominate ({hinted:?})"
+        );
     }
 }

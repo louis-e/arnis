@@ -58,12 +58,19 @@ impl PrescanResult {
 }
 
 /// Scans for 3dmr=<id> tags; suppresses the tagged element plus any building-like element inside its footprint.
-pub fn prescan(elements: &[ProcessedElement], world_rotation: f64) -> PrescanResult {
+pub fn prescan(
+    elements: &[ProcessedElement],
+    already_suppressed: &HashSet<(&'static str, u64)>,
+    world_rotation: f64,
+) -> PrescanResult {
     let mut placements = Vec::new();
     let mut suppressed = HashSet::new();
     let mut footprints: Vec<Bbox> = Vec::new();
 
     for element in elements {
+        if already_suppressed.contains(&(element.kind(), element.id())) {
+            continue;
+        }
         let Some(id_str) = element.tags().get("3dmr") else {
             continue;
         };
@@ -458,7 +465,7 @@ mod tests {
             road_tags,
         ));
 
-        let result = prescan(&[tagged, inside, outside, road], 0.0);
+        let result = prescan(&[tagged, inside, outside, road], &HashSet::new(), 0.0);
         assert!(
             result.suppressed_ids.contains(&("way", 1)),
             "tagged element suppressed"
