@@ -41,6 +41,13 @@
   "interior": "내부 생성",
   "fillground": "지면 채우기",
   "legacy_trees": "기존 나무",
+  "canopy_height": "실제 수목 분포",
+  "max_tree_size": "최대 나무 크기",
+  "tree_size_small": "작음",
+  "tree_size_medium": "보통",
+  "tree_size_big": "큼",
+  "tree_size_tall": "높음",
+  "tree_size_giant": "거대",
   "overture": "추가 건물",
   "three_dmr": "3D 모델 사용",
   "disable_height_limit": "건축 높이 확장",
@@ -68,5 +75,9 @@
   "gamemode_creative": "크리에이티브",
   "gamemode_spectator": "관전자",
   "world_time": "월드 시간",
-  "map_item": "월드 지도 아이템"
+  "map_item": "월드 지도 아이템",
+  "reset_to_default": "기본값으로 되돌리기",
+  "reset_all_settings": "모든 설정 초기화",
+  "reset_all_settings_button": "초기화",
+  "reset_all_settings_confirm": "확인?"
 }
