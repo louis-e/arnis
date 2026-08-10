@@ -1,4 +1,5 @@
 use crate::args::Args;
+use crate::canopy::{self, CanopyData};
 use crate::coordinate_system::{
     cartesian::{XZBBox, XZPoint},
     geographic::LLBBox,
@@ -36,6 +37,9 @@ pub struct Ground {
     ground_level: i32,
     elevation_data: Option<ElevationData>,
     land_cover: Option<LandCoverData>,
+    /// `None` when the option is off or the fetch failed, which restores the
+    /// land-cover-only behaviour.
+    canopy: Option<CanopyData>,
     /// World size in blocks, used to map coords onto the land-cover grid when elevation data is absent (flat mode).
     world_width: usize,
     world_height: usize,
@@ -84,6 +88,7 @@ impl Ground {
             ground_level,
             elevation_data: None,
             land_cover: None,
+            canopy: None,
             world_width: 0,
             world_height: 0,
             rotation_mask: None,
@@ -93,9 +98,20 @@ impl Ground {
     }
 
     /// Flat ground (no elevation) that still carries land cover, so water bodies and land-cover surfaces render at the flat surface level.
-    pub fn new_flat_with_land_cover(bbox: &LLBBox, scale: f64, ground_level: i32) -> Self {
+    pub fn new_flat_with_land_cover(
+        bbox: &LLBBox,
+        scale: f64,
+        ground_level: i32,
+        canopy_height: bool,
+    ) -> Self {
         let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
-        let land_cover = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+        // Canopy depends on neither, so it downloads alongside the land cover.
+        let (land_cover, canopy) = std::thread::scope(|s| {
+            let job =
+                canopy_height.then(|| s.spawn(|| canopy::fetch_canopy_data(bbox, grid_w, grid_h)));
+            let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+            (lc, job.and_then(|h| h.join().ok()).flatten())
+        });
         if land_cover.is_none() {
             eprintln!("Land cover fetch failed; generating flat ground without it.");
         }
@@ -104,6 +120,7 @@ impl Ground {
             ground_level,
             elevation_data: None,
             land_cover,
+            canopy,
             world_width: world_w,
             world_height: world_h,
             rotation_mask: None,
@@ -123,6 +140,7 @@ impl Ground {
             ground_level: 0,
             elevation_data: None,
             land_cover: Some(land_cover),
+            canopy: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -164,6 +182,7 @@ impl Ground {
                 blocks_per_meter: 1.0,
             }),
             land_cover: None,
+            canopy: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -181,6 +200,7 @@ impl Ground {
         extended_max_y: i32,
         aws_only_elevation: bool,
         benchmark: bool,
+        canopy_height: bool,
     ) -> Self {
         let mut bench = crate::bench::Bench::new(benchmark);
         // Fetch land cover FIRST so we can feed it into the elevation
@@ -188,83 +208,93 @@ impl Ground {
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
         let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
-        let mut land_cover = {
-            let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
-            if lc.is_some() {
-                println!("Land cover data loaded successfully");
+        // Canopy needs neither of the other two, so it downloads behind both.
+        std::thread::scope(|scope| {
+            let canopy_job = canopy_height
+                .then(|| scope.spawn(|| canopy::fetch_canopy_data(bbox, grid_w, grid_h)));
+            let mut land_cover = {
+                let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+                if lc.is_some() {
+                    println!("Land cover data loaded successfully");
+                } else {
+                    eprintln!("Warning: Land cover data unavailable, using default ground blocks");
+                }
+                lc
+            };
+            bench.mark("elev_landcover_fetch");
+
+            // Raise the floor for the deepest water carve (elevation path only).
+            let water_floor = match &land_cover {
+                Some(lc) => {
+                    let max_depth =
+                        crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
+                    ground_level.max(crate::world_editor::MIN_Y + max_depth + 2)
+                }
+                None => ground_level,
+            };
+
+            let source_mode = if aws_only_elevation {
+                crate::elevation::SourceMode::AwsOnly
             } else {
-                eprintln!("Warning: Land cover data unavailable, using default ground blocks");
-            }
-            lc
-        };
-        bench.mark("elev_landcover_fetch");
-
-        // Raise the floor for the deepest water carve (elevation path only).
-        let water_floor = match &land_cover {
-            Some(lc) => {
-                let max_depth =
-                    crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
-                ground_level.max(crate::world_editor::MIN_Y + max_depth + 2)
-            }
-            None => ground_level,
-        };
-
-        let source_mode = if aws_only_elevation {
-            crate::elevation::SourceMode::AwsOnly
-        } else {
-            crate::elevation::SourceMode::Auto
-        };
-        match fetch_elevation_data(
-            bbox,
-            scale,
-            water_floor,
-            disable_height_limit,
-            extended_max_y,
-            land_cover.as_mut(),
-            source_mode,
-            benchmark,
-        ) {
-            Ok(elevation_data) => {
-                let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-                let snow_threshold_y = snow_threshold_for(&elevation_data, lat, water_floor);
-                Self {
-                    elevation_enabled: true,
-                    ground_level: water_floor,
-                    elevation_data: Some(elevation_data),
-                    land_cover,
-                    world_width: world_w,
-                    world_height: world_h,
-                    rotation_mask: None,
-                    snow_threshold_y,
-                    climate: crate::climate::Climate::classify(bbox),
+                crate::elevation::SourceMode::Auto
+            };
+            match fetch_elevation_data(
+                bbox,
+                scale,
+                water_floor,
+                disable_height_limit,
+                extended_max_y,
+                land_cover.as_mut(),
+                source_mode,
+                benchmark,
+            ) {
+                Ok(elevation_data) => {
+                    let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+                    let snow_threshold_y = snow_threshold_for(&elevation_data, lat, water_floor);
+                    let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
+                    Self {
+                        elevation_enabled: true,
+                        ground_level: water_floor,
+                        elevation_data: Some(elevation_data),
+                        land_cover,
+                        canopy,
+                        world_width: world_w,
+                        world_height: world_h,
+                        rotation_mask: None,
+                        snow_threshold_y,
+                        climate: crate::climate::Climate::classify(bbox),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch elevation data: {}", e);
+                    #[cfg(feature = "gui")]
+                    {
+                        let short: String = e.to_string().chars().take(200).collect();
+                        send_log(
+                            LogLevel::Warning,
+                            &format!("Elevation unavailable, using flat ground ({short})"),
+                        );
+                    }
+                    // Graceful fallback: disable elevation and keep provided ground_level.
+                    // Land cover we already fetched is discarded since it has no
+                    // elevation grid to align against.
+                    // Still has to be collected before the scope can close.
+                    drop(canopy_job.and_then(|h| h.join().ok()));
+                    Self {
+                        elevation_enabled: false,
+                        ground_level,
+                        elevation_data: None,
+                        land_cover: None,
+                        canopy: None,
+                        world_width: 0,
+                        world_height: 0,
+                        rotation_mask: None,
+                        snow_threshold_y: i32::MAX,
+                        climate: crate::climate::Climate::classify(bbox),
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to fetch elevation data: {}", e);
-                #[cfg(feature = "gui")]
-                {
-                    let short: String = e.to_string().chars().take(200).collect();
-                    send_log(
-                        LogLevel::Warning,
-                        &format!("Elevation unavailable, using flat ground ({short})"),
-                    );
-                }
-                // Graceful fallback: disable elevation and keep provided ground_level.
-                // Land cover we already fetched is discarded since it has no
-                // elevation grid to align against.
-                Self {
-                    elevation_enabled: false,
-                    ground_level,
-                    elevation_data: None,
-                    land_cover: None,
-                    world_width: 0,
-                    world_height: 0,
-                    rotation_mask: None,
-                    snow_threshold_y: i32::MAX,
-                    climate: crate::climate::Climate::classify(bbox),
-                }
-            }
-        }
+        })
     }
 
     /// Minecraft Y at/above which terrain is snow-capped (`i32::MAX` = never,
@@ -284,6 +314,50 @@ impl Ground {
     #[inline(always)]
     pub fn has_land_cover(&self) -> bool {
         self.land_cover.is_some()
+    }
+
+    /// Returns whether canopy height data is available.
+    #[inline(always)]
+    pub fn has_canopy(&self) -> bool {
+        self.canopy.is_some()
+    }
+
+    /// Canopy top in metres, or `None` where the map has no measurement.
+    /// A measured zero is bare ground, not missing.
+    #[inline(always)]
+    pub fn canopy_height_m(&self, coord: XZPoint) -> Option<u8> {
+        let ch = self.canopy.as_ref()?;
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (ch.width - 1) as f64).round() as usize).min(ch.width - 1);
+        let z = ((z_ratio * (ch.height - 1) as f64).round() as usize).min(ch.height - 1);
+        match ch.at(x, z) {
+            canopy::CANOPY_NODATA => None,
+            h => Some(h),
+        }
+    }
+
+    /// Share of a `span` square at `origin` that carries canopy, or `None` where
+    /// nothing in it was measured. Unmeasured columns stay out of the average,
+    /// so a cell with none at all hands the decision back to the land cover.
+    pub fn canopy_fraction(&self, origin: XZPoint, span: i32) -> Option<f64> {
+        self.canopy.as_ref()?;
+        if span <= 0 {
+            return None;
+        }
+        let (mut measured, mut wooded) = (0u32, 0u32);
+        for dz in 0..span {
+            for dx in 0..span {
+                if let Some(h) = self.canopy_height_m(XZPoint::new(origin.x + dx, origin.z + dz)) {
+                    measured += 1;
+                    if h >= canopy::CANOPY_MIN_M {
+                        wooded += 1;
+                    }
+                }
+            }
+        }
+        (measured > 0).then(|| f64::from(wooded) / f64::from(measured))
     }
 
     /// Force LC_WATER for every cell inside an OSM water polygon or waterway.
@@ -631,6 +705,13 @@ impl Ground {
         }
     }
 
+    /// Replace the canopy grid after a rotation resamples it.
+    pub fn set_canopy_data(&mut self, grid: Vec<u8>, width: usize, height: usize) {
+        if self.canopy.is_some() {
+            self.canopy = Some(CanopyData::from_grid(grid, width, height));
+        }
+    }
+
     /// Computes the lazy water-blend mask now; all grid mutations must be done.
     pub fn warm_water_blend(&self) {
         if let Some(ref lc) = self.land_cover {
@@ -709,6 +790,40 @@ impl Ground {
         }
     }
 
+    /// Grey ramp of canopy heights, black where nothing was measured.
+    pub fn save_canopy_debug_image(&self, filename: &str) {
+        let Some(ref ch) = self.canopy else {
+            return;
+        };
+        if ch.height == 0 || ch.width == 0 {
+            return;
+        }
+        let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
+            RgbImage::new(ch.width as u32, ch.height as u32);
+        for z in 0..ch.height {
+            for x in 0..ch.width {
+                let color = match ch.at(x, z) {
+                    canopy::CANOPY_NODATA => Rgb([0x00, 0x00, 0x00]),
+                    h if h < canopy::CANOPY_MIN_M => Rgb([0x30, 0x30, 0x30]),
+                    // 3 m to 40 m over the green ramp, saturating at the top.
+                    h => {
+                        let t = (f32::from(h) / 40.0).min(1.0);
+                        Rgb([(64.0 * (1.0 - t)) as u8, (64.0 + 191.0 * t) as u8, 48])
+                    }
+                };
+                img.put_pixel(x as u32, z as u32, color);
+            }
+        }
+        let filename: String = if !filename.ends_with(".png") {
+            format!("{filename}.png")
+        } else {
+            filename.to_string()
+        };
+        if let Err(e) = img.save(&filename) {
+            eprintln!("Failed to save canopy debug image: {e}");
+        }
+    }
+
     fn save_debug_image(&self, filename: &str) {
         let heights = &self
             .elevation_data
@@ -776,15 +891,22 @@ pub fn generate_ground_data(args: &Args) -> Ground {
             extended_max_y_for(args),
             args.aws_only_elevation,
             args.benchmark,
+            args.canopy_height,
         );
         if args.debug {
             ground.save_debug_image("elevation_debug");
             ground.save_land_cover_debug_image("landcover_debug");
+            ground.save_canopy_debug_image("canopy_debug");
         }
         return ground;
     }
     println!("{} Fetching land cover...", "[3/7]".bold());
-    Ground::new_flat_with_land_cover(&args.bbox, args.scale, args.ground_level)
+    Ground::new_flat_with_land_cover(
+        &args.bbox,
+        args.scale,
+        args.ground_level,
+        args.canopy_height,
+    )
 }
 
 /// Per-format build-height cap when the user opts into extended build height:
@@ -819,12 +941,43 @@ mod tests {
                 blocks_per_meter: 1.0,
             }),
             land_cover: None,
+            canopy: None,
             world_width: w,
             world_height: h,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
         }
+    }
+
+    // An unmeasured cell hands the decision back to the land cover.
+    #[test]
+    fn canopy_fraction_separates_bare_from_unmeasured() {
+        let nd = canopy::CANOPY_NODATA;
+        let mut ground = ground_with(vec![vec![0.0; 4]; 4]);
+        // Left half wooded, right half measured bare, bottom row unmeasured.
+        ground.canopy = Some(CanopyData::from_grid(
+            vec![
+                12, 12, 0, 0, //
+                12, 12, 0, 0, //
+                12, 12, 0, 0, //
+                nd, nd, nd, nd,
+            ],
+            4,
+            4,
+        ));
+        assert_eq!(ground.canopy_fraction(XZPoint::new(0, 0), 2), Some(1.0));
+        assert_eq!(ground.canopy_fraction(XZPoint::new(2, 0), 2), Some(0.0));
+        assert_eq!(
+            ground.canopy_fraction(XZPoint::new(0, 3), 1),
+            None,
+            "unmeasured is not bare"
+        );
+        // A cell straddling the two averages only over what was measured.
+        assert_eq!(ground.canopy_fraction(XZPoint::new(0, 2), 2), Some(1.0));
+        // Without a canopy grid there is nothing to say.
+        ground.canopy = None;
+        assert_eq!(ground.canopy_fraction(XZPoint::new(0, 0), 2), None);
     }
 
     // Flat mode (no elevation) still maps land-cover lookups via the stored world dims, with edge clamping.

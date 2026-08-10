@@ -41,6 +41,13 @@
   "interior": "内装生成",
   "fillground": "地面を埋める",
   "legacy_trees": "従来の木",
+  "canopy_height": "実際の樹木被覆",
+  "max_tree_size": "最大の木のサイズ",
+  "tree_size_small": "小",
+  "tree_size_medium": "中",
+  "tree_size_big": "大",
+  "tree_size_tall": "高",
+  "tree_size_giant": "巨大",
   "overture": "追加の建物",
   "three_dmr": "3Dモデルを使用",
   "disable_height_limit": "建築高さを拡張",
@@ -68,5 +75,9 @@
   "gamemode_creative": "クリエイティブ",
   "gamemode_spectator": "スペクテイター",
   "world_time": "ワールド時間",
-  "map_item": "ワールド地図アイテム"
+  "map_item": "ワールド地図アイテム",
+  "reset_to_default": "デフォルトに戻す",
+  "reset_all_settings": "すべての設定をリセット",
+  "reset_all_settings_button": "リセット",
+  "reset_all_settings_confirm": "確定?"
 }

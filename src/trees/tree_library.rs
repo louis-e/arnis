@@ -5,7 +5,9 @@ const MEDIUM_MAX_HEIGHT: i32 = 12;
 const BIG_MAX_HEIGHT: i32 = 20;
 const TALL_MAX_HEIGHT: i32 = 28;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// Ordered smallest to largest; `Ord` follows declaration order, which is what
+/// the size cap compares against.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, clap::ValueEnum)]
 pub enum TreeSize {
     Small,
     Medium,
@@ -27,6 +29,11 @@ pub fn size_for_height(height: i32) -> TreeSize {
     } else {
         TreeSize::Giant
     }
+}
+
+/// Bucket a measured canopy top. One block is one metre.
+pub fn size_for_canopy_m(metres: u8) -> TreeSize {
+    size_for_height(i32::from(metres))
 }
 
 /// The five size tiers + which are enabled. Default: all (giant stays 1:1-gated in the engine).
@@ -51,7 +58,33 @@ impl Default for SizeFilter {
     }
 }
 
+impl TreeSize {
+    /// Parse a GUI name, falling back to no cap on anything unrecognised.
+    #[allow(dead_code)]
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "small" => TreeSize::Small,
+            "medium" => TreeSize::Medium,
+            "big" => TreeSize::Big,
+            "tall" => TreeSize::Tall,
+            _ => TreeSize::Giant,
+        }
+    }
+}
+
 impl SizeFilter {
+    /// Every tier up to and including `max`. Oversized picks fall back to a
+    /// smaller species in the same community where there is one.
+    pub fn up_to(max: TreeSize) -> Self {
+        SizeFilter {
+            small: TreeSize::Small <= max,
+            medium: TreeSize::Medium <= max,
+            big: TreeSize::Big <= max,
+            tall: TreeSize::Tall <= max,
+            giant: TreeSize::Giant <= max,
+        }
+    }
+
     pub fn allows(&self, size: TreeSize) -> bool {
         match size {
             TreeSize::Small => self.small,

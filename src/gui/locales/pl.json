@@ -41,6 +41,13 @@
   "interior": "Generowanie wnętrza",
   "fillground": "Wypełnij podłoże",
   "legacy_trees": "Klasyczne drzewa",
+  "canopy_height": "Rzeczywiste zadrzewienie",
+  "max_tree_size": "Maks. wielkość drzewa",
+  "tree_size_small": "Małe",
+  "tree_size_medium": "Średnie",
+  "tree_size_big": "Duże",
+  "tree_size_tall": "Wysokie",
+  "tree_size_giant": "Olbrzymie",
   "overture": "Dodatkowe budynki",
   "three_dmr": "Użyj modeli 3D",
   "disable_height_limit": "Rozszerz wysokość budowania",
@@ -68,5 +75,9 @@
   "gamemode_creative": "Kreatywny",
   "gamemode_spectator": "Obserwator",
   "world_time": "Czas świata",
-  "map_item": "Przedmiot mapy świata"
+  "map_item": "Przedmiot mapy świata",
+  "reset_to_default": "Przywróć wartość domyślną",
+  "reset_all_settings": "Zresetuj wszystkie ustawienia",
+  "reset_all_settings_button": "Zresetuj",
+  "reset_all_settings_confirm": "Potwierdzić?"
 }
