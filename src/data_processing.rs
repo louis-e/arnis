@@ -1054,11 +1054,10 @@ pub fn generate_world_with_options(
             // Release flood fill cache entries for memory optimization.
             // (Skipped in the parallel path where the cache is shared immutably.)
             match &element {
-                ProcessedElement::Way(way) => {
-                    if !relation_way_uses.contains_key(&way.id) {
-                        flood_fill_cache.remove_way(way.id);
-                    }
+                ProcessedElement::Way(way) if !relation_way_uses.contains_key(&way.id) => {
+                    flood_fill_cache.remove_way(way.id);
                 }
+                ProcessedElement::Way(_) => {}
                 ProcessedElement::Relation(rel) => {
                     // A member way can belong to multiple relations.  Release
                     // its cached fill only after the last relation has consumed

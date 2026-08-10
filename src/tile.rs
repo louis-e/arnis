@@ -144,11 +144,6 @@ fn relation_intersects_bounds(rel: &ProcessedRelation, bounds: &TileBounds) -> b
         .any(|member| way_intersects_bounds(&member.way, bounds))
 }
 
-/// Check if a way's bounding box intersects with the given bounds.
-fn way_intersects_bounds(way: &ProcessedWay, bounds: &TileBounds) -> bool {
-    way_aabb(way).is_some_and(|aabb| aabb_intersects(aabb, bounds))
-}
-
 /// Check if a way is a linear element (road, railway, barrier, etc.)
 fn is_linear_element(way: &ProcessedWay) -> bool {
     way.tags.contains_key("highway")
