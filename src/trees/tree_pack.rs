@@ -72,7 +72,7 @@ pub fn load(args: &Args, scale: f64, ground_level: i32) -> Option<RegionLibrary>
     if args.legacy_trees {
         return None;
     }
-    let sizes = SizeFilter::default();
+    let sizes = SizeFilter::up_to(args.max_tree_size);
     let lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
     let lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
     let realm = realm_for_latlon(lat, lon);

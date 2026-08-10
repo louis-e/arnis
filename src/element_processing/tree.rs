@@ -451,16 +451,10 @@ impl Tree {
         false
     }
 
-    /// Creates a tree at the specified coordinates.
-    pub fn create(
-        editor: &mut WorldEditor,
-        (x, y, z): Coord,
-        building_footprints: Option<&BuildingFootprintBitmap>,
-        bridge_surface: Option<&BridgeSurfaceMap>,
-    ) {
+    /// The species mix for a scattered tree, keyed on the column.
+    fn random_type(x: i32, z: i32) -> TreeType {
         let mut rng = coord_rng(x, z, 0);
-
-        let tree_type = match rng.random_range(1..=100) {
+        match rng.random_range(1..=100) {
             1..=20 => TreeType::Oak,
             21..=32 => TreeType::Spruce,
             33..=44 => TreeType::Birch,
@@ -476,15 +470,45 @@ impl Tree {
             93..=98 => TreeType::FloweringOak,
             99..=100 => TreeType::Mangrove,
             _ => unreachable!(),
-        };
+        }
+    }
 
-        Self::create_of_type(
+    /// Creates a tree at the specified coordinates.
+    pub fn create(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+    ) {
+        let tree_type = Self::random_type(x, z);
+        Self::build(
             editor,
             (x, y, z),
             tree_type,
             building_footprints,
             bridge_surface,
             false,
+            false,
+        );
+    }
+
+    /// Creates a tree the canopy map asked for. The map already fixed the
+    /// density, so the pack must not thin it again.
+    pub fn create_from_canopy(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+    ) {
+        let tree_type = Self::random_type(x, z);
+        Self::build(
+            editor,
+            (x, y, z),
+            tree_type,
+            building_footprints,
+            bridge_surface,
+            false,
+            true,
         );
     }
 
@@ -496,6 +520,27 @@ impl Tree {
         building_footprints: Option<&BuildingFootprintBitmap>,
         bridge_surface: Option<&BridgeSurfaceMap>,
         allow_on_paved: bool,
+    ) {
+        Self::build(
+            editor,
+            (x, y, z),
+            tree_type,
+            building_footprints,
+            bridge_surface,
+            allow_on_paved,
+            false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        tree_type: TreeType,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+        allow_on_paved: bool,
+        density_decided: bool,
     ) {
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
@@ -564,9 +609,20 @@ impl Tree {
             };
             let hint = habitat_for_tree_type(tree_type);
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
-            if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y) {
-                // The slot can be a few blocks off (x,z); re-check it isn't road/water/bridge.
+            // Read at the slot, not the request, so the hint describes the
+            // column the trunk lands in.
+            let (hx, hz) = crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
+            let req = crate::trees::region::SlotRequest {
+                want_size: editor.canopy_size_hint(hx, hz),
+                density_decided,
+            };
+            if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y, req) {
+                // The slot can be a few blocks off (x,z), so every check that
+                // rejected the request has to run again on the moved trunk.
+                // Without the footprint one a tree asked for beside a building
+                // gets snapped onto its roof.
                 if editor.is_lc_water(sx, sz)
+                    || building_footprints.is_some_and(|f| f.contains(sx, sz))
                     || editor.check_for_block(sx, 0, sz, Some(road_water))
                     || bridge_surface.is_some_and(|b| b.contains(sx, sz))
                 {

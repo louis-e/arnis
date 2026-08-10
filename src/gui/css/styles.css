@@ -762,6 +762,8 @@ input[type="range"] {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* One line per setting name, the control beside it gives up the width. */
+  white-space: nowrap;
 }
 
 /* Tooltip icon (question mark in circle) */
@@ -925,6 +927,12 @@ input[type="range"] {
   background: #fecc44;
   color: #1e1e1e;
   font-weight: 600;
+}
+
+/* Five segments do not fit beside a label at the normal size. */
+.segmented-control.is-compact .segment {
+  padding: 5px 7px;
+  font-size: 0.78em;
 }
 
 #world-time-value {
