@@ -41,6 +41,13 @@
   "interior": "Sisätilan luonti",
   "fillground": "Täytä maa",
   "legacy_trees": "Perinteiset puut",
+  "canopy_height": "Todellinen puusto",
+  "max_tree_size": "Puiden enimmäiskoko",
+  "tree_size_small": "Pieni",
+  "tree_size_medium": "Keskikokoinen",
+  "tree_size_big": "Suuri",
+  "tree_size_tall": "Korkea",
+  "tree_size_giant": "Jättiläinen",
   "overture": "Lisärakennukset",
   "three_dmr": "Käytä 3D-malleja",
   "disable_height_limit": "Laajenna rakennuskorkeutta",
@@ -68,5 +75,9 @@
   "gamemode_creative": "Luova",
   "gamemode_spectator": "Katselija",
   "world_time": "Maailman aika",
-  "map_item": "Maailmankarttaesine"
+  "map_item": "Maailmankarttaesine",
+  "reset_to_default": "Palauta oletusarvo",
+  "reset_all_settings": "Palauta kaikki asetukset",
+  "reset_all_settings_button": "Palauta",
+  "reset_all_settings_confirm": "Vahvista?"
 }

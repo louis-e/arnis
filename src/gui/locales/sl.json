@@ -41,6 +41,13 @@
   "interior": "Generiranje notranjosti",
   "fillground": "Zapolni tla",
   "legacy_trees": "Klasična drevesa",
+  "canopy_height": "Dejanska drevesna odeja",
+  "max_tree_size": "Največja velikost dreves",
+  "tree_size_small": "Majhna",
+  "tree_size_medium": "Srednja",
+  "tree_size_big": "Velika",
+  "tree_size_tall": "Visoka",
+  "tree_size_giant": "Orjaška",
   "overture": "Dodatne stavbe",
   "three_dmr": "Uporabi 3D modele",
   "disable_height_limit": "Razširi višino gradnje",
@@ -68,5 +75,9 @@
   "gamemode_creative": "Ustvarjalni",
   "gamemode_spectator": "Gledalec",
   "world_time": "Čas sveta",
-  "map_item": "Predmet zemljevida sveta"
+  "map_item": "Predmet zemljevida sveta",
+  "reset_to_default": "Ponastavi na privzeto",
+  "reset_all_settings": "Ponastavi vse nastavitve",
+  "reset_all_settings_button": "Ponastavi",
+  "reset_all_settings_confirm": "Potrdi?"
 }

@@ -165,6 +165,12 @@ pub fn generate_landuse(
             editor.set_block(actual_block, x, 0, z, None, None);
         }
 
+        // Nothing is scattered on land-cover water: the depth carve turns these
+        // cells into lake after this runs, leaving plants floating on top.
+        if editor.is_lc_water(x, z) {
+            continue;
+        }
+
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
             "cemetery" if (x % 3 == 0) && (z % 3 == 0) => {

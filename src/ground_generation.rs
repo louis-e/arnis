@@ -107,6 +107,36 @@ impl ChunkGroundCache {
     }
 }
 
+/// Whether the canopy map covers this column's lattice cell, and whether it
+/// wants a trunk rooted here. Decided once per cell, at the cell's own trunk
+/// slot, since every column in a cell snaps to that slot anyway. An unmeasured
+/// cell reports `(false, false)` so the land cover keeps its say.
+#[allow(clippy::too_many_arguments)]
+fn canopy_verdict(
+    ground: &Ground,
+    x: i32,
+    z: i32,
+    origin_x: i32,
+    origin_z: i32,
+    spacing: i32,
+    schematic_trees: bool,
+) -> (bool, bool) {
+    let cell = XZPoint::new(
+        x.div_euclid(spacing) * spacing - origin_x,
+        z.div_euclid(spacing) * spacing - origin_z,
+    );
+    let Some(fraction) = ground.canopy_fraction(cell, spacing) else {
+        return (false, false);
+    };
+    if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
+        return (true, false);
+    }
+    let p = crate::canopy::slot_probability(fraction, spacing, schematic_trees);
+    // Its own salt, so no existing draw shifts when the option is off.
+    let roll = (land_cover::coord_hash(x ^ 0x434D, z ^ 0x484D) % 10_000) as f64 / 10_000.0;
+    (true, roll < p)
+}
+
 /// Generate the ground layer for the entire bounding box.
 ///
 /// This must be called after all OSM element processing is complete and the
@@ -156,6 +186,9 @@ pub fn generate_ground_region(
     show_progress: bool,
 ) {
     let has_land_cover = ground.has_land_cover();
+    let has_canopy = ground.has_canopy();
+    let tree_spacing = editor.tree_slot_spacing();
+    let schematic_trees = editor.tree_pack().is_some();
     let terrain_enabled = ground.elevation_enabled;
     let climate = ground.climate();
 
@@ -822,6 +855,38 @@ pub fn generate_ground_region(
                                     Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
                                     None,
                                 );
+                            // Where the canopy map reaches, it decides which columns get
+                            // trees on any class, and land cover keeps the surface and the
+                            // undergrowth. Its roll uses its own hash, so turning the option
+                            // off leaves every other draw untouched.
+                            let (canopy_covered, canopy_tree) = if has_canopy && has_land_cover {
+                                canopy_verdict(
+                                    ground,
+                                    x,
+                                    z,
+                                    xzbbox.min_x(),
+                                    xzbbox.min_z(),
+                                    tree_spacing,
+                                    schematic_trees,
+                                )
+                            } else {
+                                (false, false)
+                            };
+                            // Placed before the vegetation pass, whose own guard then sees
+                            // the trunk and leaves the column alone.
+                            if canopy_tree
+                                && slope <= 4
+                                && ground_allows_trees
+                                && !tunnel_footprint.contains(x, z)
+                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                            {
+                                tree::Tree::create_from_canopy(
+                                    editor,
+                                    (x, 1, z),
+                                    Some(building_footprints),
+                                    Some(bridge_surface),
+                                );
+                            }
                             if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
                                 let cover = ground.cover_class(coord);
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
@@ -833,7 +898,7 @@ pub fn generate_ground_region(
                                             && !tunnel_footprint.contains(x, z) =>
                                     {
                                         let choice = rng.random_range(0..30);
-                                        if choice == 0 {
+                                        if choice == 0 && !canopy_covered {
                                             tree::Tree::create(
                                                 editor,
                                                 (x, 1, z),
