@@ -1146,21 +1146,30 @@ fn stone_slab_family(java_name: &str) -> Option<(&'static str, &'static str, &'s
 }
 
 /// Convert Java slab block to Bedrock format with proper type.
+///
+/// Java encodes a full-height slab as `type=double` on the slab block itself.
+/// Bedrock instead has a separate double-slab id per material, so `type=double`
+/// selects a different block rather than a different state. Treating it as an
+/// ordinary slab left half-height blocks in place of full ones — the bundled
+/// schematics (cars, boats, bridge segments, playgrounds) rely on double slabs.
 fn convert_slab(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
+    let slab_type = props.and_then(|p| p.get("type")).and_then(|v| match v {
+        fastnbt::Value::String(s) => Some(s.as_str()),
+        _ => None,
+    });
+    let is_double = slab_type == Some("double");
+
     let mut states = BTreeMap::new();
 
-    // Convert type: Java uses "top/bottom/double", Bedrock uses "top_slot_bit".
-    // Note: "double" slabs in Java become full blocks in Bedrock (different block ID)
-    let top_slot = matches!(
-        props.and_then(|p| p.get("type")),
-        Some(fastnbt::Value::String(t)) if t == "top"
-    );
+    // Convert type: Java uses "top"/"bottom", Bedrock uses "top_slot_bit".
+    // Double slabs keep the state (it is inert for them) so that the legacy
+    // family ids still carry their full state set.
     states.insert(
         "top_slot_bit".to_string(),
-        BedrockBlockStateValue::Bool(top_slot),
+        BedrockBlockStateValue::Bool(slab_type == Some("top")),
     );
 
     let bedrock_name = if let Some((name, state, value)) = stone_slab_family(java_name) {
@@ -1168,7 +1177,12 @@ fn convert_slab(
             state.to_string(),
             BedrockBlockStateValue::String(value.to_string()),
         );
-        name
+        if is_double {
+            // stone_block_slab3 -> double_stone_block_slab3
+            format!("double_{name}")
+        } else {
+            name.to_string()
+        }
     } else if matches!(
         java_name,
         "oak_slab" | "spruce_slab" | "birch_slab" | "jungle_slab" | "acacia_slab" | "dark_oak_slab"
@@ -1177,12 +1191,20 @@ fn convert_slab(
             "wood_type".to_string(),
             BedrockBlockStateValue::String(java_name.trim_end_matches("_slab").to_string()),
         );
-        "wooden_slab"
+        if is_double {
+            "double_wooden_slab".to_string()
+        } else {
+            "wooden_slab".to_string()
+        }
     } else {
         // Slabs added after the wood/stone families (blackstone, deepslate, mud
         // brick, bamboo, warped, cut copper, ...) already have their own id and
         // took top_slot_bit from the start, so the name carries over as-is.
-        java_name
+        // Their double form is spelled "<material>_double_slab".
+        match java_name.strip_suffix("_slab") {
+            Some(material) if is_double => format!("{material}_double_slab"),
+            _ => java_name.to_string(),
+        }
     };
 
     BedrockBlock {
@@ -1380,10 +1402,9 @@ fn convert_trapdoor(
 
 /// Convert Java bed block to Bedrock format with direction, head/foot, and occupied states.
 fn convert_bed(
-    java_name: &str,
+    _java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let _ = java_name;
     let mut states = BTreeMap::new();
 
     // Bedrock has a single "minecraft:bed" block and stores the dye colour in the
@@ -2192,5 +2213,82 @@ mod tests {
             bedrock.states.get("ground_sign_direction"),
             Some(BedrockBlockStateValue::Int(6))
         ));
+    }
+
+    /// Java encodes a full block as `type=double` on the slab; Bedrock has a
+    /// separate id per material. The bundled schematics (cars, boats, bridge
+    /// segments, playgrounds, crane, starship) all contain double slabs.
+    #[test]
+    fn test_double_slabs_become_double_slab_ids() {
+        use std::collections::HashMap as StdHashMap;
+
+        let double = || {
+            let mut props = StdHashMap::new();
+            props.insert(
+                "type".to_string(),
+                fastnbt::Value::String("double".to_string()),
+            );
+            props.insert(
+                "waterlogged".to_string(),
+                fastnbt::Value::String("false".to_string()),
+            );
+            props
+        };
+
+        // Every combination that actually appears in assets/structures/*.schem.
+        let cases = [
+            ("stone_slab", "minecraft:double_stone_block_slab4"),
+            ("cobblestone_slab", "minecraft:double_stone_block_slab"),
+            ("stone_brick_slab", "minecraft:double_stone_block_slab"),
+            ("quartz_slab", "minecraft:double_stone_block_slab"),
+            ("smooth_stone_slab", "minecraft:double_stone_block_slab"),
+            ("smooth_quartz_slab", "minecraft:double_stone_block_slab4"),
+            (
+                "polished_andesite_slab",
+                "minecraft:double_stone_block_slab3",
+            ),
+            ("jungle_slab", "minecraft:double_wooden_slab"),
+            ("dark_oak_slab", "minecraft:double_wooden_slab"),
+            ("warped_slab", "minecraft:warped_double_slab"),
+            (
+                "polished_blackstone_slab",
+                "minecraft:polished_blackstone_double_slab",
+            ),
+        ];
+
+        for (java_name, expected) in cases {
+            let bedrock = convert_slab(java_name, Some(&double()));
+            assert_eq!(
+                bedrock.name, expected,
+                "{java_name}[type=double] should map to {expected}"
+            );
+        }
+
+        // The material state still has to ride along on the legacy families.
+        let bedrock = convert_slab("cobblestone_slab", Some(&double()));
+        assert!(matches!(
+            bedrock.states.get("stone_slab_type"),
+            Some(BedrockBlockStateValue::String(t)) if t == "cobblestone"
+        ));
+        let bedrock = convert_slab("jungle_slab", Some(&double()));
+        assert!(matches!(
+            bedrock.states.get("wood_type"),
+            Some(BedrockBlockStateValue::String(t)) if t == "jungle"
+        ));
+
+        // ...and a half slab must NOT pick up a double id.
+        let mut half = StdHashMap::new();
+        half.insert(
+            "type".to_string(),
+            fastnbt::Value::String("bottom".to_string()),
+        );
+        assert_eq!(
+            convert_slab("warped_slab", Some(&half)).name,
+            "minecraft:warped_slab"
+        );
+        assert_eq!(
+            convert_slab("stone_slab", Some(&half)).name,
+            "minecraft:stone_block_slab4"
+        );
     }
 }
