@@ -1159,6 +1159,16 @@ fn compute_spatial_relation_part_suppression(
         tags.get("building:part")
             .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
     };
+    // Only relations the parser actually turns into a ProcessedElement::Relation can render.
+    // Anything else must be ignored here: crediting a part that will never be drawn could
+    // suppress an outline and leave the building missing entirely.
+    // Keep this in sync with the relation type filter in `parse_osm_data`.
+    let is_renderable = |tags: &HashMap<String, String>| {
+        matches!(
+            tags.get("type").map(|t| t.as_str()),
+            Some("multipolygon") | Some("building")
+        )
+    };
     // A relation's footprint is bounded by its outer/outline member ways; inner rings (holes)
     // and non-boundary roles are excluded.
     let is_outer_role =
@@ -1169,7 +1179,7 @@ fn compute_spatial_relation_part_suppression(
     let mut needed_ways: HashSet<u64> = HashSet::new();
     for rel in relations {
         let Some(tags) = &rel.tags else { continue };
-        if !(tags.contains_key("building") || is_part(tags)) {
+        if !is_renderable(tags) || !(tags.contains_key("building") || is_part(tags)) {
             continue;
         }
         for m in &rel.members {
@@ -1225,6 +1235,9 @@ fn compute_spatial_relation_part_suppression(
     let mut parts: Vec<RelPart> = Vec::new();
     for rel in relations {
         let Some(tags) = &rel.tags else { continue };
+        if !is_renderable(tags) {
+            continue;
+        }
         let part = is_part(tags);
         let outline = !part && tags.contains_key("building");
         if !part && !outline {
@@ -1752,14 +1765,19 @@ mod outline_suppression_tests {
         (ways, nodes)
     }
 
+    /// Defaults to `type=multipolygon`, since that is what the parser actually renders;
+    /// pass an explicit `type` to model a relation the parser would drop.
     fn relation_el(id: u64, tags: &[(&str, &str)], members: Vec<OsmMember>) -> OsmElement {
+        let mut map = tagmap(tags);
+        map.entry("type".to_string())
+            .or_insert_with(|| "multipolygon".to_string());
         OsmElement {
             r#type: "relation".into(),
             id,
             lat: None,
             lon: None,
             nodes: None,
-            tags: Some(tagmap(tags)),
+            tags: Some(map),
             members,
         }
     }
@@ -1796,6 +1814,41 @@ mod outline_suppression_tests {
         let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
         assert!(s.contains(&("relation", 1)));
         assert!(!s.contains(&("relation", 2)));
+    }
+
+    // parse_osm_data only turns type=multipolygon / type=building relations into renderable
+    // elements. A part of any other type is never drawn, so letting it count toward coverage
+    // would suppress the outline and leave nothing at all in its place.
+    #[test]
+    fn part_relation_the_parser_never_renders_cannot_suppress_the_outline() {
+        for part_type in ["site", "group", "boundary"] {
+            let (outline_ways, outline_nodes) =
+                split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+            let (part_way, part_nodes) = square_way(200, 2000, 0.0016);
+            // Geometry alone would clear the threshold; only the type must stop it.
+            assert!((0.0016_f64 / 0.002).powi(2) >= MIN_PART_COVERAGE);
+
+            let outline = relation_el(
+                1,
+                &[("building", "amphitheatre"), ("building:part", "no")],
+                outer_members(&[100, 101, 102, 103]),
+            );
+            let part = relation_el(
+                2,
+                &[("type", part_type), ("building:part", "yes")],
+                outer_members(&[200]),
+            );
+
+            let mut ways = outline_ways;
+            ways.push(part_way);
+            let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+            let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+            assert!(
+                !s.contains(&("relation", 1)),
+                "outline suppressed by a type={part_type} part that never renders"
+            );
+        }
     }
 
     // Same stitched multi-way outline, but the only part covers ~36% (< MIN_PART_COVERAGE),
