@@ -1475,7 +1475,7 @@ fn determine_wall_block_from_tags(
         // GlassySkyscraper walls must stay glass.
         return None;
     }
-    if element.tags.get("historic") == Some(&"castle".to_string()) {
+    if element.tags.get("historic").map(String::as_str) == Some("castle") {
         return None;
     }
     if let Some(material) = element
@@ -1507,7 +1507,7 @@ fn determine_wall_block(
     rng: &mut impl Rng,
 ) -> Block {
     // Historic castles have their own special treatment
-    if element.tags.get("historic") == Some(&"castle".to_string()) {
+    if element.tags.get("historic").map(String::as_str) == Some("castle") {
         return get_castle_wall_block(rng);
     }
 
@@ -4818,7 +4818,7 @@ pub fn generate_buildings(
         .unwrap_or("yes");
 
     // Handle shelter amenity
-    if element.tags.get("amenity") == Some(&"shelter".to_string()) {
+    if element.tags.get("amenity").map(String::as_str) == Some("shelter") {
         generate_shelter(editor, element, &cached_floor_area, scale_factor);
         return;
     }

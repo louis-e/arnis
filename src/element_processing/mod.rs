@@ -29,7 +29,12 @@ use crate::osm_parser::ProcessedNode;
 /// Merges way segments that share endpoints into closed rings.
 /// Used by water_areas.rs and boundaries.rs for assembling relation members.
 pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
-    let mut removed: Vec<usize> = vec![];
+    // Mark merged rings by index.  The previous implementation kept a `Vec<usize>`
+    // and called `contains` from the nested matching loop.  For a relation with
+    // many segments that adds another O(n) scan to the O(n²) pair search, making
+    // ring assembly effectively cubic.  A boolean marker keeps the same merge
+    // order while making the bookkeeping O(1).
+    let mut removed = vec![false; rings.len()];
     let mut merged: Vec<Vec<ProcessedNode>> = vec![];
 
     // Match nodes by ID or proximity (handles synthetic nodes from bbox clipping)
@@ -48,7 +53,7 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
                 continue;
             }
 
-            if removed.contains(&i) || removed.contains(&j) {
+            if removed[i] || removed[j] {
                 continue;
             }
 
@@ -75,32 +80,32 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
             }
 
             if nodes_match(x_first, y_first) {
-                removed.push(i);
-                removed.push(j);
+                removed[i] = true;
+                removed[j] = true;
 
                 let mut x: Vec<ProcessedNode> = x.clone();
                 x.reverse();
                 x.extend(y.iter().skip(1).cloned());
                 merged.push(x);
             } else if nodes_match(x_last, y_last) {
-                removed.push(i);
-                removed.push(j);
+                removed[i] = true;
+                removed[j] = true;
 
                 let mut x: Vec<ProcessedNode> = x.clone();
                 x.extend(y.iter().rev().skip(1).cloned());
 
                 merged.push(x);
             } else if nodes_match(x_first, y_last) {
-                removed.push(i);
-                removed.push(j);
+                removed[i] = true;
+                removed[j] = true;
 
                 let mut y: Vec<ProcessedNode> = y.clone();
                 y.extend(x.iter().skip(1).cloned());
 
                 merged.push(y);
             } else if nodes_match(x_last, y_first) {
-                removed.push(i);
-                removed.push(j);
+                removed[i] = true;
+                removed[j] = true;
 
                 let mut x: Vec<ProcessedNode> = x.clone();
                 x.extend(y.iter().skip(1).cloned());
@@ -110,10 +115,10 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
         }
     }
 
-    removed.sort();
-
-    for r in removed.iter().rev() {
-        rings.remove(*r);
+    for r in (0..removed.len()).rev() {
+        if removed[r] {
+            rings.remove(r);
+        }
     }
 
     let merged_len: usize = merged.len();
