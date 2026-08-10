@@ -928,9 +928,10 @@ pub fn generate_world_with_options(
                     }
                 }
 
-                rail_tunnel_points.extend(tile_rail_tunnel_points);
-                // Under eviction the in-tile carve already ran; don't retain the cells.
+                // Under eviction the in-tile carve already ran, and nothing reads
+                // these afterwards, so don't retain the points or the cells.
                 if !eviction_active {
+                    rail_tunnel_points.extend(tile_rail_tunnel_points);
                     tunnel_cells.extend(tile_tunnel_cells);
                 }
 
