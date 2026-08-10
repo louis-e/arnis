@@ -61,7 +61,7 @@ bedrockrs_level = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", r
 bedrockrs_shared = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", rev = "7ef268b", package = "bedrockrs_shared" }
 nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx" }
 vek = "0.17"
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 rusty-leveldb = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
