@@ -177,6 +177,34 @@ pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     }
 }
 
+/// Drops the cached flood fills whose last reader sits at `index`.
+///
+/// `last_fill_use` maps a way id to the position of the final element that reads
+/// its fill, counting both the standalone way and any relation holding it as a
+/// member. Evicting anywhere else would force a later reader to refill.
+fn release_finished_fills(
+    cache: &mut FloodFillCache,
+    last_fill_use: &HashMap<u64, usize>,
+    element: &ProcessedElement,
+    index: usize,
+) {
+    match element {
+        ProcessedElement::Way(way) => {
+            if last_fill_use.get(&way.id) == Some(&index) {
+                cache.remove_way(way.id);
+            }
+        }
+        ProcessedElement::Relation(rel) => {
+            for member in &rel.members {
+                if last_fill_use.get(&member.way.id) == Some(&index) {
+                    cache.remove_way(member.way.id);
+                }
+            }
+        }
+        ProcessedElement::Node(_) => {}
+    }
+}
+
 /// Process a single element by dispatching to the appropriate element processor.
 ///
 /// Extracted from the main loop so the same dispatch runs in both the sequential
@@ -973,16 +1001,23 @@ pub fn generate_world_with_options(
     } else {
         // Small area: sequential processing along the original code path.
         let elements_count: usize = elements.len();
-        // Relations are parsed after ways and their handlers reuse member-way
-        // flood fills.  Keep those entries alive until the relation is handled;
-        // evicting them as soon as the standalone way runs turns every relation
-        // member into an avoidable second polygon fill.
-        let mut relation_way_uses: HashMap<u64, usize> = HashMap::new();
-        for element in &elements {
-            if let ProcessedElement::Relation(rel) = element {
-                for member in &rel.members {
-                    *relation_way_uses.entry(member.way.id).or_default() += 1;
+        // A way's flood fill is read by the way itself and by every relation
+        // listing it as a member, and sort_ground_fill_areas interleaves both
+        // kinds, so neither one is reliably last. Record the position of the
+        // final reader and evict only there; dropping the entry earlier makes
+        // the remaining readers refill the same polygon.
+        let mut last_fill_use: HashMap<u64, usize> = HashMap::new();
+        for (index, element) in elements.iter().enumerate() {
+            match element {
+                ProcessedElement::Way(way) => {
+                    last_fill_use.insert(way.id, index);
                 }
+                ProcessedElement::Relation(rel) => {
+                    for member in &rel.members {
+                        last_fill_use.insert(member.way.id, index);
+                    }
+                }
+                ProcessedElement::Node(_) => {}
             }
         }
         let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -998,13 +1033,15 @@ pub fn generate_world_with_options(
         let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
         let mut element_counter: u64 = 0;
 
-        for element in elements.into_iter() {
+        for (index, element) in elements.into_iter().enumerate() {
             element_counter += 1;
             let suppression_key = (element.kind(), element.id());
             if models_3d_suppressed.contains(&suppression_key)
                 || (has_landmarks && landmark_suppressed.contains(&suppression_key))
                 || outline_suppression.contains(&suppression_key)
             {
+                // Still the last reader on record, so release its fills.
+                release_finished_fills(&mut flood_fill_cache, &last_fill_use, &element, index);
                 continue;
             }
             if element_counter.is_multiple_of(pb_batch_size) {
@@ -1053,30 +1090,7 @@ pub fn generate_world_with_options(
 
             // Release flood fill cache entries for memory optimization.
             // (Skipped in the parallel path where the cache is shared immutably.)
-            match &element {
-                ProcessedElement::Way(way) if !relation_way_uses.contains_key(&way.id) => {
-                    flood_fill_cache.remove_way(way.id);
-                }
-                ProcessedElement::Way(_) => {}
-                ProcessedElement::Relation(rel) => {
-                    // A member way can belong to multiple relations.  Release
-                    // its cached fill only after the last relation has consumed
-                    // it; otherwise later relations silently recompute it.
-                    let mut finished_way_ids = Vec::with_capacity(rel.members.len());
-                    for member in &rel.members {
-                        let Some(uses) = relation_way_uses.get_mut(&member.way.id) else {
-                            continue;
-                        };
-                        *uses -= 1;
-                        if *uses == 0 {
-                            relation_way_uses.remove(&member.way.id);
-                            finished_way_ids.push(member.way.id);
-                        }
-                    }
-                    flood_fill_cache.remove_relation_ways(&finished_way_ids);
-                }
-                _ => {}
-            }
+            release_finished_fills(&mut flood_fill_cache, &last_fill_use, &element, index);
             // Element is dropped here, freeing its memory immediately.
         }
 

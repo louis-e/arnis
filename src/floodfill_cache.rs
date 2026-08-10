@@ -465,15 +465,6 @@ impl FloodFillCache {
     pub fn remove_way(&mut self, way_id: u64) {
         self.way_cache.remove(&way_id);
     }
-
-    /// Removes all cached flood fill results for ways in a relation.
-    ///
-    /// Relations contain multiple ways, so we need to remove all of them.
-    pub fn remove_relation_ways(&mut self, way_ids: &[u64]) {
-        for &id in way_ids {
-            self.way_cache.remove(&id);
-        }
-    }
 }
 
 impl Default for FloodFillCache {

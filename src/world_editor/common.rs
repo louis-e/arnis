@@ -600,11 +600,11 @@ impl WorldToModify {
     /// hash probes for each canopy column.
     #[inline]
     pub fn highest_block_between(&self, x: i32, z: i32, min_y: i32, max_y: i32) -> Option<i32> {
-        if min_y > max_y {
-            return None;
-        }
-        let min_y = min_y.clamp(MIN_Y, MAX_Y);
-        let max_y = max_y.clamp(MIN_Y, MAX_Y);
+        // Intersect with the world bounds. Clamping each end on its own would fold
+        // a fully out-of-world range onto a boundary block and report a hit the
+        // caller never asked for.
+        let min_y = min_y.max(MIN_Y);
+        let max_y = max_y.min(MAX_Y);
         if min_y > max_y {
             return None;
         }
@@ -1415,5 +1415,33 @@ mod tests {
         assert_eq!(world.highest_block_between(3, 5, 60, 90), Some(80));
         assert_eq!(world.highest_block_between(3, 5, 65, 79), None);
         assert_eq!(world.highest_block_between(3, 5, 81, 90), None);
+    }
+
+    #[test]
+    fn highest_block_between_rejects_ranges_outside_the_world() {
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(3, MIN_Y, 5, STONE);
+        world.set_block_if_absent(3, MAX_Y, 5, COBBLESTONE);
+
+        // Wholly outside the world: no Y in the requested range can answer.
+        assert_eq!(
+            world.highest_block_between(3, 5, MAX_Y + 1, MAX_Y + 50),
+            None
+        );
+        assert_eq!(
+            world.highest_block_between(3, 5, MIN_Y - 50, MIN_Y - 1),
+            None
+        );
+        // Inverted ranges stay rejected.
+        assert_eq!(world.highest_block_between(3, 5, 90, 60), None);
+        // Partial overlap is intersected with the world, not rejected.
+        assert_eq!(
+            world.highest_block_between(3, 5, MIN_Y - 50, MIN_Y),
+            Some(MIN_Y)
+        );
+        assert_eq!(
+            world.highest_block_between(3, 5, MAX_Y, MAX_Y + 50),
+            Some(MAX_Y)
+        );
     }
 }

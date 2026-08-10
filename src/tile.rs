@@ -136,6 +136,12 @@ fn region_range(aabb: (i32, i32, i32, i32), halo: i32) -> (i32, i32, i32, i32) {
     )
 }
 
+/// Check if a way's bounding box intersects with the given bounds.
+#[cfg(test)]
+fn way_intersects_bounds(way: &ProcessedWay, bounds: &TileBounds) -> bool {
+    way_aabb(way).is_some_and(|aabb| aabb_intersects(aabb, bounds))
+}
+
 /// Check if any of a relation's member ways intersect the given bounds.
 #[cfg(test)]
 fn relation_intersects_bounds(rel: &ProcessedRelation, bounds: &TileBounds) -> bool {
