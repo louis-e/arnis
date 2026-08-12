@@ -122,9 +122,15 @@ pub fn run_gui() {
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
 
-        // Force software rendering for better compatibility
-        env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
-        env::set_var("GALLIUM_DRIVER", "softpipe");
+        // Force software rendering for better compatibility.
+        // Only set if not already configured by the user, allowing manual override
+        // for systems where software rendering causes EGL_BAD_PARAMETER (see #1247).
+        if env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
+            env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        }
+        if env::var("GALLIUM_DRIVER").is_err() {
+            env::set_var("GALLIUM_DRIVER", "softpipe");
+        }
 
         // Note: Removed sandbox disabling for security reasons
         // Note: Removed Qt WebEngine flags as they don't apply to Tauri
