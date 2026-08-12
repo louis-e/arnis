@@ -421,8 +421,8 @@ impl BedrockWriter {
             permissions_level: 0,
             player_permissions_level: 1,
 
-            // Daylight cycle
-            daylight_cycle: 0,
+            // Daylight cycle (1 = normal, 0 = frozen)
+            daylight_cycle: 1,
         };
 
         let nbt_bytes = nbtx::to_le_bytes(&level_dat)
