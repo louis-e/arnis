@@ -1729,6 +1729,13 @@ fn adjust_height_for_building_type(
     let default_height = ((10.0 * scale_factor) as i32).max(3);
     match building_type {
         "garage" | "garages" | "carport" | "shed" => ((2.0 * scale_factor) as i32).max(3),
+        // Single-family homes without explicit levels default to 6 blocks
+        // (~1.5 floors) instead of 10 to avoid stretched-looking houses (#1239)
+        "house" | "detached" | "residential" | "bungalow" | "cabin"
+            if building_height == default_height =>
+        {
+            ((6.0 * scale_factor) as i32).max(3)
+        }
         "apartments" if building_height == default_height => ((15.0 * scale_factor) as i32).max(3),
         "hospital" if building_height == default_height => ((23.0 * scale_factor) as i32).max(3),
         _ => building_height,
