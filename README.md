@@ -55,11 +55,11 @@ If you are using Nix, you can run the program directly with `nix run github:loui
 
 ## :star: Star History
 
-<a href="https://star-history.com/#louis-e/arnis&Date">
+<a href="https://star-history.dera.page/#louis-e/arnis&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=louis-e/arnis&Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=louis-e/arnis&Date&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=louis-e/arnis&Date&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=louis-e/arnis&Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=louis-e/arnis&Date&type=Date" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=louis-e/arnis&Date&type=Date" />
  </picture>
 </a>
 
