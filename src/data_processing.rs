@@ -600,6 +600,11 @@ pub fn generate_world_with_options(
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
 
+    // Field parcels align to their access roads and sunflowers favour the low ground,
+    // so both grids are built once here, before any element or ground processing runs.
+    crate::road_bearings::set_from_elements(&elements);
+    crate::lowland::set_from_ground(&ground, &xzbbox);
+
     println!("{} Processing data...", "[4/7]".bold());
     emit_gui_progress_update(19.5, "Processing data...");
 

@@ -77,6 +77,14 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
 
+    /// Farmland style: classic (uniform crops, the pre-3.1 surface), smallholding
+    /// (many small plots, full crop variety), patchwork (balanced mixed farmland),
+    /// prairie (large industrial fields) or pasture (grass and wildflowers with a few
+    /// crop plots). Anything but classic lays farmland out as separate parcels, each
+    /// growing one crop.
+    #[arg(long, value_enum, default_value_t = crate::element_processing::field_texture::FieldPreset::Patchwork)]
+    pub fields: crate::element_processing::field_texture::FieldPreset,
+
     /// Largest schematic tree to place: small (<=6 blocks), medium (<=12),
     /// big (<=20), tall (<=28) or giant. Oversized picks fall back to a smaller
     /// species in the same community where there is one.

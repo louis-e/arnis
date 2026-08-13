@@ -145,6 +145,12 @@ async function applyLocalization(localization) {
     "button[data-localize='tree_size_big']": "tree_size_big",
     "button[data-localize='tree_size_tall']": "tree_size_tall",
     "button[data-localize='tree_size_giant']": "tree_size_giant",
+    "span[data-localize='field_preset']": "field_preset",
+    "button[data-localize='field_preset_classic']": "field_preset_classic",
+    "button[data-localize='field_preset_smallholding']": "field_preset_smallholding",
+    "button[data-localize='field_preset_patchwork']": "field_preset_patchwork",
+    "button[data-localize='field_preset_prairie']": "field_preset_prairie",
+    "button[data-localize='field_preset_pasture']": "field_preset_pasture",
     "span[data-localize='gamemode']": "gamemode",
     "button[data-localize='gamemode_survival']": "gamemode_survival",
     "button[data-localize='gamemode_creative']": "gamemode_creative",
@@ -812,6 +818,15 @@ function initSettings() {
   maxTreeSizeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       maxTreeSizeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // Farmland style segmented control
+  const fieldPresetGroup = document.getElementById("field-preset-group");
+  fieldPresetGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      fieldPresetGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -1719,6 +1734,8 @@ async function startGeneration() {
     var canopy_height = document.getElementById("canopy-height-toggle").checked;
     var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
     var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
+    var fieldPresetBtn = document.querySelector("#field-preset-group .segment.active");
+    var fieldPreset = fieldPresetBtn ? fieldPresetBtn.dataset.fieldPreset : "patchwork";
     var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
@@ -1760,6 +1777,7 @@ async function startGeneration() {
         fillgroundEnabled: fill_ground,
         legacyTreesEnabled: legacy_trees,
         maxTreeSize: maxTreeSize,
+        fieldPreset: fieldPreset,
         canopyHeightEnabled: canopy_height,
         overtureEnabled: overture,
         use3dEnabled: use_3d,

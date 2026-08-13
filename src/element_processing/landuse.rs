@@ -3,6 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::field_texture::{FarmCrop, FieldCategory, FieldCell, FieldProfile};
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -101,9 +102,20 @@ pub fn generate_landuse(
 
     let is_cemetery = landuse_tag == "cemetery";
 
+    // Farmland texturing. Inactive under FieldPreset::Classic, in which case the whole
+    // field pass is skipped and the surface stays exactly what it was before.
+    let field_profile = FieldProfile::new(args.fields).with_map_scale(args.scale);
+    let field_active = landuse_tag == "farmland" && field_profile.is_active();
+
     for &(x, z) in floor_area.iter() {
+        // Resolved once per block and reused by both the surface and the decoration
+        // pass, so a plot's crop, growth stage and track flag stay consistent.
+        let field_cell = field_active.then(|| field_profile.cell_at(x, z));
+
         // Apply per-block randomness for certain landuse types
-        let actual_block = if landuse_tag == "industrial" {
+        let actual_block = if let Some(fc) = field_cell {
+            fc.surface
+        } else if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone
             let random_value = rng.random_range(0..100);
             if random_value < 70 {
@@ -233,6 +245,12 @@ pub fn generate_landuse(
                         }
                     }
                 }
+            }
+            "farmland"
+                if field_cell.is_some() && !editor.check_for_block(x, 0, z, Some(&[WATER])) =>
+            {
+                // Safe to unwrap: the guard above only matches when the cell exists.
+                decorate_field(editor, &field_cell.unwrap(), x, z, &mut rng);
             }
             "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
                 // Irrigation dots, but only where boxed in so they can't flow downhill and wash out crops.
@@ -439,6 +457,257 @@ pub fn generate_landuse(
     // Farmland fields rarely get a tractor.
     if landuse_tag == "farmland" {
         crate::structures::tractor::maybe_place_tractor(editor, floor_area.as_slice());
+    }
+}
+
+/// Ground cover on grass. Style 0 is plain grass, 1 adds occasional tall grass, 2 is
+/// the fuller mix with ferns.
+fn place_grass_cover(editor: &mut WorldEditor, x: i32, z: i32, rng: &mut impl Rng, style: u8) {
+    match style {
+        0 => editor.set_block(GRASS, x, 1, z, None, None),
+        1 => {
+            if rng.random_range(0..22) == 0 {
+                editor.set_block(TALL_GRASS_BOTTOM, x, 1, z, None, None);
+                editor.set_block(TALL_GRASS_TOP, x, 2, z, None, None);
+            } else {
+                editor.set_block(GRASS, x, 1, z, None, None);
+            }
+        }
+        _ => match rng.random_range(0..24) {
+            0..=1 => editor.set_block(FERN, x, 1, z, None, None),
+            2 => {
+                editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
+                editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
+            }
+            3 => {
+                editor.set_block(TALL_GRASS_BOTTOM, x, 1, z, None, None);
+                editor.set_block(TALL_GRASS_TOP, x, 2, z, None, None);
+            }
+            _ => editor.set_block(GRASS, x, 1, z, None, None),
+        },
+    }
+}
+
+/// Place a crop at the plot's growth level (0..=7), mapped to the crop's own max age.
+fn place_crop(editor: &mut WorldEditor, base: Block, growth: u8, max_age: u8, x: i32, z: i32) {
+    let age = (growth as u32 * max_age as u32 / 7) as u8;
+    let mut props: std::collections::HashMap<String, fastnbt::Value> =
+        std::collections::HashMap::new();
+    props.insert("age".to_string(), fastnbt::Value::String(age.to_string()));
+    let bwp = BlockWithProperties::new(base, Some(fastnbt::Value::Compound(props)));
+    let ay = editor.get_absolute_y(x, 1, z);
+    editor.set_block_with_properties_absolute(bwp, x, ay, z, None, None);
+}
+
+/// Pick from the parcel's 2-3 flower species. Real meadows carry a few species, not ten.
+fn parcel_flower(cell: &FieldCell, rng: &mut impl Rng) -> Block {
+    let n = FIELD_FLOWERS.len() as u32;
+    let count = 2 + (cell.species_seed % 2); // 2 or 3 species per parcel
+                                             // Each species slot draws from a different bit-window of the seed, so the
+                                             // subset is genuinely varied rather than collapsing onto one species.
+    let slot = rng.random_range(0..count);
+    let idx = (cell.species_seed >> (5 * slot + 3)) % n;
+    FIELD_FLOWERS[idx as usize]
+}
+
+/// Decorate one farmland cell according to its parcel style.
+fn decorate_field(editor: &mut WorldEditor, cell: &FieldCell, x: i32, z: i32, rng: &mut impl Rng) {
+    // Tracks are the worked ground between plots, so they stay clear.
+    if cell.is_track {
+        return;
+    }
+    match cell.cat {
+        FieldCategory::Farm => decorate_farm_plot(editor, cell, x, z, rng),
+        FieldCategory::Plains => {
+            if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                // Vanilla-plains density: most grass cells carry cover.
+                let style = ((cell.species_seed >> 16) % 3) as u8;
+                match rng.random_range(0..1000) {
+                    0..=780 => place_grass_cover(editor, x, z, rng, style),
+                    // The odd wildflower or lone sunflower breaking up the grass.
+                    781..=795 => {
+                        let f = parcel_flower(cell, rng);
+                        editor.set_block(f, x, 1, z, None, None);
+                    }
+                    796..=799 => {
+                        editor.set_block(SUNFLOWER_LOWER, x, 1, z, None, None);
+                        editor.set_block(SUNFLOWER_UPPER, x, 2, z, None, None);
+                    }
+                    _ => {}
+                }
+            } else if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT]))
+                && rng.random_range(0..100) < 30
+            {
+                // Tufts poking through the bare specks.
+                editor.set_block(GRASS, x, 1, z, None, None);
+            }
+        }
+        FieldCategory::Flower => {
+            if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                match rng.random_range(0..1000) {
+                    // Calm flower cover: the parcel's own 2-3 species, kept sparse,
+                    0..=105 => {
+                        let f = parcel_flower(cell, rng);
+                        editor.set_block(f, x, 1, z, None, None);
+                    }
+                    // with sunflowers sprinkled in,
+                    106..=117 => {
+                        editor.set_block(SUNFLOWER_LOWER, x, 1, z, None, None);
+                        editor.set_block(SUNFLOWER_UPPER, x, 2, z, None, None);
+                    }
+                    // on a bed of mostly short grass (style 1 keeps ferns rare).
+                    118..=580 => place_grass_cover(editor, x, z, rng, 1),
+                    _ => {}
+                }
+            }
+        }
+        FieldCategory::Coarse => {
+            // Dead bushes and ferns cluster on the coarse and rooted dirt, sparse grass
+            // on the grass peeks. Packed mud and dirt-path patches stay bare.
+            if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT, ROOTED_DIRT])) {
+                match rng.random_range(0..100) {
+                    0..=11 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    12..=17 => editor.set_block(FERN, x, 1, z, None, None),
+                    18..=24 => editor.set_block(GRASS, x, 1, z, None, None),
+                    _ => {}
+                }
+            } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                match rng.random_range(0..100) {
+                    0..=5 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    6..=28 => place_grass_cover(editor, x, z, rng, 2),
+                    _ => {}
+                }
+            }
+        }
+        FieldCategory::Moss => {
+            if editor.check_for_block(x, 0, z, Some(&[MOSS_BLOCK, GRASS_BLOCK])) {
+                match rng.random_range(0..100) {
+                    0..=3 => editor.set_block(AZALEA, x, 1, z, None, None),
+                    4..=30 => editor.set_block(MOSS_CARPET, x, 1, z, None, None),
+                    31..=40 => place_grass_cover(editor, x, z, rng, 2),
+                    41..=44 => editor.set_block(
+                        FIELD_FLOWERS[rng.random_range(0..FIELD_FLOWERS.len())],
+                        x,
+                        1,
+                        z,
+                        None,
+                        None,
+                    ),
+                    _ => {}
+                }
+            } else if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT, ROOTED_DIRT])) {
+                match rng.random_range(0..100) {
+                    0..=5 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    6..=12 => editor.set_block(FERN, x, 1, z, None, None),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Grow a farm plot's single crop. Tilled plots keep the enclosure-gated irrigation
+/// dots, sunflower plots plant rows on their dirt rows, pumpkin patches fruit sparsely
+/// on their grass and coarse mosaic, fallow fields carry stubble.
+fn decorate_farm_plot(
+    editor: &mut WorldEditor,
+    cell: &FieldCell,
+    x: i32,
+    z: i32,
+    rng: &mut impl Rng,
+) {
+    let Some(crop) = cell.crop else { return };
+    match crop {
+        FarmCrop::Wheat | FarmCrop::Potato | FarmCrop::Carrot | FarmCrop::Beetroot => {
+            if x % 9 == 0 && z % 9 == 0 && editor.water_source_is_enclosed(x, z) {
+                editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
+            } else if editor.check_for_block(x, 0, z, Some(&[FARMLAND])) {
+                let (mut block, mut max_age) = match crop {
+                    FarmCrop::Wheat => (WHEAT, 7),
+                    FarmCrop::Potato => (POTATOES, 7),
+                    FarmCrop::Carrot => (CARROTS, 7),
+                    _ => (BEETROOTS, 3),
+                };
+                // Stray-seed patches: small pockets where another crop took root, as
+                // birds carry seeds. Noise-clustered, so they read as patches rather
+                // than as single scattered blocks.
+                let stray =
+                    (crate::ground_generation::value_noise_01(x + 321, z - 777, 4) * 1000.0) as i32;
+                if stray < 22 {
+                    let alt = [WHEAT, POTATOES, CARROTS, BEETROOTS]
+                        [((cell.species_seed >> 9) % 4) as usize];
+                    if alt != block {
+                        max_age = if alt == BEETROOTS { 3 } else { 7 };
+                        block = alt;
+                    }
+                }
+                // Within-field growth jitter: most of the field sits at the field's own
+                // stage, with younger spots mixed in, so it is not a uniform carpet.
+                let mut growth = cell.crop_age;
+                if rng.random_range(0..5) == 0 {
+                    growth = growth.saturating_sub(1 + rng.random_range(0..2));
+                }
+                place_crop(editor, block, growth, max_age, x, z);
+            } else if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT, ROOTED_DIRT])) {
+                // Worn spots inside crop plots: a stray bale on wheat, the odd lone
+                // sunflower in between, a little dry growth.
+                match rng.random_range(0..100) {
+                    0..=2 if crop == FarmCrop::Wheat => {
+                        editor.set_block(HAY_BALE, x, 1, z, None, Some(&[SPONGE]));
+                    }
+                    3..=8 => {
+                        editor.set_block(SUNFLOWER_LOWER, x, 1, z, None, None);
+                        editor.set_block(SUNFLOWER_UPPER, x, 2, z, None, None);
+                    }
+                    9..=13 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    14..=20 => editor.set_block(GRASS, x, 1, z, None, None),
+                    _ => {}
+                }
+            }
+        }
+        FarmCrop::Sunflower => {
+            if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) {
+                // Planted row: dense sunflowers.
+                if rng.random_range(0..100) < 85 {
+                    editor.set_block(SUNFLOWER_LOWER, x, 1, z, None, None);
+                    editor.set_block(SUNFLOWER_UPPER, x, 2, z, None, None);
+                }
+            } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                && rng.random_range(0..100) < 25
+            {
+                editor.set_block(GRASS, x, 1, z, None, None);
+            }
+        }
+        FarmCrop::Pumpkin => {
+            if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                match rng.random_range(0..100) {
+                    0..=5 => editor.set_block(PUMPKIN, x, 1, z, None, None),
+                    6..=25 => editor.set_block(GRASS, x, 1, z, None, None),
+                    26 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    _ => {}
+                }
+            } else if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT]))
+                && rng.random_range(0..100) < 8
+            {
+                editor.set_block(GRASS, x, 1, z, None, None);
+            }
+        }
+        FarmCrop::Fallow => {
+            // Fallow is bare worked ground with no farmland under it, so nothing decays:
+            // dry stubble of dead bushes and grasses on the diggable soil.
+            if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT, ROOTED_DIRT])) {
+                match rng.random_range(0..100) {
+                    0..=5 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    6..=14 => editor.set_block(GRASS, x, 1, z, None, None),
+                    15..=16 => editor.set_block(FERN, x, 1, z, None, None),
+                    _ => {}
+                }
+            } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                && rng.random_range(0..100) < 20
+            {
+                place_grass_cover(editor, x, z, rng, 2);
+            }
+        }
     }
 }
 
