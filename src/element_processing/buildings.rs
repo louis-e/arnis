@@ -1170,6 +1170,8 @@ struct BuildingConfig {
     /// When false, foundation pillars should not be generated.
     is_ground_level: bool,
     building_height: i32,
+    /// Gross block height of one upper floor (see `floor_cycle_for`).
+    floor_cycle: i32,
     is_tall_building: bool,
     start_y_offset: i32,
     abs_terrain_offset: i32,
@@ -1326,12 +1328,20 @@ fn pick_window_frame(category: BuildingCategory, element_id: u64) -> Option<Wind
 }
 
 impl BuildingConfig {
-    /// Returns the position within a 4-block floor cycle (0 = floor row, 1-3 = open rows).
+    /// Returns the position within the floor cycle (0 = floor row, 1..cycle-1 = open rows).
     /// This aligns with `generate_floors_and_ceilings` which places intermediate ceilings
-    /// at `start_y_offset + 6, +10, +14, …` (i.e. every 4 blocks offset by +2).
+    /// at `start_y_offset + 2 + cycle, + 2*cycle, …` (i.e. every `floor_cycle` blocks
+    /// offset by +2).
     #[inline]
     fn floor_row(&self, h: i32) -> i32 {
-        ((h - self.start_y_offset - 2) % 4 + 4) % 4
+        ((h - self.start_y_offset - 2) % self.floor_cycle + self.floor_cycle) % self.floor_cycle
+    }
+
+    /// Highest wall row that still belongs to the ground floor (the ground floor
+    /// is one row taller than upper floors thanks to the +2 grammar offset).
+    #[inline]
+    fn ground_floor_top(&self) -> i32 {
+        self.start_y_offset + 1 + self.floor_cycle
     }
 
     /// Position within the 6-block window cycle (0-2 = window strip, 3-5 = wall pier).
@@ -1340,10 +1350,10 @@ impl BuildingConfig {
         (bx + bz + self.window_phase).rem_euclid(6)
     }
 
-    /// Number of darker plinth rows at the wall base.
+    /// Number of darker plinth rows at the wall base (2 from roughly three floors up).
     #[inline]
     fn base_course_rows(&self) -> i32 {
-        if self.building_height >= 12 {
+        if self.building_height >= 3 * self.floor_cycle {
             2
         } else {
             1
@@ -1652,11 +1662,26 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
 }
 
 /// Determines building height from OSM tags
+/// Gross block height of one upper floor for a building type.
+///
+/// Currently 4 for every type. The floor-rhythm stage makes this category-aware
+/// (~3 blocks for residential-scale types, matching ~3 m storeys at 1 block/m).
+/// Derived from tags only: `BuildingCategory` is resolved *after* height
+/// calculation and itself depends on the computed height, so it cannot be used here.
+fn floor_cycle_for(_building_type: &str, _tags: &HashMap<String, String>) -> i32 {
+    4
+}
+
+/// Extra rows on top of `levels * cycle`: one taller ground floor row plus the
+/// floor slab row (the "+2" in the wall grammar).
+const GROUND_FLOOR_BONUS: i32 = 2;
+
 fn calculate_building_height(
     element: &ProcessedWay,
     min_level: i32,
     scale_factor: f64,
     relation_levels: Option<i32>,
+    floor_cycle: i32,
 ) -> (i32, bool) {
     // Default: 2 floors (ground + 1 upper) = 2*4+2 = 10 blocks
     let default_height = ((10.0 * scale_factor) as i32).max(3);
@@ -1669,9 +1694,14 @@ fn calculate_building_height(
             let lev = levels - min_level as f64;
             if lev >= 1.0 {
                 // Elevated elements get the +2 in their min_level offset instead,
-                // keeping the total top at levels * 4 + 2
-                let bonus = if min_level > 0 { 0.0 } else { 2.0 };
-                building_height = (((lev * 4.0 + bonus) * scale_factor) as i32).max(3);
+                // keeping the total top at levels * cycle + 2
+                let bonus = if min_level > 0 {
+                    0.0
+                } else {
+                    GROUND_FLOOR_BONUS as f64
+                };
+                building_height =
+                    (((lev * floor_cycle as f64 + bonus) * scale_factor) as i32).max(3);
                 if levels > 7.0 {
                     is_tall_building = true;
                 }
@@ -1710,7 +1740,8 @@ fn calculate_building_height(
     // Relation levels only estimate the height, an explicit height tag wins
     if !has_explicit_height {
         if let Some(levels) = relation_levels {
-            building_height = multiply_scale(levels * 4 + 2, scale_factor).max(3);
+            building_height =
+                multiply_scale(levels * floor_cycle + GROUND_FLOOR_BONUS, scale_factor).max(3);
             if levels > 7 {
                 is_tall_building = true;
             }
@@ -1871,6 +1902,15 @@ fn generate_roof_only_structure(
     } else {
         0
     };
+    let floor_cycle = floor_cycle_for(
+        element
+            .tags
+            .get("building")
+            .or_else(|| element.tags.get("building:part"))
+            .map(|s| s.as_str())
+            .unwrap_or("roof"),
+        &element.tags,
+    );
 
     // Determine where the roof structure starts vertically.
     // Priority: min_height → building:min_level → layer hint → default.
@@ -1887,7 +1927,7 @@ fn generate_roof_only_structure(
             .ok()
             .map(|l| {
                 if l > 0 {
-                    multiply_scale(l * 4 + 2, scale_factor)
+                    multiply_scale(l * floor_cycle + GROUND_FLOOR_BONUS, scale_factor)
                 } else {
                     0
                 }
@@ -1896,12 +1936,12 @@ fn generate_roof_only_structure(
     } else if let Some(layer) = element.tags.get("layer") {
         // For building:part=roof elements without explicit height tags, interpret
         // the layer tag as a coarse vertical-placement hint.  Each layer maps to
-        // 4 blocks, producing reasonable stacking for multi-shell roof structures.
+        // one floor cycle, producing reasonable stacking for multi-shell roof structures.
         layer
             .parse::<i32>()
             .ok()
             .filter(|&l| l > 0)
-            .map(|l| multiply_scale(l * 4, scale_factor))
+            .map(|l| multiply_scale(l * floor_cycle, scale_factor))
             .unwrap_or(0)
     } else {
         0
@@ -1930,7 +1970,7 @@ fn generate_roof_only_structure(
         levels
             .parse::<i32>()
             .ok()
-            .map(|l| multiply_scale(l * 4 + 2, scale_factor).max(3))
+            .map(|l| multiply_scale(l * floor_cycle + GROUND_FLOOR_BONUS, scale_factor).max(3))
             .unwrap_or(5)
     } else {
         5 // Default thickness for thin roof / canopy structures
@@ -2332,11 +2372,11 @@ fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &Buildin
     }
 
     // Two-tone facade: 20% chance on >=3-floor buildings.
-    let floors_estimate = config.building_height / 4;
+    let floors_estimate = config.building_height / config.floor_cycle;
     if floors_estimate >= 3 {
         let mut tt_enable_rng = element_rng(config.element_id ^ 0x9F4A_5DB2_C0DE_C0DE);
         if tt_enable_rng.random_bool(0.20) {
-            let ground_floor_top = config.start_y_offset + 5;
+            let ground_floor_top = config.ground_floor_top();
             if h > ground_floor_top {
                 let mut tt_mode_rng = element_rng(config.element_id ^ 0xC1A2_5544_99B7_3F02);
                 let secondary_mix = tt_mode_rng.random_bool(0.50);
@@ -2650,8 +2690,8 @@ fn determine_wall_block_at_position_pristine(
 
     if config.use_horizontal_windows {
         // Modern skyscraper pattern: continuous horizontal window bands
-        // with stone separation bands at floor levels (every 4th block)
-        if above_floor && config.has_lobby_base && h <= config.start_y_offset + 5 {
+        // with stone separation bands at floor levels (every floor cycle)
+        if above_floor && config.has_lobby_base && h <= config.ground_floor_top() {
             // Solid lobby base: first floor cycle uses wall block
             config.wall_block
         } else if above_floor && floor_row == 0 {
@@ -2703,7 +2743,7 @@ fn determine_wall_block_at_position_pristine(
         // Storefront glazing: wider full-glass bays across the whole ground floor.
         if config.has_storefront
             && above_floor
-            && h <= config.start_y_offset + 5
+            && h <= config.ground_floor_top()
             && floor_row != 0
             && window_col < 4
         {
@@ -3005,13 +3045,14 @@ fn generate_residential_window_decorations(
                 // exclusive).  The decision is shared across all three
                 // columns via a seed derived from the window centre.
                 if mod6 < 3 {
-                    // Stop 3 rows before the top so every sill has a
-                    // full window (h+1..h+3) above it, avoids placing
-                    // sills at the roof line.
-                    let sill_max = config.start_y_offset + config.building_height - 3;
+                    // Stop a full window height before the top so every sill
+                    // has a full window above it, avoids placing sills at the
+                    // roof line.
+                    let sill_max =
+                        config.start_y_offset + config.building_height - (config.floor_cycle - 1);
                     for h in (config.start_y_offset + 2)..=sill_max {
                         if config.floor_row(h) == 0 {
-                            let floor_idx = h / 4;
+                            let floor_idx = h / config.floor_cycle;
 
                             // Shared roll seeded from the window centre.
                             let centre_sum = match mod6 {
@@ -3063,7 +3104,8 @@ fn generate_residential_window_decorations(
                                 }
                             } else if decoration_roll < 23
                                 && mod6 == 1
-                                && (!config.is_ground_level || h >= config.start_y_offset + 6)
+                                && (!config.is_ground_level
+                                    || h >= config.start_y_offset + 2 + config.floor_cycle)
                             {
                                 // ── Balcony (placed once from centre col) ──
                                 // Never on the ground floor; elevated parts keep their base row.
@@ -3331,7 +3373,7 @@ fn generate_wall_depth_features(
     }
 
     // Skip buildings with fewer than 2 floors for most styles
-    if config.building_height < 6
+    if config.building_height < config.floor_cycle + 2
         && !matches!(
             config.wall_depth_style,
             WallDepthStyle::HistoricOrnate | WallDepthStyle::ReligiousButtress
@@ -3563,7 +3605,7 @@ fn generate_window_frames(
 
                 if col < 3 {
                     // Band stair over each window at every floor line, plus occasional dressing.
-                    for h in (config.start_y_offset + 5)..=(top_h - 1) {
+                    for h in config.ground_floor_top()..=(top_h - 1) {
                         if config.floor_row(h) != 0 {
                             continue;
                         }
@@ -3781,7 +3823,7 @@ fn generate_facade_cornices(
     }
     if config.condition != BuildingCondition::Normal
         || !config.has_windows
-        || config.building_height < 8
+        || config.building_height < 2 * config.floor_cycle
     {
         return;
     }
@@ -3828,7 +3870,7 @@ fn generate_facade_cornices(
                 }
                 let lx = bx + out_nx;
                 let lz = bz + out_nz;
-                for h in (config.start_y_offset + 5)..=top_h {
+                for h in config.ground_floor_top()..=top_h {
                     // Band rows double as window headers and sills of the floor above.
                     let is_band = config.floor_row(h) == 0 && h < top_h - 1;
                     let is_crown = string_courses && !has_sloped_roof && h == top_h;
@@ -4165,10 +4207,10 @@ fn place_historic_ornate(
         None,
     );
 
-    // Arched window headers at window-top rows (floor_row == 3) for window-edge positions
+    // Arched window headers at window-top rows for window-edge positions
     if mod6 == 0 || mod6 == 2 {
         for h in (config.start_y_offset + 2)..=top_h {
-            if config.floor_row(h) == 3 {
+            if config.floor_row(h) == config.floor_cycle - 1 {
                 let stair_bwp = make_upside_down_stair(config.wall_block, facing);
                 editor.set_block_with_properties_absolute(
                     stair_bwp,
@@ -4545,9 +4587,10 @@ fn generate_floors_and_ceilings(
         }
 
         // Set intermediate ceilings with light fixtures
-        if config.building_height > 4 {
-            for h in (config.start_y_offset + 2 + 4..config.start_y_offset + config.building_height)
-                .step_by(4)
+        if config.building_height > config.floor_cycle {
+            for h in (config.start_y_offset + 2 + config.floor_cycle
+                ..config.start_y_offset + config.building_height)
+                .step_by(config.floor_cycle as usize)
             {
                 // Skip intermediate ceilings below passage opening
                 if is_passage && h <= config.start_y_offset + passage_height {
@@ -4612,13 +4655,13 @@ fn generate_floors_and_ceilings(
 }
 
 /// Calculates floor levels for multi-story buildings
-fn calculate_floor_levels(start_y_offset: i32, building_height: i32) -> Vec<i32> {
+fn calculate_floor_levels(start_y_offset: i32, building_height: i32, floor_cycle: i32) -> Vec<i32> {
     let mut floor_levels = vec![start_y_offset];
 
-    if building_height > 6 {
-        let num_upper_floors = (building_height / 4).max(1);
+    if building_height > floor_cycle + 2 {
+        let num_upper_floors = (building_height / floor_cycle).max(1);
         for floor in 1..num_upper_floors {
-            floor_levels.push(start_y_offset + 2 + (floor * 4));
+            floor_levels.push(start_y_offset + 2 + (floor * floor_cycle));
         }
     }
 
@@ -4744,6 +4787,15 @@ pub fn generate_buildings(
         0
     };
 
+    // Get building type (tags only; also drives the floor cycle used below)
+    let building_type = element
+        .tags
+        .get("building")
+        .or_else(|| element.tags.get("building:part"))
+        .map(|s| s.as_str())
+        .unwrap_or("yes");
+    let floor_cycle = floor_cycle_for(building_type, &element.tags);
+
     let min_level_offset = if let Some(mh) = element.tags.get("min_height") {
         mh.trim_end_matches('m')
             .trim()
@@ -4752,9 +4804,9 @@ pub fn generate_buildings(
             .map(|h| (h * scale_factor) as i32)
             .unwrap_or(0)
     } else if min_level > 0 {
-        // Matches the levels height formula (4 per level + 2) so a skybridge
+        // Matches the levels height formula (cycle per level + 2) so a skybridge
         // floor lines up with the level tops of the buildings it connects
-        multiply_scale(min_level * 4 + 2, scale_factor)
+        multiply_scale(min_level * floor_cycle + GROUND_FLOOR_BONUS, scale_factor)
     } else {
         0
     };
@@ -4809,14 +4861,6 @@ pub fn generate_buildings(
     // Calculate building bounds
     let bounds = BuildingBounds::from_nodes(&element.nodes);
 
-    // Get building type
-    let building_type = element
-        .tags
-        .get("building")
-        .or_else(|| element.tags.get("building:part"))
-        .map(|s| s.as_str())
-        .unwrap_or("yes");
-
     // Handle shelter amenity
     if element.tags.get("amenity").map(String::as_str) == Some("shelter") {
         generate_shelter(editor, element, &cached_floor_area, scale_factor);
@@ -4840,8 +4884,13 @@ pub fn generate_buildings(
                 return;
             }
             "parking" => {
-                let (height, _) =
-                    calculate_building_height(element, min_level, scale_factor, relation_levels);
+                let (height, _) = calculate_building_height(
+                    element,
+                    min_level,
+                    scale_factor,
+                    relation_levels,
+                    floor_cycle,
+                );
                 generate_parking_building(editor, element, &cached_floor_area, height);
                 return;
             }
@@ -4867,16 +4916,26 @@ pub fn generate_buildings(
             .get("parking")
             .is_some_and(|p| p == "multi-storey")
         {
-            let (height, _) =
-                calculate_building_height(element, min_level, scale_factor, relation_levels);
+            let (height, _) = calculate_building_height(
+                element,
+                min_level,
+                scale_factor,
+                relation_levels,
+                floor_cycle,
+            );
             generate_parking_building(editor, element, &cached_floor_area, height);
             return;
         }
     }
 
     // Calculate building height with type-specific adjustments
-    let (mut building_height, is_tall_building) =
-        calculate_building_height(element, min_level, scale_factor, relation_levels);
+    let (mut building_height, is_tall_building) = calculate_building_height(
+        element,
+        min_level,
+        scale_factor,
+        relation_levels,
+        floor_cycle,
+    );
     building_height = adjust_height_for_building_type(building_type, building_height, scale_factor);
 
     // Determine building category and get appropriate style preset
@@ -4886,7 +4945,7 @@ pub fn generate_buildings(
 
     // Resolve style with deterministic RNG
     let mut rng = element_rng(group_seed);
-    let has_multiple_floors = building_height > 6;
+    let has_multiple_floors = building_height > floor_cycle + 2;
     let style = BuildingStyle::resolve(
         &preset,
         element,
@@ -4933,6 +4992,7 @@ pub fn generate_buildings(
     let config = BuildingConfig {
         is_ground_level: min_level_offset == 0,
         building_height: effective_building_height,
+        floor_cycle,
         is_tall_building,
         start_y_offset,
         abs_terrain_offset,
@@ -5138,8 +5198,11 @@ pub fn generate_buildings(
             );
 
             if !skip_interior && cached_floor_area.len() > 100 {
-                let floor_levels =
-                    calculate_floor_levels(start_y_offset, effective_building_height);
+                let floor_levels = calculate_floor_levels(
+                    start_y_offset,
+                    effective_building_height,
+                    config.floor_cycle,
+                );
                 generate_building_interior(
                     editor,
                     &cached_floor_area,
@@ -5510,7 +5573,7 @@ fn generate_setback_crown(
 
     let dist = roof_edge_distances(roof_area);
     let roof_rel = config.start_y_offset + config.building_height + 1;
-    let tier_height = 4;
+    let tier_height = config.floor_cycle;
     let mut placed = false;
 
     for tier in 0..2i32 {
@@ -8153,14 +8216,14 @@ mod height_tests {
             ("min_height", "60"),
             ("building:levels", "19"),
         ]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, Some(19));
+        let (h, _) = calculate_building_height(&way, 0, 1.0, Some(19), 4);
         assert_eq!(h, 29);
     }
 
     #[test]
     fn relation_levels_apply_without_height_tag() {
         let way = way_with_tags(&[]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, Some(5));
+        let (h, _) = calculate_building_height(&way, 0, 1.0, Some(5), 4);
         assert_eq!(h, 22); // 5 levels * 4 + 2
     }
 
@@ -8168,7 +8231,7 @@ mod height_tests {
     #[test]
     fn elevated_thin_part_is_not_fattened() {
         let way = way_with_tags(&[("height", "19.05"), ("min_height", "19")]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, None);
+        let (h, _) = calculate_building_height(&way, 0, 1.0, None, 4);
         assert_eq!(h, 1);
     }
 
@@ -8176,7 +8239,7 @@ mod height_tests {
     #[test]
     fn elevated_part_keeps_exact_span() {
         let way = way_with_tags(&[("height", "96"), ("min_height", "94")]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, None);
+        let (h, _) = calculate_building_height(&way, 0, 1.0, None, 4);
         assert_eq!(h, 2);
     }
 
@@ -8184,7 +8247,7 @@ mod height_tests {
     #[test]
     fn ground_level_building_keeps_minimum() {
         let way = way_with_tags(&[("height", "2")]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, None);
+        let (h, _) = calculate_building_height(&way, 0, 1.0, None, 4);
         assert_eq!(h, 3);
     }
 
@@ -8192,14 +8255,14 @@ mod height_tests {
     #[test]
     fn zero_min_height_is_ground_level() {
         let way = way_with_tags(&[("height", "2"), ("min_height", "0")]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, None);
+        let (h, _) = calculate_building_height(&way, 0, 1.0, None, 4);
         assert_eq!(h, 3);
     }
 
     #[test]
     fn fractional_levels_parse() {
         let way = way_with_tags(&[("building:levels", "2.5")]);
-        let (h, _) = calculate_building_height(&way, 0, 1.0, None);
+        let (h, _) = calculate_building_height(&way, 0, 1.0, None, 4);
         assert_eq!(h, 12); // 2.5 levels * 4 + 2
     }
 
@@ -8207,7 +8270,7 @@ mod height_tests {
     #[test]
     fn min_level_walls_span_remaining_levels() {
         let way = way_with_tags(&[("building:levels", "4"), ("building:min_level", "2")]);
-        let (h, _) = calculate_building_height(&way, 2, 1.0, None);
+        let (h, _) = calculate_building_height(&way, 2, 1.0, None, 4);
         assert_eq!(h, 8);
     }
 
