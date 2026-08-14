@@ -118,6 +118,13 @@ pub fn flood_fill_area(
 /// an outline with untouched ground inside it. A large `natural=sand` area at 1:1 is the
 /// visible case. Spans are counted before anything is allocated, so the output vector is
 /// sized once and peak memory stays at the result itself.
+///
+/// Rows are sampled on the integer lattice and spans exclude their endpoints, so the cells
+/// this returns are the ones the bitmap paths would test with `geo::Contains`. The one case
+/// the two still disagree on is a cell lying exactly on a horizontal edge: ray casting cannot
+/// see that, and detecting it would cost a per-cell edge test, which is the whole reason this
+/// path exists. Only rings with a bounding box over 25M blocks get here, so that is a block of
+/// slack on a shape thousands of blocks across.
 fn scanline_fill_area(
     polygon_coords: &[(i32, i32)],
     min_x: i32,
@@ -136,16 +143,16 @@ fn scanline_fill_area(
     let mut cells: i64 = 0;
 
     for z in min_z..=max_z {
-        // Sample through the row centre so an edge lying on the integer line isn't counted twice.
-        let zc = z as f64 + 0.5;
+        let zf = z as f64;
         crossings.clear();
         for w in polygon_coords.windows(2) {
             let (x0, z0) = (w[0].0 as f64, w[0].1 as f64);
             let (x1, z1) = (w[1].0 as f64, w[1].1 as f64);
-            if (z0 <= zc) == (z1 <= zc) {
+            // Half-open in z, so a vertex sitting exactly on the row counts once, not twice.
+            if (z0 <= zf) == (z1 <= zf) {
                 continue;
             }
-            let t = (zc - z0) / (z1 - z0);
+            let t = (zf - z0) / (z1 - z0);
             crossings.push(x0 + t * (x1 - x0));
         }
         if crossings.len() < 2 {
@@ -154,9 +161,10 @@ fn scanline_fill_area(
         crossings.sort_unstable_by(f64::total_cmp);
 
         for pair in crossings.chunks_exact(2) {
-            // Rounding on a near-vertical edge can put an endpoint outside the ring.
-            let xs = (pair[0].ceil() as i32).max(min_x);
-            let xe = (pair[1].floor() as i32).min(max_x);
+            // Strictly between the crossings, so a cell sitting exactly on the edge is left to
+            // the caller's outline pass, the same way geo::Contains treats the boundary.
+            let xs = (pair[0].floor() as i32).saturating_add(1).max(min_x);
+            let xe = (pair[1].ceil() as i32).saturating_sub(1).min(max_x);
             if xe < xs {
                 continue;
             }
@@ -373,6 +381,51 @@ mod tests {
         assert!(filled
             .iter()
             .all(|&(x, z)| (0..=6000).contains(&x) && (0..=6010).contains(&z)));
+    }
+
+    #[test]
+    fn scanline_agrees_with_contains_on_the_integer_lattice() {
+        // Called directly, since a polygon small enough to brute force never has a bounding
+        // box large enough to reach this path through flood_fill_area.
+        let ring = [(0, 0), (40, 7), (55, 30), (25, 48), (3, 25), (0, 0)];
+        let (min_x, max_x, min_z, max_z) = (0, 55, 0, 48);
+
+        let exterior = LineString::from(
+            ring.iter()
+                .map(|&(x, z)| (x as f64, z as f64))
+                .collect::<Vec<_>>(),
+        );
+        let polygon = Polygon::new(exterior, vec![]).orient(Direction::Default);
+
+        let scan: std::collections::HashSet<(i32, i32)> =
+            scanline_fill_area(&ring, min_x, max_x, min_z, max_z)
+                .into_iter()
+                .collect();
+
+        for z in min_z..=max_z {
+            for x in min_x..=max_x {
+                let inside = polygon.contains(&Point::new(x as f64, z as f64));
+                assert_eq!(scan.contains(&(x, z)), inside, "disagreed at ({x}, {z})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_zero_area_ring_fills_nothing_however_big_its_bbox() {
+        // Traced out and straight back, so there is no interior at any row. The bounding box
+        // is 36M, well past the cap, but area is what decides the output.
+        let doubled_back = [(0, 0), (6000, 6000), (0, 0)];
+        assert!(flood_fill_area(&doubled_back, None).is_empty());
+    }
+
+    #[test]
+    fn a_one_block_high_wedge_never_overfills() {
+        // The scanline samples whole rows, so a shape with no interior lattice row must not
+        // pick one up. Padded to clear the bbox cap without giving it real height.
+        let wedge = [(0, 0), (26_000, 0), (13_000, 1), (0, 1000), (0, 0)];
+        let filled = flood_fill_area(&wedge, None);
+        assert!(filled.iter().all(|&(_, z)| (0..=1000).contains(&z)));
+        assert!(filled.len() < 26_000 * 1001, "got {} cells", filled.len());
     }
 
     #[test]
