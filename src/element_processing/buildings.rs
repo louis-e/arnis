@@ -7,7 +7,9 @@ use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
-use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay};
+use crate::osm_parser::{
+    ArchEra, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
+};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use rand::Rng;
@@ -917,6 +919,7 @@ impl BuildingStyle {
         element: &ProcessedWay,
         building_type: &str,
         category: BuildingCategory,
+        era: ArchEra,
         has_multiple_floors: bool,
         footprint_size: usize,
         rng: &mut impl Rng,
@@ -926,7 +929,7 @@ impl BuildingStyle {
         // Priority: OSM tag > preset > category palette.
         let wall_block = determine_wall_block_from_tags(element, category, rng)
             .or(preset.wall_block)
-            .unwrap_or_else(|| determine_wall_block(element, category, rng));
+            .unwrap_or_else(|| determine_wall_block(element, category, era, rng));
 
         // Floor block: from preset or random
         // For glassy/modern skyscrapers, use dark cap materials for the flat roof
@@ -1096,11 +1099,31 @@ impl BuildingStyle {
             preset.has_single_door.unwrap_or(false)
         };
 
-        // Wall depth style: default based on category (preset may override)
+        // Wall depth style: default based on category and era (preset may override)
         let wall_depth_style = preset.wall_depth_style.unwrap_or_else(|| {
             if footprint_size < 20 {
                 WallDepthStyle::None
             } else {
+                // Era overrides for the general urban fabric: heritage gets
+                // ornate relief, panel-era facades stay flat.
+                match (era, category) {
+                    (
+                        ArchEra::HistoricOrnate,
+                        BuildingCategory::House
+                        | BuildingCategory::Residential
+                        | BuildingCategory::Commercial,
+                    ) => return WallDepthStyle::HistoricOrnate,
+                    (
+                        ArchEra::PostWarPanel,
+                        BuildingCategory::House | BuildingCategory::Residential,
+                    ) => return WallDepthStyle::None,
+                    (ArchEra::Contemporary, BuildingCategory::Residential)
+                        if element_rng(element.id ^ 0xE5A0_11DE_57A1_0003).random_bool(0.50) =>
+                    {
+                        return WallDepthStyle::ModernPillars;
+                    }
+                    _ => {}
+                }
                 match category {
                     BuildingCategory::House | BuildingCategory::Residential => {
                         WallDepthStyle::SubtlePilasters
@@ -1191,6 +1214,8 @@ struct BuildingConfig {
     has_garage_door: bool,
     has_single_door: bool,
     category: BuildingCategory,
+    /// Architectural era from tags (weathering, and style decisions upstream).
+    era: ArchEra,
     wall_depth_style: WallDepthStyle,
     has_parapet: bool,
     has_lobby_base: bool,
@@ -1309,24 +1334,58 @@ impl WindowFrameStyle {
 }
 
 /// Picks a per-building frame style suited to the category; 55% of eligible buildings.
-fn pick_window_frame(category: BuildingCategory, element_id: u64) -> Option<WindowFrameStyle> {
+fn pick_window_frame(
+    category: BuildingCategory,
+    era: ArchEra,
+    element_id: u64,
+) -> Option<WindowFrameStyle> {
     use WindowFrameStyle::*;
-    let pool: &[WindowFrameStyle] = match category {
-        BuildingCategory::House | BuildingCategory::Residential => &[
-            SpruceCottage,
-            DarkTimber,
-            StoneOrnate,
-            RusticMossy,
-            TerracottaCopper,
-        ],
-        BuildingCategory::Commercial | BuildingCategory::Hotel => {
-            &[QuartzModern, Blackstone, StoneOrnate]
-        }
-        BuildingCategory::Historic => &[RusticMossy, StoneOrnate, Blackstone],
-        _ => return None,
+    // Category gate first: only these get dressed frames at all.
+    if !matches!(
+        category,
+        BuildingCategory::House
+            | BuildingCategory::Residential
+            | BuildingCategory::Commercial
+            | BuildingCategory::Hotel
+            | BuildingCategory::Historic
+    ) {
+        return None;
+    }
+    // A known era narrows the pool and shifts how often frames appear:
+    // heritage facades are almost always dressed, panel-era ones rarely.
+    let (pool, chance): (&[WindowFrameStyle], f64) = match era {
+        ArchEra::HistoricOrnate => (&[StoneOrnate, RusticMossy], 0.80),
+        ArchEra::TraditionalPreWar => (
+            &[
+                SpruceCottage,
+                DarkTimber,
+                StoneOrnate,
+                RusticMossy,
+                TerracottaCopper,
+            ],
+            0.60,
+        ),
+        ArchEra::PostWarPanel => (&[QuartzModern], 0.15),
+        ArchEra::Contemporary => (&[QuartzModern, Blackstone], 0.45),
+        ArchEra::Unknown => (
+            match category {
+                BuildingCategory::House | BuildingCategory::Residential => &[
+                    SpruceCottage,
+                    DarkTimber,
+                    StoneOrnate,
+                    RusticMossy,
+                    TerracottaCopper,
+                ],
+                BuildingCategory::Commercial | BuildingCategory::Hotel => {
+                    &[QuartzModern, Blackstone, StoneOrnate]
+                }
+                _ => &[RusticMossy, StoneOrnate, Blackstone],
+            },
+            0.55,
+        ),
     };
     let mut rng = element_rng(element_id ^ 0xF7A3_E001_57BD_2210);
-    rng.random_bool(0.55)
+    rng.random_bool(chance)
         .then(|| pool[rng.random_range(0..pool.len())])
 }
 
@@ -1519,7 +1578,13 @@ fn archetype_allows_window(
 }
 
 /// Weighted per-category archetype choice, seeded on the shared group seed.
-fn pick_window_archetype(category: BuildingCategory, group_seed: u64) -> WindowArchetype {
+/// The era shifts the outcome: heritage buildings gain arched bays, panel-era
+/// buildings trade paired sashes for band windows.
+fn pick_window_archetype(
+    category: BuildingCategory,
+    era: ArchEra,
+    group_seed: u64,
+) -> WindowArchetype {
     use WindowArchetype::*;
     // (archetype, weight) — weights sum to 100 per row.
     let table: &[(WindowArchetype, u32)] = match category {
@@ -1565,13 +1630,23 @@ fn pick_window_archetype(category: BuildingCategory, group_seed: u64) -> WindowA
     let mut rng = element_rng(group_seed ^ 0x57A2_C0DE_A5C1_0007);
     let total: u32 = table.iter().map(|&(_, w)| w).sum();
     let mut roll = rng.random_range(0..total);
+    let mut picked = Standard3;
     for &(archetype, weight) in table {
         if roll < weight {
-            return archetype;
+            picked = archetype;
+            break;
         }
         roll -= weight;
     }
-    Standard3
+    // Era adjustment on top of the category weights.
+    let mut era_rng = element_rng(group_seed ^ 0x57A2_C0DE_A5C1_0008);
+    match (era, picked) {
+        (ArchEra::HistoricOrnate, Standard3) if era_rng.random_bool(0.75) => ArchedTraditional,
+        (ArchEra::TraditionalPreWar, Standard3) if era_rng.random_bool(0.25) => ArchedTraditional,
+        (ArchEra::PostWarPanel, PairedNarrow) => WideHorizontal,
+        (ArchEra::Contemporary, Standard3) if era_rng.random_bool(0.25) => WideHorizontal,
+        _ => picked,
+    }
 }
 
 fn coordinated_window_block(wall_block: Block, accent_block: Block, light_default: Block) -> Block {
@@ -1630,6 +1705,7 @@ fn determine_wall_block_from_tags(
 fn determine_wall_block(
     element: &ProcessedWay,
     category: BuildingCategory,
+    era: ArchEra,
     rng: &mut impl Rng,
 ) -> Block {
     // Historic castles have their own special treatment
@@ -1662,7 +1738,90 @@ fn determine_wall_block(
     }
 
     // Otherwise, select from category-specific palette
-    get_wall_block_for_category(category, rng)
+    get_wall_block_for_category(category, era, rng)
+}
+
+/// Wall blocks that fit a building era (None for Unknown: no filtering);
+/// the sets reflect what facades of that period are actually made of.
+fn era_allow_list(era: ArchEra) -> Option<&'static [Block]> {
+    let allowed: &'static [Block] = match era {
+        ArchEra::Unknown => return None,
+        ArchEra::TraditionalPreWar => &[
+            BRICK,
+            STONE_BRICKS,
+            WHITE_TERRACOTTA,
+            BROWN_TERRACOTTA,
+            SANDSTONE,
+            SMOOTH_SANDSTONE,
+            MUD_BRICKS,
+            GRANITE,
+            POLISHED_GRANITE,
+            TERRACOTTA,
+            END_STONE_BRICKS,
+            QUARTZ_BRICKS,
+            ORANGE_TERRACOTTA,
+            RED_TERRACOTTA,
+            RED_NETHER_BRICKS,
+            NETHER_BRICK,
+            COBBLESTONE,
+            OAK_PLANKS,
+            SPRUCE_PLANKS,
+        ],
+        ArchEra::PostWarPanel => &[
+            GRAY_CONCRETE,
+            LIGHT_GRAY_CONCRETE,
+            WHITE_CONCRETE,
+            BROWN_CONCRETE,
+            GRAY_TERRACOTTA,
+            LIGHT_GRAY_TERRACOTTA,
+            POLISHED_ANDESITE,
+            SMOOTH_STONE,
+            BRICK,
+            WHITE_TERRACOTTA,
+        ],
+        ArchEra::Contemporary => &[
+            WHITE_CONCRETE,
+            LIGHT_GRAY_CONCRETE,
+            GRAY_CONCRETE,
+            QUARTZ_BLOCK,
+            QUARTZ_BRICKS,
+            POLISHED_ANDESITE,
+            SMOOTH_STONE,
+            POLISHED_DEEPSLATE,
+            DEEPSLATE_BRICKS,
+            POLISHED_BLACKSTONE,
+            LIGHT_GRAY_TERRACOTTA,
+        ],
+        ArchEra::HistoricOrnate => &[
+            SANDSTONE,
+            SMOOTH_SANDSTONE,
+            STONE_BRICKS,
+            CHISELED_STONE_BRICKS,
+            END_STONE_BRICKS,
+            QUARTZ_BRICKS,
+            WHITE_TERRACOTTA,
+            BRICK,
+            POLISHED_DIORITE,
+            GRANITE,
+            POLISHED_GRANITE,
+        ],
+    };
+    Some(allowed)
+}
+
+/// Categories whose palettes get filtered by the building era. Specialised
+/// palettes (farm wood, religious stone, industrial, glass towers) already
+/// carry their identity and stay untouched.
+fn era_filters_category(category: BuildingCategory) -> bool {
+    matches!(
+        category,
+        BuildingCategory::House
+            | BuildingCategory::Residential
+            | BuildingCategory::Commercial
+            | BuildingCategory::Office
+            | BuildingCategory::Hotel
+            | BuildingCategory::Default
+    )
 }
 
 /// Walls accepted only ~20% of the time when picked, to keep them rare.
@@ -1685,7 +1844,37 @@ fn pick_with_rare_filter<R: Rng>(palette: &[Block], rng: &mut R) -> Block {
 }
 
 /// Selects a wall block from the appropriate category palette
-fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -> Block {
+fn get_wall_block_for_category(
+    category: BuildingCategory,
+    era: ArchEra,
+    rng: &mut impl Rng,
+) -> Block {
+    // Era-filtered path for the general urban categories: intersect the
+    // category palette with the era allow-list; if that leaves fewer than two
+    // choices, draw from the era list directly.
+    if era_filters_category(category) {
+        if let Some(allow) = era_allow_list(era) {
+            let palette: &[Block] = match category {
+                BuildingCategory::House | BuildingCategory::Residential => {
+                    &RESIDENTIAL_WALL_OPTIONS
+                }
+                BuildingCategory::Commercial
+                | BuildingCategory::Office
+                | BuildingCategory::Hotel => &COMMERCIAL_WALL_OPTIONS,
+                _ => &[],
+            };
+            let filtered: Vec<Block> = palette
+                .iter()
+                .copied()
+                .filter(|b| allow.contains(b))
+                .collect();
+            return if filtered.len() >= 2 {
+                pick_with_rare_filter(&filtered, rng)
+            } else {
+                pick_with_rare_filter(allow, rng)
+            };
+        }
+    }
     match category {
         BuildingCategory::House | BuildingCategory::Residential => {
             pick_with_rare_filter(&RESIDENTIAL_WALL_OPTIONS, rng)
@@ -2840,13 +3029,19 @@ fn apply_condition_variation(
         return chosen;
     }
 
-    // Subtle weathering on age-appropriate Normal-condition categories.
+    // Subtle weathering on age-appropriate Normal-condition categories/eras.
     let normal_weather_rate: f64 = if config.condition == BuildingCondition::Normal {
-        match config.category {
+        let category_rate: f64 = match config.category {
             BuildingCategory::Historic | BuildingCategory::Religious => 0.06,
             BuildingCategory::Farm => 0.03,
             _ => 0.0,
-        }
+        };
+        let era_rate = match config.era {
+            ArchEra::HistoricOrnate => 0.05,
+            ArchEra::TraditionalPreWar => 0.02,
+            _ => 0.0,
+        };
+        category_rate.max(era_rate)
     } else {
         0.0
     };
@@ -5125,6 +5320,15 @@ pub fn generate_buildings(
         .unwrap_or("yes");
     let floor_cycle = floor_cycle_for(building_type, &element.tags);
 
+    // Architectural era, consumed by palettes, frames, depth styles and
+    // weathering. Untagged parts inherit the hint packed into the group seed.
+    let mut era = crate::osm_parser::building_arch_era(&element.tags);
+    if era == ArchEra::Unknown && element.tags.contains_key("building:part") {
+        era = crate::osm_parser::arch_era_from_hint(crate::osm_parser::style_hint_from_seed(
+            group_seed,
+        ));
+    }
+
     let min_level_offset = if let Some(mh) = element.tags.get("min_height") {
         mh.trim_end_matches('m')
             .trim()
@@ -5288,6 +5492,7 @@ pub fn generate_buildings(
         element,
         building_type,
         category,
+        era,
         has_multiple_floors,
         cached_footprint_size,
         &mut rng,
@@ -5327,7 +5532,7 @@ pub fn generate_buildings(
 
     // Window layout is picked before the config literal so the frame gate
     // below can see it (frames are designed around 3-wide bays).
-    let window_archetype = pick_window_archetype(category, group_seed);
+    let window_archetype = pick_window_archetype(category, era, group_seed);
 
     // Create config struct for cleaner function calls
     let config = BuildingConfig {
@@ -5352,6 +5557,7 @@ pub fn generate_buildings(
         has_garage_door,
         has_single_door,
         category,
+        era,
         wall_depth_style: style.wall_depth_style,
         has_parapet: style.has_parapet
             || short_flat_parapet_for(
@@ -5409,7 +5615,7 @@ pub fn generate_buildings(
                     | WindowArchetype::PairedNarrow
                     | WindowArchetype::ArchedTraditional
             ))
-        .then(|| pick_window_frame(category, group_seed))
+        .then(|| pick_window_frame(category, era, group_seed))
         .flatten(),
     };
 
@@ -8720,17 +8926,17 @@ mod style_tests {
     #[test]
     fn archetype_choice_is_deterministic_and_defaults_hold() {
         for seed in 0..30u64 {
-            let a = pick_window_archetype(BuildingCategory::House, seed);
-            let b = pick_window_archetype(BuildingCategory::House, seed);
+            let a = pick_window_archetype(BuildingCategory::House, ArchEra::Unknown, seed);
+            let b = pick_window_archetype(BuildingCategory::House, ArchEra::Unknown, seed);
             assert_eq!(a, b);
         }
         // Unhandled categories stay on the classic layout
         assert_eq!(
-            pick_window_archetype(BuildingCategory::Religious, 7),
+            pick_window_archetype(BuildingCategory::Religious, ArchEra::Unknown, 7),
             WindowArchetype::Standard3
         );
         assert_eq!(
-            pick_window_archetype(BuildingCategory::GlassySkyscraper, 7),
+            pick_window_archetype(BuildingCategory::GlassySkyscraper, ArchEra::Unknown, 7),
             WindowArchetype::Standard3
         );
     }
@@ -8741,10 +8947,42 @@ mod style_tests {
         for seed in 0..60u64 {
             seen.insert(format!(
                 "{:?}",
-                pick_window_archetype(BuildingCategory::House, seed)
+                pick_window_archetype(BuildingCategory::House, ArchEra::Unknown, seed)
             ));
         }
         assert!(seen.len() >= 3, "expected variety, got {seen:?}");
+    }
+
+    #[test]
+    fn era_shifts_archetypes_and_walls() {
+        // Ornate era pushes houses toward arched bays
+        let mut arched = 0;
+        for seed in 0..60u64 {
+            if pick_window_archetype(BuildingCategory::House, ArchEra::HistoricOrnate, seed)
+                == WindowArchetype::ArchedTraditional
+            {
+                arched += 1;
+            }
+        }
+        assert!(
+            arched >= 20,
+            "ornate era should favor arches, got {arched}/60"
+        );
+        // Panel-era residential walls stay inside the era allow-list
+        for seed in 0..40u64 {
+            let mut rng = element_rng(seed);
+            let b = get_wall_block_for_category(
+                BuildingCategory::Residential,
+                ArchEra::PostWarPanel,
+                &mut rng,
+            );
+            assert!(
+                era_allow_list(ArchEra::PostWarPanel).unwrap().contains(&b),
+                "panel era picked {b:?}"
+            );
+        }
+        // Unknown era keeps the full palette reachable (no filtering)
+        assert!(era_allow_list(ArchEra::Unknown).is_none());
     }
 
     #[test]
