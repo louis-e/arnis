@@ -5,7 +5,7 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
-use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
+use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -49,6 +49,13 @@ pub fn generate_leisure(
             }
         }
 
+        // Resolve the fill before painting the edge, for the same reason as in natural.rs:
+        // a closed ring the fill refused must not leave a border around unfilled ground.
+        let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+        if filled_area.is_empty() && is_oversized_ring(element) {
+            return;
+        }
+
         // Process leisure area nodes
         for node in &element.nodes {
             if let Some(prev) = previous_node {
@@ -81,8 +88,6 @@ pub fn generate_leisure(
 
         // Flood-fill the interior of the leisure area using cache
         if corner_count > 0 {
-            let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
-
             // Use deterministic RNG seeded by element ID for consistent results across region boundaries
             let mut rng = element_rng(element.id);
 
