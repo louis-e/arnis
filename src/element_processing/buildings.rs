@@ -1504,7 +1504,7 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("colour"));
     if let Some(building_colour) = colour {
         if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-            return Some(get_building_wall_block_for_color(rgb, rng));
+            return Some(crate::block_palette::wall_block_for_color(rgb, rng));
         }
     }
     None
@@ -1540,7 +1540,7 @@ fn determine_wall_block(
             .or_else(|| element.tags.get("colour"));
         if let Some(building_colour) = colour {
             if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-                return get_building_wall_block_for_color(rgb, rng);
+                return crate::block_palette::wall_block_for_color(rgb, rng);
             }
         }
     }
@@ -2120,8 +2120,7 @@ fn generate_roof_only_structure(
                 .or_else(|| element.tags.get("building:colour"))
                 .or_else(|| element.tags.get("colour"))
                 .and_then(|c| color_text_to_rgb_tuple(c))
-                .map(|rgb| get_building_wall_block_for_color(rgb, &mut rng))
-                .map(roof_friendly_block)
+                .map(|rgb| crate::block_palette::roof_block_for_color(rgb, &mut rng))
         })
         .unwrap_or(STONE_BRICK_SLAB);
 
@@ -7983,8 +7982,7 @@ fn generate_roof(
                 .tags
                 .get("roof:colour")
                 .and_then(|c| color_text_to_rgb_tuple(c))
-                .map(|rgb| get_building_wall_block_for_color(rgb, &mut roof_rng))
-                .map(roof_friendly_block)
+                .map(|rgb| crate::block_palette::roof_block_for_color(rgb, &mut roof_rng))
         });
 
     if let Some(block) = osm_roof_block {
