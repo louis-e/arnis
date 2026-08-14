@@ -460,6 +460,9 @@ fn is_light_transparent(name: &str) -> bool {
         "bamboo",
         "sugar_cane",
         "nether_wart",
+        "wheat",
+        "carrots",
+        "potatoes",
         "lily_pad",
         "sea_pickle",
         "cobweb",
@@ -1148,7 +1151,7 @@ fn value_to_i32(value: &Value) -> Option<i32> {
 mod tests {
     use super::super::common::{Chunk, ChunkToModify};
     use super::create_chunk_nbt;
-    use crate::block_definitions::GRASS_BLOCK;
+    use crate::block_definitions::{FARMLAND, GRASS_BLOCK, WHEAT};
     use fastnbt::Value;
     use fnv::FnvHashMap;
     use std::collections::HashMap;
@@ -1196,6 +1199,34 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn baked_lighting_leaves_crops_under_open_sky() {
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -62, z, FARMLAND);
+                c.set_block(x, -61, z, WHEAT);
+            }
+        }
+        let chunk = Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+
+        let nbt = create_chunk_nbt(&chunk, true, &plains_biome());
+        let Value::Compound(bottom) = &sections(&nbt)[0] else {
+            panic!("bottom section missing")
+        };
+        let Value::ByteArray(sky) = &bottom["SkyLight"] else {
+            panic!("SkyLight is not a byte array")
+        };
+        // Wheat sits at local y 3 of the bottom section, so cell (0, 3, 0) is nibble 768.
+        assert_eq!(sky[384] as u8 & 0x0F, 15);
     }
 
     #[test]

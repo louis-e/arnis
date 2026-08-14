@@ -4,7 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree::{Tree, TreeType};
-use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
+use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
@@ -145,6 +145,14 @@ pub fn generate_natural(
                 return;
             };
 
+            // Resolve the fill before painting the edge. It is cached, so this costs nothing
+            // extra. A closed ring that comes back empty is one the fill refused for size, and
+            // drawing its edge anyway leaves a border around ground nothing ever filled.
+            let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+            if filled_area.is_empty() && is_oversized_ring(way) {
+                return;
+            }
+
             // Process natural nodes to fill the area
             for node in &way.nodes {
                 let x: i32 = node.x;
@@ -189,8 +197,6 @@ pub fn generate_natural(
 
             // If there are natural nodes, flood-fill the area using cache
             if corner_count > 0 {
-                let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
-
                 let trees_ok_to_generate: Vec<TreeType> = {
                     let mut trees: Vec<TreeType> = vec![];
                     if let Some(leaf_type) = element.tags().get("leaf_type") {
