@@ -4,10 +4,13 @@ use itertools::Itertools;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// Maximum bounding box area (in blocks) for flood fill.
-/// Polygons exceeding this are skipped to prevent excessive memory allocations.
+/// Maximum bounding box area (in blocks) for the visited-bitmap flood fill.
 /// 25 million blocks ≈ 5000×5000; bitmap uses only ~3 MB at this size.
+/// Past this the scanline path takes over, which needs no bitmap.
 const MAX_FLOOD_FILL_AREA: i64 = 25_000_000;
+
+/// Work cap for the scanline fill, whose cost is rows × edges rather than area.
+const MAX_SCANLINE_EDGE_TESTS: i64 = 200_000_000;
 
 /// A compact bitmap for visited-coordinate tracking during flood fill.
 ///
@@ -95,11 +98,9 @@ pub fn flood_fill_area(
 
     let area = (max_x - min_x + 1) as i64 * (max_z - min_z + 1) as i64;
 
-    // Safety cap: reject polygons whose bounding box is too large.
-    // This prevents multi-GB memory allocations when ocean-adjacent elements
-    // (e.g. natural=water, large landuse) produce huge clipped polygons.
+    // Too big for the visited bitmap, which scales with the bounding box. Scanline needs none.
     if area > MAX_FLOOD_FILL_AREA {
-        return vec![];
+        return scanline_fill_area(polygon_coords, min_x, max_x, min_z, max_z);
     }
 
     // For small and medium areas, use optimized flood fill with span filling
@@ -109,6 +110,71 @@ pub fn flood_fill_area(
         // For larger areas, use original flood fill with grid sampling
         original_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
     }
+}
+
+/// Even-odd scanline fill for polygons whose bounding box is past the bitmap cap.
+///
+/// Callers draw the polygon's edge before they ask for the fill, so returning nothing left
+/// an outline with untouched ground inside it. A large `natural=sand` area at 1:1 is the
+/// visible case. Spans are counted before anything is allocated, so the output vector is
+/// sized once and peak memory stays at the result itself.
+fn scanline_fill_area(
+    polygon_coords: &[(i32, i32)],
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+) -> Vec<(i32, i32)> {
+    let rows = max_z as i64 - min_z as i64 + 1;
+    let edges = polygon_coords.len() as i64;
+    if rows.saturating_mul(edges) > MAX_SCANLINE_EDGE_TESTS {
+        return vec![];
+    }
+
+    let mut spans: Vec<(i32, i32, i32)> = Vec::new();
+    let mut crossings: Vec<f64> = Vec::new();
+    let mut cells: i64 = 0;
+
+    for z in min_z..=max_z {
+        // Sample through the row centre so an edge lying on the integer line isn't counted twice.
+        let zc = z as f64 + 0.5;
+        crossings.clear();
+        for w in polygon_coords.windows(2) {
+            let (x0, z0) = (w[0].0 as f64, w[0].1 as f64);
+            let (x1, z1) = (w[1].0 as f64, w[1].1 as f64);
+            if (z0 <= zc) == (z1 <= zc) {
+                continue;
+            }
+            let t = (zc - z0) / (z1 - z0);
+            crossings.push(x0 + t * (x1 - x0));
+        }
+        if crossings.len() < 2 {
+            continue;
+        }
+        crossings.sort_unstable_by(f64::total_cmp);
+
+        for pair in crossings.chunks_exact(2) {
+            // Rounding on a near-vertical edge can put an endpoint outside the ring.
+            let xs = (pair[0].ceil() as i32).max(min_x);
+            let xe = (pair[1].floor() as i32).min(max_x);
+            if xe < xs {
+                continue;
+            }
+            cells += (xe - xs) as i64 + 1;
+            if cells > MAX_FLOOD_FILL_AREA {
+                return vec![];
+            }
+            spans.push((z, xs, xe));
+        }
+    }
+
+    let mut filled: Vec<(i32, i32)> = Vec::with_capacity(cells as usize);
+    for (z, xs, xe) in spans {
+        for x in xs..=xe {
+            filled.push((x, z));
+        }
+    }
+    filled
 }
 
 /// Optimized flood fill for larger polygons with multi-seed detection for complex shapes like U-shapes
@@ -278,4 +344,46 @@ fn original_flood_fill_area(
     }
 
     filled_area
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_polygon_still_uses_the_bitmap_path() {
+        let square = [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)];
+        let filled = flood_fill_area(&square, None);
+        assert!(!filled.is_empty());
+        assert!(filled
+            .iter()
+            .all(|&(x, z)| (0..=10).contains(&x) && (0..=10).contains(&z)));
+    }
+
+    #[test]
+    fn huge_bbox_but_thin_polygon_is_filled_not_dropped() {
+        // 6001 x 6011 bounding box is past the bitmap cap, but the band itself is ~60k cells.
+        let band = [(0, 0), (6000, 6000), (6000, 6010), (0, 10), (0, 0)];
+        let bbox = 6001_i64 * 6011;
+        assert!(bbox > MAX_FLOOD_FILL_AREA);
+
+        let filled = flood_fill_area(&band, None);
+        assert!(filled.len() > 50_000, "got {} cells", filled.len());
+        assert!(filled.len() < 100_000, "got {} cells", filled.len());
+        assert!(filled
+            .iter()
+            .all(|&(x, z)| (0..=6000).contains(&x) && (0..=6010).contains(&z)));
+    }
+
+    #[test]
+    fn polygon_covering_more_than_the_budget_is_refused() {
+        let triangle = [(0, 0), (9000, 0), (0, 9000), (0, 0)];
+        assert!(flood_fill_area(&triangle, None).is_empty());
+    }
+
+    #[test]
+    fn absurd_row_count_is_refused_before_any_work() {
+        let sliver = [(0, 0), (10, 0), (10, 4_000_000), (0, 4_000_000), (0, 0)];
+        assert!(flood_fill_area(&sliver, None).is_empty());
+    }
 }
