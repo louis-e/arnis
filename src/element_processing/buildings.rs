@@ -943,10 +943,11 @@ impl BuildingStyle {
             }
         });
 
-        // Window block: from preset or random based on building type (tint coordinated below).
-        let window_block = preset
-            .window_block
-            .unwrap_or_else(|| get_window_block_for_building_type_with_rng(building_type, rng));
+        // Window block: from preset or random based on building category (tint coordinated below).
+        let window_block = preset.window_block.unwrap_or_else(|| {
+            let pool = window_pool_for_category(category);
+            pool[rng.random_range(0..pool.len())]
+        });
 
         // Accent block: from preset or random
         // For glassy skyscrapers, use white stained glass or blackstone
@@ -1199,6 +1200,8 @@ struct BuildingConfig {
     style_seed: u64,
     /// Per-building offset of the window rhythm so facades don't align citywide.
     window_phase: i32,
+    /// Per-building window layout on the shared lattice.
+    window_archetype: WindowArchetype,
     /// Darker plinth block for the bottom wall rows, None to skip.
     base_course_block: Option<Block>,
     /// Wider, taller glass on the ground floor of commercial buildings.
@@ -1458,6 +1461,119 @@ fn calculate_start_y_offset(
 
 /// Wall block from an OSM material/colour tag, or None if no tag is set.
 /// Tints a tower's glass to match a dark wall or dark accent band; else keeps the light default.
+/// Window glass pool per building category — the single dispatch point,
+/// replacing the old duplicate string-match on the raw `building=*` value
+/// (which used a different vocabulary and dropped farms/offices to the
+/// generic pool).
+fn window_pool_for_category(category: BuildingCategory) -> &'static [Block] {
+    match category {
+        BuildingCategory::Residential | BuildingCategory::House => &RESIDENTIAL_WINDOW_OPTIONS,
+        BuildingCategory::School
+        | BuildingCategory::Hospital
+        | BuildingCategory::Office
+        | BuildingCategory::Commercial => &INSTITUTIONAL_WINDOW_OPTIONS,
+        BuildingCategory::Hotel => &HOSPITALITY_WINDOW_OPTIONS,
+        BuildingCategory::Industrial | BuildingCategory::Warehouse => &INDUSTRIAL_WINDOW_OPTIONS,
+        BuildingCategory::Religious => &RELIGIOUS_WINDOW_OPTIONS,
+        BuildingCategory::Farm => &FARM_WINDOW_OPTIONS,
+        BuildingCategory::Historic => &HISTORIC_WINDOW_OPTIONS,
+        _ => &WINDOW_VARIATIONS,
+    }
+}
+
+/// Per-building window layout on the shared 6-column / floor-cycle lattice.
+/// Chosen once per building (part groups agree via the group seed), so a
+/// street of same-shaped houses no longer shares one identical facade grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowArchetype {
+    /// 3-wide bays over the full window rows — the classic default.
+    Standard3,
+    /// Two 1-wide sashes (cols 0 and 2) with a lintel row above.
+    PairedNarrow,
+    /// Single centered 1-wide strip over the full window rows.
+    VerticalStrip,
+    /// 4-wide band windows with a sill row below.
+    WideHorizontal,
+    /// Like Standard3 plus protruding stair headers over the window tops.
+    ArchedTraditional,
+}
+
+/// Whether (window_col, floor_row) is glass under the given archetype.
+/// `floor_row` 0 is always the solid band; rows 1..cycle-1 are open rows.
+fn archetype_allows_window(
+    archetype: WindowArchetype,
+    window_col: i32,
+    floor_row: i32,
+    floor_cycle: i32,
+) -> bool {
+    match archetype {
+        WindowArchetype::Standard3 | WindowArchetype::ArchedTraditional => window_col < 3,
+        // Drop the top open row: it reads as a lintel over the two sashes.
+        WindowArchetype::PairedNarrow => {
+            (window_col == 0 || window_col == 2) && floor_row < floor_cycle - 1
+        }
+        WindowArchetype::VerticalStrip => window_col == 1,
+        // Drop the bottom open row: it reads as a sill under the band window.
+        WindowArchetype::WideHorizontal => window_col < 4 && floor_row > 1,
+    }
+}
+
+/// Weighted per-category archetype choice, seeded on the shared group seed.
+fn pick_window_archetype(category: BuildingCategory, group_seed: u64) -> WindowArchetype {
+    use WindowArchetype::*;
+    // (archetype, weight) — weights sum to 100 per row.
+    let table: &[(WindowArchetype, u32)] = match category {
+        BuildingCategory::House => &[
+            (Standard3, 40),
+            (PairedNarrow, 35),
+            (VerticalStrip, 5),
+            (WideHorizontal, 10),
+            (ArchedTraditional, 10),
+        ],
+        BuildingCategory::Residential => &[
+            (Standard3, 35),
+            (PairedNarrow, 30),
+            (VerticalStrip, 10),
+            (WideHorizontal, 15),
+            (ArchedTraditional, 10),
+        ],
+        BuildingCategory::Commercial | BuildingCategory::Office => &[
+            (Standard3, 25),
+            (PairedNarrow, 5),
+            (VerticalStrip, 20),
+            (WideHorizontal, 45),
+            (ArchedTraditional, 5),
+        ],
+        BuildingCategory::Hotel => &[
+            (Standard3, 30),
+            (PairedNarrow, 10),
+            (VerticalStrip, 20),
+            (WideHorizontal, 35),
+            (ArchedTraditional, 5),
+        ],
+        BuildingCategory::School | BuildingCategory::Hospital => &[
+            (Standard3, 30),
+            (PairedNarrow, 10),
+            (VerticalStrip, 10),
+            (WideHorizontal, 50),
+        ],
+        BuildingCategory::Industrial | BuildingCategory::Warehouse => {
+            &[(Standard3, 20), (VerticalStrip, 10), (WideHorizontal, 70)]
+        }
+        _ => return Standard3,
+    };
+    let mut rng = element_rng(group_seed ^ 0x57A2_C0DE_A5C1_0007);
+    let total: u32 = table.iter().map(|&(_, w)| w).sum();
+    let mut roll = rng.random_range(0..total);
+    for &(archetype, weight) in table {
+        if roll < weight {
+            return archetype;
+        }
+        roll -= weight;
+    }
+    Standard3
+}
+
 fn coordinated_window_block(wall_block: Block, accent_block: Block, light_default: Block) -> Block {
     const DARK: &[Block] = &[
         BLACK_CONCRETE,
@@ -2878,13 +2994,21 @@ fn determine_wall_block_at_position_pristine(
             return GLASS;
         }
 
-        // Window width across the 6-block cycle: masonry narrow, contemporary wide, else default.
-        let window_width = match config.category {
-            BuildingCategory::MasonrySkyscraper => 2,
-            BuildingCategory::ContemporarySkyscraper => 4,
-            _ => 3,
-        };
-        let is_window_position = above_floor && floor_row != 0 && window_col < window_width;
+        // Window layout across the 6-block cycle: the two skyscraper families
+        // keep their fixed widths (masonry narrow, contemporary wide); everything
+        // else follows the per-building archetype.
+        let is_window_position = above_floor
+            && floor_row != 0
+            && match config.category {
+                BuildingCategory::MasonrySkyscraper => window_col < 2,
+                BuildingCategory::ContemporarySkyscraper => window_col < 4,
+                _ => archetype_allows_window(
+                    config.window_archetype,
+                    window_col,
+                    floor_row,
+                    config.floor_cycle,
+                ),
+            };
 
         if is_window_position {
             config.window_block
@@ -3143,7 +3267,18 @@ fn generate_residential_window_decorations(
                 // mod6 == 3 or 5 are the wall blocks flanking a window strip.
                 // Both sides share the same roll (seeded on window centre).
                 // Frame styles bring their own flank treatment, so skip these.
-                if (mod6 == 3 || mod6 == 5) && config.window_frame.is_none() {
+                // Only archetypes whose cols 3/5 are actually solid flanks
+                // next to glazing get shutters (a strip archetype has no
+                // window there; a wide band glazes col 3 itself).
+                if (mod6 == 3 || mod6 == 5)
+                    && config.window_frame.is_none()
+                    && matches!(
+                        config.window_archetype,
+                        WindowArchetype::Standard3
+                            | WindowArchetype::PairedNarrow
+                            | WindowArchetype::ArchedTraditional
+                    )
+                {
                     let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
                     let shutter_roll =
                         coord_rng(centre_sum, centre_sum, element.id).random_range(0u32..100);
@@ -3167,12 +3302,12 @@ fn generate_residential_window_decorations(
                 }
 
                 // --- Window Sills / Balconies ---
-                // Window columns are mod6 ∈ {0, 1, 2}.
                 // At each floor's floor_row==0 row we decide once per window
                 // whether this floor gets a sill OR a balcony (mutually
-                // exclusive).  The decision is shared across all three
-                // columns via a seed derived from the window centre.
-                if mod6 < 3 {
+                // exclusive).  The decision is shared across the window
+                // columns via a seed derived from the window centre. Only
+                // columns the archetype actually glazes get sills.
+                if archetype_allows_window(config.window_archetype, mod6, 1, config.floor_cycle) {
                     // Stop a full window height before the top so every sill
                     // has a full window above it, avoids placing sills at the
                     // roof line.
@@ -4005,6 +4140,72 @@ fn generate_facade_cornices(
                     if is_band || is_crown {
                         editor.set_block_with_properties_absolute(
                             cornice_stair.clone(),
+                            lx,
+                            h + config.abs_terrain_offset,
+                            lz,
+                            Some(&[AIR]),
+                            None,
+                        );
+                    }
+                }
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
+/// Protruding stair headers over each window top for the ArchedTraditional
+/// window archetype — the classic rounded-lintel look, one block proud of the
+/// facade. HistoricOrnate depth styling already places its own headers.
+fn generate_archetype_window_headers(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
+) {
+    if config.window_archetype != WindowArchetype::ArchedTraditional
+        || config.wall_depth_style == WallDepthStyle::HistoricOrnate
+        || !config.has_windows
+        || config.condition != BuildingCondition::Normal
+    {
+        return;
+    }
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
+    };
+    let top_h = config.start_y_offset + config.building_height;
+
+    let mut previous_node: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+            let facing = facing_for_normal(out_nx, out_nz);
+            let header_stair = make_upside_down_stair(config.wall_block, facing);
+
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+            for (bx, _, bz) in &points {
+                let (bx, bz) = (*bx, *bz);
+                if building_passages.contains(bx, bz) {
+                    continue;
+                }
+                let mod6 = config.window_col(bx, bz);
+                // Arch shoulders sit over the window edge columns.
+                if mod6 != 0 && mod6 != 2 {
+                    continue;
+                }
+                let lx = bx + out_nx;
+                let lz = bz + out_nz;
+                for h in (config.start_y_offset + 2)..=top_h {
+                    if config.floor_row(h) == config.floor_cycle - 1 {
+                        editor.set_block_with_properties_absolute(
+                            header_stair.clone(),
                             lx,
                             h + config.abs_terrain_offset,
                             lz,
@@ -5124,6 +5325,10 @@ pub fn generate_buildings(
         BuildingCondition::Disused | BuildingCondition::Normal => {}
     }
 
+    // Window layout is picked before the config literal so the frame gate
+    // below can see it (frames are designed around 3-wide bays).
+    let window_archetype = pick_window_archetype(category, group_seed);
+
     // Create config struct for cleaner function calls
     let config = BuildingConfig {
         is_ground_level: min_level_offset == 0,
@@ -5170,6 +5375,7 @@ pub fn generate_buildings(
         } else {
             element_rng(element.id ^ 0x77D0_A3E1_9B1C_5544).random_range(0..6)
         },
+        window_archetype,
         base_course_block: {
             let eligible = min_level_offset == 0
                 && has_windows
@@ -5194,9 +5400,17 @@ pub fn generate_buildings(
             && condition == BuildingCondition::Normal
             && min_level_offset == 0
             && element_rng(group_seed ^ 0x5709_EF90_0000_0002).random_bool(0.60),
-        window_frame: (has_windows && condition == BuildingCondition::Normal && !is_tall_building)
-            .then(|| pick_window_frame(category, group_seed))
-            .flatten(),
+        window_frame: (has_windows
+            && condition == BuildingCondition::Normal
+            && !is_tall_building
+            && matches!(
+                window_archetype,
+                WindowArchetype::Standard3
+                    | WindowArchetype::PairedNarrow
+                    | WindowArchetype::ArchedTraditional
+            ))
+        .then(|| pick_window_frame(category, group_seed))
+        .flatten(),
     };
 
     // Passages only apply to ground-level buildings. Elevated building:part
@@ -5275,6 +5489,7 @@ pub fn generate_buildings(
             effective_passages,
         );
         generate_corner_downpipes(editor, element, &config, effective_passages);
+        generate_archetype_window_headers(editor, element, &config, effective_passages);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -8480,6 +8695,73 @@ mod height_tests {
 #[cfg(test)]
 mod style_tests {
     use super::*;
+
+    #[test]
+    fn archetype_truth_table() {
+        use WindowArchetype::*;
+        // Standard3: cols 0-2 on all open rows
+        assert!(archetype_allows_window(Standard3, 0, 1, 4));
+        assert!(archetype_allows_window(Standard3, 2, 3, 4));
+        assert!(!archetype_allows_window(Standard3, 3, 2, 4));
+        // PairedNarrow: cols 0 and 2 only, top open row is a lintel
+        assert!(archetype_allows_window(PairedNarrow, 0, 1, 4));
+        assert!(!archetype_allows_window(PairedNarrow, 1, 1, 4));
+        assert!(archetype_allows_window(PairedNarrow, 2, 2, 4));
+        assert!(!archetype_allows_window(PairedNarrow, 0, 3, 4));
+        // VerticalStrip: col 1 only
+        assert!(archetype_allows_window(VerticalStrip, 1, 3, 4));
+        assert!(!archetype_allows_window(VerticalStrip, 0, 2, 4));
+        // WideHorizontal: cols 0-3, bottom open row is a sill
+        assert!(archetype_allows_window(WideHorizontal, 3, 2, 4));
+        assert!(!archetype_allows_window(WideHorizontal, 3, 1, 4));
+        assert!(!archetype_allows_window(WideHorizontal, 4, 2, 4));
+    }
+
+    #[test]
+    fn archetype_choice_is_deterministic_and_defaults_hold() {
+        for seed in 0..30u64 {
+            let a = pick_window_archetype(BuildingCategory::House, seed);
+            let b = pick_window_archetype(BuildingCategory::House, seed);
+            assert_eq!(a, b);
+        }
+        // Unhandled categories stay on the classic layout
+        assert_eq!(
+            pick_window_archetype(BuildingCategory::Religious, 7),
+            WindowArchetype::Standard3
+        );
+        assert_eq!(
+            pick_window_archetype(BuildingCategory::GlassySkyscraper, 7),
+            WindowArchetype::Standard3
+        );
+    }
+
+    #[test]
+    fn houses_vary_archetypes_across_seeds() {
+        let mut seen = std::collections::HashSet::new();
+        for seed in 0..60u64 {
+            seen.insert(format!(
+                "{:?}",
+                pick_window_archetype(BuildingCategory::House, seed)
+            ));
+        }
+        assert!(seen.len() >= 3, "expected variety, got {seen:?}");
+    }
+
+    #[test]
+    fn window_pools_cover_previously_generic_categories() {
+        assert_eq!(
+            window_pool_for_category(BuildingCategory::Farm),
+            &FARM_WINDOW_OPTIONS[..]
+        );
+        assert_eq!(
+            window_pool_for_category(BuildingCategory::Office),
+            &INSTITUTIONAL_WINDOW_OPTIONS[..]
+        );
+        assert_eq!(
+            window_pool_for_category(BuildingCategory::Historic),
+            &HISTORIC_WINDOW_OPTIONS[..]
+        );
+    }
 
     #[test]
     fn dark_wall_or_dark_accent_gets_dark_glass() {

@@ -1462,37 +1462,12 @@ pub static RELIGIOUS_WINDOW_OPTIONS: [Block; 5] = [
     WHITE_STAINED_GLASS,
 ];
 
-// Window types for different building styles (non-deterministic, for backwards compatibility)
-pub fn get_window_block_for_building_type(building_type: &str) -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-    get_window_block_for_building_type_with_rng(building_type, &mut rng)
-}
+// Farm window options (plain glazing — barns don't get tinted variety).
+pub static FARM_WINDOW_OPTIONS: [Block; 3] = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
 
-/// Deterministic window block selection using provided RNG
-pub fn get_window_block_for_building_type_with_rng(
-    building_type: &str,
-    rng: &mut impl rand::Rng,
-) -> Block {
-    match building_type {
-        "residential" | "house" | "apartment" | "apartments" => {
-            RESIDENTIAL_WINDOW_OPTIONS[rng.random_range(0..RESIDENTIAL_WINDOW_OPTIONS.len())]
-        }
-        "hospital" | "school" | "university" => {
-            INSTITUTIONAL_WINDOW_OPTIONS[rng.random_range(0..INSTITUTIONAL_WINDOW_OPTIONS.len())]
-        }
-        "hotel" | "restaurant" => {
-            HOSPITALITY_WINDOW_OPTIONS[rng.random_range(0..HOSPITALITY_WINDOW_OPTIONS.len())]
-        }
-        "industrial" | "warehouse" => {
-            INDUSTRIAL_WINDOW_OPTIONS[rng.random_range(0..INDUSTRIAL_WINDOW_OPTIONS.len())]
-        }
-        "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
-            RELIGIOUS_WINDOW_OPTIONS[rng.random_range(0..RELIGIOUS_WINDOW_OPTIONS.len())]
-        }
-        _ => WINDOW_VARIATIONS[rng.random_range(0..WINDOW_VARIATIONS.len())],
-    }
-}
+// Historic window options (clear, slightly aged glazing).
+pub static HISTORIC_WINDOW_OPTIONS: [Block; 3] =
+    [GLASS, LIGHT_GRAY_STAINED_GLASS, WHITE_STAINED_GLASS];
 
 // Floor block options for buildings
 pub static FLOOR_BLOCK_OPTIONS: [Block; 8] = [
