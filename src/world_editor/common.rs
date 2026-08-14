@@ -75,18 +75,22 @@ pub(crate) struct PaletteItem {
 /// * `Full(Vec<u8>)` – the general case for sections whose block ids all
 ///   fit in a byte (the overwhelming majority), one byte per cell.
 ///
-/// * `FullWide(Vec<Block>)` – only for sections that contain a block id of
-///   256 or more (a handful of underwater blocks); two bytes per cell. Kept
-///   separate so the common case isn't paying for the wider id space.
+/// * `FullWide(Vec<Block>)` – only for sections holding a block id of
+///   [`BYTE_ID_LIMIT`] or more; two bytes per cell. Kept separate so the
+///   common case isn't paying for the wider id space.
+///
+/// The palette is laid out so only the decorative tail lands in the wide
+/// range, which keeps this variant rare (around 0.5% of allocating sections
+/// across the sample areas). See the id-space notes in `block_definitions`.
 ///
 /// Both are heap-allocated via `Vec`, so the inline size inside the parent
 /// `FnvHashMap` entry is only 24 bytes.
 pub(crate) enum BlockStorage {
     /// Every position is the same block (commonly AIR).
     Uniform(Block),
-    /// Mixed blocks, all ids < 256 – always exactly 4 096 entries.
+    /// Mixed blocks, every id below [`BYTE_ID_LIMIT`] – always exactly 4 096 entries.
     Full(Vec<u8>),
-    /// Mixed blocks with at least one id >= 256 – always 4 096 entries.
+    /// Mixed blocks with at least one id at or above [`BYTE_ID_LIMIT`] – always 4 096 entries.
     FullWide(Vec<Block>),
 }
 
@@ -112,7 +116,7 @@ impl BlockStorage {
             }
             BlockStorage::Uniform(base) => {
                 let base = *base;
-                if base.id() < 256 && block.id() < 256 {
+                if base.id() < BYTE_ID_LIMIT && block.id() < BYTE_ID_LIMIT {
                     let mut v = vec![base.id() as u8; 4096];
                     v[index] = block.id() as u8;
                     *self = BlockStorage::Full(v);
@@ -123,7 +127,7 @@ impl BlockStorage {
                 }
             }
             BlockStorage::Full(v) => {
-                if block.id() < 256 {
+                if block.id() < BYTE_ID_LIMIT {
                     v[index] = block.id() as u8;
                 } else {
                     let mut wide: Vec<Block> = v
@@ -1223,26 +1227,32 @@ mod tests {
 
     #[test]
     fn wide_id_storage_round_trips() {
-        // Writing a wide (>= 256) id upgrades Full(u8) -> FullWide and round-trips exactly.
+        // Taken off the limit rather than named, so the test keeps testing the
+        // promotion path no matter which blocks currently sit in the wide range.
+        let wide = Block::from_raw_id(BYTE_ID_LIMIT);
+        let wider = Block::from_raw_id(BYTE_ID_LIMIT + 1);
+        assert!(STONE.id() < BYTE_ID_LIMIT);
+
+        // Writing a wide id upgrades Full(u8) -> FullWide and round-trips exactly.
         let mut s = BlockStorage::Uniform(AIR);
         s.set(0, STONE);
         assert!(matches!(s, BlockStorage::Full(_)));
-        s.set(1, KELP);
+        s.set(1, wide);
         assert!(matches!(s, BlockStorage::FullWide(_)));
         assert_eq!(s.get(0), STONE);
-        assert_eq!(s.get(1), KELP);
-        assert_eq!(s.iter().nth(1), Some(KELP));
+        assert_eq!(s.get(1), wide);
+        assert_eq!(s.iter().nth(1), Some(wide));
 
         // A wide block straight from Uniform, then a uniform fill, compacts back.
         let mut w = BlockStorage::Uniform(AIR);
-        w.set(0, SOUL_SAND);
+        w.set(0, wider);
         assert!(matches!(w, BlockStorage::FullWide(_)));
         for i in 0..4096 {
-            w.set(i, SOUL_SAND);
+            w.set(i, wider);
         }
         w.try_compact();
         assert!(matches!(w, BlockStorage::Uniform(_)));
-        assert_eq!(w.get(7), SOUL_SAND);
+        assert_eq!(w.get(7), wider);
     }
 
     #[test]
