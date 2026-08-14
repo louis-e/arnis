@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 /// Maximum bounding box area (in blocks) for the visited-bitmap flood fill.
 /// 25 million blocks ≈ 5000×5000; bitmap uses only ~3 MB at this size.
 /// Past this the scanline path takes over, which needs no bitmap.
-const MAX_FLOOD_FILL_AREA: i64 = 25_000_000;
+pub const MAX_FLOOD_FILL_AREA: i64 = 25_000_000;
 
 /// Work cap for the scanline fill, whose cost is rows × edges rather than area.
 const MAX_SCANLINE_EDGE_TESTS: i64 = 200_000_000;
@@ -126,7 +126,7 @@ fn scanline_fill_area(
     max_z: i32,
 ) -> Vec<(i32, i32)> {
     let rows = max_z as i64 - min_z as i64 + 1;
-    let edges = polygon_coords.len() as i64;
+    let edges = polygon_coords.len() as i64 - 1;
     if rows.saturating_mul(edges) > MAX_SCANLINE_EDGE_TESTS {
         return vec![];
     }
@@ -160,7 +160,7 @@ fn scanline_fill_area(
             if xe < xs {
                 continue;
             }
-            cells += (xe - xs) as i64 + 1;
+            cells += xe as i64 - xs as i64 + 1;
             if cells > MAX_FLOOD_FILL_AREA {
                 return vec![];
             }
