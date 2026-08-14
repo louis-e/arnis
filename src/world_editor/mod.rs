@@ -580,6 +580,12 @@ impl<'a> WorldEditor<'a> {
     /// Checks the road-surface override map first so that a later
     /// `ground_generation` pass will build terrain matching the road's
     /// flattened cross-section. Falls back to `Ground::level` otherwise.
+    /// Köppen climate class of the generated area (bbox centre, O(1) lookup).
+    /// Used by processors that adapt regional appearance (building palettes).
+    pub fn climate(&self) -> crate::climate::Climate {
+        crate::climate::Climate::classify(&self.llbbox)
+    }
+
     ///
     /// The `is_empty` guard matters: this function is called per-block
     /// during element processing, so every element placed before highways

@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::climate::Climate;
 use crate::clipping::clip_way_to_bbox;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::deterministic_rng::{coord_rng, element_rng};
@@ -920,6 +921,7 @@ impl BuildingStyle {
         building_type: &str,
         category: BuildingCategory,
         era: ArchEra,
+        climate: Climate,
         has_multiple_floors: bool,
         footprint_size: usize,
         rng: &mut impl Rng,
@@ -929,7 +931,7 @@ impl BuildingStyle {
         // Priority: OSM tag > preset > category palette.
         let wall_block = determine_wall_block_from_tags(element, category, rng)
             .or(preset.wall_block)
-            .unwrap_or_else(|| determine_wall_block(element, category, era, rng));
+            .unwrap_or_else(|| determine_wall_block(element, category, era, climate, rng));
 
         // Floor block: from preset or random
         // For glassy/modern skyscrapers, use dark cap materials for the flat roof
@@ -1030,7 +1032,9 @@ impl BuildingStyle {
             (rt, should_generate)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
-            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng.random_bool(0.9) {
+            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED
+                && rng.random_bool(climate_gable_probability(climate))
+            {
                 (RoofType::Gabled, true)
             } else {
                 (RoofType::Flat, false)
@@ -1706,6 +1710,7 @@ fn determine_wall_block(
     element: &ProcessedWay,
     category: BuildingCategory,
     era: ArchEra,
+    climate: Climate,
     rng: &mut impl Rng,
 ) -> Block {
     // Historic castles have their own special treatment
@@ -1738,7 +1743,7 @@ fn determine_wall_block(
     }
 
     // Otherwise, select from category-specific palette
-    get_wall_block_for_category(category, era, rng)
+    get_wall_block_for_category(category, era, climate, rng)
 }
 
 /// Wall blocks that fit a building era (None for Unknown: no filtering);
@@ -1824,6 +1829,148 @@ fn era_filters_category(category: BuildingCategory) -> bool {
     )
 }
 
+/// Wood species a nordic climate adds to the residential palette.
+const NORDIC_WOOD_ADDITIONS: [Block; 3] = [SPRUCE_PLANKS, OAK_PLANKS, DARK_OAK_PLANKS];
+
+/// Whether climate reweighting applies to this category in this climate.
+/// Residential fabric adapts everywhere; commercial only in hot climates
+/// (light high-albedo bias). Temperate is handled upstream (no change at all).
+fn climate_applies(climate: Climate, category: BuildingCategory) -> bool {
+    match category {
+        BuildingCategory::House | BuildingCategory::Residential => true,
+        BuildingCategory::Commercial | BuildingCategory::Office | BuildingCategory::Hotel => {
+            matches!(
+                climate,
+                Climate::HotDesert | Climate::HotSteppe | Climate::TropicalSavanna
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Per-block weight for climate-adapted wall palettes (1 = neutral,
+/// 0 = excluded). Reflects real regional construction tendencies: high-albedo
+/// render/stone in arid zones, painted render and fired brick in the tropics,
+/// wood-dominant homes with falu red in the boreal north. OSM tags always
+/// override upstream of this.
+fn climate_wall_weight(climate: Climate, category: BuildingCategory, block: Block) -> u8 {
+    let residential_scale = |w: u8| {
+        // Multi-family blocks are less often wood than single homes.
+        if category == BuildingCategory::Residential {
+            (w / 2).max(1)
+        } else {
+            w
+        }
+    };
+    match climate {
+        Climate::Temperate => 1,
+        Climate::HotDesert | Climate::HotSteppe => match block {
+            SANDSTONE | SMOOTH_SANDSTONE | MUD_BRICKS | WHITE_TERRACOTTA => 4,
+            WHITE_CONCRETE | END_STONE_BRICKS | TERRACOTTA => 3,
+            LIGHT_GRAY_CONCRETE | QUARTZ_BRICKS | QUARTZ_BLOCK | ORANGE_TERRACOTTA
+            | BROWN_TERRACOTTA => 2,
+            DEEPSLATE_BRICKS
+            | POLISHED_DEEPSLATE
+            | POLISHED_BLACKSTONE
+            | POLISHED_BLACKSTONE_BRICKS
+            | NETHER_BRICK
+            | RED_NETHER_BRICKS
+            | RED_TERRACOTTA
+            | GRAY_TERRACOTTA
+            | BROWN_CONCRETE
+            | SPRUCE_PLANKS
+            | OAK_PLANKS
+            | DARK_OAK_PLANKS => 0,
+            _ => 1,
+        },
+        Climate::TropicalSavanna => match block {
+            WHITE_CONCRETE => 4,
+            WHITE_TERRACOTTA | LIGHT_GRAY_CONCRETE | BRICK => 3,
+            GRAY_CONCRETE
+            | TERRACOTTA
+            | ORANGE_TERRACOTTA
+            | LIGHT_BLUE_TERRACOTTA
+            | QUARTZ_BRICKS
+            | SMOOTH_SANDSTONE
+            | MUD_BRICKS => 2,
+            DEEPSLATE_BRICKS
+            | POLISHED_DEEPSLATE
+            | POLISHED_BLACKSTONE
+            | POLISHED_BLACKSTONE_BRICKS
+            | NETHER_BRICK
+            | RED_NETHER_BRICKS
+            | SPRUCE_PLANKS
+            | OAK_PLANKS
+            | DARK_OAK_PLANKS => 0,
+            _ => 1,
+        },
+        Climate::Boreal => match block {
+            SPRUCE_PLANKS => residential_scale(5),
+            OAK_PLANKS => residential_scale(3),
+            DARK_OAK_PLANKS => residential_scale(2),
+            RED_TERRACOTTA => 3, // falu red — rare-filter exempt in the north
+            WHITE_CONCRETE | WHITE_TERRACOTTA | BRICK => 2,
+            SANDSTONE | SMOOTH_SANDSTONE | MUD_BRICKS => 0,
+            _ => 1,
+        },
+        Climate::Tundra | Climate::IceCap => match block {
+            SPRUCE_PLANKS => residential_scale(3),
+            OAK_PLANKS => residential_scale(2),
+            LIGHT_BLUE_TERRACOTTA
+            | RED_TERRACOTTA
+            | WHITE_CONCRETE
+            | GRAY_CONCRETE
+            | LIGHT_GRAY_CONCRETE => 2,
+            SANDSTONE | SMOOTH_SANDSTONE | MUD_BRICKS | DARK_OAK_PLANKS => 0,
+            _ => 1,
+        },
+        Climate::ColdSteppe | Climate::ColdDesert | Climate::DryContinental => match block {
+            BRICK => 3,
+            WHITE_TERRACOTTA | WHITE_CONCRETE | LIGHT_GRAY_CONCRETE | GRAY_CONCRETE
+            | STONE_BRICKS | MUD_BRICKS => 2,
+            SPRUCE_PLANKS | OAK_PLANKS | DARK_OAK_PLANKS => 0,
+            _ => 1,
+        },
+    }
+}
+
+/// Weighted wall pick with the same rare-block damping as
+/// `pick_with_rare_filter`; `rare_exempt` lets a climate keep one rare block
+/// at full frequency (boreal falu red).
+fn pick_weighted_wall(
+    pool: &[(Block, u8)],
+    rare_exempt: Option<Block>,
+    rng: &mut impl Rng,
+) -> Block {
+    let total: u32 = pool.iter().map(|&(_, w)| w as u32).sum();
+    for _ in 0..8 {
+        let mut roll = rng.random_range(0..total);
+        let mut picked = pool[0].0;
+        for &(b, w) in pool {
+            if roll < w as u32 {
+                picked = b;
+                break;
+            }
+            roll -= w as u32;
+        }
+        if !is_rare_wall_block(picked) || Some(picked) == rare_exempt || rng.random_bool(0.20) {
+            return picked;
+        }
+    }
+    pool[0].0
+}
+
+/// Probability that an auto-gabled candidate actually gets the pitched roof;
+/// flat roofs dominate arid construction, pitched roofs the snowy north.
+fn climate_gable_probability(climate: Climate) -> f64 {
+    match climate {
+        Climate::HotDesert | Climate::HotSteppe => 0.35,
+        Climate::TropicalSavanna => 0.60,
+        Climate::Boreal | Climate::Tundra | Climate::IceCap => 0.95,
+        _ => 0.90,
+    }
+}
+
 /// Walls accepted only ~20% of the time when picked, to keep them rare.
 #[inline]
 fn is_rare_wall_block(block: Block) -> bool {
@@ -1847,8 +1994,40 @@ fn pick_with_rare_filter<R: Rng>(palette: &[Block], rng: &mut R) -> Block {
 fn get_wall_block_for_category(
     category: BuildingCategory,
     era: ArchEra,
+    climate: Climate,
     rng: &mut impl Rng,
 ) -> Block {
+    // Climate-weighted path (never for Temperate, which keeps the exact
+    // legacy draw sequence): reweight the category palette, intersected with
+    // the era allow-list; nordic climates extend it with wood species.
+    if climate != Climate::Temperate && climate_applies(climate, category) {
+        let palette: &[Block] = match category {
+            BuildingCategory::House | BuildingCategory::Residential => &RESIDENTIAL_WALL_OPTIONS,
+            _ => &COMMERCIAL_WALL_OPTIONS,
+        };
+        let nordic = matches!(climate, Climate::Boreal | Climate::Tundra | Climate::IceCap)
+            && matches!(
+                category,
+                BuildingCategory::House | BuildingCategory::Residential
+            );
+        let allow = era_allow_list(era);
+        let extra: &[Block] = if nordic { &NORDIC_WOOD_ADDITIONS } else { &[] };
+        let pool: Vec<(Block, u8)> = palette
+            .iter()
+            .chain(extra.iter())
+            .copied()
+            .filter(|b| allow.is_none_or(|a| a.contains(b)))
+            .map(|b| (b, climate_wall_weight(climate, category, b)))
+            .filter(|&(_, w)| w > 0)
+            .collect();
+        if pool.len() >= 2 {
+            let rare_exempt =
+                matches!(climate, Climate::Boreal | Climate::Tundra | Climate::IceCap)
+                    .then_some(RED_TERRACOTTA);
+            return pick_weighted_wall(&pool, rare_exempt, rng);
+        }
+    }
+
     // Era-filtered path for the general urban categories: intersect the
     // category palette with the era allow-list; if that leaves fewer than two
     // choices, draw from the era list directly.
@@ -5487,12 +5666,14 @@ pub fn generate_buildings(
     // Resolve style with deterministic RNG
     let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > floor_cycle + 2;
+    let climate = editor.climate();
     let style = BuildingStyle::resolve(
         &preset,
         element,
         building_type,
         category,
         era,
+        climate,
         has_multiple_floors,
         cached_footprint_size,
         &mut rng,
@@ -8974,6 +9155,7 @@ mod style_tests {
             let b = get_wall_block_for_category(
                 BuildingCategory::Residential,
                 ArchEra::PostWarPanel,
+                Climate::Temperate,
                 &mut rng,
             );
             assert!(
@@ -8983,6 +9165,69 @@ mod style_tests {
         }
         // Unknown era keeps the full palette reachable (no filtering)
         assert!(era_allow_list(ArchEra::Unknown).is_none());
+    }
+
+    #[test]
+    fn climate_reweights_walls() {
+        // Desert houses stay inside the desert-weighted pool and lean sandy
+        let mut sandy = 0;
+        for seed in 0..60u64 {
+            let mut rng = element_rng(seed);
+            let b = get_wall_block_for_category(
+                BuildingCategory::House,
+                ArchEra::Unknown,
+                Climate::HotDesert,
+                &mut rng,
+            );
+            assert!(
+                climate_wall_weight(Climate::HotDesert, BuildingCategory::House, b) > 0,
+                "desert picked excluded {b:?}"
+            );
+            if matches!(
+                b,
+                SANDSTONE | SMOOTH_SANDSTONE | MUD_BRICKS | WHITE_TERRACOTTA
+            ) {
+                sandy += 1;
+            }
+        }
+        assert!(sandy >= 15, "desert should lean sandy, got {sandy}/60");
+        // Boreal houses can be wood, which the base palette never yields
+        let mut wood = 0;
+        for seed in 0..60u64 {
+            let mut rng = element_rng(seed);
+            let b = get_wall_block_for_category(
+                BuildingCategory::House,
+                ArchEra::Unknown,
+                Climate::Boreal,
+                &mut rng,
+            );
+            if NORDIC_WOOD_ADDITIONS.contains(&b) {
+                wood += 1;
+            }
+        }
+        assert!(wood >= 10, "boreal should often be wood, got {wood}/60");
+    }
+
+    #[test]
+    fn climate_gable_probabilities_ordered() {
+        assert!(
+            climate_gable_probability(Climate::HotDesert)
+                < climate_gable_probability(Climate::Temperate)
+        );
+        assert!(
+            climate_gable_probability(Climate::Boreal)
+                > climate_gable_probability(Climate::Temperate)
+        );
+    }
+
+    #[test]
+    fn sahara_bbox_editor_reports_hot_desert() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+        use crate::element_processing::building_test_support::test_editor_at;
+        let xz = XZBBox::rect_from_xz_lengths(50.0, 50.0).unwrap();
+        let editor = test_editor_at(&xz, LLBBox::new(22.9, 12.9, 23.1, 13.1).unwrap());
+        assert_eq!(editor.climate(), Climate::HotDesert);
     }
 
     #[test]
