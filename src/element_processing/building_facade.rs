@@ -1,10 +1,7 @@
-//! Street and neighbor awareness for buildings.
-//!
-//! A `FacadePlan` classifies each wall segment of a building against the
-//! precomputed road-surface and building-footprint bitmaps: does it face a
-//! street, an attached neighbor (party wall), or open ground? The plan is
-//! computed once per building from global, deterministic inputs — never from
-//! world reads — so output is identical under tile-parallel generation.
+//! Street and neighbor awareness: a `FacadePlan` classifies each wall
+//! segment against the road and footprint bitmaps (street, rear, party wall,
+//! open). Computed from precomputed global inputs only, never world reads,
+//! so tile-parallel output stays deterministic.
 
 use fnv::{FnvHashMap, FnvHashSet};
 
@@ -30,8 +27,7 @@ fn corner_min_seg_len(scale: f64) -> i32 {
     ((6.0 * scale) as i32).max(6)
 }
 
-/// Per-column facade context for the wall hot path. The default (no party,
-/// street-side) reproduces legacy behavior for callers without a plan.
+/// Per-column facade context; the default reproduces legacy behavior.
 #[derive(Copy, Clone)]
 pub struct ColumnFacade {
     pub party: bool,
@@ -96,8 +92,7 @@ pub struct FacadePlan {
     pub segments: Vec<Option<SegmentFacade>>,
     party_columns: FnvHashSet<(i32, i32)>,
     street_columns: FnvHashSet<(i32, i32)>,
-    /// Columns (and their outward clearance cells) that decoration passes
-    /// must leave alone — filled by the entrance planner.
+    /// Keep-clear columns, filled by the entrance planner.
     pub door_columns: FnvHashSet<(i32, i32)>,
     /// Street segment closest to a road (tie-break: longer, then first).
     pub front_segment: Option<usize>,
@@ -138,10 +133,8 @@ impl FacadePlan {
     }
 }
 
-/// Classifies every wall segment of `element` against the road and footprint
-/// bitmaps. `own_cells` must contain the building's own floor cells plus all
-/// its `building:part` group mates (so a tower part above a podium is not its
-/// own party wall).
+/// Classifies every wall segment. `own_cells` must include the building's
+/// own cells plus its part group mates.
 pub fn compute_facade_plan(
     element: &ProcessedWay,
     ctx: &BuildingContext<'_>,

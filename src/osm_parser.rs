@@ -562,8 +562,7 @@ fn first_year(v: &str) -> Option<i32> {
     None
 }
 
-// Ornate pre-modern styles (heritage-grade detailing). Brutalist-family styles
-// are masonry-era for the tall-building StyleHint but post-war for ArchEra.
+// Brutalist styles are masonry for StyleHint but post-war for ArchEra.
 const ORNATE_STYLES: &[&str] = &[
     "artdeco",
     "artnouveau",
@@ -707,17 +706,14 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     StyleHint::None
 }
 
-/// Architectural era of a building, consumed by low-rise styling (wall
-/// palettes, window frames, depth styles, weathering). Unlike `StyleHint`
-/// (2 bits packed into the part seed, consulted for tall buildings only),
-/// the era is recomputed from tags per building.
+/// Architectural era, consumed by low-rise styling. Recomputed from tags
+/// per building, unlike the seed-packed `StyleHint`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchEra {
     Unknown,
     /// Explicit heritage or ornate-architecture signals.
     HistoricOrnate,
-    /// Pre-1945 masonry-era fabric without ornate signals — a 1900 farmhouse
-    /// is traditional, not ornamented.
+    /// Pre-1945 masonry-era fabric without ornate signals.
     TraditionalPreWar,
     /// 1945–1979: panel, prefab, brutalist.
     PostWarPanel,

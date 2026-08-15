@@ -66,7 +66,7 @@ impl BuildingCondition {
 /// Enum representing different roof types
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum RoofType {
-    /// Steep lower slope, shallow upper slope, flat cap — the Paris roof.
+    /// Steep lower slope, shallow upper slope, flat cap.
     Mansard,
     /// Barn roof: steep lower gable pitch breaking to a shallow upper pitch.
     Gambrel,
@@ -221,11 +221,13 @@ const FARM_WALL_OPTIONS: [Block; 8] = [
 ];
 
 /// Wall blocks suitable for historic/castle buildings
-const HISTORIC_WALL_OPTIONS: [Block; 14] = [
+const HISTORIC_WALL_OPTIONS: [Block; 16] = [
     STONE_BRICKS,
     CRACKED_STONE_BRICKS,
     CHISELED_STONE_BRICKS,
     COBBLESTONE,
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
     POLISHED_BLACKSTONE_BRICKS,
     DEEPSLATE_BRICKS,
     POLISHED_ANDESITE,
@@ -1047,9 +1049,8 @@ impl BuildingStyle {
             (rt, should_generate)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
-            // Dedicated stream: this branch's draw count depends on footprint,
-            // which differs between parts of one group; drawing from the shared
-            // rng would desync every later style decision between siblings.
+            // Own stream: the draw count here depends on footprint and would
+            // otherwise desync sibling parts.
             let mut roof_rng = element_rng(style_seed ^ 0x0F1E_2D3C_4B5A_6907);
             let big_block = footprint_size > MAX_FOOTPRINT_FOR_GABLED || building_height >= 15;
             if building_type == "apartments" && big_block {
@@ -1467,10 +1468,8 @@ fn pick_window_frame(
 }
 
 impl BuildingConfig {
-    /// Anchor offset of the floor grammar. Ground-level buildings get the +2
-    /// ground-floor bonus; elevated building:parts got that bonus folded into
-    /// their min_level offset already, so their bands continue the rhythm of
-    /// the part below instead of phase-shifting by two rows at every seam.
+    /// Grammar anchor: +2 at ground level; elevated parts already carry the
+    /// bonus in their min_level offset, keeping stacked bands in phase.
     #[inline]
     fn grammar_anchor(&self) -> i32 {
         if self.is_ground_level {
@@ -1620,10 +1619,7 @@ fn calculate_start_y_offset(
     }
 }
 
-/// Window glass pool per building category — the single dispatch point,
-/// replacing the old duplicate string-match on the raw `building=*` value
-/// (which used a different vocabulary and dropped farms/offices to the
-/// generic pool).
+/// Window glass pool per building category.
 fn window_pool_for_category(category: BuildingCategory) -> &'static [Block] {
     match category {
         BuildingCategory::Residential | BuildingCategory::House => &RESIDENTIAL_WINDOW_OPTIONS,
@@ -1641,11 +1637,9 @@ fn window_pool_for_category(category: BuildingCategory) -> &'static [Block] {
 }
 
 /// Per-building window layout on the shared 6-column / floor-cycle lattice.
-/// Chosen once per building (part groups agree via the group seed), so a
-/// street of same-shaped houses no longer shares one identical facade grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WindowArchetype {
-    /// 3-wide bays over the full window rows — the classic default.
+    /// Classic 3-wide bays over the full window rows.
     Standard3,
     /// Two 1-wide sashes (cols 0 and 2) with a lintel row above.
     PairedNarrow,
@@ -1678,15 +1672,13 @@ fn archetype_allows_window(
 }
 
 /// Weighted per-category archetype choice, seeded on the shared group seed.
-/// The era shifts the outcome: heritage buildings gain arched bays, panel-era
-/// buildings trade paired sashes for band windows.
 fn pick_window_archetype(
     category: BuildingCategory,
     era: ArchEra,
     group_seed: u64,
 ) -> WindowArchetype {
     use WindowArchetype::*;
-    // (archetype, weight) — weights sum to 100 per row.
+    // (archetype, weight), summing to 100 per row
     let table: &[(WindowArchetype, u32)] = match category {
         BuildingCategory::House => &[
             (Standard3, 40),
@@ -1844,8 +1836,7 @@ fn determine_wall_block(
     get_wall_block_for_category(category, era, climate, rng)
 }
 
-/// Wall blocks that fit a building era (None for Unknown: no filtering);
-/// the sets reflect what facades of that period are actually made of.
+/// Wall blocks that fit a building era; None for Unknown.
 fn era_allow_list(era: ArchEra) -> Option<&'static [Block]> {
     let allowed: &'static [Block] = match era {
         ArchEra::Unknown => return None,
@@ -1927,7 +1918,7 @@ fn era_filters_category(category: BuildingCategory) -> bool {
     )
 }
 
-/// Vertical position of a wall row within the building's composition.
+/// Vertical position of a wall row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FloorRole {
     Ground,
@@ -1936,9 +1927,7 @@ enum FloorRole {
     Top,
 }
 
-/// How much decorative budget a building gets, from footprint, height,
-/// category, notable tags, and street visibility. Background fabric stays
-/// calm; prominent buildings earn richer dressing.
+/// Decorative budget from footprint, height, category, tags and visibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum DetailTier {
     Minimal,
@@ -2017,11 +2006,8 @@ fn climate_applies(climate: Climate, category: BuildingCategory) -> bool {
     }
 }
 
-/// Per-block weight for climate-adapted wall palettes (1 = neutral,
-/// 0 = excluded). Reflects real regional construction tendencies: high-albedo
-/// render/stone in arid zones, painted render and fired brick in the tropics,
-/// wood-dominant homes with falu red in the boreal north. OSM tags always
-/// override upstream of this.
+/// Per-block weight for climate-adapted palettes (1 neutral, 0 excluded),
+/// following real regional construction. Tags override upstream.
 fn climate_wall_weight(climate: Climate, category: BuildingCategory, block: Block) -> u8 {
     let residential_scale = |w: u8| {
         // Multi-family blocks are less often wood than single homes.
@@ -2077,7 +2063,7 @@ fn climate_wall_weight(climate: Climate, category: BuildingCategory, block: Bloc
             SPRUCE_PLANKS => residential_scale(5),
             OAK_PLANKS => residential_scale(3),
             DARK_OAK_PLANKS => residential_scale(2),
-            RED_TERRACOTTA => 3, // falu red — rare-filter exempt in the north
+            RED_TERRACOTTA => 3, // falu red, rare-filter exempt
             WHITE_CONCRETE | WHITE_TERRACOTTA | BRICK => 2,
             SANDSTONE | SMOOTH_SANDSTONE | MUD_BRICKS => 0,
             _ => 1,
@@ -2166,9 +2152,8 @@ fn get_wall_block_for_category(
     climate: Climate,
     rng: &mut impl Rng,
 ) -> Block {
-    // Climate-weighted path (never for Temperate, which keeps the exact
-    // legacy draw sequence): reweight the category palette, intersected with
-    // the era allow-list; nordic climates extend it with wood species.
+    // Climate path (never Temperate, which keeps the legacy draw sequence
+    // exactly): reweighted palette intersected with the era allow-list.
     if climate != Climate::Temperate && climate_applies(climate, category) {
         let palette: &[Block] = match category {
             BuildingCategory::House | BuildingCategory::Residential => &RESIDENTIAL_WALL_OPTIONS,
@@ -2197,9 +2182,8 @@ fn get_wall_block_for_category(
         }
     }
 
-    // Era-filtered path for the general urban categories: intersect the
-    // category palette with the era allow-list; if that leaves fewer than two
-    // choices, draw from the era list directly.
+    // Era path: intersect the category palette with the era allow-list; thin
+    // intersections draw from the era list directly.
     if era_filters_category(category) {
         if let Some(allow) = era_allow_list(era) {
             let palette: &[Block] = match category {
@@ -2216,7 +2200,7 @@ fn get_wall_block_for_category(
                 .copied()
                 .filter(|b| allow.contains(b))
                 .collect();
-            return if filtered.len() >= 2 {
+            return if filtered.len() >= 4 {
                 pick_with_rare_filter(&filtered, rng)
             } else {
                 pick_with_rare_filter(allow, rng)
@@ -2314,13 +2298,9 @@ fn get_wall_block_for_category(
     }
 }
 
-/// Gross block height of one upper floor for a building type.
-///
-/// Residential-scale types get 3-block storeys (~3 m at 1 block/m, fixing the
-/// stretched look of #1239); commercial, institutional and industrial types
-/// keep 4 blocks — their real floor-to-floor heights are 3.5-4 m. Derived from
-/// tags only: `BuildingCategory` is resolved *after* height calculation and
-/// itself depends on the computed height, so it cannot be used here.
+/// Gross block height of one upper floor: 3 for residential-scale types
+/// (~3 m storeys), 4 for commercial/institutional. Tags only, because the
+/// category is resolved after the height and cannot be used here.
 fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
     const RESIDENTIAL_SCALE: &[&str] = &[
         "house",
@@ -2375,12 +2355,9 @@ fn pick_weighted_value(rng: &mut impl Rng, options: &[(i32, u32)]) -> i32 {
     options[options.len() - 1].0
 }
 
-/// Storey/height inference for buildings without `height`, `building:levels`,
-/// or relation levels — the common case: most OSM buildings carry no height
-/// data at all. Distributions follow real-world typology per building type,
-/// modulated by footprint size for generic `building=yes`. Deterministic via
-/// the shared group seed, so all parts of one building agree and repeated
-/// runs are stable (#1197, #935, #1220).
+/// Storey inference for buildings without any OSM height data, following
+/// real-world typology per type and footprint. Seeded on the group seed so
+/// parts of one building agree (#1197, #935, #1220).
 fn infer_building_height(
     building_type: &str,
     tags: &HashMap<String, String>,
@@ -2390,10 +2367,8 @@ fn infer_building_height(
 ) -> InferredHeight {
     let mut rng = element_rng(group_seed ^ 0x48E1_6F00_1EA5_0001);
 
-    // Footprint cells scale with blocks-per-metre squared; thresholds are m².
-    // building:parts are pinned to the middle band: siblings of one group must
-    // draw from the same table regardless of each part's own footprint, or
-    // identically-tagged parts of one building would diverge in height.
+    // Thresholds are m2. Parts are pinned to the middle band so siblings of
+    // one group draw from the same table regardless of their own footprint.
     let area_m2 = if tags.contains_key("building:part") {
         400
     } else if scale_factor > 0.0 {
@@ -5312,9 +5287,8 @@ fn generate_facade_cornices(
     }
 }
 
-/// Protruding stair headers over each window top for the ArchedTraditional
-/// window archetype — the classic rounded-lintel look, one block proud of the
-/// facade. HistoricOrnate depth styling already places its own headers.
+/// Stair headers over each window top for the ArchedTraditional archetype.
+/// HistoricOrnate depth styling already places its own headers.
 fn generate_archetype_window_headers(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -6453,8 +6427,7 @@ pub fn generate_buildings(
         cached_footprint_size,
         group_seed,
     );
-    // A generic `yes` that turns out to be a tower reads better on the taller
-    // commercial rhythm; recalculate so grammar and height agree.
+    // Untagged towers read better on the taller commercial rhythm.
     let (floor_cycle, building_height, is_tall_building) =
         if is_tall_building && building_type == "yes" && floor_cycle == 3 {
             let (h, tall) = calculate_building_height(
@@ -6483,12 +6456,8 @@ pub fn generate_buildings(
     let preset = BuildingStylePreset::for_category(category);
 
     // Street/neighbor classification: party walls, fronting streets, corner.
-    // Sibling parts of one building are unioned into own_cells so they don't
-    // read as party neighbors of each other.
-    // Cells of sibling building:parts in the same group, used both to exempt
-    // them from party-wall detection and to keep part facade depth clear.
-    // Looked up by the hint-free seed; the membership check guards against
-    // synthetic-ring id collisions with foreign group seeds.
+    // Sibling part cells: exempt from party-wall detection and kept clear of
+    // part facade depth. Membership check guards against id collisions.
     let mut group_other_cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     if let Some(members) = ctx
         .group_members
@@ -6720,8 +6689,7 @@ pub fn generate_buildings(
         &empty_passages
     };
 
-    // Podium + tower massing: the shell below is built at podium height, the
-    // tower ring is added after the roof pass.
+    // Podium + tower massing: shell at podium height, tower after the roof pass.
     let podium_tower = plan_podium_tower(
         element,
         &config,
@@ -6738,16 +6706,14 @@ pub fn generate_buildings(
         },
         None => config,
     };
-    // Interiors and floor levels must stop at the podium roof too, or rooms
-    // and furniture would float in the open air around the tower.
+    // Interiors must stop at the podium roof or rooms would float.
     let effective_building_height = match &podium_tower {
         Some(plan) => plan.podium_height,
         None => effective_building_height,
     };
 
-    // Entrances: mapped nodes get oriented doors; everything else gets one
-    // synthetic door on the street-facing side. Planned before the decoration
-    // passes so their columns stay clear of shutters, sills and pilasters.
+    // Entrances are planned before the decoration passes so their columns
+    // stay clear of shutters, sills and pilasters.
     let mut entrance_plans = plan_mapped_entrances(element, &config, &facade, group_seed);
     if entrance_plans.is_empty() {
         if let Some(plan) =
@@ -6952,9 +6918,8 @@ pub fn generate_buildings(
             podium_tower.is_some(),
         );
 
-        // Raise the tower ring above the podium roof, with interior floors.
-        // The tier walls render with the FULL height so top-floor treatments
-        // apply only near the actual top, not to every tower row.
+        // Tower ring above the podium roof; full height so top-floor
+        // treatment stays at the actual top.
         if let Some(plan) = &podium_tower {
             let dist = roof_edge_distances(&roof_area);
             let tower = [InsetTier {
@@ -10715,9 +10680,7 @@ mod style_tests {
         }
     }
 
-    // Every block a building surface can reach must translate to a real
-    // Luanti node — the fallback renders as plain stone and silently breaks
-    // the Luanti export.
+    // The Luanti stone fallback would silently break the export.
     #[test]
     fn every_reachable_building_block_maps_to_luanti() {
         use crate::luanti_block_map::{to_luanti_node, LuantiGame};
@@ -10764,9 +10727,7 @@ mod style_tests {
         }
     }
 
-    // The "one color for the whole skyscraper" guarantee: parts of one
-    // building share group_seed, and identically-tagged parts must resolve
-    // the exact same style (wall, glass, accent, roof, relief).
+    // Identically-tagged parts of one group must resolve the same style.
     #[test]
     fn identically_tagged_parts_resolve_one_shared_style() {
         use crate::element_processing::building_test_support::rect_way;

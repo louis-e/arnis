@@ -604,11 +604,8 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
-    // Inverse part-group index (hint-free group seed -> sorted member way ids),
-    // used by buildings to exempt sibling parts from party-wall detection.
-    // Keyed on seed_without_hint: parts of one building can carry different
-    // packed style-hint bits (per-part material fallbacks) and must still
-    // find each other here.
+    // Sibling index keyed on the hint-free seed: parts of one building can
+    // carry different packed style-hint bits and must still find each other.
     let group_members: FnvHashMap<u64, Vec<u64>> = {
         let mut map: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
         for (&way_id, &seed) in part_groups.iter() {
@@ -1041,8 +1038,7 @@ pub fn generate_world_with_options(
                 ProcessedElement::Node(_) => {}
             }
         }
-        // Group mates read each other's fills for party-wall exemption, so a
-        // member's fill must live until the last member of its group renders.
+        // Group fills must live until the last member of the group renders.
         for members in group_members.values() {
             if let Some(max_idx) = members
                 .iter()

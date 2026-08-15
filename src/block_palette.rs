@@ -1,10 +1,6 @@
-//! Shared color → block palette, matched perceptually via Oklab.
-//!
-//! Block colors are curated from in-game texture samples. Each entry carries
-//! usage flags: 3D-model voxelization draws from the full palette, while
-//! building walls and roofs use filtered subsets (no wools/snow/gold/dirt for
-//! walls; no structural logs, dirt or wool for roofs — but thatch, green roofs
-//! and copper stay roof-eligible).
+//! Shared color to block palette, matched via Oklab. Colors are curated
+//! from in-game texture samples; usage flags give 3D models the full palette
+//! while walls and roofs draw from filtered subsets.
 
 use rand::Rng;
 
@@ -139,10 +135,8 @@ pub fn closest_blocks(color: RGBTuple, k: usize) -> Vec<Block> {
     scored.into_iter().take(k.max(1)).map(|(_, b)| b).collect()
 }
 
-/// Squared Oklab distance with lightness downweighted (L × 0.5): a mapper
-/// tagging `colour=yellow` cares about the hue far more than about matching
-/// the exact brightness, and unweighted Oklab lets pale neutrals outrank the
-/// hue-correct block for saturated tags.
+/// Squared Oklab distance with lightness downweighted: a colour tag is
+/// about hue, and plain Oklab lets pale neutrals outrank the hue match.
 fn tag_match_distance(a: &RGBTuple, b: &RGBTuple) -> f32 {
     let a = crate::colors::oklab_components(a);
     let b = crate::colors::oklab_components(b);
@@ -152,10 +146,8 @@ fn tag_match_distance(a: &RGBTuple, b: &RGBTuple) -> f32 {
     dl * dl + da * da + db * db
 }
 
-/// The three nearest usage-flagged blocks, dropping any whose distance
-/// exceeds 1.5× the nearest match, picked uniformly with the caller's rng.
-/// Keeps per-building variety without letting a garish tag color pull in
-/// unrelated blocks; an exact palette hit is returned alone.
+/// Three nearest usage-flagged blocks within 1.5x of the best match, picked
+/// with the caller's rng. An exact palette hit is returned alone.
 fn pick_for_usage(color: RGBTuple, usage: u8, rng: &mut impl Rng) -> Block {
     let mut scored: Vec<(f32, Block)> = PALETTE
         .iter()
@@ -224,7 +216,7 @@ mod tests {
         let bad = [WHITE_CONCRETE, QUARTZ_BLOCK, WHITE_WOOL, SNOW_BLOCK];
         assert!(
             !bad.iter().any(|b| b.id() == block.id()),
-            "iron-brown should not map to a white block — got {}",
+            "iron-brown should not map to a white block, got {}",
             block.id()
         );
     }
@@ -281,8 +273,7 @@ mod tests {
         );
         assert_wall_family(
             (255, 0, 0),
-            // Vivid #FF0000 may land on orange concrete — bright red paint
-            // skews orange-red; a dark nether brick would be the real mismatch.
+            // Vivid red paint skews orange-red, so orange concrete is fine.
             &[RED_CONCRETE, RED_TERRACOTTA, ORANGE_CONCRETE],
         );
         assert_wall_family((128, 0, 128), &[PURPLE_CONCRETE, MAGENTA_CONCRETE]);
