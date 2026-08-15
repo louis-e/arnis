@@ -310,6 +310,7 @@ impl BuildingCategory {
         is_tall_building: bool,
         building_height: i32,
         group_seed: u64,
+        scale_factor: f64,
     ) -> Self {
         // Check for man_made=tower before anything else
         if element.tags.get("man_made").map(|s| s.as_str()) == Some("tower") {
@@ -336,7 +337,7 @@ impl BuildingCategory {
             // Check if this qualifies as a true skyscraper:
             // Must be significantly tall AND have skyscraper proportions
             // (taller than twice its longest side dimension)
-            let is_true_skyscraper = building_height >= 120
+            let is_true_skyscraper = building_height >= multiply_scale(120, scale_factor)
                 && Self::has_skyscraper_proportions(element, building_height);
 
             if is_true_skyscraper {
@@ -648,7 +649,7 @@ impl BuildingStylePreset {
     /// Preset for industrial buildings (warehouses, factories)
     pub fn industrial() -> Self {
         Self {
-            roof_type: Some(RoofType::Flat),
+            roof_type: None,
             has_chimney: Some(false),
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
@@ -722,7 +723,7 @@ impl BuildingStylePreset {
     /// Preset for warehouses
     pub fn warehouse() -> Self {
         Self {
-            roof_type: Some(RoofType::Flat),
+            roof_type: None,
             has_chimney: Some(false),
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
@@ -1046,6 +1047,10 @@ impl BuildingStyle {
             (rt, should_generate)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
+            // Dedicated stream: this branch's draw count depends on footprint,
+            // which differs between parts of one group; drawing from the shared
+            // rng would desync every later style decision between siblings.
+            let mut roof_rng = element_rng(style_seed ^ 0x0F1E_2D3C_4B5A_6907);
             let big_block = footprint_size > MAX_FOOTPRINT_FOR_GABLED || building_height >= 15;
             if building_type == "apartments" && big_block {
                 // Urban apartment blocks: flat, hipped, or (pre-war) mansard.
@@ -1055,7 +1060,7 @@ impl BuildingStyle {
                     } else {
                         (45, 35)
                     };
-                let roll = rng.random_range(0u32..100);
+                let roll = roof_rng.random_range(0u32..100);
                 if roll < flat_w {
                     (RoofType::Flat, false)
                 } else if roll < flat_w + hip_w {
@@ -1065,12 +1070,12 @@ impl BuildingStyle {
                 }
             } else if matches!(era, ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar)
                 && (100..=MAX_FOOTPRINT_FOR_GABLED).contains(&footprint_size)
-                && rng.random_bool(0.30)
+                && roof_rng.random_bool(0.30)
             {
                 // Mid-size pre-war fabric occasionally carries a mansard.
                 (RoofType::Mansard, true)
             } else if footprint_size <= MAX_FOOTPRINT_FOR_GABLED
-                && rng.random_bool(climate_gable_probability(climate))
+                && roof_rng.random_bool(climate_gable_probability(climate))
             {
                 (RoofType::Gabled, true)
             } else {
@@ -1080,7 +1085,8 @@ impl BuildingStyle {
             && footprint_size > 800
         {
             // Big industrial halls: shallow mono-pitch or flat.
-            if rng.random_bool(0.55) {
+            let mut roof_rng = element_rng(style_seed ^ 0x0F1E_2D3C_4B5A_6907);
+            if roof_rng.random_bool(0.55) {
                 (RoofType::Skillion, true)
             } else {
                 (RoofType::Flat, false)
@@ -1461,20 +1467,33 @@ fn pick_window_frame(
 }
 
 impl BuildingConfig {
+    /// Anchor offset of the floor grammar. Ground-level buildings get the +2
+    /// ground-floor bonus; elevated building:parts got that bonus folded into
+    /// their min_level offset already, so their bands continue the rhythm of
+    /// the part below instead of phase-shifting by two rows at every seam.
+    #[inline]
+    fn grammar_anchor(&self) -> i32 {
+        if self.is_ground_level {
+            GROUND_FLOOR_BONUS
+        } else {
+            0
+        }
+    }
+
     /// Returns the position within the floor cycle (0 = floor row, 1..cycle-1 = open rows).
     /// This aligns with `generate_floors_and_ceilings` which places intermediate ceilings
-    /// at `start_y_offset + 2 + cycle, + 2*cycle, …` (i.e. every `floor_cycle` blocks
-    /// offset by +2).
+    /// at `start_y_offset + anchor + cycle, + 2*cycle, …`.
     #[inline]
     fn floor_row(&self, h: i32) -> i32 {
-        ((h - self.start_y_offset - 2) % self.floor_cycle + self.floor_cycle) % self.floor_cycle
+        ((h - self.start_y_offset - self.grammar_anchor()) % self.floor_cycle + self.floor_cycle)
+            % self.floor_cycle
     }
 
     /// Highest wall row that still belongs to the ground floor (the ground floor
     /// is one row taller than upper floors thanks to the +2 grammar offset).
     #[inline]
     fn ground_floor_top(&self) -> i32 {
-        self.start_y_offset + 1 + self.floor_cycle
+        self.start_y_offset + self.grammar_anchor() - 1 + self.floor_cycle
     }
 
     /// Positional role of a wall row: ground floor, body, or topmost cycle.
@@ -2372,7 +2391,12 @@ fn infer_building_height(
     let mut rng = element_rng(group_seed ^ 0x48E1_6F00_1EA5_0001);
 
     // Footprint cells scale with blocks-per-metre squared; thresholds are m².
-    let area_m2 = if scale_factor > 0.0 {
+    // building:parts are pinned to the middle band: siblings of one group must
+    // draw from the same table regardless of each part's own footprint, or
+    // identically-tagged parts of one building would diverge in height.
+    let area_m2 = if tags.contains_key("building:part") {
+        400
+    } else if scale_factor > 0.0 {
         (footprint_area as f64 / (scale_factor * scale_factor)) as usize
     } else {
         footprint_area
@@ -2508,6 +2532,13 @@ fn calculate_building_height(
                     .unwrap_or(0.0);
                 is_elevated_part = mh > 0.0;
                 (height - mh).max(1.0)
+            } else if min_level > 0 {
+                // `height` is absolute from ground; without a min_height tag
+                // the level-based offset must still come off the wall span,
+                // matching the min_level_offset the part is lifted by.
+                is_elevated_part = true;
+                let offset = (min_level * floor_cycle + GROUND_FLOOR_BONUS) as f64;
+                (height - offset).max(1.0)
             } else {
                 height
             };
@@ -2523,8 +2554,12 @@ fn calculate_building_height(
     // Relation levels only estimate the height, an explicit height tag wins
     if !has_explicit_height {
         if let Some(levels) = relation_levels {
-            building_height =
-                multiply_scale(levels * floor_cycle + GROUND_FLOOR_BONUS, scale_factor).max(3);
+            let bonus = if min_level > 0 { 0 } else { GROUND_FLOOR_BONUS };
+            building_height = multiply_scale(
+                (levels - min_level).max(1) * floor_cycle + bonus,
+                scale_factor,
+            )
+            .max(3);
             has_source = true;
             if levels > 7 {
                 is_tall_building = true;
@@ -2923,6 +2958,16 @@ impl DoorStyle {
             DoorStyle::Birch => BIRCH_DOOR,
         }
     }
+
+    /// Matching trapdoor species for the entrance canopy.
+    fn trapdoor_block(self) -> Block {
+        match self {
+            DoorStyle::Oak => OAK_TRAPDOOR,
+            DoorStyle::Spruce => SPRUCE_TRAPDOOR,
+            DoorStyle::DarkOak => DARK_OAK_TRAPDOOR,
+            DoorStyle::Birch => BIRCH_TRAPDOOR,
+        }
+    }
 }
 
 /// A planned entrance: one or two door leaves plus their dressing.
@@ -3071,7 +3116,8 @@ fn plan_synthetic_entrance(
             | BuildingCategory::Hotel
             | BuildingCategory::School
             | BuildingCategory::Hospital
-    ) && seg.len >= 8;
+    ) && seg.len >= 8
+        && (seg.tangent.0 == 0 || seg.tangent.1 == 0);
 
     let style = door_style_for(config.category, config.wall_block, group_seed);
     let mut dress_rng = element_rng(group_seed ^ 0xD00E_57E9_0000_0013);
@@ -3119,10 +3165,15 @@ fn plan_mapped_entrances(
     }
     let style = door_style_for(config.category, config.wall_block, group_seed);
     let n_nodes = element.nodes.len();
+    let mut seen: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     for (i, node) in element.nodes.iter().enumerate() {
         let entrance = node.tags.get("entrance");
         let door = node.tags.get("door");
         if entrance.is_none() && door.is_none() {
+            continue;
+        }
+        // A closed way repeats its first node at the end; render one door.
+        if !seen.insert((node.x, node.z)) {
             continue;
         }
         if entrance.map(String::as_str) == Some("no") || door.map(String::as_str) == Some("no") {
@@ -3160,7 +3211,9 @@ fn plan_mapped_entrances(
             && matches!(
                 config.category,
                 BuildingCategory::Commercial | BuildingCategory::Office | BuildingCategory::Hotel
-            );
+            )
+            && seg.len >= 8
+            && (seg.tangent.0 == 0 || seg.tangent.1 == 0);
         plans.push(EntrancePlan {
             x: node.x,
             z: node.z,
@@ -3278,7 +3331,7 @@ fn render_entrance(
             let cx = plan.x + nx + plan.tangent.0 * t;
             let cz = plan.z + nz + plan.tangent.1 * t;
             editor.set_block_with_properties_absolute(
-                make_closed_trapdoor(config.wall_block, facing, "top"),
+                make_closed_trapdoor(plan.style.trapdoor_block(), facing, "top"),
                 cx,
                 config.start_y_offset + 3 + config.abs_terrain_offset,
                 cz,
@@ -4359,7 +4412,7 @@ fn generate_residential_window_decorations(
                     let sill_max = config.start_y_offset + config.building_height
                         - (config.floor_cycle - 1)
                         - attic_gap;
-                    for h in (config.start_y_offset + 2)..=sill_max {
+                    for h in (config.start_y_offset + config.grammar_anchor())..=sill_max {
                         if config.floor_row(h) == 0 {
                             let floor_idx = h / config.floor_cycle;
 
@@ -6026,7 +6079,7 @@ fn generate_floors_and_ceilings(
 
         // Set intermediate ceilings with light fixtures
         if config.building_height > config.floor_cycle {
-            for h in (config.start_y_offset + 2 + config.floor_cycle
+            for h in (config.start_y_offset + config.grammar_anchor() + config.floor_cycle
                 ..config.start_y_offset + config.building_height)
                 .step_by(config.floor_cycle as usize)
             {
@@ -6093,13 +6146,18 @@ fn generate_floors_and_ceilings(
 }
 
 /// Calculates floor levels for multi-story buildings
-fn calculate_floor_levels(start_y_offset: i32, building_height: i32, floor_cycle: i32) -> Vec<i32> {
+fn calculate_floor_levels(
+    start_y_offset: i32,
+    building_height: i32,
+    floor_cycle: i32,
+    grammar_anchor: i32,
+) -> Vec<i32> {
     let mut floor_levels = vec![start_y_offset];
 
     if building_height > floor_cycle + 2 {
         let num_upper_floors = (building_height / floor_cycle).max(1);
         for floor in 1..num_upper_floors {
-            floor_levels.push(start_y_offset + 2 + (floor * floor_cycle));
+            floor_levels.push(start_y_offset + grammar_anchor + (floor * floor_cycle));
         }
     }
 
@@ -6395,10 +6453,33 @@ pub fn generate_buildings(
         cached_footprint_size,
         group_seed,
     );
+    // A generic `yes` that turns out to be a tower reads better on the taller
+    // commercial rhythm; recalculate so grammar and height agree.
+    let (floor_cycle, building_height, is_tall_building) =
+        if is_tall_building && building_type == "yes" && floor_cycle == 3 {
+            let (h, tall) = calculate_building_height(
+                element,
+                building_type,
+                min_level,
+                scale_factor,
+                relation_levels,
+                4,
+                cached_footprint_size,
+                group_seed,
+            );
+            (4, h, tall)
+        } else {
+            (floor_cycle, building_height, is_tall_building)
+        };
 
     // Determine building category and get appropriate style preset
-    let category =
-        BuildingCategory::from_element(element, is_tall_building, building_height, group_seed);
+    let category = BuildingCategory::from_element(
+        element,
+        is_tall_building,
+        building_height,
+        group_seed,
+        scale_factor,
+    );
     let preset = BuildingStylePreset::for_category(category);
 
     // Street/neighbor classification: party walls, fronting streets, corner.
@@ -6406,14 +6487,21 @@ pub fn generate_buildings(
     // read as party neighbors of each other.
     // Cells of sibling building:parts in the same group, used both to exempt
     // them from party-wall detection and to keep part facade depth clear.
+    // Looked up by the hint-free seed; the membership check guards against
+    // synthetic-ring id collisions with foreign group seeds.
     let mut group_other_cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
-    if let Some(members) = ctx.group_members.get(&group_seed) {
-        for id in members {
-            if *id == element.id {
-                continue;
-            }
-            if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
-                group_other_cells.extend(fill.iter().copied());
+    if let Some(members) = ctx
+        .group_members
+        .get(&crate::osm_parser::seed_without_hint(group_seed))
+    {
+        if members.binary_search(&element.id).is_ok() {
+            for id in members {
+                if *id == element.id {
+                    continue;
+                }
+                if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
+                    group_other_cells.extend(fill.iter().copied());
+                }
             }
         }
     }
@@ -6650,6 +6738,12 @@ pub fn generate_buildings(
         },
         None => config,
     };
+    // Interiors and floor levels must stop at the podium roof too, or rooms
+    // and furniture would float in the open air around the tower.
+    let effective_building_height = match &podium_tower {
+        Some(plan) => plan.podium_height,
+        None => effective_building_height,
+    };
 
     // Entrances: mapped nodes get oriented doors; everything else gets one
     // synthetic door on the street-facing side. Planned before the decoration
@@ -6809,6 +6903,7 @@ pub fn generate_buildings(
                     start_y_offset,
                     effective_building_height,
                     config.floor_cycle,
+                    config.grammar_anchor(),
                 );
                 generate_building_interior(
                     editor,
@@ -6858,6 +6953,8 @@ pub fn generate_buildings(
         );
 
         // Raise the tower ring above the podium roof, with interior floors.
+        // The tier walls render with the FULL height so top-floor treatments
+        // apply only near the actual top, not to every tower row.
         if let Some(plan) = &podium_tower {
             let dist = roof_edge_distances(&roof_area);
             let tower = [InsetTier {
@@ -6865,9 +6962,13 @@ pub fn generate_buildings(
                 height: plan.full_height - plan.podium_height,
                 with_ceilings: true,
             }];
+            let tower_config = BuildingConfig {
+                building_height: plan.full_height,
+                ..config.clone()
+            };
             generate_inset_tiers(
                 editor,
-                &config,
+                &tower_config,
                 &roof_area,
                 &dist,
                 config.start_y_offset + config.building_height + 1,
@@ -8218,13 +8319,16 @@ fn place_dormer_windows(
         return;
     }
 
+    // Gabled/hipped slopes have their second row at base+2; the mansard's
+    // steep band sits one higher (base + lift + boost(1) = base + 3).
     let target_h = config.base_height + 2;
+    let alt_target_h = config.base_height + 3;
     let (px, pz) = parallel_to_ridge;
 
     let mut candidates: Vec<(i32, i32)> = Vec::new();
     for &(x, z) in floor_area {
         let h = match roof_heights.get(&(x, z)) {
-            Some(&h) if h == target_h => h,
+            Some(&h) if h == target_h || h == alt_target_h => h,
             _ => continue,
         };
 
@@ -9128,7 +9232,7 @@ fn generate_hipped_roof_inner(
         let roof_height = if let Some(steep_h) = mansard_steep_h {
             // Mansard: piecewise profile with its own cap; the local wing
             // width still caps narrow wings so they don't overshoot.
-            let cap = wall_cap.max(steep_h + 2);
+            let cap = wall_cap.max(steep_h + 2).min(config.building_height.max(3));
             let local_cap = ((pd.local_half as f64) * 0.9).round().max(1.0) as i32 + steep_h;
             config.base_height + mansard_boost(pd.dist_to_edge, steep_h, cap.min(local_cap)) + lift
         } else {
@@ -10201,6 +10305,31 @@ mod height_tests {
         assert!(!is_underground_building(&way.tags));
     }
 
+    // height with building:min_level but no min_height: the level-based lift
+    // comes off the wall span, matching the offset the part is raised by
+    #[test]
+    fn height_minus_min_level_offset() {
+        let way = way_with_tags(&[
+            ("height", "30"),
+            ("building:levels", "9"),
+            ("building:min_level", "5"),
+        ]);
+        let (h, _) = calculate_building_height(&way, "yes", 5, 1.0, None, 3, 100, 1);
+        // offset = 5*3+2 = 17; wall span = 30-17 = 13
+        assert_eq!(h, 13);
+    }
+
+    // Sibling parts must infer identical heights regardless of footprint
+    #[test]
+    fn part_inference_ignores_footprint() {
+        let way = way_with_tags(&[("building:part", "yes")]);
+        for seed in 0..20u64 {
+            let (small, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 30, seed);
+            let (large, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 900, seed);
+            assert_eq!(small, large, "seed {seed}");
+        }
+    }
+
     // Inference: same seed → same height, and values stay inside the type table
     #[test]
     fn inferred_house_heights_are_deterministic_and_in_range() {
@@ -10648,7 +10777,7 @@ mod style_tests {
 
         let style_for = |way: &ProcessedWay| {
             let (h, tall) = calculate_building_height(way, "yes", 0, 1.0, None, 4, 100, group_seed);
-            let category = BuildingCategory::from_element(way, tall, h, group_seed);
+            let category = BuildingCategory::from_element(way, tall, h, group_seed, 1.0);
             let preset = BuildingStylePreset::for_category(category);
             let era = crate::osm_parser::building_arch_era(&way.tags);
             let detail = compute_detail_tier(way, category, 100, h, false);

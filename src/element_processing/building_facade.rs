@@ -310,9 +310,17 @@ fn detect_street_corner(
     scale: f64,
 ) -> Option<CornerPlan> {
     let min_len = corner_min_seg_len(scale);
+    // The wrap pair (last segment -> first) only exists on closed rings.
+    let closed = match (element.nodes.first(), element.nodes.last()) {
+        (Some(a), Some(b)) => a.x == b.x && a.z == b.z,
+        _ => false,
+    };
     let mut best: Option<(i32, CornerPlan)> = None;
     for i in 0..segments.len() {
         let j = (i + 1) % segments.len();
+        if j < i && !closed {
+            continue;
+        }
         let (Some(a), Some(b)) = (&segments[i], &segments[j]) else {
             continue;
         };
