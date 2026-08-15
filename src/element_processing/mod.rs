@@ -4,6 +4,7 @@ pub mod barriers;
 pub mod bridge_modules;
 pub mod bridge_styles;
 pub mod bridges;
+pub mod building_facade;
 #[cfg(test)]
 pub mod building_test_support;
 pub mod buildings;

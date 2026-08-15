@@ -5,6 +5,10 @@ use crate::climate::Climate;
 use crate::clipping::clip_way_to_bbox;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::deterministic_rng::{coord_rng, element_rng};
+use crate::element_processing::building_facade::{
+    compute_facade_plan, BuildingContext, ColumnFacade, FacadeClass, FacadePlan,
+    MIN_FACADE_FOOTPRINT,
+};
 use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
@@ -13,6 +17,7 @@ use crate::osm_parser::{
 };
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
+use fnv::FnvHashSet;
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
@@ -1088,10 +1093,7 @@ impl BuildingStyle {
         let has_windows = preset.has_windows.unwrap_or(true);
 
         // Suppress preset doors when an entrance/door node is mapped on the outline.
-        let has_mapped_entrance = element
-            .nodes
-            .iter()
-            .any(|n| n.tags.contains_key("entrance") || n.tags.contains_key("door"));
+        let has_mapped_entrance = outline_has_mapped_entrance(element);
         let has_garage_door = if has_mapped_entrance {
             false
         } else {
@@ -1522,8 +1524,6 @@ fn calculate_start_y_offset(
     }
 }
 
-/// Wall block from an OSM material/colour tag, or None if no tag is set.
-/// Tints a tower's glass to match a dark wall or dark accent band; else keeps the light default.
 /// Window glass pool per building category — the single dispatch point,
 /// replacing the old duplicate string-match on the raw `building=*` value
 /// (which used a different vocabulary and dropped farms/offices to the
@@ -1653,6 +1653,7 @@ fn pick_window_archetype(
     }
 }
 
+/// Tints a tower's glass to match a dark wall or dark accent band; else keeps the light default.
 fn coordinated_window_block(wall_block: Block, accent_block: Block, light_default: Block) -> Block {
     const DARK: &[Block] = &[
         BLACK_CONCRETE,
@@ -1671,6 +1672,7 @@ fn coordinated_window_block(wall_block: Block, accent_block: Block, light_defaul
     }
 }
 
+/// Wall block from an OSM material/colour tag, or None if no tag is set.
 fn determine_wall_block_from_tags(
     element: &ProcessedWay,
     category: BuildingCategory,
@@ -2717,6 +2719,408 @@ fn generate_roof_only_structure(
 
 /// Builds a wall ring (outer shell or inner courtyard) for a set of nodes.
 #[allow(clippy::too_many_arguments)]
+/// True when the outline carries a mapped entrance/door node.
+pub(crate) fn outline_has_mapped_entrance(element: &ProcessedWay) -> bool {
+    element
+        .nodes
+        .iter()
+        .any(|n| n.tags.contains_key("entrance") || n.tags.contains_key("door"))
+}
+
+/// Wood species for an entrance door, matched to category and wall material.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum DoorStyle {
+    Oak,
+    Spruce,
+    DarkOak,
+    Birch,
+}
+
+impl DoorStyle {
+    fn base_block(self) -> Block {
+        match self {
+            DoorStyle::Oak => OAK_DOOR,
+            DoorStyle::Spruce => SPRUCE_DOOR_LOWER,
+            DoorStyle::DarkOak => DARK_OAK_DOOR_LOWER,
+            DoorStyle::Birch => BIRCH_DOOR,
+        }
+    }
+}
+
+/// A planned entrance: one or two door leaves plus their dressing.
+struct EntrancePlan {
+    x: i32,
+    z: i32,
+    normal: (i32, i32),
+    tangent: (i32, i32),
+    double: bool,
+    style: DoorStyle,
+    canopy: bool,
+    lantern: bool,
+}
+
+fn door_style_for(category: BuildingCategory, wall_block: Block, group_seed: u64) -> DoorStyle {
+    match category {
+        BuildingCategory::Industrial
+        | BuildingCategory::Warehouse
+        | BuildingCategory::Commercial
+        | BuildingCategory::Office
+        | BuildingCategory::Hotel
+        | BuildingCategory::Historic
+        | BuildingCategory::Religious => DoorStyle::DarkOak,
+        _ => match wall_block {
+            OAK_PLANKS | OAK_LOG => DoorStyle::Spruce,
+            SPRUCE_PLANKS | SPRUCE_LOG | DARK_OAK_PLANKS => DoorStyle::Oak,
+            QUARTZ_BLOCK | QUARTZ_BRICKS | WHITE_CONCRETE | WHITE_TERRACOTTA => DoorStyle::Birch,
+            _ => {
+                if element_rng(group_seed ^ 0xD00E_57E9_0000_0012).random_bool(0.50) {
+                    DoorStyle::Oak
+                } else {
+                    DoorStyle::DarkOak
+                }
+            }
+        },
+    }
+}
+
+/// Plans a synthetic street-facing entrance for buildings whose outline has no
+/// mapped entrance node. Every ordinary ground-level building gets one door.
+fn plan_synthetic_entrance(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    facade: &FacadePlan,
+    building_passages: &CoordinateBitmap,
+    group_seed: u64,
+) -> Option<EntrancePlan> {
+    if !config.is_ground_level
+        || config.has_garage_door
+        || config.has_single_door
+        || matches!(
+            config.condition,
+            BuildingCondition::Construction | BuildingCondition::Ruined
+        )
+        || matches!(
+            config.category,
+            BuildingCategory::Greenhouse | BuildingCategory::Shed | BuildingCategory::Garage
+        )
+        || outline_has_mapped_entrance(element)
+        || facade.segments.is_empty()
+    {
+        return None;
+    }
+
+    // Corner buildings of public categories put the door right at the corner.
+    let corner_pick = facade.corner.as_ref().filter(|_| {
+        matches!(
+            config.category,
+            BuildingCategory::Commercial | BuildingCategory::Hotel | BuildingCategory::Office
+        )
+    });
+
+    let seg_index = if let Some(corner) = corner_pick {
+        // The longer of the two corner legs hosts the door.
+        let len = |i: usize| facade.segments[i].as_ref().map(|s| s.len).unwrap_or(0);
+        if len(corner.seg_a) >= len(corner.seg_b) {
+            corner.seg_a
+        } else {
+            corner.seg_b
+        }
+    } else if let Some(front) = facade.front_segment {
+        front
+    } else {
+        // Rural fallback: the longest non-party segment still gets a door.
+        facade
+            .segments
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
+            .filter(|(_, s)| s.class != FacadeClass::Party)
+            .max_by_key(|(_, s)| s.len)
+            .map(|(i, _)| i)?
+    };
+
+    let seg = facade.segments.get(seg_index)?.as_ref()?;
+    if seg.len < 4 {
+        return None;
+    }
+    let (x1, z1) = {
+        let n = element.nodes.get(seg_index)?;
+        (n.x, n.z)
+    };
+    let (x2, z2) = {
+        let n = element.nodes.get(seg_index + 1)?;
+        (n.x, n.z)
+    };
+    let points: Vec<(i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2)
+        .into_iter()
+        .map(|(x, _, z)| (x, z))
+        .collect();
+    if points.len() < 5 {
+        return None;
+    }
+
+    let mut pos_rng = element_rng(group_seed ^ 0xD00E_57E9_0000_0011);
+    let target = if let Some(corner) = corner_pick {
+        // 2-3 columns in from the corner vertex end of the segment.
+        let from_corner = 2 + pos_rng.random_range(0..2u32) as usize;
+        if corner.seg_a == seg_index {
+            points.len().saturating_sub(1 + from_corner)
+        } else {
+            from_corner
+        }
+    } else {
+        let jitter: f64 = pos_rng.random_range(-0.15..0.15);
+        ((points.len() as f64) * (0.5 + jitter)) as usize
+    };
+    // Dodge passages and party columns, keep 2 columns clear of the ends.
+    let clamp = |i: isize| (i.clamp(2, points.len() as isize - 3)) as usize;
+    let mut chosen: Option<(i32, i32)> = None;
+    for attempt in [0isize, 1, -1, 2, -2] {
+        let idx = clamp(target as isize + attempt);
+        let (bx, bz) = points[idx];
+        if building_passages.contains(bx, bz) || facade.is_party(bx, bz) {
+            continue;
+        }
+        chosen = Some((bx, bz));
+        break;
+    }
+    let (x, z) = chosen?;
+
+    let double = matches!(
+        config.category,
+        BuildingCategory::Commercial
+            | BuildingCategory::Office
+            | BuildingCategory::Hotel
+            | BuildingCategory::School
+            | BuildingCategory::Hospital
+    ) && seg.len >= 8;
+
+    let style = door_style_for(config.category, config.wall_block, group_seed);
+    let mut dress_rng = element_rng(group_seed ^ 0xD00E_57E9_0000_0013);
+    let canopy = (double
+        || matches!(
+            config.category,
+            BuildingCategory::Commercial | BuildingCategory::Hotel
+        ))
+        && dress_rng.random_bool(0.60);
+    let lantern = !canopy
+        && matches!(
+            config.category,
+            BuildingCategory::House | BuildingCategory::Residential | BuildingCategory::Historic
+        )
+        && dress_rng.random_bool(0.35);
+
+    Some(EntrancePlan {
+        x,
+        z,
+        normal: seg.normal,
+        tangent: seg.tangent,
+        double,
+        style,
+        canopy,
+        lantern,
+    })
+}
+
+/// Oriented, styled doors at mapped entrance/door nodes on the outline,
+/// replacing the unoriented placeholder from the node-level doors pass.
+fn plan_mapped_entrances(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    facade: &FacadePlan,
+    group_seed: u64,
+) -> Vec<EntrancePlan> {
+    let mut plans = Vec::new();
+    if !config.is_ground_level
+        || matches!(
+            config.condition,
+            BuildingCondition::Construction | BuildingCondition::Ruined
+        )
+    {
+        return plans;
+    }
+    let style = door_style_for(config.category, config.wall_block, group_seed);
+    let n_nodes = element.nodes.len();
+    for (i, node) in element.nodes.iter().enumerate() {
+        let entrance = node.tags.get("entrance");
+        let door = node.tags.get("door");
+        if entrance.is_none() && door.is_none() {
+            continue;
+        }
+        if entrance.map(String::as_str) == Some("no") || door.map(String::as_str) == Some("no") {
+            continue;
+        }
+        // Only ground-level entrances; upper-level ones have no wall opening here.
+        if let Some(level) = node.tags.get("level") {
+            if level
+                .trim()
+                .parse::<f64>()
+                .map(|l| l != 0.0)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+        }
+        // Segment ending here (i-1) or starting here (i); pick the longer.
+        let before = i
+            .checked_sub(1)
+            .and_then(|j| facade.segments.get(j))
+            .and_then(|s| s.as_ref());
+        let after = if i + 1 < n_nodes {
+            facade.segments.get(i).and_then(|s| s.as_ref())
+        } else {
+            None
+        };
+        let seg = match (before, after) {
+            (Some(a), Some(b)) => Some(if a.len >= b.len { a } else { b }),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        let Some(seg) = seg else { continue };
+        let double = entrance.map(String::as_str) == Some("main")
+            && matches!(
+                config.category,
+                BuildingCategory::Commercial | BuildingCategory::Office | BuildingCategory::Hotel
+            );
+        plans.push(EntrancePlan {
+            x: node.x,
+            z: node.z,
+            normal: seg.normal,
+            tangent: seg.tangent,
+            double,
+            style,
+            canopy: false,
+            lantern: false,
+        });
+    }
+    plans
+}
+
+/// Places a planned entrance: door leaves (overwriting the wall), threshold,
+/// doorstep stairs down to terrain, and optional canopy/lantern dressing.
+fn render_entrance(
+    editor: &mut WorldEditor,
+    plan: &EntrancePlan,
+    config: &BuildingConfig,
+    args: &Args,
+) {
+    let (nx, nz) = plan.normal;
+    let facing = facing_for_normal(nx, nz);
+    let base = plan.style.base_block();
+    let door_positions: Vec<((i32, i32), &str)> = if plan.double {
+        vec![
+            ((plan.x, plan.z), "left"),
+            ((plan.x + plan.tangent.0, plan.z + plan.tangent.1), "right"),
+        ]
+    } else {
+        vec![((plan.x, plan.z), "left")]
+    };
+
+    for ((dx, dz), hinge) in &door_positions {
+        let lower = cached_prop_block(
+            base,
+            &[("half", "lower"), ("facing", facing), ("hinge", hinge)],
+        );
+        let upper = cached_prop_block(
+            base,
+            &[("half", "upper"), ("facing", facing), ("hinge", hinge)],
+        );
+        editor.set_block_with_properties_absolute(
+            lower,
+            *dx,
+            config.start_y_offset + 1 + config.abs_terrain_offset,
+            *dz,
+            None,
+            Some(&[]),
+        );
+        editor.set_block_with_properties_absolute(
+            upper,
+            *dx,
+            config.start_y_offset + 2 + config.abs_terrain_offset,
+            *dz,
+            None,
+            Some(&[]),
+        );
+
+        // Threshold block just outside the door (first writer wins the cell,
+        // and buildings run before roads).
+        let threshold = config.base_course_block.unwrap_or(STONE_BRICKS);
+        editor.set_block_absolute(
+            threshold,
+            dx + nx,
+            config.start_y_offset + config.abs_terrain_offset,
+            dz + nz,
+            None,
+            None,
+        );
+
+        // Doorstep stairs bridging a terrain drop in front of the door.
+        if args.terrain() && config.is_ground_level {
+            let out_ground = editor
+                .terrain_level(dx + nx, dz + nz)
+                .unwrap_or(config.start_y_offset);
+            let drop = config.start_y_offset - out_ground;
+            if drop >= 1 {
+                let stair_base = get_stair_block_for_material(threshold);
+                // Ascend toward the door: high side of each step faces inward.
+                let stair_facing = match facing_for_normal(-nx, -nz) {
+                    "north" => StairFacing::North,
+                    "south" => StairFacing::South,
+                    "east" => StairFacing::East,
+                    _ => StairFacing::West,
+                };
+                for step in 1..=drop.min(3) {
+                    let stair = create_stair_with_properties(
+                        stair_base,
+                        stair_facing,
+                        StairShape::Straight,
+                    );
+                    editor.set_block_with_properties_absolute(
+                        stair,
+                        dx + nx * step,
+                        config.start_y_offset - step + 1 + config.abs_terrain_offset,
+                        dz + nz * step,
+                        Some(&[AIR]),
+                        None,
+                    );
+                }
+            }
+        }
+    }
+
+    // Canopy: closed top-half trapdoors one block out, spanning the doorway.
+    if plan.canopy {
+        let span: &[i32] = if plan.double {
+            &[-1, 0, 1, 2]
+        } else {
+            &[-1, 0, 1]
+        };
+        for t in span {
+            let cx = plan.x + nx + plan.tangent.0 * t;
+            let cz = plan.z + nz + plan.tangent.1 * t;
+            editor.set_block_with_properties_absolute(
+                make_closed_trapdoor(config.wall_block, facing, "top"),
+                cx,
+                config.start_y_offset + 3 + config.abs_terrain_offset,
+                cz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+    }
+    if plan.lantern {
+        editor.set_block_absolute(
+            LANTERN,
+            plan.x + nx,
+            config.start_y_offset + 3 + config.abs_terrain_offset,
+            plan.z + nz,
+            Some(&[AIR]),
+            None,
+        );
+    }
+}
+
 fn build_wall_ring(
     editor: &mut WorldEditor,
     nodes: &[ProcessedNode],
@@ -2724,6 +3128,7 @@ fn build_wall_ring(
     args: &Args,
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) -> (Vec<(i32, i32)>, i32) {
     let mut previous_node: Option<(i32, i32)> = None;
     // Count of generated wall coordinates; the caller only needs to know the ring is non-empty.
@@ -2793,8 +3198,12 @@ fn build_wall_ring(
                     config.start_y_offset + config.building_height
                 };
 
+                let col = ColumnFacade {
+                    party: facade.is_party(bx, bz),
+                    street: !facade.has_any_street || facade.is_street(bx, bz),
+                };
                 for h in wall_start..=column_top {
-                    let block = determine_wall_block_at_position(bx, h, bz, config);
+                    let block = determine_wall_block_at_position(bx, h, bz, config, col);
                     editor.set_block_absolute(
                         block,
                         bx,
@@ -2967,8 +3376,14 @@ fn generate_special_doors(
 
 /// Determines which block to place at a specific wall position (wall, window, or accent)
 #[inline]
-fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingConfig) -> Block {
-    let chosen = determine_wall_block_at_position_pristine(bx, h, bz, config);
+fn determine_wall_block_at_position(
+    bx: i32,
+    h: i32,
+    bz: i32,
+    config: &BuildingConfig,
+    col: ColumnFacade,
+) -> Block {
+    let chosen = determine_wall_block_at_position_pristine(bx, h, bz, config, col);
     let chosen = apply_block_variety(chosen, bx, h, bz, config);
     apply_condition_variation(chosen, bx, h, bz, config)
 }
@@ -3284,6 +3699,7 @@ fn determine_wall_block_at_position_pristine(
     h: i32,
     bz: i32,
     config: &BuildingConfig,
+    col: ColumnFacade,
 ) -> Block {
     // Darker plinth rows ground the building visually.
     if let Some(base) = config.base_course_block {
@@ -3294,8 +3710,9 @@ fn determine_wall_block_at_position_pristine(
 
     let floor_row = config.floor_row(h);
 
-    // If windows are disabled, always use wall block (with possible accent)
-    if !config.has_windows {
+    // Party walls render like windowless walls: no glazing into the
+    // attached neighbor of a terraced row.
+    if !config.has_windows || col.party {
         let above_floor = h > config.start_y_offset + 1;
         let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
         if use_accent_line {
@@ -3360,6 +3777,7 @@ fn determine_wall_block_at_position_pristine(
 
         // Storefront glazing: wider full-glass bays across the whole ground floor.
         if config.has_storefront
+            && col.street
             && above_floor
             && h <= config.ground_floor_top()
             && floor_row != 0
@@ -3434,7 +3852,7 @@ type FacadePropsCache = std::sync::Mutex<fnv::FnvHashMap<(u16, String), std::syn
 static FACADE_PROPS: once_cell::sync::Lazy<FacadePropsCache> =
     once_cell::sync::Lazy::new(Default::default);
 
-fn cached_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
+pub(crate) fn cached_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
     let key: String = props.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]).collect();
     let mut cache = FACADE_PROPS.lock().unwrap();
     let arc = cache
@@ -3479,7 +3897,7 @@ fn make_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
 
 /// Computes the centroid (average position) of the building outline nodes.
 /// Returns `None` if the node list is empty.
-fn compute_building_centroid(nodes: &[ProcessedNode]) -> Option<(i32, i32)> {
+pub(crate) fn compute_building_centroid(nodes: &[ProcessedNode]) -> Option<(i32, i32)> {
     if nodes.is_empty() {
         return None;
     }
@@ -3529,7 +3947,14 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
 ///
 /// Returns one of `(±1, 0)` or `(0, ±1)`, or `(0, 0)` for degenerate
 /// (zero-length) segments.
-fn compute_outward_normal(x1: i32, z1: i32, x2: i32, z2: i32, cx: i32, cz: i32) -> (i32, i32) {
+pub(crate) fn compute_outward_normal(
+    x1: i32,
+    z1: i32,
+    x2: i32,
+    z2: i32,
+    cx: i32,
+    cz: i32,
+) -> (i32, i32) {
     let seg_dx = x2 - x1;
     let seg_dz = z2 - z1;
 
@@ -3558,7 +3983,7 @@ fn compute_outward_normal(x1: i32, z1: i32, x2: i32, z2: i32, cx: i32, cz: i32) 
 }
 
 /// Returns the facing string for the wall's outward normal.
-fn facing_for_normal(nx: i32, nz: i32) -> &'static str {
+pub(crate) fn facing_for_normal(nx: i32, nz: i32) -> &'static str {
     match (nx, nz) {
         (1, _) => "east",
         (-1, _) => "west",
@@ -3573,6 +3998,7 @@ fn generate_residential_window_decorations(
     element: &ProcessedWay,
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     // Only non-tall residential / house buildings get decorations.
     if config.is_tall_building {
@@ -3603,10 +4029,18 @@ fn generate_residential_window_decorations(
     };
 
     let mut previous_node: Option<(i32, i32)> = None;
+    let mut seg_idx = 0usize;
 
     for node in &element.nodes {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
+            // Rear facades get thinner dressing than street-facing ones.
+            let is_rear = facade
+                .segments
+                .get(seg_idx)
+                .and_then(|s| s.as_ref())
+                .is_some_and(|s| s.class == FacadeClass::Rear);
+            seg_idx += 1;
             let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
 
             // Skip degenerate normals (zero-length segment)
@@ -3631,7 +4065,10 @@ fn generate_residential_window_decorations(
                 let bz = *bz;
 
                 // Skip decorations at passage openings
-                if building_passages.contains(bx, bz) {
+                if building_passages.contains(bx, bz)
+                    || facade.is_party(bx, bz)
+                    || facade.is_door(bx, bz)
+                {
                     continue;
                 }
 
@@ -3705,8 +4142,10 @@ fn generate_residential_window_decorations(
                             .random_range(0u32..100);
 
                             let abs_y = h + config.abs_terrain_offset;
+                            let (sill_roll_max, balcony_roll_max) =
+                                if is_rear { (8, 18) } else { (15, 23) };
 
-                            if decoration_roll < 15 && config.window_frame.is_none() {
+                            if decoration_roll < sill_roll_max && config.window_frame.is_none() {
                                 // ── Window sill ──
                                 let lx = bx + out_nx;
                                 let lz = bz + out_nz;
@@ -3722,10 +4161,12 @@ fn generate_residential_window_decorations(
 
                                 let mut pot_rng =
                                     coord_rng(bx, bz.wrapping_add(floor_idx), element.id);
+                                let (pot_centre, pot_side) =
+                                    if is_rear { (35, 12) } else { (70, 25) };
                                 let pot_here = if mod6 == 1 {
-                                    pot_rng.random_range(0u32..100) < 70
+                                    pot_rng.random_range(0u32..100) < pot_centre
                                 } else {
-                                    pot_rng.random_range(0u32..100) < 25
+                                    pot_rng.random_range(0u32..100) < pot_side
                                 };
                                 if pot_here {
                                     let plant = POTTED_PLANT_OPTIONS
@@ -3739,7 +4180,8 @@ fn generate_residential_window_decorations(
                                         None,
                                     );
                                 }
-                            } else if decoration_roll < 23
+                            } else if decoration_roll < balcony_roll_max
+                                && decoration_roll >= 15
                                 && mod6 == 1
                                 && (!config.is_ground_level
                                     || h >= config.start_y_offset + 2 + config.floor_cycle)
@@ -3929,6 +4371,7 @@ fn generate_corner_quoins(
     element: &ProcessedWay,
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     // Skip if wall and accent are the same block (nothing visible)
     if config.wall_block == config.accent_block {
@@ -3941,9 +4384,19 @@ fn generate_corner_quoins(
         return;
     }
 
-    // Deterministic 60% chance
-    let mut rng = element_rng(element.id.wrapping_add(3571));
-    if !rng.random_bool(0.6) {
+    // A detected street corner on a public building always gets its framing
+    // column; otherwise the deterministic 60% roll decides.
+    let guaranteed_corner = facade.corner.as_ref().map(|c| c.vertex).filter(|_| {
+        matches!(
+            config.category,
+            BuildingCategory::Commercial
+                | BuildingCategory::Hotel
+                | BuildingCategory::Office
+                | BuildingCategory::Historic
+        )
+    });
+    let roll_passed = element_rng(element.id.wrapping_add(3571)).random_bool(0.6);
+    if !roll_passed && guaranteed_corner.is_none() {
         return;
     }
 
@@ -3966,6 +4419,14 @@ fn generate_corner_quoins(
     wall_family.extend_from_slice(substitute_pool_only(config.wall_block));
 
     for &(cx, cz) in &corners {
+        // Party-wall vertices sit against the neighbor and get no framing.
+        if facade.is_party(cx, cz) {
+            continue;
+        }
+        // When only the street corner qualified (roll failed), frame it alone.
+        if !roll_passed && guaranteed_corner != Some((cx, cz)) {
+            continue;
+        }
         let is_passage = building_passages.contains(cx, cz);
         let start_h = if is_passage {
             passage_h + 1
@@ -3998,6 +4459,7 @@ fn generate_wall_depth_features(
     config: &BuildingConfig,
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     if config.wall_depth_style == WallDepthStyle::None {
         return;
@@ -4072,7 +4534,10 @@ fn generate_wall_depth_features(
 
                 // Skip decorative features at passage openings - the road
                 // passes through here so no pilasters/buttresses/etc.
-                if building_passages.contains(bx, bz) {
+                if building_passages.contains(bx, bz)
+                    || facade.is_party(bx, bz)
+                    || facade.is_door(bx, bz)
+                {
                     continue;
                 }
 
@@ -4199,6 +4664,7 @@ fn generate_window_frames(
     element: &ProcessedWay,
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     let Some(style) = config.window_frame else {
         return;
@@ -4216,9 +4682,17 @@ fn generate_window_frames(
     let shutter_block = style.shutter_block();
 
     let mut previous_node: Option<(i32, i32)> = None;
+    let mut seg_idx = 0usize;
     for node in &element.nodes {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
+            // Rear facades keep the band but get half the dressing.
+            let is_rear = facade
+                .segments
+                .get(seg_idx)
+                .and_then(|s| s.as_ref())
+                .is_some_and(|s| s.class == FacadeClass::Rear);
+            seg_idx += 1;
             let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
             if out_nx == 0 && out_nz == 0 {
                 previous_node = Some((x2, z2));
@@ -4233,7 +4707,10 @@ fn generate_window_frames(
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
             for (bx, _, bz) in &points {
                 let (bx, bz) = (*bx, *bz);
-                if building_passages.contains(bx, bz) {
+                if building_passages.contains(bx, bz)
+                    || facade.is_party(bx, bz)
+                    || facade.is_door(bx, bz)
+                {
                     continue;
                 }
                 let col = config.window_col(bx, bz);
@@ -4264,8 +4741,10 @@ fn generate_window_frames(
                             )
                             .random_range(0u32..100);
                             let above = h + 1 + config.abs_terrain_offset;
+                            let (t_lantern, t_pot, t_trapdoor) =
+                                if is_rear { (7, 16, 20) } else { (15, 32, 40) };
                             if h + 1 < top_h {
-                                if roll < 15 {
+                                if roll < t_lantern {
                                     if style.has_lanterns() {
                                         editor.set_block_absolute(
                                             LANTERN,
@@ -4276,7 +4755,7 @@ fn generate_window_frames(
                                             None,
                                         );
                                     }
-                                } else if roll < 32 {
+                                } else if roll < t_pot {
                                     let mut pot_rng =
                                         coord_rng(bx, bz.wrapping_add(h * 7), config.element_id);
                                     let pot = POTTED_PLANT_OPTIONS
@@ -4289,7 +4768,7 @@ fn generate_window_frames(
                                         Some(&[AIR]),
                                         None,
                                     );
-                                } else if roll < 40 {
+                                } else if roll < t_trapdoor {
                                     editor.set_block_with_properties_absolute(
                                         make_closed_trapdoor(
                                             style.detail_trapdoor(),
@@ -4447,6 +4926,7 @@ fn generate_facade_cornices(
     config: &BuildingConfig,
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     if !matches!(
         config.wall_depth_style,
@@ -4499,7 +4979,10 @@ fn generate_facade_cornices(
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
             for (bx, _, bz) in &points {
                 let (bx, bz) = (*bx, *bz);
-                if building_passages.contains(bx, bz) {
+                if building_passages.contains(bx, bz)
+                    || facade.is_party(bx, bz)
+                    || facade.is_door(bx, bz)
+                {
                     continue;
                 }
                 if window_trim && config.window_col(bx, bz) >= 3 {
@@ -4536,6 +5019,7 @@ fn generate_archetype_window_headers(
     element: &ProcessedWay,
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     if config.window_archetype != WindowArchetype::ArchedTraditional
         || config.wall_depth_style == WallDepthStyle::HistoricOrnate
@@ -4566,7 +5050,10 @@ fn generate_archetype_window_headers(
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
             for (bx, _, bz) in &points {
                 let (bx, bz) = (*bx, *bz);
-                if building_passages.contains(bx, bz) {
+                if building_passages.contains(bx, bz)
+                    || facade.is_party(bx, bz)
+                    || facade.is_door(bx, bz)
+                {
                     continue;
                 }
                 let mod6 = config.window_col(bx, bz);
@@ -5444,10 +5931,11 @@ pub fn generate_buildings(
     args: &Args,
     relation_levels: Option<i32>,
     hole_polygons: Option<&[HolePolygon]>,
-    flood_fill_cache: &FloodFillCache,
-    building_passages: &CoordinateBitmap,
+    ctx: &BuildingContext<'_>,
     group_seed: u64,
 ) {
+    let flood_fill_cache = ctx.flood_fill_cache;
+    let building_passages = ctx.building_passages;
     // Early return for underground buildings
     if is_underground_building(&element.tags) {
         return;
@@ -5711,6 +6199,26 @@ pub fn generate_buildings(
         BuildingCondition::Disused | BuildingCondition::Normal => {}
     }
 
+    // Street/neighbor classification: party walls, fronting streets, corner.
+    // Sibling parts of one building are unioned into own_cells so they don't
+    // read as party neighbors of each other.
+    let mut facade = if min_level_offset == 0 && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
+        let mut own_cells: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        if let Some(members) = ctx.group_members.get(&group_seed) {
+            for id in members {
+                if *id == element.id {
+                    continue;
+                }
+                if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
+                    own_cells.extend(fill.iter().copied());
+                }
+            }
+        }
+        compute_facade_plan(element, ctx, args.scale, &own_cells)
+    } else {
+        FacadePlan::empty()
+    };
+
     // Window layout is picked before the config literal so the frame gate
     // below can see it (frames are designed around 3-wide bays).
     let window_archetype = pick_window_archetype(category, era, group_seed);
@@ -5786,7 +6294,9 @@ pub fn generate_buildings(
         ) && has_windows
             && condition == BuildingCondition::Normal
             && min_level_offset == 0
-            && element_rng(group_seed ^ 0x5709_EF90_0000_0002).random_bool(0.60),
+            && facade.has_any_street
+            && element_rng(group_seed ^ 0x5709_EF90_0000_0002)
+                .random_bool(if facade.corner.is_some() { 0.85 } else { 0.60 }),
         window_frame: (has_windows
             && condition == BuildingCondition::Normal
             && !is_tall_building
@@ -5804,11 +6314,33 @@ pub fn generate_buildings(
     // elements (min_level > 0) sit above the passage and must keep their
     // walls, floors and decorations intact.
     let empty_passages = CoordinateBitmap::new_empty();
+    let empty_facade = FacadePlan::empty();
     let effective_passages: &CoordinateBitmap = if config.is_ground_level {
         building_passages
     } else {
         &empty_passages
     };
+
+    // Entrances: mapped nodes get oriented doors; everything else gets one
+    // synthetic door on the street-facing side. Planned before the decoration
+    // passes so their columns stay clear of shutters, sills and pilasters.
+    let mut entrance_plans = plan_mapped_entrances(element, &config, &facade, group_seed);
+    if entrance_plans.is_empty() {
+        if let Some(plan) =
+            plan_synthetic_entrance(element, &config, &facade, effective_passages, group_seed)
+        {
+            entrance_plans.push(plan);
+        }
+    }
+    for plan in &entrance_plans {
+        let leaves = if plan.double { 2 } else { 1 };
+        for t in 0..leaves {
+            let dx = plan.x + plan.tangent.0 * t;
+            let dz = plan.z + plan.tangent.1 * t;
+            facade.mark_door_column(dx, dz);
+            facade.mark_door_column(dx + plan.normal.0, dz + plan.normal.1);
+        }
+    }
 
     // Generate walls, pass whether this building will have a sloped roof.
     let has_sloped_roof = style.generate_roof
@@ -5824,6 +6356,7 @@ pub fn generate_buildings(
         args,
         has_sloped_roof,
         effective_passages,
+        &facade,
     );
 
     if let Some(holes) = hole_polygons {
@@ -5836,6 +6369,7 @@ pub fn generate_buildings(
                     args,
                     has_sloped_roof,
                     effective_passages,
+                    &empty_facade,
                 );
             }
         }
@@ -5846,11 +6380,16 @@ pub fn generate_buildings(
         generate_special_doors(editor, element, &config, &wall_outline, effective_passages);
     }
 
+    // Entrance doors overwrite the freshly built wall columns.
+    for plan in &entrance_plans {
+        render_entrance(editor, plan, &config, args);
+    }
+
     // Per-building window frame dressing, then shutters/window boxes for the rest
     if !element.tags.contains_key("building:part") {
-        generate_window_frames(editor, element, &config, effective_passages);
+        generate_window_frames(editor, element, &config, effective_passages, &facade);
     }
-    generate_residential_window_decorations(editor, element, &config, effective_passages);
+    generate_residential_window_decorations(editor, element, &config, effective_passages, &facade);
 
     // Add wall depth features (pilasters, columns, ledges, cornices, buttresses)
     // Only for standalone buildings, not building:part sub-sections (parts adjoin
@@ -5862,21 +6401,23 @@ pub fn generate_buildings(
             &config,
             has_sloped_roof,
             effective_passages,
+            &facade,
         );
     }
 
     // Add corner quoins (accent-block columns at building corners)
     if !element.tags.contains_key("building:part") {
-        generate_corner_quoins(editor, element, &config, effective_passages);
+        generate_corner_quoins(editor, element, &config, effective_passages, &facade);
         generate_facade_cornices(
             editor,
             element,
             &config,
             has_sloped_roof,
             effective_passages,
+            &facade,
         );
         generate_corner_downpipes(editor, element, &config, effective_passages);
-        generate_archetype_window_headers(editor, element, &config, effective_passages);
+        generate_archetype_window_headers(editor, element, &config, effective_passages, &facade);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -6334,7 +6875,13 @@ fn generate_setback_crown(
             if is_wall {
                 // Same wall and window logic as the facade, so bands continue upward.
                 for h in 0..tier_height {
-                    let block = determine_wall_block_at_position(x, base + h, z, config);
+                    let block = determine_wall_block_at_position(
+                        x,
+                        base + h,
+                        z,
+                        config,
+                        ColumnFacade::default(),
+                    );
                     editor.set_block_absolute(
                         block,
                         x,
@@ -8648,9 +9195,8 @@ pub fn generate_building_from_relation(
     editor: &mut WorldEditor,
     relation: &ProcessedRelation,
     args: &Args,
-    flood_fill_cache: &FloodFillCache,
+    ctx: &BuildingContext<'_>,
     xzbbox: &crate::coordinate_system::cartesian::XZBBox,
-    building_passages: &CoordinateBitmap,
 ) {
     // Skip underground buildings/building parts
     if is_underground_building(&relation.tags) {
@@ -8842,8 +9388,7 @@ pub fn generate_building_from_relation(
                 args,
                 relation_levels,
                 hole_polygons.as_deref(),
-                flood_fill_cache,
-                building_passages,
+                ctx,
                 merged_way.id,
             );
         }
@@ -9286,5 +9831,163 @@ mod style_tests {
                     | BuildingCategory::GlassCornerSkyscraper
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod facade_integration_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::element_processing::building_test_support::{
+        bitmap_with_rect, rect_way, test_editor,
+    };
+    use clap::Parser as _;
+    use fnv::FnvHashMap;
+
+    const DOOR_BLOCKS: &[Block] = &[OAK_DOOR, SPRUCE_DOOR_LOWER, DARK_OAK_DOOR_LOWER, BIRCH_DOOR];
+
+    fn flat_args() -> Args {
+        Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ])
+    }
+
+    fn run_building(
+        editor: &mut WorldEditor,
+        way: &ProcessedWay,
+        road: &CoordinateBitmap,
+        footprints: &CoordinateBitmap,
+    ) {
+        let args = flat_args();
+        let cache = FloodFillCache::new();
+        let passages = CoordinateBitmap::new_empty();
+        let groups: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+        let ctx = BuildingContext {
+            flood_fill_cache: &cache,
+            building_passages: &passages,
+            road_mask: road,
+            building_footprints: footprints,
+            group_members: &groups,
+        };
+        generate_buildings(editor, way, &args, None, None, &ctx, way.id);
+    }
+
+    #[test]
+    fn synthetic_door_lands_on_the_street_wall() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
+        let footprints = CoordinateBitmap::new(&xz);
+        let way = rect_way(
+            42,
+            20,
+            20,
+            40,
+            32,
+            &[("building", "house"), ("building:levels", "2")],
+        );
+        let mut editor = test_editor(&xz);
+        run_building(&mut editor, &way, &road, &footprints);
+
+        let door_on =
+            |e: &WorldEditor, x: i32, z: i32| e.check_for_block(x, 1, z, Some(DOOR_BLOCKS));
+        let street_wall = (20..=40).any(|x| door_on(&editor, x, 20));
+        let other_walls = (20..=40).any(|x| door_on(&editor, x, 32))
+            || (20..=32).any(|z| door_on(&editor, 20, z) || door_on(&editor, 40, z));
+        assert!(street_wall, "door should be on the street-facing wall");
+        assert!(!other_walls, "no doors on the other walls");
+    }
+
+    #[test]
+    fn mapped_entrance_suppresses_the_synthetic_door() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
+        let footprints = CoordinateBitmap::new(&xz);
+        let mut way = rect_way(
+            44,
+            20,
+            20,
+            40,
+            32,
+            &[("building", "house"), ("building:levels", "2")],
+        );
+        // Mapped entrance in the middle of the rear wall.
+        let mut tags = HashMap::new();
+        tags.insert("entrance".to_string(), "yes".to_string());
+        way.nodes.insert(
+            3,
+            ProcessedNode {
+                id: 4444,
+                tags,
+                x: 30,
+                z: 32,
+            },
+        );
+        let mut editor = test_editor(&xz);
+        run_building(&mut editor, &way, &road, &footprints);
+
+        assert!(
+            editor.check_for_block(30, 1, 32, Some(DOOR_BLOCKS)),
+            "mapped entrance gets an oriented door"
+        );
+        let street_doors = (20..=40).any(|x| editor.check_for_block(x, 1, 20, Some(DOOR_BLOCKS)));
+        assert!(
+            !street_doors,
+            "no synthetic door once an entrance is mapped"
+        );
+    }
+
+    #[test]
+    fn party_wall_has_no_windows_but_free_wall_does() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
+        // Attached neighbor east of the house.
+        let footprints = bitmap_with_rect(&xz, 41, 20, 52, 32);
+        let way = rect_way(
+            43,
+            20,
+            20,
+            40,
+            32,
+            &[("building", "house"), ("building:levels", "2")],
+        );
+        let mut editor = test_editor(&xz);
+        run_building(&mut editor, &way, &road, &footprints);
+
+        let glass = |e: &WorldEditor, x: i32, z: i32, y: i32| {
+            e.check_for_block(x, y, z, Some(&RESIDENTIAL_WINDOW_OPTIONS))
+        };
+        let east_has_glass = (21..32).any(|z| (2..=9).any(|y| glass(&editor, 40, z, y)));
+        let west_has_glass = (21..32).any(|z| (2..=9).any(|y| glass(&editor, 20, z, y)));
+        assert!(
+            !east_has_glass,
+            "party wall must not glaze into the neighbor"
+        );
+        assert!(west_has_glass, "free wall keeps its windows");
+    }
+
+    #[test]
+    fn street_aware_generation_is_deterministic() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
+        let footprints = bitmap_with_rect(&xz, 41, 20, 52, 32);
+        let way = rect_way(
+            45,
+            20,
+            20,
+            40,
+            32,
+            &[("building", "apartments"), ("building:levels", "3")],
+        );
+        let mut a = test_editor(&xz);
+        run_building(&mut a, &way, &road, &footprints);
+        let mut b = test_editor(&xz);
+        run_building(&mut b, &way, &road, &footprints);
+        assert_eq!(a.content_hash(), b.content_hash());
     }
 }
