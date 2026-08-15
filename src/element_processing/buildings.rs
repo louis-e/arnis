@@ -927,6 +927,7 @@ impl BuildingStyle {
         category: BuildingCategory,
         era: ArchEra,
         climate: Climate,
+        detail: DetailTier,
         has_multiple_floors: bool,
         footprint_size: usize,
         rng: &mut impl Rng,
@@ -1107,7 +1108,7 @@ impl BuildingStyle {
 
         // Wall depth style: default based on category and era (preset may override)
         let wall_depth_style = preset.wall_depth_style.unwrap_or_else(|| {
-            if footprint_size < 20 {
+            if footprint_size < 20 || detail == DetailTier::Minimal {
                 WallDepthStyle::None
             } else {
                 // Era overrides for the general urban fabric: heritage gets
@@ -1222,6 +1223,8 @@ struct BuildingConfig {
     category: BuildingCategory,
     /// Architectural era from tags (weathering, and style decisions upstream).
     era: ArchEra,
+    /// Decorative budget from prominence (shutters, rooftop bits, two-tone).
+    detail: DetailTier,
     wall_depth_style: WallDepthStyle,
     has_parapet: bool,
     has_lobby_base: bool,
@@ -1343,8 +1346,12 @@ impl WindowFrameStyle {
 fn pick_window_frame(
     category: BuildingCategory,
     era: ArchEra,
+    detail: DetailTier,
     element_id: u64,
 ) -> Option<WindowFrameStyle> {
+    if detail == DetailTier::Minimal {
+        return None;
+    }
     use WindowFrameStyle::*;
     // Category gate first: only these get dressed frames at all.
     if !matches!(
@@ -1389,6 +1396,11 @@ fn pick_window_frame(
             },
             0.55,
         ),
+    };
+    let chance = match detail {
+        DetailTier::Enhanced => (chance + 0.15).min(0.95),
+        DetailTier::Landmark => (chance + 0.30).min(0.95),
+        _ => chance,
     };
     let mut rng = element_rng(element_id ^ 0xF7A3_E001_57BD_2210);
     rng.random_bool(chance)
@@ -1829,6 +1841,68 @@ fn era_filters_category(category: BuildingCategory) -> bool {
             | BuildingCategory::Hotel
             | BuildingCategory::Default
     )
+}
+
+/// How much decorative budget a building gets, from footprint, height,
+/// category, notable tags, and street visibility. Background fabric stays
+/// calm; prominent buildings earn richer dressing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum DetailTier {
+    Minimal,
+    Standard,
+    Enhanced,
+    Landmark,
+}
+
+fn compute_detail_tier(
+    element: &ProcessedWay,
+    category: BuildingCategory,
+    footprint: usize,
+    building_height: i32,
+    street_facing: bool,
+) -> DetailTier {
+    let mut score: i32 = 0;
+    score += (footprint as i32 / 40).min(25);
+    score += (building_height * 2).min(25);
+    score += match category {
+        BuildingCategory::Historic | BuildingCategory::Religious => 20,
+        BuildingCategory::Commercial | BuildingCategory::Hotel | BuildingCategory::Office => 10,
+        BuildingCategory::Garage | BuildingCategory::Shed | BuildingCategory::Greenhouse => -20,
+        _ => 0,
+    };
+    let tags = &element.tags;
+    if tags.contains_key("wikidata") {
+        score += 15;
+    }
+    if tags.get("tourism").is_some_and(|t| {
+        matches!(
+            t.as_str(),
+            "attraction" | "museum" | "gallery" | "viewpoint"
+        )
+    }) {
+        score += 15;
+    }
+    if tags.get("heritage").is_some_and(|v| v != "no") {
+        score += 20;
+    }
+    if tags.get("historic").is_some_and(|v| v != "no") {
+        score += 15;
+    }
+    if tags.contains_key("building:architecture") || tags.contains_key("architecture") {
+        score += 10;
+    }
+    if street_facing {
+        score += 10;
+    }
+    if score <= 24 {
+        DetailTier::Minimal
+    } else if score <= 55 {
+        DetailTier::Standard
+    } else if score <= 80 {
+        DetailTier::Enhanced
+    } else {
+        DetailTier::Landmark
+    }
 }
 
 /// Wood species a nordic climate adds to the residential palette.
@@ -3398,9 +3472,10 @@ fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &Buildin
         return chosen;
     }
 
-    // Two-tone facade: 20% chance on >=3-floor buildings.
+    // Two-tone facade: 20% chance on >=3-floor buildings; background fabric
+    // (minimal detail) keeps a single flat field.
     let floors_estimate = config.building_height / config.floor_cycle;
-    if floors_estimate >= 3 {
+    if floors_estimate >= 3 && config.detail != DetailTier::Minimal {
         let mut tt_enable_rng = element_rng(config.element_id ^ 0x9F4A_5DB2_C0DE_C0DE);
         if tt_enable_rng.random_bool(0.20) {
             let ground_floor_top = config.ground_floor_top();
@@ -3494,7 +3569,11 @@ fn short_flat_rooftop_bits_for(
     building_height: i32,
     category: BuildingCategory,
     condition: BuildingCondition,
+    detail: DetailTier,
 ) -> bool {
+    if detail == DetailTier::Minimal {
+        return false;
+    }
     if roof_type != RoofType::Flat {
         return false;
     }
@@ -4093,7 +4172,12 @@ fn generate_residential_window_decorations(
                     let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
                     let shutter_roll =
                         coord_rng(centre_sum, centre_sum, element.id).random_range(0u32..100);
-                    if shutter_roll < 25 {
+                    let shutter_max = match config.detail {
+                        DetailTier::Minimal => 0,
+                        DetailTier::Standard => 25,
+                        DetailTier::Enhanced | DetailTier::Landmark => 40,
+                    };
+                    if shutter_roll < shutter_max {
                         for h in (config.start_y_offset + 1)
                             ..=(config.start_y_offset + config.building_height)
                         {
@@ -6151,6 +6235,35 @@ pub fn generate_buildings(
         BuildingCategory::from_element(element, is_tall_building, building_height, group_seed);
     let preset = BuildingStylePreset::for_category(category);
 
+    // Street/neighbor classification: party walls, fronting streets, corner.
+    // Sibling parts of one building are unioned into own_cells so they don't
+    // read as party neighbors of each other.
+    let mut facade = if min_level_offset == 0 && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
+        let mut own_cells: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        if let Some(members) = ctx.group_members.get(&group_seed) {
+            for id in members {
+                if *id == element.id {
+                    continue;
+                }
+                if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
+                    own_cells.extend(fill.iter().copied());
+                }
+            }
+        }
+        compute_facade_plan(element, ctx, args.scale, &own_cells)
+    } else {
+        FacadePlan::empty()
+    };
+
+    // Detail budget from prominence and notable tags.
+    let detail = compute_detail_tier(
+        element,
+        category,
+        cached_footprint_size,
+        building_height,
+        facade.has_any_street,
+    );
+
     // Resolve style with deterministic RNG
     let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > floor_cycle + 2;
@@ -6162,6 +6275,7 @@ pub fn generate_buildings(
         category,
         era,
         climate,
+        detail,
         has_multiple_floors,
         cached_footprint_size,
         &mut rng,
@@ -6199,26 +6313,6 @@ pub fn generate_buildings(
         BuildingCondition::Disused | BuildingCondition::Normal => {}
     }
 
-    // Street/neighbor classification: party walls, fronting streets, corner.
-    // Sibling parts of one building are unioned into own_cells so they don't
-    // read as party neighbors of each other.
-    let mut facade = if min_level_offset == 0 && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
-        let mut own_cells: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
-        if let Some(members) = ctx.group_members.get(&group_seed) {
-            for id in members {
-                if *id == element.id {
-                    continue;
-                }
-                if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
-                    own_cells.extend(fill.iter().copied());
-                }
-            }
-        }
-        compute_facade_plan(element, ctx, args.scale, &own_cells)
-    } else {
-        FacadePlan::empty()
-    };
-
     // Window layout is picked before the config literal so the frame gate
     // below can see it (frames are designed around 3-wide bays).
     let window_archetype = pick_window_archetype(category, era, group_seed);
@@ -6247,6 +6341,7 @@ pub fn generate_buildings(
         has_single_door,
         category,
         era,
+        detail,
         wall_depth_style: style.wall_depth_style,
         has_parapet: style.has_parapet
             || short_flat_parapet_for(
@@ -6306,7 +6401,7 @@ pub fn generate_buildings(
                     | WindowArchetype::PairedNarrow
                     | WindowArchetype::ArchedTraditional
             ))
-        .then(|| pick_window_frame(category, era, group_seed))
+        .then(|| pick_window_frame(category, era, detail, group_seed))
         .flatten(),
     };
 
@@ -6728,6 +6823,7 @@ fn generate_building_roof(
                 config.building_height,
                 category,
                 config.condition,
+                config.detail,
             ))
     {
         let roof_y = config.start_y_offset + config.building_height;
@@ -9773,6 +9869,36 @@ mod style_tests {
         let xz = XZBBox::rect_from_xz_lengths(50.0, 50.0).unwrap();
         let editor = test_editor_at(&xz, LLBBox::new(22.9, 12.9, 23.1, 13.1).unwrap());
         assert_eq!(editor.climate(), Climate::HotDesert);
+    }
+
+    #[test]
+    fn detail_tier_boundaries() {
+        let tagged = |pairs: &[(&str, &str)]| ProcessedWay {
+            id: 1,
+            nodes: Vec::new(),
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let plain = tagged(&[]);
+        assert_eq!(
+            compute_detail_tier(&plain, BuildingCategory::Garage, 30, 3, false),
+            DetailTier::Minimal
+        );
+        assert_eq!(
+            compute_detail_tier(&plain, BuildingCategory::House, 100, 10, true),
+            DetailTier::Standard
+        );
+        assert_eq!(
+            compute_detail_tier(&plain, BuildingCategory::Commercial, 800, 20, true),
+            DetailTier::Enhanced
+        );
+        let notable = tagged(&[("historic", "yes"), ("heritage", "2"), ("wikidata", "Q42")]);
+        assert_eq!(
+            compute_detail_tier(&notable, BuildingCategory::Historic, 600, 20, true),
+            DetailTier::Landmark
+        );
     }
 
     #[test]
