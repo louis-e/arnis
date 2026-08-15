@@ -336,7 +336,7 @@ impl BuildingCategory {
             // Check if this qualifies as a true skyscraper:
             // Must be significantly tall AND have skyscraper proportions
             // (taller than twice its longest side dimension)
-            let is_true_skyscraper = building_height >= 160
+            let is_true_skyscraper = building_height >= 120
                 && Self::has_skyscraper_proportions(element, building_height);
 
             if is_true_skyscraper {
@@ -2296,12 +2296,42 @@ fn get_wall_block_for_category(
 
 /// Gross block height of one upper floor for a building type.
 ///
-/// Currently 4 for every type. The floor-rhythm stage makes this category-aware
-/// (~3 blocks for residential-scale types, matching ~3 m storeys at 1 block/m).
-/// Derived from tags only: `BuildingCategory` is resolved *after* height
-/// calculation and itself depends on the computed height, so it cannot be used here.
-fn floor_cycle_for(_building_type: &str, _tags: &HashMap<String, String>) -> i32 {
-    4
+/// Residential-scale types get 3-block storeys (~3 m at 1 block/m, fixing the
+/// stretched look of #1239); commercial, institutional and industrial types
+/// keep 4 blocks — their real floor-to-floor heights are 3.5-4 m. Derived from
+/// tags only: `BuildingCategory` is resolved *after* height calculation and
+/// itself depends on the computed height, so it cannot be used here.
+fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
+    const RESIDENTIAL_SCALE: &[&str] = &[
+        "house",
+        "detached",
+        "semidetached_house",
+        "terrace",
+        "bungalow",
+        "villa",
+        "cabin",
+        "residential",
+        "apartments",
+        "dormitory",
+        "farm",
+        "hut",
+        "shed",
+        "static_caravan",
+    ];
+    if tags.contains_key("building:part") {
+        // Parts are predominantly tower volumes; generic parts stay on the
+        // taller rhythm so sibling parts of one skyscraper agree.
+        return if RESIDENTIAL_SCALE.contains(&building_type) {
+            3
+        } else {
+            4
+        };
+    }
+    if RESIDENTIAL_SCALE.contains(&building_type) || building_type == "yes" {
+        3
+    } else {
+        4
+    }
 }
 
 /// Inferred storey count or explicit hall height for buildings without any
@@ -10103,8 +10133,8 @@ mod height_tests {
     #[test]
     fn relation_levels_apply_without_height_tag() {
         let way = way_with_tags(&[]);
-        let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, Some(5), 4, 100, 1);
-        assert_eq!(h, 22); // 5 levels * 4 + 2
+        let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, Some(5), 3, 100, 1);
+        assert_eq!(h, 17); // 5 levels * 3 + 2
     }
 
     // A 5cm roof plate stays a thin slab instead of a 3-block band
@@ -10142,16 +10172,16 @@ mod height_tests {
     #[test]
     fn fractional_levels_parse() {
         let way = way_with_tags(&[("building:levels", "2.5")]);
-        let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 100, 1);
-        assert_eq!(h, 12); // 2.5 levels * 4 + 2
+        let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 3, 100, 1);
+        assert_eq!(h, 9); // 2.5 levels * 3 + 2
     }
 
     // The +2 moved into the min_level offset, wall span is exactly 4 per level
     #[test]
     fn min_level_walls_span_remaining_levels() {
         let way = way_with_tags(&[("building:levels", "4"), ("building:min_level", "2")]);
-        let (h, _) = calculate_building_height(&way, "yes", 2, 1.0, None, 4, 100, 1);
-        assert_eq!(h, 8);
+        let (h, _) = calculate_building_height(&way, "yes", 2, 1.0, None, 3, 100, 1);
+        assert_eq!(h, 6);
     }
 
     // layer=-1 is treated as underground unless an explicit surface/overground/roof location is set
@@ -10172,12 +10202,12 @@ mod height_tests {
     fn inferred_house_heights_are_deterministic_and_in_range() {
         for seed in 0..40u64 {
             let way = way_with_tags(&[("building", "house")]);
-            let (h1, tall1) = calculate_building_height(&way, "house", 0, 1.0, None, 4, 100, seed);
-            let (h2, _) = calculate_building_height(&way, "house", 0, 1.0, None, 4, 100, seed);
+            let (h1, tall1) = calculate_building_height(&way, "house", 0, 1.0, None, 3, 100, seed);
+            let (h2, _) = calculate_building_height(&way, "house", 0, 1.0, None, 3, 100, seed);
             assert_eq!(h1, h2);
             assert!(!tall1);
-            // 1-3 storeys → 6/10/14 blocks at the 4-block cycle
-            assert!(matches!(h1, 6 | 10 | 14), "unexpected house height {h1}");
+            // 1-3 storeys → 5/8/11 blocks at the 3-block cycle
+            assert!(matches!(h1, 5 | 8 | 11), "unexpected house height {h1}");
         }
     }
 
@@ -10193,19 +10223,19 @@ mod height_tests {
     #[test]
     fn tags_override_inference() {
         let way = way_with_tags(&[("building", "garage"), ("building:levels", "3")]);
-        let (h, _) = calculate_building_height(&way, "garage", 0, 1.0, None, 4, 40, 7);
-        assert_eq!(h, 14);
+        let (h, _) = calculate_building_height(&way, "garage", 0, 1.0, None, 3, 40, 7);
+        assert_eq!(h, 11);
     }
 
     #[test]
     fn generic_yes_scales_with_footprint() {
         let way = way_with_tags(&[("building", "yes")]);
         for seed in 0..40u64 {
-            let (small, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 30, seed);
-            assert!(matches!(small, 3 | 6), "tiny yes-building got {small}");
-            let (large, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 900, seed);
+            let (small, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 3, 30, seed);
+            assert!(matches!(small, 3 | 5), "tiny yes-building got {small}");
+            let (large, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 3, 900, seed);
             assert!(
-                matches!(large, 7 | 14 | 18),
+                matches!(large, 7 | 11 | 14),
                 "large yes-building got {large}"
             );
         }
@@ -10215,8 +10245,8 @@ mod height_tests {
     fn inferred_apartments_reach_midrise() {
         let way = way_with_tags(&[("building", "apartments")]);
         for seed in 0..40u64 {
-            let (h, _) = calculate_building_height(&way, "apartments", 0, 1.0, None, 4, 400, seed);
-            assert!(matches!(h, 14 | 18 | 22 | 26), "apartments got {h}");
+            let (h, _) = calculate_building_height(&way, "apartments", 0, 1.0, None, 3, 400, seed);
+            assert!(matches!(h, 11 | 14 | 17 | 20), "apartments got {h}");
         }
     }
 }
