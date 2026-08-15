@@ -1241,6 +1241,7 @@ impl BuildingStyle {
 }
 
 /// Building configuration derived from OSM tags and args
+#[derive(Clone)]
 struct BuildingConfig {
     /// True when the building starts at ground level (no min_height / min_level offset).
     /// When false, foundation pillars should not be generated.
@@ -4663,6 +4664,7 @@ fn generate_wall_depth_features(
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
     facade: &FacadePlan,
+    sibling_cells: Option<&FnvHashSet<(i32, i32)>>,
 ) {
     if config.wall_depth_style == WallDepthStyle::None {
         return;
@@ -4742,6 +4744,16 @@ fn generate_wall_depth_features(
                     || facade.is_door(bx, bz)
                 {
                     continue;
+                }
+
+                // On building:parts, protrusions must not reach into a
+                // sibling part (conservative 2D probe over the 2-deep reach).
+                if let Some(siblings) = sibling_cells {
+                    let c1 = (bx + out_nx, bz + out_nz);
+                    let c2 = (bx + 2 * out_nx, bz + 2 * out_nz);
+                    if siblings.contains(&c1) || siblings.contains(&c2) {
+                        continue;
+                    }
                 }
 
                 let mod6 = config.window_col(bx, bz);
@@ -6359,18 +6371,22 @@ pub fn generate_buildings(
     // Street/neighbor classification: party walls, fronting streets, corner.
     // Sibling parts of one building are unioned into own_cells so they don't
     // read as party neighbors of each other.
-    let mut facade = if min_level_offset == 0 && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
-        let mut own_cells: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
-        if let Some(members) = ctx.group_members.get(&group_seed) {
-            for id in members {
-                if *id == element.id {
-                    continue;
-                }
-                if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
-                    own_cells.extend(fill.iter().copied());
-                }
+    // Cells of sibling building:parts in the same group, used both to exempt
+    // them from party-wall detection and to keep part facade depth clear.
+    let mut group_other_cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+    if let Some(members) = ctx.group_members.get(&group_seed) {
+        for id in members {
+            if *id == element.id {
+                continue;
+            }
+            if let Some(fill) = ctx.flood_fill_cache.get_cached(*id) {
+                group_other_cells.extend(fill.iter().copied());
             }
         }
+    }
+    let mut facade = if min_level_offset == 0 && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
+        let mut own_cells: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        own_cells.extend(group_other_cells.iter().copied());
         compute_facade_plan(element, ctx, args.scale, &own_cells)
     } else {
         FacadePlan::empty()
@@ -6582,6 +6598,25 @@ pub fn generate_buildings(
         &empty_passages
     };
 
+    // Podium + tower massing: the shell below is built at podium height, the
+    // tower ring is added after the roof pass.
+    let podium_tower = plan_podium_tower(
+        element,
+        &config,
+        style.roof_type,
+        style.generate_roof,
+        cached_footprint_size,
+        &cached_floor_area,
+        group_seed,
+    );
+    let config = match &podium_tower {
+        Some(plan) => BuildingConfig {
+            building_height: plan.podium_height,
+            ..config.clone()
+        },
+        None => config,
+    };
+
     // Entrances: mapped nodes get oriented doors; everything else gets one
     // synthetic door on the street-facing side. Planned before the decoration
     // passes so their columns stay clear of shutters, sills and pilasters.
@@ -6645,19 +6680,24 @@ pub fn generate_buildings(
     }
     generate_residential_window_decorations(editor, element, &config, effective_passages, &facade);
 
-    // Add wall depth features (pilasters, columns, ledges, cornices, buttresses)
-    // Only for standalone buildings, not building:part sub-sections (parts adjoin
-    // other parts and outward protrusions would collide with neighbours).
-    if !element.tags.contains_key("building:part") {
-        generate_wall_depth_features(
-            editor,
-            element,
-            &config,
-            has_sloped_roof,
-            effective_passages,
-            &facade,
-        );
-    }
+    // Add wall depth features (pilasters, columns, ledges, cornices, buttresses).
+    // building:part sub-sections get them too, with a sibling-cell probe so
+    // protrusions stay clear of adjoining parts.
+    let is_part = element.tags.contains_key("building:part");
+    let sibling_probe = if is_part {
+        Some(&group_other_cells)
+    } else {
+        None
+    };
+    generate_wall_depth_features(
+        editor,
+        element,
+        &config,
+        has_sloped_roof,
+        effective_passages,
+        &facade,
+        sibling_probe,
+    );
 
     // Add corner quoins (accent-block columns at building corners)
     if !element.tags.contains_key("building:part") {
@@ -6780,7 +6820,26 @@ pub fn generate_buildings(
             &roof_area,
             category,
             preferred_ridge_along_x,
+            podium_tower.is_some(),
         );
+
+        // Raise the tower ring above the podium roof, with interior floors.
+        if let Some(plan) = &podium_tower {
+            let dist = roof_edge_distances(&roof_area);
+            let tower = [InsetTier {
+                inset: plan.inset,
+                height: plan.full_height - plan.podium_height,
+                with_ceilings: true,
+            }];
+            generate_inset_tiers(
+                editor,
+                &config,
+                &roof_area,
+                &dist,
+                config.start_y_offset + config.building_height + 1,
+                &tower,
+            );
+        }
     }
 }
 
@@ -6913,6 +6972,7 @@ fn generate_building_roof(
     roof_area: &[(i32, i32)],
     category: BuildingCategory,
     preferred_ridge_along_x: Option<bool>,
+    suppress_flat_extras: bool,
 ) {
     // Dormers: house/residential pitched roofs, plus historic mansards.
     let add_dormers = config.condition == BuildingCondition::Normal
@@ -6960,9 +7020,13 @@ fn generate_building_roof(
         generate_flat_roof_edge_variation(editor, element, config);
     }
 
-    // Stepped setback crowns and wooden water towers on flat roofs
-    let mut has_crown = false;
-    if style.roof_type == RoofType::Flat && !element.tags.contains_key("building:part") {
+    // Stepped setback crowns and wooden water towers on flat roofs.
+    // A planned tower rises from this roof, so it gets neither.
+    let mut has_crown = suppress_flat_extras;
+    if !suppress_flat_extras
+        && style.roof_type == RoofType::Flat
+        && !element.tags.contains_key("building:part")
+    {
         has_crown = generate_setback_crown(editor, config, roof_area);
         if !has_crown {
             generate_water_tower(editor, config, roof_area, category);
@@ -7115,50 +7179,108 @@ fn roof_edge_distances(roof_area: &[(i32, i32)]) -> RoofDistanceGrid {
 }
 
 /// Stepped setback crown on 35% of tall flat-roofed towers, the classic art deco silhouette.
-fn generate_setback_crown(
+/// Podium + tower massing for a large tall building mapped as one outline.
+struct PodiumTowerPlan {
+    podium_height: i32,
+    inset: i32,
+    full_height: i32,
+}
+
+/// Big flat-roofed towers on large footprints read better as a 2-3 storey
+/// podium with an inset tower than as one sheer extrusion. Mapped
+/// `building:part` massing always wins (parts never take this path).
+fn plan_podium_tower(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    roof_type: RoofType,
+    generate_roof_flag: bool,
+    footprint_size: usize,
+    floor_area: &[(i32, i32)],
+    group_seed: u64,
+) -> Option<PodiumTowerPlan> {
+    if !config.is_tall_building
+        || config.building_height < 30
+        || footprint_size < 600
+        || roof_type != RoofType::Flat
+        || !generate_roof_flag
+        || config.condition != BuildingCondition::Normal
+        || element.tags.contains_key("building:part")
+    {
+        return None;
+    }
+    let mut rng = element_rng(group_seed ^ 0x90D1_0A70_0000_0001);
+    if !rng.random_bool(0.40) {
+        return None;
+    }
+    let inset = if footprint_size < 1200 {
+        3
+    } else {
+        4 + rng.random_range(0..2)
+    };
+    // Validate the tower footprint before committing to the massing.
+    let dist = roof_edge_distances(floor_area);
+    let tower_cells = floor_area
+        .iter()
+        .filter(|&&(x, z)| dist.get(x, z) >= inset)
+        .count();
+    if tower_cells < 150 || tower_cells * 4 < footprint_size {
+        return None;
+    }
+    let podium_floors = 2 + rng.random_range(0..2);
+    let podium_height = podium_floors * config.floor_cycle + GROUND_FLOOR_BONUS;
+    if config.building_height - podium_height < 2 * config.floor_cycle {
+        return None;
+    }
+    Some(PodiumTowerPlan {
+        podium_height,
+        inset,
+        full_height: config.building_height,
+    })
+}
+
+/// One inset ring of a tiered top (setback crown tier, or a whole tower).
+struct InsetTier {
+    inset: i32,
+    height: i32,
+    /// Lay interior ceiling plates with the usual light grid inside the ring.
+    with_ceilings: bool,
+}
+
+/// Places stacked inset wall rings above `base_rel` using the building's own
+/// facade grammar (window bands continue upward), capping each tier with a
+/// floor plate. Returns the relative Y of the top cap, or None when even the
+/// first tier is too small.
+fn generate_inset_tiers(
     editor: &mut WorldEditor,
     config: &BuildingConfig,
     roof_area: &[(i32, i32)],
-) -> bool {
-    if !config.is_tall_building
-        || config.condition != BuildingCondition::Normal
-        || roof_area.len() < 300
-    {
-        return false;
-    }
-    let mut rng = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001);
-    if !rng.random_bool(0.35) {
-        return false;
-    }
-
-    let dist = roof_edge_distances(roof_area);
-    let roof_rel = config.start_y_offset + config.building_height + 1;
-    let tier_height = config.floor_cycle;
+    dist: &RoofDistanceGrid,
+    base_rel: i32,
+    tiers: &[InsetTier],
+) -> Option<i32> {
+    let mut current_base = base_rel;
     let mut placed = false;
-
-    for tier in 0..2i32 {
-        let inset = 3 + tier * 3;
+    for tier in tiers {
         let tier_cells: Vec<(i32, i32)> = roof_area
             .iter()
             .copied()
-            .filter(|&(x, z)| dist.get(x, z) >= inset)
+            .filter(|&(x, z)| dist.get(x, z) >= tier.inset)
             .collect();
         if tier_cells.len() < 30 {
             break;
         }
         placed = true;
-        let base = roof_rel + tier * tier_height;
 
         for &(x, z) in &tier_cells {
             let is_wall = [(1, 0), (-1, 0), (0, 1), (0, -1)]
                 .iter()
-                .any(|&(dx, dz)| dist.get(x + dx, z + dz) < inset);
+                .any(|&(dx, dz)| dist.get(x + dx, z + dz) < tier.inset);
             if is_wall {
                 // Same wall and window logic as the facade, so bands continue upward.
-                for h in 0..tier_height {
+                for h in 0..tier.height {
                     let block = determine_wall_block_at_position(
                         x,
-                        base + h,
+                        current_base + h,
                         z,
                         config,
                         ColumnFacade::default(),
@@ -7166,37 +7288,93 @@ fn generate_setback_crown(
                     editor.set_block_absolute(
                         block,
                         x,
-                        base + h + config.abs_terrain_offset,
+                        current_base + h + config.abs_terrain_offset,
                         z,
                         None,
                         Some(&[]),
                     );
                 }
+            } else if tier.with_ceilings {
+                for h in 0..tier.height {
+                    let gy = current_base + h;
+                    if config.floor_row(gy) == 0 {
+                        let block = if x % 3 == 0 && z % 3 == 0 {
+                            GLOWSTONE
+                        } else {
+                            config.floor_block
+                        };
+                        editor.set_block_absolute(
+                            block,
+                            x,
+                            gy + config.abs_terrain_offset,
+                            z,
+                            None,
+                            Some(&[]),
+                        );
+                    }
+                }
             }
             editor.set_block_absolute(
                 config.floor_block,
                 x,
-                base + tier_height + config.abs_terrain_offset,
+                current_base + tier.height + config.abs_terrain_offset,
                 z,
                 None,
                 Some(&[]),
             );
         }
+        current_base += tier.height;
+    }
+    placed.then_some(current_base)
+}
+
+fn generate_setback_crown(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    roof_area: &[(i32, i32)],
+) -> bool {
+    if !config.is_tall_building
+        || config.condition != BuildingCondition::Normal
+        || roof_area.len() < 200
+    {
+        return false;
+    }
+    let mut rng = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001);
+    if !rng.random_bool(0.45) {
+        return false;
     }
 
+    let dist = roof_edge_distances(roof_area);
+    let roof_rel = config.start_y_offset + config.building_height + 1;
+    // Masonry towers get the full art-deco wedding cake.
+    let tier_count = if config.category == BuildingCategory::MasonrySkyscraper {
+        3
+    } else {
+        2
+    };
+    let tiers: Vec<InsetTier> = (0..tier_count)
+        .map(|t| InsetTier {
+            inset: 3 + t * 3,
+            height: config.floor_cycle,
+            with_ceilings: false,
+        })
+        .collect();
+    let Some(top) = generate_inset_tiers(editor, config, roof_area, &dist, roof_rel, &tiers) else {
+        return false;
+    };
+
     // Small mast on the crown centre, on the deepest cell.
-    if placed {
-        if let Some(&(mx, mz)) = roof_area.iter().max_by_key(|&&(x, z)| dist.get(x, z)) {
-            if dist.get(mx, mz) >= 6 {
-                let top = roof_rel + 2 * tier_height + 1 + config.abs_terrain_offset;
-                for h in 0..3 {
-                    editor.set_block_absolute(IRON_BARS, mx, top + h, mz, None, Some(&[]));
-                }
-                editor.set_block_absolute(LIGHTNING_ROD, mx, top + 3, mz, None, Some(&[]));
+    if let Some(&(mx, mz)) = roof_area.iter().max_by_key(|&&(x, z)| dist.get(x, z)) {
+        if dist.get(mx, mz) >= 6 {
+            let top_abs = top + 1 + config.abs_terrain_offset;
+            for h in 0..3 {
+                editor.set_block_absolute(IRON_BARS, mx, top_abs + h, mz, None, Some(&[]));
             }
+            editor.set_block_absolute(LIGHTNING_ROD, mx, top_abs + 3, mz, None, Some(&[]));
         }
     }
-    placed
+
+    true
 }
 
 /// Wooden rooftop water tank on legs, a staple of brick mid-rises. 18% of eligible flat roofs.
@@ -10301,6 +10479,77 @@ mod style_tests {
         assert_eq!(parse_roof_type("hipped"), RoofType::Hipped);
         assert_eq!(parse_roof_type("round"), RoofType::Hipped);
         assert_eq!(parse_roof_type("gabled"), RoofType::Gabled);
+    }
+
+    #[test]
+    fn podium_tower_planning_is_bounded_and_deterministic() {
+        let mut config = test_config(50, false, false);
+        config.is_tall_building = true;
+        let way = ProcessedWay {
+            id: 9,
+            nodes: Vec::new(),
+            tags: std::iter::once(("building".to_string(), "office".to_string())).collect(),
+        };
+        let mut floor_area: Vec<(i32, i32)> = Vec::new();
+        for x in 20..=50 {
+            for z in 20..=44 {
+                floor_area.push((x, z));
+            }
+        }
+        let footprint = floor_area.len();
+
+        let mut any_plan = false;
+        for seed in 0..30u64 {
+            let a = plan_podium_tower(
+                &way,
+                &config,
+                RoofType::Flat,
+                true,
+                footprint,
+                &floor_area,
+                seed,
+            );
+            let b = plan_podium_tower(
+                &way,
+                &config,
+                RoofType::Flat,
+                true,
+                footprint,
+                &floor_area,
+                seed,
+            );
+            assert_eq!(a.is_some(), b.is_some());
+            if let (Some(a), Some(b)) = (a, b) {
+                any_plan = true;
+                assert_eq!(a.podium_height, b.podium_height);
+                assert!(a.podium_height == 10 || a.podium_height == 14);
+                assert_eq!(a.full_height, 50);
+                assert!(a.inset >= 3);
+                assert!(config.building_height - a.podium_height >= 2 * config.floor_cycle);
+            }
+        }
+        assert!(any_plan, "the 40% roll should hit within 30 seeds");
+
+        // Small footprints never get a podium split.
+        let small: Vec<(i32, i32)> = floor_area.iter().copied().take(300).collect();
+        for seed in 0..30u64 {
+            assert!(
+                plan_podium_tower(&way, &config, RoofType::Flat, true, 300, &small, seed).is_none()
+            );
+        }
+        // Pitched roofs never do either.
+        for seed in 0..30u64 {
+            assert!(plan_podium_tower(
+                &way,
+                &config,
+                RoofType::Gabled,
+                true,
+                footprint,
+                &floor_area,
+                seed
+            )
+            .is_none());
+        }
     }
 
     #[test]
