@@ -937,6 +937,7 @@ impl BuildingStyle {
         building_height: i32,
         has_multiple_floors: bool,
         footprint_size: usize,
+        style_seed: u64,
         rng: &mut impl Rng,
     ) -> Self {
         // === Block Palette ===
@@ -1170,7 +1171,7 @@ impl BuildingStyle {
                         BuildingCategory::House | BuildingCategory::Residential,
                     ) => return WallDepthStyle::None,
                     (ArchEra::Contemporary, BuildingCategory::Residential)
-                        if element_rng(element.id ^ 0xE5A0_11DE_57A1_0003).random_bool(0.50) =>
+                        if element_rng(style_seed ^ 0xE5A0_11DE_57A1_0003).random_bool(0.50) =>
                     {
                         return WallDepthStyle::ModernPillars;
                     }
@@ -4721,8 +4722,10 @@ fn generate_wall_depth_features(
         None => return,
     };
 
-    // Per-building deterministic roll for probability-gated styles
-    let mut bldg_rng = element_rng(element.id.wrapping_add(7919));
+    // Per-building deterministic roll for probability-gated styles. Seeded on
+    // the shared style seed (== element id for standalone buildings) so
+    // identically-tagged parts of one building agree.
+    let mut bldg_rng = element_rng(config.style_seed.wrapping_add(7919));
     let depth_roll: u32 = bldg_rng.random_range(0..100);
 
     // SubtlePilasters: 60% of eligible buildings
@@ -6446,6 +6449,7 @@ pub fn generate_buildings(
         building_height,
         has_multiple_floors,
         cached_footprint_size,
+        group_seed,
         &mut rng,
     );
 
@@ -10629,6 +10633,57 @@ mod style_tests {
                 b.name()
             );
         }
+    }
+
+    // The "one color for the whole skyscraper" guarantee: parts of one
+    // building share group_seed, and identically-tagged parts must resolve
+    // the exact same style (wall, glass, accent, roof, relief).
+    #[test]
+    fn identically_tagged_parts_resolve_one_shared_style() {
+        use crate::element_processing::building_test_support::rect_way;
+        let tags: &[(&str, &str)] = &[("building:part", "yes"), ("height", "40")];
+        let way_a = rect_way(500, 20, 20, 30, 30, tags);
+        let way_b = rect_way(501, 31, 20, 41, 30, tags);
+        let group_seed = 4242u64;
+
+        let style_for = |way: &ProcessedWay| {
+            let (h, tall) = calculate_building_height(way, "yes", 0, 1.0, None, 4, 100, group_seed);
+            let category = BuildingCategory::from_element(way, tall, h, group_seed);
+            let preset = BuildingStylePreset::for_category(category);
+            let era = crate::osm_parser::building_arch_era(&way.tags);
+            let detail = compute_detail_tier(way, category, 100, h, false);
+            let mut rng = element_rng(group_seed);
+            (
+                category,
+                BuildingStyle::resolve(
+                    &preset,
+                    way,
+                    "yes",
+                    category,
+                    era,
+                    Climate::Temperate,
+                    detail,
+                    h,
+                    h > 6,
+                    100,
+                    group_seed,
+                    &mut rng,
+                ),
+            )
+        };
+        let (cat_a, a) = style_for(&way_a);
+        let (cat_b, b) = style_for(&way_b);
+        assert_eq!(cat_a, cat_b);
+        assert_eq!(a.wall_block, b.wall_block);
+        assert_eq!(a.window_block, b.window_block);
+        assert_eq!(a.accent_block, b.accent_block);
+        assert_eq!(a.roof_block, b.roof_block);
+        assert_eq!(a.wall_depth_style, b.wall_depth_style);
+        assert_eq!(a.roof_type, b.roof_type);
+        assert_eq!(
+            pick_window_archetype(cat_a, ArchEra::Unknown, group_seed),
+            pick_window_archetype(cat_b, ArchEra::Unknown, group_seed)
+        );
     }
 
     #[test]
