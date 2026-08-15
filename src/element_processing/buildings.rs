@@ -1300,6 +1300,10 @@ struct BuildingConfig {
     window_phase: i32,
     /// Per-building window layout on the shared lattice.
     window_archetype: WindowArchetype,
+    /// Balcony layout on street facades.
+    balcony_band: BalconyBand,
+    /// Banded stone ground floor on masonry-era urban buildings.
+    rustication: bool,
     /// Darker plinth block for the bottom wall rows, None to skip.
     base_course_block: Option<Block>,
     /// Wider, taller glass on the ground floor of commercial buildings.
@@ -1431,7 +1435,7 @@ fn pick_window_frame(
     // A known era narrows the pool and shifts how often frames appear:
     // heritage facades are almost always dressed, panel-era ones rarely.
     let (pool, chance): (&[WindowFrameStyle], f64) = match era {
-        ArchEra::HistoricOrnate => (&[StoneOrnate, RusticMossy], 0.80),
+        ArchEra::HistoricOrnate => (&[StoneOrnate, RusticMossy], 0.95),
         ArchEra::TraditionalPreWar => (
             &[
                 SpruceCottage,
@@ -1440,10 +1444,10 @@ fn pick_window_frame(
                 RusticMossy,
                 TerracottaCopper,
             ],
-            0.60,
+            0.90,
         ),
         ArchEra::PostWarPanel => (&[QuartzModern], 0.15),
-        ArchEra::Contemporary => (&[QuartzModern, Blackstone], 0.45),
+        ArchEra::Contemporary => (&[QuartzModern, Blackstone], 0.70),
         ArchEra::Unknown => (
             match category {
                 BuildingCategory::House | BuildingCategory::Residential => &[
@@ -1458,7 +1462,7 @@ fn pick_window_frame(
                 }
                 _ => &[RusticMossy, StoneOrnate, Blackstone],
             },
-            0.55,
+            0.90,
         ),
     };
     let chance = match detail {
@@ -1637,6 +1641,43 @@ fn window_pool_for_category(category: BuildingCategory) -> &'static [Block] {
         BuildingCategory::Farm => &FARM_WINDOW_OPTIONS,
         BuildingCategory::Historic => &HISTORIC_WINDOW_OPTIONS,
         _ => &WINDOW_VARIATIONS,
+    }
+}
+
+/// Balcony layout for multi-storey residential street facades. A repeated
+/// pattern reads as architecture where scattered singles read as noise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BalconyBand {
+    /// Legacy per-window random balconies.
+    Scattered,
+    /// A balcony on every street-facing bay of every upper floor.
+    EveryBay,
+    /// Balconies on every other bay, stacked vertically.
+    Alternating,
+}
+
+fn pick_balcony_band(
+    category: BuildingCategory,
+    building_height: i32,
+    floor_cycle: i32,
+    has_street: bool,
+    group_seed: u64,
+) -> BalconyBand {
+    if !matches!(
+        category,
+        BuildingCategory::Residential | BuildingCategory::House
+    ) || building_height < 3 * floor_cycle
+        || !has_street
+    {
+        return BalconyBand::Scattered;
+    }
+    let roll = element_rng(group_seed ^ 0xBA1C_0417_0000_0009).random_range(0u32..100);
+    if roll < 30 {
+        BalconyBand::Scattered
+    } else if roll < 60 {
+        BalconyBand::EveryBay
+    } else {
+        BalconyBand::Alternating
     }
 }
 
@@ -4061,6 +4102,13 @@ fn determine_wall_block_at_position_pristine(
 
             if use_accent_line || use_vertical_accent_here {
                 config.accent_block
+            } else if config.rustication
+                && role == FloorRole::Ground
+                && h > config.start_y_offset + config.base_course_rows()
+                && (h - config.start_y_offset) % 2 == 0
+            {
+                // Banded stone courses over the plinth.
+                config.base_course_block.unwrap_or(config.accent_block)
             } else {
                 config.wall_block
             }
@@ -4405,8 +4453,26 @@ fn generate_residential_window_decorations(
                             let abs_y = h + config.abs_terrain_offset;
                             let (sill_roll_max, balcony_roll_max) =
                                 if is_rear { (8, 18) } else { (15, 23) };
+                            let above_ground = !config.is_ground_level
+                                || h >= config.start_y_offset + 2 + config.floor_cycle;
+                            let wants_balcony = mod6 == 1
+                                && above_ground
+                                && match config.balcony_band {
+                                    BalconyBand::Scattered => {
+                                        (15..balcony_roll_max).contains(&decoration_roll)
+                                    }
+                                    BalconyBand::EveryBay => facade.is_street(bx, bz),
+                                    BalconyBand::Alternating => {
+                                        facade.is_street(bx, bz)
+                                            && (bx + bz + config.window_phase).div_euclid(6) % 2
+                                                == 0
+                                    }
+                                };
 
-                            if decoration_roll < sill_roll_max && config.window_frame.is_none() {
+                            if !wants_balcony
+                                && decoration_roll < sill_roll_max
+                                && config.window_frame.is_none()
+                            {
                                 // ── Window sill ──
                                 let lx = bx + out_nx;
                                 let lz = bz + out_nz;
@@ -4441,12 +4507,7 @@ fn generate_residential_window_decorations(
                                         None,
                                     );
                                 }
-                            } else if decoration_roll < balcony_roll_max
-                                && decoration_roll >= 15
-                                && mod6 == 1
-                                && (!config.is_ground_level
-                                    || h >= config.start_y_offset + 2 + config.floor_cycle)
-                            {
+                            } else if wants_balcony {
                                 // ── Balcony (placed once from centre col) ──
                                 // Never on the ground floor; elevated parts keep their base row.
                                 // A small 3-wide × 2-deep platform with
@@ -4656,7 +4717,15 @@ fn generate_corner_quoins(
                 | BuildingCategory::Historic
         )
     });
-    let roll_passed = element_rng(element.id.wrapping_add(3571)).random_bool(0.6);
+    let quoin_chance = if matches!(
+        config.era,
+        ArchEra::TraditionalPreWar | ArchEra::HistoricOrnate
+    ) {
+        0.9
+    } else {
+        0.6
+    };
+    let roll_passed = element_rng(element.id.wrapping_add(3571)).random_bool(quoin_chance);
     if !roll_passed && guaranteed_corner.is_none() {
         return;
     }
@@ -5228,10 +5297,10 @@ fn generate_facade_cornices(
         None => return,
     };
 
-    // 40% string courses, 35% window header trim, 25% plain.
+    // 55% string courses, 40% window header trim, 5% plain.
     let roll: u32 = element_rng(config.element_id ^ 0xC0A2_11CE_0000_77AB).random_range(0..100);
-    let string_courses = roll < 40;
-    let window_trim = (40..75).contains(&roll);
+    let string_courses = roll < 55;
+    let window_trim = (55..95).contains(&roll);
     if !string_courses && !window_trim {
         return;
     }
@@ -5349,6 +5418,68 @@ fn generate_archetype_window_headers(
                         );
                     }
                 }
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
+/// Awning trapdoors over street-facing storefront glass.
+fn generate_storefront_awnings(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
+) {
+    if !config.has_storefront || config.condition != BuildingCondition::Normal {
+        return;
+    }
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
+    };
+    const AWNING_OPTIONS: [Block; 5] = [
+        WARPED_TRAPDOOR,
+        SPRUCE_TRAPDOOR,
+        DARK_OAK_TRAPDOOR,
+        JUNGLE_TRAPDOOR,
+        ACACIA_TRAPDOOR,
+    ];
+    let awning = AWNING_OPTIONS[element_rng(config.style_seed ^ 0x0A3B_11B6_0000_000B)
+        .random_range(0..AWNING_OPTIONS.len())];
+    let awning_y = config.ground_floor_top() + config.abs_terrain_offset;
+
+    let mut previous_node: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+            let facing = facing_for_normal(out_nx, out_nz);
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+            for (bx, _, bz) in &points {
+                let (bx, bz) = (*bx, *bz);
+                if building_passages.contains(bx, bz)
+                    || facade.is_party(bx, bz)
+                    || facade.is_door(bx, bz)
+                    || !facade.is_street(bx, bz)
+                    || config.window_col(bx, bz) >= 4
+                {
+                    continue;
+                }
+                editor.set_block_with_properties_absolute(
+                    make_closed_trapdoor(awning, facing, "top"),
+                    bx + out_nx,
+                    awning_y,
+                    bz + out_nz,
+                    Some(&[AIR]),
+                    None,
+                );
             }
         }
         previous_node = Some((x2, z2));
@@ -6650,6 +6781,30 @@ pub fn generate_buildings(
             element_rng(element.id ^ 0x77D0_A3E1_9B1C_5544).random_range(0..6)
         },
         window_archetype,
+        balcony_band: pick_balcony_band(
+            category,
+            effective_building_height,
+            floor_cycle,
+            facade.has_any_street,
+            group_seed,
+        ),
+        rustication: matches!(
+            category,
+            BuildingCategory::House
+                | BuildingCategory::Residential
+                | BuildingCategory::Commercial
+                | BuildingCategory::Hotel
+                | BuildingCategory::Historic
+        ) && min_level_offset == 0
+            && condition == BuildingCondition::Normal
+            && detail >= DetailTier::Standard
+            && match era {
+                ArchEra::HistoricOrnate => true,
+                ArchEra::TraditionalPreWar => {
+                    element_rng(group_seed ^ 0x0BA5_E5A0_0000_000A).random_bool(0.70)
+                }
+                _ => false,
+            },
         base_course_block: {
             let eligible = min_level_offset == 0
                 && has_windows
@@ -6822,6 +6977,7 @@ pub fn generate_buildings(
         );
         generate_corner_downpipes(editor, element, &config, effective_passages);
         generate_archetype_window_headers(editor, element, &config, effective_passages, &facade);
+        generate_storefront_awnings(editor, element, &config, effective_passages, &facade);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -8675,8 +8831,8 @@ fn generate_gabled_roof(
     struct PosData {
         dist_to_edge: i32,
         local_half: i32,
-        /// Along-ridge distance to the nearest gable end (for half-hips).
-        end_dist: i32,
+        dm_along: i32,
+        dp_along: i32,
     }
     let mut pos_data: HashMap<(i32, i32), PosData> = HashMap::new();
     let mut max_perp_half: i32 = 0;
@@ -8693,10 +8849,10 @@ fn generate_gabled_roof(
             (dm_x, dp_x)
         };
         edge_scans.insert((x, z), (dm_perp, dp_perp));
-        let end_dist = if ridge_runs_along_x {
-            dm_x.min(dp_x)
+        let (dm_along, dp_along) = if ridge_runs_along_x {
+            (dm_x, dp_x)
         } else {
-            dm_z.min(dp_z)
+            (dm_z, dp_z)
         };
 
         let dist_to_edge = dm_perp.min(dp_perp);
@@ -8715,7 +8871,8 @@ fn generate_gabled_roof(
             PosData {
                 dist_to_edge,
                 local_half,
-                end_dist,
+                dm_along,
+                dp_along,
             },
         );
     }
@@ -8743,7 +8900,7 @@ fn generate_gabled_roof(
         if profile == GableProfile::HalfHipped {
             // The hip only bites above half the peak near the gable ends.
             let hip_start = (wall_cap / 2).max(2);
-            let hip_limit = config.base_height + hip_start + pd.end_dist + 1;
+            let hip_limit = config.base_height + hip_start + pd.dm_along.min(pd.dp_along) + 1;
             roof_height = roof_height.min(hip_limit);
         }
         roof_heights.insert((x, z), roof_height);
@@ -8878,6 +9035,41 @@ fn generate_gabled_roof(
                         None,
                     );
                 }
+            }
+        }
+    }
+
+    // Gable-end trim: the roof line continues one block past the gable face.
+    if profile != GableProfile::HalfHipped {
+        let along: (i32, i32) = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
+        for &(x, z) in floor_area {
+            let pd = &pos_data[&(x, z)];
+            let is_perp_edge = if ridge_runs_along_x {
+                !footprint.contains(&(x, z - 1)) || !footprint.contains(&(x, z + 1))
+            } else {
+                !footprint.contains(&(x - 1, z)) || !footprint.contains(&(x + 1, z))
+            };
+            if is_perp_edge {
+                continue;
+            }
+            let h = roof_heights[&(x, z)];
+            for (end_zero, sign) in [(pd.dm_along == 0, -1), (pd.dp_along == 0, 1)] {
+                if !end_zero {
+                    continue;
+                }
+                let tx = x + along.0 * sign;
+                let tz = z + along.1 * sign;
+                if footprint.contains(&(tx, tz)) {
+                    continue;
+                }
+                editor.set_block_with_properties_absolute(
+                    get_slope_stair(x, z),
+                    tx,
+                    h + config.abs_terrain_offset,
+                    tz,
+                    Some(&[AIR]),
+                    None,
+                );
             }
         }
     }
@@ -10551,6 +10743,8 @@ mod style_tests {
             style_seed: 1,
             window_phase: 0,
             window_archetype: WindowArchetype::Standard3,
+            balcony_band: BalconyBand::Scattered,
+            rustication: false,
             base_course_block: None,
             has_storefront: false,
             window_frame: None,
@@ -11065,5 +11259,105 @@ mod facade_integration_tests {
         let mut b = test_editor(&xz);
         run_building(&mut b, &way, &road, &footprints);
         assert_eq!(a.content_hash(), b.content_hash());
+    }
+}
+
+#[cfg(test)]
+mod facade_dump {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::element_processing::building_test_support::{
+        bitmap_with_rect, rect_way, test_editor,
+    };
+    use clap::Parser as _;
+    use fnv::FnvHashMap;
+
+    fn glyph(block: Option<Block>) -> char {
+        let Some(b) = block else { return ' ' };
+        let name = b.name();
+        if name.contains("glass") {
+            'o'
+        } else if name.contains("trapdoor") {
+            '^'
+        } else if name.contains("door") {
+            'D'
+        } else if name.contains("stair") {
+            '/'
+        } else if name.contains("slab") {
+            '_'
+        } else if name.contains("fence") || name.contains("bars") {
+            '+'
+        } else if name.contains("lantern") || name.contains("potted") || name.contains("pot") {
+            '*'
+        } else if name == "air" {
+            ' '
+        } else {
+            '#'
+        }
+    }
+
+    // Renders the street facade of a synthetic building as ASCII for manual
+    // dial tuning: cargo test facade_dump -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn dump_street_facades() {
+        for (label, tags) in [
+            (
+                "apartments 4 levels, pre-war",
+                vec![
+                    ("building", "apartments"),
+                    ("building:levels", "4"),
+                    ("start_date", "1905"),
+                ],
+            ),
+            (
+                "commercial 3 levels (storefront)",
+                vec![("building", "commercial"), ("building:levels", "3")],
+            ),
+            ("plain house, no tags", vec![("building", "house")]),
+        ] {
+            let xz = XZBBox::rect_from_xz_lengths(70.0, 60.0).unwrap();
+            let road = bitmap_with_rect(&xz, 0, 12, 69, 14);
+            let footprints = CoordinateBitmap::new(&xz);
+            let way = rect_way(4242, 22, 20, 52, 34, &tags);
+            let mut editor = test_editor(&xz);
+            let args = Args::parse_from([
+                "arnis",
+                "--bbox",
+                "1,2,3,4",
+                "--mode",
+                "geo-only",
+                "--ground-level",
+                "0",
+            ]);
+            let cache = FloodFillCache::new();
+            let passages = CoordinateBitmap::new_empty();
+            let groups: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+            let ctx = BuildingContext {
+                flood_fill_cache: &cache,
+                building_passages: &passages,
+                road_mask: &road,
+                building_footprints: &footprints,
+                group_members: &groups,
+            };
+            generate_buildings(&mut editor, &way, &args, None, None, &ctx, way.id);
+
+            println!("\n=== {label} ===");
+            println!("street wall plane (z=20) with outward layer (z=19) overlaid:");
+            for y in (0..=22).rev() {
+                let mut line = String::new();
+                for x in 20..=54 {
+                    let outward = editor.get_block_absolute(x, y, 19);
+                    let wall = editor.get_block_absolute(x, y, 20);
+                    let c = if outward.is_some() {
+                        glyph(outward).to_ascii_uppercase()
+                    } else {
+                        glyph(wall)
+                    };
+                    line.push(c);
+                }
+                println!("y{y:>2} |{line}|");
+            }
+        }
     }
 }
