@@ -10582,6 +10582,55 @@ mod style_tests {
         }
     }
 
+    // Every block a building surface can reach must translate to a real
+    // Luanti node — the fallback renders as plain stone and silently breaks
+    // the Luanti export.
+    #[test]
+    fn every_reachable_building_block_maps_to_luanti() {
+        use crate::luanti_block_map::{to_luanti_node, LuantiGame};
+        let mut blocks: Vec<Block> = Vec::new();
+        blocks.extend(crate::block_palette::all_building_palette_blocks());
+        blocks.extend_from_slice(&RESIDENTIAL_WALL_OPTIONS);
+        blocks.extend_from_slice(&COMMERCIAL_WALL_OPTIONS);
+        blocks.extend_from_slice(&INDUSTRIAL_WALL_OPTIONS);
+        blocks.extend_from_slice(&RELIGIOUS_WALL_OPTIONS);
+        blocks.extend_from_slice(&INSTITUTIONAL_WALL_OPTIONS);
+        blocks.extend_from_slice(&FARM_WALL_OPTIONS);
+        blocks.extend_from_slice(&HISTORIC_WALL_OPTIONS);
+        blocks.extend_from_slice(&GARAGE_WALL_OPTIONS);
+        blocks.extend_from_slice(&NORDIC_WOOD_ADDITIONS);
+        blocks.extend_from_slice(&ACCENT_BLOCK_OPTIONS);
+        blocks.extend_from_slice(&WINDOW_VARIATIONS);
+        blocks.extend_from_slice(&RESIDENTIAL_WINDOW_OPTIONS);
+        blocks.extend_from_slice(&FARM_WINDOW_OPTIONS);
+        blocks.extend_from_slice(&HISTORIC_WINDOW_OPTIONS);
+        blocks.extend_from_slice(&FLOOR_BLOCK_OPTIONS);
+        for style in [
+            DoorStyle::Oak,
+            DoorStyle::Spruce,
+            DoorStyle::DarkOak,
+            DoorStyle::Birch,
+        ] {
+            blocks.push(style.base_block());
+        }
+        let base: Vec<Block> = blocks.clone();
+        for b in base {
+            blocks.extend_from_slice(substitute_pool_only(b));
+        }
+        for b in blocks {
+            if b == STONE {
+                continue;
+            }
+            let node = to_luanti_node(b, LuantiGame::Mineclonia, None);
+            assert_ne!(
+                node.name,
+                "mcl_core:stone",
+                "{} falls back to stone on Luanti",
+                b.name()
+            );
+        }
+    }
+
     #[test]
     fn detail_tier_boundaries() {
         let tagged = |pairs: &[(&str, &str)]| ProcessedWay {

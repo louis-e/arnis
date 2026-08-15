@@ -179,6 +179,16 @@ pub fn roof_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
     pick_for_usage(color, USE_ROOF, rng)
 }
 
+/// All wall/roof-eligible palette blocks, for export-coverage tests.
+#[cfg(test)]
+pub(crate) fn all_building_palette_blocks() -> Vec<Block> {
+    PALETTE
+        .iter()
+        .filter(|(_, _, f)| f & (USE_WALL | USE_ROOF) != 0)
+        .map(|(_, b, _)| *b)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
