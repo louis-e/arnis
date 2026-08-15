@@ -1225,6 +1225,12 @@ struct BuildingConfig {
     era: ArchEra,
     /// Decorative budget from prominence (shutters, rooftop bits, two-tone).
     detail: DetailTier,
+    /// Narrower top-floor windows with an accent band below them.
+    top_treatment: bool,
+    /// Solid attic band with small lights under a pitched roof.
+    attic_style: bool,
+    /// Taller, wider windows on the first floor above ground (piano nobile).
+    piano_nobile: bool,
     wall_depth_style: WallDepthStyle,
     has_parapet: bool,
     has_lobby_base: bool,
@@ -1422,6 +1428,18 @@ impl BuildingConfig {
     #[inline]
     fn ground_floor_top(&self) -> i32 {
         self.start_y_offset + 1 + self.floor_cycle
+    }
+
+    /// Positional role of a wall row: ground floor, body, or topmost cycle.
+    #[inline]
+    fn floor_role(&self, h: i32) -> FloorRole {
+        if h <= self.ground_floor_top() {
+            FloorRole::Ground
+        } else if h > self.start_y_offset + self.building_height - self.floor_cycle {
+            FloorRole::Top
+        } else {
+            FloorRole::Body
+        }
     }
 
     /// Position within the 6-block window cycle (0-2 = window strip, 3-5 = wall pier).
@@ -1841,6 +1859,15 @@ fn era_filters_category(category: BuildingCategory) -> bool {
             | BuildingCategory::Hotel
             | BuildingCategory::Default
     )
+}
+
+/// Vertical position of a wall row within the building's composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FloorRole {
+    Ground,
+    Body,
+    /// The topmost floor cycle (attic/top-floor treatments hook in here).
+    Top,
 }
 
 /// How much decorative budget a building gets, from footprint, height,
@@ -3865,10 +3892,30 @@ fn determine_wall_block_at_position_pristine(
             return GLASS;
         }
 
+        let role = config.floor_role(h);
+
+        // Attic band: solid wall under the pitched roof with small single
+        // lights instead of full windows.
+        if config.attic_style && role == FloorRole::Top {
+            return if above_floor && window_col == 1 && floor_row == 2 {
+                config.window_block
+            } else {
+                config.wall_block
+            };
+        }
+
+        // Band cornice separating the body from a treated top floor.
+        if config.top_treatment
+            && floor_row == 0
+            && h == config.start_y_offset + config.building_height - config.floor_cycle
+        {
+            return config.accent_block;
+        }
+
         // Window layout across the 6-block cycle: the two skyscraper families
         // keep their fixed widths (masonry narrow, contemporary wide); everything
         // else follows the per-building archetype.
-        let is_window_position = above_floor
+        let mut is_window_position = above_floor
             && floor_row != 0
             && match config.category {
                 BuildingCategory::MasonrySkyscraper => window_col < 2,
@@ -3880,6 +3927,27 @@ fn determine_wall_block_at_position_pristine(
                     config.floor_cycle,
                 ),
             };
+
+        // Treated top floors narrow their windows by one column.
+        if config.top_treatment && role == FloorRole::Top {
+            let narrowed = match config.window_archetype {
+                WindowArchetype::Standard3 | WindowArchetype::ArchedTraditional => window_col != 2,
+                WindowArchetype::WideHorizontal => window_col != 3,
+                _ => true,
+            };
+            is_window_position = is_window_position && narrowed;
+        }
+
+        // Piano nobile: the first floor above ground gets grander glazing.
+        if config.piano_nobile
+            && role == FloorRole::Body
+            && h <= config.ground_floor_top() + config.floor_cycle
+            && above_floor
+            && floor_row != 0
+            && window_col < 3
+        {
+            is_window_position = true;
+        }
 
         if is_window_position {
             config.window_block
@@ -4206,8 +4274,14 @@ fn generate_residential_window_decorations(
                     // Stop a full window height before the top so every sill
                     // has a full window above it, avoids placing sills at the
                     // roof line.
-                    let sill_max =
-                        config.start_y_offset + config.building_height - (config.floor_cycle - 1);
+                    let attic_gap = if config.attic_style {
+                        config.floor_cycle
+                    } else {
+                        0
+                    };
+                    let sill_max = config.start_y_offset + config.building_height
+                        - (config.floor_cycle - 1)
+                        - attic_gap;
                     for h in (config.start_y_offset + 2)..=sill_max {
                         if config.floor_row(h) == 0 {
                             let floor_idx = h / config.floor_cycle;
@@ -6313,9 +6387,50 @@ pub fn generate_buildings(
         BuildingCondition::Disused | BuildingCondition::Normal => {}
     }
 
+    // Whether this building will get a sloped roof (drives the attic band).
+    let has_sloped_roof = style.generate_roof
+        && style.roof_type != RoofType::Flat
+        && !matches!(
+            condition,
+            BuildingCondition::Construction | BuildingCondition::Ruined
+        );
+
     // Window layout is picked before the config literal so the frame gate
     // below can see it (frames are designed around 3-wide bays).
     let window_archetype = pick_window_archetype(category, era, group_seed);
+
+    // Vertical composition: top-floor and first-floor treatments, seeded on
+    // the group seed so building:part groups agree.
+    let top_treatment = has_windows
+        && effective_building_height >= 4 * floor_cycle
+        && !style.use_horizontal_windows
+        && !matches!(
+            category,
+            BuildingCategory::GlassySkyscraper
+                | BuildingCategory::GlassCornerSkyscraper
+                | BuildingCategory::GridSkyscraper
+                | BuildingCategory::Tower
+        )
+        && element_rng(group_seed ^ 0xF10A_401E_0000_0001).random_bool(0.45);
+    let attic_style = has_windows
+        && has_sloped_roof
+        && effective_building_height >= 3 * floor_cycle
+        && matches!(
+            category,
+            BuildingCategory::House | BuildingCategory::Residential | BuildingCategory::Historic
+        )
+        && element_rng(group_seed ^ 0xF10A_401E_0000_0002).random_bool(0.55);
+    let piano_nobile = has_windows
+        && effective_building_height >= 3 * floor_cycle
+        && match category {
+            BuildingCategory::Historic => {
+                element_rng(group_seed ^ 0xF10A_401E_0000_0003).random_bool(0.50)
+            }
+            BuildingCategory::Hotel => {
+                element_rng(group_seed ^ 0xF10A_401E_0000_0003).random_bool(0.20)
+            }
+            _ => false,
+        };
 
     // Create config struct for cleaner function calls
     let config = BuildingConfig {
@@ -6342,6 +6457,9 @@ pub fn generate_buildings(
         category,
         era,
         detail,
+        top_treatment,
+        attic_style,
+        piano_nobile,
         wall_depth_style: style.wall_depth_style,
         has_parapet: style.has_parapet
             || short_flat_parapet_for(
@@ -6437,13 +6555,6 @@ pub fn generate_buildings(
         }
     }
 
-    // Generate walls, pass whether this building will have a sloped roof.
-    let has_sloped_roof = style.generate_roof
-        && style.roof_type != RoofType::Flat
-        && !matches!(
-            config.condition,
-            BuildingCondition::Construction | BuildingCondition::Ruined
-        );
     let (wall_outline, corner_count) = build_wall_ring(
         editor,
         &element.nodes,
@@ -9869,6 +9980,91 @@ mod style_tests {
         let xz = XZBBox::rect_from_xz_lengths(50.0, 50.0).unwrap();
         let editor = test_editor_at(&xz, LLBBox::new(22.9, 12.9, 23.1, 13.1).unwrap());
         assert_eq!(editor.climate(), Climate::HotDesert);
+    }
+
+    fn test_config(height: i32, attic: bool, top: bool) -> BuildingConfig {
+        BuildingConfig {
+            is_ground_level: true,
+            building_height: height,
+            floor_cycle: 4,
+            is_tall_building: false,
+            start_y_offset: 0,
+            abs_terrain_offset: 0,
+            wall_block: BRICK,
+            floor_block: OAK_PLANKS,
+            window_block: GLASS,
+            accent_block: SMOOTH_STONE,
+            roof_block: None,
+            use_vertical_windows: false,
+            use_horizontal_windows: false,
+            use_accent_roof_line: false,
+            use_accent_lines: false,
+            use_vertical_accent: false,
+            is_abandoned_building: false,
+            has_windows: true,
+            has_garage_door: false,
+            has_single_door: false,
+            category: BuildingCategory::House,
+            era: ArchEra::Unknown,
+            detail: DetailTier::Standard,
+            top_treatment: top,
+            attic_style: attic,
+            piano_nobile: false,
+            wall_depth_style: WallDepthStyle::None,
+            has_parapet: false,
+            has_lobby_base: false,
+            condition: BuildingCondition::Normal,
+            element_id: 1,
+            style_seed: 1,
+            window_phase: 0,
+            window_archetype: WindowArchetype::Standard3,
+            base_course_block: None,
+            has_storefront: false,
+            window_frame: None,
+        }
+    }
+
+    #[test]
+    fn floor_role_boundaries() {
+        // 3 storeys at cycle 4: height = 3*4 + 2 = 14.
+        let config = test_config(14, false, false);
+        assert_eq!(config.floor_role(1), FloorRole::Ground);
+        assert_eq!(config.floor_role(5), FloorRole::Ground);
+        assert_eq!(config.floor_role(6), FloorRole::Body);
+        assert_eq!(config.floor_role(10), FloorRole::Body);
+        assert_eq!(config.floor_role(11), FloorRole::Top);
+        assert_eq!(config.floor_role(14), FloorRole::Top);
+    }
+
+    #[test]
+    fn attic_band_is_solid_with_small_lights() {
+        use crate::element_processing::building_facade::ColumnFacade;
+        let config = test_config(14, true, false);
+        let col = ColumnFacade::default();
+        // Middle of the attic band: window only at the single light position.
+        let light = determine_wall_block_at_position_pristine(1, 12, 0, &config, col);
+        assert_eq!(light, GLASS, "attic light at window_col 1, floor_row 2");
+        let wall = determine_wall_block_at_position_pristine(0, 12, 0, &config, col);
+        assert_eq!(wall, BRICK, "attic band is otherwise solid");
+        // Body floors keep full 3-wide windows.
+        let body = determine_wall_block_at_position_pristine(0, 7, 0, &config, col);
+        assert_eq!(body, GLASS);
+    }
+
+    #[test]
+    fn top_treatment_narrows_windows_and_adds_band() {
+        use crate::element_processing::building_facade::ColumnFacade;
+        let config = test_config(14, false, true);
+        let col = ColumnFacade::default();
+        // Band below the treated top floor (h = height - cycle = 10, row 0).
+        let band = determine_wall_block_at_position_pristine(0, 10, 0, &config, col);
+        assert_eq!(band, SMOOTH_STONE);
+        // Top floor loses its third window column…
+        let narrowed = determine_wall_block_at_position_pristine(2, 12, 0, &config, col);
+        assert_eq!(narrowed, BRICK);
+        // …but keeps the first two.
+        let kept = determine_wall_block_at_position_pristine(1, 12, 0, &config, col);
+        assert_eq!(kept, GLASS);
     }
 
     #[test]
