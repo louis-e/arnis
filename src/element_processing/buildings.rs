@@ -66,6 +66,12 @@ impl BuildingCondition {
 /// Enum representing different roof types
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum RoofType {
+    /// Steep lower slope, shallow upper slope, flat cap — the Paris roof.
+    Mansard,
+    /// Barn roof: steep lower gable pitch breaking to a shallow upper pitch.
+    Gambrel,
+    /// Gable whose ends are hipped only above half height.
+    HalfHipped,
     Gabled,    // Two sloping sides meeting at a ridge
     Hipped, // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
     Skillion, // Single sloping surface
@@ -928,6 +934,7 @@ impl BuildingStyle {
         era: ArchEra,
         climate: Climate,
         detail: DetailTier,
+        building_height: i32,
         has_multiple_floors: bool,
         footprint_size: usize,
         rng: &mut impl Rng,
@@ -1038,10 +1045,42 @@ impl BuildingStyle {
             (rt, should_generate)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
-            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED
+            let big_block = footprint_size > MAX_FOOTPRINT_FOR_GABLED || building_height >= 15;
+            if building_type == "apartments" && big_block {
+                // Urban apartment blocks: flat, hipped, or (pre-war) mansard.
+                let (flat_w, hip_w) =
+                    if matches!(era, ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar) {
+                        (45, 20)
+                    } else {
+                        (45, 35)
+                    };
+                let roll = rng.random_range(0u32..100);
+                if roll < flat_w {
+                    (RoofType::Flat, false)
+                } else if roll < flat_w + hip_w {
+                    (RoofType::Hipped, true)
+                } else {
+                    (RoofType::Mansard, true)
+                }
+            } else if matches!(era, ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar)
+                && (100..=MAX_FOOTPRINT_FOR_GABLED).contains(&footprint_size)
+                && rng.random_bool(0.30)
+            {
+                // Mid-size pre-war fabric occasionally carries a mansard.
+                (RoofType::Mansard, true)
+            } else if footprint_size <= MAX_FOOTPRINT_FOR_GABLED
                 && rng.random_bool(climate_gable_probability(climate))
             {
                 (RoofType::Gabled, true)
+            } else {
+                (RoofType::Flat, false)
+            }
+        } else if matches!(building_type, "industrial" | "warehouse" | "hangar")
+            && footprint_size > 800
+        {
+            // Big industrial halls: shallow mono-pitch or flat.
+            if rng.random_bool(0.55) {
+                (RoofType::Skillion, true)
             } else {
                 (RoofType::Flat, false)
             }
@@ -1058,7 +1097,10 @@ impl BuildingStyle {
         const DIAGONAL_THRESHOLD: f64 = 0.35;
         let diagonality = compute_building_diagonality(&element.nodes);
         let roof_type = if !has_explicit_roof_shape
-            && matches!(roof_type, RoofType::Gabled | RoofType::Hipped)
+            && matches!(
+                roof_type,
+                RoofType::Gabled | RoofType::Hipped | RoofType::Mansard | RoofType::Gambrel
+            )
             && diagonality < DIAGONAL_THRESHOLD
         {
             RoofType::Pyramidal
@@ -1081,7 +1123,10 @@ impl BuildingStyle {
                     | "villa"
                     | "yes"
             );
-            let suitable_roof = matches!(roof_type, RoofType::Gabled | RoofType::Hipped);
+            let suitable_roof = matches!(
+                roof_type,
+                RoofType::Gabled | RoofType::Hipped | RoofType::Gambrel | RoofType::HalfHipped
+            );
             let suitable_size = (30..=400).contains(&footprint_size);
 
             is_residential && suitable_roof && suitable_size && rng.random_bool(0.40)
@@ -6037,8 +6082,10 @@ fn parse_roof_type(roof_shape: &str) -> RoofType {
     match roof_shape {
         "gabled" | "gable" | "pitched" | "saltbox" | "double_saltbox" | "quadruple_saltbox"
         | "gabled_row" => RoofType::Gabled,
-        "hipped" | "hip" | "half-hipped" | "gambrel" | "mansard" | "round" | "side_hipped"
-        | "side_half-hipped" => RoofType::Hipped,
+        "hipped" | "hip" | "round" | "side_hipped" => RoofType::Hipped,
+        "mansard" => RoofType::Mansard,
+        "gambrel" => RoofType::Gambrel,
+        "half-hipped" | "half_hipped" | "side_half-hipped" => RoofType::HalfHipped,
         "skillion" | "shed" | "lean_to" | "monopitch" => RoofType::Skillion,
         "pyramidal" | "pyramid" => RoofType::Pyramidal,
         "dome" | "spherical" => RoofType::Dome,
@@ -6350,6 +6397,7 @@ pub fn generate_buildings(
         era,
         climate,
         detail,
+        building_height,
         has_multiple_floors,
         cached_footprint_size,
         &mut rng,
@@ -6714,8 +6762,24 @@ pub fn generate_buildings(
         BuildingCondition::Construction | BuildingCondition::Ruined
     );
     if style.generate_roof && !skip_roof {
+        // Terraced fabric prefers its ridge parallel to the fronting street.
+        let preferred_ridge_along_x = if matches!(building_type, "terrace" | "semidetached_house") {
+            facade
+                .front_segment
+                .and_then(|i| facade.segments[i].as_ref())
+                .map(|seg| seg.normal.0 == 0)
+        } else {
+            None
+        };
         generate_building_roof(
-            editor, element, &config, &style, &bounds, &roof_area, category,
+            editor,
+            element,
+            &config,
+            &style,
+            &bounds,
+            &roof_area,
+            category,
+            preferred_ridge_along_x,
         );
     }
 }
@@ -6839,6 +6903,7 @@ fn generate_flat_roof_edge_variation(
 }
 
 /// Handles roof generation including chimney placement and rooftop equipment
+#[allow(clippy::too_many_arguments)]
 fn generate_building_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -6847,13 +6912,20 @@ fn generate_building_roof(
     bounds: &BuildingBounds,
     roof_area: &[(i32, i32)],
     category: BuildingCategory,
+    preferred_ridge_along_x: Option<bool>,
 ) {
-    // Dormers fire only on House/Residential gabled roofs in Normal condition.
-    let add_dormers = matches!(
-        category,
-        BuildingCategory::House | BuildingCategory::Residential
-    ) && config.condition == BuildingCondition::Normal
-        && style.roof_type == RoofType::Gabled;
+    // Dormers: house/residential pitched roofs, plus historic mansards.
+    let add_dormers = config.condition == BuildingCondition::Normal
+        && ((matches!(
+            category,
+            BuildingCategory::House | BuildingCategory::Residential
+        ) && matches!(
+            style.roof_type,
+            RoofType::Gabled | RoofType::Hipped | RoofType::Mansard
+        )) || (category == BuildingCategory::Historic && style.roof_type == RoofType::Mansard));
+
+    // Churches carry visibly steeper gables than houses.
+    let steep_gable = category == BuildingCategory::Religious;
 
     // roof:colour/material on a part means the mapper modeled this surface, keep it clean
     let modeled_part_roof = element.tags.contains_key("building:part")
@@ -6873,6 +6945,8 @@ fn generate_building_roof(
         config.abs_terrain_offset,
         add_dormers,
         config.style_seed,
+        steep_gable,
+        preferred_ridge_along_x,
     );
 
     // Add parapet on flat-roofed buildings
@@ -8233,11 +8307,26 @@ fn generate_flat_roof(
 }
 
 /// Generates a gabled roof
+/// Variants of the two-slope roof family sharing the gabled scan.
+#[derive(Copy, Clone, PartialEq)]
+enum GableProfile {
+    /// Classic gable, peak capped at 60% of the wall height.
+    Standard,
+    /// Steeper church-style gable (90% cap).
+    Steep,
+    /// Barn roof: 2:1 rise for the first two cells, then 1:1.
+    Gambrel,
+    /// Gable with hipped ends above half height.
+    HalfHipped,
+}
+
 fn generate_gabled_roof(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
     config: &RoofConfig,
     roof_orientation: Option<&str>,
+    profile: GableProfile,
+    preferred_ridge_along_x: Option<bool>,
 ) {
     // Create a HashSet for O(1) footprint lookups, this is the actual building shape
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
@@ -8246,7 +8335,7 @@ fn generate_gabled_roof(
     let ridge_runs_along_x = match roof_orientation {
         Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
         Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
-        _ => width_is_longer,
+        _ => preferred_ridge_along_x.unwrap_or(width_is_longer),
     };
 
     // For each footprint position, scan all 4 cardinal directions to
@@ -8277,12 +8366,21 @@ fn generate_gabled_roof(
 
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
 
-    // Hard cap: the roof peak should never exceed ~60% of the wall height.
-    let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
+    // Hard cap: the roof peak should not exceed a fraction of the wall height.
+    let cap_factor = if profile == GableProfile::Steep {
+        0.9
+    } else {
+        0.6
+    };
+    let wall_cap = ((config.building_height as f64) * cap_factor)
+        .round()
+        .max(1.0) as i32;
 
     struct PosData {
         dist_to_edge: i32,
         local_half: i32,
+        /// Along-ridge distance to the nearest gable end (for half-hips).
+        end_dist: i32,
     }
     let mut pos_data: HashMap<(i32, i32), PosData> = HashMap::new();
     let mut max_perp_half: i32 = 0;
@@ -8299,6 +8397,11 @@ fn generate_gabled_roof(
             (dm_x, dp_x)
         };
         edge_scans.insert((x, z), (dm_perp, dp_perp));
+        let end_dist = if ridge_runs_along_x {
+            dm_x.min(dp_x)
+        } else {
+            dm_z.min(dp_z)
+        };
 
         let dist_to_edge = dm_perp.min(dp_perp);
 
@@ -8316,12 +8419,13 @@ fn generate_gabled_roof(
             PosData {
                 dist_to_edge,
                 local_half,
+                end_dist,
             },
         );
     }
 
     // Half-pitch when the capped flat ridge would be >= 4 blocks wide.
-    let use_half_pitch = max_perp_half - wall_cap >= 4;
+    let use_half_pitch = profile != GableProfile::Gambrel && max_perp_half - wall_cap >= 4;
 
     for &(x, z) in floor_area {
         let pd = &pos_data[&(x, z)];
@@ -8330,10 +8434,22 @@ fn generate_gabled_roof(
         } else {
             pd.dist_to_edge
         };
+        let boost = if profile == GableProfile::Gambrel {
+            // 2 blocks per cell over the steep band, then 1 per cell.
+            2 * slope_dist.min(2) + (slope_dist - 2).max(0)
+        } else {
+            slope_dist
+        };
         let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
         let capped_boost = local_boost.min(wall_cap);
-        let roof_height =
-            (config.base_height + slope_dist).min(config.base_height + capped_boost) + 1;
+        let mut roof_height =
+            (config.base_height + boost).min(config.base_height + capped_boost) + 1;
+        if profile == GableProfile::HalfHipped {
+            // The hip only bites above half the peak near the gable ends.
+            let hip_start = (wall_cap / 2).max(2);
+            let hip_limit = config.base_height + hip_start + pd.end_dist + 1;
+            roof_height = roof_height.min(hip_limit);
+        }
         roof_heights.insert((x, z), roof_height);
     }
 
@@ -8679,7 +8795,26 @@ fn place_eave_overhang_inner(
 
 /// Hipped roof via polygon-edge scanning, capped at 60% of wall height.
 fn generate_hipped_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], config: &RoofConfig) {
-    generate_hipped_roof_inner(editor, floor_area, config, true);
+    generate_hipped_roof_inner(editor, floor_area, config, true, None);
+}
+
+/// Mansard roof: the hipped scan with a piecewise profile.
+fn generate_mansard_roof(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    config: &RoofConfig,
+    steep_h: i32,
+) {
+    generate_hipped_roof_inner(editor, floor_area, config, true, Some(steep_h));
+}
+
+/// Height boost of a mansard profile at `dist_to_edge`: a steep 2-cell band
+/// rising to `steep_h`, then a shallow 1:2 slope, capped at `cap`.
+fn mansard_boost(dist_to_edge: i32, steep_h: i32, cap: i32) -> i32 {
+    const STEEP_RUN: i32 = 2;
+    let steep = (dist_to_edge.min(STEEP_RUN) * steep_h + STEEP_RUN - 1) / STEEP_RUN;
+    let shallow = (dist_to_edge - STEEP_RUN).max(0) / 2;
+    (steep + shallow).min(cap)
 }
 
 fn generate_hipped_roof_inner(
@@ -8687,6 +8822,7 @@ fn generate_hipped_roof_inner(
     floor_area: &[(i32, i32)],
     config: &RoofConfig,
     with_overhang: bool,
+    mansard_steep_h: Option<i32>,
 ) {
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
@@ -8718,12 +8854,23 @@ fn generate_hipped_roof_inner(
     }
     let mut pos_data: HashMap<(i32, i32), PosData> = HashMap::new();
     let mut max_full_span: i32 = 0;
+    // Perpendicular-to-ridge scans for dormer placement (ridge = longer axis).
+    let ridge_runs_along_x = config.width() >= config.length();
+    let mut edge_scans: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
 
     for &(x, z) in floor_area {
         let dm_x = scan_dir(x, z, -1, 0);
         let dp_x = scan_dir(x, z, 1, 0);
         let dm_z = scan_dir(x, z, 0, -1);
         let dp_z = scan_dir(x, z, 0, 1);
+        edge_scans.insert(
+            (x, z),
+            if ridge_runs_along_x {
+                (dm_z, dp_z)
+            } else {
+                (dm_x, dp_x)
+            },
+        );
 
         let dists = [dm_x, dp_x, dm_z, dp_z];
         let dist_to_edge = *dists.iter().min().unwrap();
@@ -8766,15 +8913,22 @@ fn generate_hipped_roof_inner(
 
     for &(x, z) in floor_area {
         let pd = &pos_data[&(x, z)];
-        let slope_dist = if use_half_pitch {
-            (pd.dist_to_edge + 1) / 2
+        let roof_height = if let Some(steep_h) = mansard_steep_h {
+            // Mansard: piecewise profile with its own cap; the local wing
+            // width still caps narrow wings so they don't overshoot.
+            let cap = wall_cap.max(steep_h + 2);
+            let local_cap = ((pd.local_half as f64) * 0.9).round().max(1.0) as i32 + steep_h;
+            config.base_height + mansard_boost(pd.dist_to_edge, steep_h, cap.min(local_cap)) + lift
         } else {
-            pd.dist_to_edge
+            let slope_dist = if use_half_pitch {
+                (pd.dist_to_edge + 1) / 2
+            } else {
+                pd.dist_to_edge
+            };
+            let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
+            let capped_boost = local_boost.min(wall_cap);
+            (config.base_height + slope_dist).min(config.base_height + capped_boost) + lift
         };
-        let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
-        let capped_boost = local_boost.min(wall_cap);
-        let roof_height =
-            (config.base_height + slope_dist).min(config.base_height + capped_boost) + lift;
         roof_heights.insert((x, z), roof_height);
     }
 
@@ -8950,6 +9104,17 @@ fn generate_hipped_roof_inner(
     if with_overhang {
         place_eave_overhang_all_sides(editor, floor_area, &footprint, config, stair_block_material);
     }
+
+    let parallel_to_ridge = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
+    place_dormer_windows(
+        editor,
+        floor_area,
+        &roof_heights,
+        &edge_scans,
+        config,
+        parallel_to_ridge,
+        &footprint,
+    );
 }
 
 /// Parses `roof:direction` (compass point or degrees) to the nearest cardinal.
@@ -9298,8 +9463,8 @@ fn onion_profile_radius(t: f64) -> f64 {
 }
 
 /// Unified function to generate various roof types
-#[allow(clippy::too_many_arguments)]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn generate_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -9313,6 +9478,8 @@ fn generate_roof(
     abs_terrain_offset: i32,
     add_dormers: bool,
     style_seed: u64,
+    steep_gable: bool,
+    preferred_ridge_along_x: Option<bool>,
 ) {
     if roof_area.is_empty() {
         return;
@@ -9368,11 +9535,56 @@ fn generate_roof(
         }
 
         RoofType::Gabled => {
-            generate_gabled_roof(editor, roof_area, &config, roof_orientation);
+            let profile = if steep_gable {
+                GableProfile::Steep
+            } else {
+                GableProfile::Standard
+            };
+            generate_gabled_roof(
+                editor,
+                roof_area,
+                &config,
+                roof_orientation,
+                profile,
+                preferred_ridge_along_x,
+            );
+        }
+
+        RoofType::Gambrel => {
+            generate_gabled_roof(
+                editor,
+                roof_area,
+                &config,
+                roof_orientation,
+                GableProfile::Gambrel,
+                preferred_ridge_along_x,
+            );
+        }
+
+        RoofType::HalfHipped => {
+            generate_gabled_roof(
+                editor,
+                roof_area,
+                &config,
+                roof_orientation,
+                GableProfile::HalfHipped,
+                preferred_ridge_along_x,
+            );
         }
 
         RoofType::Hipped => {
             generate_hipped_roof(editor, roof_area, &config);
+        }
+
+        RoofType::Mansard => {
+            // roof:levels hints how tall the steep band is (3 blocks per level).
+            let steep_h = element
+                .tags
+                .get("roof:levels")
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .map(|l| ((l * 3.0).round() as i32).clamp(3, 6))
+                .unwrap_or(4);
+            generate_mansard_roof(editor, roof_area, &config, steep_h);
         }
 
         RoofType::Skillion => {
@@ -10068,6 +10280,30 @@ mod style_tests {
     }
 
     #[test]
+    fn mansard_profile_shape() {
+        // Steep 2-cell band to steep_h, then shallow 1:2, capped.
+        assert_eq!(mansard_boost(0, 4, 10), 0);
+        assert_eq!(mansard_boost(1, 4, 10), 2);
+        assert_eq!(mansard_boost(2, 4, 10), 4);
+        assert_eq!(mansard_boost(3, 4, 10), 4);
+        assert_eq!(mansard_boost(4, 4, 10), 5);
+        assert_eq!(mansard_boost(8, 4, 6), 6); // capped
+        for d in 0..20 {
+            assert!(mansard_boost(d + 1, 4, 12) >= mansard_boost(d, 4, 12));
+        }
+    }
+
+    #[test]
+    fn new_roof_shapes_parse_distinctly() {
+        assert_eq!(parse_roof_type("mansard"), RoofType::Mansard);
+        assert_eq!(parse_roof_type("gambrel"), RoofType::Gambrel);
+        assert_eq!(parse_roof_type("half-hipped"), RoofType::HalfHipped);
+        assert_eq!(parse_roof_type("hipped"), RoofType::Hipped);
+        assert_eq!(parse_roof_type("round"), RoofType::Hipped);
+        assert_eq!(parse_roof_type("gabled"), RoofType::Gabled);
+    }
+
+    #[test]
     fn detail_tier_boundaries() {
         let tagged = |pairs: &[(&str, &str)]| ProcessedWay {
             id: 1,
@@ -10291,6 +10527,36 @@ mod facade_integration_tests {
             "party wall must not glaze into the neighbor"
         );
         assert!(west_has_glass, "free wall keeps its windows");
+    }
+
+    #[test]
+    fn mansard_and_gambrel_roofs_build_above_the_walls() {
+        const SLATE: &[Block] = &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE];
+        for shape in ["mansard", "gambrel"] {
+            let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+            let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
+            let footprints = CoordinateBitmap::new(&xz);
+            let way = rect_way(
+                46,
+                20,
+                20,
+                40,
+                32,
+                &[
+                    ("building", "house"),
+                    ("building:levels", "2"),
+                    ("roof:shape", shape),
+                    ("roof:material", "slate"),
+                ],
+            );
+            let mut editor = test_editor(&xz);
+            run_building(&mut editor, &way, &road, &footprints);
+
+            // Slate roof mass above the 10-block walls near the footprint centre.
+            let roofed =
+                (11..=18).any(|y| (24..=28).any(|z| editor.check_for_block(30, y, z, Some(SLATE))));
+            assert!(roofed, "{shape} roof should rise above the walls");
+        }
     }
 
     #[test]
