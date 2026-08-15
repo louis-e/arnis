@@ -1133,7 +1133,11 @@ impl BuildingStyle {
             );
             let suitable_roof = matches!(
                 roof_type,
-                RoofType::Gabled | RoofType::Hipped | RoofType::Gambrel | RoofType::HalfHipped
+                RoofType::Gabled
+                    | RoofType::Hipped
+                    | RoofType::Mansard
+                    | RoofType::Gambrel
+                    | RoofType::HalfHipped
             );
             let suitable_size = (30..=400).contains(&footprint_size);
 
@@ -1569,7 +1573,7 @@ impl BuildingBounds {
 
 /// Checks if a building should be skipped (underground structures)
 #[inline]
-fn is_underground_building(tags: &HashMap<String, String>) -> bool {
+pub(crate) fn is_underground_building(tags: &HashMap<String, String>) -> bool {
     // An explicit surface location wins over layer=-1, which is only stacking order
     match tags.get("location").map(String::as_str) {
         Some("underground") | Some("subway") => return true,
@@ -2319,13 +2323,8 @@ fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
         "static_caravan",
     ];
     if tags.contains_key("building:part") {
-        // Parts are predominantly tower volumes; generic parts stay on the
-        // taller rhythm so sibling parts of one skyscraper agree.
-        return if RESIDENTIAL_SCALE.contains(&building_type) {
-            3
-        } else {
-            4
-        };
+        // One cycle for all parts keeps stacked volumes flush at the seams.
+        return 4;
     }
     if RESIDENTIAL_SCALE.contains(&building_type) || building_type == "yes" {
         3
@@ -3001,7 +3000,6 @@ fn plan_synthetic_entrance(
             config.category,
             BuildingCategory::Greenhouse | BuildingCategory::Shed | BuildingCategory::Garage
         )
-        || outline_has_mapped_entrance(element)
         || facade.segments.is_empty()
     {
         return None;
@@ -4723,7 +4721,7 @@ fn generate_wall_depth_features(
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
     facade: &FacadePlan,
-    sibling_cells: Option<&FnvHashSet<(i32, i32)>>,
+    part_probe: Option<(&CoordinateBitmap, &FnvHashSet<(i32, i32)>)>,
 ) {
     if config.wall_depth_style == WallDepthStyle::None {
         return;
@@ -4807,12 +4805,13 @@ fn generate_wall_depth_features(
                     continue;
                 }
 
-                // On building:parts, protrusions must not reach into a
-                // sibling part (conservative 2D probe over the 2-deep reach).
-                if let Some(siblings) = sibling_cells {
-                    let c1 = (bx + out_nx, bz + out_nz);
-                    let c2 = (bx + 2 * out_nx, bz + 2 * out_nz);
-                    if siblings.contains(&c1) || siblings.contains(&c2) {
+                // Part protrusions stay out of any other building's cells.
+                if let Some((footprints, own)) = part_probe {
+                    let blocked =
+                        |cx: i32, cz: i32| footprints.contains(cx, cz) && !own.contains(&(cx, cz));
+                    if blocked(bx + out_nx, bz + out_nz)
+                        || blocked(bx + 2 * out_nx, bz + 2 * out_nz)
+                    {
                         continue;
                     }
                 }
@@ -6428,7 +6427,7 @@ pub fn generate_buildings(
         group_seed,
     );
     // Untagged towers read better on the taller commercial rhythm.
-    let (floor_cycle, building_height, is_tall_building) =
+    let (floor_cycle, building_height, is_tall_building, min_level_offset) =
         if is_tall_building && building_type == "yes" && floor_cycle == 3 {
             let (h, tall) = calculate_building_height(
                 element,
@@ -6440,9 +6439,21 @@ pub fn generate_buildings(
                 cached_footprint_size,
                 group_seed,
             );
-            (4, h, tall)
+            let lift = if element.tags.contains_key("min_height") {
+                min_level_offset
+            } else if min_level > 0 {
+                multiply_scale(min_level * 4 + GROUND_FLOOR_BONUS, scale_factor)
+            } else {
+                min_level_offset
+            };
+            (4, h, tall, lift)
         } else {
-            (floor_cycle, building_height, is_tall_building)
+            (
+                floor_cycle,
+                building_height,
+                is_tall_building,
+                min_level_offset,
+            )
         };
 
     // Determine building category and get appropriate style preset
@@ -6778,11 +6789,16 @@ pub fn generate_buildings(
     // building:part sub-sections get them too, with a sibling-cell probe so
     // protrusions stay clear of adjoining parts.
     let is_part = element.tags.contains_key("building:part");
-    let sibling_probe = if is_part {
-        Some(&group_other_cells)
+    let part_own_cells: FnvHashSet<(i32, i32)> = if is_part {
+        cached_floor_area
+            .iter()
+            .copied()
+            .chain(group_other_cells.iter().copied())
+            .collect()
     } else {
-        None
+        FnvHashSet::default()
     };
+    let part_probe = is_part.then(|| (ctx.building_footprints, &part_own_cells));
     generate_wall_depth_features(
         editor,
         element,
@@ -6790,7 +6806,7 @@ pub fn generate_buildings(
         has_sloped_roof,
         effective_passages,
         &facade,
-        sibling_probe,
+        part_probe,
     );
 
     // Add corner quoins (accent-block columns at building corners)
@@ -8290,7 +8306,7 @@ fn place_dormer_windows(
     let alt_target_h = config.base_height + 3;
     let (px, pz) = parallel_to_ridge;
 
-    let mut candidates: Vec<(i32, i32)> = Vec::new();
+    let mut candidates: Vec<(i32, i32, i32)> = Vec::new();
     for &(x, z) in floor_area {
         let h = match roof_heights.get(&(x, z)) {
             Some(&h) if h == target_h || h == alt_target_h => h,
@@ -8319,7 +8335,7 @@ fn place_dormer_windows(
             continue;
         }
 
-        candidates.push((x, z));
+        candidates.push((x, z, h));
     }
 
     if candidates.is_empty() {
@@ -8330,14 +8346,14 @@ fn place_dormer_windows(
     let target_count = (candidates.len() / 12).clamp(1, 3);
 
     let mut rng = element_rng(config.element_id_for_decor ^ 0x000D_04E4_DEC0);
-    let mut chosen: Vec<(i32, i32)> = Vec::new();
+    let mut chosen: Vec<(i32, i32, i32)> = Vec::new();
     let mut attempts = 0;
     while chosen.len() < target_count && attempts < candidates.len() * 4 {
         attempts += 1;
         let idx = rng.random_range(0..candidates.len());
         let pos = candidates[idx];
-        // Ridge-axis spacing ≥ 4 blocks between dormers.
-        let too_close = chosen.iter().any(|&(cx, cz)| {
+        // Ridge-axis spacing of at least 4 blocks between dormers.
+        let too_close = chosen.iter().any(|&(cx, cz, _)| {
             let d = ((cx - pos.0) * px + (cz - pos.1) * pz).abs();
             d < 4
         });
@@ -8363,8 +8379,7 @@ fn place_dormer_windows(
 
     let overwrite_anything: &[Block] = &[];
 
-    for (x, z) in chosen {
-        let h = config.base_height + 2;
+    for (x, z, h) in chosen {
         let lower_y = h - 1 + abs;
         let face_y = h + abs;
         let cap_y = h + 1 + abs;

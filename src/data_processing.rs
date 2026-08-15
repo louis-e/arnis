@@ -179,31 +179,18 @@ pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     }
 }
 
-/// Drops the cached flood fills whose last reader sits at `index`.
-///
-/// `last_fill_use` maps a way id to the position of the final element that reads
-/// its fill, counting both the standalone way and any relation holding it as a
-/// member. Evicting anywhere else would force a later reader to refill.
+/// Drops every cached flood fill whose last reader sits at `index`.
+/// Group-lifetime extension can point a fill at an index belonging to a
+/// different element, so eviction goes by index, not by the current element.
 fn release_finished_fills(
     cache: &mut FloodFillCache,
-    last_fill_use: &HashMap<u64, usize>,
-    element: &ProcessedElement,
+    fills_expiring_at: &HashMap<usize, Vec<u64>>,
     index: usize,
 ) {
-    match element {
-        ProcessedElement::Way(way) => {
-            if last_fill_use.get(&way.id) == Some(&index) {
-                cache.remove_way(way.id);
-            }
+    if let Some(ids) = fills_expiring_at.get(&index) {
+        for &id in ids {
+            cache.remove_way(id);
         }
-        ProcessedElement::Relation(rel) => {
-            for member in &rel.members {
-                if last_fill_use.get(&member.way.id) == Some(&index) {
-                    cache.remove_way(member.way.id);
-                }
-            }
-        }
-        ProcessedElement::Node(_) => {}
     }
 }
 
@@ -1051,6 +1038,10 @@ pub fn generate_world_with_options(
                 }
             }
         }
+        let mut fills_expiring_at: HashMap<usize, Vec<u64>> = HashMap::new();
+        for (&id, &idx) in last_fill_use.iter() {
+            fills_expiring_at.entry(idx).or_default().push(id);
+        }
         let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
         process_pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
@@ -1072,7 +1063,7 @@ pub fn generate_world_with_options(
                 || outline_suppression.contains(&suppression_key)
             {
                 // Still the last reader on record, so release its fills.
-                release_finished_fills(&mut flood_fill_cache, &last_fill_use, &element, index);
+                release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
                 continue;
             }
             if element_counter.is_multiple_of(pb_batch_size) {
@@ -1122,7 +1113,7 @@ pub fn generate_world_with_options(
 
             // Release flood fill cache entries for memory optimization.
             // (Skipped in the parallel path where the cache is shared immutably.)
-            release_finished_fills(&mut flood_fill_cache, &last_fill_use, &element, index);
+            release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
             // Element is dropped here, freeing its memory immediately.
         }
 

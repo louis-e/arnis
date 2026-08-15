@@ -1,6 +1,6 @@
 # Golden world hashes (scripts/golden_hash.sh). Regenerate with --update.
-levittown	8fd82cb05795c884
-marrakech	ac176c6da8521e35
-midtown	f9213bf4b8cb3929
-munich_altstadt	33be14ada9fd5c56
-rovaniemi	9c8cc9e669c7de67
+levittown	8b15e360751d644f
+marrakech	b1019eb9357e2ddf
+midtown	58f7cb4e458613fb
+munich_altstadt	48e6de7953c6fe45
+rovaniemi	79ad2e53c68e7ee0

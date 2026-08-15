@@ -461,9 +461,10 @@ impl FloodFillCache {
         // Relations first (outer fills, courtyards clear), ways second so courtyard buildings re-mark.
         for element in elements {
             if let ProcessedElement::Relation(rel) = element {
-                let is_building = rel.tags.contains_key("building")
+                let is_building = (rel.tags.contains_key("building")
                     || rel.tags.contains_key("building:part")
-                    || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                    || rel.tags.get("type").map(|t| t.as_str()) == Some("building"))
+                    && !crate::element_processing::buildings::is_underground_building(&rel.tags);
                 if !is_building {
                     continue;
                 }
@@ -478,7 +479,9 @@ impl FloodFillCache {
 
         for element in elements {
             if let ProcessedElement::Way(way) = element {
-                if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+                    && !crate::element_processing::buildings::is_underground_building(&way.tags)
+                {
                     if let Some(cached) = self.way_cache.get(&way.id) {
                         for &(x, z) in cached.iter() {
                             footprints.set(x, z);
