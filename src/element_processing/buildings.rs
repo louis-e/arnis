@@ -6798,7 +6798,7 @@ pub fn generate_buildings(
     } else {
         FnvHashSet::default()
     };
-    let part_probe = is_part.then(|| (ctx.building_footprints, &part_own_cells));
+    let part_probe = is_part.then_some((ctx.building_footprints, &part_own_cells));
     generate_wall_depth_features(
         editor,
         element,
