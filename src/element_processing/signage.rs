@@ -1127,7 +1127,9 @@ pub fn generate_node_signage(
     footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
 ) {
-    if !editor.signage_enabled() {
+    // Nodes normally land in one tile, but some kinds are assigned to every tile they
+    // reach, and a sign must not be placed twice.
+    if !editor.signage_enabled() || !editor.owns(node.x, node.z) {
         return;
     }
     let tags = &node.tags;

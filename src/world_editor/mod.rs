@@ -84,6 +84,27 @@ fn is_disk_full_error(err: &dyn std::error::Error) -> bool {
     false
 }
 
+/// Ground cover a sign may hang in front of. Matched exactly: `grass_block`, `snow_block`
+/// and `flower_pot` are solid despite reading like plants.
+fn is_passable_cover(name: &str) -> bool {
+    matches!(
+        name,
+        "grass"
+            | "short_grass"
+            | "tall_grass"
+            | "fern"
+            | "large_fern"
+            | "dead_bush"
+            | "seagrass"
+            | "tall_seagrass"
+            | "snow"
+            | "dandelion"
+            | "poppy"
+            | "blue_orchid"
+            | "azure_bluet"
+    ) || name.ends_with("_carpet")
+}
+
 /// Quotes `s` as a JSON string literal for a sign text component.
 fn json_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -528,23 +549,7 @@ impl<'a> WorldEditor<'a> {
         match self.world.get_block(x, abs_y, z) {
             None => true,
             Some(b) if b == AIR => true,
-            Some(b) => {
-                let n = b.name();
-                if n.starts_with("potted") {
-                    return false;
-                }
-                n.contains("grass")
-                    || n.contains("fern")
-                    || n.contains("flower")
-                    || n.contains("sapling")
-                    || n.contains("snow")
-                    || n.contains("dandelion")
-                    || n.contains("poppy")
-                    || n.contains("tulip")
-                    || n.contains("azure")
-                    || n.contains("carpet")
-                    || n.contains("vine")
-            }
+            Some(b) => is_passable_cover(b.name()),
         }
     }
 
@@ -1391,7 +1396,7 @@ impl<'a> WorldEditor<'a> {
         facing: i8,
         lines: &[&str],
     ) -> bool {
-        if self.format != WorldFormat::JavaAnvil {
+        if self.format != WorldFormat::JavaAnvil || !(2..=5).contains(&facing) {
             return false;
         }
         let (fx, fy, fz) = Self::decal_frame_cell(bx, abs_y, bz, facing);
@@ -2252,5 +2257,40 @@ mod eviction_guard_tests {
             editor.world.regions.contains_key(&(1, 1)),
             "writes to a resident region still land"
         );
+    }
+
+    #[test]
+    fn solid_blocks_that_read_like_plants_are_not_passable() {
+        for solid in [
+            "grass_block",
+            "snow_block",
+            "flower_pot",
+            "stone",
+            "oak_planks",
+        ] {
+            assert!(!is_passable_cover(solid), "{solid}");
+        }
+        for cover in [
+            "short_grass",
+            "tall_grass",
+            "fern",
+            "snow",
+            "poppy",
+            "white_carpet",
+        ] {
+            assert!(is_passable_cover(cover), "{cover}");
+        }
+    }
+
+    #[test]
+    fn wall_signs_reject_floor_and_ceiling_facings() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block_absolute(SMOOTH_STONE, 10, 5, 10, None, None);
+        for facing in [0i8, 1] {
+            assert!(!editor.place_wall_sign(10, 5, 10, facing, &["x"]));
+        }
+        assert!(editor.place_wall_sign(10, 5, 10, 2, &["x"]));
     }
 }
