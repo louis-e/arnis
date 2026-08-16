@@ -8624,6 +8624,15 @@ fn place_dormer_windows(
             continue;
         }
 
+        // The roof must keep rising inward of the row; on a height-capped
+        // flat top the target rows reappear mid-roof and would sprout
+        // dormers in the middle of the plateau.
+        let inward = if dm_perp <= dp_perp { 1 } else { -1 };
+        let above = (x + pz * inward, z + px * inward);
+        if roof_heights.get(&above).is_none_or(|&ah| ah <= h) {
+            continue;
+        }
+
         candidates.push((x, z, h));
     }
 
@@ -9074,6 +9083,27 @@ fn generate_gabled_roof(
         roof_heights.insert((x, z), roof_height);
     }
 
+    // Rasterized diagonal outlines make the perp span wobble by one cell,
+    // which reads as a bumpy ridge line. A 3-cell median along the ridge
+    // evens single-cell jitter and is the identity on aligned buildings.
+    let smooth_along: (i32, i32) = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
+    let roof_heights: HashMap<(i32, i32), i32> = roof_heights
+        .iter()
+        .map(|(&(x, z), &h)| {
+            let l = roof_heights.get(&(x - smooth_along.0, z - smooth_along.1));
+            let r = roof_heights.get(&(x + smooth_along.0, z + smooth_along.1));
+            let h = match (l, r) {
+                (Some(&a), Some(&b)) => {
+                    let mut t = [a, h, b];
+                    t.sort_unstable();
+                    t[1]
+                }
+                _ => h,
+            };
+            ((x, z), h)
+        })
+        .collect();
+
     let stair_block_material = get_stair_block_for_material(config.roof_block);
     let replace_any: &[Block] = &[];
 
@@ -9261,6 +9291,16 @@ fn generate_gabled_roof(
                 continue;
             }
             let h = roof_heights[&(x, z)];
+            // Skip only genuinely flat cap cells; half-pitch slopes pair
+            // equal heights, so require both perp neighbors level, not
+            // merely none lower.
+            let (pdx, pdz) = if ridge_runs_along_x { (0, 1) } else { (1, 0) };
+            let flat_here = [(x - pdx, z - pdz), (x + pdx, z + pdz)]
+                .iter()
+                .all(|n| roof_heights.get(n).is_none_or(|&nh| nh == h));
+            if flat_here {
+                continue;
+            }
             for (end_zero, sign) in [(pd.dm_along == 0, -1), (pd.dp_along == 0, 1)] {
                 if !end_zero {
                     continue;
