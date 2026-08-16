@@ -361,17 +361,17 @@ impl FloodFillCache {
         cache
     }
 
+    /// Cached fill for a way id, None when absent (no computation).
+    pub fn get_cached(&self, way_id: u64) -> Option<&FloodFillResult> {
+        self.way_cache.get(&way_id)
+    }
+
     /// Gets cached flood fill result for a way, or computes it if not cached.
     ///
     /// Note: Combined ways created from relations (e.g., in `generate_natural_from_relation`)
     /// will miss the cache and fall back to on-demand computation. This is by design,
     /// these synthetic ways don't exist in the original element list and have relation IDs
     /// rather than way IDs. The individual member ways are still cached.
-    /// Cached fill for a way id, None when absent (no computation).
-    pub fn get_cached(&self, way_id: u64) -> Option<&FloodFillResult> {
-        self.way_cache.get(&way_id)
-    }
-
     pub fn get_or_compute(
         &self,
         way: &ProcessedWay,

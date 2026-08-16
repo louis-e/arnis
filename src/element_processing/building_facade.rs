@@ -202,9 +202,15 @@ pub fn compute_facade_plan(
             for &i in &sample_idx {
                 let (bx, bz) = points[i.min(points.len().saturating_sub(1))];
                 for d in 1..=setback_max {
-                    if ctx.road_mask.contains(bx + nx * d, bz + nz * d) {
+                    let (px, pz) = (bx + nx * d, bz + nz * d);
+                    if ctx.road_mask.contains(px, pz) {
                         hits += 1;
                         min_dist = Some(min_dist.map_or(d, |m: i32| m.min(d)));
+                        break;
+                    }
+                    // A neighbour in the way means the road behind it belongs
+                    // to that building, not to this wall.
+                    if ctx.building_footprints.contains(px, pz) && !own_cells.contains(&(px, pz)) {
                         break;
                     }
                 }
