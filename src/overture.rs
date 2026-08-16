@@ -82,6 +82,28 @@ pub struct OsmAttributeHint {
     num_floors: Option<i32>,
 }
 
+impl OsmAttributeHint {
+    /// Drop values the generator would refuse to use, so the hint budget is
+    /// spent only on attributes that can actually reach a building. This is the
+    /// single place those rules live; `apply` trusts what it is given.
+    fn usable(self) -> Self {
+        Self {
+            // ML-derived heights occasionally emit sub-metre slivers or absurd
+            // towers; neither should become blocks.
+            height_m: self
+                .height_m
+                .filter(|h| (HINT_MIN_HEIGHT_M..=HINT_MAX_HEIGHT_M).contains(h)),
+            // A single floor adds nothing over the generator's own inference,
+            // and the upper bound guards against parse noise.
+            num_floors: self.num_floors.filter(|f| (2..200).contains(f)),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.height_m.is_none() && self.num_floors.is_none()
+    }
+}
+
 /// `OsmRef` -> attributes, built from the OSM-sourced Overture rows that the
 /// footprint pass discards.
 #[derive(Debug, Default)]
@@ -95,18 +117,38 @@ impl OvertureHints {
     }
 
     fn insert(&mut self, key: OsmRef, hint: OsmAttributeHint) {
-        if self.hints.len() >= MAX_OSM_HINTS {
+        self.insert_capped(key, hint, MAX_OSM_HINTS);
+    }
+
+    fn insert_capped(&mut self, key: OsmRef, hint: OsmAttributeHint, cap: usize) {
+        // Most Overture rows carry no height at all; storing those would spend
+        // the budget on entries that could never enrich anything.
+        let hint = hint.usable();
+        if hint.is_empty() {
             return;
         }
-        // Overture is one row per building, but a partition boundary can repeat a
-        // row; keep the first, richer entry rather than letting a later partial
-        // one clobber it.
-        let slot = self.hints.entry(key).or_default();
-        if slot.height_m.is_none() {
-            slot.height_m = hint.height_m;
-        }
-        if slot.num_floors.is_none() {
-            slot.num_floors = hint.num_floors;
+
+        // Only a new key costs budget. An already-tracked building must stay
+        // completable, otherwise a full map would freeze half-filled entries.
+        let at_capacity = self.hints.len() >= cap;
+        match self.hints.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                // Overture is one row per building, but a partition boundary can
+                // repeat a row; keep the first, richer entry rather than letting
+                // a later partial one clobber it.
+                let slot = slot.get_mut();
+                if slot.height_m.is_none() {
+                    slot.height_m = hint.height_m;
+                }
+                if slot.num_floors.is_none() {
+                    slot.num_floors = hint.num_floors;
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                if !at_capacity {
+                    slot.insert(hint);
+                }
+            }
         }
     }
 
@@ -150,28 +192,19 @@ impl OvertureHints {
                 continue;
             }
 
-            let mut applied = false;
+            // Every stored hint holds at least one validated value (see `insert`).
             if let Some(floors) = hint.num_floors {
-                if (2..200).contains(&floors) {
-                    tags.insert("building:levels".to_string(), floors.to_string());
-                    applied = true;
-                }
+                tags.insert("building:levels".to_string(), floors.to_string());
             }
             if let Some(h) = hint.height_m {
-                if (HINT_MIN_HEIGHT_M..=HINT_MAX_HEIGHT_M).contains(&h) {
-                    tags.insert("height".to_string(), format!("{h:.1}"));
-                    applied = true;
-                }
+                tags.insert("height".to_string(), format!("{h:.1}"));
             }
-
-            if applied {
-                // Marks the provenance for debugging and for the licence notice.
-                tags.insert(
-                    "arnis:height_source".to_string(),
-                    "overture_maps".to_string(),
-                );
-                enriched += 1;
-            }
+            // Marks the provenance for debugging and for the licence notice.
+            tags.insert(
+                "arnis:height_source".to_string(),
+                "overture_maps".to_string(),
+            );
+            enriched += 1;
         }
         enriched
     }
@@ -1903,6 +1936,7 @@ mod tests {
                 num_floors: None,
             },
         );
+        assert_eq!(sliver.len(), 0, "the sliver must not even be stored");
         let mut elements = vec![hint_way(42, &[("building", "yes")])];
         assert_eq!(sliver.apply(&mut elements), 0);
         assert!(!elements[0].tags().contains_key("height"));
@@ -1928,6 +1962,88 @@ mod tests {
         );
         let mut elements = vec![hint_way(42, &[("building", "yes")])];
         assert_eq!(one_floor.apply(&mut elements), 0);
+    }
+
+    #[test]
+    fn unusable_rows_do_not_occupy_the_hint_budget() {
+        let mut hints = OvertureHints::default();
+        // Most Overture rows carry no height or floor count at all.
+        hints.insert(
+            OsmRef { kind: "way", id: 1 },
+            OsmAttributeHint {
+                height_m: None,
+                num_floors: None,
+            },
+        );
+        // Values the generator would reject are just as useless.
+        hints.insert(
+            OsmRef { kind: "way", id: 2 },
+            OsmAttributeHint {
+                height_m: Some(0.4),
+                num_floors: Some(1),
+            },
+        );
+        assert_eq!(hints.len(), 0);
+
+        // A row with one usable value is still worth keeping.
+        hints.insert(
+            OsmRef { kind: "way", id: 3 },
+            OsmAttributeHint {
+                height_m: Some(0.4),
+                num_floors: Some(4),
+            },
+        );
+        assert_eq!(hints.len(), 1);
+    }
+
+    #[test]
+    fn a_full_map_still_completes_the_buildings_it_tracks() {
+        let tracked = OsmRef { kind: "way", id: 1 };
+        let mut hints = OvertureHints::default();
+        hints.insert_capped(
+            tracked,
+            OsmAttributeHint {
+                height_m: None,
+                num_floors: Some(4),
+            },
+            1,
+        );
+        assert_eq!(hints.len(), 1);
+
+        // At capacity a new building is refused ...
+        hints.insert_capped(
+            OsmRef { kind: "way", id: 2 },
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: None,
+            },
+            1,
+        );
+        assert_eq!(hints.len(), 1);
+
+        // ... but one already tracked can still be completed by a later row.
+        hints.insert_capped(
+            tracked,
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: None,
+            },
+            1,
+        );
+
+        let mut elements = vec![hint_way(1, &[("building", "yes")])];
+        assert_eq!(hints.apply(&mut elements), 1);
+        assert_eq!(
+            elements[0].tags().get("height").map(String::as_str),
+            Some("18.0")
+        );
+        assert_eq!(
+            elements[0]
+                .tags()
+                .get("building:levels")
+                .map(String::as_str),
+            Some("4")
+        );
     }
 
     #[test]
