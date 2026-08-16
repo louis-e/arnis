@@ -814,18 +814,25 @@ impl WorldToModify {
     /// e.g. tree canopies that cross tile boundaries would be clobbered when
     /// the receiving tile happens to have a chunk in the same column.
     /// Position key for a block entity (x/y/z ints) or entity (floored Pos doubles).
-    fn entity_coords(value: &Value) -> Option<(i32, i32, i32)> {
+    /// Dedup key: cell coordinates plus, for hanging entities, the face they hang on, so
+    /// several decals can share one cell without collapsing into one.
+    fn entity_coords(value: &Value) -> Option<(i32, i32, i32, i32)> {
         let Value::Compound(map) = value else {
             return None;
+        };
+        let facing = match map.get("Facing") {
+            Some(Value::Byte(f)) => *f as i32,
+            Some(Value::Int(f)) => *f,
+            _ => -1,
         };
         if let (Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Int(z))) =
             (map.get("x"), map.get("y"), map.get("z"))
         {
-            return Some((*x, *y, *z));
+            return Some((*x, *y, *z, facing));
         }
         if let Some(Value::List(pos)) = map.get("Pos") {
             if let [Value::Double(x), Value::Double(y), Value::Double(z)] = pos.as_slice() {
-                return Some((x.floor() as i32, y.floor() as i32, z.floor() as i32));
+                return Some((x.floor() as i32, y.floor() as i32, z.floor() as i32, facing));
             }
         }
         None
@@ -835,7 +842,7 @@ impl WorldToModify {
     /// Tile halos process boundary features twice, so this drops the duplicate copies instead of
     /// retaining both (which also spared the save path from stripping them later).
     fn dedup_extend(self_list: &mut Vec<Value>, other_list: &[Value]) {
-        let mut seen: FnvHashSet<(i32, i32, i32)> =
+        let mut seen: FnvHashSet<(i32, i32, i32, i32)> =
             self_list.iter().filter_map(Self::entity_coords).collect();
         for entry in other_list {
             match Self::entity_coords(entry) {

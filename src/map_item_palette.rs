@@ -1,5 +1,6 @@
 //! Minecraft Java 1.21 filled-map color palette and nearest-color quantizer.
 
+use crate::colors::{oklab_distance_lab, rgb_to_oklab, RGBTuple};
 use once_cell::sync::Lazy;
 
 /// Map color id for fully transparent pixels (base 0, any shade).
@@ -90,25 +91,42 @@ fn shaded_color(color_id: u8) -> (u8, u8, u8) {
     )
 }
 
-/// All opaque shaded variants (base ids 1..=61, four shades each) as (color_id, r, g, b).
-static SHADED_PALETTE: Lazy<Vec<(u8, u8, u8, u8)>> = Lazy::new(|| {
+/// RGB of a map color id; the transparent ids 0..=3 report black.
+pub fn map_color_rgb(color_id: u8) -> RGBTuple {
+    if color_id < 4 {
+        return (0, 0, 0);
+    }
+    shaded_color(color_id)
+}
+
+/// Map color id for a base color (0..=61) and shade (0..=3).
+pub const fn map_color_id(base: u8, shade: u8) -> u8 {
+    base * 4 + shade
+}
+
+/// All opaque shaded variants (base ids 1..=61, four shades each) as
+/// (color_id, r, g, b, oklab), the Oklab form precomputed for the nearest-color scan.
+type PaletteEntry = (u8, u8, u8, u8, (f32, f32, f32));
+static SHADED_PALETTE: Lazy<Vec<PaletteEntry>> = Lazy::new(|| {
     (4..(BASE_COLORS.len() as u16 * 4))
         .map(|id| {
             let (r, g, b) = shaded_color(id as u8);
-            (id as u8, r, g, b)
+            (id as u8, r, g, b, rgb_to_oklab(r, g, b))
         })
         .collect()
 });
 
-/// Returns the opaque map color id (base * 4 + shade) closest to the given RGB.
+/// Returns the opaque map color id (base * 4 + shade) perceptually closest to the given RGB.
+/// Exact palette colors short-circuit; everything else is matched in Oklab.
 pub fn nearest_map_color(r: u8, g: u8, b: u8) -> u8 {
+    let lab = rgb_to_oklab(r, g, b);
     let mut best_id = 4u8;
-    let mut best_dist = u32::MAX;
-    for &(id, pr, pg, pb) in SHADED_PALETTE.iter() {
-        let dr = r as i32 - pr as i32;
-        let dg = g as i32 - pg as i32;
-        let db = b as i32 - pb as i32;
-        let dist = (dr * dr + dg * dg + db * db) as u32;
+    let mut best_dist = f32::MAX;
+    for &(id, pr, pg, pb, plab) in SHADED_PALETTE.iter() {
+        if pr == r && pg == g && pb == b {
+            return id;
+        }
+        let dist = oklab_distance_lab(lab, plab);
         if dist < best_dist {
             best_dist = dist;
             best_id = id;
@@ -167,5 +185,20 @@ mod tests {
         assert_eq!(shaded_color(4), (89, 125, 39));
         // GRASS shade 3: floor(127*135/255)=67, floor(178*135/255)=94, floor(56*135/255)=29.
         assert_eq!(shaded_color(4 + 3), (67, 94, 29));
+    }
+
+    #[test]
+    fn perceptual_match_prefers_hue_over_raw_distance() {
+        // A saturated traffic red must land on a red, not on a brown or orange.
+        let id = nearest_map_color(200, 20, 20);
+        let (r, g, b) = shaded_color(id);
+        assert!(r > 150 && g < 60 && b < 60, "got {:?}", (r, g, b));
+    }
+
+    #[test]
+    fn rgb_roundtrip_and_id_helper() {
+        assert_eq!(map_color_id(8, 2), 34);
+        assert_eq!(map_color_rgb(34), (255, 255, 255));
+        assert_eq!(map_color_rgb(TRANSPARENT), (0, 0, 0));
     }
 }

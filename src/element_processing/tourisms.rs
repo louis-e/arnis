@@ -1,8 +1,13 @@
 use crate::block_definitions::*;
+use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode) {
+pub fn generate_tourisms(
+    editor: &mut WorldEditor,
+    element: &ProcessedNode,
+    road_mask: &RoadMaskBitmap,
+) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -23,6 +28,12 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode) {
         if tourism_type == "information" {
             if let Some(info_type) = element.tags.get("information").map(|x: &String| x.as_str()) {
                 if info_type != "office" && info_type != "visitor_centre" {
+                    // Java decals: a local map board or an "i" post; banners are the fallback.
+                    if crate::element_processing::signage::generate_information_board(
+                        editor, element, road_mask,
+                    ) {
+                        return;
+                    }
                     // Draw an information board
                     editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
                     editor.set_block(OAK_PLANKS, x, 2, z, None, None);

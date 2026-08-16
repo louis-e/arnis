@@ -33,6 +33,7 @@ const SETTINGS = [
   { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
+  { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
   { id: 'disable-height-limit-toggle', kind: 'checkbox', store: OWN },
   { id: 'aws-only-elevation-toggle', kind: 'checkbox', store: OWN },
   { id: 'bake-lighting-toggle', kind: 'checkbox', store: OWN },

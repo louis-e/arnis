@@ -152,6 +152,39 @@ pub struct Args {
     /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
     #[arg(long, default_value_t = 6000, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
+
+    /// Readable image signs, Java only. `basic` covers public signage: street names,
+    /// traffic signs, transit stops, information boards and billboards. `full` adds
+    /// building signage: shop name plates, house numbers and crossing signs.
+    #[arg(long, value_enum, default_value_t = SignageLevel::Basic)]
+    pub signage: SignageLevel,
+}
+
+/// How much image signage to place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum SignageLevel {
+    None,
+    #[default]
+    Basic,
+    Full,
+}
+
+impl SignageLevel {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "none" => SignageLevel::None,
+            "full" => SignageLevel::Full,
+            _ => SignageLevel::Basic,
+        }
+    }
+
+    pub fn enabled(self) -> bool {
+        self != SignageLevel::None
+    }
+
+    pub fn full(self) -> bool {
+        self == SignageLevel::Full
+    }
 }
 
 /// Generation mode, matching the GUI's dropdown (src/gui/js/main.js).
@@ -419,6 +452,17 @@ mod tests {
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
         assert!(!args.map_preview);
+        assert_eq!(args.signage, SignageLevel::Basic);
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--signage",
+            "none",
+        ];
+        assert!(!Args::parse_from(cmd.iter()).signage.enabled());
         // interior is opt-in (off by default); overture defaults to true
         assert!(!args.interior);
         assert!(args.overture);

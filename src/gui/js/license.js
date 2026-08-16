@@ -51,6 +51,10 @@ The "Real Tree Cover" setting places trees from the <a href="https://registry.op
 Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" style="color: inherit;" target="_blank">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
 <br><br>
 
+<b>DejaVu Sans Bold:</b><br>
+In-world signage (street names, shop signs, boards) is lettered with bitmap atlases rasterized from <a href="https://dejavu-fonts.github.io/" style="color: inherit;" target="_blank">DejaVu Sans Bold</a>. DejaVu changes are in the public domain; the Bitstream Vera glyphs are &copy; 2003 Bitstream, Inc., under the <a href="https://dejavu-fonts.github.io/License.html" style="color: inherit;" target="_blank">Bitstream Vera Fonts license</a>.
+<br><br>
+
 <b>Schematic Tree Models:</b><br>
 The bundled region tree pack used by the optional "Schematic Trees" feature was created by <a href="https://www.planetminecraft.com/member/paleozoey/" style="color: inherit;" target="_blank">paleozoey</a>. Arnis bundles and places them; the artistry is theirs.
 <br><br>

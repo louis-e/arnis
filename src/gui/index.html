@@ -234,6 +234,21 @@
           </div>
         </div>
 
+        <!-- Signage level -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="signage">Signage</span>
+            <span class="tooltip-icon" data-tooltip="Readable image signs (Java only). Basic covers public signage: street names, traffic signs, transit stops and billboards. Full adds shop name plates, house numbers and crossing signs.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="signage-group">
+              <button type="button" class="segment" data-signage="none" data-localize="signage_none">None</button>
+              <button type="button" class="segment active" data-default data-signage="basic" data-localize="signage_basic">Basic</button>
+              <button type="button" class="segment" data-signage="full" data-localize="signage_full">Full</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Extend Build Height Toggle -->
         <div class="settings-row">
           <label for="disable-height-limit-toggle">

@@ -84,6 +84,53 @@ fn is_disk_full_error(err: &dyn std::error::Error) -> bool {
     false
 }
 
+/// Ground cover a sign may hang in front of. Matched exactly: `grass_block`, `snow_block`
+/// and `flower_pot` are solid despite reading like plants.
+fn is_passable_cover(name: &str) -> bool {
+    matches!(
+        name,
+        "grass"
+            | "short_grass"
+            | "tall_grass"
+            | "fern"
+            | "large_fern"
+            | "dead_bush"
+            | "seagrass"
+            | "tall_seagrass"
+            | "snow"
+            | "dandelion"
+            | "poppy"
+            | "blue_orchid"
+            | "azure_bluet"
+    ) || name.ends_with("_carpet")
+}
+
+/// Quotes `s` as a JSON string literal for a sign text component.
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// One placed item frame, as read back by tests.
+#[cfg(test)]
+pub struct PlacedFrame {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub map_id: i32,
+}
+
 /// World format to generate
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
@@ -177,6 +224,13 @@ pub struct WorldEditor<'a> {
     start_with_map: bool,
     /// Place bundled map image decals as map item frames. Java only.
     map_decals: bool,
+    /// Signage context (decal registry, styles, intersections); shared with tile editors.
+    signage: Option<Arc<crate::element_processing::signage::SignageContext>>,
+    /// Strict (non-halo) bounds of a tile editor: min_x, min_z, max_x, max_z inclusive.
+    /// None for the main editor, which owns everything.
+    strict_bounds: Option<(i32, i32, i32, i32)>,
+    /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
+    frame_cells: FnvHashSet<(i32, i32, i32)>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -213,6 +267,9 @@ impl<'a> WorldEditor<'a> {
             world_time: 6000,
             start_with_map: false,
             map_decals: false,
+            signage: None,
+            strict_bounds: None,
+            frame_cells: FnvHashSet::default(),
         }
     }
 
@@ -255,6 +312,9 @@ impl<'a> WorldEditor<'a> {
             world_time: 6000,
             start_with_map: false,
             map_decals: false,
+            signage: None,
+            strict_bounds: None,
+            frame_cells: FnvHashSet::default(),
         }
     }
 
@@ -297,6 +357,9 @@ impl<'a> WorldEditor<'a> {
             world_time: 6000,
             start_with_map: false,
             map_decals: false,
+            signage: None,
+            strict_bounds: None,
+            frame_cells: FnvHashSet::default(),
         }
     }
 
@@ -421,27 +484,101 @@ impl<'a> WorldEditor<'a> {
         self.map_decals = enabled;
     }
 
-    /// True if image decals should be placed.
-    pub fn map_decals_enabled(&self) -> bool {
-        self.map_decals
+    /// Attach the signage context (decal registry, styles, intersections).
+    pub fn set_signage(&mut self, ctx: Arc<crate::element_processing::signage::SignageContext>) {
+        self.signage = Some(ctx);
     }
 
-    /// Places an invisible fixed item frame holding a locked map on one face of a block.
-    /// facing: 2=north, 3=south, 4=west, 5=east. Absolute Y.
-    pub fn place_map_decal(&mut self, bx: i32, abs_y: i32, bz: i32, facing: i8, map_id: i32) {
-        let (dx, dz) = match facing {
-            3 => (0, 1),
-            4 => (-1, 0),
-            5 => (1, 0),
-            _ => (0, -1),
-        };
-        let fx = bx + dx;
-        let fz = bz + dz;
+    /// Strict bounds of a tile editor (inclusive), used by placements that must run in
+    /// exactly one tile even though the element is processed by every tile it overlaps.
+    pub fn set_strict_bounds(&mut self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) {
+        self.strict_bounds = Some((min_x, min_z, max_x, max_z));
+    }
+
+    /// True if this editor is the single owner of (x, z): always for the main editor, and
+    /// inside the strict tile bounds for a tile editor.
+    pub fn owns(&self, x: i32, z: i32) -> bool {
+        match self.strict_bounds {
+            None => true,
+            Some((min_x, min_z, max_x, max_z)) => {
+                x >= min_x && x <= max_x && z >= min_z && z <= max_z
+            }
+        }
+    }
+
+    /// The signage context, if decals are enabled and a registry was built.
+    pub fn signage(&self) -> Option<Arc<crate::element_processing::signage::SignageContext>> {
+        if !self.map_decals {
+            return None;
+        }
+        self.signage.clone()
+    }
+
+    /// Decals are locked maps in item frames, which only Java reads. Bedrock and Luanti
+    /// never build a registry, so every handler is skipped.
+    #[inline]
+    pub fn signage_enabled(&self) -> bool {
+        self.map_decals && self.signage.is_some()
+    }
+
+    /// Cell the frame occupies for a decal on the given face of block (bx, abs_y, bz).
+    /// facing: 0=down, 1=up, 2=north, 3=south, 4=west, 5=east.
+    fn decal_frame_cell(bx: i32, abs_y: i32, bz: i32, facing: i8) -> (i32, i32, i32) {
+        match facing {
+            0 => (bx, abs_y - 1, bz),
+            1 => (bx, abs_y + 1, bz),
+            3 => (bx, abs_y, bz + 1),
+            4 => (bx - 1, abs_y, bz),
+            5 => (bx + 1, abs_y, bz),
+            _ => (bx, abs_y, bz - 1),
+        }
+    }
+
+    /// True if the cell holds nothing a sign could not sit in front of (air, plants, snow).
+    pub fn cell_open_at(&self, x: i32, abs_y: i32, z: i32) -> bool {
+        self.cell_is_open(x, abs_y, z)
+    }
+
+    /// True if a decal frame already hangs here.
+    pub fn cell_has_frame(&self, x: i32, abs_y: i32, z: i32) -> bool {
+        !self.frame_cells.is_empty() && self.frame_cells.contains(&(x, abs_y, z))
+    }
+
+    /// True if the cell holds nothing a sign could not sit in front of (air, plants, snow).
+    fn cell_is_open(&self, x: i32, abs_y: i32, z: i32) -> bool {
+        match self.world.get_block(x, abs_y, z) {
+            None => true,
+            Some(b) if b == AIR => true,
+            Some(b) => is_passable_cover(b.name()),
+        }
+    }
+
+    /// One map decal. facing 0..=5 (down, up, N, S, W, E), rotation in eighth turns.
+    /// False when the frame cell is inside terrain, or a block if `require_air`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_map_decal_ex(
+        &mut self,
+        bx: i32,
+        abs_y: i32,
+        bz: i32,
+        facing: i8,
+        map_id: i32,
+        rotation: i8,
+        glow: bool,
+        require_air: bool,
+    ) -> bool {
+        let (fx, fy, fz) = Self::decal_frame_cell(bx, abs_y, bz, facing);
+        if !self.xzbbox.contains(&XZPoint::new(fx, fz)) || self.is_region_flushed(fx, fz) {
+            return false;
+        }
 
         // Skip a face whose cell sits in the terrain; that frame would be culled on load.
-        let rel_y = abs_y - self.get_absolute_y(fx, 0, fz);
+        let rel_y = fy - self.get_absolute_y(fx, 0, fz);
         if rel_y < 1 {
-            return;
+            return false;
+        }
+        if require_air && !self.cell_is_open(fx, fy, fz) {
+            return false;
         }
 
         let mut components = HashMap::new();
@@ -456,20 +593,177 @@ impl<'a> WorldEditor<'a> {
 
         let mut extra = HashMap::new();
         extra.insert("Facing".to_string(), Value::Byte(facing));
-        extra.insert("ItemRotation".to_string(), Value::Byte(0));
+        extra.insert(
+            "ItemRotation".to_string(),
+            Value::Byte(rotation.rem_euclid(8)),
+        );
         extra.insert("Item".to_string(), Value::Compound(item));
         extra.insert("ItemDropChance".to_string(), Value::Float(0.0));
         extra.insert("Fixed".to_string(), Value::Byte(1));
         extra.insert("Invisible".to_string(), Value::Byte(1));
         extra.insert("TileX".to_string(), Value::Int(fx));
-        extra.insert("TileY".to_string(), Value::Int(abs_y));
+        extra.insert("TileY".to_string(), Value::Int(fy));
         extra.insert("TileZ".to_string(), Value::Int(fz));
         extra.insert(
             "block_pos".to_string(),
-            Value::List(vec![Value::Int(fx), Value::Int(abs_y), Value::Int(fz)]),
+            Value::List(vec![Value::Int(fx), Value::Int(fy), Value::Int(fz)]),
         );
 
-        self.add_entity("minecraft:item_frame", fx, rel_y, fz, Some(extra));
+        let id = if glow {
+            "minecraft:glow_item_frame"
+        } else {
+            "minecraft:item_frame"
+        };
+        self.add_entity(id, fx, rel_y, fz, Some(extra));
+        self.frame_cells.insert((fx, fy, fz));
+        true
+    }
+
+    /// Places a registered decal on one face of a block. Multi-tile keys are laid out with
+    /// this block behind the viewer's top-left tile; see `place_decal_panel`.
+    pub fn place_decal(
+        &mut self,
+        bx: i32,
+        abs_y: i32,
+        bz: i32,
+        facing: i8,
+        key: &crate::decals::DecalKey,
+    ) -> bool {
+        self.place_decal_panel(bx, abs_y, bz, facing, key, false, false)
+    }
+
+    /// A multi-tile decal anchored at the viewer's top-left tile, running right and down.
+    /// Nothing is placed unless every tile has an open frame cell.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_decal_panel(
+        &mut self,
+        bx: i32,
+        abs_y: i32,
+        bz: i32,
+        facing: i8,
+        key: &crate::decals::DecalKey,
+        glow: bool,
+        require_hosts: bool,
+    ) -> bool {
+        let Some(entry) = self.signage().and_then(|s| s.registry.get(key)) else {
+            return false;
+        };
+        let (rx, rz, down_dy, floor_rz) = Self::panel_axes(facing);
+        // Every tile must be placeable before any is written.
+        for r in 0..entry.rows as i32 {
+            for c in 0..entry.cols as i32 {
+                let (hx, hy, hz) = if facing <= 1 {
+                    (bx + rx * c, abs_y, bz + floor_rz * r)
+                } else {
+                    (bx + rx * c, abs_y + down_dy * r, bz + rz * c)
+                };
+                let (fx, fy, fz) = Self::decal_frame_cell(hx, hy, hz, facing);
+                if !self.xzbbox.contains(&XZPoint::new(fx, fz)) || self.is_region_flushed(fx, fz) {
+                    return false;
+                }
+                if fy - self.get_absolute_y(fx, 0, fz) < 1 || !self.cell_is_open(fx, fy, fz) {
+                    return false;
+                }
+                if require_hosts && self.cell_is_open(hx, hy, hz) {
+                    return false;
+                }
+            }
+        }
+        for r in 0..entry.rows as i32 {
+            for c in 0..entry.cols as i32 {
+                let (hx, hy, hz) = if facing <= 1 {
+                    (bx + rx * c, abs_y, bz + floor_rz * r)
+                } else {
+                    (bx + rx * c, abs_y + down_dy * r, bz + rz * c)
+                };
+                self.place_map_decal_ex(
+                    hx,
+                    hy,
+                    hz,
+                    facing,
+                    entry.tile_id(c as u32, r as u32),
+                    0,
+                    glow,
+                    false,
+                );
+            }
+        }
+        true
+    }
+
+    /// Viewer's right, the Y row step for walls, and the Z row step for floors.
+    fn panel_axes(facing: i8) -> (i32, i32, i32, i32) {
+        match facing {
+            0 | 1 => (1, 0, 0, 1),
+            2 => (-1, 0, -1, 0),
+            3 => (1, 0, -1, 0),
+            4 => (0, 1, -1, 0),
+            _ => (0, -1, -1, 0),
+        }
+    }
+
+    /// Host block behind the viewer's-left tile of a `cols`-wide wall panel centred on
+    /// (cx, cz), for a frame `facing` the viewer. Even widths lean toward the viewer's left.
+    pub fn panel_left_anchor(cx: i32, cz: i32, facing: i8, cols: i32) -> (i32, i32) {
+        let (rx, rz, _, _) = Self::panel_axes(facing);
+        let half = (cols - 1) / 2;
+        (cx - rx * half, cz - rz * half)
+    }
+
+    /// Item frame facing byte for an outward normal snapped to an axis.
+    pub fn facing_for_normal(nx: i32, nz: i32) -> i8 {
+        if nx.abs() >= nz.abs() {
+            if nx >= 0 {
+                5
+            } else {
+                4
+            }
+        } else if nz >= 0 {
+            3
+        } else {
+            2
+        }
+    }
+
+    /// Every item frame currently in the world, for tests that check decal placement.
+    #[cfg(test)]
+    pub fn item_frames(&self) -> Vec<PlacedFrame> {
+        let mut out = Vec::new();
+        for region in self.world.regions.values() {
+            for chunk in region.chunks.values() {
+                let Some(Value::List(entities)) = chunk.other.get("entities") else {
+                    continue;
+                };
+                for entity in entities {
+                    let Value::Compound(e) = entity else { continue };
+                    let is_frame = matches!(e.get("id"), Some(Value::String(id))
+                        if id == "minecraft:item_frame" || id == "minecraft:glow_item_frame");
+                    if !is_frame {
+                        continue;
+                    }
+                    let int = |k: &str| match e.get(k) {
+                        Some(Value::Int(v)) => Some(*v),
+                        _ => None,
+                    };
+                    let map_id = match e.get("Item") {
+                        Some(Value::Compound(item)) => match item.get("components") {
+                            Some(Value::Compound(c)) => match c.get("minecraft:map_id") {
+                                Some(Value::Int(v)) => Some(*v),
+                                _ => None,
+                            },
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let (Some(x), Some(y), Some(z), Some(map_id)) =
+                        (int("TileX"), int("TileY"), int("TileZ"), map_id)
+                    {
+                        out.push(PlacedFrame { x, y, z, map_id });
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
@@ -1021,7 +1315,39 @@ impl<'a> WorldEditor<'a> {
         self.insert_block_entity(x, z, be);
     }
 
-    /// Sets a sign at the given coordinates
+    /// Sign block entity with up to four front lines (JSON text components).
+    fn sign_block_entity(
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        lines: &[&str],
+        color: &str,
+        glow: bool,
+    ) -> HashMap<String, Value> {
+        let messages: Vec<Value> = (0..4)
+            .map(|i| Value::String(json_string(lines.get(i).copied().unwrap_or(""))))
+            .collect();
+        let mut text_data = HashMap::new();
+        text_data.insert("messages".to_string(), Value::List(messages));
+        text_data.insert("color".to_string(), Value::String(color.to_string()));
+        text_data.insert("has_glowing_text".to_string(), Value::Byte(glow as i8));
+
+        let mut be = HashMap::new();
+        be.insert("front_text".to_string(), Value::Compound(text_data));
+        be.insert(
+            "id".to_string(),
+            Value::String("minecraft:sign".to_string()),
+        );
+        be.insert("is_waxed".to_string(), Value::Byte(1));
+        be.insert("keepPacked".to_string(), Value::Byte(0));
+        be.insert("x".to_string(), Value::Int(x));
+        be.insert("y".to_string(), Value::Int(absolute_y));
+        be.insert("z".to_string(), Value::Int(z));
+        be
+    }
+
+    /// Standing sign with four text lines at ground-relative `y`; `rotation` is 0..=15
+    /// (0 = facing south, clockwise). Java only.
     #[allow(clippy::too_many_arguments, dead_code)]
     pub fn set_sign(
         &mut self,
@@ -1032,57 +1358,74 @@ impl<'a> WorldEditor<'a> {
         x: i32,
         y: i32,
         z: i32,
-        _rotation: i8,
+        rotation: i8,
     ) {
+        if self.format != WorldFormat::JavaAnvil {
+            return;
+        }
         if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
             return;
         }
         let absolute_y = self.get_absolute_y(x, y, z);
-        let chunk_x = x >> 4;
-        let chunk_z = z >> 4;
-        let region_x = chunk_x >> 5;
-        let region_z = chunk_z >> 5;
-
-        let mut block_entities = HashMap::new();
-
-        let messages = vec![
-            Value::String(format!("\"{line1}\"")),
-            Value::String(format!("\"{line2}\"")),
-            Value::String(format!("\"{line3}\"")),
-            Value::String(format!("\"{line4}\"")),
-        ];
-
-        let mut text_data = HashMap::new();
-        text_data.insert("messages".to_string(), Value::List(messages));
-        text_data.insert("color".to_string(), Value::String("black".to_string()));
-        text_data.insert("has_glowing_text".to_string(), Value::Byte(0));
-
-        block_entities.insert("front_text".to_string(), Value::Compound(text_data));
-        block_entities.insert(
-            "id".to_string(),
-            Value::String("minecraft:sign".to_string()),
+        let be = Self::sign_block_entity(
+            x,
+            absolute_y,
+            z,
+            &[&line1, &line2, &line3, &line4],
+            "black",
+            false,
         );
-        block_entities.insert("is_waxed".to_string(), Value::Byte(0));
-        block_entities.insert("keepPacked".to_string(), Value::Byte(0));
-        block_entities.insert("x".to_string(), Value::Int(x));
-        block_entities.insert("y".to_string(), Value::Int(absolute_y));
-        block_entities.insert("z".to_string(), Value::Int(z));
+        self.insert_block_entity(x, z, be);
+        let props = fastnbt::nbt!({ "rotation": rotation.rem_euclid(16).to_string(), "waterlogged": "false" });
+        self.set_block_with_properties_absolute(
+            BlockWithProperties::new(SIGN, Some(props)),
+            x,
+            absolute_y,
+            z,
+            None,
+            None,
+        );
+    }
 
-        let region = self.world.get_or_create_region(region_x, region_z);
-        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
-
-        if let Some(chunk_data) = chunk.other.get_mut("block_entities") {
-            if let Value::List(entities) = chunk_data {
-                entities.push(Value::Compound(block_entities));
-            }
-        } else {
-            chunk.other.insert(
-                "block_entities".to_string(),
-                Value::List(vec![Value::Compound(block_entities)]),
-            );
+    /// Wall sign with white text, used where the bundled font lacks the glyphs. Java only.
+    pub fn place_wall_sign(
+        &mut self,
+        bx: i32,
+        abs_y: i32,
+        bz: i32,
+        facing: i8,
+        lines: &[&str],
+    ) -> bool {
+        if self.format != WorldFormat::JavaAnvil || !(2..=5).contains(&facing) {
+            return false;
         }
-
-        self.set_block(SIGN, x, y, z, None, None);
+        let (fx, fy, fz) = Self::decal_frame_cell(bx, abs_y, bz, facing);
+        if !self.xzbbox.contains(&XZPoint::new(fx, fz)) || self.is_region_flushed(fx, fz) {
+            return false;
+        }
+        if fy - self.get_absolute_y(fx, 0, fz) < 1 || !self.cell_is_open(fx, fy, fz) {
+            return false;
+        }
+        let facing_name = match facing {
+            3 => "south",
+            4 => "west",
+            5 => "east",
+            _ => "north",
+        };
+        let be = Self::sign_block_entity(fx, fy, fz, lines, "white", false);
+        self.insert_block_entity(fx, fz, be);
+        self.set_block_with_properties_absolute(
+            BlockWithProperties::new(
+                SPRUCE_WALL_SIGN,
+                Some(fastnbt::nbt!({ "facing": facing_name, "waterlogged": "false" })),
+            ),
+            fx,
+            fy,
+            fz,
+            None,
+            Some(&[]),
+        );
+        true
     }
 
     /// Adds an entity at the given coordinates (Y is ground-relative).
@@ -1105,6 +1448,12 @@ impl<'a> WorldEditor<'a> {
 
         let absolute_y = self.get_absolute_y(x, y, z);
 
+        // Two hanging entities can share a cell on opposite faces, so the face belongs in
+        // the UUID seed; without it they collide and the game keeps only one.
+        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
+            Some(Value::Byte(f)) => *f as i64,
+            _ => -1,
+        };
         let mut entity = HashMap::new();
         entity.insert("id".to_string(), Value::String(id.to_string()));
         entity.insert(
@@ -1134,7 +1483,7 @@ impl<'a> WorldEditor<'a> {
         entity.insert("PortalCooldown".to_string(), Value::Int(0));
         entity.insert(
             "UUID".to_string(),
-            Value::IntArray(build_deterministic_uuid(id, x, absolute_y, z)),
+            Value::IntArray(build_deterministic_uuid(id, x, absolute_y, z, face)),
         );
 
         if let Some(extra) = extra_data {
@@ -1764,11 +2113,12 @@ impl<'a> WorldEditor<'a> {
 }
 
 #[allow(dead_code)]
-fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
+fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32, face: i64) -> IntArray {
     let mut hash: i64 = 17;
     for byte in id.bytes() {
         hash = hash.wrapping_mul(31).wrapping_add(byte as i64);
     }
+    hash = hash.wrapping_mul(31).wrapping_add(face);
 
     let seed_a = hash ^ (x as i64).wrapping_shl(32) ^ (y as i64).wrapping_mul(17);
     let seed_b = hash.rotate_left(7) ^ (z as i64).wrapping_mul(31) ^ (x as i64).wrapping_mul(13);
@@ -1914,5 +2264,70 @@ mod eviction_guard_tests {
             editor.world.regions.contains_key(&(1, 1)),
             "writes to a resident region still land"
         );
+    }
+
+    #[test]
+    fn frames_on_opposite_faces_of_one_cell_get_distinct_uuids() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_map_decals(true);
+        // Two hosts with a one block gap, each showing a sign into that gap.
+        editor.set_block_absolute(SMOOTH_STONE, 20, 5, 20, None, None);
+        editor.set_block_absolute(SMOOTH_STONE, 20, 5, 22, None, None);
+        assert!(editor.place_map_decal_ex(20, 5, 20, 3, 7, 0, false, false));
+        assert!(editor.place_map_decal_ex(20, 5, 22, 2, 8, 0, false, false));
+
+        let mut uuids: Vec<Vec<i32>> = Vec::new();
+        for region in editor.world.regions.values() {
+            for chunk in region.chunks.values() {
+                let Some(Value::List(entities)) = chunk.other.get("entities") else {
+                    continue;
+                };
+                for e in entities {
+                    let Value::Compound(m) = e else { continue };
+                    if let Some(Value::IntArray(u)) = m.get("UUID") {
+                        uuids.push(u.iter().copied().collect());
+                    }
+                }
+            }
+        }
+        assert_eq!(uuids.len(), 2);
+        assert_ne!(uuids[0], uuids[1], "same cell, different face, same UUID");
+    }
+
+    #[test]
+    fn solid_blocks_that_read_like_plants_are_not_passable() {
+        for solid in [
+            "grass_block",
+            "snow_block",
+            "flower_pot",
+            "stone",
+            "oak_planks",
+        ] {
+            assert!(!is_passable_cover(solid), "{solid}");
+        }
+        for cover in [
+            "short_grass",
+            "tall_grass",
+            "fern",
+            "snow",
+            "poppy",
+            "white_carpet",
+        ] {
+            assert!(is_passable_cover(cover), "{cover}");
+        }
+    }
+
+    #[test]
+    fn wall_signs_reject_floor_and_ceiling_facings() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block_absolute(SMOOTH_STONE, 10, 5, 10, None, None);
+        for facing in [0i8, 1] {
+            assert!(!editor.place_wall_sign(10, 5, 10, facing, &["x"]));
+        }
+        assert!(editor.place_wall_sign(10, 5, 10, 2, &["x"]));
     }
 }

@@ -69,19 +69,21 @@ pub fn generate_amenities(
                         items,
                     );
 
-                    if editor.map_decals_enabled() {
-                        place_recycling_decals(editor, pt.x, absolute_y, pt.z);
-                    } else if let Some(category) = single_loot_category(&loot_pool) {
-                        if let Some(display_item) =
-                            build_display_item_for_category(category, &mut rng)
-                        {
-                            place_item_frame_on_random_side(
-                                editor,
-                                pt.x,
-                                absolute_y,
-                                pt.z,
-                                display_item,
-                            );
+                    let decals_placed =
+                        place_furniture_decals(editor, element.tags(), pt.x, absolute_y, pt.z);
+                    if !decals_placed {
+                        if let Some(category) = single_loot_category(&loot_pool) {
+                            if let Some(display_item) =
+                                build_display_item_for_category(category, &mut rng)
+                            {
+                                place_item_frame_on_random_side(
+                                    editor,
+                                    pt.x,
+                                    absolute_y,
+                                    pt.z,
+                                    display_item,
+                                );
+                            }
                         }
                     }
                 }
@@ -90,16 +92,17 @@ pub fn generate_amenities(
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(pt) = first_node {
                     editor.set_block(CAULDRON, pt.x, 1, pt.z, None, None);
-                    if editor.map_decals_enabled() {
-                        let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
-                        place_recycling_decals(editor, pt.x, abs_y, pt.z);
-                    }
+                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    place_furniture_decals(editor, element.tags(), pt.x, abs_y, pt.z);
                 }
             }
             "vending_machine" | "atm" => {
                 if let Some(pt) = first_node {
                     editor.set_block(IRON_BLOCK, pt.x, 1, pt.z, None, None);
                     editor.set_block(IRON_BLOCK, pt.x, 2, pt.z, None, None);
+                    // Front graphic on the upper block, all four sides.
+                    let abs_y = editor.get_absolute_y(pt.x, 2, pt.z);
+                    place_furniture_decals(editor, element.tags(), pt.x, abs_y, pt.z);
                 }
             }
             "bicycle_parking" => {
@@ -643,11 +646,25 @@ fn build_display_item_for_category(
     }
 }
 
-/// Places the recycling sign on all four sides of a bin block (Java decals).
-fn place_recycling_decals(editor: &mut WorldEditor, x: i32, abs_y: i32, z: i32) {
-    for facing in [2i8, 3, 4, 5] {
-        editor.place_map_decal(x, abs_y, z, facing, crate::map_item::RECYCLING_MAP_ID);
+/// Places the furniture pictogram (recycling, vending, ATM) on all four sides of a block.
+/// Returns false when decals are off or the icon is not registered.
+fn place_furniture_decals(
+    editor: &mut WorldEditor,
+    tags: &HashMap<String, String>,
+    x: i32,
+    abs_y: i32,
+    z: i32,
+) -> bool {
+    let Some(key) = crate::element_processing::signage::furniture_pictogram(tags) else {
+        return false;
+    };
+    if !editor.signage().is_some_and(|s| s.registry.contains(&key)) {
+        return false;
     }
+    for facing in [2i8, 3, 4, 5] {
+        editor.place_decal(x, abs_y, z, facing, &key);
+    }
+    true
 }
 
 fn place_item_frame_on_random_side(
