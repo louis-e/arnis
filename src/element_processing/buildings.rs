@@ -3705,6 +3705,13 @@ fn roof_friendly_block(block: Block) -> Block {
     match block {
         OAK_LOG => OAK_PLANKS,
         SPRUCE_LOG => SPRUCE_PLANKS,
+        RED_CONCRETE => RED_TERRACOTTA,
+        ORANGE_CONCRETE => ORANGE_TERRACOTTA,
+        YELLOW_CONCRETE => YELLOW_TERRACOTTA,
+        LIME_CONCRETE => GREEN_CONCRETE,
+        BLUE_CONCRETE => BLUE_TERRACOTTA,
+        LIGHT_BLUE_CONCRETE => LIGHT_BLUE_TERRACOTTA,
+        CYAN_CONCRETE => CYAN_TERRACOTTA,
         _ => block,
     }
 }

@@ -78,39 +78,39 @@ static PALETTE: &[(RGBTuple, Block, u8)] = &[
     ((151, 98,  83),  BRICK, MWR),
     ((143, 61,  47),  RED_TERRACOTTA, MWR),
     ((161, 39,  35),  RED_WOOL, M),
-    ((142, 33,  33),  RED_CONCRETE, MWR),
+    ((142, 33,  33),  RED_CONCRETE, MW),
     ((70,  7,   9),   RED_NETHER_BRICKS, MWR),
     ((44,  22,  26),  NETHER_BRICK, MWR),
     ((152, 94,  68),  TERRACOTTA, MWR),
     // Orange / copper
     ((162, 84,  38),  ORANGE_TERRACOTTA, MWR),
     ((241, 118, 20),  ORANGE_WOOL, M),
-    ((224, 97,  1),   ORANGE_CONCRETE, MWR),
+    ((224, 97,  1),   ORANGE_CONCRETE, MW),
     ((192, 108, 80),  WAXED_COPPER_BLOCK, MWR),
     ((161, 126, 104), WAXED_EXPOSED_COPPER, MWR),
     // Yellows
-    ((241, 175, 21),  YELLOW_CONCRETE, MWR),
+    ((241, 175, 21),  YELLOW_CONCRETE, MW),
     ((186, 133, 35),  YELLOW_TERRACOTTA, MWR),
     ((249, 198, 40),  YELLOW_WOOL, M),
     ((246, 208, 62),  GOLD_BLOCK, M),
     // Greens
     ((73,  91,  36),  GREEN_CONCRETE, MWR),
     ((85,  110, 28),  GREEN_WOOL, M),
-    ((94,  169, 24),  LIME_CONCRETE, MWR),
+    ((94,  169, 24),  LIME_CONCRETE, MW),
     ((89,  110, 45),  MOSS_BLOCK, MR),
     ((110, 118, 95),  MOSSY_COBBLESTONE, MW),
     ((82,  163, 133), WAXED_OXIDIZED_COPPER, MWR),
     // Blues
-    ((45,  47,  143), BLUE_CONCRETE, MWR),
+    ((45,  47,  143), BLUE_CONCRETE, MW),
     ((74,  60,  91),  BLUE_TERRACOTTA, MWR),
     ((53,  57,  157), BLUE_WOOL, M),
-    ((36,  137, 199), LIGHT_BLUE_CONCRETE, MWR),
+    ((36,  137, 199), LIGHT_BLUE_CONCRETE, MW),
     ((113, 109, 138), LIGHT_BLUE_TERRACOTTA, MWR),
     // Purples / magentas
-    ((100, 32,  156), PURPLE_CONCRETE, MWR),
-    ((169, 48,  159), MAGENTA_CONCRETE, MWR),
+    ((100, 32,  156), PURPLE_CONCRETE, MW),
+    ((169, 48,  159), MAGENTA_CONCRETE, MW),
     // Cyans
-    ((21,  119, 136), CYAN_CONCRETE, MWR),
+    ((21,  119, 136), CYAN_CONCRETE, MW),
     ((87,  91,  91),  CYAN_TERRACOTTA, MWR),
 ];
 
@@ -376,11 +376,49 @@ mod tests {
 
     #[test]
     fn red_roof_gives_tile_family() {
-        let family = [BRICK, RED_TERRACOTTA, RED_CONCRETE, RED_NETHER_BRICKS];
+        let family = [BRICK, RED_TERRACOTTA, TERRACOTTA, RED_NETHER_BRICKS];
         for seed in 0..10u64 {
             let mut r = ChaCha8Rng::seed_from_u64(seed);
             let block = roof_block_for_color((160, 50, 40), &mut r);
             assert!(family.contains(&block), "red roof got {block:?}");
+        }
+    }
+
+    #[test]
+    fn saturated_concrete_never_roofs() {
+        let banned = [
+            RED_CONCRETE,
+            ORANGE_CONCRETE,
+            YELLOW_CONCRETE,
+            LIME_CONCRETE,
+            BLUE_CONCRETE,
+            LIGHT_BLUE_CONCRETE,
+            PURPLE_CONCRETE,
+            MAGENTA_CONCRETE,
+            CYAN_CONCRETE,
+        ];
+        for rgb in [
+            (255, 0, 0),
+            (255, 128, 0),
+            (32, 116, 192),
+            (255, 255, 0),
+            (128, 0, 128),
+        ] {
+            for seed in 0..12u64 {
+                let mut r = ChaCha8Rng::seed_from_u64(seed);
+                let b = roof_block_for_color(rgb, &mut r);
+                assert!(!banned.contains(&b), "roof colour {rgb:?} got {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn blue_roof_stays_muted_blue() {
+        let family = [LIGHT_BLUE_TERRACOTTA, BLUE_TERRACOTTA, CYAN_TERRACOTTA];
+        for seed in 0..12u64 {
+            let mut r = ChaCha8Rng::seed_from_u64(seed);
+            let b = roof_block_for_color((32, 116, 192), &mut r);
+            assert!(family.contains(&b), "blue roof got {b:?}");
         }
     }
 
