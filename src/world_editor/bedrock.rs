@@ -205,9 +205,19 @@ impl BedrockWriter {
         Ok(())
     }
 
+    /// Prepares the staging directory, reusing leftovers but never deleting foreign data.
     fn prepare_output_dir(&self) -> Result<(), BedrockSaveError> {
-        // Remove existing output directory and mcworld file to avoid conflicts
         if self.output_dir.exists() {
+            if !is_arnis_staging_dir(&self.output_dir) {
+                return Err(BedrockSaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!(
+                        "'{}' already exists and was not created by Arnis. \
+                         Rename or move it, or choose a different Bedrock save path.",
+                        self.output_dir.display()
+                    ),
+                )));
+            }
             fs::remove_dir_all(&self.output_dir)?;
         }
         let mcworld_path = self.output_dir.with_extension("mcworld");
@@ -836,6 +846,14 @@ impl BedrockWriter {
     }
 }
 
+/// Whether a directory is empty or holds the files a previous run staged there.
+fn is_arnis_staging_dir(dir: &std::path::Path) -> bool {
+    if dir.join("levelname.txt").is_file() || dir.join("db").is_dir() {
+        return true;
+    }
+    fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_none())
+}
+
 fn add_directory_to_zip(
     writer: &mut ZipWriter<File>,
     dir_path: &std::path::Path,
@@ -1259,6 +1277,46 @@ mod tests {
         let mut buff: Cursor<&mut [u8]> = Cursor::new(&mut key_bytes);
         chunk_key.write_key(&mut buff);
         key_bytes
+    }
+
+    fn test_writer(output_path: PathBuf) -> BedrockWriter {
+        BedrockWriter::new(
+            output_path,
+            "Arnis World: Test".to_string(),
+            None,
+            None,
+            false,
+            "local".to_string(),
+            1.0,
+            crate::args::GameMode::Creative,
+            0,
+            false,
+        )
+    }
+
+    #[test]
+    fn prepare_output_dir_keeps_foreign_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("Arnis Test");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("notes.txt"), b"not ours").unwrap();
+
+        let writer = test_writer(staging.with_extension("mcworld"));
+        assert!(writer.prepare_output_dir().is_err());
+        assert!(staging.join("notes.txt").is_file());
+    }
+
+    #[test]
+    fn prepare_output_dir_wipes_previous_staging_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("Arnis Test");
+        fs::create_dir_all(staging.join("db")).unwrap();
+        fs::write(staging.join("levelname.txt"), b"Arnis World: Old").unwrap();
+
+        let writer = test_writer(staging.with_extension("mcworld"));
+        writer.prepare_output_dir().unwrap();
+        assert!(staging.is_dir());
+        assert!(!staging.join("levelname.txt").exists());
     }
 
     #[test]

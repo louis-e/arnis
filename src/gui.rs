@@ -146,6 +146,7 @@ pub fn run_gui() {
         .invoke_handler(tauri::generate_handler![
             gui_create_world,
             gui_get_default_save_path,
+            gui_get_default_bedrock_save_path,
             gui_set_save_path,
             gui_pick_save_directory,
             gui_start_generation,
@@ -220,6 +221,29 @@ fn detect_minecraft_saves_directory() -> PathBuf {
 #[tauri::command]
 fn gui_get_default_save_path() -> String {
     detect_minecraft_saves_directory().display().to_string()
+}
+
+/// Returns the default directory for Bedrock .mcworld files (the Desktop).
+#[tauri::command]
+fn gui_get_default_bedrock_save_path() -> String {
+    crate::world_utils::get_bedrock_output_directory()
+        .display()
+        .to_string()
+}
+
+/// Returns the configured Bedrock output directory, or the default if it is unusable.
+fn resolve_bedrock_output_dir(configured: &str) -> PathBuf {
+    let trimmed = configured.trim();
+    if !trimmed.is_empty() {
+        let configured_dir = PathBuf::from(trimmed);
+        if configured_dir.is_dir() {
+            return configured_dir;
+        }
+        eprintln!(
+            "Warning: Bedrock save path '{trimmed}' is not a directory, using the default instead."
+        );
+    }
+    crate::world_utils::get_bedrock_output_directory()
 }
 
 #[derive(serde::Serialize)]
@@ -907,6 +931,7 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
+    bedrock_save_path: String,
     world_scale: f64,
     ground_level: i32,
     terrain_enabled: bool,
@@ -1022,13 +1047,18 @@ fn gui_start_generation(
                     None
                 };
 
+            // Resolved up front because the disk space check below needs it
+            let bedrock_output_dir = match world_format {
+                WorldFormat::BedrockMcWorld => resolve_bedrock_output_dir(&bedrock_save_path),
+                _ => PathBuf::new(),
+            };
+
             // Check available disk space before starting generation (minimum 3GB required)
             const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
-            let check_path = if world_format == WorldFormat::JavaAnvil {
-                world_path.clone()
-            } else {
-                // For Bedrock, check current directory where .mcworld will be created
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            let check_path = match world_format {
+                WorldFormat::JavaAnvil => world_path.clone(),
+                WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
+                WorldFormat::LuantiWorld => crate::world_utils::get_luanti_worlds_directory(),
             };
             // Probe the nearest existing ancestor: a missing or space-containing
             // path otherwise confuses the Windows volume lookup, which then reports
@@ -1104,10 +1134,9 @@ fn gui_start_generation(
                     (updated_path, None)
                 }
                 WorldFormat::BedrockMcWorld => {
-                    // Bedrock: generate .mcworld on Desktop with location-based name
-                    let output_dir = crate::world_utils::get_bedrock_output_directory();
+                    // Bedrock: generate .mcworld in the configured directory
                     let (output_path, lvl_name) =
-                        crate::world_utils::build_bedrock_output(&bbox, output_dir);
+                        crate::world_utils::build_bedrock_output(&bbox, bedrock_output_dir);
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }

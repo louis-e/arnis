@@ -1,6 +1,6 @@
 // Persistence, per-setting revert and global reset for the Settings modal.
-// Values live in one localStorage blob. The six preferences that already had
-// their own keys (language, map theme, world format, Luanti, save path,
+// Values live in one localStorage blob. The preferences that already had their
+// own keys (language, map theme, world format, Luanti, the two save paths,
 // telemetry) keep them and are only listed here for revert and reset.
 // Defaults come from the HTML attributes, which JS assignments never change,
 // so there is no ordering hazard with initSettings().
@@ -49,6 +49,12 @@ const SETTINGS = [
 
   // Application
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },
+  {
+    id: 'bedrock-save-path-input',
+    kind: 'text',
+    store: EXTERNAL,
+    dynamicDefault: 'bedrockSavePath',
+  },
   { id: 'language-select', kind: 'select', store: EXTERNAL, dynamicDefault: 'language' },
 
   // Consent record, not a preference. The user answered it on first run and the
