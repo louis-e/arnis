@@ -1448,6 +1448,12 @@ impl<'a> WorldEditor<'a> {
 
         let absolute_y = self.get_absolute_y(x, y, z);
 
+        // Two hanging entities can share a cell on opposite faces, so the face belongs in
+        // the UUID seed; without it they collide and the game keeps only one.
+        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
+            Some(Value::Byte(f)) => *f as i64,
+            _ => -1,
+        };
         let mut entity = HashMap::new();
         entity.insert("id".to_string(), Value::String(id.to_string()));
         entity.insert(
@@ -1477,7 +1483,7 @@ impl<'a> WorldEditor<'a> {
         entity.insert("PortalCooldown".to_string(), Value::Int(0));
         entity.insert(
             "UUID".to_string(),
-            Value::IntArray(build_deterministic_uuid(id, x, absolute_y, z)),
+            Value::IntArray(build_deterministic_uuid(id, x, absolute_y, z, face)),
         );
 
         if let Some(extra) = extra_data {
@@ -2107,11 +2113,12 @@ impl<'a> WorldEditor<'a> {
 }
 
 #[allow(dead_code)]
-fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
+fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32, face: i64) -> IntArray {
     let mut hash: i64 = 17;
     for byte in id.bytes() {
         hash = hash.wrapping_mul(31).wrapping_add(byte as i64);
     }
+    hash = hash.wrapping_mul(31).wrapping_add(face);
 
     let seed_a = hash ^ (x as i64).wrapping_shl(32) ^ (y as i64).wrapping_mul(17);
     let seed_b = hash.rotate_left(7) ^ (z as i64).wrapping_mul(31) ^ (x as i64).wrapping_mul(13);
@@ -2257,6 +2264,36 @@ mod eviction_guard_tests {
             editor.world.regions.contains_key(&(1, 1)),
             "writes to a resident region still land"
         );
+    }
+
+    #[test]
+    fn frames_on_opposite_faces_of_one_cell_get_distinct_uuids() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_map_decals(true);
+        // Two hosts with a one block gap, each showing a sign into that gap.
+        editor.set_block_absolute(SMOOTH_STONE, 20, 5, 20, None, None);
+        editor.set_block_absolute(SMOOTH_STONE, 20, 5, 22, None, None);
+        assert!(editor.place_map_decal_ex(20, 5, 20, 3, 7, 0, false, false));
+        assert!(editor.place_map_decal_ex(20, 5, 22, 2, 8, 0, false, false));
+
+        let mut uuids: Vec<Vec<i32>> = Vec::new();
+        for region in editor.world.regions.values() {
+            for chunk in region.chunks.values() {
+                let Some(Value::List(entities)) = chunk.other.get("entities") else {
+                    continue;
+                };
+                for e in entities {
+                    let Value::Compound(m) = e else { continue };
+                    if let Some(Value::IntArray(u)) = m.get("UUID") {
+                        uuids.push(u.iter().copied().collect());
+                    }
+                }
+            }
+        }
+        assert_eq!(uuids.len(), 2);
+        assert_ne!(uuids[0], uuids[1], "same cell, different face, same UUID");
     }
 
     #[test]

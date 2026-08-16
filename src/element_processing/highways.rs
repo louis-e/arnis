@@ -835,7 +835,7 @@ fn generate_highways_internal(
                                     arm_y,
                                     lz,
                                     None,
-                                    Some(&[]),
+                                    None,
                                 );
                             }
                         }
