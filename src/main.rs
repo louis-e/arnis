@@ -300,15 +300,15 @@ fn run_cli() {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
     }
     let fetch_start = std::time::Instant::now();
-    let (raw_data, overture_elements, mut ground) = std::thread::scope(|s| {
+    let (raw_data, overture_data, mut ground) = std::thread::scope(|s| {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let elements = if args.overture && !skip_objects {
+            let data = if args.overture && !skip_objects {
                 overture::fetch_overture_buildings(&effective_bbox, args.scale, args.debug)
             } else {
-                Vec::new()
+                overture::OvertureData::default()
             };
-            (elements, t.elapsed())
+            (data, t.elapsed())
         });
         let ground_handle = s.spawn(|| {
             let t = std::time::Instant::now();
@@ -335,13 +335,13 @@ fn run_cli() {
         };
         bench.report("osm_fetch", t.elapsed());
 
-        let (overture_elements, overture_dur) =
+        let (overture_data, overture_dur) =
             overture_handle.join().expect("Overture fetch panicked");
         bench.report("overture_fetch", overture_dur);
         let (ground, ground_dur) = ground_handle.join().expect("Terrain fetch panicked");
         bench.report("terrain_total", ground_dur);
 
-        (raw_data, overture_elements, ground)
+        (raw_data, overture_data, ground)
     });
     bench.report("fetch_total", fetch_start.elapsed());
     bench.reset();
@@ -358,6 +358,21 @@ fn run_cli() {
     bench.mark("parse_osm");
 
     // Merge the Overture buildings now that the OSM elements are parsed.
+    let overture::OvertureData {
+        elements: overture_elements,
+        hints: overture_hints,
+    } = overture_data;
+
+    // Fill height/levels on OSM buildings that have neither, before the
+    // footprints are merged (Overture's own ways carry their tags already).
+    let enriched = overture_hints.apply(&mut parsed_elements);
+    if enriched > 0 {
+        println!(
+            "  Filled heights on {} OSM buildings from Overture Maps",
+            enriched.to_string().bright_white().bold()
+        );
+    }
+
     if !overture_elements.is_empty() {
         let before_count = parsed_elements.len();
         let unique_overture =
@@ -368,7 +383,7 @@ fn run_cli() {
             "  Added {} buildings from Overture Maps",
             added.to_string().bright_white().bold()
         );
-    } else if args.overture && !skip_objects {
+    } else if args.overture && !skip_objects && enriched == 0 {
         println!("  No additional buildings from Overture Maps for this area");
     }
 

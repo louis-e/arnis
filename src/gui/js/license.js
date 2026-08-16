@@ -23,6 +23,10 @@ export const licenseText = `
 <b>OpenFreeMap:</b><br> Vector tiles © <a href="https://openfreemap.org" style="color: inherit;" target="_blank">OpenFreeMap</a>, "Liberty" style © <a href="https://www.openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a>, map data © OpenStreetMap contributors
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
+<b>Overture Maps Buildings:</b><br>
+The "Additional Buildings" setting adds building footprints from the <a href="https://overturemaps.org/" style="color: inherit;" target="_blank">Overture Maps Foundation</a> buildings theme, and fills in building heights that OpenStreetMap leaves untagged. Contains information from Overture Maps, which is made available under the <a href="https://opendatacommons.org/licenses/odbl/" style="color: inherit;" target="_blank">Open Database License (ODbL)</a>. &copy; OpenStreetMap contributors; contributing sources include Esri Community Maps, Google Open Buildings, Microsoft Global ML Building Footprints and USGS 3DEP. Full attribution: <a href="https://docs.overturemaps.org/attribution/" style="color: inherit;" target="_blank">docs.overturemaps.org/attribution</a>.
+<br><br>
+
 <b>Mapterhorn Terrain Tiles:</b><br>
 Elevation data &copy; <a href="https://mapterhorn.com/" style="color: inherit;" target="_blank">Mapterhorn</a>, aggregating open elevation datasets including Copernicus GLO-30 (&copy; DLR/ESA) and national terrain models from mapping agencies (GeoBasis-DE, IGN France, IGN Espa&ntilde;a, GSI Japan, swisstopo and others) under CC-BY-4.0-family licenses. Full source list: <a href="https://mapterhorn.com/attribution/" style="color: inherit;" target="_blank">mapterhorn.com/attribution</a>.
 <br><br>
