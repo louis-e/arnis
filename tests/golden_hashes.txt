@@ -2,5 +2,5 @@
 levittown	96de55b9de8b96ce
 marrakech	fb098d4ca4c0921d
 midtown	6d7b15853beed746
-munich_altstadt	362d481f68d1261c
+munich_altstadt	add2fb35bbedf45f
 rovaniemi	5875dcab1e90d74a

@@ -104,13 +104,13 @@ static PALETTE: &[(RGBTuple, Block, u8)] = &[
     ((45,  47,  143), BLUE_CONCRETE, MW),
     ((74,  60,  91),  BLUE_TERRACOTTA, MWR),
     ((53,  57,  157), BLUE_WOOL, M),
-    ((36,  137, 199), LIGHT_BLUE_CONCRETE, MW),
+    ((36,  137, 199), LIGHT_BLUE_CONCRETE, MWR),
     ((113, 109, 138), LIGHT_BLUE_TERRACOTTA, MWR),
     // Purples / magentas
     ((100, 32,  156), PURPLE_CONCRETE, MW),
     ((169, 48,  159), MAGENTA_CONCRETE, MW),
     // Cyans
-    ((21,  119, 136), CYAN_CONCRETE, MW),
+    ((21,  119, 136), CYAN_CONCRETE, MWR),
     ((87,  91,  91),  CYAN_TERRACOTTA, MWR),
 ];
 
@@ -385,25 +385,16 @@ mod tests {
     }
 
     #[test]
-    fn saturated_concrete_never_roofs() {
+    fn warm_saturated_concrete_never_roofs() {
         let banned = [
             RED_CONCRETE,
             ORANGE_CONCRETE,
             YELLOW_CONCRETE,
             LIME_CONCRETE,
-            BLUE_CONCRETE,
-            LIGHT_BLUE_CONCRETE,
             PURPLE_CONCRETE,
             MAGENTA_CONCRETE,
-            CYAN_CONCRETE,
         ];
-        for rgb in [
-            (255, 0, 0),
-            (255, 128, 0),
-            (32, 116, 192),
-            (255, 255, 0),
-            (128, 0, 128),
-        ] {
+        for rgb in [(255, 0, 0), (255, 128, 0), (255, 255, 0), (128, 0, 128)] {
             for seed in 0..12u64 {
                 let mut r = ChaCha8Rng::seed_from_u64(seed);
                 let b = roof_block_for_color(rgb, &mut r);
@@ -412,13 +403,28 @@ mod tests {
         }
     }
 
+    // Cool tones keep their saturation: painted blue metal roofs are real,
+    // and the BMW Museum logo slab must stay BMW blue.
     #[test]
-    fn blue_roof_stays_muted_blue() {
-        let family = [LIGHT_BLUE_TERRACOTTA, BLUE_TERRACOTTA, CYAN_TERRACOTTA];
+    fn saturated_blue_roof_keeps_blue_concrete() {
         for seed in 0..12u64 {
             let mut r = ChaCha8Rng::seed_from_u64(seed);
             let b = roof_block_for_color((32, 116, 192), &mut r);
-            assert!(family.contains(&b), "blue roof got {b:?}");
+            assert_eq!(b, LIGHT_BLUE_CONCRETE, "BMW blue got {b:?}");
+        }
+    }
+
+    // Dark violet and navy tags land on muted terracotta, never navy or
+    // purple concrete.
+    #[test]
+    fn violet_roofs_stay_muted() {
+        let banned = [BLUE_CONCRETE, PURPLE_CONCRETE, MAGENTA_CONCRETE];
+        for rgb in [(148, 0, 211), (45, 47, 143), (128, 0, 128)] {
+            for seed in 0..12u64 {
+                let mut r = ChaCha8Rng::seed_from_u64(seed);
+                let b = roof_block_for_color(rgb, &mut r);
+                assert!(!banned.contains(&b), "colour {rgb:?} got {b:?}");
+            }
         }
     }
 

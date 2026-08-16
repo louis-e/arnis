@@ -1336,6 +1336,10 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         // Greys and concretes
         GRAY_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         LIGHT_GRAY_CONCRETE => STONE_BRICK_STAIRS,
+        BLACK_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        LIGHT_BLUE_CONCRETE => POLISHED_DIORITE_STAIRS,
+        CYAN_CONCRETE => DEEPSLATE_BRICK_STAIRS,
+        GREEN_CONCRETE => MOSSY_COBBLESTONE_STAIRS,
 
         // Nether brick family
         NETHER_BRICK => NETHER_BRICK_STAIRS,
