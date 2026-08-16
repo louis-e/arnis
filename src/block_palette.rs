@@ -403,8 +403,7 @@ mod tests {
         }
     }
 
-    // Cool tones keep their saturation: painted blue metal roofs are real,
-    // and the BMW Museum logo slab must stay BMW blue.
+    // painted blue metal roofs are real, the BMW logo slab stays BMW blue
     #[test]
     fn saturated_blue_roof_keeps_blue_concrete() {
         for seed in 0..12u64 {
@@ -414,8 +413,7 @@ mod tests {
         }
     }
 
-    // Dark violet and navy tags land on muted terracotta, never navy or
-    // purple concrete.
+    // violet and navy tags land on muted terracotta
     #[test]
     fn violet_roofs_stay_muted() {
         let banned = [BLUE_CONCRETE, PURPLE_CONCRETE, MAGENTA_CONCRETE];

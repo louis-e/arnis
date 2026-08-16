@@ -1101,8 +1101,7 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         };
 
-        // pyramidal downgrade only for truly rotated shapes; the fill ratio
-        // alone would also hit concave axis-aligned footprints
+        // downgrade only truly rotated shapes, not concave axis-aligned ones
         let has_explicit_roof_shape = element.tags.contains_key("roof:shape");
         const DIAGONAL_THRESHOLD: f64 = 0.35;
         let diagonality = compute_building_diagonality(&element.nodes);
@@ -2579,8 +2578,7 @@ fn calculate_building_height(
                 element.tags.get("roof:shape"),
             ) {
                 (Some(rh), Some(shape)) if shape != "flat" => {
-                    // OSM height spans walls plus roof; a tagged roof:height
-                    // comes off the wall span so the total stays as mapped.
+                    // height includes the roof, a tagged roof:height comes off the walls
                     let rh = rh
                         .trim_end_matches('m')
                         .trim()
@@ -2626,8 +2624,7 @@ fn calculate_building_height(
             group_seed,
         ) {
             InferredHeight::Levels(levels) => {
-                // Same min_level handling as the tagged branches, so an
-                // elevated part tops out flush with its ground sibling
+                // subtract min_level like the tagged branches, parts top out flush
                 let lev = (levels - min_level as f64).max(1.0);
                 let bonus = if min_level > 0 {
                     0.0
@@ -2898,8 +2895,7 @@ fn generate_roof_only_structure(
                         (min_x.min(x), max_x.max(x), min_z.min(z), max_z.max(z))
                     },
                 );
-                // The shaped canopy springs from the top of its support
-                // height like the flat arm, not from the ground.
+                // shaped canopies spring from the support height like the flat arm
                 let springing = start_y_offset + roof_thickness;
                 let config = RoofConfig {
                     min_x,
@@ -4310,8 +4306,7 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
     (polygon_area / bbox_area).min(1.0)
 }
 
-/// Signed dominant edge orientation in radians, folded into (-45, 45] deg
-/// off the world axes. Length-weighted circular mean over mod-90 edge space.
+/// Length-weighted dominant edge angle in radians, folded to (-45, 45] deg.
 fn dominant_axis_angle(nodes: &[ProcessedNode]) -> f64 {
     let mut sum_c = 0.0f64;
     let mut sum_s = 0.0f64;
@@ -4333,9 +4328,7 @@ fn dominant_axis_angle(nodes: &[ProcessedNode]) -> f64 {
     sum_s.atan2(sum_c) / 4.0
 }
 
-/// Slightly-rotated rectangular buildings get an axis-aligned gable tent so
-/// the ridge stays straight instead of stepping with the polygon edges.
-/// Applies between 1 and 12 degrees off-axis on near-rectangular footprints.
+/// Near-rectangular footprints rotated 1 to 12 deg get an axis-aligned tent.
 fn gable_axis_snap(nodes: &[ProcessedNode]) -> bool {
     if nodes.len() < 3 {
         return false;
@@ -7397,8 +7390,7 @@ fn generate_building_roof(
         }
     }
 
-    // Chimneys belong on pitched roofs only; presets cannot force one onto
-    // a flat roof where the peak estimate would leave it floating.
+    // chimneys only on pitched roofs, presets cannot force one onto flat
     if style.has_chimney
         && matches!(
             style.roof_type,
@@ -7422,9 +7414,7 @@ fn generate_building_roof(
         );
     }
 
-    // Roof terrace on flat-roofed tall building:part elements. A part whose
-    // footprint is covered by a sibling part gets no rooftop extras at all;
-    // they would end up inside the volume stacked above it.
+    // no rooftop extras when a sibling part is stacked on top
     let has_terrace = !modeled_part_roof
         && !covered_by_sibling_part
         && should_generate_roof_terrace(element, config, style.roof_type);
@@ -7867,8 +7857,7 @@ fn generate_chimney(
         return;
     }
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
-    // One step inside the polygon edge: the roof surface there is low in
-    // every profile, so a short shaft always sits embedded and protrudes.
+    // one step inside the edge the surface is low in every roof profile
     let near_eave = |x: i32, z: i32| {
         [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
             .iter()
@@ -7923,9 +7912,7 @@ fn generate_chimney(
     // Pick a point from candidates
     let (chimney_x, chimney_z) = final_candidates[rng.random_range(0..final_candidates.len())];
 
-    // The shaft rises from just above the roof base; at an eave-adjacent
-    // cell every profile keeps the local surface within this span, so the
-    // bottom is embedded and the top clears the roof.
+    // short shaft above the roof base, embedded below and clear on top
     let chimney_base = roof_base + 1;
     let chimney_height = 4;
 
@@ -8241,8 +8228,7 @@ fn generate_rooftop_equipment(
     let replace_any: &[Block] = &[];
     let equip_y = roof_y + abs_terrain_offset + 2; // On top of the flat roof surface
 
-    // The outermost ring carries the parapet or edge trim; equipment and
-    // its extent checks must stay off it.
+    // keep equipment off the outline ring where the parapet sits
     let raw_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
     let floor_set: HashSet<(i32, i32)> = raw_set
         .iter()
@@ -8594,8 +8580,7 @@ fn place_dormer_windows(
         return;
     }
 
-    // Gabled/hipped slopes have their second row at base+2 or base+3; a
-    // mansard steep band can sit higher, passed in by the caller.
+    // second row at base+2/base+3, the mansard band comes from the caller
     let target_h = config.base_height + 2;
     let alt_target_h = config.base_height + 3;
     let (px, pz) = parallel_to_ridge;
@@ -8629,9 +8614,7 @@ fn place_dormer_windows(
             continue;
         }
 
-        // The roof must keep rising inward of the row; on a height-capped
-        // flat top the target rows reappear mid-roof and would sprout
-        // dormers in the middle of the plateau.
+        // roof must keep rising inward, else capped flat tops sprout dormers
         let inward = if dm_perp <= dp_perp { 1 } else { -1 };
         let above = (x + pz * inward, z + px * inward);
         if roof_heights.get(&above).is_none_or(|&ah| ah <= h) {
@@ -8695,8 +8678,7 @@ fn place_dormer_windows(
 
         let ext_x = x + ox;
         let ext_z = z + oz;
-        // The overhang extension needs roof below it; near a rotated rim the
-        // outward cell can be off-footprint and the extension would float.
+        // skip the extension when the outward cell leaves the footprint
         let ext_in = footprint.contains(&(ext_x, ext_z));
 
         // Lower base row: solid wall at the eave so the dormer reads as flush.
@@ -9002,8 +8984,7 @@ fn generate_gabled_roof(
         let sp_z = scan_dir(x, z, 0, 1);
         let sm_x = scan_dir(x, z, -1, 0);
         let sp_x = scan_dir(x, z, 1, 0);
-        // snap mode: bbox distances drive the slope, footprint scans keep
-        // gable ends and the rim clamp honest
+        // snap mode: bbox distances drive the slope, scans keep the rim honest
         let (dm_z, dp_z, dm_x, dp_x) = if axis_snap {
             (
                 z - config.min_z,
@@ -9075,8 +9056,7 @@ fn generate_gabled_roof(
         let capped_boost = local_boost.min(wall_cap);
         let mut roof_height =
             (config.base_height + boost).min(config.base_height + capped_boost) + 1;
-        // No-op for the polygon scan; in snap mode this feathers the tent
-        // back down to the real rim at rotated corners.
+        // no-op for the polygon scan, feathers the snap tent at rotated corners
         roof_height = roof_height.min(config.base_height + pd.scan_perp_min + 1);
         if profile == GableProfile::HalfHipped {
             // The hip only bites above half the peak near the gable ends.
@@ -9087,9 +9067,7 @@ fn generate_gabled_roof(
         roof_heights.insert((x, z), roof_height);
     }
 
-    // Rasterized diagonal outlines make the perp span wobble by one cell,
-    // which reads as a bumpy ridge line. A 3-cell median along the ridge
-    // evens single-cell jitter and is the identity on aligned buildings.
+    // median along the ridge evens rasterization wobble, identity when aligned
     let smooth_along: (i32, i32) = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
     let roof_heights: HashMap<(i32, i32), i32> = roof_heights
         .iter()
@@ -9178,8 +9156,7 @@ fn generate_gabled_roof(
         }
     };
 
-    // Hip-end slopes of a half-hipped roof descend along the ridge; the
-    // perp-only slope stair would face sideways there.
+    // hip ends descend along the ridge, perp-only stairs would face sideways
     let along_descent_stair = |x: i32, z: i32, h: i32| -> Option<BlockWithProperties> {
         if profile != GableProfile::HalfHipped {
             return None;
@@ -9295,9 +9272,7 @@ fn generate_gabled_roof(
                 continue;
             }
             let h = roof_heights[&(x, z)];
-            // Skip only genuinely flat cap cells; half-pitch slopes pair
-            // equal heights, so require both perp neighbors level, not
-            // merely none lower.
+            // skip flat cap cells only, half-pitch treads pair equal heights
             let (pdx, pdz) = if ridge_runs_along_x { (0, 1) } else { (1, 0) };
             let flat_here = [(x - pdx, z - pdz), (x + pdx, z + pdz)]
                 .iter()
@@ -9914,8 +9889,7 @@ fn generate_skillion_roof(
     let width = config.width().max(1);
     let length = config.length().max(1);
 
-    // Rise follows the slope run, not the long axis, and stays below the
-    // wall height so narrow sheds do not grow cliff-sized mono-pitches.
+    // rise follows the slope run and stays below the wall height
     let run = match downhill {
         StairFacing::West | StairFacing::East => width,
         StairFacing::North | StairFacing::South => length,
@@ -10104,8 +10078,7 @@ fn generate_pyramidal_roof(
 
 /// Generates a dome roof
 fn generate_dome_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], config: &RoofConfig) {
-    // Elliptical normalization: the shell descends to the eave on every
-    // wall instead of getting sliced off on the short axis.
+    // elliptical normalization so the shell meets the eave on every wall
     let half_w = (config.width() as f64 / 2.0).max(1.0);
     let half_l = (config.length() as f64 / 2.0).max(1.0);
     let rise = (half_w.min(half_l) * 0.8).max(1.0);
@@ -10167,8 +10140,7 @@ fn generate_cone_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], confi
 
 /// Onion roof: bulbous Russian-Orthodox / Bavarian profile.
 fn generate_onion_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], config: &RoofConfig) {
-    // Shorter axis: the bulb may bulge ~25% past the walls, not cantilever
-    // half the long axis into the neighborhood.
+    // shorter axis, the bulb bulges a little instead of half the long axis
     let base_radius = (config.width().min(config.length()) / 2) as f64;
     let replace_any: &[Block] = &[];
 
