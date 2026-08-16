@@ -1383,16 +1383,6 @@ impl WindowFrameStyle {
         }
     }
 
-    /// Open fence gate as a French-balcony rail in front of the window.
-    fn balconette_gate(self) -> Option<Block> {
-        match self {
-            Self::SpruceCottage => Some(SPRUCE_FENCE_GATE),
-            Self::DarkTimber => Some(DARK_OAK_FENCE_GATE),
-            Self::TerracottaCopper => Some(OAK_FENCE_GATE),
-            _ => None,
-        }
-    }
-
     /// Button studs on the band front.
     fn stud_button(self) -> Option<Block> {
         match self {
@@ -1401,20 +1391,36 @@ impl WindowFrameStyle {
             _ => None,
         }
     }
+}
 
-    fn has_azalea_box(self) -> bool {
-        matches!(
-            self,
-            Self::SpruceCottage | Self::TerracottaCopper | Self::RusticMossy
-        )
+/// Whether a frame style's trim harmonizes with the wall it sits on.
+fn frame_fits_wall(style: WindowFrameStyle, wall: Block) -> bool {
+    use WindowFrameStyle::*;
+    match wall {
+        WHITE_CONCRETE | LIGHT_GRAY_CONCRETE | GRAY_CONCRETE | QUARTZ_BLOCK | QUARTZ_BRICKS
+        | SMOOTH_STONE | POLISHED_ANDESITE | POLISHED_DIORITE => {
+            matches!(style, QuartzModern | Blackstone | StoneOrnate)
+        }
+        OAK_PLANKS | SPRUCE_PLANKS | DARK_OAK_PLANKS | OAK_LOG | SPRUCE_LOG => {
+            matches!(style, SpruceCottage | DarkTimber | RusticMossy)
+        }
+        BRICK | RED_TERRACOTTA | ORANGE_TERRACOTTA | TERRACOTTA | BROWN_TERRACOTTA
+        | RED_NETHER_BRICKS | NETHER_BRICK | GRANITE | POLISHED_GRANITE => {
+            matches!(style, StoneOrnate | TerracottaCopper | DarkTimber)
+        }
+        SANDSTONE | SMOOTH_SANDSTONE | END_STONE_BRICKS | WHITE_TERRACOTTA => {
+            matches!(style, StoneOrnate | TerracottaCopper | QuartzModern)
+        }
+        _ => true,
     }
 }
 
-/// Picks a per-building frame style suited to the category; 55% of eligible buildings.
+/// Picks a per-building frame style suited to category, era and wall.
 fn pick_window_frame(
     category: BuildingCategory,
     era: ArchEra,
     detail: DetailTier,
+    wall_block: Block,
     element_id: u64,
 ) -> Option<WindowFrameStyle> {
     if detail == DetailTier::Minimal {
@@ -1470,9 +1476,17 @@ fn pick_window_frame(
         DetailTier::Landmark => (chance + 0.30).min(0.95),
         _ => chance,
     };
+    let fitting: Vec<WindowFrameStyle> = pool
+        .iter()
+        .copied()
+        .filter(|&f| frame_fits_wall(f, wall_block))
+        .collect();
+    if fitting.is_empty() {
+        return None;
+    }
     let mut rng = element_rng(element_id ^ 0xF7A3_E001_57BD_2210);
     rng.random_bool(chance)
-        .then(|| pool[rng.random_range(0..pool.len())])
+        .then(|| fitting[rng.random_range(0..fitting.len())])
 }
 
 impl BuildingConfig {
@@ -5043,7 +5057,6 @@ fn generate_window_frames(
                 continue;
             }
             let facing = facing_for_normal(out_nx, out_nz);
-            let inward_facing = facing_for_normal(-out_nx, -out_nz);
             let band_stair = make_upside_down_stair(style.band_material(), facing);
             let shutter = shutter_block.map(|b| make_open_trapdoor(b, facing));
 
@@ -5125,39 +5138,6 @@ fn generate_window_frames(
                                         Some(&[AIR]),
                                         None,
                                     );
-                                } else if roll < 46 && style.has_azalea_box() {
-                                    editor.set_block_with_properties_absolute(
-                                        make_prop_block(AZALEA_LEAVES, &[("persistent", "true")]),
-                                        lx,
-                                        above,
-                                        lz,
-                                        Some(&[AIR]),
-                                        None,
-                                    );
-                                    if h + 2 < top_h && roll % 5 < 2 {
-                                        editor.set_block_absolute(
-                                            FLOWER_POT,
-                                            lx,
-                                            above + 1,
-                                            lz,
-                                            Some(&[AIR]),
-                                            None,
-                                        );
-                                    }
-                                } else if roll < 54 {
-                                    if let Some(gate) = style.balconette_gate() {
-                                        editor.set_block_with_properties_absolute(
-                                            make_prop_block(
-                                                gate,
-                                                &[("facing", inward_facing), ("open", "true")],
-                                            ),
-                                            lx,
-                                            above,
-                                            lz,
-                                            Some(&[AIR]),
-                                            None,
-                                        );
-                                    }
                                 }
                             }
 
@@ -6840,7 +6820,7 @@ pub fn generate_buildings(
                     | WindowArchetype::PairedNarrow
                     | WindowArchetype::ArchedTraditional
             ))
-        .then(|| pick_window_frame(category, era, detail, group_seed))
+        .then(|| pick_window_frame(category, era, detail, wall_block, group_seed))
         .flatten(),
     };
 
