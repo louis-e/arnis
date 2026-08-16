@@ -90,6 +90,28 @@ fn prop_eq(props: Option<&Value>, key: &str, val: &str) -> bool {
 ///   data 4–7   (open,   bottom) → mtn_open,  param2 = facedir
 ///   data 8–11  (closed, top)    → mtn,       param2 = facedir + 20
 ///   data 12–15 (open,   top)    → mtn_open,  param2 = facedir + 20
+/// Door halves: the stored props decide, else the id (the *_UPPER ids are top).
+fn conv_door(props: Option<&Value>, id: u16, species: &str) -> LuantiNode {
+    let is_upper = match prop_str(props, "half") {
+        Some(h) => h == "upper",
+        None => matches!(id, 107 | 365 | 366),
+    };
+    let name: &'static str = match (species, is_upper) {
+        ("dark_oak", false) => "mcl_doors:door_dark_oak_b_1",
+        ("dark_oak", true) => "mcl_doors:door_dark_oak_t_1",
+        ("spruce", false) => "mcl_doors:door_spruce_b_1",
+        ("spruce", true) => "mcl_doors:door_spruce_t_1",
+        ("birch", false) => "mcl_doors:door_birch_b_1",
+        ("birch", true) => "mcl_doors:door_birch_t_1",
+        (_, false) => "mcl_doors:door_oak_b_1",
+        (_, true) => "mcl_doors:door_oak_t_1",
+    };
+    LuantiNode {
+        name,
+        param2: facing_to_facedir(prop_str(props, "facing").unwrap_or("north")),
+    }
+}
+
 fn conv_trapdoor(props: Option<&Value>, closed: &'static str, open: &'static str) -> LuantiNode {
     let facing = prop_str(props, "facing").unwrap_or("north");
     let is_open = prop_eq(props, "open", "true");
@@ -246,8 +268,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         103 => "mcl_copper:block_oxidized", // WAXED_OXIDIZED_COPPER (waxed variant approximated as oxidized)
         104 => "mcl_colorblocks:hardened_clay_yellow",
         105 => "mcl_farming:carrot_7",
-        106 => "mcl_doors:door_dark_oak_b_1",
-        107 => "mcl_doors:door_dark_oak_t_1",
+        106 | 107 => return conv_door(props, block.id(), "dark_oak"),
         108 => "mcl_farming:potato_4",
         109 => "mcl_farming:wheat_7",
         110 => "mcl_core:bedrock",
@@ -438,7 +459,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         276 => "mcl_fences:jungle_fence",
         277 => "mcl_banners:hanging_banner", // BLACK_WALL_BANNER
         278 => "mcl_banners:hanging_banner", // RED_WALL_BANNER
-        279 => "mcl_doors:door_birch_b_1",
+        279 => return conv_door(props, block.id(), "birch"),
         280 => "mcl_pressureplates:pressure_plate_birch_off",
         281 => "mcl_pressureplates:pressure_plate_stone_off",
         282 => "mcl_blast_furnace:blast_furnace",
@@ -452,7 +473,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         290 => "mcl_blackstone:blackstone_chiseled_polished",
         291 => "mcl_walls:stonebrickmossy",
         292 => return conv_stair(props, "mcl_stairs:stair_bamboo"), // BAMBOO_STAIRS
-        293 => "mcl_doors:door_oak_b_1",
+        293 => return conv_door(props, block.id(), "oak"),
         296 => "mcl_walls:endbricks",
         297 => "mcl_stairs:slab_bamboo",
         298 => "mcl_deepslate:deepslate_chiseled",
@@ -520,9 +541,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         360 => "mcl_wool:orange",
         361 => "mcl_wool:blue",
         363 => "mcl_banners:hanging_banner", // WHITE_WALL_BANNER
-        364 => "mcl_doors:door_spruce_b_1",
-        365 => "mcl_doors:door_spruce_t_1",
-        366 => "mcl_doors:door_oak_b_1",
+        364 | 365 => return conv_door(props, block.id(), "spruce"),
+        366 => return conv_door(props, block.id(), "oak"),
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

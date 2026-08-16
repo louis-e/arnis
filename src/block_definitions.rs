@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::colors::RGBTuple;
-
 // Enums for stair properties
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StairFacing {
@@ -50,11 +48,6 @@ impl StairShape {
         }
     }
 }
-
-// Type definitions for better readability
-type ColorTuple = (u8, u8, u8);
-type BlockOptions = &'static [Block];
-type ColorBlockMapping = (ColorTuple, BlockOptions);
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
@@ -1343,6 +1336,10 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         // Greys and concretes
         GRAY_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         LIGHT_GRAY_CONCRETE => STONE_BRICK_STAIRS,
+        BLACK_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        LIGHT_BLUE_CONCRETE => POLISHED_DIORITE_STAIRS,
+        CYAN_CONCRETE => DEEPSLATE_BRICK_STAIRS,
+        GREEN_CONCRETE => MOSSY_COBBLESTONE_STAIRS,
 
         // Nether brick family
         NETHER_BRICK => NETHER_BRICK_STAIRS,
@@ -1469,37 +1466,12 @@ pub static RELIGIOUS_WINDOW_OPTIONS: [Block; 5] = [
     WHITE_STAINED_GLASS,
 ];
 
-// Window types for different building styles (non-deterministic, for backwards compatibility)
-pub fn get_window_block_for_building_type(building_type: &str) -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-    get_window_block_for_building_type_with_rng(building_type, &mut rng)
-}
+// Farm window options, plain glazing since barns don't get tinted variety.
+pub static FARM_WINDOW_OPTIONS: [Block; 3] = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
 
-/// Deterministic window block selection using provided RNG
-pub fn get_window_block_for_building_type_with_rng(
-    building_type: &str,
-    rng: &mut impl rand::Rng,
-) -> Block {
-    match building_type {
-        "residential" | "house" | "apartment" | "apartments" => {
-            RESIDENTIAL_WINDOW_OPTIONS[rng.random_range(0..RESIDENTIAL_WINDOW_OPTIONS.len())]
-        }
-        "hospital" | "school" | "university" => {
-            INSTITUTIONAL_WINDOW_OPTIONS[rng.random_range(0..INSTITUTIONAL_WINDOW_OPTIONS.len())]
-        }
-        "hotel" | "restaurant" => {
-            HOSPITALITY_WINDOW_OPTIONS[rng.random_range(0..HOSPITALITY_WINDOW_OPTIONS.len())]
-        }
-        "industrial" | "warehouse" => {
-            INDUSTRIAL_WINDOW_OPTIONS[rng.random_range(0..INDUSTRIAL_WINDOW_OPTIONS.len())]
-        }
-        "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
-            RELIGIOUS_WINDOW_OPTIONS[rng.random_range(0..RELIGIOUS_WINDOW_OPTIONS.len())]
-        }
-        _ => WINDOW_VARIATIONS[rng.random_range(0..WINDOW_VARIATIONS.len())],
-    }
-}
+// Historic window options (clear, slightly aged glazing).
+pub static HISTORIC_WINDOW_OPTIONS: [Block; 3] =
+    [GLASS, LIGHT_GRAY_STAINED_GLASS, WHITE_STAINED_GLASS];
 
 // Floor block options for buildings
 pub static FLOOR_BLOCK_OPTIONS: [Block; 8] = [
@@ -1523,172 +1495,6 @@ pub fn get_random_floor_block() -> Block {
 /// Deterministic floor block selection using provided RNG
 pub fn get_floor_block_with_rng(rng: &mut impl rand::Rng) -> Block {
     FLOOR_BLOCK_OPTIONS[rng.random_range(0..FLOOR_BLOCK_OPTIONS.len())]
-}
-
-// Define all predefined colors with their blocks
-static DEFINED_COLORS: &[ColorBlockMapping] = &[
-    ((233, 107, 57), &[BRICK, NETHER_BRICK]),
-    (
-        (18, 12, 13),
-        &[POLISHED_BLACKSTONE_BRICKS, BLACKSTONE, DEEPSLATE_BRICKS],
-    ),
-    ((76, 127, 153), &[LIGHT_BLUE_TERRACOTTA]),
-    (
-        (0, 0, 0),
-        &[DEEPSLATE_BRICKS, BLACKSTONE, POLISHED_BLACKSTONE],
-    ),
-    (
-        (186, 195, 142),
-        &[
-            END_STONE_BRICKS,
-            SANDSTONE,
-            SMOOTH_SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-        ],
-    ),
-    (
-        (57, 41, 35),
-        &[BROWN_TERRACOTTA, BROWN_CONCRETE, MUD_BRICKS, BRICK],
-    ),
-    (
-        (112, 108, 138),
-        &[LIGHT_BLUE_TERRACOTTA, GRAY_TERRACOTTA, GRAY_CONCRETE],
-    ),
-    (
-        (122, 92, 66),
-        &[MUD_BRICKS, BROWN_TERRACOTTA, SANDSTONE, BRICK],
-    ),
-    ((24, 13, 14), &[NETHER_BRICK, BLACKSTONE, DEEPSLATE_BRICKS]),
-    (
-        (159, 82, 36),
-        &[
-            BROWN_TERRACOTTA,
-            BRICK,
-            POLISHED_GRANITE,
-            BROWN_CONCRETE,
-            NETHERITE_BLOCK,
-            POLISHED_DEEPSLATE,
-        ],
-    ),
-    (
-        (128, 128, 128),
-        &[
-            POLISHED_ANDESITE,
-            LIGHT_GRAY_CONCRETE,
-            SMOOTH_STONE,
-            STONE_BRICKS,
-        ],
-    ),
-    (
-        (174, 173, 174),
-        &[
-            POLISHED_ANDESITE,
-            LIGHT_GRAY_CONCRETE,
-            SMOOTH_STONE,
-            STONE_BRICKS,
-        ],
-    ),
-    ((141, 101, 142), &[STONE_BRICKS, BRICK, MUD_BRICKS]),
-    (
-        (142, 60, 46),
-        &[
-            BLACK_TERRACOTTA,
-            NETHERITE_BLOCK,
-            NETHER_BRICK,
-            POLISHED_GRANITE,
-            POLISHED_DEEPSLATE,
-            BROWN_TERRACOTTA,
-        ],
-    ),
-    (
-        (153, 83, 28),
-        &[
-            BLACK_TERRACOTTA,
-            POLISHED_GRANITE,
-            BROWN_CONCRETE,
-            BROWN_TERRACOTTA,
-            STONE_BRICKS,
-        ],
-    ),
-    (
-        (224, 216, 175),
-        &[
-            SMOOTH_SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-            POLISHED_ANDESITE,
-            SMOOTH_STONE,
-        ],
-    ),
-    (
-        (188, 182, 179),
-        &[
-            SMOOTH_SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-            QUARTZ_BRICKS,
-            POLISHED_ANDESITE,
-            SMOOTH_STONE,
-        ],
-    ),
-    (
-        (35, 86, 85),
-        &[
-            POLISHED_BLACKSTONE_BRICKS,
-            BLUE_TERRACOTTA,
-            LIGHT_BLUE_TERRACOTTA,
-        ],
-    ),
-    (
-        (255, 255, 255),
-        &[WHITE_CONCRETE, QUARTZ_BRICKS, QUARTZ_BLOCK],
-    ),
-    (
-        (209, 177, 161),
-        &[
-            WHITE_TERRACOTTA,
-            SMOOTH_SANDSTONE,
-            SMOOTH_STONE,
-            SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-        ],
-    ),
-    ((191, 147, 42), &[SMOOTH_SANDSTONE, SANDSTONE, SMOOTH_STONE]),
-    // Oxidized-copper green
-    ((85, 158, 134), &[WAXED_OXIDIZED_COPPER]),
-    // Terracotta-tile orange-red
-    (
-        (178, 76, 50),
-        &[RED_TERRACOTTA, ORANGE_TERRACOTTA, BRICK, NETHER_BRICK],
-    ),
-    (
-        (210, 110, 60),
-        &[ORANGE_TERRACOTTA, BRICK, BROWN_TERRACOTTA, RED_TERRACOTTA],
-    ),
-    // Saturated tag colours, the muted entries above would wash these out
-    ((36, 137, 199), &[LIGHT_BLUE_CONCRETE]),
-    ((45, 47, 143), &[BLUE_CONCRETE, BLUE_TERRACOTTA]),
-    ((21, 119, 136), &[CYAN_CONCRETE]),
-    ((73, 91, 36), &[GREEN_CONCRETE]),
-    ((120, 200, 30), &[LIME_CONCRETE]),
-    ((241, 175, 21), &[YELLOW_CONCRETE]),
-    ((186, 133, 35), &[YELLOW_TERRACOTTA]),
-    ((200, 30, 30), &[RED_CONCRETE]),
-    ((100, 32, 156), &[PURPLE_CONCRETE]),
-    ((169, 48, 159), &[MAGENTA_CONCRETE]),
-    ((224, 97, 1), &[ORANGE_CONCRETE]),
-    ((90, 90, 90), &[GRAY_CONCRETE, POLISHED_DEEPSLATE]),
-];
-
-// Function to randomly select building wall block with alternatives
-pub fn get_building_wall_block_for_color(color: RGBTuple, rng: &mut impl rand::Rng) -> Block {
-    let closest_color = DEFINED_COLORS
-        .iter()
-        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
-
-    if let Some((_, options)) = closest_color {
-        options[rng.random_range(0..options.len())]
-    } else {
-        get_fallback_building_block(rng)
-    }
 }
 
 // Function to get a random fallback building block when no color attribute is specified
@@ -1919,49 +1725,6 @@ mod material_tests {
     }
 
     #[test]
-    fn saturated_colours_map_to_matching_blocks() {
-        let cases = [
-            ((0, 128, 0), GREEN_CONCRETE),
-            ((255, 255, 0), YELLOW_CONCRETE),
-            ((255, 0, 0), RED_CONCRETE),
-            ((128, 0, 128), PURPLE_CONCRETE),
-            ((255, 128, 0), ORANGE_CONCRETE),
-            ((24, 116, 205), LIGHT_BLUE_CONCRETE),
-        ];
-        for (rgb, expected) in cases {
-            assert_eq!(
-                get_building_wall_block_for_color(rgb, &mut rng()),
-                expected,
-                "colour {rgb:?} should map to {expected:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn muted_colours_keep_muted_blocks() {
-        let saturated = [
-            GREEN_CONCRETE,
-            LIME_CONCRETE,
-            YELLOW_CONCRETE,
-            RED_CONCRETE,
-            PURPLE_CONCRETE,
-            MAGENTA_CONCRETE,
-            ORANGE_CONCRETE,
-            LIGHT_BLUE_CONCRETE,
-            BLUE_CONCRETE,
-            CYAN_CONCRETE,
-        ];
-        // beige, pale rose, brick red
-        for rgb in [(187, 173, 142), (209, 177, 161), (176, 74, 58)] {
-            let b = get_building_wall_block_for_color(rgb, &mut rng());
-            assert!(
-                !saturated.contains(&b),
-                "colour {rgb:?} got saturated {b:?}"
-            );
-        }
-    }
-
-    #[test]
     fn underscore_and_space_normalization_holds() {
         // The normalizer strips spaces/underscores/hyphens and lowercases.
         assert_eq!(
@@ -2020,10 +1783,8 @@ mod material_tests {
             }
         }
 
-        for (_, options) in DEFINED_COLORS {
-            for &block in *options {
-                check(block, "DEFINED_COLORS");
-            }
+        for block in crate::block_palette::all_building_palette_blocks() {
+            check(block, "block_palette");
         }
 
         // Every wall material derives its own stairs, slabs and wall pieces, so
@@ -2059,19 +1820,6 @@ mod material_tests {
             );
             check(get_castle_wall_block(&mut r), "get_castle_wall_block");
             check(get_floor_block_with_rng(&mut r), "get_floor_block_with_rng");
-            for kind in [
-                "residential",
-                "hospital",
-                "hotel",
-                "industrial",
-                "religious",
-                "other",
-            ] {
-                check(
-                    get_window_block_for_building_type_with_rng(kind, &mut r),
-                    "get_window_block_for_building_type_with_rng",
-                );
-            }
             for material in WALL_MATERIALS {
                 if let Some(block) = get_wall_block_for_material(material, &mut r) {
                     check(block, "get_wall_block_for_material");

@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::element_processing::building_facade::BuildingContext;
 use crate::element_processing::*;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::ground::Ground;
@@ -20,6 +21,7 @@ use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
 use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat};
 use colored::Colorize;
+use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -177,31 +179,18 @@ pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     }
 }
 
-/// Drops the cached flood fills whose last reader sits at `index`.
-///
-/// `last_fill_use` maps a way id to the position of the final element that reads
-/// its fill, counting both the standalone way and any relation holding it as a
-/// member. Evicting anywhere else would force a later reader to refill.
+/// Drops every cached flood fill whose last reader sits at `index`.
+/// Group-lifetime extension can point a fill at an index belonging to a
+/// different element, so eviction goes by index, not by the current element.
 fn release_finished_fills(
     cache: &mut FloodFillCache,
-    last_fill_use: &HashMap<u64, usize>,
-    element: &ProcessedElement,
+    fills_expiring_at: &HashMap<usize, Vec<u64>>,
     index: usize,
 ) {
-    match element {
-        ProcessedElement::Way(way) => {
-            if last_fill_use.get(&way.id) == Some(&index) {
-                cache.remove_way(way.id);
-            }
+    if let Some(ids) = fills_expiring_at.get(&index) {
+        for &id in ids {
+            cache.remove_way(id);
         }
-        ProcessedElement::Relation(rel) => {
-            for member in &rel.members {
-                if last_fill_use.get(&member.way.id) == Some(&index) {
-                    cache.remove_way(member.way.id);
-                }
-            }
-        }
-        ProcessedElement::Node(_) => {}
     }
 }
 
@@ -236,6 +225,7 @@ fn process_element(
     tunnel_internal_endpoints: &highways::TunnelInternalEndpoints,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
     part_groups: &PartGroups,
+    group_members: &FnvHashMap<u64, Vec<u64>>,
 ) {
     match element {
         ProcessedElement::Way(way) => {
@@ -256,16 +246,14 @@ fn process_element(
             if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                 // parts of one building share a style seed so untagged parts match
                 let group_seed = part_groups.get(&way.id).copied().unwrap_or(way.id);
-                buildings::generate_buildings(
-                    editor,
-                    way,
-                    args,
-                    None,
-                    None,
+                let ctx = BuildingContext {
                     flood_fill_cache,
                     building_passages,
-                    group_seed,
-                );
+                    road_mask,
+                    building_footprints,
+                    group_members,
+                };
+                buildings::generate_buildings(editor, way, args, None, None, &ctx, group_seed);
             } else if way.tags.contains_key("highway") {
                 highways::generate_highways(
                     editor,
@@ -410,14 +398,14 @@ fn process_element(
                 || rel.tags.contains_key("building:part")
                 || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
             if is_building_relation {
-                buildings::generate_building_from_relation(
-                    editor,
-                    rel,
-                    args,
+                let ctx = BuildingContext {
                     flood_fill_cache,
-                    xzbbox,
                     building_passages,
-                );
+                    road_mask,
+                    building_footprints,
+                    group_members,
+                };
+                buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
             } else if rel.tags.contains_key("water")
                 || rel
                     .tags
@@ -602,6 +590,22 @@ pub fn generate_world_with_options(
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
+
+    // Sibling index keyed on the hint-free seed: parts of one building can
+    // carry different packed style-hint bits and must still find each other.
+    let group_members: FnvHashMap<u64, Vec<u64>> = {
+        let mut map: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+        for (&way_id, &seed) in part_groups.iter() {
+            map.entry(crate::osm_parser::seed_without_hint(seed))
+                .or_default()
+                .push(way_id);
+        }
+        map.retain(|_, v| v.len() >= 2);
+        for v in map.values_mut() {
+            v.sort_unstable();
+        }
+        map
+    };
 
     // Tunnel bore footprints, so the water depth-carve and vegetation stay off them.
     let mut tunnel_footprint = highways::collect_tunnel_footprint(&elements, &xzbbox, args.scale);
@@ -825,6 +829,7 @@ pub fn generate_world_with_options(
                             &tunnel_internal_endpoints,
                             &mut tile_tunnel_cells,
                             &part_groups,
+                            &group_members,
                         );
                     }
 
@@ -1020,6 +1025,23 @@ pub fn generate_world_with_options(
                 ProcessedElement::Node(_) => {}
             }
         }
+        // Group fills must live until the last member of the group renders.
+        for members in group_members.values() {
+            if let Some(max_idx) = members
+                .iter()
+                .filter_map(|id| last_fill_use.get(id))
+                .max()
+                .copied()
+            {
+                for id in members {
+                    last_fill_use.insert(*id, max_idx);
+                }
+            }
+        }
+        let mut fills_expiring_at: HashMap<usize, Vec<u64>> = HashMap::new();
+        for (&id, &idx) in last_fill_use.iter() {
+            fills_expiring_at.entry(idx).or_default().push(id);
+        }
         let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
         process_pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
@@ -1041,7 +1063,7 @@ pub fn generate_world_with_options(
                 || outline_suppression.contains(&suppression_key)
             {
                 // Still the last reader on record, so release its fills.
-                release_finished_fills(&mut flood_fill_cache, &last_fill_use, &element, index);
+                release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
                 continue;
             }
             if element_counter.is_multiple_of(pb_batch_size) {
@@ -1086,11 +1108,12 @@ pub fn generate_world_with_options(
                 &tunnel_internal_endpoints,
                 &mut tunnel_cells,
                 &part_groups,
+                &group_members,
             );
 
             // Release flood fill cache entries for memory optimization.
             // (Skipped in the parallel path where the cache is shared immutably.)
-            release_finished_fills(&mut flood_fill_cache, &last_fill_use, &element, index);
+            release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
             // Element is dropped here, freeing its memory immediately.
         }
 

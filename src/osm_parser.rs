@@ -562,6 +562,81 @@ fn first_year(v: &str) -> Option<i32> {
     None
 }
 
+// Brutalist styles are masonry for StyleHint but post-war for ArchEra.
+const ORNATE_STYLES: &[&str] = &[
+    "artdeco",
+    "artnouveau",
+    "gothic",
+    "neogothic",
+    "gothicrevival",
+    "neoclassicism",
+    "neoclassical",
+    "classicism",
+    "classicalrevival",
+    "greekrevival",
+    "baroque",
+    "neobaroque",
+    "rococo",
+    "barocco",
+    "historicism",
+    "eclectic",
+    "renaissance",
+    "neorenaissance",
+    "romanesque",
+    "neoromanesque",
+    "romanesquerevival",
+    "victorian",
+    "georgian",
+    "federal",
+    "italianate",
+    "beauxarts",
+    "wilhelminianstyle",
+    "queenanne",
+];
+const BRUTALIST_STYLES: &[&str] = &["brutalist", "constructivism", "stalinistneoclassicism"];
+const MODERN_STYLES: &[&str] = &[
+    "modern",
+    "contemporary",
+    "modernism",
+    "functionalism",
+    "newobjectivity",
+    "postmodern",
+    "bauhaus",
+];
+const MASONRY_MATERIALS: &[&str] = &[
+    "brick",
+    "bricks",
+    "redbrick",
+    "silicatebrick",
+    "stone",
+    "naturalstone",
+    "sandstone",
+    "limestone",
+    "masonry",
+    "granite",
+    "marble",
+    "terracotta",
+    "adobe",
+    "stucco",
+    "pebbledash",
+];
+const MASONRY_CLADDING: &[&str] = &[
+    "brick",
+    "brickmonolith",
+    "plaster",
+    "rendered",
+    "rendering",
+    "stone",
+    "tiling",
+];
+const CONCRETE_MATERIALS: &[&str] = &[
+    "concrete",
+    "reinforcedconcrete",
+    "concretereinforced",
+    "concretemasonryunit",
+];
+const PANEL_MATERIALS: &[&str] = &["panel", "panels", "prefab", "prefabricated", "panelhouse"];
+
 /// Picks a facade style for a building from its OSM tags, or None to leave it to the random roll.
 pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     let material = tags
@@ -588,36 +663,13 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     {
         return StyleHint::Masonry;
     }
-    const MASONRY: &[&str] = &[
-        "brick",
-        "bricks",
-        "redbrick",
-        "silicatebrick",
-        "stone",
-        "naturalstone",
-        "sandstone",
-        "limestone",
-        "masonry",
-        "granite",
-        "marble",
-        "terracotta",
-        "adobe",
-        "stucco",
-        "pebbledash",
-    ];
-    if material.as_deref().is_some_and(|m| MASONRY.contains(&m)) {
+    if material
+        .as_deref()
+        .is_some_and(|m| MASONRY_MATERIALS.contains(&m))
+    {
         return StyleHint::Masonry;
     }
     if let Some(c) = tags.get("building:cladding") {
-        const MASONRY_CLADDING: &[&str] = &[
-            "brick",
-            "brickmonolith",
-            "plaster",
-            "rendered",
-            "rendering",
-            "stone",
-            "tiling",
-        ];
         if MASONRY_CLADDING.contains(&norm_tag(c).as_str()) {
             return StyleHint::Masonry;
         }
@@ -627,49 +679,7 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
         .or_else(|| tags.get("architecture"))
         .map(|a| norm_tag(a));
     if let Some(a) = arch.as_deref() {
-        const HISTORIC_STYLES: &[&str] = &[
-            "artdeco",
-            "artnouveau",
-            "gothic",
-            "neogothic",
-            "gothicrevival",
-            "neoclassicism",
-            "neoclassical",
-            "classicism",
-            "classicalrevival",
-            "greekrevival",
-            "baroque",
-            "neobaroque",
-            "rococo",
-            "barocco",
-            "historicism",
-            "eclectic",
-            "renaissance",
-            "neorenaissance",
-            "romanesque",
-            "neoromanesque",
-            "romanesquerevival",
-            "victorian",
-            "georgian",
-            "federal",
-            "italianate",
-            "beauxarts",
-            "brutalist",
-            "constructivism",
-            "stalinistneoclassicism",
-            "wilhelminianstyle",
-            "queenanne",
-        ];
-        const MODERN_STYLES: &[&str] = &[
-            "modern",
-            "contemporary",
-            "modernism",
-            "functionalism",
-            "newobjectivity",
-            "postmodern",
-            "bauhaus",
-        ];
-        if HISTORIC_STYLES.contains(&a) {
+        if ORNATE_STYLES.contains(&a) || BRUTALIST_STYLES.contains(&a) {
             return StyleHint::Masonry;
         }
         if MODERN_STYLES.contains(&a) {
@@ -687,16 +697,102 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     }
 
     // Concrete frame reads as a solid facade with windows: the contemporary middle style.
-    const CONCRETE: &[&str] = &[
-        "concrete",
-        "reinforcedconcrete",
-        "concretereinforced",
-        "concretemasonryunit",
-    ];
-    if material.as_deref().is_some_and(|m| CONCRETE.contains(&m)) {
+    if material
+        .as_deref()
+        .is_some_and(|m| CONCRETE_MATERIALS.contains(&m))
+    {
         return StyleHint::Contemporary;
     }
     StyleHint::None
+}
+
+/// Architectural era, consumed by low-rise styling. Recomputed from tags
+/// per building, unlike the seed-packed `StyleHint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchEra {
+    Unknown,
+    /// Explicit heritage or ornate-architecture signals.
+    HistoricOrnate,
+    /// Pre-1945 masonry-era fabric without ornate signals.
+    TraditionalPreWar,
+    /// 1945–1979: panel, prefab, brutalist.
+    PostWarPanel,
+    /// 1980+: concrete/glass contemporary.
+    Contemporary,
+}
+
+/// Classifies a building's era from its tags; `Unknown` when nothing signals.
+pub fn building_arch_era(tags: &HashMap<String, String>) -> ArchEra {
+    // Explicit heritage signals → ornate. `no` is a negation, not a signal.
+    let present_and_not_no =
+        |key: &str| tags.get(key).is_some_and(|v| !v.eq_ignore_ascii_case("no"));
+    if present_and_not_no("historic")
+        || present_and_not_no("heritage")
+        || tags.contains_key("ref:nrhp")
+        || present_and_not_no("listed_status")
+    {
+        return ArchEra::HistoricOrnate;
+    }
+
+    let arch = tags
+        .get("building:architecture")
+        .or_else(|| tags.get("architecture"))
+        .map(|a| norm_tag(a));
+    if let Some(a) = arch.as_deref() {
+        if ORNATE_STYLES.contains(&a) {
+            return ArchEra::HistoricOrnate;
+        }
+        if BRUTALIST_STYLES.contains(&a) {
+            return ArchEra::PostWarPanel;
+        }
+        if MODERN_STYLES.contains(&a) {
+            return ArchEra::Contemporary;
+        }
+    }
+
+    for key in ["start_date", "construction_date", "year_of_construction"] {
+        if let Some(y) = tags.get(key).and_then(|v| first_year(v)) {
+            return if y < 1945 {
+                ArchEra::TraditionalPreWar
+            } else if y < 1980 {
+                ArchEra::PostWarPanel
+            } else {
+                ArchEra::Contemporary
+            };
+        }
+    }
+
+    let material = tags
+        .get("building:material")
+        .or_else(|| tags.get("building:facade:material"))
+        .or_else(|| tags.get("facade:material"))
+        .map(|m| norm_tag(m));
+    if let Some(m) = material.as_deref() {
+        if PANEL_MATERIALS.contains(&m) {
+            return ArchEra::PostWarPanel;
+        }
+        if MASONRY_MATERIALS.contains(&m) {
+            return ArchEra::TraditionalPreWar;
+        }
+        if CONCRETE_MATERIALS.contains(&m) || m == "glass" || m == "mirror" {
+            return ArchEra::Contemporary;
+        }
+    }
+    if let Some(c) = tags.get("building:cladding") {
+        if MASONRY_CLADDING.contains(&norm_tag(c).as_str()) {
+            return ArchEra::TraditionalPreWar;
+        }
+    }
+    ArchEra::Unknown
+}
+
+/// Fallback era for untagged `building:part`s from the packed group-seed hint.
+pub fn arch_era_from_hint(hint: StyleHint) -> ArchEra {
+    match hint {
+        StyleHint::Masonry => ArchEra::TraditionalPreWar,
+        StyleHint::Contemporary | StyleHint::Glass => ArchEra::Contemporary,
+        StyleHint::None => ArchEra::Unknown,
+    }
 }
 
 pub fn parse_osm_data(
@@ -2320,5 +2416,53 @@ mod osm_xml_tests {
         assert_eq!(resolve_bbox(None, None, &data_no_bounds), Some(node_extent));
         // nothing resolvable -> None
         assert_eq!(resolve_bbox(None, None, &OsmData::empty()), None);
+    }
+}
+
+#[cfg(test)]
+mod arch_era_tests {
+    use super::*;
+
+    fn tags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn era_derivation_table() {
+        use ArchEra::*;
+        let cases: &[(&[(&str, &str)], ArchEra)] = &[
+            (&[("historic", "yes")], HistoricOrnate),
+            (&[("heritage", "2")], HistoricOrnate),
+            (&[("historic", "no")], Unknown),
+            (&[("building:architecture", "art_deco")], HistoricOrnate),
+            (&[("building:architecture", "brutalist")], PostWarPanel),
+            (&[("building:architecture", "bauhaus")], Contemporary),
+            (&[("start_date", "1890")], TraditionalPreWar),
+            (&[("start_date", "1965")], PostWarPanel),
+            (&[("start_date", "2003-05")], Contemporary),
+            (&[("building:material", "panel")], PostWarPanel),
+            (&[("building:material", "brick")], TraditionalPreWar),
+            (&[("building:material", "concrete")], Contemporary),
+            (&[("building:cladding", "plaster")], TraditionalPreWar),
+            (&[("building", "house")], Unknown),
+            // heritage beats a modern start_date
+            (&[("heritage", "1"), ("start_date", "1995")], HistoricOrnate),
+        ];
+        for (pairs, expected) in cases {
+            assert_eq!(building_arch_era(&tags(pairs)), *expected, "tags {pairs:?}");
+        }
+    }
+
+    #[test]
+    fn part_hint_fallback_mapping() {
+        assert_eq!(
+            arch_era_from_hint(StyleHint::Masonry),
+            ArchEra::TraditionalPreWar
+        );
+        assert_eq!(arch_era_from_hint(StyleHint::Glass), ArchEra::Contemporary);
+        assert_eq!(arch_era_from_hint(StyleHint::None), ArchEra::Unknown);
     }
 }

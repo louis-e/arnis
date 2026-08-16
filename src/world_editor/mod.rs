@@ -575,6 +575,11 @@ impl<'a> WorldEditor<'a> {
         self.get_ground_level(x, z) + y_offset
     }
 
+    /// Köppen climate class of the generated area, taken at the bbox centre.
+    pub fn climate(&self) -> crate::climate::Climate {
+        crate::climate::Climate::classify(&self.llbbox)
+    }
+
     /// Get the effective ground level at a world coordinate.
     ///
     /// Checks the road-surface override map first so that a later

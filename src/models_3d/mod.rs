@@ -1,7 +1,6 @@
 //! 3D model substitution pipelines (3DMR glTF, Wikidata P4896 STL, Arnis-hosted archetypes).
 
 pub(crate) mod custom;
-pub(crate) mod palette;
 pub(crate) mod pipeline;
 pub(crate) mod three_dmr;
 pub(crate) mod voxelize;

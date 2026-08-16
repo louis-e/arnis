@@ -2,8 +2,8 @@
 
 use crate::args::Args;
 use crate::block_definitions::*;
+use crate::block_palette::closest_blocks;
 use crate::colors::{color_text_to_rgb_tuple, RGBTuple};
-use crate::models_3d::palette::closest_blocks;
 use crate::models_3d::voxelize::{
     glb_model_bbox, voxelize_glb, voxelize_uniform_triangles, WorldTransform,
 };

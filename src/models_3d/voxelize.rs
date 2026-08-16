@@ -1,7 +1,7 @@
 //! glTF (.glb) → triangles → voxels via dda-voxelize.
 
 use crate::block_definitions::{Block, GLASS, STONE_BRICKS};
-use crate::models_3d::palette::closest_block;
+use crate::block_palette::closest_block;
 use dda_voxelize::DdaVoxelizer;
 
 /// Pure magenta (#FF00FF) in model colors becomes GLASS instead of palette-mapping.
