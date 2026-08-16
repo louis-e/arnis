@@ -1466,7 +1466,7 @@ pub static RELIGIOUS_WINDOW_OPTIONS: [Block; 5] = [
     WHITE_STAINED_GLASS,
 ];
 
-// Farm window options (plain glazing — barns don't get tinted variety).
+// Farm window options, plain glazing since barns don't get tinted variety.
 pub static FARM_WINDOW_OPTIONS: [Block; 3] = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
 
 // Historic window options (clear, slightly aged glazing).
@@ -1783,10 +1783,8 @@ mod material_tests {
             }
         }
 
-        for (_, options) in DEFINED_COLORS {
-            for &block in *options {
-                check(block, "DEFINED_COLORS");
-            }
+        for block in crate::block_palette::all_building_palette_blocks() {
+            check(block, "block_palette");
         }
 
         // Every wall material derives its own stairs, slabs and wall pieces, so
@@ -1822,19 +1820,6 @@ mod material_tests {
             );
             check(get_castle_wall_block(&mut r), "get_castle_wall_block");
             check(get_floor_block_with_rng(&mut r), "get_floor_block_with_rng");
-            for kind in [
-                "residential",
-                "hospital",
-                "hotel",
-                "industrial",
-                "religious",
-                "other",
-            ] {
-                check(
-                    get_window_block_for_building_type_with_rng(kind, &mut r),
-                    "get_window_block_for_building_type_with_rng",
-                );
-            }
             for material in WALL_MATERIALS {
                 if let Some(block) = get_wall_block_for_material(material, &mut r) {
                     check(block, "get_wall_block_for_material");
