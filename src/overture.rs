@@ -34,7 +34,7 @@ const OVERTURE_RELEASE_LIST_URL: &str =
 /// Used when release discovery fails; bump occasionally to a recent release.
 const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-07-22.0";
 
-/// Caps how long a broken STAC host can stall the fetch before we give up on it.
+/// How many releases to request before giving up, so a broken host cannot stall the fetch.
 const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
 
 /// High bit marker for Overture IDs to avoid collision with OSM IDs.
@@ -363,7 +363,7 @@ fn fetch_stac_catalog(
     client: &Client,
     debug: bool,
 ) -> Result<reqwest::blocking::Response, Box<dyn std::error::Error>> {
-    let mut releases = match discover_releases(client) {
+    let releases = match discover_releases(client) {
         Ok(releases) => releases,
         Err(e) => {
             if debug {
@@ -372,16 +372,25 @@ fn fetch_stac_catalog(
             Vec::new()
         }
     };
-    if !releases.iter().any(|r| r == OVERTURE_STAC_RELEASE_FALLBACK) {
-        releases.push(OVERTURE_STAC_RELEASE_FALLBACK.to_string());
+
+    // Reserve the last attempt for the fallback so it stays reachable on a long listing.
+    let mut candidates: Vec<String> = releases
+        .into_iter()
+        .take(OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(1))
+        .collect();
+    if !candidates
+        .iter()
+        .any(|r| r == OVERTURE_STAC_RELEASE_FALLBACK)
+    {
+        candidates.push(OVERTURE_STAC_RELEASE_FALLBACK.to_string());
     }
 
     if debug {
-        println!("Overture releases available: {}", releases.join(", "));
+        println!("Overture releases to try: {}", candidates.join(", "));
     }
 
     let mut last_error = String::from("no Overture release candidates");
-    for release in releases.iter().take(OVERTURE_MAX_RELEASE_ATTEMPTS) {
+    for release in &candidates {
         let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
         match client.get(&url).send() {
             Ok(response) if response.status().is_success() => {
