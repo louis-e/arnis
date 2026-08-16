@@ -201,7 +201,7 @@ pub fn compute_facade_plan(
             let mut min_dist: Option<i32> = None;
             for &i in &sample_idx {
                 let (bx, bz) = points[i.min(points.len().saturating_sub(1))];
-                for d in 2..=setback_max {
+                for d in 1..=setback_max {
                     if ctx.road_mask.contains(bx + nx * d, bz + nz * d) {
                         hits += 1;
                         min_dist = Some(min_dist.map_or(d, |m: i32| m.min(d)));
