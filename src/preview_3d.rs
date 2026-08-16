@@ -194,9 +194,12 @@ pub fn build_buildings_geojson(bbox_text: &str) -> Result<String, String> {
     }
 
     let client = overture::overture_client().map_err(|e| e.to_string())?;
+    // The preview keeps OSM-sourced footprints for full coverage, so the
+    // attribute hints alongside them are not needed here.
     let buildings =
         overture::collect_overture_buildings(&client, &bbox, true, BUILDINGS_MAX_FEATURES, false)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .buildings;
 
     let features: Vec<serde_json::Value> = buildings
         .iter()

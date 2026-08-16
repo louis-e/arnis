@@ -1263,12 +1263,12 @@ fn gui_start_generation(
             }
 
             // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
-            let (fetch_result, overture_elements, ground) = std::thread::scope(|s| {
+            let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
                     if args.overture {
                         overture::fetch_overture_buildings(&bbox, args.scale, args.debug)
                     } else {
-                        Vec::new()
+                        overture::OvertureData::default()
                     }
                 });
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
@@ -1292,6 +1292,14 @@ fn gui_start_generation(
                             args.debug,
                             crate::projection::ProjectionKind::Local,
                         );
+
+                    let overture::OvertureData {
+                        elements: overture_elements,
+                        hints: overture_hints,
+                    } = overture_data;
+
+                    // Fill height/levels on OSM buildings that have neither
+                    overture_hints.apply(&mut parsed_elements);
 
                     // Merge supplementary Overture buildings against parsed OSM
                     if !overture_elements.is_empty() {
