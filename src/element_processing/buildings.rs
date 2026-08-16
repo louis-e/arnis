@@ -5005,6 +5005,16 @@ fn generate_wall_depth_features(
                     }
                 }
 
+                // The wall carries a foundation down to the local terrain, so on
+                // sloping ground the vertical details have to follow it down.
+                let descent = if config.is_ground_level {
+                    editor
+                        .terrain_level(bx, bz)
+                        .map_or(0, |g| (config.start_y_offset - g).max(0))
+                } else {
+                    0
+                };
+
                 let mod6 = config.window_col(bx, bz);
 
                 match config.wall_depth_style {
@@ -5018,6 +5028,7 @@ fn generate_wall_depth_features(
                             out_nx,
                             out_nz,
                             height_reduction,
+                            descent,
                         );
                     }
                     WallDepthStyle::ModernPillars => {
@@ -5031,6 +5042,7 @@ fn generate_wall_depth_features(
                             out_nz,
                             &sill_block,
                             height_reduction,
+                            descent,
                         );
                     }
                     WallDepthStyle::InstitutionalBands => {
@@ -5044,6 +5056,7 @@ fn generate_wall_depth_features(
                             out_nz,
                             facing,
                             height_reduction,
+                            descent,
                         );
                     }
                     WallDepthStyle::IndustrialBeams => {
@@ -5057,6 +5070,7 @@ fn generate_wall_depth_features(
                                 out_nx,
                                 out_nz,
                                 height_reduction,
+                                descent,
                             );
                         }
                     }
@@ -5071,6 +5085,7 @@ fn generate_wall_depth_features(
                             out_nz,
                             facing,
                             height_reduction,
+                            descent,
                         );
                     }
                     WallDepthStyle::ReligiousButtress => {
@@ -5084,6 +5099,7 @@ fn generate_wall_depth_features(
                             out_nz,
                             facing,
                             height_reduction,
+                            descent,
                         );
                     }
                     WallDepthStyle::SkyscraperFins => {
@@ -5097,6 +5113,7 @@ fn generate_wall_depth_features(
                             out_nz,
                             &sill_block,
                             height_reduction,
+                            descent,
                         );
                     }
                     WallDepthStyle::GlassCurtain => {
@@ -5110,6 +5127,7 @@ fn generate_wall_depth_features(
                                 out_nx,
                                 out_nz,
                                 height_reduction,
+                                descent,
                             );
                         }
                     }
@@ -5626,7 +5644,17 @@ fn generate_corner_downpipes(
             continue;
         }
         let (ox, oz) = (px + dx, pz + dz);
-        for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        // Follow the wall foundation down where the ground drops away.
+        let descent = if config.is_ground_level {
+            editor
+                .terrain_level(px, pz)
+                .map_or(0, |g| (config.start_y_offset - g).max(0))
+        } else {
+            0
+        };
+        for h in
+            (config.start_y_offset + 1 - descent)..=(config.start_y_offset + config.building_height)
+        {
             editor.set_block_absolute(
                 pipe,
                 ox,
@@ -5651,6 +5679,7 @@ fn place_subtle_pilasters(
     out_nx: i32,
     out_nz: i32,
     height_reduction: i32,
+    descent: i32,
 ) {
     if mod6 != 3 {
         return;
@@ -5660,7 +5689,7 @@ fn place_subtle_pilasters(
     let lz = bz + out_nz;
     let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=top_h {
+    for h in (config.start_y_offset + 1 - descent)..=top_h {
         let block = if h == config.start_y_offset + 1 {
             config.accent_block // Foundation course
         } else {
@@ -5690,6 +5719,7 @@ fn place_modern_pillars(
     out_nz: i32,
     sill_block: &BlockWithProperties,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
@@ -5697,7 +5727,7 @@ fn place_modern_pillars(
 
     // Pillar columns at edges of window bays
     if mod6 == 3 || mod6 == 5 {
-        for h in (config.start_y_offset + 1)..=top_h {
+        for h in (config.start_y_offset + 1 - descent)..=top_h {
             editor.set_block_absolute(
                 config.accent_block,
                 lx,
@@ -5754,6 +5784,7 @@ fn place_institutional_bands(
     out_nz: i32,
     facing: &str,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
@@ -5761,7 +5792,7 @@ fn place_institutional_bands(
 
     // Pillar columns
     if mod6 == 3 {
-        for h in (config.start_y_offset + 1)..=top_h {
+        for h in (config.start_y_offset + 1 - descent)..=top_h {
             editor.set_block_absolute(
                 config.accent_block,
                 lx,
@@ -5814,12 +5845,13 @@ fn place_industrial_beams(
     out_nx: i32,
     out_nz: i32,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
     let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=top_h {
+    for h in (config.start_y_offset + 1 - descent)..=top_h {
         editor.set_block_absolute(
             config.wall_block,
             lx,
@@ -5845,6 +5877,7 @@ fn place_historic_ornate(
     out_nz: i32,
     facing: &str,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
@@ -5853,7 +5886,7 @@ fn place_historic_ornate(
 
     // Full-height pillar columns between window groups
     if mod6 == 3 {
-        for h in (config.start_y_offset + 1)..=top_h {
+        for h in (config.start_y_offset + 1 - descent)..=top_h {
             editor.set_block_absolute(
                 config.wall_block,
                 lx,
@@ -5933,6 +5966,7 @@ fn place_religious_buttress(
     out_nz: i32,
     facing: &str,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
@@ -5944,7 +5978,7 @@ fn place_religious_buttress(
         let buttress_cutoff = config.start_y_offset + (config.building_height * 3 / 5);
 
         // Inner layer (outward+1): full height
-        for h in (config.start_y_offset + 1)..=top_h {
+        for h in (config.start_y_offset + 1 - descent)..=top_h {
             editor.set_block_absolute(
                 config.wall_block,
                 lx,
@@ -5958,7 +5992,7 @@ fn place_religious_buttress(
         // Outer layer (outward+2): lower 60% of height
         let lx2 = bx + out_nx * 2;
         let lz2 = bz + out_nz * 2;
-        for h in (config.start_y_offset + 1)..=buttress_cutoff {
+        for h in (config.start_y_offset + 1 - descent)..=buttress_cutoff {
             editor.set_block_absolute(
                 config.wall_block,
                 lx2,
@@ -5999,6 +6033,7 @@ fn place_skyscraper_fins(
     out_nz: i32,
     sill_block: &BlockWithProperties,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
@@ -6016,7 +6051,7 @@ fn place_skyscraper_fins(
 
     if mod6 == 3 {
         // Vertical fin column (existing behavior)
-        for h in (config.start_y_offset + 1)..=top_h {
+        for h in (config.start_y_offset + 1 - descent)..=top_h {
             editor.set_block_absolute(
                 config.accent_block,
                 lx,
@@ -6055,12 +6090,13 @@ fn place_glass_curtain_corners(
     out_nx: i32,
     out_nz: i32,
     height_reduction: i32,
+    descent: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
     let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=top_h {
+    for h in (config.start_y_offset + 1 - descent)..=top_h {
         editor.set_block_absolute(
             config.accent_block,
             lx,
