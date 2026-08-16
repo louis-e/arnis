@@ -1,18 +1,25 @@
 //! Processing of advertising elements.
 //!
 //! This module handles advertising-related OSM elements including:
+//! - `advertising=billboard` - Poster panels on posts (needs Java map decals)
 //! - `advertising=column` - Cylindrical advertising columns (Litfaßsäule)
 //! - `advertising=flag` - Advertising flags on poles
 //! - `advertising=poster_box` - Illuminated poster display boxes
 
 use crate::block_definitions::*;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::signage;
+use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
 /// Generate advertising structures from node elements
-pub fn generate_advertising(editor: &mut WorldEditor, node: &ProcessedNode) {
+pub fn generate_advertising(
+    editor: &mut WorldEditor,
+    node: &ProcessedNode,
+    road_mask: &RoadMaskBitmap,
+) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = node.tags.get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -28,6 +35,10 @@ pub fn generate_advertising(editor: &mut WorldEditor, node: &ProcessedNode) {
 
     if let Some(advertising_type) = node.tags.get("advertising") {
         match advertising_type.as_str() {
+            "billboard" => {
+                // Poster panels are decal-only; without them the node renders nothing.
+                signage::generate_billboard(editor, node, road_mask);
+            }
             "column" => generate_advertising_column(editor, node),
             "flag" => generate_advertising_flag(editor, node),
             "poster_box" => generate_poster_box(editor, node),
@@ -38,8 +49,11 @@ pub fn generate_advertising(editor: &mut WorldEditor, node: &ProcessedNode) {
 
 /// Generate an advertising column (Litfaßsäule)
 ///
-/// Creates a simple advertising column.
+/// A poster-wrapped pillar where decals are available, else a plain green column.
 fn generate_advertising_column(editor: &mut WorldEditor, node: &ProcessedNode) {
+    if signage::generate_column(editor, node) {
+        return;
+    }
     let x = node.x;
     let z = node.z;
 
@@ -117,4 +131,7 @@ fn generate_poster_box(editor: &mut WorldEditor, node: &ProcessedNode) {
     // Y=4: Two polished stone brick slabs
     editor.set_block(STONE_BRICK_SLAB, x, 4, z, None, None);
     editor.set_block(STONE_BRICK_SLAB, x + 1, 4, z, None, None);
+
+    // Lit posters on both broad faces of the lightbox.
+    signage::place_poster_box_posters(editor, node);
 }

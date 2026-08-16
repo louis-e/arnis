@@ -6,7 +6,7 @@ use crate::clipping::clip_way_to_bbox;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::building_facade::{
-    compute_facade_plan, BuildingContext, ColumnFacade, FacadeClass, FacadePlan,
+    compute_facade_plan, BuildingContext, ColumnFacade, FacadeAnchor, FacadeClass, FacadePlan,
     MIN_FACADE_FOOTPRINT,
 };
 use crate::element_processing::historic;
@@ -1624,7 +1624,7 @@ pub(crate) fn is_underground_building(tags: &HashMap<String, String>) -> bool {
 }
 
 /// Calculates the starting Y offset based on terrain and min_level
-fn calculate_start_y_offset(
+pub(crate) fn calculate_start_y_offset(
     editor: &WorldEditor,
     element: &ProcessedWay,
     args: &Args,
@@ -6448,6 +6448,8 @@ fn qualifies_for_auto_gabled_roof(building_type: &str) -> bool {
 
 #[inline]
 #[allow(clippy::too_many_arguments)]
+/// Renders one building. None when it rendered as something else (shelter, roof, car park,
+/// bridge, tank, pyramid, underground) or has no street-facing wall.
 pub fn generate_buildings(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -6456,16 +6458,16 @@ pub fn generate_buildings(
     hole_polygons: Option<&[HolePolygon]>,
     ctx: &BuildingContext<'_>,
     group_seed: u64,
-) {
+) -> Option<FacadeAnchor> {
     let flood_fill_cache = ctx.flood_fill_cache;
     let building_passages = ctx.building_passages;
     // Early return for underground buildings
     if is_underground_building(&element.tags) {
-        return;
+        return None;
     }
 
     if SKIP_WAY_IDS.contains(&element.id) {
-        return;
+        return None;
     }
 
     // Tank-style structures route to their own cylindrical renderer.
@@ -6476,13 +6478,13 @@ pub fn generate_buildings(
             &processed_element,
             args,
         );
-        return;
+        return None;
     }
 
     // Intercept tomb=pyramid: generate a sandstone pyramid instead of a building
     if element.tags.get("tomb").map(|v| v.as_str()) == Some("pyramid") {
         historic::generate_pyramid(editor, element, args, flood_fill_cache);
-        return;
+        return None;
     }
 
     // Parse vertical offset: min_height (meters) takes priority, then
@@ -6575,7 +6577,7 @@ pub fn generate_buildings(
 
     let cached_footprint_size = cached_floor_area.len();
     if cached_footprint_size == 0 {
-        return;
+        return None;
     }
 
     // Calculate start Y offset
@@ -6587,7 +6589,7 @@ pub fn generate_buildings(
     // Handle shelter amenity
     if element.tags.get("amenity").map(String::as_str) == Some("shelter") {
         generate_shelter(editor, element, &cached_floor_area, scale_factor);
-        return;
+        return None;
     }
 
     // Route building:part="roof" to the roof-only structure generator.
@@ -6596,7 +6598,7 @@ pub fn generate_buildings(
     // through to the full building pipeline and render as small boxy buildings.
     if element.tags.get("building:part").map(|v| v.as_str()) == Some("roof") {
         generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
-        return;
+        return None;
     }
 
     // Handle special building types with early returns
@@ -6604,7 +6606,7 @@ pub fn generate_buildings(
         match btype.as_str() {
             "shed" if element.tags.contains_key("bicycle_parking") => {
                 generate_bicycle_parking_shed(editor, element, &cached_floor_area);
-                return;
+                return None;
             }
             "parking" => {
                 let (height, _) = calculate_building_height(
@@ -6618,11 +6620,11 @@ pub fn generate_buildings(
                     group_seed,
                 );
                 generate_parking_building(editor, element, &cached_floor_area, height);
-                return;
+                return None;
             }
             "roof" => {
                 generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
-                return;
+                return None;
             }
             // Skybridges with elevation data render as normal elevated buildings,
             // the flat deck below is only the fallback for untagged ones
@@ -6631,7 +6633,7 @@ pub fn generate_buildings(
                     && !element.tags.contains_key("building:min_level") =>
             {
                 generate_bridge(editor, element, flood_fill_cache, args.timeout.as_ref());
-                return;
+                return None;
             }
             _ => {}
         }
@@ -6653,7 +6655,7 @@ pub fn generate_buildings(
                 group_seed,
             );
             generate_parking_building(editor, element, &cached_floor_area, height);
-            return;
+            return None;
         }
     }
 
@@ -7230,6 +7232,47 @@ pub fn generate_buildings(
             );
         }
     }
+
+    facade_anchor(element, &facade, &config, &entrance_plans)
+}
+
+/// Sign anchor: the entrance column, else the middle of the front wall.
+fn facade_anchor(
+    element: &ProcessedWay,
+    facade: &FacadePlan,
+    config: &BuildingConfig,
+    entrances: &[EntrancePlan],
+) -> Option<FacadeAnchor> {
+    let abs = config.abs_terrain_offset;
+    // First row above the ground floor, clearing the storefront glazing and its awning.
+    let fascia_y = config.ground_floor_top() + 1 + abs;
+    let door_y = config.start_y_offset + abs + 1;
+
+    if let Some(plan) = entrances.first() {
+        return Some(FacadeAnchor {
+            x: plan.x,
+            z: plan.z,
+            normal: plan.normal,
+            fascia_y: fascia_y.max(door_y + 3),
+            number_y: door_y + 1,
+            door: Some((plan.x, plan.z)),
+        });
+    }
+
+    let front = facade.front_segment?;
+    let seg = facade.segments[front].as_ref()?;
+    // Segment i spans nodes[i]..nodes[i+1]; hang the plate on the middle of that wall.
+    let (a, b) = (element.nodes.get(front)?, element.nodes.get(front + 1)?);
+    let cells = bresenham_line(a.x, 0, a.z, b.x, 0, b.z);
+    let (x, _, z) = *cells.get(cells.len() / 2)?;
+    Some(FacadeAnchor {
+        x,
+        z,
+        normal: seg.normal,
+        fascia_y,
+        number_y: door_y + 1,
+        door: None,
+    })
 }
 
 /// Generates a parapet (low wall) around the edge of flat-roofed buildings.

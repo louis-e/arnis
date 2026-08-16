@@ -68,6 +68,10 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
         if k == "start_date" {
             return keep_start_date;
         }
+        // The house number feeds the door plate; the rest of addr:* stays out.
+        if k == "addr:housenumber" {
+            return true;
+        }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
     });
     tags

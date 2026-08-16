@@ -342,9 +342,11 @@ impl RegionWriteCtx {
 }
 
 /// Helper function to get entity coordinates
-/// Extracts a block entity or entity position for coordinate dedup.
+/// Extracts a block entity or entity position for coordinate dedup. Hanging entities
+/// (item frames, paintings) add their `Facing`, so several decals can share one cell.
 #[inline]
-fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)> {
+fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, i32)> {
+    let facing = entity.get("Facing").and_then(value_to_i32).unwrap_or(-1);
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
             if let (Some(x), Some(y), Some(z)) = (
@@ -352,7 +354,7 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)>
                 value_to_i32(&pos[1]),
                 value_to_i32(&pos[2]),
             ) {
-                return Some((x, y, z));
+                return Some((x, y, z, facing));
             }
         }
     }
@@ -365,7 +367,7 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)>
         return None;
     };
 
-    Some((x, y, z))
+    Some((x, y, z, facing))
 }
 
 // Reads a string blockstate property, if present.
@@ -899,7 +901,7 @@ fn block_entity_owned_by_block(chunk: &ChunkToModify, be: &Value) -> bool {
 
 /// Deduplicates a compound list by entity coordinate, keeping the last occurrence.
 fn dedup_compound_list(values: &[Value]) -> Vec<Value> {
-    let mut coord_index: HashMap<(i32, i32, i32), usize> = HashMap::new();
+    let mut coord_index: HashMap<(i32, i32, i32, i32), usize> = HashMap::new();
     let mut deduped: Vec<Value> = Vec::with_capacity(values.len());
 
     for value in values {
@@ -1114,10 +1116,10 @@ fn merge_compound_list(chunk: &mut Chunk, chunk_to_modify: &ChunkToModify, key: 
             if let (Value::List(existing), Value::List(new)) = (existing_entities, new_entities) {
                 existing.retain(|e| {
                     if let Value::Compound(map) = e {
-                        if let Some((x, y, z)) = get_entity_coords(map) {
+                        if let Some(coords) = get_entity_coords(map) {
                             return !new.iter().any(|new_e| {
                                 if let Value::Compound(new_map) = new_e {
-                                    get_entity_coords(new_map) == Some((x, y, z))
+                                    get_entity_coords(new_map) == Some(coords)
                                 } else {
                                     false
                                 }

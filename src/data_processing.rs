@@ -227,6 +227,7 @@ fn process_element(
     part_groups: &PartGroups,
     group_members: &FnvHashMap<u64, Vec<u64>>,
 ) {
+    let signage = editor.signage_enabled();
     match element {
         ProcessedElement::Way(way) => {
             // Fenced solar farms carry barrier=fence, which would shadow the generator below.
@@ -253,7 +254,11 @@ fn process_element(
                     building_footprints,
                     group_members,
                 };
-                buildings::generate_buildings(editor, way, args, None, None, &ctx, group_seed);
+                let anchor =
+                    buildings::generate_buildings(editor, way, args, None, None, &ctx, group_seed);
+                if signage {
+                    signage::generate_building_signage(editor, way, anchor);
+                }
             } else if way.tags.contains_key("highway") {
                 highways::generate_highways(
                     editor,
@@ -267,6 +272,9 @@ fn process_element(
                     tunnel_internal_endpoints,
                     tunnel_cells,
                 );
+                if signage {
+                    signage::generate_highway_way_signage(editor, way, building_footprints);
+                }
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(
                     editor,
@@ -291,6 +299,9 @@ fn process_element(
                 );
             } else if way.tags.contains_key("amenity") {
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
+                if signage && way.tags.get("amenity").map(String::as_str) == Some("parking") {
+                    signage::generate_parking_signage(editor, way, road_mask);
+                }
             } else if way.tags.contains_key("leisure") {
                 leisure::generate_leisure(
                     editor,
@@ -344,11 +355,17 @@ fn process_element(
                     flood_fill_cache,
                     args.timeout.as_ref(),
                 );
+                if signage {
+                    signage::generate_power_signage(editor, way, road_mask);
+                }
             } else if way.tags.contains_key("place") {
                 landuse::generate_place(editor, way, args, flood_fill_cache);
             }
         }
         ProcessedElement::Node(node) => {
+            if signage {
+                signage::generate_node_signage(editor, node, building_footprints, road_mask);
+            }
             if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
                 doors::generate_doors(editor, node);
             } else if node.tags.get("natural").map(String::as_str) == Some("tree") {
@@ -380,7 +397,7 @@ fn process_element(
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
             } else if node.tags.contains_key("tourism") {
-                tourisms::generate_tourisms(editor, node);
+                tourisms::generate_tourisms(editor, node, road_mask);
             } else if node.tags.contains_key("man_made") {
                 man_made::generate_man_made_nodes(editor, node, args);
             } else if node.tags.contains_key("power") {
@@ -390,7 +407,7 @@ fn process_element(
             } else if node.tags.contains_key("emergency") {
                 emergency::generate_emergency(editor, node);
             } else if node.tags.contains_key("advertising") {
-                advertising::generate_advertising(editor, node);
+                advertising::generate_advertising(editor, node, road_mask);
             }
         }
         ProcessedElement::Relation(rel) => {
@@ -523,6 +540,32 @@ pub fn generate_world_with_options(
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
 
+    // Signage pre-pass: every decal the world needs gets its map id now, so the tile
+    // threads only read the registry. Java only; other formats keep banner fallbacks.
+    let signage_start = args.benchmark.then(std::time::Instant::now);
+    let signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
+        == WorldFormat::JavaAnvil)
+        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox))
+        .flatten()
+        .map(Arc::new);
+    if let (Some(t), Some(_)) = (signage_start, signage_ctx.as_ref()) {
+        eprintln!("[BENCHMARK] signage_prepass_ms={}", t.elapsed().as_millis());
+    }
+    if let Some(ctx) = &signage_ctx {
+        editor.set_signage(Arc::clone(ctx));
+        println!(
+            "  Signage: {} distinct decals ({} map tiles), {} named intersections",
+            ctx.registry.len(),
+            ctx.registry.tile_count(),
+            ctx.intersections.len()
+        );
+    }
+    let wants_local_maps = signage_ctx.as_ref().is_some_and(|c| {
+        c.registry
+            .iter()
+            .any(|(k, _)| matches!(k, crate::decals::DecalKey::LocalMap { .. }))
+    });
+
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
     let preview_epoch = map_preview::begin_preview_epoch();
     // The map item consumes the same accumulator, so either feature enables it.
@@ -532,9 +575,12 @@ pub fn generate_world_with_options(
     // Branding map ships on every Java world.
     let place_branding = world_format == WorldFormat::JavaAnvil;
     let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
-    let preview = (wants_png || wants_map_item).then(|| {
+    let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
         Arc::new(if wants_png {
             PreviewAccumulator::new(&xzbbox)
+        } else if wants_local_maps {
+            // "You are here" boards crop this, so give them a little more resolution.
+            PreviewAccumulator::new_capped(&xzbbox, 1024)
         } else {
             PreviewAccumulator::new_capped(&xzbbox, 512)
         })
@@ -658,9 +704,11 @@ pub fn generate_world_with_options(
     let mut flush_worker: Option<FlushWorker> = None;
     // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
     // real ground. Resolved exactly like the finalize call; spawn doesn't change during generation.
+    // An explicit spawn wins over level.dat, which the CLI only updates after generation.
     let spawn_region: Option<(i32, i32)> = place_branding.then(|| {
-        let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
-            .or(options.spawn_point)
+        let (sx, sz) = options
+            .spawn_point
+            .or_else(|| crate::map_item::read_spawn_xz(&output_path))
             .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
         (sx >> 9, sz >> 9)
     });
@@ -793,6 +841,15 @@ pub fn generate_world_with_options(
                     if let Some(ref tp) = tree_pack {
                         tile_editor.set_tree_pack(Arc::clone(tp));
                     }
+                    if let Some(ctx) = &signage_ctx {
+                        tile_editor.set_signage(Arc::clone(ctx));
+                    }
+                    tile_editor.set_strict_bounds(
+                        tile_bounds.min_x,
+                        tile_bounds.min_z,
+                        tile_bounds.max_x - 1,
+                        tile_bounds.max_z - 1,
+                    );
 
                     let mut tile_rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
                     let mut tile_tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
@@ -1233,8 +1290,9 @@ pub fn generate_world_with_options(
 
     // Map id 0 is the first map; branding is id 1 with the preview on, else id 0.
     if place_branding {
-        let (sx, sz) = crate::map_item::read_spawn_xz(&output_path)
-            .or(options.spawn_point)
+        let (sx, sz) = options
+            .spawn_point
+            .or_else(|| crate::map_item::read_spawn_xz(&output_path))
             .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
         if wants_map_item {
             editor.place_map_item_frame(sx, sz, 0, 1);
@@ -1262,10 +1320,16 @@ pub fn generate_world_with_options(
         }
     }
 
-    if place_branding {
-        if let Err(e) = crate::map_item::write_decoration_maps(&output_path) {
-            eprintln!("Warning: Failed to create decoration maps: {e}");
+    if let Some(ctx) = &signage_ctx {
+        let t = args.benchmark.then(std::time::Instant::now);
+        match crate::map_item::write_decal_maps(&output_path, &ctx.registry, preview.as_deref()) {
+            Ok(n) => println!("Wrote {n} signage map tiles."),
+            Err(e) => eprintln!("Warning: Failed to create signage maps: {e}"),
         }
+        if let Some(t) = t {
+            eprintln!("[BENCHMARK] signage_maps_ms={}", t.elapsed().as_millis());
+        }
+        println!("{}", ctx.summary(args.debug));
     }
 
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.

@@ -626,6 +626,23 @@ pub fn collect_tunnel_footprint(
     bitmap
 }
 
+/// Iron bars with their side connections spelled out. A generated chunk keeps the stored
+/// blockstate until something triggers a neighbour update, so a run of bars placed with the
+/// default state renders as separate posts instead of a joined railing.
+fn connected_iron_bars(north: bool, south: bool, east: bool, west: bool) -> BlockWithProperties {
+    let flag = |v: bool| fastnbt::Value::String(if v { "true" } else { "false" }.to_string());
+    BlockWithProperties::new(
+        IRON_BARS,
+        Some(fastnbt::Value::Compound(HashMap::from([
+            ("north".to_string(), flag(north)),
+            ("south".to_string(), flag(south)),
+            ("east".to_string(), flag(east)),
+            ("west".to_string(), flag(west)),
+            ("waterlogged".to_string(), flag(false)),
+        ]))),
+    )
+}
+
 fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
     editor.set_block_absolute(SMOOTH_STONE, x, base + 1, z, None, None);
     for dy in 2..=4 {
@@ -762,150 +779,108 @@ fn generate_highways_internal(
                 let base = node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
                 place_street_lamp(editor, x, z, base);
             }
-        } else if highway_type == "crossing" {
-            // Handle traffic signals for crossings
-            if let Some(crossing_type) = element.tags().get("crossing") {
-                if crossing_type == "traffic_signals" {
-                    if let ProcessedElement::Node(node) = element {
-                        let x = node.x;
-                        let z = node.z;
-                        let head_base =
-                            node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
+        } else if highway_type == "crossing" || highway_type == "traffic_signals" {
+            // Signal heads for signalised crossings and standalone traffic_signals nodes.
+            let signalised = highway_type == "traffic_signals"
+                || element.tags().get("crossing").map(String::as_str) == Some("traffic_signals");
+            if signalised {
+                if let ProcessedElement::Node(node) = element {
+                    let x = node.x;
+                    let z = node.z;
+                    let head_base =
+                        node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
 
-                        // Try to build a hanging signal if it's on a road
-                        let anchor = road_mask
-                            .contains(x, z)
-                            .then(|| get_nearest_non_road_block(x, z, 4, road_mask))
-                            .flatten();
+                    // Try to build a hanging signal if it's on a road
+                    let anchor = road_mask
+                        .contains(x, z)
+                        .then(|| get_nearest_non_road_block(x, z, 4, road_mask))
+                        .flatten();
 
-                        match anchor {
-                            Some((ax, az)) => {
-                                let pole_base = node_feature_base_y(
-                                    editor,
-                                    bridge_surface,
-                                    ax,
-                                    az,
-                                    layer_boost,
-                                    4,
-                                );
-                                editor.set_block_absolute(
-                                    COBBLESTONE_WALL,
-                                    ax,
-                                    pole_base + 1,
-                                    az,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block_absolute(
-                                    IRON_BARS,
-                                    ax,
-                                    pole_base + 2,
-                                    az,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block_absolute(
-                                    IRON_BARS,
-                                    ax,
-                                    pole_base + 3,
-                                    az,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block_absolute(
-                                    IRON_BARS,
-                                    ax,
-                                    pole_base + 4,
-                                    az,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block_absolute(
-                                    IRON_BARS,
-                                    ax,
-                                    pole_base + 5,
-                                    az,
-                                    None,
-                                    None,
-                                );
-
-                                let bar_y_a = head_base + 6;
-                                for (lx, _, lz) in bresenham_line(x, bar_y_a, z, ax, bar_y_a, az) {
-                                    let bar_base = node_feature_base_y(
-                                        editor,
-                                        bridge_surface,
-                                        lx,
-                                        lz,
-                                        layer_boost,
-                                        4,
-                                    );
-                                    editor.set_block_absolute(
-                                        IRON_BARS,
-                                        lx,
-                                        bar_base + 6,
-                                        lz,
-                                        None,
-                                        None,
-                                    );
-                                }
-                            }
-                            None => {
-                                editor.set_block_absolute(
-                                    COBBLESTONE_WALL,
-                                    x,
-                                    head_base + 1,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block_absolute(
-                                    IRON_BARS,
-                                    x,
-                                    head_base + 2,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block_absolute(
-                                    IRON_BARS,
-                                    x,
-                                    head_base + 3,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                            }
-                        }
-
-                        editor.set_block_absolute(BLACK_WOOL, x, head_base + 4, z, None, None);
-                        editor.set_block_absolute(BLACK_WOOL, x, head_base + 5, z, None, None);
-
-                        const BANNER_PATTERNS: &[(&str, &str)] = &[
-                            ("red", "minecraft:triangle_top"),
-                            ("lime", "minecraft:triangle_bottom"),
-                            ("yellow", "minecraft:circle"),
-                            ("black", "minecraft:curly_border"),
-                            ("black", "minecraft:border"),
-                        ];
-
-                        let banner_y = head_base + 5;
-                        let banner_offsets: [(i32, i32, &str); 4] = [
-                            (0, -1, "north"),
-                            (0, 1, "south"),
-                            (-1, 0, "west"),
-                            (1, 0, "east"),
-                        ];
-                        for (dx, dz, facing) in &banner_offsets {
-                            editor.place_wall_banner(
-                                LIGHT_GRAY_WALL_BANNER,
-                                x + dx,
-                                banner_y,
-                                z + dz,
-                                facing,
-                                "light_gray",
-                                BANNER_PATTERNS,
+                    match anchor {
+                        Some((ax, az)) => {
+                            let pole_base =
+                                node_feature_base_y(editor, bridge_surface, ax, az, layer_boost, 4);
+                            editor.set_block_absolute(
+                                COBBLESTONE_WALL,
+                                ax,
+                                pole_base + 1,
+                                az,
+                                None,
+                                None,
                             );
+                            // The mast carries the arm, so it has to reach the arm's level.
+                            let arm_y = head_base + 6;
+                            for y in (pole_base + 2)..arm_y {
+                                editor.set_block_absolute(IRON_BARS, ax, y, az, None, None);
+                            }
+
+                            // One level for the whole arm, so its bars are true neighbours and
+                            // can be joined; a per-cell terrain height would step them apart.
+                            let arm: Vec<(i32, i32)> = bresenham_line(x, 0, z, ax, 0, az)
+                                .into_iter()
+                                .map(|(lx, _, lz)| (lx, lz))
+                                .collect();
+                            let arm_cells: HashSet<(i32, i32)> = arm.iter().copied().collect();
+                            for &(lx, lz) in &arm {
+                                let joins =
+                                    |dx: i32, dz: i32| arm_cells.contains(&(lx + dx, lz + dz));
+                                editor.set_block_with_properties_absolute(
+                                    connected_iron_bars(
+                                        joins(0, -1),
+                                        joins(0, 1),
+                                        joins(1, 0),
+                                        joins(-1, 0),
+                                    ),
+                                    lx,
+                                    arm_y,
+                                    lz,
+                                    None,
+                                    Some(&[]),
+                                );
+                            }
                         }
+                        None => {
+                            editor.set_block_absolute(
+                                COBBLESTONE_WALL,
+                                x,
+                                head_base + 1,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block_absolute(IRON_BARS, x, head_base + 2, z, None, None);
+                            editor.set_block_absolute(IRON_BARS, x, head_base + 3, z, None, None);
+                        }
+                    }
+
+                    editor.set_block_absolute(BLACK_WOOL, x, head_base + 4, z, None, None);
+                    editor.set_block_absolute(BLACK_WOOL, x, head_base + 5, z, None, None);
+
+                    const BANNER_PATTERNS: &[(&str, &str)] = &[
+                        ("red", "minecraft:triangle_top"),
+                        ("lime", "minecraft:triangle_bottom"),
+                        ("yellow", "minecraft:circle"),
+                        ("black", "minecraft:curly_border"),
+                        ("black", "minecraft:border"),
+                    ];
+
+                    let banner_y = head_base + 5;
+                    let banner_offsets: [(i32, i32, &str); 4] = [
+                        (0, -1, "north"),
+                        (0, 1, "south"),
+                        (-1, 0, "west"),
+                        (1, 0, "east"),
+                    ];
+                    for (dx, dz, facing) in &banner_offsets {
+                        editor.place_wall_banner(
+                            LIGHT_GRAY_WALL_BANNER,
+                            x + dx,
+                            banner_y,
+                            z + dz,
+                            facing,
+                            "light_gray",
+                            BANNER_PATTERNS,
+                        );
                     }
                 }
             }
@@ -923,12 +898,14 @@ fn generate_highways_internal(
                     node_feature_base_y(editor, bridge_surface, x + 1, z, layer_boost, 1);
                 editor.set_block_absolute(WHITE_WOOL, x + 1, neighbor_base + 4, z, None, None);
 
-                // Bus sign on both broad faces of the overhanging wool.
-                if editor.map_decals_enabled() {
-                    let sign_y = neighbor_base + 4;
-                    editor.place_map_decal(x + 1, sign_y, z, 2, crate::map_item::BUS_STOP_MAP_ID);
-                    editor.place_map_decal(x + 1, sign_y, z, 3, crate::map_item::BUS_STOP_MAP_ID);
-                }
+                // Bus sign on both broad faces of the overhanging wool, stop name on the pole block.
+                crate::element_processing::signage::place_bus_stop_signs(
+                    editor,
+                    &node.tags,
+                    x,
+                    neighbor_base + 4,
+                    z,
+                );
             }
         } else if element
             .tags()
@@ -2228,6 +2205,40 @@ pub fn collect_road_surface_coords(
     xzbbox: &XZBBox,
     scale: f64,
 ) -> CoordinateBitmap {
+    collect_highway_surface_coords(elements, xzbbox, scale, |_| true)
+}
+
+/// Vehicular carriageways only (no footways, cycleways, paths, steps or pedestrian
+/// streets). Signage uses this to keep posts on the sidewalk but off the road.
+pub fn collect_carriageway_coords(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+) -> CoordinateBitmap {
+    collect_highway_surface_coords(elements, xzbbox, scale, |highway| {
+        !matches!(
+            highway,
+            "footway"
+                | "path"
+                | "steps"
+                | "pedestrian"
+                | "cycleway"
+                | "bridleway"
+                | "corridor"
+                | "track"
+                | "elevator"
+                | "platform"
+        )
+    })
+}
+
+/// Shared stamping loop for the road-surface bitmaps; `include` filters by highway type.
+fn collect_highway_surface_coords(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+    include: impl Fn(&str) -> bool,
+) -> CoordinateBitmap {
     let mut bitmap = CoordinateBitmap::new(xzbbox);
 
     for element in elements {
@@ -2243,6 +2254,9 @@ pub fn collect_road_surface_coords(
         match highway_type.as_str() {
             "street_lamp" | "crossing" | "bus_stop" => continue,
             _ => {}
+        }
+        if !include(highway_type) {
+            continue;
         }
 
         // Exclude area highways (pedestrian plazas etc.) — flood-filled separately

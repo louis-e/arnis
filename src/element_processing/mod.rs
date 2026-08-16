@@ -18,6 +18,7 @@ pub mod man_made;
 pub mod natural;
 pub mod power;
 pub mod railways;
+pub mod signage;
 pub mod sport_pitches;
 pub mod subprocessor;
 mod surfaces;

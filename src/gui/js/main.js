@@ -150,6 +150,10 @@ async function applyLocalization(localization) {
     "button[data-localize='gamemode_spectator']": "gamemode_spectator",
     "span[data-localize='world_time']": "world_time",
     "span[data-localize='map_item']": "map_item",
+    "span[data-localize='signage']": "signage",
+    "button[data-localize='signage_none']": "signage_none",
+    "button[data-localize='signage_basic']": "signage_basic",
+    "button[data-localize='signage_full']": "signage_full",
     "div[data-localize='settings_section_generation']": "settings_section_generation",
     "div[data-localize='settings_section_world']": "settings_section_world",
     "div[data-localize='settings_section_map']": "settings_section_map",
@@ -784,6 +788,15 @@ function initSettings() {
   gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // Signage segmented control
+  const signageGroup = document.getElementById("signage-group");
+  signageGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      signageGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -1698,6 +1711,8 @@ async function startGeneration() {
     var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
     var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
     var mapItem = document.getElementById("map-item-toggle").checked;
+    var signageBtn = document.querySelector("#signage-group .segment.active");
+    var signage = signageBtn ? signageBtn.dataset.signage : "basic";
     // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
     var clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
     var worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
@@ -1727,7 +1742,8 @@ async function startGeneration() {
         rotationAngle: rotationAngle,
         gamemode: gamemode,
         worldTime: worldTime,
-        mapItem: mapItem
+        mapItem: mapItem,
+        signage: signage
     });
 
     console.log("Generation process started.");

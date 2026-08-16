@@ -85,6 +85,23 @@ pub struct CornerPlan {
     pub seg_b: usize,
 }
 
+/// Where a facade sign belongs. Only the building generator knows the wall base, the floor
+/// grammar and where the entrance ended up.
+#[derive(Copy, Clone, Debug)]
+pub struct FacadeAnchor {
+    /// Entrance column if there is one, else the middle of the street-facing wall.
+    pub x: i32,
+    pub z: i32,
+    /// Axis-snapped outward normal of that wall.
+    pub normal: (i32, i32),
+    /// Fascia band, clear of the storefront glazing, awning and entrance canopy.
+    pub fascia_y: i32,
+    /// Absolute Y for a house-number plate, beside the door at door height.
+    pub number_y: i32,
+    /// Door column, if the building has an entrance on this wall.
+    pub door: Option<(i32, i32)>,
+}
+
 /// Per-building facade classification, computed once before wall placement.
 pub struct FacadePlan {
     /// Aligned with node pairs: segments\[i\] covers nodes\[i\]..nodes\[i+1\].
