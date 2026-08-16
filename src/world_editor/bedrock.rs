@@ -87,6 +87,9 @@ impl From<serde_json::Error> for BedrockSaveError {
 
 const DEFAULT_BEDROCK_COMPRESSION_LEVEL: u8 = 6;
 
+/// Marks the staging directory as ours. Never packaged, `package_mcworld` names its files.
+const STAGING_MARKER: &str = ".arnis-staging";
+
 /// A LevelDB (key, value) record, and all records for one chunk.
 type DbRecord = (Vec<u8>, Vec<u8>);
 type ChunkRecords = Vec<DbRecord>;
@@ -130,6 +133,7 @@ impl From<&BedrockBlockStateValue> for BedrockNbtValue {
 /// Writer for Bedrock Edition worlds
 pub struct BedrockWriter {
     output_dir: PathBuf,
+    mcworld_path: PathBuf,
     level_name: String,
     spawn_point: Option<(i32, i32)>,
     ground: Option<Arc<Ground>>,
@@ -158,14 +162,17 @@ impl BedrockWriter {
     ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
-        let output_dir = if output_path.extension().is_some_and(|ext| ext == "mcworld") {
-            output_path.with_extension("")
-        } else {
-            output_path
-        };
+        let (output_dir, mcworld_path) =
+            if output_path.extension().is_some_and(|ext| ext == "mcworld") {
+                (output_path.with_extension(""), output_path)
+            } else {
+                let mcworld_path = append_mcworld_extension(&output_path);
+                (output_path, mcworld_path)
+            };
 
         Self {
             output_dir,
+            mcworld_path,
             level_name,
             spawn_point,
             ground,
@@ -220,12 +227,12 @@ impl BedrockWriter {
             }
             fs::remove_dir_all(&self.output_dir)?;
         }
-        let mcworld_path = self.output_dir.with_extension("mcworld");
-        if mcworld_path.exists() {
-            fs::remove_file(&mcworld_path)?;
+        if self.mcworld_path.exists() {
+            fs::remove_file(&self.mcworld_path)?;
         }
 
         fs::create_dir_all(&self.output_dir)?;
+        fs::write(self.output_dir.join(STAGING_MARKER), b"")?;
         // db directory will be created by LevelDB
         Ok(())
     }
@@ -780,8 +787,7 @@ impl BedrockWriter {
     }
 
     fn package_mcworld(&self) -> Result<(), BedrockSaveError> {
-        let mcworld_path = self.output_dir.with_extension("mcworld");
-        let file = File::create(&mcworld_path)?;
+        let file = File::create(&self.mcworld_path)?;
         let mut writer = ZipWriter::new(file);
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
 
@@ -846,9 +852,16 @@ impl BedrockWriter {
     }
 }
 
-/// Whether a directory is empty or holds the files a previous run staged there.
+/// Appends the extension rather than replacing it, level names can contain dots.
+fn append_mcworld_extension(dir: &std::path::Path) -> PathBuf {
+    let mut name = dir.as_os_str().to_os_string();
+    name.push(".mcworld");
+    PathBuf::from(name)
+}
+
+/// Whether a directory is empty or ours. Only the marker counts, real worlds hold the same files.
 fn is_arnis_staging_dir(dir: &std::path::Path) -> bool {
-    if dir.join("levelname.txt").is_file() || dir.join("db").is_dir() {
+    if dir.join(STAGING_MARKER).is_file() {
         return true;
     }
     fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_none())
@@ -1295,6 +1308,14 @@ mod tests {
     }
 
     #[test]
+    fn mcworld_path_keeps_dots_in_area_name() {
+        let output = PathBuf::from("Arnis St. Louis.mcworld");
+        let writer = test_writer(output.clone());
+        assert_eq!(writer.mcworld_path, output);
+        assert_eq!(writer.output_dir, PathBuf::from("Arnis St. Louis"));
+    }
+
+    #[test]
     fn prepare_output_dir_keeps_foreign_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let staging = tmp.path().join("Arnis Test");
@@ -1307,16 +1328,41 @@ mod tests {
     }
 
     #[test]
+    fn prepare_output_dir_keeps_existing_bedrock_world() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("Arnis Test");
+        fs::create_dir_all(staging.join("db")).unwrap();
+        fs::write(staging.join("levelname.txt"), b"Someone's World").unwrap();
+        fs::write(staging.join("db").join("CURRENT"), b"leveldb").unwrap();
+
+        let writer = test_writer(staging.with_extension("mcworld"));
+        assert!(writer.prepare_output_dir().is_err());
+        assert!(staging.join("db").join("CURRENT").is_file());
+    }
+
+    #[test]
     fn prepare_output_dir_wipes_previous_staging_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let staging = tmp.path().join("Arnis Test");
         fs::create_dir_all(staging.join("db")).unwrap();
+        fs::write(staging.join(STAGING_MARKER), b"").unwrap();
         fs::write(staging.join("levelname.txt"), b"Arnis World: Old").unwrap();
 
         let writer = test_writer(staging.with_extension("mcworld"));
         writer.prepare_output_dir().unwrap();
-        assert!(staging.is_dir());
+        assert!(staging.join(STAGING_MARKER).is_file());
         assert!(!staging.join("levelname.txt").exists());
+    }
+
+    #[test]
+    fn prepare_output_dir_accepts_empty_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("Arnis Test");
+        fs::create_dir_all(&staging).unwrap();
+
+        let writer = test_writer(staging.with_extension("mcworld"));
+        writer.prepare_output_dir().unwrap();
+        assert!(staging.join(STAGING_MARKER).is_file());
     }
 
     #[test]

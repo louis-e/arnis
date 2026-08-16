@@ -49,12 +49,7 @@ const SETTINGS = [
 
   // Application
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },
-  {
-    id: 'bedrock-save-path-input',
-    kind: 'text',
-    store: EXTERNAL,
-    dynamicDefault: 'bedrockSavePath',
-  },
+  { id: 'bedrock-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'bedrockSavePath' },
   { id: 'language-select', kind: 'select', store: EXTERNAL, dynamicDefault: 'language' },
 
   // Consent record, not a preference. The user answered it on first run and the
