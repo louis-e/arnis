@@ -233,10 +233,10 @@ pub const TALL_DATAPACK_NAME: &str = "arnis_tall";
 /// Install the bundled tall-world datapack into a Java world and register it
 /// in `level.dat`'s `Data.DataPacks.Enabled` so it auto-activates on first
 /// load. The base `data/` tree uses the legacy flat dimension_type schema
-/// (formats 61-89, i.e. 1.21.4-1.21.10); overlays carry the attributes schema
-/// for 1.21.11-era (formats 90-100) and the clock/`default_clock` schema for
-/// 26.1 and later (formats 101+), since the schema is mutually incompatible
-/// across those eras. Overlays must declare their range only via
+/// (formats below 90, so up to 1.21.10); overlays carry the attributes schema
+/// for formats 90-100 and the clock/`default_clock` schema for 101 and up,
+/// since the schema is mutually incompatible across those eras.
+/// Overlays must declare their range only via
 /// `min_format`/`max_format`; the deprecated `formats` key makes 1.21.9+ drop
 /// the whole overlays section and fall back to the legacy tree.
 pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
