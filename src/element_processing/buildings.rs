@@ -1047,9 +1047,10 @@ impl BuildingStyle {
         } else if let Some(rt) = preset.roof_type {
             let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
             (rt, should_generate)
-        } else if element.tags.contains_key("building:part") {
-            // Parts are mapper-modeled volumes; without roof:shape they are
-            // flat by Simple 3D semantics, never an inferred pitched roof.
+        } else if element.tags.contains_key("building:part")
+            && (element.tags.contains_key("height") || element.tags.contains_key("building:levels"))
+        {
+            // Parts with an explicit top are modeled volumes, flat by default
             (RoofType::Flat, false)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
@@ -1100,11 +1101,8 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         };
 
-        // For strongly rotated buildings without an explicit roof:shape tag,
-        // switch from gabled/hipped to pyramidal. The bbox-fill ratio alone
-        // also catches concave axis-aligned footprints (L/U shapes), which
-        // the polygon-edge scan handles fine, so the downgrade additionally
-        // requires the dominant edge angle to be well off the world axes.
+        // pyramidal downgrade only for truly rotated shapes; the fill ratio
+        // alone would also hit concave axis-aligned footprints
         let has_explicit_roof_shape = element.tags.contains_key("roof:shape");
         const DIAGONAL_THRESHOLD: f64 = 0.35;
         let diagonality = compute_building_diagonality(&element.nodes);
@@ -2628,9 +2626,16 @@ fn calculate_building_height(
             group_seed,
         ) {
             InferredHeight::Levels(levels) => {
-                building_height = (((levels * floor_cycle as f64 + GROUND_FLOOR_BONUS as f64)
-                    * scale_factor) as i32)
-                    .max(3);
+                // Same min_level handling as the tagged branches, so an
+                // elevated part tops out flush with its ground sibling
+                let lev = (levels - min_level as f64).max(1.0);
+                let bonus = if min_level > 0 {
+                    0.0
+                } else {
+                    GROUND_FLOOR_BONUS as f64
+                };
+                building_height =
+                    (((lev * floor_cycle as f64 + bonus) * scale_factor) as i32).max(3);
                 if levels > 7.0 {
                     is_tall_building = true;
                 }
@@ -8997,9 +9002,8 @@ fn generate_gabled_roof(
         let sp_z = scan_dir(x, z, 0, 1);
         let sm_x = scan_dir(x, z, -1, 0);
         let sp_x = scan_dir(x, z, 1, 0);
-        // Snap mode drives the slope from bbox distances (straight ridge)
-        // but keeps the footprint scans for along-ridge tests and the rim
-        // clamp, so gable ends and rotated corners follow the real outline.
+        // snap mode: bbox distances drive the slope, footprint scans keep
+        // gable ends and the rim clamp honest
         let (dm_z, dp_z, dm_x, dp_x) = if axis_snap {
             (
                 z - config.min_z,
@@ -11381,6 +11385,27 @@ mod style_tests {
             pick_window_archetype(cat_a, ArchEra::Unknown, group_seed),
             pick_window_archetype(cat_b, ArchEra::Unknown, group_seed)
         );
+    }
+
+    // An inferred elevated part ends flush with its ground-level sibling
+    #[test]
+    fn inferred_elevated_part_tops_flush() {
+        let tagged = |pairs: &[(&str, &str)]| ProcessedWay {
+            id: 1,
+            nodes: Vec::new(),
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let ground = tagged(&[("building:part", "yes")]);
+        let lifted = tagged(&[("building:part", "yes"), ("building:min_level", "1")]);
+        for seed in 1..20u64 {
+            let (hg, _) = calculate_building_height(&ground, "yes", 0, 1.0, None, 4, 400, seed);
+            let (hl, _) = calculate_building_height(&lifted, "yes", 1, 1.0, None, 4, 400, seed);
+            let lift = 4 + GROUND_FLOOR_BONUS;
+            assert_eq!(hl + lift, hg, "seed {seed}");
+        }
     }
 
     // Parts without roof:shape stay flat instead of rolling the gable lottery.
