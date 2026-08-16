@@ -4265,6 +4265,63 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
     (polygon_area / bbox_area).min(1.0)
 }
 
+/// Signed dominant edge orientation in radians, folded into (-45, 45] deg
+/// off the world axes. Length-weighted circular mean over mod-90 edge space.
+fn dominant_axis_angle(nodes: &[ProcessedNode]) -> f64 {
+    let mut sum_c = 0.0f64;
+    let mut sum_s = 0.0f64;
+    for i in 0..nodes.len() {
+        let j = (i + 1) % nodes.len();
+        let dx = (nodes[j].x - nodes[i].x) as f64;
+        let dz = (nodes[j].z - nodes[i].z) as f64;
+        let len = (dx * dx + dz * dz).sqrt();
+        if len < 3.0 {
+            continue;
+        }
+        let ang = dz.atan2(dx);
+        sum_c += len * (4.0 * ang).cos();
+        sum_s += len * (4.0 * ang).sin();
+    }
+    if sum_c == 0.0 && sum_s == 0.0 {
+        return 0.0;
+    }
+    sum_s.atan2(sum_c) / 4.0
+}
+
+/// Slightly-rotated rectangular buildings get an axis-aligned gable tent so
+/// the ridge stays straight instead of stepping with the polygon edges.
+/// Applies between 1 and 12 degrees off-axis on near-rectangular footprints.
+fn gable_axis_snap(nodes: &[ProcessedNode]) -> bool {
+    if nodes.len() < 3 {
+        return false;
+    }
+    let ang = dominant_axis_angle(nodes);
+    let dev = ang.to_degrees().abs();
+    if !(1.0..=12.0).contains(&dev) {
+        return false;
+    }
+    let mut area = 0i64;
+    for i in 0..nodes.len() {
+        let j = (i + 1) % nodes.len();
+        area += (nodes[i].x as i64) * (nodes[j].z as i64);
+        area -= (nodes[j].x as i64) * (nodes[i].z as i64);
+    }
+    let polygon_area = (area.abs() as f64) / 2.0;
+    let (c, sn) = (ang.cos(), ang.sin());
+    let (mut u_min, mut u_max) = (f64::MAX, f64::MIN);
+    let (mut v_min, mut v_max) = (f64::MAX, f64::MIN);
+    for n in nodes {
+        let u = n.x as f64 * c + n.z as f64 * sn;
+        let v = -(n.x as f64) * sn + n.z as f64 * c;
+        u_min = u_min.min(u);
+        u_max = u_max.max(u);
+        v_min = v_min.min(v);
+        v_max = v_max.max(v);
+    }
+    let rect_area = (u_max - u_min) * (v_max - v_min);
+    rect_area > 0.0 && polygon_area / rect_area >= 0.78
+}
+
 /// Computes the axis-aligned outward normal for a wall segment defined by
 /// `(x1,z1)→(x2,z2)`, given the building centroid `(cx,cz)`.
 ///
@@ -8770,6 +8827,7 @@ fn generate_gabled_roof(
     roof_orientation: Option<&str>,
     profile: GableProfile,
     preferred_ridge_along_x: Option<bool>,
+    axis_snap: bool,
 ) {
     // Create a HashSet for O(1) footprint lookups, this is the actual building shape
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
@@ -8829,10 +8887,21 @@ fn generate_gabled_roof(
     let mut max_perp_half: i32 = 0;
 
     for &(x, z) in floor_area {
-        let dm_z = scan_dir(x, z, 0, -1);
-        let dp_z = scan_dir(x, z, 0, 1);
-        let dm_x = scan_dir(x, z, -1, 0);
-        let dp_x = scan_dir(x, z, 1, 0);
+        let (dm_z, dp_z, dm_x, dp_x) = if axis_snap {
+            (
+                z - config.min_z,
+                config.max_z - z,
+                x - config.min_x,
+                config.max_x - x,
+            )
+        } else {
+            (
+                scan_dir(x, z, 0, -1),
+                scan_dir(x, z, 0, 1),
+                scan_dir(x, z, -1, 0),
+                scan_dir(x, z, 1, 0),
+            )
+        };
 
         let (dm_perp, dp_perp) = if ridge_runs_along_x {
             (dm_z, dp_z)
@@ -9996,6 +10065,10 @@ fn generate_roof(
     config.add_dormers = add_dormers;
 
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
+    let axis_snap = matches!(
+        roof_type,
+        RoofType::Gabled | RoofType::Gambrel | RoofType::HalfHipped
+    ) && gable_axis_snap(&element.nodes);
 
     // For flat roofs: OSM tags override > preset override > floor block default.
     let flat_roof_block = osm_roof_block
@@ -10026,6 +10099,7 @@ fn generate_roof(
                 roof_orientation,
                 profile,
                 preferred_ridge_along_x,
+                axis_snap,
             );
         }
 
@@ -10037,6 +10111,7 @@ fn generate_roof(
                 roof_orientation,
                 GableProfile::Gambrel,
                 preferred_ridge_along_x,
+                axis_snap,
             );
         }
 
@@ -10048,6 +10123,7 @@ fn generate_roof(
                 roof_orientation,
                 GableProfile::HalfHipped,
                 preferred_ridge_along_x,
+                axis_snap,
             );
         }
 
@@ -10377,6 +10453,71 @@ fn generate_bridge(
 #[cfg(test)]
 mod height_tests {
     use super::*;
+
+    fn ring(points: &[(i32, i32)]) -> Vec<ProcessedNode> {
+        let mut nodes: Vec<ProcessedNode> = points
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| ProcessedNode {
+                id: i as u64 + 1,
+                tags: HashMap::new(),
+                x,
+                z,
+            })
+            .collect();
+        nodes.push(nodes[0].clone());
+        nodes
+    }
+
+    fn rotated_rect(w: f64, l: f64, deg: f64) -> Vec<ProcessedNode> {
+        let (c, sn) = (deg.to_radians().cos(), deg.to_radians().sin());
+        let pts: Vec<(i32, i32)> = [(0.0, 0.0), (l, 0.0), (l, w), (0.0, w)]
+            .iter()
+            .map(|&(u, v)| {
+                (
+                    (u * c - v * sn).round() as i32,
+                    (u * sn + v * c).round() as i32,
+                )
+            })
+            .collect();
+        ring(&pts)
+    }
+
+    #[test]
+    fn axis_snap_catches_slight_rotation() {
+        assert!(gable_axis_snap(&rotated_rect(12.0, 30.0, 8.0)));
+        assert!(gable_axis_snap(&rotated_rect(10.0, 24.0, 4.0)));
+    }
+
+    #[test]
+    fn axis_snap_leaves_aligned_and_steep_alone() {
+        assert!(!gable_axis_snap(&rotated_rect(12.0, 30.0, 0.0)));
+        assert!(!gable_axis_snap(&rotated_rect(12.0, 30.0, 20.0)));
+        assert!(!gable_axis_snap(&rotated_rect(12.0, 30.0, 44.0)));
+    }
+
+    #[test]
+    fn axis_snap_skips_l_shapes() {
+        // L-shape rotated ~8 deg: rectangle-likeness gate must reject it.
+        let (c, sn) = (8.0f64.to_radians().cos(), 8.0f64.to_radians().sin());
+        let pts: Vec<(i32, i32)> = [
+            (0.0, 0.0),
+            (30.0, 0.0),
+            (30.0, 10.0),
+            (12.0, 10.0),
+            (12.0, 26.0),
+            (0.0, 26.0),
+        ]
+        .iter()
+        .map(|&(u, v): &(f64, f64)| {
+            (
+                (u * c - v * sn).round() as i32,
+                (u * sn + v * c).round() as i32,
+            )
+        })
+        .collect();
+        assert!(!gable_axis_snap(&ring(&pts)));
+    }
 
     fn way_with_tags(tags: &[(&str, &str)]) -> ProcessedWay {
         ProcessedWay {
