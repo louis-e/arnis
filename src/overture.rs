@@ -27,8 +27,15 @@ use std::time::Duration;
 /// Overture STAC catalog root; releases live at /<release>/collections.parquet.
 const OVERTURE_STAC_ROOT: &str = "https://stac.overturemaps.org";
 
-/// Used when /catalog.json discovery fails; bump occasionally to a recent release.
-const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-05-20.0";
+/// Bucket listing used to discover release names; only the newest few stay online.
+const OVERTURE_RELEASE_LIST_URL: &str =
+    "https://overturemaps-us-west-2.s3.amazonaws.com/?list-type=2&prefix=release/&delimiter=/";
+
+/// Used when release discovery fails; bump occasionally to a recent release.
+const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-07-22.0";
+
+/// How many releases to request before giving up, so a broken host cannot stall the fetch.
+const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
 
 /// High bit marker for Overture IDs to avoid collision with OSM IDs.
 /// OSM IDs are sequential positive u64 (currently up to ~12 billion, well under 2^34).
@@ -301,19 +308,111 @@ fn fetch_overture_buildings_inner(
     Ok(elements)
 }
 
-/// Resolve the current STAC collections URL via /catalog.json's `latest` field,
-/// falling back to the bundled release if discovery fails.
-fn resolve_stac_url(client: &Client) -> String {
-    let release = client
-        .get(format!("{OVERTURE_STAC_ROOT}/catalog.json"))
-        .send()
-        .ok()
-        .filter(|r| r.status().is_success())
-        .and_then(|r| r.text().ok())
-        .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
-        .and_then(|v| v.get("latest").and_then(|s| s.as_str().map(String::from)))
-        .unwrap_or_else(|| OVERTURE_STAC_RELEASE_FALLBACK.to_string());
-    format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet")
+/// Sorts `YYYY-MM-DD.N` release names, comparing the revision numerically.
+fn release_sort_key(release: &str) -> (&str, u32) {
+    match release.split_once('.') {
+        Some((date, rev)) => (date, rev.parse().unwrap_or(0)),
+        None => (release, 0),
+    }
+}
+
+/// Extract release names from an S3 `ListObjectsV2` response, newest first.
+fn parse_release_listing(body: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    // Releases arrive as <Prefix>release/2026-07-22.0/</Prefix>; the echoed request prefix strips to empty.
+    let mut xml = Reader::from_str(body);
+    let mut releases: Vec<String> = Vec::new();
+    let mut in_prefix = false;
+    loop {
+        match xml.read_event()? {
+            Event::Start(e) if e.local_name().as_ref() == b"Prefix" => in_prefix = true,
+            Event::End(e) if e.local_name().as_ref() == b"Prefix" => in_prefix = false,
+            Event::Text(e) if in_prefix => {
+                let text = e.xml10_content()?;
+                if let Some(name) = text.trim().strip_prefix("release/") {
+                    let name = name.trim_end_matches('/');
+                    if !name.is_empty() {
+                        releases.push(name.to_string());
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    releases.sort_by(|a, b| release_sort_key(b).cmp(&release_sort_key(a)));
+    releases.dedup();
+    Ok(releases)
+}
+
+/// Release names currently published in the bucket, newest first.
+fn discover_releases(client: &Client) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let body = client
+        .get(OVERTURE_RELEASE_LIST_URL)
+        .send()?
+        .error_for_status()?
+        .text()?;
+    parse_release_listing(&body)
+}
+
+/// Downloads the STAC index from the newest release that serves one, oldest tried last.
+fn fetch_stac_catalog(
+    client: &Client,
+    debug: bool,
+) -> Result<reqwest::blocking::Response, Box<dyn std::error::Error>> {
+    let releases = match discover_releases(client) {
+        Ok(releases) => releases,
+        Err(e) => {
+            if debug {
+                println!("Overture release discovery failed ({e}), using bundled release");
+            }
+            Vec::new()
+        }
+    };
+
+    // Reserve the last attempt for the fallback so it stays reachable on a long listing.
+    let mut candidates: Vec<String> = releases
+        .into_iter()
+        .take(OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(1))
+        .collect();
+    if !candidates
+        .iter()
+        .any(|r| r == OVERTURE_STAC_RELEASE_FALLBACK)
+    {
+        candidates.push(OVERTURE_STAC_RELEASE_FALLBACK.to_string());
+    }
+
+    if debug {
+        println!("Overture releases to try: {}", candidates.join(", "));
+    }
+
+    let mut last_error = String::from("no Overture release candidates");
+    for release in &candidates {
+        let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
+        match client.get(&url).send() {
+            Ok(response) if response.status().is_success() => {
+                if debug {
+                    println!("Using Overture release {release}");
+                }
+                return Ok(response);
+            }
+            Ok(response) => {
+                last_error = format!(
+                    "STAC catalog download failed with status {} (url: {url})",
+                    response.status()
+                );
+            }
+            Err(e) => last_error = format!("STAC catalog request failed: {e} (url: {url})"),
+        }
+        if debug {
+            println!("Overture release {release} unavailable: {last_error}");
+        }
+    }
+
+    Err(last_error.into())
 }
 
 /// List partition file URLs that overlap the target bbox.
@@ -328,17 +427,7 @@ fn list_partition_files(
     debug: bool,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     // Resolve the current release dynamically; old releases are retired and 404.
-    let stac_url = resolve_stac_url(client);
-    let response = client.get(&stac_url).send()?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "STAC catalog download failed with status {} (url: {stac_url})",
-            response.status()
-        )
-        .into());
-    }
-
-    let stac_bytes = response.bytes()?;
+    let stac_bytes = fetch_stac_catalog(client, debug)?.bytes()?;
     let reader = SerializedFileReader::new(stac_bytes)?;
 
     let target_min_lng = bbox.min().lng();
@@ -1418,6 +1507,27 @@ fn fetch_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_release_listing() {
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>overturemaps-us-west-2</Name><Prefix>release/</Prefix><KeyCount>2</KeyCount><MaxKeys>1000</MaxKeys><Delimiter>/</Delimiter><IsTruncated>false</IsTruncated><CommonPrefixes><Prefix>release/2026-06-17.0/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>release/2026-07-22.0/</Prefix></CommonPrefixes></ListBucketResult>"#;
+
+        assert_eq!(
+            parse_release_listing(body).unwrap(),
+            vec!["2026-07-22.0", "2026-06-17.0"]
+        );
+    }
+
+    #[test]
+    fn test_release_sort_key_orders_revisions_numerically() {
+        let mut releases = vec!["2026-07-22.9", "2026-06-17.0", "2026-07-22.10"];
+        releases.sort_by(|a, b| release_sort_key(b).cmp(&release_sort_key(a)));
+        assert_eq!(
+            releases,
+            vec!["2026-07-22.10", "2026-07-22.9", "2026-06-17.0"]
+        );
+    }
 
     #[test]
     fn test_gers_id_to_u64_high_bit() {
