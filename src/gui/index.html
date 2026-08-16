@@ -352,15 +352,29 @@
         <!-- Section: Application -->
         <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
-        <!-- Save Path -->
+        <!-- Java Save Path -->
         <div class="settings-row">
           <label for="save-path-input">
-            <span data-localize="save_path">Save Path</span>
+            <span data-localize="java_save_path">Java Save Path</span>
             <span class="tooltip-icon" data-tooltip="Directory where new Minecraft Java worlds are created">?</span>
           </label>
           <div class="settings-control save-path-control">
             <input type="text" id="save-path-input" name="save-path-input" class="save-path-input" placeholder="Minecraft saves directory">
             <button type="button" id="save-path-browse" class="save-path-browse" title="Browse...">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Bedrock Save Path -->
+        <div class="settings-row">
+          <label for="bedrock-save-path-input">
+            <span data-localize="bedrock_save_path">Bedrock Save Path</span>
+            <span class="tooltip-icon" data-tooltip="Directory the generated Bedrock .mcworld file is saved to. Open that file to import the world into Minecraft.">?</span>
+          </label>
+          <div class="settings-control save-path-control">
+            <input type="text" id="bedrock-save-path-input" name="bedrock-save-path-input" class="save-path-input" placeholder="Bedrock .mcworld directory">
+            <button type="button" id="bedrock-save-path-browse" class="save-path-browse" title="Browse...">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
             </button>
           </div>

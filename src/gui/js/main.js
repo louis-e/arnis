@@ -135,7 +135,8 @@ async function applyLocalization(localization) {
     "span[data-localize='bake_lighting']": "bake_lighting",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
-    "span[data-localize='save_path']": "save_path",
+    "span[data-localize='java_save_path']": "java_save_path",
+    "span[data-localize='bedrock_save_path']": "bedrock_save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
     "span[data-localize='canopy_height']": "canopy_height",
     "span[data-localize='max_tree_size']": "max_tree_size",
@@ -713,19 +714,24 @@ function detectBrowserLanguage(availableOptions) {
   return 'en';
 }
 
-// Gives the settings store the save path default. Not awaited, since startup
+// Gives the settings store the save path defaults. Not awaited, since startup
 // must not block on a filesystem probe; on failure the revert stays hidden.
 function resolveDefaultSavePath() {
-  Promise.resolve()
-    .then(() => invoke('gui_get_default_save_path'))
-    .then((detected) => {
-      if (typeof detected === 'string' && detected) {
-        setDynamicDefault('savePath', detected);
-      }
-    })
-    .catch(() => {
-      // No detectable default, so that row keeps no revert button.
-    });
+  const resolve = (command, name) => {
+    Promise.resolve()
+      .then(() => invoke(command))
+      .then((detected) => {
+        if (typeof detected === 'string' && detected) {
+          setDynamicDefault(name, detected);
+        }
+      })
+      .catch(() => {
+        // No detectable default, so that row keeps no revert button.
+      });
+  };
+
+  resolve('gui_get_default_save_path', 'savePath');
+  resolve('gui_get_default_bedrock_save_path', 'bedrockSavePath');
 }
 
 function initSettings() {
@@ -1306,80 +1312,104 @@ function initTooltips() {
   }
 }
 
-/// Save path management
+/// Save path management, one path per world format
 let savePath = "";
+let bedrockSavePath = "";
+
+const SAVE_PATHS = {
+  java: {
+    storageKey: 'arnis-save-path',
+    defaultCommand: 'gui_get_default_save_path',
+    inputId: 'save-path-input',
+    browseId: 'save-path-browse',
+    get: () => savePath,
+    set: (value) => { savePath = value; },
+  },
+  bedrock: {
+    storageKey: 'arnis-bedrock-save-path',
+    defaultCommand: 'gui_get_default_bedrock_save_path',
+    inputId: 'bedrock-save-path-input',
+    browseId: 'bedrock-save-path-browse',
+    get: () => bedrockSavePath,
+    set: (value) => { bedrockSavePath = value; },
+  },
+};
 
 async function initSavePath() {
-  // Check if user has a saved path in localStorage
-  const saved = localStorage.getItem('arnis-save-path');
+  for (const config of Object.values(SAVE_PATHS)) {
+    config.set(await resolveStoredSavePath(config));
+    const input = document.getElementById(config.inputId);
+    if (input) {
+      input.value = config.get();
+    }
+  }
+}
+
+async function resolveStoredSavePath({ storageKey, defaultCommand }) {
+  const saved = localStorage.getItem(storageKey);
   if (saved) {
     // Validate the saved path still exists (handles upgrades / moved directories)
     try {
       const normalized = await invoke('gui_set_save_path', { path: saved });
-      savePath = normalized;
-      localStorage.setItem('arnis-save-path', savePath);
+      localStorage.setItem(storageKey, normalized);
+      return normalized;
     } catch (_) {
-      // Saved path is no longer valid – re-detect
-      console.warn("Stored save path no longer valid, re-detecting...");
-      localStorage.removeItem('arnis-save-path');
-      try {
-        savePath = await invoke('gui_get_default_save_path');
-        localStorage.setItem('arnis-save-path', savePath);
-      } catch (error) {
-        console.error("Failed to detect save path:", error);
-      }
-    }
-  } else {
-    // Auto-detect on first run
-    try {
-      savePath = await invoke('gui_get_default_save_path');
-      localStorage.setItem('arnis-save-path', savePath);
-    } catch (error) {
-      console.error("Failed to detect save path:", error);
+      console.warn(`Stored path ${storageKey} no longer valid, re-detecting...`);
+      localStorage.removeItem(storageKey);
     }
   }
 
-  // Populate the save path input in settings
-  const savePathInput = document.getElementById('save-path-input');
-  if (savePathInput) {
-    savePathInput.value = savePath;
+  try {
+    const detected = await invoke(defaultCommand);
+    localStorage.setItem(storageKey, detected);
+    return detected;
+  } catch (error) {
+    console.error(`Failed to detect path for ${storageKey}:`, error);
+    return "";
   }
 }
 
 function initSavePathSetting() {
-  const savePathInput = document.getElementById('save-path-input');
-  if (!savePathInput) return;
+  for (const config of Object.values(SAVE_PATHS)) {
+    initSavePathRow(config);
+  }
+}
 
-  savePathInput.value = savePath;
+function initSavePathRow({ storageKey, inputId, browseId, get, set }) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+
+  input.value = get();
 
   // Manual text input – validate on change, revert if invalid
-  savePathInput.addEventListener('change', async () => {
-    const newPath = savePathInput.value.trim();
+  input.addEventListener('change', async () => {
+    const newPath = input.value.trim();
     if (!newPath) {
-      savePathInput.value = savePath;
+      input.value = get();
       return;
     }
 
     try {
       const validated = await invoke('gui_set_save_path', { path: newPath });
-      savePath = validated;
-      localStorage.setItem('arnis-save-path', savePath);
+      set(validated);
+      input.value = validated;
+      localStorage.setItem(storageKey, validated);
     } catch (_) {
       // Invalid path – silently revert to previous value
-      savePathInput.value = savePath;
+      input.value = get();
     }
   });
 
   // Folder picker button
-  const browseBtn = document.getElementById('save-path-browse');
+  const browseBtn = document.getElementById(browseId);
   if (browseBtn) {
     browseBtn.addEventListener('click', async () => {
       try {
-        const picked = await invoke('gui_pick_save_directory', { startPath: savePath });
+        const picked = await invoke('gui_pick_save_directory', { startPath: get() });
         if (picked) {
-          savePath = picked;
-          savePathInput.value = savePath;
-          localStorage.setItem('arnis-save-path', savePath);
+          set(picked);
+          input.value = picked;
+          localStorage.setItem(storageKey, picked);
         }
       } catch (error) {
         console.error("Folder picker failed:", error);
@@ -1721,6 +1751,7 @@ async function startGeneration() {
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
         selectedWorld: worldPath,
+        bedrockSavePath: bedrockSavePath,
         worldScale: scale,
         groundLevel: ground_level,
         terrainEnabled: terrain,
