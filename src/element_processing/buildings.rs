@@ -1047,6 +1047,10 @@ impl BuildingStyle {
         } else if let Some(rt) = preset.roof_type {
             let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
             (rt, should_generate)
+        } else if element.tags.contains_key("building:part") {
+            // Parts are mapper-modeled volumes; without roof:shape they are
+            // flat by Simple 3D semantics, never an inferred pitched roof.
+            (RoofType::Flat, false)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
             // Own stream: the draw count here depends on footprint and would
@@ -10970,6 +10974,38 @@ mod style_tests {
             pick_window_archetype(cat_a, ArchEra::Unknown, group_seed),
             pick_window_archetype(cat_b, ArchEra::Unknown, group_seed)
         );
+    }
+
+    // Parts without roof:shape stay flat instead of rolling the gable lottery.
+    #[test]
+    fn untagged_parts_never_infer_pitched_roofs() {
+        use crate::element_processing::building_test_support::rect_way;
+        for seed in 1..30u64 {
+            let tags: &[(&str, &str)] = &[("building:part", "yes"), ("height", "12")];
+            let way = rect_way(seed * 7 + 1, 20, 20, 32, 32, tags);
+            let (h, tall) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 144, seed);
+            let category = BuildingCategory::from_element(&way, tall, h, seed, 1.0);
+            let preset = BuildingStylePreset::for_category(category);
+            let era = crate::osm_parser::building_arch_era(&way.tags);
+            let detail = compute_detail_tier(&way, category, 144, h, false);
+            let mut rng = element_rng(seed);
+            let style = BuildingStyle::resolve(
+                &preset,
+                &way,
+                "yes",
+                category,
+                era,
+                Climate::Temperate,
+                detail,
+                h,
+                h > 6,
+                144,
+                seed,
+                &mut rng,
+            );
+            assert_eq!(style.roof_type, RoofType::Flat, "seed {seed}");
+            assert!(!style.generate_roof, "seed {seed}");
+        }
     }
 
     #[test]
