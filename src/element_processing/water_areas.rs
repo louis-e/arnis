@@ -570,17 +570,14 @@ pub fn prescan_still_surfaces(
     StillWaterSurfaces(entries.into_iter().collect())
 }
 
-/// Whether a way is rendered as a water area (mirrors the dispatch in data_processing).
+/// Ways this renderer actually receives. `natural=water` and `landuse=reservoir` ways are
+/// taken by the natural and landuse arms of the dispatch first, so a surface resolved for
+/// them would never be read. Relations are not routed that way and keep the full predicate.
 fn is_water_area_way(way: &ProcessedWay) -> bool {
-    way.tags.contains_key("water")
-        || matches!(
-            way.tags.get("natural").map(String::as_str),
-            Some("water" | "bay")
-        )
-        || matches!(
-            way.tags.get("waterway").map(String::as_str),
-            Some("dock" | "riverbank")
-        )
+    matches!(
+        way.tags.get("waterway").map(String::as_str),
+        Some("dock" | "riverbank")
+    )
 }
 
 /// The single water-surface Y of a polygon that ESA also sees as one still body.

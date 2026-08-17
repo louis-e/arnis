@@ -409,11 +409,14 @@ impl EsaPixelRaster {
         if gw == 0 || gh == 0 || self.width == 0 || self.height == 0 {
             return grid;
         }
-        // Grid column span [lo, hi) of every pixel column, computed once.
-        let col_spans: Vec<(usize, usize)> = (0..self.width)
-            .map(|px| {
+        // Grid column span of every pixel column, computed once. Only the columns that
+        // land on a cell are kept, so a grid coarser than the pixels walks the grid width
+        // per row instead of the pixel width.
+        let col_spans: Vec<(usize, usize, usize)> = (0..self.width)
+            .filter_map(|px| {
                 let x = (self.x0 + px as i64) as f64;
-                mapping.cell_span(mapping.gx(x), mapping.gx(x + 1.0), gw)
+                let (lo, hi) = mapping.cell_span(mapping.gx(x), mapping.gx(x + 1.0), gw);
+                (lo < hi).then_some((px, lo, hi))
             })
             .collect();
         let mut row_buf = vec![0u8; gw];
@@ -425,10 +428,8 @@ impl EsaPixelRaster {
             }
             let src = &self.data[py * self.width..(py + 1) * self.width];
             row_buf.fill(0);
-            for (px, &(lo, hi)) in col_spans.iter().enumerate() {
-                if lo < hi {
-                    row_buf[lo..hi].fill(src[px]);
-                }
+            for &(px, lo, hi) in &col_spans {
+                row_buf[lo..hi].fill(src[px]);
             }
             for row in grid.iter_mut().take(z_hi).skip(z_lo) {
                 row.copy_from_slice(&row_buf);
@@ -1034,6 +1035,10 @@ fn read_u64(bytes: &[u8], offset: usize, big_endian: bool) -> u64 {
 /// Fill gaps (zero values) in the grid using nearest-neighbor interpolation.
 /// Iterates until no more gaps can be filled or a max number of passes is reached.
 fn fill_gaps(grid: &mut [Vec<u8>], width: usize, height: usize) {
+    // Checked up front so a gap-free grid never pays for the snapshot below.
+    if !grid.iter().any(|row| row.contains(&0)) {
+        return;
+    }
     for _ in 0..10 {
         let mut changed = false;
         // Make a snapshot to read from while writing

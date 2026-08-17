@@ -14,8 +14,12 @@ const MAX_STEEP_WATER_AREA_M2: f64 = 250_000.0;
 /// Median slope above which small water is shadow, not water. 19 degrees.
 const MIN_STEEP_WATER_SLOPE: f64 = 0.35;
 
-/// How far below the water nearby land must reach for it to be on a slope, not in a basin.
+/// How far below a cell the ground a step away must sit for that cell to count as perched.
 const STEEP_WATER_LAND_BELOW_M: f64 = 2.0;
+
+/// Share of a component's edge cells that must be perched. Only a blob's downhill side
+/// is, so this is low; the slope gate above is what does the separating.
+const MIN_PERCHED_FRACTION: f64 = 0.10;
 
 /// Repair terrain anomalies (LiDAR classification errors, tile seams, provider glitches).
 ///
@@ -840,6 +844,11 @@ fn set_bit(mask: &mut [u64], idx: usize) {
     mask[idx >> 6] |= 1u64 << (idx & 63);
 }
 
+#[inline(always)]
+fn clear_bit(mask: &mut [u64], idx: usize) {
+    mask[idx >> 6] &= !(1u64 << (idx & 63));
+}
+
 /// Class of the nearest non-water, non-nodata cell within `radius`, if any.
 fn nearest_non_water_class(lc_grid: &[Vec<u8>], x: usize, y: usize, radius: i32) -> Option<u8> {
     let h = lc_grid.len() as i32;
@@ -895,31 +904,38 @@ fn drop_water_on_steep_terrain(
     let max_cells = (MAX_STEEP_WATER_AREA_M2 / (m_per_cell * m_per_cell)) as usize;
     // Slope of the claimed water surface, sampled between water cells only. Sampling the
     // terrain instead would read the canyon walls across any channel narrower than the step.
+    // The farthest water within the step is used, so a patch smaller than the step still
+    // gets measured rather than falling through unjudged.
     let cell_slope = |x: usize, y: usize| -> Option<f64> {
         let here = heights[y][x];
         if !here.is_finite() {
             return None;
         }
-        let at = |nx: i64, ny: i64| -> Option<f64> {
-            if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
-                return None;
+        let (x, y) = (x as i64, y as i64);
+        let at = |ux: i64, uy: i64| -> Option<(f64, f64)> {
+            for d in (1..=step).rev() {
+                let (nx, ny) = (x + ux * d, y + uy * d);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                    continue;
+                }
+                if lc_grid[ny as usize][nx as usize] != LC_WATER {
+                    continue;
+                }
+                let v = heights[ny as usize][nx as usize];
+                if v.is_finite() {
+                    return Some((v, d as f64 * m_per_cell));
+                }
             }
-            if lc_grid[ny as usize][nx as usize] != LC_WATER {
-                return None;
-            }
-            let v = heights[ny as usize][nx as usize];
-            v.is_finite().then_some(v)
+            None
         };
-        let span = step as f64 * m_per_cell;
-        let axis = |lo: Option<f64>, hi: Option<f64>| match (lo, hi) {
-            (Some(a), Some(b)) => Some((b - a) / (2.0 * span)),
-            (Some(a), None) => Some((here - a) / span),
-            (None, Some(b)) => Some((b - here) / span),
+        let axis = |lo: Option<(f64, f64)>, hi: Option<(f64, f64)>| match (lo, hi) {
+            (Some((a, da)), Some((b, db))) => Some((b - a) / (da + db)),
+            (Some((a, da)), None) => Some((here - a) / da),
+            (None, Some((b, db))) => Some((b - here) / db),
             (None, None) => None,
         };
-        let (x, y) = (x as i64, y as i64);
-        let gx = axis(at(x - step, y), at(x + step, y));
-        let gz = axis(at(x, y - step), at(x, y + step));
+        let gx = axis(at(-1, 0), at(1, 0));
+        let gz = axis(at(0, -1), at(0, 1));
         if gx.is_none() && gz.is_none() {
             return None;
         }
@@ -933,6 +949,8 @@ fn drop_water_on_steep_terrain(
     };
 
     let mut visited = vec![0u64; (w * h).div_ceil(64)];
+    // Reused per component, always cleared again after the basin test below.
+    let mut in_component = vec![0u64; (w * h).div_ceil(64)];
     let mut dropped_cells: Vec<(usize, usize)> = Vec::new();
     let mut dropped_components = 0usize;
     let mut component: Vec<(u32, u32)> = Vec::new();
@@ -975,36 +993,51 @@ fn drop_water_on_steep_terrain(
             if slopes.is_empty() || median(&mut slopes) <= MIN_STEEP_WATER_SLOPE {
                 continue;
             }
-            // Water sits in a basin, so nothing around it is lower. A blob on a slope has
-            // the hillside continuing below it. Sampled at the slope step, so a narrow
-            // channel reads past its own banks rather than into them.
-            let (mut water_min, mut ring_min) = (f64::INFINITY, f64::INFINITY);
+            // Water sits in a basin, so nothing near it is lower. A blob on a slope has the
+            // hillside continuing below it. Measured per cell against ground a step away,
+            // because comparing whole components confuses a slope with a gradient: a
+            // stream's source is far above its mouth while its banks still rise beside it.
+            // Only this component's own cells are excluded, so a blob perched over a river
+            // reads that river as the ground below it while a stream only finds itself.
             for &(x, y) in &component {
-                let (x, y) = (x as i64, y as i64);
+                set_bit(&mut in_component, y as usize * w + x as usize);
+            }
+            let (mut edge_cells, mut perched) = (0usize, 0usize);
+            for &(x, y) in &component {
                 let here = heights[y as usize][x as usize];
-                if here.is_finite() {
-                    water_min = water_min.min(here);
+                if !here.is_finite() {
+                    continue;
                 }
+                let (x, y) = (x as i64, y as i64);
+                let mut lowest = f64::INFINITY;
                 for (dx, dy) in [(step, 0), (-step, 0), (0, step), (0, -step)] {
                     let (nx, ny) = (x + dx, y + dy);
                     if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
                         continue;
                     }
-                    if lc_grid[ny as usize][nx as usize] == LC_WATER {
+                    if get_bit(&in_component, ny as usize * w + nx as usize) {
                         continue;
                     }
                     let v = heights[ny as usize][nx as usize];
                     if v.is_finite() {
-                        ring_min = ring_min.min(v);
+                        lowest = lowest.min(v);
                     }
                 }
+                if !lowest.is_finite() {
+                    continue;
+                }
+                edge_cells += 1;
+                if lowest < here - STEEP_WATER_LAND_BELOW_M {
+                    perched += 1;
+                }
             }
-            if !water_min.is_finite()
-                || !ring_min.is_finite()
-                || ring_min >= water_min - STEEP_WATER_LAND_BELOW_M
-            {
+            for &(x, y) in &component {
+                clear_bit(&mut in_component, y as usize * w + x as usize);
+            }
+            if edge_cells == 0 || (perched as f64) < MIN_PERCHED_FRACTION * edge_cells as f64 {
                 continue;
             }
+
             dropped_components += 1;
             dropped_cells.extend(component.iter().map(|&(x, y)| (x as usize, y as usize)));
         }

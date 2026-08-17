@@ -129,6 +129,7 @@ pub fn apply_osm_land_override(
     for (l, o) in land.iter_mut().zip(over_water.iter()) {
         *l &= !o;
     }
+    drop(over_water);
 
     // Water within `band` steps of ESA land: the rim the classification may have got wrong.
     let rim = dilate(n, width, height, band, |idx| !is_water(idx), is_water);
@@ -149,7 +150,7 @@ pub fn apply_osm_land_override(
     };
 
     let radius = band + 2;
-    let mut changes: Vec<(usize, usize, u8)> = Vec::new();
+    let mut changes: Vec<(u32, u32, u8)> = Vec::new();
     for idx in 0..n {
         if !get_bit(&rim, idx) || get_bit(&water_area, idx) || get_bit(&water_line, idx) {
             continue;
@@ -159,14 +160,14 @@ pub fn apply_osm_land_override(
         }
         let (x, z) = (idx % width, idx / width);
         if let Some(c) = nearest_land_class(grid, width, height, x, z, radius) {
-            changes.push((x, z, c));
+            changes.push((x as u32, z as u32, c));
         }
     }
     if changes.is_empty() {
         return;
     }
     for &(x, z, c) in &changes {
-        land_cover.grid[z][x] = c;
+        land_cover.grid[z as usize][x as usize] = c;
     }
     eprintln!(
         "OSM land override: {} shore cells reclassified from ESA water to land",
