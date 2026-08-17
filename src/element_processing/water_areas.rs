@@ -1,3 +1,4 @@
+use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::water_depth::{carve_water_column, BigWaterField};
@@ -13,6 +14,7 @@ pub fn generate_water_area_from_way(
     _xzbbox: &XZBBox,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
 ) {
     let outers = [element.nodes.clone()];
     if !verify_closed_rings(&outers) {
@@ -20,7 +22,7 @@ pub fn generate_water_area_from_way(
         return;
     }
 
-    generate_water_areas(editor, &outers, &[], bwf, road_mask);
+    generate_water_areas(editor, &outers, &[], bwf, road_mask, tunnel_footprint);
 }
 
 pub fn generate_water_areas_from_relation(
@@ -29,6 +31,7 @@ pub fn generate_water_areas_from_relation(
     xzbbox: &XZBBox,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
 ) {
     // Check if this is a water relation (either with water tag or natural=water)
     let is_water = element.tags.contains_key("water")
@@ -121,7 +124,7 @@ pub fn generate_water_areas_from_relation(
         return;
     }
 
-    generate_water_areas(editor, &outers, &inners, bwf, road_mask);
+    generate_water_areas(editor, &outers, &inners, bwf, road_mask, tunnel_footprint);
 }
 
 fn generate_water_areas(
@@ -130,6 +133,7 @@ fn generate_water_areas(
     inners: &[Vec<ProcessedNode>],
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
 ) {
     // Calculate polygon bounding box to limit fill area
     let mut poly_min_x = i32::MAX;
@@ -169,7 +173,16 @@ fn generate_water_areas(
         .collect();
 
     scanline_fill_water(
-        min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf, road_mask,
+        min_x,
+        min_z,
+        max_x,
+        max_z,
+        &outers_xz,
+        &inners_xz,
+        editor,
+        bwf,
+        road_mask,
+        tunnel_footprint,
     );
 
     // Scatter boats over open water; grid on a global lattice with independent rolls, so the set is identical across parallel tiles.
@@ -405,6 +418,7 @@ fn scanline_fill_water(
     editor: &mut WorldEditor,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
 ) {
     // Collect edges per outer ring so we can union their spans correctly,
     // even if multiple outer rings happen to overlap (invalid OSM, but
@@ -449,6 +463,11 @@ fn scanline_fill_water(
                 let ground_y = editor.get_ground_level(x, z);
                 // Skip hillside blocks the polygon claims above the waterline.
                 if ground_y > water_y {
+                    continue;
+                }
+                // Over a bore, lay the surface but do not excavate into it.
+                if tunnel_footprint.contains(x, z) {
+                    editor.set_block_absolute(WATER, x, water_y, z, None, Some(&[]));
                     continue;
                 }
                 // depth_at gives the carved depth (0 without land-cover water data).
