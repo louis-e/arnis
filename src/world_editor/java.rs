@@ -17,26 +17,34 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Minecraft 1.21.1 data version for chunk format identification.
 pub(crate) const DATA_VERSION: i32 = 3955;
 
-/// Cached base chunk sections (grass at Y=-62)
-/// Computed once on first use and reused for all empty chunks
-static BASE_CHUNK_SECTIONS: OnceLock<Vec<Section>> = OnceLock::new();
+/// Cached base chunk sections (a grass plane at the terrain base).
+/// Keyed by that base: it sinks when the relief needs the extended floor, and a GUI process
+/// can generate several worlds in a row, so a plain OnceLock would go stale.
+static BASE_CHUNK_SECTIONS: Mutex<Option<(i32, Arc<Vec<Section>>)>> = Mutex::new(None);
 
-/// Get or create the cached base chunk sections
-fn get_base_chunk_sections() -> &'static [Section] {
-    BASE_CHUNK_SECTIONS.get_or_init(|| {
-        let mut chunk = ChunkToModify::default();
-        for x in 0..16 {
-            for z in 0..16 {
-                chunk.set_block(x, -62, z, GRASS_BLOCK);
-            }
+/// Get or create the cached base chunk sections for the current terrain base.
+fn get_base_chunk_sections() -> Arc<Vec<Section>> {
+    let base_y = crate::world_editor::base_chunk_y();
+    let mut cache = BASE_CHUNK_SECTIONS.lock().unwrap();
+    if let Some((cached_y, ref sections)) = *cache {
+        if cached_y == base_y {
+            return Arc::clone(sections);
         }
-        chunk.sections().collect()
-    })
+    }
+    let mut chunk = ChunkToModify::default();
+    for x in 0..16 {
+        for z in 0..16 {
+            chunk.set_block(x, base_y, z, GRASS_BLOCK);
+        }
+    }
+    let sections = Arc::new(chunk.sections().collect::<Vec<Section>>());
+    *cache = Some((base_y, Arc::clone(&sections)));
+    sections
 }
 
 #[cfg(feature = "gui")]

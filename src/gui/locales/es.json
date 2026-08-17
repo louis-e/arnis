@@ -9,6 +9,7 @@
   "generation_process_started": "Proceso de generación iniciado.",
   "winter_mode": "Modo invierno",
   "world_scale": "Escala del mundo",
+  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Tiempo de espera de relleno (seg)",
   "ground_level": "Nivel del suelo",

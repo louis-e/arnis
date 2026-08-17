@@ -477,7 +477,7 @@ pub fn generate_highway_tunnel_shell(
         let (bx, bz) = pts[i];
         let ry = road_y[i];
         let ty = terrain_ys[i];
-        if ry - 1 <= crate::world_editor::MIN_Y {
+        if ry - 1 <= crate::world_editor::min_y() {
             continue;
         }
         let covered = ty >= ry + TUNNEL_COVER_DROP;
@@ -545,7 +545,7 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
     ];
 
     for cell in tunnel_cells {
-        if cell.road_y - 1 <= crate::world_editor::MIN_Y {
+        if cell.road_y - 1 <= crate::world_editor::min_y() {
             continue;
         }
         let ceil_y = cell.road_y + TUNNEL_CEIL_OFFSET;
@@ -569,7 +569,7 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
     }
 
     for cell in tunnel_cells {
-        if cell.road_y - 1 <= crate::world_editor::MIN_Y {
+        if cell.road_y - 1 <= crate::world_editor::min_y() {
             continue;
         }
         let hw = cell.half_width;

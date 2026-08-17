@@ -900,7 +900,7 @@ fn generate_rail_tunnel_shell(
             let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
 
             // Safety: skip if the tunnel would go below world minimum.
-            if floor_y <= crate::world_editor::MIN_Y {
+            if floor_y <= crate::world_editor::min_y() {
                 continue;
             }
 
@@ -989,7 +989,7 @@ pub fn carve_rail_tunnel_interior(editor: &mut WorldEditor, rail_tunnel_points: 
         let ceil_y = ground_y - RAIL_TUNNEL_DEPTH;
         let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
 
-        if floor_y <= crate::world_editor::MIN_Y {
+        if floor_y <= crate::world_editor::min_y() {
             continue;
         }
 

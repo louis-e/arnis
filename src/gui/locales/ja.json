@@ -9,6 +9,7 @@
   "generation_process_started": "生成処理を開始しました。",
   "winter_mode": "冬モード",
   "world_scale": "ワールド倍率",
+  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "フラッドフィルのタイムアウト（秒）",
   "ground_level": "地面レベル",

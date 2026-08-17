@@ -961,6 +961,13 @@ fn gui_start_generation(
 
     progress::reset_progress_floor();
 
+    // The GUI builds Args directly and never runs validate_args, so guard the scale here
+    // rather than letting it panic deep in the coordinate transform after the fetch.
+    if let Err(e) = crate::args::validate_scale(world_scale) {
+        emit_gui_error(&e);
+        return Err(e);
+    }
+
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);
 
@@ -1246,8 +1253,12 @@ fn gui_start_generation(
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
             };
 
-            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
-            if skip_osm_objects {
+            // Same as run_cli: open the world floor before the editor is touched.
+            crate::world_editor::set_min_y(ground::extended_min_y_for(&args));
+
+            // Ask Args, not the frontend flag: below OBJECT_SKIP_SCALE objects are skipped
+            // regardless of the selected generation mode.
+            if args.skip_objects() {
                 // Generate ground data (terrain) for terrain-only mode
                 let mut ground = ground::generate_ground_data(&args, bbox);
 

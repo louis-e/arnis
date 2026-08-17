@@ -9,6 +9,7 @@
   "generation_process_started": "Postopek generiranja se je začel.",
   "winter_mode": "Zimski način",
   "world_scale": "Merilo sveta",
+  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Časovna omejitev zapolnjevanja (sek)",
   "ground_level": "Nivo tal",

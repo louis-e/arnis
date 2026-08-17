@@ -10,7 +10,7 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::LC_WATER;
-use crate::world_editor::{WorldEditor, MIN_Y};
+use crate::world_editor::{min_y, WorldEditor};
 
 /// Flat shoal width in chamfer-DT units; slope only starts past it.
 const SHOAL_DT_UNITS: u16 = 9;
@@ -370,7 +370,7 @@ pub fn carve_water_column(
     // Clamp to the valid tier range, and keep the bed above bedrock.
     let depth = depth
         .clamp(0, MAX_WATER_DEPTH)
-        .min((water_y - MIN_Y - 2).max(0));
+        .min((water_y - min_y() - 2).max(0));
     for dy in 0..=depth {
         editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
     }
@@ -436,16 +436,16 @@ pub fn carve_water_column(
         _ => (GRAVEL, STONE),
     };
 
-    if bed_y > MIN_Y {
+    if bed_y > min_y() {
         editor.set_block_absolute(top_block, x, bed_y, z, None, Some(&[]));
     }
     // Supports the gravity-affected bed; dropped onto bedrock at the lowest carve.
-    if bed_y - 1 > MIN_Y {
+    if bed_y - 1 > min_y() {
         editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
     }
     // Backfill stone so neighbour side-faces never expose air under varied beds.
-    let fill_to = (bed_y - 2).max(MIN_Y + 1);
-    let fill_from = (bed_y - 12).max(MIN_Y + 1);
+    let fill_to = (bed_y - 2).max(min_y() + 1);
+    let fill_from = (bed_y - 12).max(min_y() + 1);
     if fill_from <= fill_to {
         editor.fill_column_absolute(STONE, x, z, fill_from, fill_to, true);
     }
