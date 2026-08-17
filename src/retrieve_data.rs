@@ -122,6 +122,58 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
+/// Whether an Overpass `remark` means the result is cut short.
+///
+/// Overpass streams its output, so a query that runs out of time or memory
+/// *after* printing has started still closes the JSON and appends a `remark`.
+/// That response parses like any other, and the elements it does contain are
+/// real - the ones it never got to are simply absent. Without this test a
+/// half-finished continent looks exactly like a finished one.
+fn remark_means_truncated(remark: &str) -> bool {
+    let remark = remark.to_ascii_lowercase();
+    remark.contains("runtime error")
+        || remark.contains("timed out")
+        || remark.contains("out of memory")
+}
+
+/// Why a downloaded Overpass body could not be used.
+#[derive(Debug)]
+enum ResponseError {
+    /// Not valid Overpass JSON (usually a body cut off mid-token).
+    Malformed(String),
+    /// Valid JSON, but the server said it stopped early.
+    Truncated(String),
+}
+
+impl ResponseError {
+    fn message(&self) -> &str {
+        match self {
+            ResponseError::Malformed(m) | ResponseError::Truncated(m) => m,
+        }
+    }
+}
+
+/// Parses an Overpass body and rejects the ones that only look complete.
+fn parse_overpass_response(body: &str) -> Result<OsmData, ResponseError> {
+    let mut deserializer = serde_json::Deserializer::from_reader(Cursor::new(body.as_bytes()));
+    let data = OsmData::deserialize(&mut deserializer)
+        .map_err(|e| ResponseError::Malformed(format!("Malformed response: {e}")))?;
+
+    // An empty result with a remark is handled by the caller: it is either a
+    // hard failure or a genuinely empty area, and both need the full picture.
+    if !data.is_empty() {
+        if let Some(remark) = data.remark.as_deref() {
+            if remark_means_truncated(remark) {
+                return Err(ResponseError::Truncated(format!(
+                    "Server returned partial data: {remark}"
+                )));
+            }
+        }
+    }
+
+    Ok(data)
+}
+
 /// File extensions (case-insensitive) that select the raw OSM XML path instead of
 /// Arnis's own JSON dump.
 const OSM_XML_EXTENSIONS: &[&str] = &["osm", "xml"];
@@ -285,7 +337,10 @@ pub fn fetch_data_from_overpass(
         let total = request_plan.len();
         let mut last_error: Option<Box<dyn std::error::Error>> = None;
         let mut attempted_hosts: Vec<String> = Vec::new();
-        let response: String = 'server_loop: {
+        // Set when every server that answered did so with a partial result, which
+        // means the area is too big for the API rather than the servers being down.
+        let mut saw_truncated = false;
+        let (response, data): (String, OsmData) = 'server_loop: {
             for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
                     120
@@ -299,6 +354,20 @@ pub fn fetch_data_from_overpass(
                     "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
                     _ => download_with_reqwest(url, &query, timeout_secs), // Default to requests
                 };
+
+                // A body that arrived is not yet an answer: parse it here so a
+                // truncated result falls through to the next server instead of
+                // silently becoming a world with most of its areas missing.
+                let result = result.and_then(|body| match parse_overpass_response(&body) {
+                    Ok(data) => Ok((body, data)),
+                    Err(e) => {
+                        if matches!(e, ResponseError::Truncated(_)) {
+                            saw_truncated = true;
+                        }
+                        eprintln!("{}", format!("Error! {}", e.message()).red().bold());
+                        Err(e.message().to_string().into())
+                    }
+                });
 
                 match result {
                     Ok(response) => break 'server_loop response,
@@ -337,6 +406,16 @@ pub fn fetch_data_from_overpass(
                     ),
                 );
             }
+            if saw_truncated {
+                eprintln!(
+                    "{}",
+                    "Error! The area is too large for the OpenStreetMap API: every server \
+                     stopped mid-response. Try using a smaller area."
+                        .red()
+                        .bold()
+                );
+                emit_gui_error("Try using a smaller area.");
+            }
             return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };
 
@@ -345,10 +424,6 @@ pub fn fetch_data_from_overpass(
             file.write_all(response.as_bytes())?;
             println!("API response saved to: {save_file}");
         }
-
-        let mut deserializer =
-            serde_json::Deserializer::from_reader(Cursor::new(response.as_bytes()));
-        let data: OsmData = OsmData::deserialize(&mut deserializer)?;
 
         if data.is_empty() {
             // Distinguish a real server error (memory/runtime) from a benign
@@ -449,6 +524,77 @@ mod user_agent_tests {
         // Only ASCII, and short enough that no server's header limit is in play.
         assert!(OSM_USER_AGENT.is_ascii());
         assert!(OSM_USER_AGENT.len() < 200);
+    }
+}
+
+#[cfg(test)]
+mod partial_response_tests {
+    use super::*;
+
+    // Overpass streams its output, so a query that dies mid-print still closes the
+    // JSON and appends a remark. The elements that made it are valid, which is what
+    // makes this dangerous: a 21,000 km² request that lost most of its nodes parses
+    // fine and generates a world with the areas silently missing (issue #1257).
+    #[test]
+    fn a_timed_out_response_with_elements_is_rejected() {
+        let body = r#"{
+            "version": 0.6,
+            "elements": [{"type":"node","id":1,"lat":1.0,"lon":2.0}],
+            "remark": "runtime error: Query timed out in \"print\" at line 5 after 360 seconds."
+        }"#;
+        let err = parse_overpass_response(body).expect_err("partial data must not be accepted");
+        assert!(matches!(err, ResponseError::Truncated(_)));
+    }
+
+    #[test]
+    fn an_out_of_memory_response_with_elements_is_rejected() {
+        let body = r#"{
+            "elements": [{"type":"way","id":7,"nodes":[1,2,1]}],
+            "remark": "runtime error: Query run out of memory in \"query\" at line 3."
+        }"#;
+        assert!(matches!(
+            parse_overpass_response(body),
+            Err(ResponseError::Truncated(_))
+        ));
+    }
+
+    // A body cut off mid-token is not JSON at all; it must fail over to the next
+    // server rather than take the whole run down.
+    #[test]
+    fn a_body_cut_mid_token_is_malformed() {
+        let body = r#"{"elements":[{"type":"node","id":1,"lat":1.0,"lon":-8"#;
+        assert!(matches!(
+            parse_overpass_response(body),
+            Err(ResponseError::Malformed(_))
+        ));
+    }
+
+    // An empty result keeps its remark for the caller, which distinguishes a server
+    // failure from a bbox that genuinely has nothing mapped in it.
+    #[test]
+    fn an_empty_response_with_a_remark_is_left_to_the_caller() {
+        let body = r#"{"elements":[],"remark":"runtime error: Query run out of memory"}"#;
+        let data = parse_overpass_response(body).expect("empty results stay the caller's call");
+        assert!(data.is_empty());
+        assert!(data.remark.is_some());
+    }
+
+    #[test]
+    fn a_complete_response_is_accepted() {
+        let body = r#"{"elements":[{"type":"node","id":1,"lat":1.0,"lon":2.0}]}"#;
+        let data = parse_overpass_response(body).expect("a clean response must be accepted");
+        assert!(!data.is_empty());
+    }
+
+    #[test]
+    fn only_error_remarks_count_as_truncation() {
+        assert!(remark_means_truncated(
+            "runtime error: Query timed out in \"print\""
+        ));
+        assert!(remark_means_truncated("Query run out of memory"));
+        assert!(!remark_means_truncated(
+            "Please note the data is from OpenStreetMap"
+        ));
     }
 }
 

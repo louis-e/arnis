@@ -48,8 +48,19 @@ const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
 /// Setting bit 63 guarantees no collision.
 const OVERTURE_ID_HIGH_BIT: u64 = 0x8000_0000_0000_0000;
 
-/// Maximum number of Overture buildings to add (safety limit for huge areas)
-const MAX_OVERTURE_BUILDINGS: usize = 100_000;
+/// Budget of Overture footprints, as a rate per km² of the requested area plus a
+/// floor and a ceiling. The cap only exists so a continent-sized request cannot
+/// exhaust memory. It scales with area because a flat number is spent by whichever
+/// partitions happen to be read first, which leaves the districts read last with no
+/// ML footprints at all while their neighbours get every one of theirs.
+const OVERTURE_BUILDINGS_PER_KM2: f64 = 1_000.0;
+const MIN_OVERTURE_BUILDINGS: usize = 100_000;
+const MAX_OVERTURE_BUILDINGS: usize = 2_000_000;
+
+/// Attempts per HTTP range read before a row group is given up on. One partition
+/// is hundreds of range requests, and a dropped row group takes a contiguous block
+/// of the map's footprints with it, so a transient failure must not settle it.
+const OVERTURE_RANGE_ATTEMPTS: u32 = 3;
 
 /// HTTP client timeout for Overture data fetching
 const HTTP_TIMEOUT_SECS: u64 = 120;
@@ -450,6 +461,16 @@ pub(crate) struct OvertureCollection {
     pub(crate) hints: OvertureHints,
 }
 
+/// How many Overture footprints this bbox is allowed to contribute.
+fn overture_building_budget(bbox: &LLBBox) -> usize {
+    let mid_lat = ((bbox.min().lat() + bbox.max().lat()) / 2.0).to_radians();
+    let width_m = (bbox.max().lng() - bbox.min().lng()) * 111_320.0 * mid_lat.cos();
+    let height_m = (bbox.max().lat() - bbox.min().lat()) * 111_320.0;
+    let area_km2 = (width_m * height_m).abs() / 1_000_000.0;
+    ((area_km2 * OVERTURE_BUILDINGS_PER_KM2) as usize)
+        .clamp(MIN_OVERTURE_BUILDINGS, MAX_OVERTURE_BUILDINGS)
+}
+
 /// Collects raw Overture buildings overlapping the bbox. The generation path
 /// drops OSM-sourced entries (duplicates of the Overpass data); the 3D
 /// preview keeps them for full coverage.
@@ -484,12 +505,16 @@ pub(crate) fn collect_overture_buildings(
     // Process each partition file: read footer, check for bbox overlap, fetch matching rows
     let mut all_buildings: Vec<OvertureBuilding> = Vec::new();
     let mut hints = OvertureHints::default();
+    // Rows are stored in spatial order, so anything skipped here is a contiguous
+    // block of the map with no ML footprints. Reported below rather than only
+    // under --debug, since the world itself gives no hint that it happened.
+    let mut lost_partitions = 0usize;
+    let mut lost_row_groups = 0usize;
+    let mut capped = false;
 
     for (i, url) in partition_urls.iter().enumerate() {
         if all_buildings.len() >= max_buildings {
-            if debug {
-                println!("Reached building limit ({max_buildings}), stopping");
-            }
+            capped = true;
             break;
         }
 
@@ -502,7 +527,8 @@ pub(crate) fn collect_overture_buildings(
         }
 
         match process_partition_file(client, url, bbox, debug) {
-            Ok(buildings) => {
+            Ok((buildings, failed_row_groups)) => {
+                lost_row_groups += failed_row_groups;
                 for building in buildings {
                     // Harvest first: an OSM-sourced row is a duplicate footprint
                     // but still carries conflated Microsoft / Esri / 3DEP values.
@@ -524,6 +550,7 @@ pub(crate) fn collect_overture_buildings(
                 }
             }
             Err(e) => {
+                lost_partitions += 1;
                 if debug {
                     eprintln!("Warning: Failed to process partition {url}: {e}");
                 }
@@ -534,7 +561,24 @@ pub(crate) fn collect_overture_buildings(
 
     // The loop only checks the cap between partitions; a single dense
     // partition can overshoot it, so enforce the exact cap here.
+    capped |= all_buildings.len() > max_buildings;
     all_buildings.truncate(max_buildings);
+
+    if lost_partitions > 0 || lost_row_groups > 0 {
+        eprintln!(
+            "{} Overture Maps data incomplete: {lost_partitions} partition(s) and \
+             {lost_row_groups} row group(s) could not be read. Buildings are missing \
+             from the areas they cover.",
+            "Warning:".yellow().bold()
+        );
+    }
+    if capped {
+        eprintln!(
+            "{} Reached the Overture Maps building limit ({max_buildings}); footprints \
+             beyond it were dropped. Use a smaller area for full coverage.",
+            "Warning:".yellow().bold()
+        );
+    }
 
     Ok(OvertureCollection {
         buildings: all_buildings,
@@ -551,10 +595,11 @@ fn fetch_overture_buildings_inner(
 
     emit_gui_progress_update(6.0, "Downloading data...");
 
+    let budget = overture_building_budget(bbox);
     let OvertureCollection {
         buildings: all_buildings,
         hints,
-    } = collect_overture_buildings(&client, bbox, false, MAX_OVERTURE_BUILDINGS, debug)?;
+    } = collect_overture_buildings(&client, bbox, false, budget, debug)?;
 
     if debug {
         println!(
@@ -569,7 +614,7 @@ fn fetch_overture_buildings_inner(
 
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
-        .take(MAX_OVERTURE_BUILDINGS)
+        .take(budget)
         .filter_map(|building| {
             let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
             let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
@@ -825,12 +870,15 @@ fn list_partition_files(
 /// 1. Read the Parquet file footer via HTTP Range request
 /// 2. Check row group statistics for bbox overlap
 /// 3. Download and parse matching row groups
+///
+/// Returns the buildings plus the number of row groups that could not be read,
+/// so the caller can report the coverage that was lost rather than hide it.
 fn process_partition_file(
     client: &Client,
     url: &str,
     bbox: &LLBBox,
     debug: bool,
-) -> Result<Vec<OvertureBuilding>, Box<dyn std::error::Error>> {
+) -> Result<(Vec<OvertureBuilding>, usize), Box<dyn std::error::Error>> {
     // Step 1: Get file size via HEAD request
     let head_resp = client.head(url).send()?;
     if !head_resp.status().is_success() {
@@ -878,7 +926,7 @@ fn process_partition_file(
     // Step 3: Filter row groups by bbox overlap
     let matching_groups = filter_row_groups_by_bbox(&metadata, bbox);
     if matching_groups.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
 
     if debug {
@@ -902,14 +950,18 @@ fn process_partition_file(
 
     // Pre-fetch each matching row group's byte range
     let mut downloaded_bytes: u64 = footer_len + 8;
+    let mut failed_row_groups = 0usize;
+    let mut downloaded: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for &rg_idx in &matching_groups {
         let (rg_offset, rg_len) = row_group_byte_range(&metadata, rg_idx);
         match fetch_range(client, url, rg_offset, rg_len) {
             Ok(rg_data) => {
                 downloaded_bytes += rg_len;
+                downloaded.insert(rg_idx);
                 sparse.add_range(rg_offset, bytes::Bytes::from(rg_data));
             }
             Err(e) => {
+                failed_row_groups += 1;
                 if debug {
                     eprintln!("Warning: Failed to download row group {rg_idx}: {e}");
                 }
@@ -947,6 +999,12 @@ fn process_partition_file(
         ) {
             Ok(rg_buildings) => buildings.extend(rg_buildings),
             Err(e) => {
+                // A row group whose bytes never arrived fails here too; count it
+                // once by only charging the groups that did download.
+                if !downloaded.contains(&rg_idx) {
+                    continue;
+                }
+                failed_row_groups += 1;
                 if debug {
                     eprintln!("Warning: Failed to parse row group {rg_idx}: {e}");
                 }
@@ -954,7 +1012,7 @@ fn process_partition_file(
         }
     }
 
-    Ok(buildings)
+    Ok((buildings, failed_row_groups))
 }
 
 /// Filter row groups whose bbox statistics overlap the target area.
@@ -1762,7 +1820,7 @@ fn row_group_byte_range(metadata: &ParquetMetaData, rg_idx: usize) -> (u64, u64)
     (min_offset, max_end.saturating_sub(min_offset))
 }
 
-/// Fetch a byte range from a URL via HTTP Range request.
+/// Fetch a byte range from a URL via HTTP Range request, retrying transient failures.
 fn fetch_range(
     client: &Client,
     url: &str,
@@ -1773,17 +1831,41 @@ fn fetch_range(
         return Err("fetch_range called with length 0".into());
     }
     let end = start + length - 1;
-    let response = client
-        .get(url)
-        .header("Range", format!("bytes={start}-{end}"))
-        .send()?;
+    let mut last_error = String::new();
 
-    let status = response.status();
-    if status.as_u16() != 206 {
-        return Err(format!("HTTP {status} fetching range from {url} (expected 206)").into());
+    for attempt in 0..OVERTURE_RANGE_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(500 << (attempt - 1)));
+        }
+        let response = match client
+            .get(url)
+            .header("Range", format!("bytes={start}-{end}"))
+            .send()
+        {
+            Ok(response) => response,
+            Err(e) => {
+                last_error = format!("range request to {url} failed: {e}");
+                continue;
+            }
+        };
+
+        let status = response.status();
+        if status.as_u16() != 206 {
+            last_error = format!("HTTP {status} fetching range from {url} (expected 206)");
+            // Only an overloaded or rate-limiting host can answer differently next time.
+            if !(status.is_server_error() || status.as_u16() == 429) {
+                break;
+            }
+            continue;
+        }
+
+        match response.bytes() {
+            Ok(body) => return Ok(body.to_vec()),
+            Err(e) => last_error = format!("range body from {url} could not be read: {e}"),
+        }
     }
 
-    Ok(response.bytes()?.to_vec())
+    Err(last_error.into())
 }
 
 #[cfg(test)]
@@ -2205,5 +2287,35 @@ mod tests {
         assert_eq!(coords.len(), 4);
         assert_eq!(coords[0], (10.0, 20.0)); // Z is ignored
         assert_eq!(coords[1], (11.0, 20.0));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    // A small city keeps the old flat allowance.
+    #[test]
+    fn a_small_area_gets_the_floor() {
+        let bbox = LLBBox::new(41.49, -81.70, 41.52, -81.65).unwrap();
+        assert_eq!(overture_building_budget(&bbox), MIN_OVERTURE_BUILDINGS);
+    }
+
+    // The reported bbox is ~21,800 km²; a flat 100k cap spent the whole budget on
+    // whichever partitions were read first and left the rest without footprints
+    // (issue #1257), so the budget has to grow with the area.
+    #[test]
+    fn a_regional_area_scales_past_the_floor() {
+        let bbox = LLBBox::new(40.7, -82.3, 42.0, -80.5).unwrap();
+        let budget = overture_building_budget(&bbox);
+        assert!(budget > MIN_OVERTURE_BUILDINGS, "budget was {budget}");
+        assert!(budget <= MAX_OVERTURE_BUILDINGS, "budget was {budget}");
+    }
+
+    // The cap still exists: a continent must not be allowed to exhaust memory.
+    #[test]
+    fn a_continent_is_clamped_to_the_ceiling() {
+        let bbox = LLBBox::new(30.0, -120.0, 50.0, -80.0).unwrap();
+        assert_eq!(overture_building_budget(&bbox), MAX_OVERTURE_BUILDINGS);
     }
 }
