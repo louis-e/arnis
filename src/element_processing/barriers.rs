@@ -78,6 +78,9 @@ pub fn generate_barriers(
         if barrier_mat == "metal" {
             barrier_material = STONE_BRICK_WALL;
         }
+        if barrier_mat == "wood" {
+            barrier_material = OAK_FENCE;
+        }
     }
 
     if let ProcessedElement::Way(way) = element {
