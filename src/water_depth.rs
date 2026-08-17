@@ -730,10 +730,15 @@ pub fn carve_lc_water_region(
             if ground.cover_class(coord) != LC_WATER {
                 continue;
             }
-            let water_y = ground.water_level(coord);
-            // Skip land bumps an over-claiming water polygon sits above.
-            if editor.get_ground_level(x, z) > water_y {
-                continue;
+            let mut water_y = ground.water_level(coord);
+            let ground_y = editor.get_ground_level(x, z);
+            if ground_y > water_y {
+                // A bank cell the snap pulled below its terrain: skip. Interior water
+                // above a dip is a step inside the body: keep it at its own level.
+                if !ground.is_interior_water(coord) {
+                    continue;
+                }
+                water_y = ground_y;
             }
             carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask, bwf);
         }

@@ -1423,6 +1423,7 @@ fn gui_start_generation(
 
                     // OSM water override first, then bridge repair.
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
 
                     // Transform map (parsed_elements). Operations are defined in a json file

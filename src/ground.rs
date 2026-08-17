@@ -377,41 +377,69 @@ impl Ground {
         (measured > 0).then(|| f64::from(wooded) / f64::from(measured))
     }
 
-    /// Force LC_WATER for every cell inside an OSM water polygon or waterway.
+    /// Force LC_WATER inside OSM water, sinking those cells onto that water's surface.
     pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
-        let Some(lc) = self.land_cover.as_mut() else {
+        let Ground {
+            land_cover,
+            elevation_data,
+            ..
+        } = self;
+        let (Some(lc), Some(data)) = (land_cover.as_mut(), elevation_data.as_mut()) else {
             return;
         };
-        let Some(data) = self.elevation_data.as_ref() else {
-            return;
-        };
+        let (world_width, world_height) = (data.world_width, data.world_height);
         crate::land_cover::osm_water_override::apply_osm_water_override(
             lc,
-            &data.heights,
-            data.world_width,
-            data.world_height,
+            &mut data.heights,
+            world_width,
+            world_height,
             elements,
             xzbbox,
         );
     }
 
-    /// Reclassify cells under OSM-tagged bridges to the surrounding class.
+    /// Trim ESA water back to land where OSM shows roads, buildings or its own shoreline.
+    pub fn apply_osm_land_override(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        scale: f64,
+    ) {
+        let (world_width, world_height) = self.world_dims();
+        let Some(lc) = self.land_cover.as_mut() else {
+            return;
+        };
+        crate::land_cover::osm_land_override::apply_osm_land_override(
+            lc,
+            world_width,
+            world_height,
+            elements,
+            xzbbox,
+            scale,
+        );
+    }
+
+    /// Reclassify cells under bridges to the surrounding class, sinking new water.
     pub fn apply_bridge_land_cover_repair(
         &mut self,
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
         scale: f64,
     ) {
-        let Some(lc) = self.land_cover.as_mut() else {
+        let Ground {
+            land_cover,
+            elevation_data,
+            ..
+        } = self;
+        let (Some(lc), Some(data)) = (land_cover.as_mut(), elevation_data.as_mut()) else {
             return;
         };
-        let Some(data) = self.elevation_data.as_ref() else {
-            return;
-        };
+        let (world_width, world_height) = (data.world_width, data.world_height);
         crate::land_cover::bridge_repair::apply_bridge_land_cover_repair(
             lc,
-            data.world_width,
-            data.world_height,
+            &mut data.heights,
+            world_width,
+            world_height,
             elements,
             xzbbox,
             scale,
@@ -487,6 +515,17 @@ impl Ground {
         } else {
             0
         }
+    }
+
+    /// True for a water cell at least four cells from shore. `water_distance` is 0 past
+    /// its cap of 15, so 0 counts as interior here. Tells a step inside a body from a bank.
+    #[inline(always)]
+    pub fn is_interior_water(&self, coord: XZPoint) -> bool {
+        if self.cover_class(coord) != land_cover::LC_WATER {
+            return false;
+        }
+        let d = self.water_distance(coord);
+        d == 0 || d >= 4
     }
 
     /// Returns a continuous 0.0–1.0 value indicating how "watery" a block is,

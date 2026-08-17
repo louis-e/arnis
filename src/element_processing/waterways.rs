@@ -2,26 +2,18 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
+use std::collections::HashMap;
 
 pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(waterway_type) = element.tags.get("waterway") {
-        let mut waterway_width = get_waterway_width(waterway_type);
-
-        // Check for custom width in tags
-        if let Some(width_str) = element.tags.get("width") {
-            waterway_width = width_str.parse::<i32>().unwrap_or_else(|_| {
-                width_str
-                    .parse::<f32>()
-                    .map(|f: f32| f as i32)
-                    .unwrap_or(waterway_width)
-            });
+        // waterway=* structures are not channels; outlining a dam draws canals down it.
+        if !is_channel_waterway(waterway_type) {
+            return;
         }
+        let waterway_width = waterway_width(waterway_type, &element.tags);
 
-        // Skip layers below the ground level
-        if matches!(
-            element.tags.get("layer").map(|s| s.as_str()),
-            Some("-1") | Some("-2") | Some("-3")
-        ) {
+        // Culverts and pipes are not open water; they would cut channels through banks.
+        if is_underground_waterway(&element.tags) {
             return;
         }
 
@@ -53,8 +45,45 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
     }
 }
 
+/// False for `waterway=*` values that are structures or points, not a channel.
+pub fn is_channel_waterway(waterway_type: &str) -> bool {
+    !matches!(
+        waterway_type,
+        "dam"
+            | "weir"
+            | "lock_gate"
+            | "waterfall"
+            | "rapids"
+            | "boatyard"
+            | "fuel"
+            | "dock"
+            | "riverbank"
+            | "water_point"
+            | "turning_point"
+            | "sluice_gate"
+            | "fish_pass"
+            | "security_lock"
+            | "milestone"
+            | "check_dam"
+            | "floating_barrier"
+    )
+}
+
+/// True for waterways underground: any `tunnel=*` other than `no`, or a negative layer.
+pub fn is_underground_waterway(tags: &std::collections::HashMap<String, String>) -> bool {
+    if tags
+        .get("tunnel")
+        .is_some_and(|v| !matches!(v.as_str(), "no" | "0" | "false"))
+    {
+        return true;
+    }
+    tags.get("layer")
+        .and_then(|l| l.trim().parse::<i32>().ok())
+        .is_some_and(|l| l < 0)
+}
+
 /// Determines channel width based on waterway type.
-fn get_waterway_width(waterway_type: &str) -> i32 {
+pub fn get_waterway_width(waterway_type: &str) -> i32 {
     match waterway_type {
         "river" => 8,
         "canal" => 6,
@@ -65,6 +94,24 @@ fn get_waterway_width(waterway_type: &str) -> i32 {
         "ditch" => 2,
         "drain" => 1,
         _ => 4,
+    }
+}
+
+/// Widest channel a `width=*` tag may ask for. Every renderer of a waterway walks its
+/// width squared per centreline point, so an unbounded tag value hangs generation.
+pub const MAX_WATERWAY_WIDTH: i32 = 128;
+
+/// Channel width in blocks, from `width=*` when it parses and the type default otherwise.
+pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i32 {
+    let tagged = tags
+        .get("width")
+        .and_then(|s| s.trim().split(' ').next())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|w| w.is_finite())
+        .map(|w| w.round() as i64);
+    match tagged {
+        Some(w) if w >= 1 => w.min(i64::from(MAX_WATERWAY_WIDTH)) as i32,
+        _ => get_waterway_width(waterway_type),
     }
 }
 
