@@ -412,6 +412,7 @@ mod tests {
             water_blend_cache: once_cell::sync::OnceCell::new(),
             width: w,
             height: h,
+            cells_per_meter: 1.0,
         };
         let mut ground = Ground::new_flat_land_cover_test(lc, w, h);
         let mut elements = Vec::new();

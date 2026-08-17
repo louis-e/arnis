@@ -1040,6 +1040,7 @@ mod tests {
             ]),
             width: 2,
             height: 2,
+            cells_per_meter: 1.0,
         };
         // world 4x4 over a 2x2 grid: x<=1 samples column 0, x>=2 samples column 1.
         let ground = Ground::new_flat_land_cover_test(lc, 4, 4);
