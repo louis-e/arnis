@@ -122,8 +122,12 @@ fn run_cli() {
     }
 
     // Open up the world floor before anything touches the editor. The bundled packs already
-    // grant the full engine range; without this the lower half of it goes unused.
-    world_editor::set_min_y(ground::extended_min_y_for(&args));
+    // grant the full engine range; without this the lower half of it goes unused. The ceiling
+    // goes with it: chunk serialization needs the whole dimension span, not just the floor.
+    world_editor::set_world_bounds(
+        ground::extended_min_y_for(&args),
+        ground::world_top_y_for(&args),
+    );
 
     if args.legacy_terrain {
         eprintln!(

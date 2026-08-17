@@ -14,25 +14,58 @@ pub const DEFAULT_MIN_Y: i32 = -64;
 /// this, an extended floor would make every bedrock/fill/ore column ~4000 blocks deep.
 pub const TERRAIN_FLOOR_DEPTH: i32 = 64;
 
-static WORLD_MIN_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
+/// Default (vanilla 1.18+) world ceiling. Distinct from `MAX_Y`, which is the highest Y the
+/// editor will store; this is the top of the dimension the engine is actually told about.
+pub const DEFAULT_MAX_Y: i32 = 319;
 
-/// Serialises tests that mutate the world-floor globals against tests that read them.
+static WORLD_MIN_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
+static WORLD_MAX_Y: AtomicI32 = AtomicI32::new(DEFAULT_MAX_Y);
+
+/// Serialises tests that mutate the world-bounds globals against tests that read them.
 #[cfg(test)]
 pub(crate) static FLOOR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Set the world floor once, at startup, from the CLI args. Must be a multiple of 16.
+/// Set the world bounds once, at startup, from the CLI args.
 ///
-/// Asserted in release too: a floor off a section boundary silently corrupts every section
-/// index derived from it, which is far worse than failing on the spot. Runs once per world.
-pub fn set_min_y(y: i32) {
-    assert_eq!(y.rem_euclid(16), 0, "world floor must be a multiple of 16");
-    WORLD_MIN_Y.store(y, MemOrdering::Relaxed);
+/// These must describe the dimension the engine is told about — vanilla, or the tall
+/// datapack — because chunk serialization sizes heightmaps from the span between them and
+/// offsets every value from the floor. Set as a pair so the two cannot drift apart.
+///
+/// Asserted in release too: bounds off a section boundary silently corrupt every section
+/// index derived from them, which is far worse than failing on the spot. Runs once per world.
+pub fn set_world_bounds(min: i32, max: i32) {
+    assert_eq!(
+        min.rem_euclid(16),
+        0,
+        "world floor must be a multiple of 16"
+    );
+    assert_eq!(max.rem_euclid(16), 15, "world ceiling must end a section");
+    assert!(min < max, "world floor must sit below the ceiling");
+    WORLD_MIN_Y.store(min, MemOrdering::Relaxed);
+    WORLD_MAX_Y.store(max, MemOrdering::Relaxed);
 }
 
 /// Lowest legal Y in this world: -64, or the pack-extended floor (-2032 Java / -512 Bedrock).
 #[inline(always)]
 pub fn min_y() -> i32 {
     WORLD_MIN_Y.load(MemOrdering::Relaxed)
+}
+
+/// Highest legal Y in this world: 319, or the pack-extended ceiling (2031 Java).
+#[inline(always)]
+pub fn world_max_y() -> i32 {
+    WORLD_MAX_Y.load(MemOrdering::Relaxed)
+}
+
+/// Section span of the configured dimension, as `(min_section, max_section)`.
+///
+/// Chunk serialization must write `yPos` and heightmaps against this, never against whichever
+/// sections a chunk happens to contain: Minecraft sizes the heightmap bit width from the
+/// dimension's height and offsets each value from its floor. A content-derived span usually
+/// mismatches the expected array length — the engine warns and recomputes — but when the two
+/// coincidentally agree it accepts the values silently, off by the difference in origin.
+pub fn world_section_range() -> (i8, i8) {
+    ((min_y() >> 4) as i8, (world_max_y() >> 4) as i8)
 }
 
 /// Lowest section index covering `min_y()`. Callers derive their own bottom section from the
@@ -1545,10 +1578,16 @@ mod terrain_floor_tests {
     fn with_floor<T>(world_floor: i32, base: i32, f: impl FnOnce() -> T) -> T {
         // Mutates process-global state, so it runs under the shared floor lock and restores it.
         let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        set_min_y(world_floor);
+        // An extended floor always comes with the tall datapack's ceiling.
+        let ceiling = if world_floor < DEFAULT_MIN_Y {
+            2031
+        } else {
+            DEFAULT_MAX_Y
+        };
+        set_world_bounds(world_floor, ceiling);
         set_terrain_floor_y(base);
         let out = f();
-        set_min_y(DEFAULT_MIN_Y);
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
         set_terrain_floor_y(DEFAULT_GROUND_LEVEL);
         out
     }

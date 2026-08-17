@@ -944,6 +944,17 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
 /// (dimension_type min_y=-2032, height=4064), so the only thing keeping Arnis at -64 was the
 /// old constant. Java only: the Bedrock behavior pack declares -512, but the LevelDB subchunk
 /// writer is unverified below -64, and Luanti has no such pack at all.
+/// Dimension ceiling actually declared to the engine: the tall datapack's 2031, or vanilla's
+/// 319. Gated identically to `extended_min_y_for` — chunk serialization sizes heightmaps from
+/// the span between the two, so the pair must always describe the same dimension.
+pub(crate) fn world_top_y_for(args: &Args) -> i32 {
+    if args.disable_height_limit && !args.bedrock && !args.luanti {
+        2031
+    } else {
+        crate::world_editor::DEFAULT_MAX_Y
+    }
+}
+
 pub(crate) fn extended_min_y_for(args: &Args) -> i32 {
     if args.disable_height_limit && !args.bedrock && !args.luanti {
         -2032

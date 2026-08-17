@@ -1290,8 +1290,11 @@ fn gui_start_generation(
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
             };
 
-            // Same as run_cli: open the world floor before the editor is touched.
-            crate::world_editor::set_min_y(ground::extended_min_y_for(&args));
+            // Same as run_cli: fix the dimension span before the editor is touched.
+            crate::world_editor::set_world_bounds(
+                ground::extended_min_y_for(&args),
+                ground::world_top_y_for(&args),
+            );
 
             // Ask Args, not the frontend flag: below OBJECT_SKIP_SCALE objects are skipped
             // regardless of the selected generation mode.

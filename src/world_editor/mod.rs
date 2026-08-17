@@ -17,8 +17,8 @@ pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
 pub use common::{
-    base_chunk_y, min_y, set_base_chunk_y, set_min_y, set_terrain_floor_y, terrain_floor_y,
-    DEFAULT_MIN_Y,
+    base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
+    world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
 };
 pub(crate) use common::{BlockStorage, RegionToModify, SectionToModify, MAX_BLOCK_ID};
 
