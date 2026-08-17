@@ -154,20 +154,22 @@ impl ResponseError {
 }
 
 /// Parses an Overpass body and rejects the ones that only look complete.
+///
+/// The element count is deliberately not consulted. A query that dies before
+/// printing anything reports the same remark over an empty list, and that is the
+/// worst case rather than a milder one: nothing distinguishes it from a bbox with
+/// nothing mapped in it, so it would otherwise pass as "continue without OSM data"
+/// and produce a world with no buildings and no roads at all.
 fn parse_overpass_response(body: &str) -> Result<OsmData, ResponseError> {
     let mut deserializer = serde_json::Deserializer::from_reader(Cursor::new(body.as_bytes()));
     let data = OsmData::deserialize(&mut deserializer)
         .map_err(|e| ResponseError::Malformed(format!("Malformed response: {e}")))?;
 
-    // An empty result with a remark is handled by the caller: it is either a
-    // hard failure or a genuinely empty area, and both need the full picture.
-    if !data.is_empty() {
-        if let Some(remark) = data.remark.as_deref() {
-            if remark_means_truncated(remark) {
-                return Err(ResponseError::Truncated(format!(
-                    "Server returned partial data: {remark}"
-                )));
-            }
+    if let Some(remark) = data.remark.as_deref() {
+        if remark_means_truncated(remark) {
+            return Err(ResponseError::Truncated(format!(
+                "Server stopped early: {remark}"
+            )));
         }
     }
 
@@ -432,11 +434,17 @@ pub fn fetch_data_from_overpass(
                 eprintln!(
                     "{}",
                     "Error! The area is too large for the OpenStreetMap API: the servers \
-                     that answered all stopped mid-response. Try using a smaller area."
+                     that answered all stopped early. Try using a smaller area."
                         .red()
                         .bold()
                 );
                 emit_gui_error("Try using a smaller area.");
+                // Same exit as the out-of-memory case below: the CLI unwraps this
+                // Result, so returning Err here would replace the advice with a panic.
+                if !is_running_with_gui() {
+                    std::process::exit(1);
+                }
+                return Err("Data fetch failed".into());
             } else if truncated > 0 {
                 eprintln!(
                     "{}",
@@ -458,34 +466,18 @@ pub fn fetch_data_from_overpass(
         }
 
         if data.is_empty() {
-            // Distinguish a real server error (memory/runtime) from a benign
-            // "this bbox has no mapped objects" response. The former still
-            // aborts; the latter is allowed because Arnis can generate
-            // nature/terrain on its own from elevation + land-cover data,
-            // and unmapped natural areas are common on OSM.
+            // Every remark that means the server gave up was already rejected by
+            // parse_overpass_response, which failed over to the next host. Reaching
+            // here with no elements means the bbox genuinely has nothing mapped in
+            // it, which is allowed: Arnis can still generate nature/terrain from
+            // elevation + land-cover data, and unmapped natural areas are common.
             if let Some(remark) = data.remark.as_deref() {
-                if remark.contains("runtime error") && remark.contains("out of memory") {
-                    eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
-                    emit_gui_error("Try using a smaller area.");
-
-                    if debug {
-                        println!("Additional debug information: {data:?}");
-                    }
-
-                    if !is_running_with_gui() {
-                        std::process::exit(1);
-                    } else {
-                        return Err("Data fetch failed".into());
-                    }
-                } else {
-                    // Non-fatal upstream remark (e.g. timeout that still returned an empty body).
-                    eprintln!(
-                        "{}",
-                        format!("Warning: API returned: {remark}. Continuing without OSM data.")
-                            .yellow()
-                            .bold()
-                    );
-                }
+                eprintln!(
+                    "{}",
+                    format!("Warning: API returned: {remark}. Continuing without OSM data.")
+                        .yellow()
+                        .bold()
+                );
             } else {
                 eprintln!(
                     "{}",
@@ -601,14 +593,46 @@ mod partial_response_tests {
         ));
     }
 
-    // An empty result keeps its remark for the caller, which distinguishes a server
-    // failure from a bbox that genuinely has nothing mapped in it.
+    // The worst case, not a milder one: a query that dies before printing anything
+    // reports the same remark over an empty list. Accepting it looks exactly like a
+    // bbox with nothing mapped in it, and the caller would carry on and build a world
+    // with no buildings AND no roads.
     #[test]
-    fn an_empty_response_with_a_remark_is_left_to_the_caller() {
-        let body = r#"{"elements":[],"remark":"runtime error: Query run out of memory"}"#;
-        let data = parse_overpass_response(body).expect("empty results stay the caller's call");
+    fn an_empty_response_that_stopped_early_is_rejected() {
+        // The inner quotes stay JSON-escaped so these parse as real Overpass bodies;
+        // an unescaped one would be rejected as malformed and prove nothing.
+        for remark in [
+            r#"runtime error: Query timed out in \"query\" at line 3 after 360 seconds."#,
+            r#"runtime error: Query run out of memory in \"query\" at line 3."#,
+        ] {
+            let body = format!(r#"{{"elements":[],"remark":"{remark}"}}"#);
+            assert!(
+                matches!(
+                    parse_overpass_response(&body),
+                    Err(ResponseError::Truncated(_))
+                ),
+                "empty + {remark} must not pass as an empty area"
+            );
+        }
+    }
+
+    // The one empty case that is genuinely fine: no remark at all. Arnis can still
+    // build terrain and nature, so this must keep working.
+    #[test]
+    fn an_empty_response_with_no_remark_is_accepted() {
+        let data = parse_overpass_response(r#"{"elements":[]}"#)
+            .expect("an unmapped bbox is not a failure");
         assert!(data.is_empty());
-        assert!(data.remark.is_some());
+    }
+
+    // A remark that is not an error must not be mistaken for one, whether or not
+    // the response carried elements.
+    #[test]
+    fn a_benign_remark_is_accepted_either_way() {
+        let with = r#"{"elements":[{"type":"node","id":1,"lat":1.0,"lon":2.0}],"remark":"Please note the data is from OpenStreetMap"}"#;
+        let without = r#"{"elements":[],"remark":"Please note the data is from OpenStreetMap"}"#;
+        assert!(parse_overpass_response(with).is_ok());
+        assert!(parse_overpass_response(without).is_ok());
     }
 
     #[test]
