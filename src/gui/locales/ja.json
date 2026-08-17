@@ -9,6 +9,7 @@
   "generation_process_started": "生成処理を開始しました。",
   "winter_mode": "冬モード",
   "world_scale": "ワールド倍率",
+  "world_scale_objects_skipped": "0.30 未満では建物や道路が小さすぎて描画できないため、地形と土地被覆のみが生成されます。",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "フラッドフィルのタイムアウト（秒）",
   "ground_level": "地面レベル",

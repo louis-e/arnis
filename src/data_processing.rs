@@ -593,8 +593,10 @@ pub fn generate_world_with_options(
     // Materialize the lazy water-blend mask now, before world memory peaks.
     ground.warm_water_blend();
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
+    // Uses the ground's real base, not args: the montane check measures blocks above it, and
+    // the base sinks when the relief needs the extended floor.
     let tree_pack =
-        crate::trees::tree_pack::load(args, llbbox, args.scale, args.ground_level).map(Arc::new);
+        crate::trees::tree_pack::load(args, llbbox, args.scale, ground.base_level()).map(Arc::new);
     let mut bench = crate::bench::Bench::new(args.benchmark);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
@@ -836,6 +838,8 @@ pub fn generate_world_with_options(
                     let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
                     tile_editor.set_ground(Arc::clone(&ground));
                     tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
+                    // Ground generation runs on tile editors, so they need the real scale.
+                    tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
                     tile_editor.set_place_schematics(args.use_3d);
                     tile_editor.set_map_decals(place_branding);
                     if let Some(ref tp) = tree_pack {

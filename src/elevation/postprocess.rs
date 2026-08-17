@@ -1198,14 +1198,20 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 /// 2031; Bedrock BP: 512); ignored otherwise.
 /// Scales real-world metre heights to Minecraft Y. Also returns the affine
 /// parameters `(min_height_m, blocks_per_meter)` so a real-world elevation can
-/// be converted back to a Minecraft Y threshold (e.g. for the snow line).
+/// be converted back to a Minecraft Y threshold (e.g. for the snow line), plus the
+/// terrain base actually used (see `min_ground_level`).
+///
+/// `min_ground_level` is the lowest base the terrain may sink to. The base only sinks when
+/// the relief genuinely does not fit above `ground_level`, so a small bbox is not dropped
+/// into the basement just because the world floor was extended.
 pub fn scale_to_minecraft(
     blurred_heights: &[Vec<f64>],
     scale: f64,
     ground_level: i32,
+    min_ground_level: i32,
     disable_height_limit: bool,
     extended_max_y: i32,
-) -> (Vec<Vec<f64>>, f64, f64) {
+) -> (Vec<Vec<f64>>, f64, f64, i32) {
     // Derive min/max
     let (min_height, max_height) = blurred_heights
         .par_iter()
@@ -1249,7 +1255,24 @@ pub fn scale_to_minecraft(
     let upper_clamp = (effective_max_y - TERRAIN_HEIGHT_BUFFER) as f64;
 
     let ideal_scaled_range: f64 = height_range * scale;
-    let available_y_range: f64 = (effective_max_y - TERRAIN_HEIGHT_BUFFER - ground_level) as f64;
+    let ceiling = effective_max_y - TERRAIN_HEIGHT_BUFFER;
+
+    // Sink the terrain base to reach the extended floor, but only as far as the relief
+    // actually needs. Blindly sinking would drop a low-relief bbox thousands of blocks down
+    // with an empty sky above it; not sinking at all would waste the pack's lower half.
+    // Only ever fires with the extended floor: callers pass min_ground_level == ground_level
+    // otherwise, so an explicit --ground-level is never silently overridden.
+    let ground_level = if disable_height_limit
+        && min_ground_level < ground_level
+        && ideal_scaled_range.is_finite()
+    {
+        let needed = ideal_scaled_range.ceil() as i32;
+        (ceiling.saturating_sub(needed)).clamp(min_ground_level, ground_level)
+    } else {
+        ground_level
+    };
+
+    let available_y_range: f64 = (ceiling - ground_level) as f64;
 
     let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
         eprintln!(
@@ -1293,19 +1316,77 @@ pub fn scale_to_minecraft(
     } else {
         0.0
     };
-    (mc_heights, min_height, blocks_per_meter)
+    (mc_heights, min_height, blocks_per_meter, ground_level)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Swiss relief: Lake Maggiore 193 m to Dufourspitze 4634 m.
+    fn swiss_grid() -> Vec<Vec<f64>> {
+        vec![vec![193.0, 4634.0], vec![193.0, 4634.0]]
+    }
+
+    #[test]
+    fn terrain_sinks_only_as_far_as_the_relief_needs() {
+        // Java datapack: floor -2032, so the base may sink to -2030.
+        let grid = swiss_grid();
+
+        // At scale 0.1 the relief needs 444 blocks, which already fits above -62.
+        // The base must NOT sink: doing so would bury a shallow world in the basement.
+        let (_mc, _min_m, bpm, base) = scale_to_minecraft(&grid, 0.1, -62, -2030, true, 2031);
+        assert_eq!(base, -62, "base must not sink when the relief already fits");
+        assert!(
+            (bpm - 0.1).abs() < 1e-9,
+            "relief fits, so it must map 1:1 with the horizontal scale (got {bpm})"
+        );
+
+        // At scale 1.0 the relief needs 4441 blocks; only 2078 exist above -62, so the
+        // base sinks to reach the datapack's lower half.
+        let (_mc, _min_m, bpm, base) = scale_to_minecraft(&grid, 1.0, -62, -2030, true, 2031);
+        assert_eq!(
+            base, -2030,
+            "base must sink to the floor when the relief needs it"
+        );
+        // Headroom is now 2031 - 15 + 2030 = 4046 against 4441 m of relief.
+        assert!(
+            (0.90..0.92).contains(&bpm),
+            "sinking must give near-1:1 vertical (got {bpm})"
+        );
+    }
+
+    #[test]
+    fn vanilla_never_sinks_an_explicit_ground_level() {
+        // With the vanilla floor the caller passes min_ground_level == ground_level, and the
+        // disable_height_limit gate holds regardless: an explicit --ground-level is honoured
+        // and the relief is compressed to fit, as before.
+        let grid = swiss_grid();
+        let (_mc, _min_m, _bpm, base) = scale_to_minecraft(&grid, 1.0, 100, -62, false, 0);
+        assert_eq!(
+            base, 100,
+            "vanilla must not sink below an explicit ground level"
+        );
+    }
+
+    #[test]
+    fn without_the_extended_floor_the_alps_are_compressed() {
+        // Vanilla: 319 - 15 + 62 = 366 blocks for 4441 m of relief.
+        let grid = swiss_grid();
+        let (_mc, _min_m, bpm, base) = scale_to_minecraft(&grid, 1.0, -62, -62, false, 0);
+        assert_eq!(base, -62);
+        assert!(
+            (bpm - 366.0 / 4441.0).abs() < 1e-6,
+            "vanilla must compress 4441 m into 366 blocks (got {bpm})"
+        );
+    }
+
     #[test]
     fn scale_flat_terrain_keeps_real_min_height() {
         // Zero-relief terrain must still report its true elevation so the snow
         // line can tell a high plateau from a low one.
         let grid = vec![vec![4500.0_f64; 4]; 4];
-        let (mc, min_m, blocks_per_meter) = scale_to_minecraft(&grid, 1.0, 64, false, 0);
+        let (mc, min_m, blocks_per_meter, _base) = scale_to_minecraft(&grid, 1.0, 64, 64, false, 0);
         assert_eq!(min_m, 4500.0);
         assert_eq!(blocks_per_meter, 0.0);
         // Every cell flattens to ground level.
@@ -1316,7 +1397,8 @@ mod tests {
     fn scale_all_nan_grid_min_height_zero() {
         // No finite samples must not leak the f64::MAX reduce sentinel as min.
         let grid = vec![vec![f64::NAN; 4]; 4];
-        let (_mc, min_m, blocks_per_meter) = scale_to_minecraft(&grid, 1.0, 64, false, 0);
+        let (_mc, min_m, blocks_per_meter, _base) =
+            scale_to_minecraft(&grid, 1.0, 64, 64, false, 0);
         assert_eq!(min_m, 0.0);
         assert_eq!(blocks_per_meter, 0.0);
     }

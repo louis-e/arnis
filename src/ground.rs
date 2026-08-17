@@ -81,6 +81,13 @@ fn snow_threshold_for(ed: &ElevationData, lat_deg: f64, ground_level: i32) -> i3
 }
 
 impl Ground {
+    /// Terrain base actually in use. Differs from `args.ground_level` when the elevation
+    /// scaler sank the base to reach the extended floor, so anything inverting the
+    /// metre->Y affine (snow line, montane trees, filler chunks) must read it from here.
+    pub fn base_level(&self) -> i32 {
+        self.ground_level
+    }
+
     #[cfg(test)]
     pub fn new_flat(ground_level: i32) -> Self {
         Self {
@@ -180,6 +187,7 @@ impl Ground {
                 world_height,
                 min_height_m: 0.0,
                 blocks_per_meter: 1.0,
+                ground_level: 0,
             }),
             land_cover: None,
             canopy: None,
@@ -196,6 +204,7 @@ impl Ground {
         bbox: &LLBBox,
         scale: f64,
         ground_level: i32,
+        min_ground_level: i32,
         disable_height_limit: bool,
         extended_max_y: i32,
         aws_only_elevation: bool,
@@ -224,14 +233,18 @@ impl Ground {
             bench.mark("elev_landcover_fetch");
 
             // Raise the floor for the deepest water carve (elevation path only).
-            let water_floor = match &land_cover {
+            let carve_floor = match &land_cover {
                 Some(lc) => {
                     let max_depth =
                         crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
-                    ground_level.max(crate::world_editor::MIN_Y + max_depth + 2)
+                    crate::world_editor::min_y() + max_depth + 2
                 }
-                None => ground_level,
+                None => crate::world_editor::min_y(),
             };
+            let water_floor = ground_level.max(carve_floor);
+            // The terrain may sink to reach an extended floor, but never below the carve floor:
+            // water would otherwise be cut straight through the bedrock layer.
+            let sink_floor = min_ground_level.max(carve_floor).min(water_floor);
 
             let source_mode = if aws_only_elevation {
                 crate::elevation::SourceMode::AwsOnly
@@ -242,6 +255,7 @@ impl Ground {
                 bbox,
                 scale,
                 water_floor,
+                sink_floor,
                 disable_height_limit,
                 extended_max_y,
                 land_cover.as_mut(),
@@ -250,11 +264,14 @@ impl Ground {
             ) {
                 Ok(elevation_data) => {
                     let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-                    let snow_threshold_y = snow_threshold_for(&elevation_data, lat, water_floor);
+                    // Must use the base the scaler actually settled on: snow_threshold_for
+                    // inverts that exact affine, so a mismatched base misplaces every snow cap.
+                    let base = elevation_data.ground_level;
+                    let snow_threshold_y = snow_threshold_for(&elevation_data, lat, base);
                     let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
                     Self {
                         elevation_enabled: true,
-                        ground_level: water_floor,
+                        ground_level: base,
                         elevation_data: Some(elevation_data),
                         land_cover,
                         canopy,
@@ -887,12 +904,17 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
             &bbox,
             args.scale,
             args.ground_level,
+            min_ground_level_for(args),
             args.disable_height_limit,
             extended_max_y_for(args),
             args.aws_only_elevation,
             args.benchmark,
             args.canopy_height,
         );
+        // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
+        // the out-of-bbox filler chunks both key off that base, so pin them to it now.
+        crate::world_editor::set_base_chunk_y(ground.base_level());
+        crate::world_editor::set_terrain_floor_y(ground.base_level());
         if args.debug {
             ground.save_debug_image("elevation_debug");
             ground.save_land_cover_debug_image("landcover_debug");
@@ -901,7 +923,11 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         return ground;
     }
     println!("{} Fetching land cover...", "[3/7]".bold());
-    Ground::new_flat_with_land_cover(&bbox, args.scale, args.ground_level, args.canopy_height)
+    let ground =
+        Ground::new_flat_with_land_cover(&bbox, args.scale, args.ground_level, args.canopy_height);
+    crate::world_editor::set_base_chunk_y(ground.base_level());
+    crate::world_editor::set_terrain_floor_y(ground.base_level());
+    ground
 }
 
 /// Per-format build-height cap when the user opts into extended build height:
@@ -911,6 +937,42 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
         512
     } else {
         2031
+    }
+}
+
+/// World floor. The bundled Java datapack already declares the full range the engine allows
+/// (dimension_type min_y=-2032, height=4064), so the only thing keeping Arnis at -64 was the
+/// old constant. Java only: the Bedrock behavior pack declares -512, but the LevelDB subchunk
+/// writer is unverified below -64, and Luanti has no such pack at all.
+/// Dimension ceiling actually declared to the engine: the tall datapack's 2031, or vanilla's
+/// 319. Gated identically to `extended_min_y_for` — chunk serialization sizes heightmaps from
+/// the span between the two, so the pair must always describe the same dimension.
+pub(crate) fn world_top_y_for(args: &Args) -> i32 {
+    if args.disable_height_limit && !args.bedrock && !args.luanti {
+        2031
+    } else {
+        crate::world_editor::DEFAULT_MAX_Y
+    }
+}
+
+pub(crate) fn extended_min_y_for(args: &Args) -> i32 {
+    if args.disable_height_limit && !args.bedrock && !args.luanti {
+        -2032
+    } else {
+        crate::world_editor::DEFAULT_MIN_Y
+    }
+}
+
+/// Lowest terrain base the elevation scaler may sink to, leaving room for the bedrock layer
+/// beneath it (mirroring the vanilla -64 floor / -62 base relationship). With a vanilla floor
+/// this returns the requested ground level, which disables the sink entirely — an explicit
+/// --ground-level must not be silently overridden.
+pub(crate) fn min_ground_level_for(args: &Args) -> i32 {
+    let floor = extended_min_y_for(args);
+    if floor >= crate::world_editor::DEFAULT_MIN_Y {
+        args.ground_level
+    } else {
+        floor + 2
     }
 }
 
@@ -934,6 +996,7 @@ mod tests {
                 world_height: h,
                 min_height_m: 0.0,
                 blocks_per_meter: 1.0,
+                ground_level: 0,
             }),
             land_cover: None,
             canopy: None,
@@ -988,6 +1051,7 @@ mod tests {
             ]),
             width: 2,
             height: 2,
+            cells_per_meter: 1.0,
         };
         // world 4x4 over a 2x2 grid: x<=1 samples column 0, x>=2 samples column 1.
         let ground = Ground::new_flat_land_cover_test(lc, 4, 4);
@@ -1043,6 +1107,7 @@ mod tests {
             world_height: 2,
             min_height_m: min_m,
             blocks_per_meter: bpm,
+            ground_level: 0,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
         assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);

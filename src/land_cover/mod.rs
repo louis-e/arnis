@@ -31,6 +31,22 @@ const LAND_COVER_CACHE_DIR: &str = "arnis-landcover-cache";
 /// ESA tile size in degrees (each tile covers a 3x3 degree area)
 const ESA_TILE_DEGREES: f64 = 3.0;
 
+/// Grid cells per real-world meter, from the bbox's true width.
+///
+/// Both smoothing passes below have to break up ESA's 10 m rectangular steps, which is a
+/// distance in *meters*, not in cells. At scale 1.0 a cell is a metre and the two agree, but
+/// at scale 2.0 a cell is half a metre, so a sigma fixed in cells reaches only half as far and
+/// the steps survive as visible rectangular patches.
+fn cells_per_meter(bbox: &LLBBox, grid_width: usize) -> f64 {
+    let (_, width_m) =
+        crate::coordinate_system::transformation::geo_distance(bbox.min(), bbox.max());
+    if width_m > 0.0 && grid_width > 0 {
+        grid_width as f64 / width_m
+    } else {
+        1.0
+    }
+}
+
 // ─── Land cover class constants ────────────────────────────────────────────
 
 /// Tree cover (forests, dense tree canopy)
@@ -73,13 +89,16 @@ pub struct LandCoverData {
     pub width: usize,
     /// Grid height (matches elevation grid height)
     pub height: usize,
+    /// Grid cells per real-world meter, so the smoothing passes can size themselves in meters.
+    pub cells_per_meter: f64,
 }
 
 impl LandCoverData {
     /// Smoothed water mask, computed on first use after the last grid mutation.
     pub(crate) fn water_blend_grid(&self) -> &[Vec<f32>] {
-        self.water_blend_cache
-            .get_or_init(|| compute_water_blend_smooth(&self.grid, self.width, self.height))
+        self.water_blend_cache.get_or_init(|| {
+            compute_water_blend_smooth(&self.grid, self.width, self.height, self.cells_per_meter)
+        })
     }
 
     /// Call after any mutation to `grid` so the mask is recomputed on next use.
@@ -95,11 +114,20 @@ impl LandCoverData {
 /// - 1-to-1 grid-to-world mapping (small/medium bbox on a high-res provider):
 ///   gives a ~3 block softening band — enough to break the ESA 10 m grid
 ///   rectangular steps without visibly eroding the shoreline.
-/// - Coarser grid-to-world (large bbox, capped at 4096): each cell already
-///   represents many blocks, so a 3-cell blur represents many blocks of
+/// - Coarser grid-to-world (large bbox, capped by the cell budget): each cell
+///   already represents many blocks, so a 3-cell blur represents many blocks of
 ///   softening — appropriate for the coarser effective resolution.
-fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<f32>> {
+/// - Finer than 1 cell per metre (scale above 1.0): 3 cells would now be under
+///   3 m and stop covering the 10 m steps, so σ is held at 3 m instead.
+fn compute_water_blend_smooth(
+    grid: &[Vec<u8>],
+    width: usize,
+    height: usize,
+    cells_per_meter: f64,
+) -> Vec<Vec<f32>> {
     const SIGMA_CELLS: f64 = 3.0;
+    const SIGMA_METERS: f64 = 3.0;
+    let sigma = SIGMA_CELLS.max(SIGMA_METERS * cells_per_meter);
 
     if width == 0 || height == 0 {
         return Vec::new();
@@ -117,7 +145,7 @@ fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> 
     // Gaussian blur runs in f64 for numerical stability, then we drop down to
     // f32 for storage — values land in [0, 1] and are only ever compared to a
     // 0.5 threshold, so precision beyond f32 is wasted.
-    crate::elevation::postprocess::gaussian_blur_grid(&binary, SIGMA_CELLS)
+    crate::elevation::postprocess::gaussian_blur_grid(&binary, sigma)
         .into_iter()
         .map(|row| row.into_iter().map(|v| v as f32).collect())
         .collect()
@@ -170,6 +198,7 @@ pub fn fetch_land_cover_data(
 
     // Build the land cover grid by sampling each position
     let mut grid = vec![vec![0u8; grid_width]; grid_height];
+    let cells_per_meter = cells_per_meter(bbox, grid_width);
 
     for (tile_lat, tile_lng, tile_url) in &tile_specs {
         // Try to read pixels from this ESA tile for our bbox
@@ -209,7 +238,7 @@ pub fn fetch_land_cover_data(
     // Smooth class boundaries via Gaussian-weighted local voting. Replaces
     // the rectangular axis-aligned 10 m ESA steps with clean smooth contours
     // for every class (including water shorelines).
-    smooth_class_boundaries(&mut grid, grid_width, grid_height);
+    smooth_class_boundaries(&mut grid, grid_width, grid_height, cells_per_meter);
 
     // Compute distance from each water cell to nearest shore via multi-source BFS.
     // Used for shoreline blending (land cells adjacent to water get sand surface).
@@ -221,6 +250,7 @@ pub fn fetch_land_cover_data(
         water_blend_cache: OnceCell::new(),
         width: grid_width,
         height: grid_height,
+        cells_per_meter,
     })
 }
 
@@ -992,15 +1022,24 @@ pub(crate) fn compute_water_distance(
 /// usually fine because OSM waterways render rivers as a separate
 /// overlay; for other classes it cleans up what's often classifier noise
 /// at the 10 m grain.
-fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
+fn smooth_class_boundaries(
+    grid: &mut [Vec<u8>],
+    width: usize,
+    height: usize,
+    cells_per_meter: f64,
+) {
     const SIGMA_CELLS: f64 = 2.0;
-    let radius = (SIGMA_CELLS * 3.0).ceil() as i32;
+    // The ESA steps are 10 m wide whatever the scale, so hold the reach in meters once a cell
+    // drops below a metre. Otherwise scale 2.0 smooths half as far and the steps stay square.
+    const SIGMA_METERS: f64 = 2.0;
+    let sigma = SIGMA_CELLS.max(SIGMA_METERS * cells_per_meter);
+    let radius = (sigma * 3.0).ceil() as i32;
     let kernel_size = (radius * 2 + 1) as usize;
 
     // Precompute the 2D Gaussian kernel as a flat vec.
     let mut kernel = vec![0.0f64; kernel_size * kernel_size];
     let center = radius as f64;
-    let two_sigma_sq = 2.0 * SIGMA_CELLS * SIGMA_CELLS;
+    let two_sigma_sq = 2.0 * sigma * sigma;
     for ky in 0..kernel_size {
         for kx in 0..kernel_size {
             let dy = ky as f64 - center;
@@ -1214,4 +1253,58 @@ fn read_bits_msb(data: &[u8], bit_offset: usize, n: usize) -> u32 {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod smoothing_scale_tests {
+    use super::*;
+
+    /// Area the smoothing rounds off a square's four corners, in square metres. Area rather
+    /// than a diagonal walk: it grows with sigma squared, so it separates the resolutions
+    /// instead of quantising down to a cell or two.
+    fn corner_cut_area_m2(side_m: usize, cells_per_meter: f64) -> f64 {
+        let side = (side_m as f64 * cells_per_meter).round() as usize;
+        let pad = side;
+        let dim = side + pad * 2;
+        let mut grid = vec![vec![LC_GRASSLAND; dim]; dim];
+        for row in grid.iter_mut().skip(pad).take(side) {
+            for cell in row.iter_mut().skip(pad).take(side) {
+                *cell = LC_TREE_COVER;
+            }
+        }
+        smooth_class_boundaries(&mut grid, dim, dim, cells_per_meter);
+        let remaining = grid
+            .iter()
+            .flatten()
+            .filter(|&&c| c == LC_TREE_COVER)
+            .count();
+        let cut_cells = (side * side).saturating_sub(remaining) as f64;
+        cut_cells / (cells_per_meter * cells_per_meter)
+    }
+
+    #[test]
+    fn corner_smoothing_reach_is_scale_invariant() {
+        // The same 20 m square sampled at 1 and at 2 cells per metre. ESA's steps are a fixed
+        // real-world size, so the smoothing must round the corners off by the same real AREA at
+        // both resolutions. Sizing the kernel in cells alone quarters that area at scale 2.0,
+        // leaving the raw rectangular patches standing.
+        let coarse = corner_cut_area_m2(20, 1.0);
+        let fine = corner_cut_area_m2(20, 2.0);
+        assert!(coarse > 0.0, "the corners must be rounded at all");
+        let ratio = fine / coarse;
+        assert!(
+            (0.75..=1.33).contains(&ratio),
+            "corner rounding must agree in m^2: {coarse} at 1 cell/m vs {fine} at 2 cells/m"
+        );
+    }
+
+    #[test]
+    fn coarse_grids_keep_the_cell_sized_kernel() {
+        // Below one cell per metre (country scale) each cell already spans many blocks, so the
+        // kernel stays at its cell-based minimum rather than collapsing toward zero.
+        assert!(
+            corner_cut_area_m2(400, 0.1) > 0.0,
+            "a coarse grid must still round the corners"
+        );
+    }
 }

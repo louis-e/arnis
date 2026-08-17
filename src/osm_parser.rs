@@ -828,9 +828,10 @@ pub fn parse_osm_data(
             CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
         }
     }
+    // Panics rather than exits: the GUI calls this from a Tauri blocking task, where an
+    // exit would take the whole app down. Bad scales are rejected up front by validate_scale.
     .unwrap_or_else(|e| {
-        eprintln!("Error in defining coordinate transformation:\n{e}");
-        panic!();
+        panic!("Error in defining coordinate transformation:\n{e}");
     });
 
     if debug {

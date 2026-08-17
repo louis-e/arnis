@@ -38,8 +38,8 @@ pub struct Args {
     #[arg(long, default_value = "requests")]
     pub downloader: String,
 
-    /// World scale to use, in blocks per meter
-    #[arg(long, default_value_t = 1.0)]
+    /// World scale to use, in blocks per meter (1.0 = real size)
+    #[arg(long, default_value_t = 1.0, allow_hyphen_values = true, value_parser = parse_scale)]
     pub scale: f64,
 
     /// Projection mode for coordinate mapping
@@ -211,15 +211,53 @@ impl GenerationMode {
     }
 }
 
+/// Below this scale, OSM objects stop being representable: road half-widths floor at 1
+/// (so every road is >= 3 blocks = 10 m across at 0.3), buildings collapse into 1x1x3
+/// pillars, and fixed-size props come to dominate the scene. Objects are skipped instead.
+pub const OBJECT_SKIP_SCALE: f64 = 0.3;
+
+/// Smallest usable scale. Below this a country-sized bbox degenerates into a few hundred
+/// blocks and terrain detail is lost entirely.
+pub const MIN_SCALE: f64 = 0.05;
+/// Largest usable scale. Beyond this a single square kilometer already costs GBs and hours.
+pub const MAX_SCALE: f64 = 4.0;
+
+/// Rejects NaN, infinities and out-of-range scales. Used by both the CLI parser and the
+/// GUI entry point so an invalid scale can never reach the (expensive) fetch stage.
+pub fn validate_scale(scale: f64) -> Result<(), String> {
+    if !scale.is_finite() {
+        return Err("World scale must be a finite number.".to_string());
+    }
+    if !(MIN_SCALE..=MAX_SCALE).contains(&scale) {
+        return Err(format!(
+            "World scale must be between {MIN_SCALE} and {MAX_SCALE} (got {scale})."
+        ));
+    }
+    Ok(())
+}
+
+fn parse_scale(arg: &str) -> Result<f64, String> {
+    let scale: f64 = arg
+        .parse()
+        .map_err(|_| format!("`{arg}` is not a number"))?;
+    validate_scale(scale)?;
+    Ok(scale)
+}
+
 impl Args {
     /// Whether this run uses real elevation terrain rather than flat ground.
     pub fn terrain(&self) -> bool {
         self.mode.terrain()
     }
 
-    /// Whether this run skips OSM/Overture objects (terrain-only).
+    /// Whether this run skips OSM/Overture objects (terrain-only, or too small a scale).
     pub fn skip_objects(&self) -> bool {
-        self.mode.skip_objects()
+        self.mode.skip_objects() || self.scale < OBJECT_SKIP_SCALE
+    }
+
+    /// Whether objects are being skipped only because the scale is below `OBJECT_SKIP_SCALE`.
+    pub fn skip_objects_due_to_scale(&self) -> bool {
+        !self.mode.skip_objects() && self.scale < OBJECT_SKIP_SCALE
     }
 }
 
@@ -260,6 +298,8 @@ impl GameMode {
 /// For Java Edition: `--path` is required. If the directory doesn't exist, it will be created.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    validate_scale(args.scale)?;
+
     if args.bedrock && args.luanti {
         return Err("Cannot use --bedrock and --luanti together.".to_string());
     }

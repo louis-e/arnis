@@ -931,6 +931,33 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Set while a generation owns the process. The world floor, terrain floor and filler-chunk
+/// base are process globals read from deep inside the block writers, and the terrain floor
+/// is derived from the bbox's own elevation, so a second run would retune all three under the
+/// first one's feet. The progress channel and world path are shared besides.
+static GENERATION_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Owns `GENERATION_ACTIVE` for the length of one generation and clears it on drop, including
+/// on the early-return paths before the worker is spawned.
+struct GenerationSlot;
+
+impl GenerationSlot {
+    /// `None` when a generation is already running.
+    fn acquire() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        GENERATION_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for GenerationSlot {
+    fn drop(&mut self) {
+        GENERATION_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
@@ -965,7 +992,22 @@ fn gui_start_generation(
     use progress::emit_gui_error;
     use LLBBox;
 
+    // Claim the process before touching any shared state. The frontend disables its button
+    // for the same reason; this is the authoritative check behind it.
+    let Some(generation_slot) = GenerationSlot::acquire() else {
+        let msg = "A generation is already running.".to_string();
+        emit_gui_error(&msg);
+        return Err(msg);
+    };
+
     progress::reset_progress_floor();
+
+    // The GUI builds Args directly and never runs validate_args, so guard the scale here
+    // rather than letting it panic deep in the coordinate transform after the fetch.
+    if let Err(e) = crate::args::validate_scale(world_scale) {
+        emit_gui_error(&e);
+        return Err(e);
+    }
 
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);
@@ -1025,6 +1067,8 @@ fn gui_start_generation(
     }
 
     tauri::async_runtime::spawn(async move {
+        // Held until the worker finishes, on every path, so the globals stay this run's.
+        let _generation_slot = generation_slot;
         if let Err(e) = tokio::task::spawn_blocking(move || {
             let world_path = PathBuf::from(&selected_world);
 
@@ -1252,8 +1296,15 @@ fn gui_start_generation(
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
             };
 
-            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
-            if skip_osm_objects {
+            // Same as run_cli: fix the dimension span before the editor is touched.
+            crate::world_editor::set_world_bounds(
+                ground::extended_min_y_for(&args),
+                ground::world_top_y_for(&args),
+            );
+
+            // Ask Args, not the frontend flag: below OBJECT_SKIP_SCALE objects are skipped
+            // regardless of the selected generation mode.
+            if args.skip_objects() {
                 // Generate ground data (terrain) for terrain-only mode
                 let mut ground = ground::generate_ground_data(&args, bbox);
 
@@ -1431,6 +1482,27 @@ fn gui_start_generation(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod generation_slot_tests {
+    use super::GenerationSlot;
+
+    #[test]
+    fn second_generation_is_refused_until_the_first_finishes() {
+        // The world floor, terrain floor and filler base are process globals, so a second
+        // concurrent run would retune them under the first one's feet.
+        let first = GenerationSlot::acquire().expect("the first generation must get the slot");
+        assert!(
+            GenerationSlot::acquire().is_none(),
+            "a second generation must be refused while the first holds the slot"
+        );
+        drop(first);
+        assert!(
+            GenerationSlot::acquire().is_some(),
+            "the slot must be free again once the first generation finishes"
+        );
+    }
 }
 
 #[cfg(test)]

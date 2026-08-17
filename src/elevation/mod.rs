@@ -41,6 +41,9 @@ pub struct ElevationData {
     /// elevation (e.g. the snow line) to a Minecraft Y threshold.
     pub(crate) min_height_m: f64,
     pub(crate) blocks_per_meter: f64,
+    /// Terrain base actually used: the requested ground level, or lower if the relief
+    /// needed the extended floor. Every consumer of the affine must use this, not args.
+    pub(crate) ground_level: i32,
 }
 
 /// Maximum elevation grid dimension requested from providers per axis.
@@ -60,6 +63,12 @@ pub struct ElevationData {
 /// available. Typical user bboxes stay well below the cap.
 pub const MAX_ELEVATION_GRID_DIM: usize = 16384;
 
+/// Total elevation-grid cell budget. The per-axis cap alone is not enough: clamping each
+/// axis independently changes the grid's aspect ratio, so a wide bbox ends up sampled more
+/// coarsely along X than along Z and the terrain smears directionally. Budgeting total cells
+/// and shrinking both axes by the same factor keeps sampling isotropic at the same memory.
+pub const MAX_ELEVATION_GRID_CELLS: usize = MAX_ELEVATION_GRID_DIM * MAX_ELEVATION_GRID_DIM;
+
 /// Compute world and grid dimensions for the given bbox and scale.
 ///
 /// Exposed so callers (e.g. `Ground::new_enabled`) can fetch land cover at the
@@ -75,9 +84,24 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
     // scale_factor+1 distinct positions.
     let world_width: usize = scale_factor_x as usize + 1;
     let world_height: usize = scale_factor_z as usize + 1;
-    // Cap grid dimensions to avoid WMS server rejections.
-    let grid_width: usize = world_width.clamp(2, MAX_ELEVATION_GRID_DIM);
-    let grid_height: usize = world_height.clamp(2, MAX_ELEVATION_GRID_DIM);
+
+    // One elevation sample per block is the ideal: finer buys nothing (a block is the
+    // smallest representable unit), coarser blurs the terrain. Only shrink below that when
+    // the grid would breach a limit.
+    let mut grid_width: usize = world_width.max(2);
+    let mut grid_height: usize = world_height.max(2);
+    let cells = grid_width as f64 * grid_height as f64;
+    let budget_shrink = (cells / MAX_ELEVATION_GRID_CELLS as f64).sqrt();
+    // A long thin bbox stays under the cell budget while still running far past the per-axis
+    // cap, so both limits have to feed the same factor.
+    let axis_shrink = grid_width.max(grid_height) as f64 / MAX_ELEVATION_GRID_DIM as f64;
+    let shrink = budget_shrink.max(axis_shrink);
+    if shrink > 1.0 {
+        // Shrink both axes by the same factor so the sampling stays isotropic.
+        grid_width = ((grid_width as f64 / shrink).floor() as usize).clamp(2, world_width.max(2));
+        grid_height =
+            ((grid_height as f64 / shrink).floor() as usize).clamp(2, world_height.max(2));
+    }
     (world_width, world_height, grid_width, grid_height)
 }
 
@@ -97,6 +121,7 @@ pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
     ground_level: i32,
+    min_ground_level: i32,
     disable_height_limit: bool,
     extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
@@ -181,10 +206,11 @@ pub fn fetch_elevation_data(
     bench.mark("elev_landcover_repair");
     emit_gui_progress_update(16.0, "Processing elevation...");
 
-    let (mc_heights, min_height_m, blocks_per_meter) = scale_to_minecraft(
+    let (mc_heights, min_height_m, blocks_per_meter, effective_ground_level) = scale_to_minecraft(
         &height_grid,
         scale,
         ground_level,
+        min_ground_level,
         disable_height_limit,
         extended_max_y,
     );
@@ -221,6 +247,7 @@ pub fn fetch_elevation_data(
         world_height,
         min_height_m,
         blocks_per_meter,
+        ground_level: effective_ground_level,
     })
 }
 
@@ -306,4 +333,87 @@ fn compute_nan_ratio(heights: &[Vec<f64>]) -> f64 {
         return 1.0;
     }
     nan_count as f64 / total as f64
+}
+
+#[cfg(test)]
+mod grid_dim_tests {
+    use super::*;
+    use crate::coordinate_system::geographic::LLBBox;
+
+    /// The Switzerland bbox: ~346 km x ~225 km, a 1.54:1 aspect.
+    fn switzerland() -> LLBBox {
+        LLBBox::from_str("45.80,5.95,47.82,10.50").unwrap()
+    }
+
+    #[test]
+    fn grid_is_one_sample_per_block_when_it_fits() {
+        // A city-sized bbox is far under the budget, so the grid must match the world
+        // exactly: one elevation sample per block, no blur, no wasted memory.
+        let bbox = LLBBox::from_str("47.3700,8.5350,47.3790,8.5480").unwrap();
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(&bbox, 1.0);
+        assert_eq!((grid_w, grid_h), (world_w, world_h));
+    }
+
+    #[test]
+    fn oversized_grid_keeps_the_world_aspect_ratio() {
+        // Switzerland at scale 0.1 is ~34.6k x 22.5k blocks, well over the cell budget.
+        // The old per-axis clamp produced a square 16384x16384 grid, smearing X ~1.5x
+        // more than Z. Both axes must now shrink by the same factor.
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(&switzerland(), 0.1);
+        assert!(grid_w * grid_h <= MAX_ELEVATION_GRID_CELLS);
+
+        let world_aspect = world_w as f64 / world_h as f64;
+        let grid_aspect = grid_w as f64 / grid_h as f64;
+        assert!(
+            (world_aspect - grid_aspect).abs() / world_aspect < 0.01,
+            "grid aspect {grid_aspect:.3} must track world aspect {world_aspect:.3}"
+        );
+
+        // Equivalently: blocks-per-sample must be the same on both axes (isotropic).
+        let smear_x = world_w as f64 / grid_w as f64;
+        let smear_z = world_h as f64 / grid_h as f64;
+        assert!(
+            (smear_x - smear_z).abs() < 0.05,
+            "sampling must be isotropic, got {smear_x:.2} blocks/sample in X vs {smear_z:.2} in Z"
+        );
+    }
+
+    #[test]
+    fn grid_never_exceeds_the_cell_budget() {
+        for scale in [0.05, 0.1, 0.3, 0.5, 1.0, 2.5] {
+            let (_, _, grid_w, grid_h) = compute_grid_dims(&switzerland(), scale);
+            assert!(
+                grid_w * grid_h <= MAX_ELEVATION_GRID_CELLS,
+                "scale {scale} blew the cell budget: {grid_w}x{grid_h}"
+            );
+            assert!(grid_w >= 2 && grid_h >= 2);
+        }
+    }
+
+    #[test]
+    fn long_thin_bbox_respects_the_per_axis_cap() {
+        // 50188 x 5004 blocks: 251M cells, comfortably inside the 268M budget, yet 3x past
+        // the per-axis cap. Clamping on total cells alone would leave the full 50k-wide grid
+        // and triple the old peak allocation for this shape.
+        let strip = LLBBox::from_str("46.00,5.95,46.045,6.60").unwrap();
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(&strip, 1.0);
+        assert!(
+            world_w > MAX_ELEVATION_GRID_DIM,
+            "test bbox must actually exceed the per-axis cap, got {world_w}"
+        );
+        assert!(
+            (world_w * world_h) < MAX_ELEVATION_GRID_CELLS,
+            "bbox must sit inside the cell budget so this isolates the per-axis cap"
+        );
+        assert!(grid_w <= MAX_ELEVATION_GRID_DIM && grid_h <= MAX_ELEVATION_GRID_DIM);
+        assert!(grid_w * grid_h <= MAX_ELEVATION_GRID_CELLS);
+
+        // Capping must not reintroduce the smear: both axes still shrink by one factor.
+        let smear_x = world_w as f64 / grid_w as f64;
+        let smear_z = world_h as f64 / grid_h as f64;
+        assert!(
+            (smear_x - smear_z).abs() / smear_x < 0.01,
+            "sampling must stay isotropic, got {smear_x:.2} blocks/sample in X vs {smear_z:.2} in Z"
+        );
+    }
 }

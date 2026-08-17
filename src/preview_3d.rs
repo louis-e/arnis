@@ -94,10 +94,20 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
         crate::elevation::SourceMode::GlobalOnly
     };
 
-    // ground_level 0 keeps the meter->Y affine trivially invertible below.
-    let elevation =
-        fetch_elevation_data(&bbox, preview_scale, 0, false, 0, None, source_mode, false)
-            .map_err(|e| format!("Elevation fetch failed: {e}"))?;
+    // ground_level 0 keeps the meter->Y affine trivially invertible below; passing the same
+    // value as min_ground_level disables the terrain sink, which would break that invariant.
+    let elevation = fetch_elevation_data(
+        &bbox,
+        preview_scale,
+        0,
+        0,
+        false,
+        0,
+        None,
+        source_mode,
+        false,
+    )
+    .map_err(|e| format!("Elevation fetch failed: {e}"))?;
 
     let gw = elevation.width;
     let gh = elevation.height;

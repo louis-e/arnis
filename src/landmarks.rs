@@ -582,7 +582,7 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
     let clear_top = layer(model.max_y - landmark.ground_y + 1);
     // Writes past the world floor get clamped onto it rather than dropped, so a
     // dug-in model would smear its buried courses across bedrock. Skip them.
-    let world_floor = crate::world_editor::MIN_Y + 1;
+    let world_floor = crate::world_editor::min_y() + 1;
     let mut placed = 0usize;
 
     // Sampling the destination grid keeps it hole-free at any rotation or scale.
@@ -673,7 +673,7 @@ fn base_ground_y(editor: &WorldEditor, args: &Args, placement: &LandmarkPlacemen
     levels.sort_unstable();
     let base = levels[levels.len() / 2] + 1 + landmark.ground_offset;
     // One course above the lowest writable layer so the ground layer exists.
-    base.max(crate::world_editor::MIN_Y + 2)
+    base.max(crate::world_editor::min_y() + 2)
 }
 
 #[cfg(test)]

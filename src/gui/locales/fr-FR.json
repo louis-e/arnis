@@ -9,6 +9,7 @@
   "generation_process_started": "Processus de génération commencé.",
   "winter_mode": "Mode hiver",
   "world_scale": "Échelle du monde",
+  "world_scale_objects_skipped": "En dessous de 0,30, les bâtiments et les routes sont trop petits pour être rendus : seuls le relief et la couverture du sol sont générés.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Expiration du délai de remplissage (en secondes)",
   "ground_level": "Niveau du sol",

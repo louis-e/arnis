@@ -116,6 +116,7 @@ async function applyLocalization(localization) {
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
+    "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
@@ -777,10 +778,19 @@ function initSettings() {
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
 
-  // Update slider value display
-  slider.addEventListener("input", () => {
-    sliderValue.textContent = parseFloat(slider.value).toFixed(2);
-  });
+  // Mirrors OBJECT_SKIP_SCALE in src/args.rs
+  const OBJECT_SKIP_SCALE = 0.3;
+  const scaleObjectsNote = document.getElementById("scale-objects-note");
+
+  function refreshScaleDisplay() {
+    const value = parseFloat(slider.value);
+    sliderValue.textContent = value.toFixed(2);
+    if (scaleObjectsNote) {
+      scaleObjectsNote.style.display = value < OBJECT_SKIP_SCALE ? "" : "none";
+    }
+  }
+
+  slider.addEventListener("input", refreshScaleDisplay);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -788,6 +798,7 @@ function initSettings() {
     slider.dispatchEvent(new Event("input", { bubbles: true }));
     slider.dispatchEvent(new Event("change", { bubbles: true }));
   });
+  refreshScaleDisplay();
 
   // Game mode segmented control
   const gamemodeGroup = document.getElementById("gamemode-group");
@@ -1664,11 +1675,16 @@ let generationButtonEnabled = true;
  * @returns {Promise<void>}
  */
 async function startGeneration() {
-  try {
-    if (generationButtonEnabled === false) {
-      return;
-    }
+  if (generationButtonEnabled === false) {
+    return;
+  }
+  // Claim the guard before the first await. gui_create_world and gui_start_generation are
+  // both awaited round-trips, so leaving the claim until after them lets a second click
+  // through and starts a parallel run against the same process-global world floor.
+  generationButtonEnabled = false;
+  let started = false;
 
+  try {
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
       const bboxSelectionInfo = document.getElementById('bbox-selection-info');
       setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
@@ -1779,12 +1795,17 @@ async function startGeneration() {
 
     console.log("Generation process started.");
     resetEta();
-    generationButtonEnabled = false;
+    started = true;
     window.arnisPreview3D?.setGenerationRunning(true);
   } catch (error) {
     console.error("Error starting generation:", error);
-    generationButtonEnabled = true;
-    window.arnisPreview3D?.setGenerationRunning(false);
+  } finally {
+    // Hand the guard back unless a run actually started; once it has, the Done!/Error!
+    // progress message releases it instead.
+    if (!started) {
+      generationButtonEnabled = true;
+      window.arnisPreview3D?.setGenerationRunning(false);
+    }
   }
 }
 

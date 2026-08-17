@@ -17,26 +17,34 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Minecraft 1.21.1 data version for chunk format identification.
 pub(crate) const DATA_VERSION: i32 = 3955;
 
-/// Cached base chunk sections (grass at Y=-62)
-/// Computed once on first use and reused for all empty chunks
-static BASE_CHUNK_SECTIONS: OnceLock<Vec<Section>> = OnceLock::new();
+/// Cached base chunk sections (a grass plane at the terrain base).
+/// Keyed by that base: it sinks when the relief needs the extended floor, and a GUI process
+/// can generate several worlds in a row, so a plain OnceLock would go stale.
+static BASE_CHUNK_SECTIONS: Mutex<Option<(i32, Arc<Vec<Section>>)>> = Mutex::new(None);
 
-/// Get or create the cached base chunk sections
-fn get_base_chunk_sections() -> &'static [Section] {
-    BASE_CHUNK_SECTIONS.get_or_init(|| {
-        let mut chunk = ChunkToModify::default();
-        for x in 0..16 {
-            for z in 0..16 {
-                chunk.set_block(x, -62, z, GRASS_BLOCK);
-            }
+/// Get or create the cached base chunk sections for the current terrain base.
+fn get_base_chunk_sections() -> Arc<Vec<Section>> {
+    let base_y = crate::world_editor::base_chunk_y();
+    let mut cache = BASE_CHUNK_SECTIONS.lock().unwrap();
+    if let Some((cached_y, ref sections)) = *cache {
+        if cached_y == base_y {
+            return Arc::clone(sections);
         }
-        chunk.sections().collect()
-    })
+    }
+    let mut chunk = ChunkToModify::default();
+    for x in 0..16 {
+        for z in 0..16 {
+            chunk.set_block(x, base_y, z, GRASS_BLOCK);
+        }
+    }
+    let sections = Arc::new(chunk.sections().collect::<Vec<Section>>());
+    *cache = Some((base_y, Arc::clone(&sections)));
+    sections
 }
 
 #[cfg(feature = "gui")]
@@ -769,7 +777,10 @@ fn create_chunk_nbt(
         .map(|(i, s)| (s.y, i))
         .collect();
 
-    // Determine section range: start with vanilla range, expand to cover content
+    // Emitted section range: the vanilla span, expanded to cover content. Deliberately NOT
+    // the whole dimension — under the tall datapack that would be 254 sections per chunk
+    // instead of ~24. Minecraft slots each section by its own `Y` and fills the gaps with air,
+    // so a sparse list is fine.
     let mut min_section_y: i8 = -4; // vanilla min (Y=-64)
     let mut max_section_y: i8 = 19; // vanilla max (Y=319)
     for &y in section_map.keys() {
@@ -780,6 +791,15 @@ fn create_chunk_nbt(
             max_section_y = y;
         }
     }
+
+    // `yPos` and the heightmaps are dimension-relative and must NOT come from the emitted
+    // range: Minecraft sizes the heightmap bit width from the dimension's height and offsets
+    // every value from its floor. With the tall datapack installed but shallow relief, a
+    // content-derived span writes 9-bit maps against a -64 origin where the engine expects
+    // 12-bit against -2032 — usually a length mismatch it warns about and recomputes, but
+    // when the widths happen to agree it accepts the values silently, off by ~1968 blocks.
+    let (world_min_section, world_max_section) = crate::world_editor::world_section_range();
+    let world_height = ((world_max_section as i32 + 1) - world_min_section as i32) * 16;
 
     // Bake lighting only when requested; otherwise leave it for the engine to relight on load.
     let mut lighting = if bake_lighting {
@@ -817,9 +837,8 @@ fn create_chunk_nbt(
         })
         .collect();
 
-    // Compute heightmaps from block data
-    let total_height = ((max_section_y as i32 + 1) - min_section_y as i32) * 16;
-    let heightmaps = compute_heightmaps(&chunk.sections, min_section_y, total_height);
+    // Compute heightmaps from block data, against the dimension rather than the content.
+    let heightmaps = compute_heightmaps(&chunk.sections, world_min_section, world_height);
 
     // PostProcessing: one empty list per section
     let post_processing: Vec<Value> = (0..sections.len()).map(|_| Value::List(vec![])).collect();
@@ -828,7 +847,7 @@ fn create_chunk_nbt(
     let mut root = HashMap::from([
         ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
         ("xPos".to_string(), Value::Int(chunk.x_pos)),
-        ("yPos".to_string(), Value::Int(min_section_y as i32)),
+        ("yPos".to_string(), Value::Int(world_min_section as i32)),
         ("zPos".to_string(), Value::Int(chunk.z_pos)),
         (
             "Status".to_string(),
@@ -960,7 +979,8 @@ fn build_section_value(section: &Section) -> HashMap<String, Value> {
 /// Returns a Value::Compound with four heightmap types (MOTION_BLOCKING,
 /// MOTION_BLOCKING_NO_LEAVES, OCEAN_FLOOR, WORLD_SURFACE) as packed LongArrays.
 /// Bit width is determined dynamically based on total world height.
-/// Value for each column = (highest_non_air_Y - min_block_y + 1), or 0 if all air.
+/// Value for each column = (highest_non_air_Y - min_block_y + 1), or 0 if all air,
+/// clamped to the dimension height so a block outside it cannot wrap the packed mask.
 fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32) -> Value {
     // Precompute per-section metadata to avoid redundant work in the inner loop.
     enum SectionKind<'a> {
@@ -1028,7 +1048,7 @@ fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32
                     SectionKind::Uniform { solid: false } => continue,
                     SectionKind::Uniform { solid: true } | SectionKind::NoAir => {
                         let abs_y = (meta.y as i32) * 16 + 15;
-                        heights[col_idx] = abs_y - min_block_y + 1;
+                        heights[col_idx] = (abs_y - min_block_y + 1).clamp(0, total_height);
                         break 'outer;
                     }
                     SectionKind::Mixed {
@@ -1049,7 +1069,8 @@ fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32
                                     && meta.palette[palette_idx].name != "minecraft:air"
                                 {
                                     let abs_y = (meta.y as i32) * 16 + local_y as i32;
-                                    heights[col_idx] = abs_y - min_block_y + 1;
+                                    heights[col_idx] =
+                                        (abs_y - min_block_y + 1).clamp(0, total_height);
                                     break 'outer;
                                 }
                             }
@@ -1260,5 +1281,94 @@ mod tests {
             // 0xFF == two nibbles of 15 (full skylight)
             assert!(b.iter().all(|&v| v == -1));
         }
+    }
+}
+
+#[cfg(test)]
+mod dimension_bounds_tests {
+    use super::*;
+    use crate::block_definitions::STONE;
+    use crate::world_editor::{set_world_bounds, DEFAULT_MAX_Y, DEFAULT_MIN_Y};
+
+    /// Longs Minecraft allocates for a heightmap in a dimension `height` blocks tall:
+    /// ceil(log2(height + 1)) bits per value, 256 values, no value spanning two longs.
+    fn expected_longs(height: i32) -> usize {
+        let bits = ((height + 1) as f64).log2().ceil().max(9.0) as usize;
+        256_usize.div_ceil(64 / bits)
+    }
+
+    fn heightmap_longs(nbt: &HashMap<String, Value>) -> usize {
+        let Value::Compound(maps) = &nbt["Heightmaps"] else {
+            panic!("chunk has no Heightmaps")
+        };
+        let Value::LongArray(packed) = &maps["MOTION_BLOCKING"] else {
+            panic!("no MOTION_BLOCKING heightmap")
+        };
+        packed.len()
+    }
+
+    /// A chunk whose blocks all sit in the vanilla span, as shallow relief produces.
+    fn shallow_chunk() -> Chunk {
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -62, z, STONE);
+            }
+        }
+        Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        }
+    }
+
+    #[test]
+    fn heightmaps_follow_the_dimension_not_the_chunk_content() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let biome = Value::Compound(HashMap::new());
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        let nbt = create_chunk_nbt(&shallow_chunk(), false, &biome);
+        assert_eq!(nbt["yPos"], Value::Int(-4));
+        assert_eq!(heightmap_longs(&nbt), expected_longs(384));
+
+        // Tall datapack installed, but the relief never reaches the extended floor: the chunk
+        // still holds only vanilla-range sections, yet the engine sizes heightmaps for a
+        // 4064-block dimension and offsets every value from -2032.
+        set_world_bounds(-2032, 2031);
+        let nbt = create_chunk_nbt(&shallow_chunk(), false, &biome);
+        assert_eq!(nbt["yPos"], Value::Int(-127));
+        assert_eq!(
+            heightmap_longs(&nbt),
+            expected_longs(4064),
+            "heightmaps must be sized for the dimension, not the populated sections"
+        );
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn sections_stay_sparse_under_the_tall_datapack() {
+        // Spanning all 254 dimension sections per chunk would bloat every region file tenfold.
+        // Minecraft slots each section by its own Y and fills the gaps with air.
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+        let nbt = create_chunk_nbt(&shallow_chunk(), false, &Value::Compound(HashMap::new()));
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        assert_eq!(
+            sections.len(),
+            24,
+            "expected just the vanilla span, got {}",
+            sections.len()
+        );
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
     }
 }

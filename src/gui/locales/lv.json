@@ -9,6 +9,7 @@
   "generation_process_started": "Ģenerēšanas process uzsākts",
   "winter_mode": "Ziemas režīms",
   "world_scale": "Pasaules mērogs",
+  "world_scale_objects_skipped": "Zem 0,30 ēkas un ceļi ir pārāk mazi, lai tos attēlotu, tāpēc tiek ģenerēts tikai reljefs un zemes segums.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Aizpildes noildze (sek.)",
   "ground_level": "Zemes līmenis",

@@ -5,10 +5,120 @@
 
 use crate::block_definitions::*;
 
-/// Minimum Y coordinate in Minecraft (1.18+)
-pub const MIN_Y: i32 = -64;
-/// Lowest section index covering MIN_Y (-64 / 16).
-pub const MIN_SECTION_Y: i8 = (MIN_Y / 16) as i8;
+use std::sync::atomic::{AtomicI32, Ordering as MemOrdering};
+
+/// Default (vanilla 1.18+) world floor.
+pub const DEFAULT_MIN_Y: i32 = -64;
+
+/// Blocks of solid ground kept under the local surface once the floor is extended. Without
+/// this, an extended floor would make every bedrock/fill/ore column ~4000 blocks deep.
+pub const TERRAIN_FLOOR_DEPTH: i32 = 64;
+
+/// Default (vanilla 1.18+) world ceiling. Distinct from `MAX_Y`, which is the highest Y the
+/// editor will store; this is the top of the dimension the engine is actually told about.
+pub const DEFAULT_MAX_Y: i32 = 319;
+
+static WORLD_MIN_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
+static WORLD_MAX_Y: AtomicI32 = AtomicI32::new(DEFAULT_MAX_Y);
+
+/// Serialises tests that mutate the world-bounds globals against tests that read them.
+#[cfg(test)]
+pub(crate) static FLOOR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Set the world bounds once, at startup, from the CLI args.
+///
+/// These must describe the dimension the engine is told about — vanilla, or the tall
+/// datapack — because chunk serialization sizes heightmaps from the span between them and
+/// offsets every value from the floor. Set as a pair so the two cannot drift apart.
+///
+/// Asserted in release too: bounds off a section boundary silently corrupt every section
+/// index derived from them, which is far worse than failing on the spot. Runs once per world.
+pub fn set_world_bounds(min: i32, max: i32) {
+    assert_eq!(
+        min.rem_euclid(16),
+        0,
+        "world floor must be a multiple of 16"
+    );
+    assert_eq!(max.rem_euclid(16), 15, "world ceiling must end a section");
+    assert!(min < max, "world floor must sit below the ceiling");
+    WORLD_MIN_Y.store(min, MemOrdering::Relaxed);
+    WORLD_MAX_Y.store(max, MemOrdering::Relaxed);
+}
+
+/// Lowest legal Y in this world: -64, or the pack-extended floor (-2032 Java / -512 Bedrock).
+#[inline(always)]
+pub fn min_y() -> i32 {
+    WORLD_MIN_Y.load(MemOrdering::Relaxed)
+}
+
+/// Highest legal Y in this world: 319, or the pack-extended ceiling (2031 Java).
+#[inline(always)]
+pub fn world_max_y() -> i32 {
+    WORLD_MAX_Y.load(MemOrdering::Relaxed)
+}
+
+/// Section span of the configured dimension, as `(min_section, max_section)`.
+///
+/// Chunk serialization must write `yPos` and heightmaps against this, never against whichever
+/// sections a chunk happens to contain: Minecraft sizes the heightmap bit width from the
+/// dimension's height and offsets each value from its floor. A content-derived span usually
+/// mismatches the expected array length — the engine warns and recomputes — but when the two
+/// coincidentally agree it accepts the values silently, off by the difference in origin.
+pub fn world_section_range() -> (i8, i8) {
+    ((min_y() >> 4) as i8, (world_max_y() >> 4) as i8)
+}
+
+/// Lowest section index covering `min_y()`. Callers derive their own bottom section from the
+/// terrain floor instead, so this only serves the tests.
+#[cfg(test)]
+pub fn min_section_y() -> i8 {
+    (min_y() >> 4) as i8
+}
+
+/// Default terrain base (the vanilla -64 floor plus its bedrock layer).
+pub const DEFAULT_GROUND_LEVEL: i32 = -62;
+
+static TERRAIN_FLOOR_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
+
+/// Set the terrain floor from the terrain base, once the elevation scaler has settled it.
+///
+/// This is a WORLD CONSTANT, not a per-column value: bedrock has to be a flat plane. Anchoring
+/// it to each column's own surface would make it a wavy shell with void underneath.
+///
+/// It sits `TERRAIN_FLOOR_DEPTH` below the base (the lowest point terrain can reach), clamped
+/// to the world floor. With the vanilla floor that clamp always wins, so this is exactly the
+/// old constant -64 and nothing changes. With an extended floor it keeps the filled column a
+/// bounded depth instead of ~4000 blocks, and keeps the chunk's section span tight.
+///
+/// Snapped down to a section boundary, which the old `MIN_Y = -64` was by construction. The
+/// `--fillground` fast path bulk-fills whole sections from this floor's section and lets the
+/// bedrock plane overwrite the bottom layer; an unaligned floor (base -62 gives -126) would
+/// leave the rest of that section, here Y -128 and -127, as stone underneath the bedrock.
+pub fn set_terrain_floor_y(ground_level: i32) {
+    let floor = min_y().max(ground_level.saturating_sub(TERRAIN_FLOOR_DEPTH));
+    let aligned = floor.div_euclid(16) * 16;
+    TERRAIN_FLOOR_Y.store(aligned.max(min_y()), MemOrdering::Relaxed);
+}
+
+/// Y of the bedrock plane, and the bottom of `--fillground` / ore generation.
+#[inline(always)]
+pub fn terrain_floor_y() -> i32 {
+    TERRAIN_FLOOR_Y.load(MemOrdering::Relaxed)
+}
+
+static BASE_CHUNK_Y: AtomicI32 = AtomicI32::new(DEFAULT_GROUND_LEVEL);
+
+/// Y of the grass plane used for out-of-bbox filler chunks. Follows the terrain base, which
+/// sinks when the relief needs the extended floor; otherwise the filler would be a plane
+/// floating up to ~2000 blocks above the terrain it is supposed to border.
+pub fn set_base_chunk_y(y: i32) {
+    BASE_CHUNK_Y.store(y, MemOrdering::Relaxed);
+}
+
+#[inline]
+pub fn base_chunk_y() -> i32 {
+    BASE_CHUNK_Y.load(MemOrdering::Relaxed)
+}
 /// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
 /// Vanilla limit is 319, but data packs can extend this up to 2031.
 /// The world editor supports the full range; the elevation system controls
@@ -460,7 +570,7 @@ impl ChunkToModify {
     #[inline]
     pub fn get_block(&self, x: u8, y: i32, z: u8) -> Option<Block> {
         // Clamp Y to valid Minecraft range to prevent TryFromIntError
-        let y = y.clamp(MIN_Y, MAX_Y);
+        let y = y.clamp(min_y(), MAX_Y);
         let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.get(&section_idx)?;
         section.get_block(x, (y & 15) as u8, z)
@@ -469,7 +579,7 @@ impl ChunkToModify {
     #[inline]
     pub fn set_block(&mut self, x: u8, y: i32, z: u8, block: Block) {
         // Clamp Y to valid Minecraft range to prevent TryFromIntError
-        let y = y.clamp(MIN_Y, MAX_Y);
+        let y = y.clamp(min_y(), MAX_Y);
         let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.entry(section_idx).or_default();
         section.set_block(x, (y & 15) as u8, z, block);
@@ -484,7 +594,7 @@ impl ChunkToModify {
         block_with_props: BlockWithProperties,
     ) {
         // Clamp Y to valid Minecraft range to prevent TryFromIntError
-        let y = y.clamp(MIN_Y, MAX_Y);
+        let y = y.clamp(min_y(), MAX_Y);
         let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.entry(section_idx).or_default();
         section.set_block_with_properties(x, (y & 15) as u8, z, block_with_props);
@@ -607,7 +717,7 @@ impl WorldToModify {
         // Intersect with the world bounds. Clamping each end on its own would fold
         // a fully out-of-world range onto a boundary block and report a hit the
         // caller never asked for.
-        let min_y = min_y.max(MIN_Y);
+        let min_y = min_y.max(crate::world_editor::min_y());
         let max_y = max_y.min(MAX_Y);
         if min_y > max_y {
             return None;
@@ -695,7 +805,7 @@ impl WorldToModify {
             .entry((chunk_x & 31, chunk_z & 31))
             .or_default();
 
-        let y = y.clamp(MIN_Y, MAX_Y);
+        let y = y.clamp(min_y(), MAX_Y);
         let section_idx: i8 = (y >> 4) as i8;
         let section = chunk.sections.entry(section_idx).or_default();
 
@@ -740,8 +850,8 @@ impl WorldToModify {
         let local_x = (x & 15) as u8;
         let local_z = (z & 15) as u8;
 
-        let y_min = y_min.clamp(MIN_Y, MAX_Y);
-        let y_max = y_max.clamp(MIN_Y, MAX_Y);
+        let y_min = y_min.clamp(min_y(), MAX_Y);
+        let y_max = y_max.clamp(min_y(), MAX_Y);
 
         for y in y_min..=y_max {
             let section_idx: i8 = (y >> 4) as i8;
@@ -767,10 +877,11 @@ impl WorldToModify {
         &mut self,
         chunk_x: i32,
         chunk_z: i32,
+        section_y_min: i8,
         section_y_max: i8,
         block: Block,
     ) -> bool {
-        if section_y_max < MIN_SECTION_Y {
+        if section_y_max < section_y_min {
             return true;
         }
         let region_x = chunk_x >> 5;
@@ -782,7 +893,7 @@ impl WorldToModify {
             .or_default();
 
         let mut all_clean = true;
-        for section_y in MIN_SECTION_Y..=section_y_max {
+        for section_y in section_y_min..=section_y_max {
             let section = chunk.sections.entry(section_y).or_default();
             let is_empty = section.properties.is_empty()
                 && matches!(&section.storage, BlockStorage::Uniform(b) if *b == AIR);
@@ -1265,13 +1376,13 @@ mod tests {
     #[test]
     fn bulk_fill_empty_chunk_all_clean() {
         let mut world = WorldToModify::default();
-        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, min_section_y(), -2, STONE);
         assert!(all_clean, "fresh chunk should report all sections clean");
 
         let region = world.get_region(0, 0).unwrap();
         let chunk = region.get_chunk(0, 0).unwrap();
         // Sections -4, -3, -2 must now exist as Uniform(STONE)
-        for y in MIN_SECTION_Y..=-2 {
+        for y in min_section_y()..=-2 {
             let section = chunk
                 .sections
                 .get(&y)
@@ -1295,7 +1406,7 @@ mod tests {
         // to simulate e.g. a bridge pier.
         world.set_block_if_absent(0, -20, 0, COBBLESTONE);
 
-        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, min_section_y(), -2, STONE);
         assert!(
             !all_clean,
             "should return false because section -2 was occupied"
@@ -1330,7 +1441,8 @@ mod tests {
     #[test]
     fn bulk_fill_below_min_section_is_noop() {
         let mut world = WorldToModify::default();
-        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, MIN_SECTION_Y - 1, STONE);
+        let all_clean =
+            world.bulk_fill_chunk_sections_below(0, 0, min_section_y(), min_section_y() - 1, STONE);
         assert!(all_clean, "below-min request should be vacuously clean");
         // No region should have been created
         assert!(world.get_region(0, 0).is_none());
@@ -1343,11 +1455,11 @@ mod tests {
         // false) but leaves them in their correct final state — calling
         // bulk_fill twice is harmless.
         let mut world = WorldToModify::default();
-        assert!(world.bulk_fill_chunk_sections_below(0, 0, -2, STONE));
-        let second = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(world.bulk_fill_chunk_sections_below(0, 0, min_section_y(), -2, STONE));
+        let second = world.bulk_fill_chunk_sections_below(0, 0, min_section_y(), -2, STONE);
         assert!(!second, "second call sees Uniform(STONE) as occupied");
         let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
-        for y in MIN_SECTION_Y..=-2 {
+        for y in min_section_y()..=-2 {
             let section = chunk.sections.get(&y).unwrap();
             assert!(
                 matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
@@ -1436,8 +1548,10 @@ mod tests {
 
     #[test]
     fn highest_block_between_rejects_ranges_outside_the_world() {
+        // The clamp reads the world floor, so hold it at the default for the assertions.
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut world = WorldToModify::default();
-        world.set_block_if_absent(3, MIN_Y, 5, STONE);
+        world.set_block_if_absent(3, DEFAULT_MIN_Y, 5, STONE);
         world.set_block_if_absent(3, MAX_Y, 5, COBBLESTONE);
 
         // Wholly outside the world: no Y in the requested range can answer.
@@ -1446,19 +1560,101 @@ mod tests {
             None
         );
         assert_eq!(
-            world.highest_block_between(3, 5, MIN_Y - 50, MIN_Y - 1),
+            world.highest_block_between(3, 5, DEFAULT_MIN_Y - 50, DEFAULT_MIN_Y - 1),
             None
         );
         // Inverted ranges stay rejected.
         assert_eq!(world.highest_block_between(3, 5, 90, 60), None);
         // Partial overlap is intersected with the world, not rejected.
         assert_eq!(
-            world.highest_block_between(3, 5, MIN_Y - 50, MIN_Y),
-            Some(MIN_Y)
+            world.highest_block_between(3, 5, DEFAULT_MIN_Y - 50, DEFAULT_MIN_Y),
+            Some(DEFAULT_MIN_Y)
         );
         assert_eq!(
             world.highest_block_between(3, 5, MAX_Y, MAX_Y + 50),
             Some(MAX_Y)
         );
+    }
+}
+
+#[cfg(test)]
+mod terrain_floor_tests {
+    use super::*;
+
+    fn with_floor<T>(world_floor: i32, base: i32, f: impl FnOnce() -> T) -> T {
+        // Mutates process-global state, so it runs under the shared floor lock and restores it.
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // An extended floor always comes with the tall datapack's ceiling.
+        let ceiling = if world_floor < DEFAULT_MIN_Y {
+            2031
+        } else {
+            DEFAULT_MAX_Y
+        };
+        set_world_bounds(world_floor, ceiling);
+        set_terrain_floor_y(base);
+        let out = f();
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        set_terrain_floor_y(DEFAULT_GROUND_LEVEL);
+        out
+    }
+
+    #[test]
+    fn vanilla_floor_is_unchanged() {
+        // The vanilla clamp must always win, so bedrock stays exactly where it always was.
+        with_floor(DEFAULT_MIN_Y, DEFAULT_GROUND_LEVEL, || {
+            assert_eq!(terrain_floor_y(), -64);
+        });
+    }
+
+    #[test]
+    fn bedrock_is_flat_and_bounded_under_an_extended_floor() {
+        // Switzerland at scale 0.1: floor -2032, base stays at -62 (the relief fits).
+        // The bedrock plane must be a CONSTANT a bounded depth below the base -- not a
+        // per-column shell tracking the terrain, and not 2000 blocks down at the world floor.
+        with_floor(-2032, -62, || {
+            let floor = terrain_floor_y();
+            // At least TERRAIN_FLOOR_DEPTH under the base, snapped down to a section: -126
+            // rounds to -128.
+            assert_eq!(floor, -128);
+            assert!(floor <= -62 - TERRAIN_FLOOR_DEPTH);
+            // It is a constant: reading it never depends on any column's surface Y.
+            assert_eq!(terrain_floor_y(), floor);
+            assert!(
+                floor > -2032,
+                "must not sit at the world floor when the base is high"
+            );
+        });
+    }
+
+    #[test]
+    fn terrain_floor_always_lands_on_a_section_boundary() {
+        // The --fillground fast path bulk-fills whole sections starting at this floor and lets
+        // bedrock overwrite the bottom layer. Off a boundary, the rest of that bottom section
+        // stays stone *under* the bedrock plane. Vanilla's -64 was aligned by construction;
+        // every extended-floor base has to be too.
+        for (world_floor, base) in [
+            (DEFAULT_MIN_Y, DEFAULT_GROUND_LEVEL),
+            (DEFAULT_MIN_Y, 100),
+            (-2032, -62),
+            (-2032, -2030),
+            (-2032, 0),
+            (-2032, 317),
+        ] {
+            let floor = with_floor(world_floor, base, terrain_floor_y);
+            assert_eq!(
+                floor.rem_euclid(16),
+                0,
+                "floor {floor} for base {base} is not on a section boundary"
+            );
+            assert!(floor >= world_floor, "floor {floor} fell through the world");
+        }
+    }
+
+    #[test]
+    fn sunk_base_puts_bedrock_on_the_world_floor() {
+        // Scale 1.0 with the datapack: the base sinks to -2030, so the floor clamps to -2032.
+        with_floor(-2032, -2030, || {
+            assert_eq!(terrain_floor_y(), -2032);
+        });
     }
 }

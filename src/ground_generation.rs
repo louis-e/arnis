@@ -30,7 +30,7 @@ use crate::ground::Ground;
 use crate::land_cover;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
-use crate::world_editor::MIN_Y;
+use crate::world_editor::{min_y, terrain_floor_y};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
@@ -263,7 +263,7 @@ pub fn generate_ground_region(
             // Uniform(STONE) so the per-column loop only walks the boundary
             // section. Gated on full bbox coverage so out-of-bbox columns
             // don't get stone underneath.
-            let mut column_fill_y_min = crate::world_editor::MIN_Y + 1;
+            let mut column_fill_y_min = terrain_floor_y() + 1;
             if args.fillground {
                 let chunk_fully_in_bbox = chunk_min_x == chunk_x << 4
                     && chunk_max_x == (chunk_x << 4) + 15
@@ -285,13 +285,30 @@ pub fn generate_ground_region(
                     } else {
                         args.ground_level
                     };
+                    // Compare in i32: `as i8` on a section index below -128 wraps positive,
+                    // which would pass the ordering check and stone-fill the whole column.
+                    // Bounded below by the terrain floor, so an extended world floor does not
+                    // stone-fill ~127 sections per chunk down to Y=-2032.
+                    //
+                    // This fills WHOLE sections, so it relies on the terrain floor sitting on a
+                    // section boundary (set_terrain_floor_y snaps it). Otherwise the part of the
+                    // bottom section below the floor would be stone under the bedrock plane.
+                    debug_assert_eq!(terrain_floor_y().rem_euclid(16), 0);
+                    let bottom_section = terrain_floor_y().div_euclid(16);
                     // section_top = section_y*16 + 15 <= min_ground_y - 3
-                    let top_buried = (min_ground_y - 18).div_euclid(16) as i8;
-                    if top_buried >= crate::world_editor::MIN_SECTION_Y {
-                        let all_clean = editor
-                            .bulk_fill_chunk_sections_below(chunk_x, chunk_z, top_buried, STONE);
+                    let top_section = (min_ground_y - 18).div_euclid(16);
+                    let in_i8 = (i8::MIN as i32..=i8::MAX as i32).contains(&bottom_section)
+                        && (i8::MIN as i32..=i8::MAX as i32).contains(&top_section);
+                    if in_i8 && top_section >= bottom_section {
+                        let all_clean = editor.bulk_fill_chunk_sections_below(
+                            chunk_x,
+                            chunk_z,
+                            bottom_section as i8,
+                            top_section as i8,
+                            STONE,
+                        );
                         if all_clean {
-                            column_fill_y_min = (top_buried as i32 + 1) * 16;
+                            column_fill_y_min = (top_section + 1) * 16;
                         }
                     }
                 }
@@ -441,10 +458,10 @@ pub fn generate_ground_region(
                         if place_esa_water {
                             // Pre-paint; carve_lc_water_pass later overwrites with depth.
                             editor.set_block_if_absent_absolute(WATER, x, water_y, z);
-                            if water_y - 1 > MIN_Y {
+                            if water_y - 1 > min_y() {
                                 editor.set_block_if_absent_absolute(SAND, x, water_y - 1, z);
                             }
-                            if water_y - 2 > MIN_Y {
+                            if water_y - 2 > min_y() {
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
@@ -789,8 +806,8 @@ pub fn generate_ground_region(
                                     2
                                 };
                                 let y_max = ground_y - 1;
-                                if y_max > MIN_Y {
-                                    let y_min = (ground_y - depth).max(MIN_Y + 1);
+                                if y_max > min_y() {
+                                    let y_min = (ground_y - depth).max(min_y() + 1);
                                     editor.fill_column_absolute(
                                         under_block,
                                         x,
@@ -805,7 +822,7 @@ pub fn generate_ground_region(
                                 // Under OSM water: find bottom of water column,
                                 // place sand/gravel/clay floor + sandstone below.
                                 let mut water_bottom = ground_y;
-                                while water_bottom - 1 > MIN_Y
+                                while water_bottom - 1 > min_y()
                                     && editor.check_for_block_absolute(
                                         x,
                                         water_bottom - 1,
@@ -817,7 +834,7 @@ pub fn generate_ground_region(
                                     water_bottom -= 1;
                                 }
                                 let floor_y = water_bottom - 1;
-                                if floor_y > MIN_Y {
+                                if floor_y > min_y() {
                                     let h = land_cover::coord_hash(x, z);
                                     let floor_block = match h % 5 {
                                         0 => GRAVEL,
@@ -825,7 +842,7 @@ pub fn generate_ground_region(
                                         _ => SAND,
                                     };
                                     editor.set_block_if_absent_absolute(floor_block, x, floor_y, z);
-                                    if floor_y - 1 > MIN_Y {
+                                    if floor_y - 1 > min_y() {
                                         editor.set_block_if_absent_absolute(
                                             SANDSTONE,
                                             x,
@@ -897,7 +914,16 @@ pub fn generate_ground_region(
                                             && ground_allows_trees
                                             && !tunnel_footprint.contains(x, z) =>
                                     {
-                                        let choice = rng.random_range(0..30);
+                                        // Micro trees cover ~5 blocks instead of ~80, so the
+                                        // normal rate would read as bare ground from altitude.
+                                        let tree_rate = if args.scale
+                                            < crate::element_processing::tree::MICRO_TREE_MAX_SCALE
+                                        {
+                                            4
+                                        } else {
+                                            30
+                                        };
+                                        let choice = rng.random_range(0..tree_rate);
                                         if choice == 0 && !canopy_covered {
                                             tree::Tree::create(
                                                 editor,
@@ -1179,7 +1205,7 @@ pub fn generate_ground_region(
                             }
                             let depth = (ground_y - min_neighbor_y + 1).clamp(2, 64);
                             let y_max = ground_y - 1;
-                            let y_min = (ground_y - depth).max(MIN_Y + 1);
+                            let y_min = (ground_y - depth).max(min_y() + 1);
                             if y_min <= y_max {
                                 editor.fill_column_absolute(STONE, x, z, y_min, y_max, true);
                             }
@@ -1267,8 +1293,15 @@ pub fn generate_ground_region(
                             true, // skip_existing: don't overwrite blocks placed by element processing
                         );
                     }
-                    // Generate a bedrock level at MIN_Y
-                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+                    // Bedrock is a flat plane at the terrain floor, as in vanilla.
+                    editor.set_block_absolute(
+                        BEDROCK,
+                        x,
+                        terrain_floor_y(),
+                        z,
+                        None,
+                        Some(&[BEDROCK]),
+                    );
 
                     block_counter += 1;
                     #[allow(clippy::manual_is_multiple_of)]

@@ -137,6 +137,14 @@ fn run_cli() {
         std::process::exit(1);
     }
 
+    // Open up the world floor before anything touches the editor. The bundled packs already
+    // grant the full engine range; without this the lower half of it goes unused. The ceiling
+    // goes with it: chunk serialization needs the whole dimension span, not just the floor.
+    world_editor::set_world_bounds(
+        ground::extended_min_y_for(&args),
+        ground::world_top_y_for(&args),
+    );
+
     if args.legacy_terrain {
         eprintln!(
             "{} --terrain is deprecated: terrain is now on by default. \
@@ -300,8 +308,16 @@ fn run_cli() {
     // its own internal Bench for the block-placement phases.
     let mut bench = bench::Bench::new(args.benchmark);
 
-    // Terrain-only skips every object source: no Overpass query, no Overture footprints.
-    if skip_objects {
+    // Terrain-only (or a scale too small to render objects) skips every object source:
+    // no Overpass query, no Overture footprints. Land cover is still fetched.
+    if args.skip_objects_due_to_scale() {
+        println!(
+            "{} Scale {:.2} is below {:.2}: skipping OpenStreetMap and Overture objects (terrain and land cover only)",
+            "[1/7]".bold(),
+            args.scale,
+            args::OBJECT_SKIP_SCALE
+        );
+    } else if skip_objects {
         println!(
             "{} Terrain-only mode: skipping OpenStreetMap and Overture objects",
             "[1/7]".bold()

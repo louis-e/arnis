@@ -16,8 +16,11 @@ mod luanti;
 pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
+pub use common::{
+    base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
+    world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
+};
 pub(crate) use common::{BlockStorage, RegionToModify, SectionToModify, MAX_BLOCK_ID};
-pub use common::{MIN_SECTION_Y, MIN_Y};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -367,6 +370,11 @@ impl<'a> WorldEditor<'a> {
     pub fn set_projection_info(&mut self, projection: &str, scale: f64) {
         self.projection = projection.to_string();
         self.scale = scale;
+    }
+
+    /// World scale in blocks per meter.
+    pub fn scale(&self) -> f64 {
+        self.scale
     }
 
     /// Override the ground lookup origin for tile editors.
@@ -1945,6 +1953,7 @@ impl<'a> WorldEditor<'a> {
         &mut self,
         chunk_x: i32,
         chunk_z: i32,
+        section_y_min: i8,
         section_y_max: i8,
         block: Block,
     ) -> bool {
@@ -1952,8 +1961,13 @@ impl<'a> WorldEditor<'a> {
         if self.is_region_flushed(chunk_x << 4, chunk_z << 4) {
             return false;
         }
-        self.world
-            .bulk_fill_chunk_sections_below(chunk_x, chunk_z, section_y_max, block)
+        self.world.bulk_fill_chunk_sections_below(
+            chunk_x,
+            chunk_z,
+            section_y_min,
+            section_y_max,
+            block,
+        )
     }
 
     /// Saves all changes made to the world by writing to the appropriate format.

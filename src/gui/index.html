@@ -289,9 +289,12 @@
             <span class="tooltip-icon" data-tooltip="Scale factor for the generated world (1.0 = real-world scale)">?</span>
           </label>
           <div class="settings-control">
-            <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
+            <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.05" max="2.5" step="0.05" value="1">
             <span id="slider-value">1.00</span>
           </div>
+        </div>
+        <div class="settings-row" id="scale-objects-note" style="display: none;">
+          <span data-localize="world_scale_objects_skipped">Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.</span>
         </div>
 
         <!-- Rotation Angle -->
