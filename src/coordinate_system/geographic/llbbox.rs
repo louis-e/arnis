@@ -30,12 +30,22 @@ impl LLBBox {
     }
 
     pub fn from_str(s: &str) -> Result<Self, String> {
-        let [min_lat, min_lng, max_lat, max_lng]: [f64; 4] = s
-            .split([',', ' '])
-            .map(|e| e.parse().unwrap())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        // Empty fields are skipped so "a, b, c, d" parses like "a,b,c,d".
+        let mut values: Vec<f64> = Vec::with_capacity(4);
+        for field in s.split([',', ' ']).filter(|f| !f.is_empty()) {
+            let value: f64 = field
+                .parse()
+                .map_err(|_| format!("Invalid LLBBox: '{field}' is not a number"))?;
+            if !value.is_finite() {
+                return Err(format!("Invalid LLBBox: '{field}' is not a finite number"));
+            }
+            values.push(value);
+        }
+
+        let [min_lat, min_lng, max_lat, max_lng]: [f64; 4] =
+            values.try_into().map_err(|v: Vec<f64>| {
+                format!("Invalid LLBBox: expected 4 values, got {}", v.len())
+            })?;
 
         // So, the GUI does Lat/Lng and no GDAL (comma-sep values), which is the exact opposite of
         // what bboxfinder.com does. :facepalm: (bboxfinder is wrong here: Lat comes first!)
@@ -113,6 +123,26 @@ mod tests {
         };
 
         assert_eq!(bbox_result.unwrap(), arnis_correct);
+    }
+
+    #[test]
+    fn test_from_str_comma_space() {
+        const ARNIS_MIXED_STR: &str = "9.927928, 54.627053, 9.937563, 54.634902";
+
+        assert!(LLBBox::from_str(ARNIS_MIXED_STR).is_ok());
+    }
+
+    #[test]
+    fn test_from_str_rejects_bad_input_without_panicking() {
+        // Every one of these used to panic in `from_str`.
+        assert!(LLBBox::from_str("").is_err());
+        assert!(LLBBox::from_str("   ").is_err());
+        assert!(LLBBox::from_str(",,,").is_err());
+        assert!(LLBBox::from_str("9.927928,54.627053,9.937563").is_err());
+        assert!(LLBBox::from_str("9.927928,54.627053,9.937563,54.634902,1.0").is_err());
+        assert!(LLBBox::from_str("9.927928,abc,9.937563,54.634902").is_err());
+        assert!(LLBBox::from_str("nan,nan,nan,nan").is_err());
+        assert!(LLBBox::from_str("-inf,0,inf,1").is_err());
     }
 
     #[test]

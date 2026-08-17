@@ -1305,12 +1305,22 @@ fn gui_start_generation(
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
                 let fetch_result =
                     retrieve_data::fetch_data_from_overpass(bbox, args.debug, "requests", None);
-                (
-                    fetch_result,
-                    overture_handle.join().expect("Overture fetch panicked"),
-                    ground_handle.join().expect("Terrain fetch panicked"),
-                )
+                // A panicked worker already reported itself through the panic hook.
+                // Overture is supplementary, so drop it and keep going; terrain is
+                // not, so hand the failure back instead of taking the app down.
+                let overture_data = overture_handle.join().unwrap_or_else(|_| {
+                    eprintln!("Overture fetch failed, continuing without Overture buildings.");
+                    overture::OvertureData::default()
+                });
+                (fetch_result, overture_data, ground_handle.join().ok())
             });
+
+            let Some(ground) = ground else {
+                let error_msg = "Terrain fetch failed unexpectedly".to_string();
+                eprintln!("{error_msg}");
+                emit_gui_error(&error_msg);
+                return Err(error_msg);
+            };
 
             // Run world generation
             match fetch_result {

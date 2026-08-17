@@ -31,6 +31,7 @@ mod map_preview;
 mod map_renderer;
 mod map_transformation;
 mod models_3d;
+mod net;
 mod ore_generation;
 mod osm_parser;
 mod overture;
@@ -79,7 +80,22 @@ mod progress {
     }
 }
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
+use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+/// Reattach to the console this process was launched from, so terminal output
+/// works in both CLI and GUI runs.
+///
+/// Deliberately no `FreeConsole` first: a windows-subsystem process starts with
+/// no console of its own, so `AttachConsole` alone reaches the parent terminal.
+/// Freeing first can only invalidate the inherited handles, and a `FreeConsole`
+/// that succeeds followed by a reattach that fails leaves stdout/stderr pointing
+/// at a dead console, which turns every later `println!` into a panic.
+#[cfg(target_os = "windows")]
+fn attach_parent_console() {
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
 
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
@@ -336,10 +352,23 @@ fn run_cli() {
         };
         bench.report("osm_fetch", t.elapsed());
 
-        let (overture_data, overture_dur) =
-            overture_handle.join().expect("Overture fetch panicked");
+        // A panicked worker already reported itself through the panic hook, so
+        // degrade instead of taking the whole run down with it.
+        let (overture_data, overture_dur) = overture_handle.join().unwrap_or_else(|_| {
+            eprintln!(
+                "{} Overture fetch failed, continuing without Overture buildings.",
+                "Warning:".yellow().bold()
+            );
+            (
+                overture::OvertureData::default(),
+                std::time::Duration::ZERO,
+            )
+        });
         bench.report("overture_fetch", overture_dur);
-        let (ground, ground_dur) = ground_handle.join().expect("Terrain fetch panicked");
+        let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {
+            eprintln!("{} Terrain fetch failed.", "Error:".red().bold());
+            std::process::exit(1);
+        });
         bench.report("terrain_total", ground_dur);
 
         (raw_data, overture_data, ground)
@@ -556,13 +585,8 @@ fn run_cli() {
 }
 
 fn main() {
-    // If on Windows, free and reattach to the parent console when using as a CLI tool
-    // Either of these can fail, but if they do it is not an issue, so the return value is ignored
     #[cfg(target_os = "windows")]
-    unsafe {
-        let _ = FreeConsole();
-        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
-    }
+    attach_parent_console();
 
     // Only run CLI mode if the user supplied args.
     #[cfg(feature = "gui")]
