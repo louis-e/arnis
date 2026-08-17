@@ -914,6 +914,15 @@ pub fn parse_osm_data(
         }
     }
 
+    // A way whose node list is not fully resolvable is silently shortened below.
+    // For a road that only bends it; for an area it breaks the ring, and an
+    // unclosed ring flood-fills to nothing, so the whole polygon disappears
+    // without a word. Counted here so an incomplete source is reported once
+    // rather than discovered by looking at the finished world.
+    let mut unresolved_node_refs: u64 = 0;
+    let mut total_node_refs: u64 = 0;
+    let mut ways_missing_nodes: u64 = 0;
+
     // Second pass: process ways and clip them to bbox
     for element in data.ways {
         if ways_map.contains_key(&element.id) {
@@ -921,10 +930,16 @@ pub fn parse_osm_data(
         }
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
+            let before = unresolved_node_refs;
             for &node_id in node_ids {
-                if let Some(node) = nodes_map.get(&node_id) {
-                    nodes.push(node.clone());
+                total_node_refs += 1;
+                match nodes_map.get(&node_id) {
+                    Some(node) => nodes.push(node.clone()),
+                    None => unresolved_node_refs += 1,
                 }
+            }
+            if unresolved_node_refs > before {
+                ways_missing_nodes += 1;
             }
         }
 
@@ -954,6 +969,22 @@ pub fn parse_osm_data(
         };
 
         processed_elements.push(ProcessedElement::Way(processed));
+    }
+
+    if unresolved_node_refs > 0 {
+        let percent = unresolved_node_refs as f64 / total_node_refs.max(1) as f64 * 100.0;
+        eprintln!(
+            "{}",
+            format!(
+                "Warning: {unresolved_node_refs} of {total_node_refs} way node references \
+                 ({percent:.1}%) could not be resolved, affecting {ways_missing_nodes} ways. \
+                 Buildings and other areas that lost a corner cannot be filled and will not \
+                 appear in the world. Expected near the edges of a clipped local file; from \
+                 the API it means the response was incomplete."
+            )
+            .yellow()
+            .bold()
+        );
     }
 
     // Third pass: process relations and clip member ways

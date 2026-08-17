@@ -66,6 +66,16 @@ impl LLBBox {
             && llpoint.lng() >= self.min().lng()
             && llpoint.lng() <= self.max().lng()
     }
+
+    /// Ground area in km², on an equirectangular approximation taken at the
+    /// midpoint latitude. Good enough for the size checks that use it; nothing
+    /// here depends on it being an exact geodesic area.
+    pub fn area_km2(&self) -> f64 {
+        let mid_lat = ((self.min().lat() + self.max().lat()) / 2.0).to_radians();
+        let width_m = (self.max().lng() - self.min().lng()) * 111_320.0 * mid_lat.cos();
+        let height_m = (self.max().lat() - self.min().lat()) * 111_320.0;
+        (width_m * height_m).abs() / 1_000_000.0
+    }
 }
 
 #[cfg(test)]
