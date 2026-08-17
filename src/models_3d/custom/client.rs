@@ -1,9 +1,10 @@
 //! Shared HTTP fetch + on-disk cache for Arnis-hosted archetype models.
 
-use reqwest::blocking::ClientBuilder;
+use reqwest::blocking::{Client, ClientBuilder};
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 const CACHE_SUBDIR: &str = "arnis/custom_models";
@@ -16,6 +17,26 @@ pub(crate) fn cache_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("./.arnis_custom_cache"))
 }
 
+/// Shared because model fetches fan out across the global Rayon pool, and every
+/// `Client` carries its own tokio runtime and I/O driver.
+fn client() -> Result<&'static Client, String> {
+    static CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            ClientBuilder::new()
+                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+                .user_agent(concat!(
+                    "Arnis/",
+                    env!("CARGO_PKG_VERSION"),
+                    " (+https://github.com/louis-e/arnis)"
+                ))
+                .build()
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
 pub(super) fn fetch_glb(url: &str, filename: &str) -> Result<Vec<u8>, String> {
     let dir = cache_root();
     let path = dir.join(filename);
@@ -25,15 +46,8 @@ pub(super) fn fetch_glb(url: &str, filename: &str) -> Result<Vec<u8>, String> {
         }
     }
 
-    let client = ClientBuilder::new()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .user_agent(concat!(
-            "Arnis/",
-            env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/louis-e/arnis)"
-        ))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = client()?;
+    let _permit = crate::net::request_permit();
     let mut resp = client.get(url).send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));

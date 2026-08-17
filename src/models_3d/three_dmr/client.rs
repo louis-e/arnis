@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer};
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 const API_BASE: &str = "https://3dmr.eu/api";
@@ -58,16 +59,24 @@ pub(crate) fn cache_root() -> PathBuf {
     }
 }
 
-fn build_client() -> Result<Client, String> {
-    ClientBuilder::new()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .user_agent(concat!(
-            "Arnis/",
-            env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/louis-e/arnis)"
-        ))
-        .build()
-        .map_err(|e| e.to_string())
+/// Shared because model fetches fan out across the global Rayon pool, and every
+/// `Client` carries its own tokio runtime and I/O driver.
+fn client() -> Result<&'static Client, String> {
+    static CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            ClientBuilder::new()
+                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+                .user_agent(concat!(
+                    "Arnis/",
+                    env!("CARGO_PKG_VERSION"),
+                    " (+https://github.com/louis-e/arnis)"
+                ))
+                .build()
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 fn read_capped(mut resp: reqwest::blocking::Response, cap: u64) -> Result<Vec<u8>, String> {
@@ -96,8 +105,9 @@ pub fn fetch_info(id: u64) -> Result<ModelInfo, String> {
         }
     }
 
-    let client = build_client()?;
+    let client = client()?;
     let url = format!("{API_BASE}/info/{id}");
+    let _permit = crate::net::request_permit();
     let resp = client.get(&url).send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("3DMR info {id}: HTTP {}", resp.status()));
@@ -123,8 +133,9 @@ pub fn fetch_glb(id: u64) -> Result<Vec<u8>, String> {
         }
     }
 
-    let client = build_client()?;
+    let client = client()?;
     let url = format!("{API_BASE}/model/{id}");
+    let _permit = crate::net::request_permit();
     let resp = client.get(&url).send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("3DMR model {id}: HTTP {}", resp.status()));

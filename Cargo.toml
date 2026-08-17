@@ -2,6 +2,8 @@
 name = "arnis"
 version = "3.0.0"
 edition = "2021"
+# Cargo only auto-detects a root build.rs, so the moved path has to be declared.
+build = "src/build.rs"
 description = "Arnis - Generate real life cities in Minecraft"
 homepage = "https://github.com/louis-e/arnis"
 repository = "https://github.com/louis-e/arnis"

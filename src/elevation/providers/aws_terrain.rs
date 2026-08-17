@@ -313,6 +313,7 @@ fn download_tile_once(
     url: &str,
     tile_path: &Path,
 ) -> Result<TileImage, String> {
+    let _permit = crate::net::request_permit();
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;

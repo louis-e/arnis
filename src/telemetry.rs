@@ -2,13 +2,67 @@ use log::error;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 /// Telemetry endpoint URL
 const TELEMETRY_URL: &str = "https://arnismc.com/telemetry/report_telemetry.php";
 
 /// Global flag to store user's telemetry consent
 static TELEMETRY_CONSENT: AtomicBool = AtomicBool::new(false);
+
+/// Every `Client` owns a tokio runtime with its own I/O driver, so building one
+/// per message let a burst of warnings exhaust the OS I/O resources. Warnings
+/// come from per-tile fetch loops, so the burst is not hypothetical.
+static SHARED_CLIENT: OnceLock<Option<Client>> = OnceLock::new();
+
+fn shared_client() -> Option<&'static Client> {
+    SHARED_CLIENT
+        .get_or_init(|| match build_client(TELEMETRY_TIMEOUT) {
+            Ok(client) => Some(client),
+            Err(e) => {
+                // Runs once, so this cannot spam the log.
+                error!("Telemetry disabled: HTTP client build failed: {e}");
+                None
+            }
+        })
+        .as_ref()
+}
+
+/// Timeout for telemetry requests. Crash reports use a shorter one because the
+/// panic hook blocks on them while the process is on its way down.
+const TELEMETRY_TIMEOUT: Duration = Duration::from_secs(15);
+const CRASH_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn build_client(timeout: Duration) -> Result<Client, reqwest::Error> {
+    Client::builder().timeout(timeout).build()
+}
+
+/// Ceiling on log sends in flight; extra messages are dropped, not queued. Logs
+/// are emitted from per-tile loops, so an unbounded burst is one thread and one
+/// socket per warning.
+const MAX_SENDS_IN_FLIGHT: usize = 4;
+static SENDS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+struct SendSlot;
+
+impl SendSlot {
+    fn acquire() -> Option<Self> {
+        SENDS_IN_FLIGHT
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < MAX_SENDS_IN_FLIGHT).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for SendSlot {
+    fn drop(&mut self) {
+        SENDS_IN_FLIGHT.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// Sets the user's telemetry consent preference
 pub fn set_telemetry_consent(consent: bool) {
@@ -67,7 +121,11 @@ fn send_crash_report(error_message: String, platform: &str, app_version: &str) {
     // Wrap in catch_unwind to prevent any panics during crash reporting
     let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
         let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let client = Client::new();
+            // Deliberately not the shared client: a dead HTTP runtime is itself a
+            // crash cause, and this runs once per crash. The timeout is required,
+            // not optional: the panic hook blocks here, so a stalled connection
+            // would hang crash handling indefinitely.
+            let client = build_client(CRASH_REPORT_TIMEOUT)?;
 
             let payload = CrashReport {
                 r#type: "crash",
@@ -99,12 +157,15 @@ pub fn send_generation_click() {
         return;
     }
 
-    // Send in background thread to avoid blocking UI
+    // Not slot-limited: this fires once per click and the count has to stay exact.
+    // Send in background thread to avoid blocking UI. `Builder` over `spawn` because
+    // spawn panics when the OS is out of thread resources, which is a state telemetry
+    // has to survive rather than escalate.
     // Wrap in catch_unwind to prevent any panics from escaping
-    let _ = std::thread::spawn(|| {
+    let _ = std::thread::Builder::new().spawn(|| {
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
-                let client = Client::new();
+                let client = shared_client().ok_or("telemetry client unavailable")?;
 
                 let payload = GenerationClick {
                     r#type: "generation_click",
@@ -207,12 +268,19 @@ pub fn send_log(level: LogLevel, message: &str) {
     let platform = get_platform();
     let app_version = get_app_version();
 
-    // Send in background thread to avoid blocking
+    let Some(slot) = SendSlot::acquire() else {
+        return;
+    };
+
+    // Send in background thread to avoid blocking. `Builder` over `spawn` because
+    // spawn panics when the OS is out of thread resources, which is a state telemetry
+    // has to survive rather than escalate.
     // Wrap in catch_unwind to prevent any panics from escaping
-    let _ = std::thread::spawn(move || {
+    let _ = std::thread::Builder::new().spawn(move || {
+        let _slot = slot;
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
-                let client = Client::new();
+                let client = shared_client().ok_or("telemetry client unavailable")?;
 
                 let payload = LogEntry {
                     r#type: "log",
