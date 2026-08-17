@@ -1675,11 +1675,16 @@ let generationButtonEnabled = true;
  * @returns {Promise<void>}
  */
 async function startGeneration() {
-  try {
-    if (generationButtonEnabled === false) {
-      return;
-    }
+  if (generationButtonEnabled === false) {
+    return;
+  }
+  // Claim the guard before the first await. gui_create_world and gui_start_generation are
+  // both awaited round-trips, so leaving the claim until after them lets a second click
+  // through and starts a parallel run against the same process-global world floor.
+  generationButtonEnabled = false;
+  let started = false;
 
+  try {
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
       const bboxSelectionInfo = document.getElementById('bbox-selection-info');
       setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
@@ -1790,12 +1795,17 @@ async function startGeneration() {
 
     console.log("Generation process started.");
     resetEta();
-    generationButtonEnabled = false;
+    started = true;
     window.arnisPreview3D?.setGenerationRunning(true);
   } catch (error) {
     console.error("Error starting generation:", error);
-    generationButtonEnabled = true;
-    window.arnisPreview3D?.setGenerationRunning(false);
+  } finally {
+    // Hand the guard back unless a run actually started; once it has, the Done!/Error!
+    // progress message releases it instead.
+    if (!started) {
+      generationButtonEnabled = true;
+      window.arnisPreview3D?.setGenerationRunning(false);
+    }
   }
 }
 
