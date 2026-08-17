@@ -49,18 +49,29 @@ const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
 const OVERTURE_ID_HIGH_BIT: u64 = 0x8000_0000_0000_0000;
 
 /// Budget of Overture footprints, as a rate per km² of the requested area plus a
-/// floor and a ceiling. The cap only exists so a continent-sized request cannot
-/// exhaust memory. It scales with area because a flat number is spent by whichever
-/// partitions happen to be read first, which leaves the districts read last with no
-/// ML footprints at all while their neighbours get every one of theirs.
+/// floor and a ceiling. The cap exists so a large request cannot exhaust memory.
+///
+/// It scales with area only so that the cap stops binding on ordinary requests: a
+/// flat 100k was already spent before a mid-size city was finished. It does NOT fix
+/// how the overflow is distributed. Rows arrive in spatial order and the budget is a
+/// running total, so whatever exceeds it is still a contiguous block of districts
+/// with no footprints. Raising the number moves that threshold; it does not remove
+/// it, which is why hitting the cap is now reported rather than passed over.
 const OVERTURE_BUILDINGS_PER_KM2: f64 = 1_000.0;
 const MIN_OVERTURE_BUILDINGS: usize = 100_000;
-const MAX_OVERTURE_BUILDINGS: usize = 2_000_000;
+/// Roughly the supported area ceiling at the rate above. Past this the memory held
+/// by the raw rows and their expanded ways is the binding constraint, not coverage.
+const MAX_OVERTURE_BUILDINGS: usize = 500_000;
 
 /// Attempts per HTTP range read before a row group is given up on. One partition
 /// is hundreds of range requests, and a dropped row group takes a contiguous block
 /// of the map's footprints with it, so a transient failure must not settle it.
 const OVERTURE_RANGE_ATTEMPTS: u32 = 3;
+
+/// Once a partition has lost this many row groups the host is not having a bad
+/// moment, it is unhealthy. Retrying the rest only multiplies the wall clock by
+/// the attempt count, so the remaining reads get a single try.
+const OVERTURE_UNHEALTHY_FAILURES: usize = 3;
 
 /// HTTP client timeout for Overture data fetching
 const HTTP_TIMEOUT_SECS: u64 = 120;
@@ -463,11 +474,7 @@ pub(crate) struct OvertureCollection {
 
 /// How many Overture footprints this bbox is allowed to contribute.
 fn overture_building_budget(bbox: &LLBBox) -> usize {
-    let mid_lat = ((bbox.min().lat() + bbox.max().lat()) / 2.0).to_radians();
-    let width_m = (bbox.max().lng() - bbox.min().lng()) * 111_320.0 * mid_lat.cos();
-    let height_m = (bbox.max().lat() - bbox.min().lat()) * 111_320.0;
-    let area_km2 = (width_m * height_m).abs() / 1_000_000.0;
-    ((area_km2 * OVERTURE_BUILDINGS_PER_KM2) as usize)
+    ((bbox.area_km2() * OVERTURE_BUILDINGS_PER_KM2) as usize)
         .clamp(MIN_OVERTURE_BUILDINGS, MAX_OVERTURE_BUILDINGS)
 }
 
@@ -478,11 +485,17 @@ fn overture_building_budget(bbox: &LLBBox) -> usize {
 /// Either way the OSM-sourced rows are mined for `height` / `num_floors` hints
 /// first, so the enrichment costs no extra requests. Hints never count towards
 /// `max_buildings` - that cap governs added footprints only.
+///
+/// `report_gaps` warns about coverage the caller did not get: skipped partitions,
+/// unreadable row groups, and a spent budget. Only the generation path wants this.
+/// For the 3D preview `max_buildings` is a deliberate render budget rather than a
+/// data problem, and its fetch repeats on every pan.
 pub(crate) fn collect_overture_buildings(
     client: &Client,
     bbox: &LLBBox,
     include_osm_sourced: bool,
     max_buildings: usize,
+    report_gaps: bool,
     debug: bool,
 ) -> Result<OvertureCollection, Box<dyn std::error::Error>> {
     // List partition files whose geographic bounds overlap our bbox
@@ -564,7 +577,7 @@ pub(crate) fn collect_overture_buildings(
     capped |= all_buildings.len() > max_buildings;
     all_buildings.truncate(max_buildings);
 
-    if lost_partitions > 0 || lost_row_groups > 0 {
+    if report_gaps && (lost_partitions > 0 || lost_row_groups > 0) {
         eprintln!(
             "{} Overture Maps data incomplete: {lost_partitions} partition(s) and \
              {lost_row_groups} row group(s) could not be read. Buildings are missing \
@@ -572,10 +585,11 @@ pub(crate) fn collect_overture_buildings(
             "Warning:".yellow().bold()
         );
     }
-    if capped {
+    if report_gaps && capped {
         eprintln!(
             "{} Reached the Overture Maps building limit ({max_buildings}); footprints \
-             beyond it were dropped. Use a smaller area for full coverage.",
+             beyond it were dropped, which leaves whole districts without them. \
+             Use a smaller area for full coverage.",
             "Warning:".yellow().bold()
         );
     }
@@ -599,7 +613,7 @@ fn fetch_overture_buildings_inner(
     let OvertureCollection {
         buildings: all_buildings,
         hints,
-    } = collect_overture_buildings(&client, bbox, false, budget, debug)?;
+    } = collect_overture_buildings(&client, bbox, false, budget, true, debug)?;
 
     if debug {
         println!(
@@ -954,7 +968,14 @@ fn process_partition_file(
     let mut downloaded: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for &rg_idx in &matching_groups {
         let (rg_offset, rg_len) = row_group_byte_range(&metadata, rg_idx);
-        match fetch_range(client, url, rg_offset, rg_len) {
+        // Each attempt can burn the full HTTP timeout, and there are hundreds of
+        // these, so stop paying for retries once the host has proved unhealthy.
+        let attempts = if failed_row_groups >= OVERTURE_UNHEALTHY_FAILURES {
+            1
+        } else {
+            OVERTURE_RANGE_ATTEMPTS
+        };
+        match fetch_range_with_attempts(client, url, rg_offset, rg_len, attempts) {
             Ok(rg_data) => {
                 downloaded_bytes += rg_len;
                 downloaded.insert(rg_idx);
@@ -1827,13 +1848,24 @@ fn fetch_range(
     start: u64,
     length: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fetch_range_with_attempts(client, url, start, length, OVERTURE_RANGE_ATTEMPTS)
+}
+
+/// As [`fetch_range`], with the retry budget chosen by the caller.
+fn fetch_range_with_attempts(
+    client: &Client,
+    url: &str,
+    start: u64,
+    length: u64,
+    max_attempts: u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if length == 0 {
         return Err("fetch_range called with length 0".into());
     }
     let end = start + length - 1;
     let mut last_error = String::new();
 
-    for attempt in 0..OVERTURE_RANGE_ATTEMPTS {
+    for attempt in 0..max_attempts.max(1) {
         if attempt > 0 {
             std::thread::sleep(Duration::from_millis(500 << (attempt - 1)));
         }
@@ -2301,15 +2333,21 @@ mod budget_tests {
         assert_eq!(overture_building_budget(&bbox), MIN_OVERTURE_BUILDINGS);
     }
 
-    // The reported bbox is ~21,800 km²; a flat 100k cap spent the whole budget on
-    // whichever partitions were read first and left the rest without footprints
-    // (issue #1257), so the budget has to grow with the area.
+    // Between the floor and the ceiling the budget must track the rate, not sit on
+    // a clamp. A flat 100k was already spent before a mid-size metro was finished,
+    // which is what leaves the districts read last with no footprints (issue #1257).
     #[test]
-    fn a_regional_area_scales_past_the_floor() {
-        let bbox = LLBBox::new(40.7, -82.3, 42.0, -80.5).unwrap();
+    fn a_mid_size_area_tracks_the_per_km2_rate() {
+        // ~0.15 deg lat by ~0.20 deg lng at 41.5 deg N, about 280 km²: inside the
+        // floor and the ceiling, which meet at 100 km² and 500 km² respectively.
+        let bbox = LLBBox::new(41.40, -81.80, 41.55, -81.60).unwrap();
         let budget = overture_building_budget(&bbox);
-        assert!(budget > MIN_OVERTURE_BUILDINGS, "budget was {budget}");
-        assert!(budget <= MAX_OVERTURE_BUILDINGS, "budget was {budget}");
+        assert!(
+            budget > MIN_OVERTURE_BUILDINGS && budget < MAX_OVERTURE_BUILDINGS,
+            "budget {budget} sat on a clamp instead of tracking the rate"
+        );
+        let expected = (bbox.area_km2() * OVERTURE_BUILDINGS_PER_KM2) as usize;
+        assert_eq!(budget, expected);
     }
 
     // The cap still exists: a continent must not be allowed to exhaust memory.

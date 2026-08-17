@@ -337,9 +337,15 @@ pub fn fetch_data_from_overpass(
         let total = request_plan.len();
         let mut last_error: Option<Box<dyn std::error::Error>> = None;
         let mut attempted_hosts: Vec<String> = Vec::new();
-        // Set when every server that answered did so with a partial result, which
-        // means the area is too big for the API rather than the servers being down.
-        let mut saw_truncated = false;
+        // A truncation is only evidence about the *area* when it is what every
+        // answering server did. Counted separately from hosts that never answered,
+        // so an unreachable network is not reported as an oversized bbox.
+        let mut answered = 0usize;
+        let mut truncated = 0usize;
+        // Two servers agreeing is enough: a size-driven timeout repeats everywhere,
+        // while a merely overloaded instance deserves one second opinion. Without
+        // this the user waits out all six timeouts (~30 min) for a foregone answer.
+        const TRUNCATIONS_BEFORE_GIVING_UP: usize = 2;
         let (response, data): (String, OsmData) = 'server_loop: {
             for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
@@ -358,14 +364,24 @@ pub fn fetch_data_from_overpass(
                 // A body that arrived is not yet an answer: parse it here so a
                 // truncated result falls through to the next server instead of
                 // silently becoming a world with most of its areas missing.
-                let result = result.and_then(|body| match parse_overpass_response(&body) {
-                    Ok(data) => Ok((body, data)),
-                    Err(e) => {
-                        if matches!(e, ResponseError::Truncated(_)) {
-                            saw_truncated = true;
+                let result = result.and_then(|body| {
+                    answered += 1;
+                    match parse_overpass_response(&body) {
+                        Ok(data) => Ok((body, data)),
+                        Err(e) => {
+                            if matches!(e, ResponseError::Truncated(_)) {
+                                truncated += 1;
+                            }
+                            // Keep the rejected body when one was asked for; it is
+                            // the only record of what the server actually sent.
+                            if let Some(save_file) = save_file {
+                                if let Ok(mut file) = File::create(save_file) {
+                                    let _ = file.write_all(body.as_bytes());
+                                }
+                            }
+                            eprintln!("{}", format!("Error! {}", e.message()).red().bold());
+                            Err(e.message().to_string().into())
                         }
-                        eprintln!("{}", format!("Error! {}", e.message()).red().bold());
-                        Err(e.message().to_string().into())
                     }
                 });
 
@@ -377,6 +393,10 @@ pub fn fetch_data_from_overpass(
                         }
                         attempted_hosts.push(url_host(url));
                         last_error = Some(error);
+
+                        if truncated >= TRUNCATIONS_BEFORE_GIVING_UP {
+                            break;
+                        }
 
                         if i + 1 < total {
                             let delay_secs = if *kind == ServerKind::Fallback { 5 } else { 3 };
@@ -406,15 +426,27 @@ pub fn fetch_data_from_overpass(
                     ),
                 );
             }
-            if saw_truncated {
+            // Only blame the bbox when truncation is what every answering server did.
+            // If some hosts simply never replied, the size is not the established cause.
+            if truncated > 0 && truncated == answered {
                 eprintln!(
                     "{}",
-                    "Error! The area is too large for the OpenStreetMap API: every server \
-                     stopped mid-response. Try using a smaller area."
+                    "Error! The area is too large for the OpenStreetMap API: the servers \
+                     that answered all stopped mid-response. Try using a smaller area."
                         .red()
                         .bold()
                 );
                 emit_gui_error("Try using a smaller area.");
+            } else if truncated > 0 {
+                eprintln!(
+                    "{}",
+                    format!(
+                        "Error! {truncated} of {answered} answering server(s) returned partial \
+                         data and the rest could not be reached. Try again, or use a smaller area."
+                    )
+                    .red()
+                    .bold()
+                );
             }
             return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };

@@ -977,9 +977,10 @@ pub fn parse_osm_data(
             "{}",
             format!(
                 "Warning: {unresolved_node_refs} of {total_node_refs} way node references \
-                 ({percent:.1}%) are missing from the source data, affecting \
-                 {ways_missing_nodes} ways. Buildings and other areas that lost a corner \
-                 cannot be filled and will not appear in the world."
+                 ({percent:.1}%) could not be resolved, affecting {ways_missing_nodes} ways. \
+                 Buildings and other areas that lost a corner cannot be filled and will not \
+                 appear in the world. Expected near the edges of a clipped local file; from \
+                 the API it means the response was incomplete."
             )
             .yellow()
             .bold()
