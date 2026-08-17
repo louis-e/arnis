@@ -36,6 +36,9 @@ pub fn apply_osm_water_override(
     if width < 2 || height < 2 || world_width < 2 || world_height < 2 {
         return;
     }
+    if heights.len() < height || heights.iter().take(height).any(|r| r.len() < width) {
+        return;
+    }
     let scale_to_grid_x = (width as f64 - 1.0) / (world_width as f64 - 1.0);
     let scale_to_grid_z = (height as f64 - 1.0) / (world_height as f64 - 1.0);
     let min_x = xzbbox.min_x();

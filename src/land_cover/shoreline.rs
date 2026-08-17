@@ -759,8 +759,9 @@ mod tests {
 
     #[test]
     fn single_pixel_bumps_and_notches_survive_on_straight_coasts() {
-        // A one-pixel bump or notch whose centre is clearly (>= 0.6 px) on the wrong side
-        // must survive, while the coast around it still simplifies.
+        // A one-pixel bump or notch must survive once its centre is clearly on the wrong
+        // side of the line. A stair corner already reaches 1/sqrt(2) = 0.71 px at 45
+        // degrees, so only past that is a feature something the fit can tell apart.
         let mut checked = 0;
         for angle_deg in [0.0f64, 12.0, 30.0, 45.0, 63.0, 80.0, 90.0] {
             let (s, c) = angle_deg.to_radians().sin_cos();
@@ -778,7 +779,7 @@ mod tests {
             for (px, py) in (0..40).flat_map(|px| (0..40).map(move |py| (px, py))) {
                 let d = signed(px as f64 + 0.5, py as f64 + 0.5);
                 // Bump: land pixel touching water on the land side. Notch: the mirror.
-                let (is_bump, is_notch) = ((0.6..1.0).contains(&d), (-1.0..=-0.6).contains(&d));
+                let (is_bump, is_notch) = ((0.8..1.0).contains(&d), (-1.0..=-0.8).contains(&d));
                 if !(is_bump || is_notch) || !(3..=36).contains(&px) || !(3..=36).contains(&py) {
                     continue;
                 }

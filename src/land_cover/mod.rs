@@ -381,13 +381,23 @@ impl EsaPixelRaster {
             );
             return None;
         }
+        // A country-scale bbox asks for a gigabyte here, so failing to get it has to drop
+        // land cover rather than abort the process the way an infallible alloc would.
+        let mut data: Vec<u8> = Vec::new();
+        if data.try_reserve_exact(pixels).is_err() {
+            eprintln!(
+                "Warning: could not allocate the {pixels}-pixel ESA WorldCover raster; skipping land cover"
+            );
+            return None;
+        }
+        data.resize(pixels, 0);
         Some(Self {
             x0: x0 as i64,
             y0: y0 as i64,
             width: width as usize,
             height: height as usize,
             ppd,
-            data: vec![0u8; pixels],
+            data,
         })
     }
 
