@@ -9,7 +9,7 @@
   "generation_process_started": "بدأت عملية البناء.",
   "winter_mode": "وضع الشتاء",
   "world_scale": "مقياس العالم",
-  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
+  "world_scale_objects_skipped": "أقل من 0.30 تكون المباني والطرق أصغر من أن تُرسم، لذا يتم إنشاء التضاريس والغطاء الأرضي فقط.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "مهلة ملء الفيضان (ثواني)",
   "ground_level": "مستوى الأرض",

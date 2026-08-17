@@ -21,8 +21,11 @@ static WORLD_MIN_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
 pub(crate) static FLOOR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Set the world floor once, at startup, from the CLI args. Must be a multiple of 16.
+///
+/// Asserted in release too: a floor off a section boundary silently corrupts every section
+/// index derived from it, which is far worse than failing on the spot. Runs once per world.
 pub fn set_min_y(y: i32) {
-    debug_assert_eq!(y.rem_euclid(16), 0, "world floor must be a multiple of 16");
+    assert_eq!(y.rem_euclid(16), 0, "world floor must be a multiple of 16");
     WORLD_MIN_Y.store(y, MemOrdering::Relaxed);
 }
 

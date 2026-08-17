@@ -9,7 +9,7 @@
   "generation_process_started": "Proces generowania rozpoczęty.",
   "winter_mode": "Tryb Zimowy",
   "world_scale": "Skala świata",
-  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
+  "world_scale_objects_skipped": "Poniżej 0,30 budynki i drogi są zbyt małe, aby je odwzorować, więc generowany jest tylko teren i pokrycie terenu.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Limit czasu wypełniania (sek)",
   "ground_level": "Wysokość obszaru",

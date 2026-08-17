@@ -87,13 +87,17 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
 
     // One elevation sample per block is the ideal: finer buys nothing (a block is the
     // smallest representable unit), coarser blurs the terrain. Only shrink below that when
-    // the grid would exceed the memory budget.
+    // the grid would breach a limit.
     let mut grid_width: usize = world_width.max(2);
     let mut grid_height: usize = world_height.max(2);
-    if grid_width.saturating_mul(grid_height) > MAX_ELEVATION_GRID_CELLS {
+    let cells = grid_width as f64 * grid_height as f64;
+    let budget_shrink = (cells / MAX_ELEVATION_GRID_CELLS as f64).sqrt();
+    // A long thin bbox stays under the cell budget while still running far past the per-axis
+    // cap, so both limits have to feed the same factor.
+    let axis_shrink = grid_width.max(grid_height) as f64 / MAX_ELEVATION_GRID_DIM as f64;
+    let shrink = budget_shrink.max(axis_shrink);
+    if shrink > 1.0 {
         // Shrink both axes by the same factor so the sampling stays isotropic.
-        let cells = grid_width as f64 * grid_height as f64;
-        let shrink = (cells / MAX_ELEVATION_GRID_CELLS as f64).sqrt();
         grid_width = ((grid_width as f64 / shrink).floor() as usize).clamp(2, world_width.max(2));
         grid_height =
             ((grid_height as f64 / shrink).floor() as usize).clamp(2, world_height.max(2));
@@ -384,5 +388,32 @@ mod grid_dim_tests {
             );
             assert!(grid_w >= 2 && grid_h >= 2);
         }
+    }
+
+    #[test]
+    fn long_thin_bbox_respects_the_per_axis_cap() {
+        // 50188 x 5004 blocks: 251M cells, comfortably inside the 268M budget, yet 3x past
+        // the per-axis cap. Clamping on total cells alone would leave the full 50k-wide grid
+        // and triple the old peak allocation for this shape.
+        let strip = LLBBox::from_str("46.00,5.95,46.045,6.60").unwrap();
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(&strip, 1.0);
+        assert!(
+            world_w > MAX_ELEVATION_GRID_DIM,
+            "test bbox must actually exceed the per-axis cap, got {world_w}"
+        );
+        assert!(
+            (world_w * world_h) < MAX_ELEVATION_GRID_CELLS,
+            "bbox must sit inside the cell budget so this isolates the per-axis cap"
+        );
+        assert!(grid_w <= MAX_ELEVATION_GRID_DIM && grid_h <= MAX_ELEVATION_GRID_DIM);
+        assert!(grid_w * grid_h <= MAX_ELEVATION_GRID_CELLS);
+
+        // Capping must not reintroduce the smear: both axes still shrink by one factor.
+        let smear_x = world_w as f64 / grid_w as f64;
+        let smear_z = world_h as f64 / grid_h as f64;
+        assert!(
+            (smear_x - smear_z).abs() / smear_x < 0.01,
+            "sampling must stay isotropic, got {smear_x:.2} blocks/sample in X vs {smear_z:.2} in Z"
+        );
     }
 }

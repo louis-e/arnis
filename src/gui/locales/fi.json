@@ -9,7 +9,7 @@
   "generation_process_started": "Luontiprosessi aloitettu.",
   "winter_mode": "Talvitila",
   "world_scale": "Maailmanskaalaus",
-  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
+  "world_scale_objects_skipped": "Alle 0,30 rakennukset ja tiet ovat liian pieniä piirrettäviksi, joten vain maasto ja maanpeite luodaan.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Täytön aikakatkaisu (sec)",
   "ground_level": "Maataso",

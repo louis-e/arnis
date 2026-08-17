@@ -9,7 +9,7 @@
   "generation_process_started": "Процесс генерации начат",
   "winter_mode": "Зимний режим",
   "world_scale": "Масштаб мира",
-  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
+  "world_scale_objects_skipped": "Ниже 0,30 здания и дороги слишком малы для отрисовки, поэтому создаются только рельеф и почвенно-растительный покров.",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Тайм-аут заливки (сек)",
   "ground_level": "Уровень земли",

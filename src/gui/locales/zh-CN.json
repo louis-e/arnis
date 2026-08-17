@@ -9,7 +9,7 @@
   "generation_process_started": "生成过程已开始。",
   "winter_mode": "冬季模式",
   "world_scale": "世界比例",
-  "world_scale_objects_skipped": "Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.",
+  "world_scale_objects_skipped": "低于 0.30 时建筑和道路太小而无法渲染，因此仅生成地形和地表覆盖。",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "填充超时（秒）",
   "ground_level": "地面高度",
