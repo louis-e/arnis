@@ -32,7 +32,9 @@ impl Drop for RequestPermit {
 pub fn request_permit() -> RequestPermit {
     let mut in_flight = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
     while *in_flight >= MAX_CONCURRENT_REQUESTS {
-        in_flight = SLOT_FREED.wait(in_flight).unwrap_or_else(|e| e.into_inner());
+        in_flight = SLOT_FREED
+            .wait(in_flight)
+            .unwrap_or_else(|e| e.into_inner());
     }
     *in_flight += 1;
     RequestPermit { _private: () }

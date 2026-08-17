@@ -359,10 +359,7 @@ fn run_cli() {
                 "{} Overture fetch failed, continuing without Overture buildings.",
                 "Warning:".yellow().bold()
             );
-            (
-                overture::OvertureData::default(),
-                std::time::Duration::ZERO,
-            )
+            (overture::OvertureData::default(), std::time::Duration::ZERO)
         });
         bench.report("overture_fetch", overture_dur);
         let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {

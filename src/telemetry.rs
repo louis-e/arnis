@@ -19,13 +19,24 @@ static SHARED_CLIENT: OnceLock<Option<Client>> = OnceLock::new();
 
 fn shared_client() -> Option<&'static Client> {
     SHARED_CLIENT
-        .get_or_init(|| {
-            Client::builder()
-                .timeout(Duration::from_secs(15))
-                .build()
-                .ok()
+        .get_or_init(|| match build_client(TELEMETRY_TIMEOUT) {
+            Ok(client) => Some(client),
+            Err(e) => {
+                // Runs once, so this cannot spam the log.
+                error!("Telemetry disabled: HTTP client build failed: {e}");
+                None
+            }
         })
         .as_ref()
+}
+
+/// Timeout for telemetry requests. Crash reports use a shorter one because the
+/// panic hook blocks on them while the process is on its way down.
+const TELEMETRY_TIMEOUT: Duration = Duration::from_secs(15);
+const CRASH_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn build_client(timeout: Duration) -> Result<Client, reqwest::Error> {
+    Client::builder().timeout(timeout).build()
 }
 
 /// Ceiling on log sends in flight; extra messages are dropped, not queued. Logs
@@ -111,8 +122,10 @@ fn send_crash_report(error_message: String, platform: &str, app_version: &str) {
     let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
         let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
             // Deliberately not the shared client: a dead HTTP runtime is itself a
-            // crash cause, and this runs once per crash.
-            let client = Client::new();
+            // crash cause, and this runs once per crash. The timeout is required,
+            // not optional: the panic hook blocks here, so a stalled connection
+            // would hang crash handling indefinitely.
+            let client = build_client(CRASH_REPORT_TIMEOUT)?;
 
             let payload = CrashReport {
                 r#type: "crash",

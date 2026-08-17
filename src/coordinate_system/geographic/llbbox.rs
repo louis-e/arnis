@@ -42,10 +42,9 @@ impl LLBBox {
             values.push(value);
         }
 
-        let [min_lat, min_lng, max_lat, max_lng]: [f64; 4] =
-            values.try_into().map_err(|v: Vec<f64>| {
-                format!("Invalid LLBBox: expected 4 values, got {}", v.len())
-            })?;
+        let [min_lat, min_lng, max_lat, max_lng]: [f64; 4] = values
+            .try_into()
+            .map_err(|v: Vec<f64>| format!("Invalid LLBBox: expected 4 values, got {}", v.len()))?;
 
         // So, the GUI does Lat/Lng and no GDAL (comma-sep values), which is the exact opposite of
         // what bboxfinder.com does. :facepalm: (bboxfinder is wrong here: Lat comes first!)

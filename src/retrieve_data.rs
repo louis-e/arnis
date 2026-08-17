@@ -25,6 +25,19 @@ fn url_host(url: &str) -> String {
         .to_string()
 }
 
+/// User agent for OSM-facing requests (Overpass, Nominatim).
+///
+/// The build hash rides in the comment field so `Arnis/<version>` stays the
+/// leading product token, and it tells an official release apart from a local
+/// build when a report only carries a version number.
+pub const OSM_USER_AGENT: &str = concat!(
+    "Arnis/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/louis-e/arnis; build/",
+    env!("ARNIS_BUILD_HASH"),
+    ")"
+);
+
 /// Function to download data using reqwest
 fn download_with_reqwest(
     url: &str,
@@ -33,11 +46,7 @@ fn download_with_reqwest(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(timeout_secs))
-        .user_agent(concat!(
-            "Arnis/",
-            env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/louis-e/arnis)"
-        ))
+        .user_agent(OSM_USER_AGENT)
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -86,6 +95,8 @@ fn download_with_reqwest(
 fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("curl")
         .arg("-s") // Add silent mode to suppress output
+        .arg("-A")
+        .arg(OSM_USER_AGENT)
         .arg(format!("{url}?data={query}"))
         .output()?;
 
@@ -100,6 +111,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
 fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("wget")
         .arg("-qO-") // Use `-qO-` to output the result directly to stdout
+        .arg(format!("--user-agent={OSM_USER_AGENT}"))
         .arg(format!("{url}?data={query}"))
         .output()?;
 
@@ -391,11 +403,7 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent(concat!(
-            "Arnis/",
-            env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/louis-e/arnis)"
-        ))
+        .user_agent(OSM_USER_AGENT)
         .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
@@ -425,6 +433,23 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod user_agent_tests {
+    use super::*;
+
+    #[test]
+    fn osm_user_agent_carries_version_and_build_hash() {
+        assert!(OSM_USER_AGENT.starts_with(concat!("Arnis/", env!("CARGO_PKG_VERSION"))));
+        assert!(OSM_USER_AGENT.contains("build/"));
+
+        let hash = env!("ARNIS_BUILD_HASH");
+        assert!(!hash.is_empty());
+        // Only ASCII, and short enough that no server's header limit is in play.
+        assert!(OSM_USER_AGENT.is_ascii());
+        assert!(OSM_USER_AGENT.len() < 200);
+    }
 }
 
 #[cfg(test)]
