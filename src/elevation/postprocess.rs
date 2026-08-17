@@ -517,15 +517,31 @@ fn level_water_surfaces(
     is_water_surface
 }
 
+/// Downsampling step for the coarse field: fine enough for the blur, coarse enough that a
+/// component spanning the grid cannot materialize its whole bounding box.
+///
+/// A river crossing the map has a bounding box the size of the grid while holding only a
+/// ribbon of samples. At a coarse metres-per-cell the sigma alone leaves the step at 1, so
+/// the budget has to set it instead.
+fn coarse_step(bbox_w: usize, bbox_h: usize, sigma_cells: f64) -> usize {
+    // Coarse cells per sigma; below this the downsampling shows.
+    const COARSE_PER_SIGMA: f64 = 8.0;
+    const MAX_COARSE_CELLS: f64 = (4 << 20) as f64;
+
+    let from_sigma = (sigma_cells / COARSE_PER_SIGMA).floor().max(1.0);
+    let from_budget = (bbox_w as f64 * bbox_h as f64 / MAX_COARSE_CELLS)
+        .sqrt()
+        .ceil()
+        .max(1.0);
+    from_sigma.max(from_budget) as usize
+}
+
 /// Blur `cells` (grid x, grid z, value) at `sigma_cells`, one output per input cell.
 ///
 /// The samples are a thin ribbon in a grid up to 16k a side, so the blur runs on their
 /// downsampled bounding box and is sampled back. It is a low-pass either way, and the
 /// cost follows the ribbon instead of the grid.
 fn smooth_sparse_field(cells: &[(u32, u32, f32)], sigma_cells: f64) -> Vec<f64> {
-    // Coarse cells per sigma; below this the downsampling shows.
-    const COARSE_PER_SIGMA: f64 = 8.0;
-
     let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0u32, u32::MAX, 0u32);
     for &(x, y, _) in cells {
         x0 = x0.min(x);
@@ -533,9 +549,11 @@ fn smooth_sparse_field(cells: &[(u32, u32, f32)], sigma_cells: f64) -> Vec<f64> 
         y0 = y0.min(y);
         y1 = y1.max(y);
     }
-    let step = ((sigma_cells / COARSE_PER_SIGMA).floor() as usize).max(1);
-    let cw = ((x1 - x0) as usize) / step + 1;
-    let ch = ((y1 - y0) as usize) / step + 1;
+    let bw = (x1 - x0) as usize + 1;
+    let bh = (y1 - y0) as usize + 1;
+    let step = coarse_step(bw, bh, sigma_cells);
+    let cw = (bw - 1) / step + 1;
+    let ch = (bh - 1) / step + 1;
     let mut sum = vec![vec![0.0f64; cw]; ch];
     let mut count = vec![vec![0u32; cw]; ch];
     for &(x, y, v) in cells {
@@ -544,13 +562,14 @@ fn smooth_sparse_field(cells: &[(u32, u32, f32)], sigma_cells: f64) -> Vec<f64> 
         sum[cy][cx] += f64::from(v);
         count[cy][cx] += 1;
     }
+    // Consumed, so the two accumulators are gone before the blur allocates.
     let coarse: Vec<Vec<f64>> = sum
-        .iter()
-        .zip(count.iter())
+        .into_iter()
+        .zip(count)
         .map(|(srow, crow)| {
-            srow.iter()
-                .zip(crow.iter())
-                .map(|(&s, &c)| if c > 0 { s / f64::from(c) } else { f64::NAN })
+            srow.into_iter()
+                .zip(crow)
+                .map(|(s, c)| if c > 0 { s / f64::from(c) } else { f64::NAN })
                 .collect()
         })
         .collect();
@@ -1836,6 +1855,22 @@ mod tests {
             }
         }
         (heights, lc)
+    }
+
+    #[test]
+    fn coarse_field_stays_bounded_for_a_grid_spanning_river() {
+        // A thin river across the largest supported grid, at the metres-per-cell where the
+        // sigma alone leaves the step at 1 and the whole bounding box gets allocated.
+        const N: usize = 16384;
+        let step = coarse_step(N, N, 6.6);
+        let cw = (N - 1) / step + 1;
+        assert!(cw * cw <= 4 << 20, "coarse grid is {} cells", cw * cw);
+    }
+
+    #[test]
+    fn small_components_keep_the_sigma_step() {
+        // City scale must keep the sampling the blur was tuned for.
+        assert_eq!(coarse_step(1583, 2217, 40.0), 5);
     }
 
     #[test]
