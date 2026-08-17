@@ -452,6 +452,11 @@ pub fn generate_ground_region(
                             if ground_y <= wy {
                                 water_y = wy;
                                 place_esa_water = true;
+                            } else if grid_is_water && ground.is_interior_water(coord) {
+                                // A step inside the body, not a bank the snap pulled
+                                // below: water here, not a line of grass across the river.
+                                water_y = ground_y;
+                                place_esa_water = true;
                             }
                         }
 

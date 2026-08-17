@@ -432,6 +432,7 @@ fn run_cli() {
 
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
     }

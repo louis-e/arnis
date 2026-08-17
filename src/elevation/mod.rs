@@ -200,6 +200,7 @@ pub fn fetch_elevation_data(
             lc,
             built_up_sigma_cells,
             coastal_pull_cells,
+            m_per_cell,
             &|f| emit_gui_progress_update(14.0 + f * 2.0, "Processing elevation..."),
         );
     }
