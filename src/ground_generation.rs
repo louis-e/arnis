@@ -289,6 +289,11 @@ pub fn generate_ground_region(
                     // which would pass the ordering check and stone-fill the whole column.
                     // Bounded below by the terrain floor, so an extended world floor does not
                     // stone-fill ~127 sections per chunk down to Y=-2032.
+                    //
+                    // This fills WHOLE sections, so it relies on the terrain floor sitting on a
+                    // section boundary (set_terrain_floor_y snaps it). Otherwise the part of the
+                    // bottom section below the floor would be stone under the bedrock plane.
+                    debug_assert_eq!(terrain_floor_y().rem_euclid(16), 0);
                     let bottom_section = terrain_floor_y().div_euclid(16);
                     // section_top = section_y*16 + 15 <= min_ground_y - 3
                     let top_section = (min_ground_y - 18).div_euclid(16);

@@ -89,9 +89,15 @@ static TERRAIN_FLOOR_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
 /// to the world floor. With the vanilla floor that clamp always wins, so this is exactly the
 /// old constant -64 and nothing changes. With an extended floor it keeps the filled column a
 /// bounded depth instead of ~4000 blocks, and keeps the chunk's section span tight.
+///
+/// Snapped down to a section boundary, which the old `MIN_Y = -64` was by construction. The
+/// `--fillground` fast path bulk-fills whole sections from this floor's section and lets the
+/// bedrock plane overwrite the bottom layer; an unaligned floor (base -62 gives -126) would
+/// leave the rest of that section, here Y -128 and -127, as stone underneath the bedrock.
 pub fn set_terrain_floor_y(ground_level: i32) {
     let floor = min_y().max(ground_level.saturating_sub(TERRAIN_FLOOR_DEPTH));
-    TERRAIN_FLOOR_Y.store(floor, MemOrdering::Relaxed);
+    let aligned = floor.div_euclid(16) * 16;
+    TERRAIN_FLOOR_Y.store(aligned.max(min_y()), MemOrdering::Relaxed);
 }
 
 /// Y of the bedrock plane, and the bottom of `--fillground` / ore generation.
@@ -1607,7 +1613,10 @@ mod terrain_floor_tests {
         // per-column shell tracking the terrain, and not 2000 blocks down at the world floor.
         with_floor(-2032, -62, || {
             let floor = terrain_floor_y();
-            assert_eq!(floor, -62 - TERRAIN_FLOOR_DEPTH);
+            // At least TERRAIN_FLOOR_DEPTH under the base, snapped down to a section: -126
+            // rounds to -128.
+            assert_eq!(floor, -128);
+            assert!(floor <= -62 - TERRAIN_FLOOR_DEPTH);
             // It is a constant: reading it never depends on any column's surface Y.
             assert_eq!(terrain_floor_y(), floor);
             assert!(
@@ -1615,6 +1624,30 @@ mod terrain_floor_tests {
                 "must not sit at the world floor when the base is high"
             );
         });
+    }
+
+    #[test]
+    fn terrain_floor_always_lands_on_a_section_boundary() {
+        // The --fillground fast path bulk-fills whole sections starting at this floor and lets
+        // bedrock overwrite the bottom layer. Off a boundary, the rest of that bottom section
+        // stays stone *under* the bedrock plane. Vanilla's -64 was aligned by construction;
+        // every extended-floor base has to be too.
+        for (world_floor, base) in [
+            (DEFAULT_MIN_Y, DEFAULT_GROUND_LEVEL),
+            (DEFAULT_MIN_Y, 100),
+            (-2032, -62),
+            (-2032, -2030),
+            (-2032, 0),
+            (-2032, 317),
+        ] {
+            let floor = with_floor(world_floor, base, terrain_floor_y);
+            assert_eq!(
+                floor.rem_euclid(16),
+                0,
+                "floor {floor} for base {base} is not on a section boundary"
+            );
+            assert!(floor >= world_floor, "floor {floor} fell through the world");
+        }
     }
 
     #[test]
