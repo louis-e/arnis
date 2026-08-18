@@ -1076,6 +1076,8 @@ impl<'a> WorldEditor<'a> {
         be.insert("x".to_string(), Value::Int(x));
         be.insert("y".to_string(), Value::Int(absolute_y));
         be.insert("z".to_string(), Value::Int(z));
+        // Java bed block entities require a color index (0-15). Our interiors place red beds.
+        be.insert("color".to_string(), Value::Int(14));
         be.insert("keepPacked".to_string(), Value::Byte(0));
         self.insert_block_entity(x, z, be);
     }
@@ -2345,5 +2347,50 @@ mod eviction_guard_tests {
             assert!(!editor.place_wall_sign(10, 5, 10, facing, &["x"]));
         }
         assert!(editor.place_wall_sign(10, 5, 10, 2, &["x"]));
+    }
+}
+
+#[cfg(test)]
+mod bed_block_entity_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+
+    #[test]
+    fn bed_block_entity_includes_red_color_tag() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+
+        editor.set_bed_block_entity_absolute(10, 5, 10);
+
+        let region = editor
+            .world
+            .regions
+            .get(&(0, 0))
+            .expect("region should exist");
+        let chunk = region
+            .chunks
+            .get(&(0, 0))
+            .expect("chunk should exist");
+
+        let entities = match chunk.other.get("block_entities") {
+            Some(Value::List(list)) => list,
+            other => panic!("expected block_entities list, got {other:?}"),
+        };
+
+        let bed = entities
+            .iter()
+            .find_map(|entry| match entry {
+                Value::Compound(be)
+                    if be.get("id") == Some(&Value::String("minecraft:bed".to_string())) =>
+                {
+                    Some(be)
+                }
+                _ => None,
+            })
+            .expect("bed block entity should be present");
+
+        assert_eq!(bed.get("color"), Some(&Value::Int(14)));
     }
 }
