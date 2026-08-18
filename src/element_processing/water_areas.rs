@@ -736,14 +736,89 @@ fn scanline_fill_water(
                         }
                     }
                 };
-                // Over a bore, lay the surface but do not excavate into it.
+                // Over a bore, fill down to the terrain but never carve into it.
                 if tunnel_footprint.contains(x, z) {
-                    editor.set_block_absolute(WATER, x, water_y, z, None, Some(&[]));
+                    for y in (ground_y + 1).min(water_y)..=water_y {
+                        editor.set_block_absolute(WATER, x, y, z, None, Some(&[]));
+                    }
                     continue;
                 }
                 // depth_at gives the carved depth (0 without land-cover water data).
                 carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask, bwf);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::floodfill_cache::CoordinateBitmap;
+    use std::collections::HashMap as StdMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn ring(id: u64, min: i32, max: i32) -> ProcessedWay {
+        let corner = |i: u64, x: i32, z: i32| ProcessedNode {
+            id: i,
+            tags: StdMap::new(),
+            x,
+            z,
+        };
+        let mut tags = StdMap::new();
+        tags.insert("natural".to_string(), "water".to_string());
+        ProcessedWay {
+            id,
+            nodes: vec![
+                corner(1, min, min),
+                corner(2, max, min),
+                corner(3, max, max),
+                corner(4, min, max),
+                corner(1, min, min),
+            ],
+            tags,
+        }
+    }
+
+    /// A still surface sits up to `MAX_STILL_FILL_DROP` over the terrain, so laying
+    /// only the top block over a bore leaves the body hanging on air.
+    #[test]
+    fn water_over_a_bore_fills_down_to_the_terrain() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let ground = crate::ground::Ground::new_elevation_test(vec![vec![0.0f32; 80]; 80], 80, 80);
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+        editor.set_ground(Arc::new(ground.clone()));
+
+        let mut footprint = CoordinateBitmap::new(&xzbbox);
+        for x in 30..=40 {
+            for z in 30..=40 {
+                footprint.set(x, z);
+            }
+        }
+        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let road_mask = CoordinateBitmap::new_empty();
+        let surface = 5;
+        let mut surfaces = FnvHashMap::default();
+        surfaces.insert(("way", 1u64), surface);
+
+        generate_water_area_from_way(
+            &mut editor,
+            &ring(1, 20, 60),
+            &bwf,
+            &road_mask,
+            &footprint,
+            &StillWaterSurfaces(surfaces),
+        );
+
+        for y in 1..=surface {
+            assert!(
+                editor.check_for_block_absolute(35, y, 35, Some(&[WATER]), None),
+                "gap under the surface at y={y}"
+            );
+        }
+        // The bore itself is untouched below the terrain.
+        assert!(!editor.block_exists_absolute(35, -1, 35));
     }
 }
