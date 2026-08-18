@@ -16,6 +16,8 @@ mod luanti;
 pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
+#[cfg(test)]
+pub(crate) use common::FLOOR_TEST_LOCK;
 pub use common::{
     base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
     world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,

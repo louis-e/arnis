@@ -215,6 +215,7 @@ fn process_element(
     building_passages: &CoordinateBitmap,
     road_mask: &CoordinateBitmap,
     rail_mask: &CoordinateBitmap,
+    tunnel_footprint: &CoordinateBitmap,
     xzbbox: &XZBBox,
     big_water_field: &crate::water_depth::BigWaterField,
     bridge_structures: &bridges::BridgeStructureMap,
@@ -223,6 +224,7 @@ fn process_element(
     rail_bridge_internal_endpoints: &railways::RailBridgeInternalEndpoints,
     rail_tunnel_points: &mut Vec<(i32, i32)>,
     tunnel_internal_endpoints: &highways::TunnelInternalEndpoints,
+    tunnel_portals: &highways::TunnelPortalMap,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
     part_groups: &PartGroups,
     group_members: &FnvHashMap<u64, Vec<u64>>,
@@ -271,6 +273,8 @@ fn process_element(
                     bridge_structures,
                     bridge_surface,
                     tunnel_internal_endpoints,
+                    tunnel_portals,
+                    tunnel_footprint,
                     tunnel_cells,
                 );
                 if signage {
@@ -322,6 +326,7 @@ fn process_element(
                         way,
                         big_water_field,
                         road_mask,
+                        tunnel_footprint,
                         still_surfaces,
                     );
                 } else {
@@ -393,6 +398,8 @@ fn process_element(
                     bridge_structures,
                     bridge_surface,
                     tunnel_internal_endpoints,
+                    tunnel_portals,
+                    tunnel_footprint,
                     tunnel_cells,
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
@@ -437,6 +444,7 @@ fn process_element(
                     xzbbox,
                     big_water_field,
                     road_mask,
+                    tunnel_footprint,
                     still_surfaces,
                 );
             } else if rel.tags.contains_key("natural") {
@@ -641,7 +649,7 @@ pub fn generate_world_with_options(
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
+    let road_mask = highways::collect_road_surface_coords(&elements, &editor, &xzbbox, args.scale);
 
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
@@ -659,10 +667,6 @@ pub fn generate_world_with_options(
         map
     };
 
-    // Tunnel bore footprints, so the water depth-carve and vegetation stay off them.
-    let mut tunnel_footprint = highways::collect_tunnel_footprint(&elements, &xzbbox, args.scale);
-    railways::add_tunnel_footprint(&elements, &xzbbox, &mut tunnel_footprint);
-
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
     let bridge_structures =
@@ -676,7 +680,24 @@ pub fn generate_world_with_options(
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
 
-    let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements);
+    let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
+
+    // Tunnel bore footprints, so the water depth-carve and vegetation stay off them.
+    let mut tunnel_footprint = highways::collect_tunnel_footprint(
+        &elements,
+        &editor,
+        &tunnel_internal_endpoints,
+        &xzbbox,
+        args.scale,
+    );
+    railways::add_tunnel_footprint(&elements, &xzbbox, &mut tunnel_footprint);
+    let tunnel_portals = highways::collect_tunnel_portals(
+        &elements,
+        &editor,
+        &bridge_structures,
+        &tunnel_internal_endpoints,
+        args.scale,
+    );
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
@@ -881,6 +902,7 @@ pub fn generate_world_with_options(
                             &building_passages,
                             &road_mask,
                             &rail_mask,
+                            &tunnel_footprint,
                             // World bbox (not tile) for relation/area ring clipping: clipping to
                             // the tile can drop a relation whose ring fails to close. The tile
                             // editor still bounds the actual writes.
@@ -892,6 +914,7 @@ pub fn generate_world_with_options(
                             &rail_bridge_internal_endpoints,
                             &mut tile_rail_tunnel_points,
                             &tunnel_internal_endpoints,
+                            &tunnel_portals,
                             &mut tile_tunnel_cells,
                             &part_groups,
                             &group_members,
@@ -1164,6 +1187,7 @@ pub fn generate_world_with_options(
                 &building_passages,
                 &road_mask,
                 &rail_mask,
+                &tunnel_footprint,
                 &xzbbox,
                 &big_water_field,
                 &bridge_structures,
@@ -1172,6 +1196,7 @@ pub fn generate_world_with_options(
                 &rail_bridge_internal_endpoints,
                 &mut rail_tunnel_points,
                 &tunnel_internal_endpoints,
+                &tunnel_portals,
                 &mut tunnel_cells,
                 &part_groups,
                 &group_members,
