@@ -5,6 +5,7 @@ use crate::decals::render::{render as render_decal, PreviewRaster};
 use crate::decals::DecalRegistry;
 use crate::map_item_palette::{nearest_map_color, TRANSPARENT};
 use crate::map_renderer::PreviewAccumulator;
+use crate::progress::emit_gui_progress_update;
 use fastnbt::{ByteArray, Value};
 use flate2::read::GzDecoder;
 use image::RgbImage;
@@ -12,6 +13,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAP_SIZE: i32 = 128;
 // Fallback when the world DataVersion cannot be read.
@@ -395,6 +397,12 @@ pub fn write_decal_maps(
 
     // Render, encode and gzip are independent per decal.
     let entries: Vec<_> = registry.iter().collect();
+    // Fills the 97-99.5 band; on large areas this outlasts the region write.
+    // Counted in map tiles, not entries: an entry spans 1 to 6 tiles and both the
+    // render and the write scale with that.
+    let total_tiles = registry.tile_count().max(1) as usize;
+    let tiles_done = AtomicUsize::new(0);
+    let emit_step = (total_tiles / 20).max(1);
     let results: Vec<Result<(i32, usize), String>> = entries
         .par_iter()
         .map(|(key, entry)| {
@@ -409,6 +417,13 @@ pub fn write_decal_maps(
                     highest = highest.max(id);
                     written += 1;
                 }
+            }
+            // Bucket-crossing test, not a modulo: `written` can jump a whole step.
+            let before = tiles_done.fetch_add(written, Ordering::Relaxed);
+            let after = before + written;
+            if after / emit_step != before / emit_step || after >= total_tiles {
+                let f = (after as f64 / total_tiles as f64).min(1.0);
+                emit_gui_progress_update(97.0 + f * 2.5, "Finalizing world...");
             }
             Ok((highest, written))
         })

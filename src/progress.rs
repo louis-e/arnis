@@ -74,7 +74,8 @@ pub fn is_running_with_gui() -> bool {
 /// Processing data...         19.5%    (flood fills, footprints, road masks, 3D prescan)
 /// Generating area...         20-70%
 /// Generating ground...       70-90%
-/// Saving world...            90-100%
+/// Saving world...            90-97%    (region writes)
+/// Finalizing world...        97-100%   (map item, signage map tiles, world settings)
 ///
 /// The function `emit_gui_progress_update` is used to send real-time progress updates to the UI.
 pub fn emit_gui_progress_update(progress: f64, message: &str) {

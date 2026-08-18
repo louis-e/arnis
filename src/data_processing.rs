@@ -839,6 +839,8 @@ pub fn generate_world_with_options(
         let mut place_dur = std::time::Duration::ZERO;
         let mut merge_dur = std::time::Duration::ZERO;
         let total_tiles = indexed_tiles.len().max(1);
+        // Counted per tile, not per element: measured per-tile cost is near flat
+        // (the area work dominates), so tile count tracks time despite LPT order.
         let mut tiles_merged = 0usize;
         let mut last_emitted_pct = 20.0_f64;
         // Placement-side ticks so the bar moves before the first batch merges.
@@ -1342,6 +1344,10 @@ pub fn generate_world_with_options(
     }
     bench.mark("save");
 
+    // Map item, signage tiles and world settings are often longer than the region
+    // write, so they get their own band instead of a frozen bar at the end of save.
+    emit_gui_progress_update(97.0, "Finalizing world...");
+
     if wants_map_item {
         if let Some(p) = preview.as_ref() {
             match crate::map_item::write_map_item(&output_path, p, &xzbbox) {
@@ -1409,7 +1415,7 @@ pub fn generate_world_with_options(
         eprintln!("[BENCHMARK] generation_time_ms={gen_ms}");
     }
 
-    emit_gui_progress_update(99.0, "Finalizing world...");
+    emit_gui_progress_update(99.5, "Finalizing world...");
 
     if world_format == WorldFormat::JavaAnvil {
         if let Err(e) = crate::world_utils::apply_java_world_settings(
