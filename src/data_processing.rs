@@ -228,6 +228,7 @@ fn process_element(
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
     part_groups: &PartGroups,
     group_members: &FnvHashMap<u64, Vec<u64>>,
+    still_surfaces: &water_areas::StillWaterSurfaces,
 ) {
     let signage = editor.signage_enabled();
     match element {
@@ -318,15 +319,15 @@ fn process_element(
             } else if way.tags.contains_key("barrier") {
                 barriers::generate_barriers(editor, element, bridge_surface);
             } else if let Some(val) = way.tags.get("waterway") {
-                if val == "dock" {
-                    // docks count as water areas
+                if val == "dock" || val == "riverbank" {
+                    // docks and (legacy) riverbank areas count as water areas
                     water_areas::generate_water_area_from_way(
                         editor,
                         way,
-                        xzbbox,
                         big_water_field,
                         road_mask,
                         tunnel_footprint,
+                        still_surfaces,
                     );
                 } else {
                     waterways::generate_waterways(editor, way);
@@ -444,6 +445,7 @@ fn process_element(
                     big_water_field,
                     road_mask,
                     tunnel_footprint,
+                    still_surfaces,
                 );
             } else if rel.tags.contains_key("natural") {
                 natural::generate_natural_from_relation(
@@ -609,6 +611,8 @@ pub fn generate_world_with_options(
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+    // Resolved once here: a body spanning many tiles must not be measured per tile.
+    let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, &xzbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
     emit_gui_progress_update(19.5, "Processing data...");
@@ -914,6 +918,7 @@ pub fn generate_world_with_options(
                             &mut tile_tunnel_cells,
                             &part_groups,
                             &group_members,
+                            &still_surfaces,
                         );
                     }
 
@@ -1195,6 +1200,7 @@ pub fn generate_world_with_options(
                 &mut tunnel_cells,
                 &part_groups,
                 &group_members,
+                &still_surfaces,
             );
 
             // Release flood fill cache entries for memory optimization.

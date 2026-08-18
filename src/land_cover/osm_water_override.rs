@@ -25,7 +25,7 @@ struct WaterContext {
 
 pub fn apply_osm_water_override(
     land_cover: &mut LandCoverData,
-    heights: &[Vec<f32>],
+    heights: &mut [Vec<f32>],
     world_width: usize,
     world_height: usize,
     elements: &[ProcessedElement],
@@ -34,6 +34,9 @@ pub fn apply_osm_water_override(
     let width = land_cover.width;
     let height = land_cover.height;
     if width < 2 || height < 2 || world_width < 2 || world_height < 2 {
+        return;
+    }
+    if heights.len() < height || heights.iter().take(height).any(|r| r.len() < width) {
         return;
     }
     let scale_to_grid_x = (width as f64 - 1.0) / (world_width as f64 - 1.0);
@@ -51,6 +54,7 @@ pub fn apply_osm_water_override(
         scale_to_grid_x,
         scale_to_grid_z,
     );
+    let heights: &mut [Vec<f32>] = heights;
 
     let mut changed: usize = 0;
     for elem in elements {
@@ -82,7 +86,15 @@ pub fn apply_osm_water_override(
                         scale_to_grid_z,
                     );
                 } else if let Some(waterway_type) = way.tags.get("waterway") {
-                    let waterway_width = get_waterway_width(waterway_type, &way.tags);
+                    if !crate::element_processing::waterways::is_channel_waterway(waterway_type)
+                        || crate::element_processing::waterways::is_underground_waterway(&way.tags)
+                    {
+                        continue;
+                    }
+                    let waterway_width = crate::element_processing::waterways::waterway_width(
+                        waterway_type,
+                        &way.tags,
+                    );
                     let half_width = waterway_width / 2;
                     changed += rasterize_line(
                         &mut land_cover.grid,
@@ -171,6 +183,35 @@ pub fn apply_osm_water_override(
         );
         land_cover.water_distance = compute_water_distance(&land_cover.grid, width, height);
         land_cover.invalidate_water_blend_grid();
+        // The grid was leveled before this ran, so cells added here sit at their own
+        // terrain height and render as a rim above the body. Sink them onto the water
+        // they were judged against. ESA water is its own seed and stays put.
+        if let Some(nearest_y) = context.as_ref().and_then(|c| c.nearest_y.as_deref()) {
+            let mut sunk = 0usize;
+            for gz in 0..height {
+                for gx in 0..width {
+                    if land_cover.grid[gz][gx] != LC_WATER {
+                        continue;
+                    }
+                    let cell_y = heights[gz][gx];
+                    let water_y = nearest_y[gz][gx];
+                    if cell_y.is_finite()
+                        && water_y.is_finite()
+                        && cell_y > water_y
+                        && cell_y <= water_y + ELEVATION_TOLERANCE_BLOCKS
+                    {
+                        heights[gz][gx] = water_y;
+                        sunk += 1;
+                    }
+                }
+            }
+            if sunk > 0 {
+                eprintln!(
+                    "OSM water override: sank {} overridden cells onto the adjacent water surface",
+                    sunk
+                );
+            }
+        }
     }
 }
 
@@ -193,6 +234,10 @@ fn has_water_polygon_tags(tags: &HashMap<String, String>) -> bool {
     matches!(tags.get("natural").map(|s| s.as_str()), Some("water"))
         || has_explicit_water_tag(tags)
         || matches!(tags.get("landuse").map(|s| s.as_str()), Some("reservoir"))
+        || matches!(
+            tags.get("waterway").map(|s| s.as_str()),
+            Some("dock" | "riverbank")
+        )
 }
 
 // `water=no` and similar negatives must not count as water.
@@ -213,27 +258,6 @@ fn is_ring_closed(nodes: &[ProcessedNode]) -> bool {
     let dx = (first.x - last.x).abs();
     let dz = (first.z - last.z).abs();
     dx <= 1 && dz <= 1
-}
-
-fn get_waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i32 {
-    if let Some(w) = tags.get("width").and_then(|s| {
-        s.parse::<f32>()
-            .ok()
-            .or_else(|| s.parse::<i32>().ok().map(|i| i as f32))
-    }) {
-        return w.round() as i32;
-    }
-    match waterway_type {
-        "river" => 8,
-        "canal" => 6,
-        "stream" => 3,
-        "fairway" => 12,
-        "flowline" => 2,
-        "brook" => 2,
-        "ditch" => 2,
-        "drain" => 1,
-        _ => 4,
-    }
 }
 
 #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]

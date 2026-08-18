@@ -10,7 +10,9 @@
 //! downloading the full ~500MB tiles.
 
 pub mod bridge_repair;
+pub mod osm_land_override;
 pub mod osm_water_override;
+mod shoreline;
 
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -196,22 +198,20 @@ pub fn fetch_land_cover_data(
         return None;
     }
 
-    // Build the land cover grid by sampling each position
-    let mut grid = vec![vec![0u8; grid_width]; grid_height];
+    // Read the ESA pixels into one raster, then resample every grid cell from it.
+    // Sampling per cell is what keeps the grid gap-free at any --scale, and the raster
+    // also feeds the shoreline reconstruction below.
+    let mut raster: Option<EsaPixelRaster> = None;
     let cells_per_meter = cells_per_meter(bbox, grid_width);
-
     for (tile_lat, tile_lng, tile_url) in &tile_specs {
-        // Try to read pixels from this ESA tile for our bbox
-        match read_esa_tile_pixels(
+        match read_esa_tile_into_raster(
             &client,
             tile_url,
             &cache_dir,
             *tile_lat,
             *tile_lng,
             bbox,
-            grid_width,
-            grid_height,
-            &mut grid,
+            &mut raster,
         ) {
             Ok(()) => {}
             Err(e) => {
@@ -221,7 +221,9 @@ pub fn fetch_land_cover_data(
     }
 
     // Check if we got any valid data
-    let has_data = grid.iter().any(|row| row.iter().any(|&v| v != 0));
+    let has_data = raster
+        .as_ref()
+        .is_some_and(|r| r.data.iter().any(|&v| v != 0));
     if !has_data {
         eprintln!("Warning: No land cover data received for this area");
         #[cfg(feature = "gui")]
@@ -231,6 +233,13 @@ pub fn fetch_land_cover_data(
         );
         return None;
     }
+    let raster = raster?;
+    let mapping = GridMapping::new(bbox, raster.ppd, grid_width, grid_height)?;
+    let mut grid = raster.sample_grid(&mapping);
+
+    // Straighten the shore before anything else reads the water mask.
+    shoreline::reconstruct_water_shoreline(&raster, &mapping, &mut grid);
+    drop(raster);
 
     // Fill gaps (0 values surrounded by valid data) with nearest neighbor
     fill_gaps(&mut grid, grid_width, grid_height);
@@ -329,26 +338,172 @@ fn esa_tile_url(lat: f64, lng: f64) -> String {
 
 // ─── COG reading ──────────────────────────────────────────────────────────
 
-/// Read pixels from a single ESA tile into our grid.
-///
-/// This function reads the Cloud-Optimized GeoTIFF header to find internal tile
-/// offsets, then fetches only the tiles overlapping our bounding box via HTTP
-/// Range requests. Each fetched tile is decompressed and sampled into the grid.
-#[allow(clippy::too_many_arguments)]
-fn read_esa_tile_pixels(
+/// ESA pixels covering the bbox, in the product's global pixel grid:
+/// `x = floor((lng + 180) * ppd)`, `y = floor((90 - lat) * ppd)`. Class 0 = nodata.
+pub(crate) struct EsaPixelRaster {
+    /// Global pixel column of the first raster column.
+    pub x0: i64,
+    /// Global pixel row of the first raster row.
+    pub y0: i64,
+    pub width: usize,
+    pub height: usize,
+    /// Pixels per degree (12000 for the 10 m product).
+    pub ppd: f64,
+    /// Row-major classes, `height * width`.
+    pub data: Vec<u8>,
+}
+
+/// Raster cap, so a pathological bbox fails instead of allocating unbounded.
+const MAX_RASTER_PIXELS: usize = 1 << 31;
+
+impl EsaPixelRaster {
+    /// Raster covering `bbox` at `ppd`, filled with nodata.
+    fn covering(bbox: &LLBBox, ppd: f64) -> Option<Self> {
+        let x0 = ((bbox.min().lng() + 180.0) * ppd).floor();
+        let x1 = ((bbox.max().lng() + 180.0) * ppd).floor();
+        let y0 = ((90.0 - bbox.max().lat()) * ppd).floor();
+        let y1 = ((90.0 - bbox.min().lat()) * ppd).floor();
+        if !(x0.is_finite() && x1.is_finite() && y0.is_finite() && y1.is_finite()) {
+            return None;
+        }
+        // Inclusive on both ends: the cell at the bbox edge lies in the pixel
+        // containing max_lng / min_lat.
+        let width = (x1 - x0) as i64 + 1;
+        let height = (y1 - y0) as i64 + 1;
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let pixels = (width as usize).checked_mul(height as usize)?;
+        if pixels > MAX_RASTER_PIXELS {
+            eprintln!(
+                "Warning: bounding box spans {} ESA WorldCover pixels, too many to hold; skipping land cover",
+                pixels
+            );
+            return None;
+        }
+        // A country-scale bbox asks for a gigabyte here, so failing to get it has to drop
+        // land cover rather than abort the process the way an infallible alloc would.
+        let mut data: Vec<u8> = Vec::new();
+        if data.try_reserve_exact(pixels).is_err() {
+            eprintln!(
+                "Warning: could not allocate the {pixels}-pixel ESA WorldCover raster; skipping land cover"
+            );
+            return None;
+        }
+        data.resize(pixels, 0);
+        Some(Self {
+            x0: x0 as i64,
+            y0: y0 as i64,
+            width: width as usize,
+            height: height as usize,
+            ppd,
+            data,
+        })
+    }
+
+    /// Nearest-neighbour resample: every grid cell takes the class of its pixel.
+    /// Nodata pixels leave 0 for `fill_gaps`.
+    pub(crate) fn sample_grid(&self, mapping: &GridMapping) -> Vec<Vec<u8>> {
+        let (gw, gh) = (mapping.grid_w, mapping.grid_h);
+        let mut grid = vec![vec![0u8; gw]; gh];
+        if gw == 0 || gh == 0 || self.width == 0 || self.height == 0 {
+            return grid;
+        }
+        // Grid column span of every pixel column, computed once. Only the columns that
+        // land on a cell are kept, so a grid coarser than the pixels walks the grid width
+        // per row instead of the pixel width.
+        let col_spans: Vec<(usize, usize, usize)> = (0..self.width)
+            .filter_map(|px| {
+                let x = (self.x0 + px as i64) as f64;
+                let (lo, hi) = mapping.cell_span(mapping.gx(x), mapping.gx(x + 1.0), gw);
+                (lo < hi).then_some((px, lo, hi))
+            })
+            .collect();
+        let mut row_buf = vec![0u8; gw];
+        for py in 0..self.height {
+            let y = (self.y0 + py as i64) as f64;
+            let (z_lo, z_hi) = mapping.cell_span(mapping.gz(y), mapping.gz(y + 1.0), gh);
+            if z_lo >= z_hi {
+                continue;
+            }
+            let src = &self.data[py * self.width..(py + 1) * self.width];
+            row_buf.fill(0);
+            for &(px, lo, hi) in &col_spans {
+                row_buf[lo..hi].fill(src[px]);
+            }
+            for row in grid.iter_mut().take(z_hi).skip(z_lo) {
+                row.copy_from_slice(&row_buf);
+            }
+        }
+        grid
+    }
+}
+
+/// Global ESA pixel coordinates to grid cells, on the elevation grid's convention:
+/// cell `gx` sits at `min_lng + gx / (grid_w - 1) * (max_lng - min_lng)`.
+pub(crate) struct GridMapping {
+    /// Global pixel x of the bbox west edge (fractional).
+    pub x_origin: f64,
+    /// Global pixel y of the bbox north edge (fractional).
+    pub y_origin: f64,
+    /// Grid cells per pixel along x / y.
+    pub sx: f64,
+    pub sy: f64,
+    pub grid_w: usize,
+    pub grid_h: usize,
+}
+
+impl GridMapping {
+    fn new(bbox: &LLBBox, ppd: f64, grid_w: usize, grid_h: usize) -> Option<Self> {
+        let lng_px = (bbox.max().lng() - bbox.min().lng()) * ppd;
+        let lat_px = (bbox.max().lat() - bbox.min().lat()) * ppd;
+        if !(lng_px > 0.0 && lat_px > 0.0) || grid_w < 2 || grid_h < 2 {
+            return None;
+        }
+        Some(Self {
+            x_origin: (bbox.min().lng() + 180.0) * ppd,
+            y_origin: (90.0 - bbox.max().lat()) * ppd,
+            sx: (grid_w - 1) as f64 / lng_px,
+            sy: (grid_h - 1) as f64 / lat_px,
+            grid_w,
+            grid_h,
+        })
+    }
+
+    /// Grid x coordinate of global pixel x.
+    #[inline(always)]
+    pub(crate) fn gx(&self, px_x: f64) -> f64 {
+        (px_x - self.x_origin) * self.sx
+    }
+
+    /// Grid z coordinate of global pixel y.
+    #[inline(always)]
+    pub(crate) fn gz(&self, px_y: f64) -> f64 {
+        (px_y - self.y_origin) * self.sy
+    }
+
+    /// Cells `[lo, hi)` whose coordinate lies in `[a, b)`, clamped to `0..n`.
+    #[inline(always)]
+    fn cell_span(&self, a: f64, b: f64, n: usize) -> (usize, usize) {
+        let lo = a.ceil().max(0.0).min(n as f64) as usize;
+        let hi = b.ceil().max(0.0).min(n as f64) as usize;
+        (lo, hi)
+    }
+}
+
+/// Read the pixels of one ESA tile overlapping the bbox into `raster`, creating it from
+/// the tile's pixel size on first use. Only the COG tiles that overlap are fetched.
+fn read_esa_tile_into_raster(
     client: &reqwest::blocking::Client,
     url: &str,
     cache_dir: &Path,
     tile_lat: f64,
     tile_lng: f64,
     bbox: &LLBBox,
-    grid_width: usize,
-    grid_height: usize,
-    grid: &mut [Vec<u8>],
+    raster: &mut Option<EsaPixelRaster>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // The ESA tile covers [tile_lat, tile_lat+3] x [tile_lng, tile_lng+3]
     let tile_north = tile_lat + ESA_TILE_DEGREES;
-    let tile_east = tile_lng + ESA_TILE_DEGREES;
 
     // Generate a cache filename from the URL
     let cache_filename = url
@@ -406,34 +561,48 @@ fn read_esa_tile_pixels(
         return Err("Tile dimensions are zero".into());
     }
 
-    // Step 4: Calculate pixel coordinates for our bbox within this ESA tile
-    let pixels_per_degree_x = cog.image_width as f64 / ESA_TILE_DEGREES;
-    let pixels_per_degree_y = cog.image_height as f64 / ESA_TILE_DEGREES;
+    // Step 4: Place the tile in the global pixel grid. Tiles are 3 degrees square, so
+    // pixel size defines the raster; a tile with a different size cannot merge.
+    let ppd = cog.image_width as f64 / ESA_TILE_DEGREES;
+    if (cog.image_height as f64 / ESA_TILE_DEGREES - ppd).abs() > 1e-9 {
+        return Err("Non-square ESA tile pixels".into());
+    }
+    let raster = match raster {
+        Some(r) => {
+            if (r.ppd - ppd).abs() > 1e-9 {
+                return Err(format!(
+                    "Tile pixel size {ppd}/deg differs from the raster's {}/deg",
+                    r.ppd
+                )
+                .into());
+            }
+            r
+        }
+        slot @ None => {
+            let r = EsaPixelRaster::covering(bbox, ppd)
+                .ok_or("Cannot build a pixel raster for this bounding box")?;
+            slot.insert(r)
+        }
+    };
+    let tile_px_x0 = ((tile_lng + 180.0) * ppd).round() as i64;
+    let tile_px_y0 = ((90.0 - tile_north) * ppd).round() as i64;
 
-    // Clamp bbox to this tile's extent
-    let clip_min_lat = bbox.min().lat().max(tile_lat);
-    let clip_max_lat = bbox.max().lat().min(tile_north);
-    let clip_min_lng = bbox.min().lng().max(tile_lng);
-    let clip_max_lng = bbox.max().lng().min(tile_east);
-
-    // Convert geographic coords to pixel coords within this ESA tile
-    // Pixel (0,0) is top-left = (tile_lng, tile_north)
-    let px_min_x = ((clip_min_lng - tile_lng) * pixels_per_degree_x) as u64;
-    let px_max_x = ((clip_max_lng - tile_lng) * pixels_per_degree_x).ceil() as u64;
-    let px_min_y = ((tile_north - clip_max_lat) * pixels_per_degree_y) as u64;
-    let px_max_y = ((tile_north - clip_min_lat) * pixels_per_degree_y).ceil() as u64;
-
-    let px_min_x = px_min_x.min(cog.image_width - 1);
-    let px_max_x = px_max_x.min(cog.image_width);
-    let px_min_y = px_min_y.min(cog.image_height - 1);
-    let px_max_y = px_max_y.min(cog.image_height);
+    // Overlap of the raster with this tile, in tile-local pixels.
+    let lx_lo = (raster.x0 - tile_px_x0).max(0);
+    let lx_hi = (raster.x0 + raster.width as i64 - tile_px_x0).min(cog.image_width as i64);
+    let ly_lo = (raster.y0 - tile_px_y0).max(0);
+    let ly_hi = (raster.y0 + raster.height as i64 - tile_px_y0).min(cog.image_height as i64);
+    if lx_lo >= lx_hi || ly_lo >= ly_hi {
+        return Ok(());
+    }
+    let (lx_lo, lx_hi, ly_lo, ly_hi) = (lx_lo as u64, lx_hi as u64, ly_lo as u64, ly_hi as u64);
 
     // Step 5: Determine which internal tiles we need
     let tiles_across = cog.image_width.div_ceil(cog.tile_width);
-    let itile_min_x = px_min_x / cog.tile_width;
-    let itile_max_x = (px_max_x.saturating_sub(1)) / cog.tile_width;
-    let itile_min_y = px_min_y / cog.tile_height;
-    let itile_max_y = (px_max_y.saturating_sub(1)) / cog.tile_height;
+    let itile_min_x = lx_lo / cog.tile_width;
+    let itile_max_x = (lx_hi - 1) / cog.tile_width;
+    let itile_min_y = ly_lo / cog.tile_height;
+    let itile_max_y = (ly_hi - 1) / cog.tile_height;
 
     // Step 6: Fetch and decode each needed internal tile
     for ity in itile_min_y..=itile_max_y {
@@ -470,53 +639,28 @@ fn read_esa_tile_pixels(
             let pixel_count = (cog.tile_width * cog.tile_height) as usize;
             let pixels = decompress_tile(&compressed_data, pixel_count, cog.compression)?;
 
-            // Step 7: Map decompressed pixels into our grid
+            // Step 7: Copy the overlapping rows into the raster
             let tile_pixel_x0 = itx * cog.tile_width;
             let tile_pixel_y0 = ity * cog.tile_height;
-
-            for py in 0..cog.tile_height {
-                let abs_py = tile_pixel_y0 + py;
-                if abs_py < px_min_y || abs_py >= px_max_y {
-                    continue;
+            let x_from = lx_lo.max(tile_pixel_x0);
+            let x_to = lx_hi.min(tile_pixel_x0 + cog.tile_width);
+            let y_from = ly_lo.max(tile_pixel_y0);
+            let y_to = ly_hi.min(tile_pixel_y0 + cog.tile_height);
+            if x_from >= x_to {
+                continue;
+            }
+            for abs_py in y_from..y_to {
+                let src_start =
+                    ((abs_py - tile_pixel_y0) * cog.tile_width + (x_from - tile_pixel_x0)) as usize;
+                let src_end = src_start + (x_to - x_from) as usize;
+                if src_end > pixels.len() {
+                    break;
                 }
-
-                for px in 0..cog.tile_width {
-                    let abs_px = tile_pixel_x0 + px;
-                    if abs_px < px_min_x || abs_px >= px_max_x {
-                        continue;
-                    }
-
-                    let pixel_idx = (py * cog.tile_width + px) as usize;
-                    if pixel_idx >= pixels.len() {
-                        continue;
-                    }
-
-                    let class_value = pixels[pixel_idx];
-                    if class_value == 0 {
-                        continue; // No data
-                    }
-
-                    // Map pixel geographic position to grid coordinates
-                    // Pixel abs_px corresponds to longitude:
-                    let pixel_lng = tile_lng + (abs_px as f64 / pixels_per_degree_x);
-                    // Pixel abs_py corresponds to latitude (inverted):
-                    let pixel_lat = tile_north - (abs_py as f64 / pixels_per_degree_y);
-
-                    // Convert to grid coordinates (same mapping as elevation grid)
-                    let rel_x =
-                        (pixel_lng - bbox.min().lng()) / (bbox.max().lng() - bbox.min().lng());
-                    let rel_z = 1.0
-                        - (pixel_lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
-
-                    // Scale to grid indices using (size - 1) so rel==1.0 maps to
-                    // the last valid index (same approach as elevation_data.rs)
-                    let gx = (rel_x * (grid_width - 1) as f64).round() as i64;
-                    let gz = (rel_z * (grid_height - 1) as f64).round() as i64;
-
-                    if gx >= 0 && gx < grid_width as i64 && gz >= 0 && gz < grid_height as i64 {
-                        grid[gz as usize][gx as usize] = class_value;
-                    }
-                }
+                let ry = (tile_px_y0 + abs_py as i64 - raster.y0) as usize;
+                let rx = (tile_px_x0 + x_from as i64 - raster.x0) as usize;
+                let dst_start = ry * raster.width + rx;
+                raster.data[dst_start..dst_start + (x_to - x_from) as usize]
+                    .copy_from_slice(&pixels[src_start..src_end]);
             }
         }
     }
@@ -891,6 +1035,10 @@ fn read_u64(bytes: &[u8], offset: usize, big_endian: bool) -> u64 {
 /// Fill gaps (zero values) in the grid using nearest-neighbor interpolation.
 /// Iterates until no more gaps can be filled or a max number of passes is reached.
 fn fill_gaps(grid: &mut [Vec<u8>], width: usize, height: usize) {
+    // Checked up front so a gap-free grid never pays for the snapshot below.
+    if !grid.iter().any(|row| row.contains(&0)) {
+        return;
+    }
     for _ in 0..10 {
         let mut changed = false;
         // Make a snapshot to read from while writing
@@ -926,6 +1074,40 @@ fn fill_gaps(grid: &mut [Vec<u8>], width: usize, height: usize) {
             break;
         }
     }
+}
+
+/// Class of the nearest non-water, non-nodata cell (ring search), if any.
+pub(crate) fn nearest_land_class(
+    grid: &[Vec<u8>],
+    gw: usize,
+    gh: usize,
+    x: usize,
+    z: usize,
+    radius: i32,
+) -> Option<u8> {
+    for r in 1..=radius {
+        for dz in -r..=r {
+            let nz = z as i32 + dz;
+            if nz < 0 || nz >= gh as i32 {
+                continue;
+            }
+            let row = &grid[nz as usize];
+            // Only the ring at Chebyshev distance exactly r.
+            let step = if dz.abs() == r { 1 } else { 2 * r };
+            let mut dx = -r;
+            while dx <= r {
+                let nx = x as i32 + dx;
+                if nx >= 0 && nx < gw as i32 {
+                    let c = row[nx as usize];
+                    if c != LC_WATER && c != 0 {
+                        return Some(c);
+                    }
+                }
+                dx += step;
+            }
+        }
+    }
+    None
 }
 
 // ─── Water distance field ─────────────────────────────────────────────────
