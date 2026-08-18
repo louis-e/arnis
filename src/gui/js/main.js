@@ -447,14 +447,38 @@ const ETA_RISE_ABS = 2; // shown rises by at most max(2s, 10%) per update
 const ETA_RISE_FRAC = 0.1; // => smooth, monotonic-feeling countdown
 
 // Progress bands [lo, hi) and per-regime RELATIVE time weights (not % widths).
+// Measured on Heidelberg 1/2.5/5/10 km runs (terrain + land cover + Overture):
+// the finalize tail (map item, signage map tiles, world settings) is as long as
+// the region write on small areas and several times longer on large ones, so it
+// gets its own band rather than hiding behind the last save percent.
 const ETA_PHASES = [
   { id: "terrain", lo: 20, hi: 70 },
   { id: "ground", lo: 70, hi: 90 },
-  { id: "save", lo: 90, hi: 100 },
+  { id: "save", lo: 90, hi: 97 },
+  { id: "finalize", lo: 97, hi: 100 },
 ];
-const ETA_WPRIOR = { nonStreaming: [37, 2, 10], streaming: [60, 0.3, 0.2] };
+const ETA_WPRIOR = {
+  nonStreaming: [37, 2, 11, 20],
+  streaming: [60, 0.3, 0.5, 3.0],
+};
+// Signage map tiles are what makes the finalize band long, and they are Java-only.
+// Without them the tail is just the map item and level.dat settings.
+const ETA_WFINALIZE_NO_SIGNAGE = 1.5;
 
 let eta = null;
+// Set from the generate handler; decides the finalize weight for the next run.
+let etaSignageExpected = true;
+
+function setEtaSignageExpected(expected) {
+  etaSignageExpected = !!expected;
+}
+
+// Copy of the regime prior with the finalize weight adjusted for this run.
+function etaWeightsFor(streaming) {
+  const w = (streaming ? ETA_WPRIOR.streaming : ETA_WPRIOR.nonStreaming).slice();
+  if (!etaSignageExpected) w[3] = ETA_WFINALIZE_NO_SIGNAGE;
+  return w;
+}
 
 function etaPhaseIdx(p) {
   for (let i = 0; i < ETA_PHASES.length; i++) if (p < ETA_PHASES[i].hi) return i;
@@ -548,7 +572,7 @@ function updateEta(progress, streaming) {
   const now = performance.now();
   if (!eta) {
     eta = {
-      streamingKnown: false, wprior: ETA_WPRIOR.nonStreaming, phaseIdx: -1,
+      streamingKnown: false, wprior: etaWeightsFor(false), phaseIdx: -1,
       phaseStartT: now, phaseStartProgress: null, movedInPhase: false,
       samples: [], doneSec: 0, doneWeight: 0, est: null, shown: null,
       lastTickAt: now, lastProgress: null, lastIncreaseAt: now, tickHandle: null,
@@ -556,7 +580,7 @@ function updateEta(progress, streaming) {
   }
   if (streaming != null && !eta.streamingKnown) {
     eta.streamingKnown = true;
-    eta.wprior = streaming ? ETA_WPRIOR.streaming : ETA_WPRIOR.nonStreaming;
+    eta.wprior = etaWeightsFor(streaming);
   }
 
   const idx = etaPhaseIdx(progress), ph = ETA_PHASES[idx];
@@ -599,9 +623,8 @@ function updateEta(progress, streaming) {
   if (G != null) G = Math.min(1000, Math.max(0.02, G));
 
   let raw = null;
-  if (ph.id === "save" && rate) {
-    raw = Math.max(0, remCur); // snap to the real region-write rate, no future term
-  } else if (remCur != null) {
+  if (remCur != null) {
+    // In the last band this is just the measured rate; earlier ones budget the rest.
     raw = Math.max(0, remCur);
     if (G != null) for (let j = idx + 1; j < ETA_PHASES.length; j++) raw += eta.wprior[j] * G;
   }
@@ -1794,6 +1817,7 @@ async function startGeneration() {
     });
 
     console.log("Generation process started.");
+    setEtaSignageExpected(signage !== "none" && getEffectiveWorldFormat() === "java");
     resetEta();
     started = true;
     window.arnisPreview3D?.setGenerationRunning(true);

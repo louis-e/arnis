@@ -166,9 +166,10 @@ impl<'a> WorldEditor<'a> {
                 // Update progress
                 let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst) + 1;
 
+                // 90->97; 97-100 is the finalize tail (map/signage tiles, settings).
                 let update_interval = (total_regions / 10).max(1);
                 if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
-                    let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 9.0;
+                    let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 7.0;
                     emit_gui_progress_update(progress, "Saving world...");
                 }
 
