@@ -1214,6 +1214,7 @@ fn gui_start_generation(
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld
                     && rotation_angle.abs() <= f64::EPSILON,
+                nametags: false,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

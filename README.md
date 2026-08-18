@@ -49,6 +49,8 @@ GUI Build: ```cargo run --release```<br>
 | `geo-only` | OSM objects on flat ground |
 | `terrain-only` | Real elevation terrain, no objects at all (skips the OpenStreetMap query and the Overture fetch entirely, so `--overture` has no effect) |
 
+`--nametags` (Java only, off by default) floats a name/category label above every named or address-tagged OSM element, plus a category label (e.g. "Restaurant") above any element carrying a recognized OSM tag even without a name. Labels are `minecraft:text_display` entities, so they render at a distance and always face the viewer. Capped at 3000 labeled elements per world.
+
 After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`

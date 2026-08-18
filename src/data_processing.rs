@@ -7,6 +7,7 @@ use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_preview;
 use crate::map_renderer::PreviewAccumulator;
+use crate::nametags;
 use crate::osm_parser::{
     OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole, ProcessedNode,
     ProcessedRelation, ProcessedWay,
@@ -563,6 +564,14 @@ pub fn generate_world_with_options(
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
+
+    // Collected up front: `elements` is dropped (or moved into the tile loop) below,
+    // long before the block/entity-writing phase where labels actually get placed.
+    let nametag_labels = if args.nametags && world_format == WorldFormat::JavaAnvil {
+        nametags::collect_nametag_labels(&elements)
+    } else {
+        Vec::new()
+    };
 
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
@@ -1152,6 +1161,10 @@ pub fn generate_world_with_options(
         } else {
             editor.place_branding_map_only(sx, sz, 0);
         }
+    }
+
+    if !nametag_labels.is_empty() {
+        nametags::place_nametags(&mut editor, &nametag_labels);
     }
 
     // Save world

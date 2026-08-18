@@ -139,6 +139,11 @@ pub struct Args {
     /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
     #[arg(long, default_value_t = 6000, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
+
+    /// Float a floating name/category tag above every named or categorized OSM
+    /// element (optional, off unless requested). Java only.
+    #[arg(long, default_value_t = false)]
+    pub nametags: bool,
 }
 
 /// Generation mode, matching the GUI's dropdown (src/gui/js/main.js).
@@ -389,6 +394,25 @@ mod tests {
         // interior is opt-in (off by default); overture defaults to true
         assert!(!args.interior);
         assert!(args.overture);
+        // nametags is opt-in (off by default)
+        assert!(!args.nametags);
+    }
+
+    #[test]
+    fn test_nametags_flag() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--nametags",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.nametags);
     }
 
     #[test]
