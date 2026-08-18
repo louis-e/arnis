@@ -481,23 +481,52 @@ impl SectionToModify {
         // Single pass: build palette and per-block index array simultaneously.
         let mut unique_blocks: Vec<(Block, Option<Arc<Value>>)> = Vec::new();
         let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
+        // Memo from the identity of a property compound to its palette slot, in front of the
+        // content-keyed map below. The content map stays authoritative, so two distinct Arcs
+        // holding equal NBT still collapse into one palette entry exactly as before; this
+        // only avoids re-deriving the answer for an Arc already seen in this section.
+        //
+        // Without it the debug-format below runs once per CELL, so a producer that shares one
+        // compound across a whole area (crops) pays 4096 string formats per section to
+        // rediscover the same handful of entries.
+        let mut ptr_lookup: FnvHashMap<(Block, usize), usize> = FnvHashMap::default();
         let mut indices = Vec::with_capacity(4096);
 
         for (i, block) in self.storage.iter().enumerate() {
             let properties = self.properties.get(&i);
 
-            // Create a key for the lookup (block + properties debug string)
-            let props_key = properties.map(|p| format!("{p:?}"));
-            let lookup_key = (block, props_key);
-
-            let palette_index = match palette_lookup.entry(lookup_key) {
-                std::collections::hash_map::Entry::Occupied(e) => *e.get(),
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    let idx = unique_blocks.len();
-                    e.insert(idx);
-                    unique_blocks.push((block, properties.cloned()));
-                    idx
+            let palette_index = match properties {
+                Some(arc) => {
+                    let ptr_key = (block, Arc::as_ptr(arc) as usize);
+                    if let Some(&idx) = ptr_lookup.get(&ptr_key) {
+                        idx
+                    } else {
+                        // First sighting of this exact Arc here: fall back to the content key,
+                        // so an equal compound from a different allocation still lands in the
+                        // slot that already exists for it.
+                        let lookup_key = (block, Some(format!("{arc:?}")));
+                        let idx = match palette_lookup.entry(lookup_key) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let idx = unique_blocks.len();
+                                e.insert(idx);
+                                unique_blocks.push((block, Some(Arc::clone(arc))));
+                                idx
+                            }
+                        };
+                        ptr_lookup.insert(ptr_key, idx);
+                        idx
+                    }
                 }
+                None => match palette_lookup.entry((block, None)) {
+                    std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        let idx = unique_blocks.len();
+                        e.insert(idx);
+                        unique_blocks.push((block, None));
+                        idx
+                    }
+                },
             };
             indices.push(palette_index);
         }
@@ -1341,6 +1370,66 @@ impl WorldToModify {
 
 #[cfg(test)]
 mod tests {
+
+    /// The palette is keyed by property CONTENT, and the identity memo in front of it must
+    /// not change that. Two equal compounds arriving as separate allocations still have to
+    /// collapse into one entry, or a world gains duplicate palette slots purely from how
+    /// its producer allocated.
+    #[test]
+    fn equal_properties_from_distinct_arcs_share_one_palette_entry() {
+        use std::collections::HashMap;
+
+        let make = || {
+            let mut props: HashMap<String, Value> = HashMap::new();
+            props.insert("age".to_string(), Value::String("7".to_string()));
+            Arc::new(Value::Compound(props))
+        };
+        let a = make();
+        let b = make();
+        assert!(!Arc::ptr_eq(&a, &b), "test needs two distinct allocations");
+
+        let mut section = SectionToModify::default();
+        section.set_block_with_properties(0, 0, 0, BlockWithProperties::from_arc(STONE, Some(a)));
+        section.set_block_with_properties(1, 0, 0, BlockWithProperties::from_arc(STONE, Some(b)));
+
+        let entries = section
+            .to_section(0)
+            .block_states
+            .palette
+            .iter()
+            .filter(|p| p.name.ends_with("stone") && p.properties.is_some())
+            .count();
+        assert_eq!(entries, 1, "equal compounds must not split the palette");
+    }
+
+    /// The path the memo exists for: one interned compound shared across a whole field.
+    #[test]
+    fn one_shared_arc_resolves_to_one_palette_entry() {
+        use std::collections::HashMap;
+
+        let mut props: HashMap<String, Value> = HashMap::new();
+        props.insert("age".to_string(), Value::String("3".to_string()));
+        let shared = Arc::new(Value::Compound(props));
+
+        let mut section = SectionToModify::default();
+        for x in 0..8u8 {
+            section.set_block_with_properties(
+                x,
+                0,
+                0,
+                BlockWithProperties::from_arc(STONE, Some(Arc::clone(&shared))),
+            );
+        }
+
+        let entries = section
+            .to_section(0)
+            .block_states
+            .palette
+            .iter()
+            .filter(|p| p.name.ends_with("stone") && p.properties.is_some())
+            .count();
+        assert_eq!(entries, 1);
+    }
     use super::*;
 
     #[test]

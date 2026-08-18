@@ -973,6 +973,7 @@ fn gui_start_generation(
     fillground_enabled: bool,
     legacy_trees_enabled: bool,
     max_tree_size: String,
+    field_preset: String,
     canopy_height_enabled: bool,
     overture_enabled: bool,
     use_3d_enabled: bool,
@@ -1275,6 +1276,9 @@ fn gui_start_generation(
                 fillground: fillground_enabled,
                 legacy_trees: legacy_trees_enabled,
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
+                fields: crate::element_processing::field_texture::FieldPreset::from_str_lossy(
+                    &field_preset,
+                ),
                 canopy_height: canopy_height_enabled,
                 overture: overture_enabled,
                 use_3d: use_3d_enabled,

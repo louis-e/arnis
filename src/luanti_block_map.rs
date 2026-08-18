@@ -543,6 +543,23 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         363 => "mcl_banners:hanging_banner", // WHITE_WALL_BANNER
         364 | 365 => return conv_door(props, block.id(), "spruce"),
         366 => return conv_door(props, block.id(), "oak"),
+        // Farmland texturing palette. Crop stages are not carried over: Mineclonia
+        // models growth as separate nodes, and the rest of this table already exports
+        // crops at their ripe node.
+        367 => "mcl_mud:packed_mud",
+        368 => "mcl_lush_caves:rooted_dirt",
+        369 => "mcl_lush_caves:moss_carpet",
+        370 => "mcl_lush_caves:azalea",
+        371 => "mcl_farming:pumpkin",
+        372 => "mcl_farming:beetroot", // BEETROOTS, ripe
+        373 => "mcl_flowers:sunflower",
+        374 => "mcl_flowers:sunflower_top",
+        375 => "mcl_flowers:allium",
+        376 => "mcl_flowers:cornflower",
+        377 => "mcl_flowers:lily_of_the_valley",
+        378 => "mcl_flowers:tulip_orange",
+        379 => "mcl_flowers:tulip_pink",
+        380 => "mcl_flowers:oxeye_daisy",
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }
