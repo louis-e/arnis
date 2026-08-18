@@ -1,6 +1,6 @@
 [package]
 name = "arnis"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2021"
 # Cargo only auto-detects a root build.rs, so the moved path has to be declared.
 build = "src/build.rs"
