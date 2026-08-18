@@ -81,7 +81,11 @@ pub struct Args {
     /// (many small plots, full crop variety), patchwork (balanced mixed farmland),
     /// prairie (large industrial fields) or pasture (grass and wildflowers with a few
     /// crop plots). Anything but classic lays farmland out as separate parcels, each
-    /// growing one crop.
+    /// growing one crop, separated by dirt tracks.
+    ///
+    /// Parcels are not free: on farmland-heavy areas they cost roughly 15% more
+    /// generation time and about 1.5x the peak memory of `classic`. Pick `classic` if
+    /// you want the cheapest run or the pre-3.1 look.
     #[arg(long, value_enum, default_value_t = crate::element_processing::field_texture::FieldPreset::Patchwork)]
     pub fields: crate::element_processing::field_texture::FieldPreset,
 
