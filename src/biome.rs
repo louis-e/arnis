@@ -15,8 +15,12 @@ pub fn biome_for_class(lc: u8, climate: Climate, lat_deg: f64, water_dist: u8) -
     if lc == LC_WATER {
         let abs_lat = lat_deg.abs();
         let cold = matches!(climate, Climate::IceCap | Climate::Tundra | Climate::Boreal);
-        let deep = water_dist >= 12;
-        if water_dist < 8 {
+        // water_distance BFS caps at 15, so open water past the cap stays at 0.
+        // Treat that as deep ocean, not river, otherwise open sea renders as a
+        // river ring with a band of ocean hugging the coast (issue #1189).
+        let past_cap = water_dist == 0;
+        let deep = past_cap || water_dist >= 12;
+        if water_dist < 8 && !past_cap {
             return if cold {
                 "minecraft:frozen_river"
             } else {
@@ -285,6 +289,15 @@ mod tests {
         let t = Climate::Temperate;
         assert_eq!(biome_for_class(LC_WATER, t, 0.0, 1), "minecraft:river");
         assert_eq!(biome_for_class(LC_WATER, t, 0.0, 8), "minecraft:warm_ocean");
+        // water_dist == 0 is open water past the BFS cap: deep ocean, not a river.
+        assert_eq!(
+            biome_for_class(LC_WATER, t, 0.0, 0),
+            "minecraft:warm_ocean"
+        );
+        assert_eq!(
+            biome_for_class(LC_WATER, t, 50.0, 0),
+            "minecraft:deep_cold_ocean"
+        );
         assert_eq!(
             biome_for_class(LC_WATER, t, 35.0, 8),
             "minecraft:lukewarm_ocean"
