@@ -39,7 +39,7 @@ pub fn generate_barriers(
                     "chain_link" | "metal" | "wire" | "barbed_wire" | "corrugated_metal"
                     | "electric" | "metal_bars",
                 ) => {
-                    barrier_material = STONE_BRICK_WALL; // IRON_BARS
+                    barrier_material = IRON_BARS;
                     barrier_height = 2;
                 }
                 Some("slatted" | "paling") => {
