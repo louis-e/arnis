@@ -7,9 +7,11 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng) (required)
+    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng).
+    /// Required unless --file supplies a local .osm/.xml file to derive it from
+    /// (terrain-only mode ignores --file, so it always requires --bbox).
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
-    pub bbox: LLBBox,
+    pub bbox: Option<LLBBox>,
 
     /// JSON file containing OSM data (optional)
     #[arg(long, group = "location")]
@@ -36,8 +38,8 @@ pub struct Args {
     #[arg(long, default_value = "requests")]
     pub downloader: String,
 
-    /// World scale to use, in blocks per meter
-    #[arg(long, default_value_t = 1.0)]
+    /// World scale to use, in blocks per meter (1.0 = real size)
+    #[arg(long, default_value_t = 1.0, allow_hyphen_values = true, value_parser = parse_scale)]
     pub scale: f64,
 
     /// Projection mode for coordinate mapping
@@ -74,6 +76,17 @@ pub struct Args {
     /// Schematic trees are on by default; this flag opts out.
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
+
+    /// Largest schematic tree to place: small (<=6 blocks), medium (<=12),
+    /// big (<=20), tall (<=28) or giant. Oversized picks fall back to a smaller
+    /// species in the same community where there is one.
+    #[arg(long, value_enum, default_value_t = crate::trees::tree_library::TreeSize::Giant)]
+    pub max_tree_size: crate::trees::tree_library::TreeSize,
+
+    /// Place trees from the Meta/WRI global canopy height map instead of assuming
+    /// every tree-cover cell is forest. Land cover still decides the surface.
+    #[arg(long = "canopy-height", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub canopy_height: bool,
 
     /// Add building footprints from Overture Maps that are missing in OpenStreetMap.
     /// Helps sparsely mapped areas; may occasionally add a satellite-detected false positive.
@@ -139,6 +152,39 @@ pub struct Args {
     /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
     #[arg(long, default_value_t = 6000, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
+
+    /// Readable image signs, Java only. `basic` covers public signage: street names,
+    /// traffic signs, transit stops, information boards and billboards. `full` adds
+    /// building signage: shop name plates, house numbers and crossing signs.
+    #[arg(long, value_enum, default_value_t = SignageLevel::Basic)]
+    pub signage: SignageLevel,
+}
+
+/// How much image signage to place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum SignageLevel {
+    None,
+    #[default]
+    Basic,
+    Full,
+}
+
+impl SignageLevel {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "none" => SignageLevel::None,
+            "full" => SignageLevel::Full,
+            _ => SignageLevel::Basic,
+        }
+    }
+
+    pub fn enabled(self) -> bool {
+        self != SignageLevel::None
+    }
+
+    pub fn full(self) -> bool {
+        self == SignageLevel::Full
+    }
 }
 
 /// Generation mode, matching the GUI's dropdown (src/gui/js/main.js).
@@ -165,15 +211,53 @@ impl GenerationMode {
     }
 }
 
+/// Below this scale, OSM objects stop being representable: road half-widths floor at 1
+/// (so every road is >= 3 blocks = 10 m across at 0.3), buildings collapse into 1x1x3
+/// pillars, and fixed-size props come to dominate the scene. Objects are skipped instead.
+pub const OBJECT_SKIP_SCALE: f64 = 0.3;
+
+/// Smallest usable scale. Below this a country-sized bbox degenerates into a few hundred
+/// blocks and terrain detail is lost entirely.
+pub const MIN_SCALE: f64 = 0.05;
+/// Largest usable scale. Beyond this a single square kilometer already costs GBs and hours.
+pub const MAX_SCALE: f64 = 4.0;
+
+/// Rejects NaN, infinities and out-of-range scales. Used by both the CLI parser and the
+/// GUI entry point so an invalid scale can never reach the (expensive) fetch stage.
+pub fn validate_scale(scale: f64) -> Result<(), String> {
+    if !scale.is_finite() {
+        return Err("World scale must be a finite number.".to_string());
+    }
+    if !(MIN_SCALE..=MAX_SCALE).contains(&scale) {
+        return Err(format!(
+            "World scale must be between {MIN_SCALE} and {MAX_SCALE} (got {scale})."
+        ));
+    }
+    Ok(())
+}
+
+fn parse_scale(arg: &str) -> Result<f64, String> {
+    let scale: f64 = arg
+        .parse()
+        .map_err(|_| format!("`{arg}` is not a number"))?;
+    validate_scale(scale)?;
+    Ok(scale)
+}
+
 impl Args {
     /// Whether this run uses real elevation terrain rather than flat ground.
     pub fn terrain(&self) -> bool {
         self.mode.terrain()
     }
 
-    /// Whether this run skips OSM/Overture objects (terrain-only).
+    /// Whether this run skips OSM/Overture objects (terrain-only, or too small a scale).
     pub fn skip_objects(&self) -> bool {
-        self.mode.skip_objects()
+        self.mode.skip_objects() || self.scale < OBJECT_SKIP_SCALE
+    }
+
+    /// Whether objects are being skipped only because the scale is below `OBJECT_SKIP_SCALE`.
+    pub fn skip_objects_due_to_scale(&self) -> bool {
+        !self.mode.skip_objects() && self.scale < OBJECT_SKIP_SCALE
     }
 }
 
@@ -214,6 +298,8 @@ impl GameMode {
 /// For Java Edition: `--path` is required. If the directory doesn't exist, it will be created.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    validate_scale(args.scale)?;
+
     if args.bedrock && args.luanti {
         return Err("Cannot use --bedrock and --luanti together.".to_string());
     }
@@ -229,6 +315,23 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
 
     if args.map_preview && args.luanti {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
+    }
+
+    // A bounding box is required unless a local --file supplies one to derive it from.
+    // Terrain-only mode ignores --file (it never loads OSM objects), so it always needs --bbox.
+    if args.bbox.is_none() {
+        if args.skip_objects() {
+            return Err(
+                "--mode terrain-only requires --bbox (a local --file is ignored in terrain-only mode)."
+                    .to_string(),
+            );
+        }
+        if args.file.is_none() {
+            return Err(
+                "Provide --bbox, or --file with a local .osm/.xml file to derive the bounding box from."
+                    .to_string(),
+            );
+        }
     }
 
     if args.bedrock {
@@ -284,12 +387,15 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             let llpoint =
                 LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
 
-            // Validate that spawn point is within the bounding box
-            if !args.bbox.contains(&llpoint) {
-                return Err(
-                    "Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box."
-                        .to_string(),
-                );
+            // Validate that spawn point is within the bounding box. Only enforceable when the
+            // bbox is known up front; a file-derived bbox isn't available until the file is parsed.
+            if let Some(bbox) = args.bbox {
+                if !bbox.contains(&llpoint) {
+                    return Err(
+                        "Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box."
+                            .to_string(),
+                    );
+                }
             }
         }
         _ => {}
@@ -386,6 +492,17 @@ mod tests {
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
         assert!(!args.map_preview);
+        assert_eq!(args.signage, SignageLevel::Basic);
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--signage",
+            "none",
+        ];
+        assert!(!Args::parse_from(cmd.iter()).signage.enabled());
         // interior is opt-in (off by default); overture defaults to true
         assert!(!args.interior);
         assert!(args.overture);
@@ -518,8 +635,11 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
+        // `arnis` alone now parses (--bbox is optional at the CLI layer), but validation
+        // rejects it: no output dir, and neither --bbox nor --file.
         let cmd = ["arnis"];
-        assert!(Args::try_parse_from(cmd.iter()).is_err());
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_err());
 
         let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
         let args = Args::try_parse_from(cmd.iter()).unwrap();
@@ -530,12 +650,51 @@ mod tests {
         let args = Args::try_parse_from(cmd.iter()).unwrap();
         assert!(validate_args(&args).is_ok());
 
-        let cmd = ["arnis", "--output-dir", tmp_path, "--file", ""];
-        assert!(Args::try_parse_from(cmd.iter()).is_err());
+        // #881: --file without --bbox is accepted; the bbox is derived from the file later.
+        let cmd = ["arnis", "--output-dir", tmp_path, "--file", "area.osm"];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_ok());
+
+        // Neither --bbox nor --file (even with an output dir) is a validation error.
+        let cmd = ["arnis", "--output-dir", tmp_path];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_err());
 
         // The --gui flag isn't used here, ugh. TODO clean up main.rs and its argparse usage.
         // let cmd = ["arnis", "--gui"];
         // assert!(Args::try_parse_from(cmd.iter()).is_ok());
+    }
+
+    #[test]
+    fn test_terrain_only_requires_bbox_even_with_file() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        // terrain-only ignores --file, so a bbox is still required.
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--file",
+            "area.osm",
+            "--mode",
+            "terrain-only",
+        ];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_err());
+
+        // With --bbox it validates.
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "terrain-only",
+        ];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_ok());
     }
 
     #[test]

@@ -122,9 +122,15 @@ pub fn run_gui() {
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
 
-        // Force software rendering for better compatibility
-        env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
-        env::set_var("GALLIUM_DRIVER", "softpipe");
+        // Force software rendering for better compatibility.
+        // Only set if not already configured by the user, allowing manual override
+        // for systems where software rendering causes EGL_BAD_PARAMETER (see #1247).
+        if env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
+            env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        }
+        if env::var("GALLIUM_DRIVER").is_err() {
+            env::set_var("GALLIUM_DRIVER", "softpipe");
+        }
 
         // Note: Removed sandbox disabling for security reasons
         // Note: Removed Qt WebEngine flags as they don't apply to Tauri
@@ -146,6 +152,7 @@ pub fn run_gui() {
         .invoke_handler(tauri::generate_handler![
             gui_create_world,
             gui_get_default_save_path,
+            gui_get_default_bedrock_save_path,
             gui_set_save_path,
             gui_pick_save_directory,
             gui_start_generation,
@@ -220,6 +227,29 @@ fn detect_minecraft_saves_directory() -> PathBuf {
 #[tauri::command]
 fn gui_get_default_save_path() -> String {
     detect_minecraft_saves_directory().display().to_string()
+}
+
+/// Returns the default directory for Bedrock .mcworld files (the Desktop).
+#[tauri::command]
+fn gui_get_default_bedrock_save_path() -> String {
+    crate::world_utils::get_bedrock_output_directory()
+        .display()
+        .to_string()
+}
+
+/// Returns the configured Bedrock output directory, or the default if it is unusable.
+fn resolve_bedrock_output_dir(configured: &str) -> PathBuf {
+    let trimmed = configured.trim();
+    if !trimmed.is_empty() {
+        let configured_dir = PathBuf::from(trimmed);
+        if configured_dir.is_dir() {
+            return configured_dir;
+        }
+        eprintln!(
+            "Warning: Bedrock save path '{trimmed}' is not a directory, using the default instead."
+        );
+    }
+    crate::world_utils::get_bedrock_output_directory()
 }
 
 #[derive(serde::Serialize)]
@@ -512,14 +542,13 @@ fn set_player_spawn_in_level_dat(
 
 // Function to update player spawn Y coordinate based on terrain height after generation
 // This updates the spawn Y coordinate to be at terrain height + 3 blocks
+// `xzbbox` must be the box the world was generated from, post-rotation when a
+// rotation was applied, since `ground` is indexed against it.
 pub fn update_player_spawn_y_after_generation(
     world_path: &Path,
-    bbox_text: String,
-    scale: f64,
+    xzbbox: &XZBBox,
     ground: &Ground,
 ) -> Result<(), String> {
-    use crate::coordinate_system::transformation::CoordTransformer;
-
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
     if !level_path.exists() {
@@ -577,13 +606,8 @@ pub fn update_player_spawn_y_after_generation(
 
     // Calculate terrain-based Y coordinate
     let spawn_y = if ground.elevation_enabled {
-        // Parse coordinates for terrain lookup
-        let llbbox = LLBBox::from_str(&bbox_text)
-            .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{e}"))?;
-        let (_, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
-            .map_err(|e| format!("Failed to build transformation:\n{e}"))?;
-
-        // Calculate relative coordinates for ground system
+        // Deriving the bbox from lat/lng here would give the pre-rotation
+        // extents and sample the wrong point on rotated worlds.
         let relative_x = existing_spawn_x - xzbbox.min_x();
         let relative_z = existing_spawn_z - xzbbox.min_z();
         let terrain_point = XZPoint::new(relative_x, relative_z);
@@ -721,6 +745,7 @@ fn gui_clear_tile_caches() -> Result<String, String> {
 
     let combined = clear_all_cached_tiles()
         .combined(clear_land_cover_cache())
+        .combined(crate::canopy::clear_canopy_cache())
         .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
@@ -906,12 +931,40 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Set while a generation owns the process. The world floor, terrain floor and filler-chunk
+/// base are process globals read from deep inside the block writers, and the terrain floor
+/// is derived from the bbox's own elevation, so a second run would retune all three under the
+/// first one's feet. The progress channel and world path are shared besides.
+static GENERATION_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Owns `GENERATION_ACTIVE` for the length of one generation and clears it on drop, including
+/// on the early-return paths before the worker is spawned.
+struct GenerationSlot;
+
+impl GenerationSlot {
+    /// `None` when a generation is already running.
+    fn acquire() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        GENERATION_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for GenerationSlot {
+    fn drop(&mut self) {
+        GENERATION_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
+    bedrock_save_path: String,
     world_scale: f64,
     ground_level: i32,
     terrain_enabled: bool,
@@ -919,6 +972,8 @@ fn gui_start_generation(
     interior_enabled: bool,
     fillground_enabled: bool,
     legacy_trees_enabled: bool,
+    max_tree_size: String,
+    canopy_height_enabled: bool,
     overture_enabled: bool,
     use_3d_enabled: bool,
     disable_height_limit: bool,
@@ -935,11 +990,27 @@ fn gui_start_generation(
     gamemode: String,
     world_time: i64,
     map_item: bool,
+    signage: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
 
+    // Claim the process before touching any shared state. The frontend disables its button
+    // for the same reason; this is the authoritative check behind it.
+    let Some(generation_slot) = GenerationSlot::acquire() else {
+        let msg = "A generation is already running.".to_string();
+        emit_gui_error(&msg);
+        return Err(msg);
+    };
+
     progress::reset_progress_floor();
+
+    // The GUI builds Args directly and never runs validate_args, so guard the scale here
+    // rather than letting it panic deep in the coordinate transform after the fetch.
+    if let Err(e) = crate::args::validate_scale(world_scale) {
+        emit_gui_error(&e);
+        return Err(e);
+    }
 
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);
@@ -1013,6 +1084,8 @@ fn gui_start_generation(
     }
 
     tauri::async_runtime::spawn(async move {
+        // Held until the worker finishes, on every path, so the globals stay this run's.
+        let _generation_slot = generation_slot;
         if let Err(e) = tokio::task::spawn_blocking(move || {
             let world_path = PathBuf::from(&selected_world);
 
@@ -1042,13 +1115,18 @@ fn gui_start_generation(
                     None
                 };
 
+            // Resolved up front because the disk space check below needs it
+            let bedrock_output_dir = match world_format {
+                WorldFormat::BedrockMcWorld => resolve_bedrock_output_dir(&bedrock_save_path),
+                _ => PathBuf::new(),
+            };
+
             // Check available disk space before starting generation (minimum 3GB required)
             const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
-            let check_path = if world_format == WorldFormat::JavaAnvil {
-                world_path.clone()
-            } else {
-                // For Bedrock, check current directory where .mcworld will be created
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            let check_path = match world_format {
+                WorldFormat::JavaAnvil => world_path.clone(),
+                WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
+                WorldFormat::LuantiWorld => crate::world_utils::get_luanti_worlds_directory(),
             };
             // Probe the nearest existing ancestor: a missing or space-containing
             // path otherwise confuses the Windows volume lookup, which then reports
@@ -1124,10 +1202,9 @@ fn gui_start_generation(
                     (updated_path, None)
                 }
                 WorldFormat::BedrockMcWorld => {
-                    // Bedrock: generate .mcworld on Desktop with location-based name
-                    let output_dir = crate::world_utils::get_bedrock_output_directory();
+                    // Bedrock: generate .mcworld in the configured directory
                     let (output_path, lvl_name) =
-                        crate::world_utils::build_bedrock_output(&bbox, output_dir);
+                        crate::world_utils::build_bedrock_output(&bbox, bedrock_output_dir);
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }
@@ -1189,7 +1266,7 @@ fn gui_start_generation(
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
-                bbox,
+                bbox: Some(bbox),
                 file: None,
                 save_json_file: None,
                 path: Some(if world_format == WorldFormat::JavaAnvil {
@@ -1214,6 +1291,8 @@ fn gui_start_generation(
                 interior: interior_enabled,
                 fillground: fillground_enabled,
                 legacy_trees: legacy_trees_enabled,
+                max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
+                canopy_height: canopy_height_enabled,
                 overture: overture_enabled,
                 use_3d: use_3d_enabled,
                 debug: false,
@@ -1231,23 +1310,45 @@ fn gui_start_generation(
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld
                     && rotation_angle.abs() <= f64::EPSILON,
+                signage: crate::args::SignageLevel::from_str_lossy(&signage),
             };
 
-            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
-            if skip_osm_objects {
+            // Same as run_cli: fix the dimension span before the editor is touched.
+            crate::world_editor::set_world_bounds(
+                ground::extended_min_y_for(&args),
+                ground::world_top_y_for(&args),
+            );
+
+            // Ask Args, not the frontend flag: below OBJECT_SKIP_SCALE objects are skipped
+            // regardless of the selected generation mode.
+            if args.skip_objects() {
                 // Generate ground data (terrain) for terrain-only mode
-                let ground = ground::generate_ground_data(&args);
+                let mut ground = ground::generate_ground_data(&args, bbox);
 
                 // Create empty parsed_elements and xzbbox for terrain-only mode
-                let parsed_elements = Vec::new();
-                let (_coord_transformer, xzbbox) =
-                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                let mut parsed_elements = Vec::new();
+                let (_coord_transformer, mut xzbbox) =
+                    CoordTransformer::llbbox_to_xzbbox(&bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+
+                // The spawn point is rotated above, so skipping the world
+                // rotation here would drop the player outside the terrain.
+                map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
+
+                if rotation_angle.abs() > f64::EPSILON {
+                    map_transformation::rotate::rotate_world(
+                        rotation_angle.clamp(-90.0, 90.0),
+                        &mut parsed_elements,
+                        &mut xzbbox,
+                        &mut ground,
+                    )
+                    .map_err(|e| format!("Rotation failed: {e}"))?;
+                }
 
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,
                     xzbbox,
-                    args.bbox,
+                    bbox,
                     ground,
                     &args,
                     generation_options.clone(),
@@ -1267,24 +1368,33 @@ fn gui_start_generation(
             }
 
             // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
-            let (fetch_result, overture_elements, ground) = std::thread::scope(|s| {
+            let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
                     if args.overture {
-                        overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+                        overture::fetch_overture_buildings(&bbox, args.scale, args.debug)
                     } else {
-                        Vec::new()
+                        overture::OvertureData::default()
                     }
                 });
-                let ground_handle = s.spawn(|| ground::generate_ground_data(&args));
-                let fetch_result = retrieve_data::fetch_data_from_overpass(
-                    args.bbox, args.debug, "requests", None,
-                );
-                (
-                    fetch_result,
-                    overture_handle.join().expect("Overture fetch panicked"),
-                    ground_handle.join().expect("Terrain fetch panicked"),
-                )
+                let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
+                let fetch_result =
+                    retrieve_data::fetch_data_from_overpass(bbox, args.debug, "requests", None);
+                // A panicked worker already reported itself through the panic hook.
+                // Overture is supplementary, so drop it and keep going; terrain is
+                // not, so hand the failure back instead of taking the app down.
+                let overture_data = overture_handle.join().unwrap_or_else(|_| {
+                    eprintln!("Overture fetch failed, continuing without Overture buildings.");
+                    overture::OvertureData::default()
+                });
+                (fetch_result, overture_data, ground_handle.join().ok())
             });
+
+            let Some(ground) = ground else {
+                let error_msg = "Terrain fetch failed unexpectedly".to_string();
+                eprintln!("{error_msg}");
+                emit_gui_error(&error_msg);
+                return Err(error_msg);
+            };
 
             // Run world generation
             match fetch_result {
@@ -1292,11 +1402,19 @@ fn gui_start_generation(
                     let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
                         osm_parser::parse_osm_data(
                             raw_data,
-                            args.bbox,
+                            bbox,
                             args.scale,
                             args.debug,
                             crate::projection::ProjectionKind::Local,
                         );
+
+                    let overture::OvertureData {
+                        elements: overture_elements,
+                        hints: overture_hints,
+                    } = overture_data;
+
+                    // Fill height/levels on OSM buildings that have neither
+                    overture_hints.apply(&mut parsed_elements);
 
                     // Merge supplementary Overture buildings against parsed OSM
                     if !overture_elements.is_empty() {
@@ -1322,6 +1440,7 @@ fn gui_start_generation(
 
                     // OSM water override first, then bridge repair.
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
 
                     // Transform map (parsed_elements). Operations are defined in a json file
@@ -1345,7 +1464,7 @@ fn gui_start_generation(
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,
                         xzbbox,
-                        args.bbox,
+                        bbox,
                         ground,
                         &args,
                         generation_options.clone(),
@@ -1381,6 +1500,27 @@ fn gui_start_generation(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod generation_slot_tests {
+    use super::GenerationSlot;
+
+    #[test]
+    fn second_generation_is_refused_until_the_first_finishes() {
+        // The world floor, terrain floor and filler base are process globals, so a second
+        // concurrent run would retune them under the first one's feet.
+        let first = GenerationSlot::acquire().expect("the first generation must get the slot");
+        assert!(
+            GenerationSlot::acquire().is_none(),
+            "a second generation must be refused while the first holds the slot"
+        );
+        drop(first);
+        assert!(
+            GenerationSlot::acquire().is_some(),
+            "the slot must be free again once the first generation finishes"
+        );
+    }
 }
 
 #[cfg(test)]

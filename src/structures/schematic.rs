@@ -308,6 +308,25 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "quartz_stairs" => QUARTZ_STAIRS,
         "red_concrete" => RED_CONCRETE,
         "redstone_wall_torch" => REDSTONE_WALL_TORCH,
+        // Landmark blocks.
+        "green_wool" => GREEN_WOOL,
+        "green_terracotta" => GREEN_STAINED_HARDENED_CLAY,
+        "red_terracotta" => RED_TERRACOTTA,
+        "gray_concrete" => GRAY_CONCRETE,
+        "diorite" => DIORITE,
+        "snow_block" => SNOW_BLOCK,
+        "acacia_log" => ACACIA_LOG,
+        // No cracked/glazed variants exist; nearest match.
+        "cracked_polished_blackstone_bricks" => POLISHED_BLACKSTONE_BRICKS,
+        "brown_glazed_terracotta" => BROWN_TERRACOTTA,
+        "cut_red_sandstone" => SMOOTH_RED_SANDSTONE,
+        "andesite_stairs" => ANDESITE_STAIRS,
+        // Olympiahalle palette. All already carry through to Bedrock and Luanti.
+        "mud" => MUD,
+        "brown_stained_glass" => BROWN_STAINED_GLASS,
+        "nether_bricks" => NETHER_BRICK,
+        "black_terracotta" => BLACK_TERRACOTTA,
+        "tinted_glass" => TINTED_GLASS,
         _ => return None,
     };
     Some(BlockWithProperties::new(block, parse_state(name)))
@@ -333,7 +352,36 @@ fn parse_state(name: &str) -> Option<Value> {
     }
 }
 
+/// Decode a Sponge `Data` byte stream: LEB128 varint palette indices. Lazy, so
+/// a large model needs no `Vec<i32>` four times the size of its block data.
+fn varint_indices(data: &[i8]) -> impl Iterator<Item = i32> + '_ {
+    let mut i = 0usize;
+    std::iter::from_fn(move || {
+        if i >= data.len() {
+            return None;
+        }
+        let mut val: i32 = 0;
+        let mut shift = 0u32;
+        loop {
+            let byte = data[i] as u8;
+            i += 1;
+            if shift < 32 {
+                val |= i32::from(byte & 0x7F) << shift;
+            }
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+            if i >= data.len() {
+                break;
+            }
+        }
+        Some(val)
+    })
+}
+
 /// Decode a Sponge `Data`/`BlockData` byte stream: LEB128 varint palette indices.
+#[cfg(test)]
 fn decode_varints(data: &[u8]) -> Vec<i32> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -374,13 +422,28 @@ fn short_field(c: &HashMap<String, Value>, k: &str) -> Result<i32, String> {
     }
 }
 
-/// Load a gzipped Sponge `.schem` (v2 or v3) keeping all mapped blocks + states.
-pub fn load_structure(gz_bytes: &[u8]) -> Result<StructureSchematic, String> {
-    let mut raw = Vec::new();
-    flate2::read::GzDecoder::new(gz_bytes)
-        .read_to_end(&mut raw)
-        .map_err(|e| format!("schem: gunzip failed: {e}"))?;
-    let root: Value = fastnbt::from_bytes(&raw).map_err(|e| format!("schem: nbt parse: {e}"))?;
+/// A parsed `.schem` still referring to its blocks by palette index. One byte
+/// per voxel, which at landmark size costs a quarter of expanded blocks.
+pub struct PalettizedSchematic {
+    pub width: i32,
+    pub length: i32,
+    /// One entry per accepted palette id; index with a voxel's `.3`.
+    pub palette: Vec<BlockWithProperties>,
+    /// (x, y, z, palette index), y floored so the lowest layer is 0.
+    pub voxels: Vec<(i16, i16, i16, u8)>,
+}
+
+/// Load a gzipped Sponge `.schem` keeping palette indices. Unmapped entries are
+/// dropped, so the palette is dense and fits a `u8`.
+pub fn load_palettized(gz_bytes: &[u8]) -> Result<PalettizedSchematic, String> {
+    // Scoped so the decompressed NBT is freed before the voxel list grows.
+    let root: Value = {
+        let mut raw = Vec::new();
+        flate2::read::GzDecoder::new(gz_bytes)
+            .read_to_end(&mut raw)
+            .map_err(|e| format!("schem: gunzip failed: {e}"))?;
+        fastnbt::from_bytes(&raw).map_err(|e| format!("schem: nbt parse: {e}"))?
+    };
     let root_c = as_compound(&root).ok_or("schem: root not a compound")?;
     let scm = root_c
         .get("Schematic")
@@ -393,51 +456,105 @@ pub fn load_structure(gz_bytes: &[u8]) -> Result<StructureSchematic, String> {
     if width <= 0 || height <= 0 || length <= 0 {
         return Err("schem: non-positive dimensions".into());
     }
+    if width > i32::from(i16::MAX) || height > i32::from(i16::MAX) || length > i32::from(i16::MAX) {
+        return Err("schem: dimensions exceed the i16 voxel coordinate range".into());
+    }
 
     let (palette_v, data_v) = match scm.get("Blocks").and_then(as_compound) {
         Some(blocks) => (blocks.get("Palette"), blocks.get("Data")),
         None => (scm.get("Palette"), scm.get("BlockData")),
     };
-    let palette = palette_v
+    let palette_c = palette_v
         .and_then(as_compound)
         .ok_or("schem: missing Palette")?;
 
-    let mut idx_to_block: HashMap<i32, BlockWithProperties> = HashMap::new();
-    for (name, v) in palette {
+    // Compacted so the per-voxel index stays a byte however sparse the source is.
+    let mut palette: Vec<BlockWithProperties> = Vec::new();
+    let mut idx_to_slot: HashMap<i32, u8> = HashMap::new();
+    for (name, v) in palette_c {
         if let Value::Int(i) = v {
             if let Some(bwp) = map_structure_block(name) {
-                idx_to_block.insert(*i, bwp);
+                if palette.len() >= 256 {
+                    return Err("schem: more than 256 rendered palette entries".into());
+                }
+                idx_to_slot.insert(*i, palette.len() as u8);
+                palette.push(bwp);
             }
         }
     }
 
-    let data_bytes: Vec<u8> = match data_v {
-        Some(Value::ByteArray(b)) => b.iter().map(|&x| x as u8).collect(),
-        _ => return Err("schem: missing BlockData".into()),
+    let Some(Value::ByteArray(data)) = data_v else {
+        return Err("schem: missing BlockData".into());
     };
-    let indices = decode_varints(&data_bytes);
+
+    // Sponge requires exactly Width*Height*Length entries. A stream that runs long
+    // or short is corrupt, and would otherwise fold into out-of-range coordinates.
+    let volume = i64::from(width) * i64::from(height) * i64::from(length);
+    if volume > i64::from(i32::MAX) {
+        return Err("schem: volume exceeds the supported range".into());
+    }
+    let volume = volume as usize;
 
     let wl = width * length;
-    let mut voxels = Vec::new();
-    for (i, &idx) in indices.iter().enumerate() {
-        let i = i as i32;
-        if let Some(bwp) = idx_to_block.get(&idx) {
-            let x = i % width;
-            let z = (i / width) % length;
-            let y = i / wl;
-            voxels.push((x, y, z, bwp.clone()));
+    let mut voxels: Vec<(i16, i16, i16, u8)> = Vec::new();
+    let mut min_y = i32::MAX;
+    let mut seen = 0usize;
+    for (i, idx) in varint_indices(data.iter().as_slice()).enumerate() {
+        if i >= volume {
+            return Err("schem: BlockData longer than Width*Height*Length".into());
         }
+        seen = i + 1;
+        if let Some(&slot) = idx_to_slot.get(&idx) {
+            let i = i as i32;
+            let y = i / wl;
+            min_y = min_y.min(y);
+            voxels.push((
+                (i % width) as i16,
+                y as i16,
+                ((i / width) % length) as i16,
+                slot,
+            ));
+        }
+    }
+    if seen != volume {
+        return Err(format!(
+            "schem: BlockData has {seen} entries, expected {volume}"
+        ));
     }
 
     // Drop empty layers below so the model's lowest block sits at y=0.
-    if let Some(min_y) = voxels.iter().map(|v| v.1).min() {
-        if min_y != 0 {
-            for v in &mut voxels {
-                v.1 -= min_y;
-            }
+    if min_y != i32::MAX && min_y != 0 {
+        let min_y = min_y as i16;
+        for v in &mut voxels {
+            v.1 -= min_y;
         }
     }
     voxels.shrink_to_fit();
+
+    Ok(PalettizedSchematic {
+        width,
+        length,
+        palette,
+        voxels,
+    })
+}
+
+/// Load a gzipped Sponge `.schem` (v2 or v3) keeping all mapped blocks + states.
+pub fn load_structure(gz_bytes: &[u8]) -> Result<StructureSchematic, String> {
+    let p = load_palettized(gz_bytes)?;
+    let (width, length) = (p.width, p.length);
+    let voxels: Vec<(i32, i32, i32, BlockWithProperties)> = p
+        .voxels
+        .iter()
+        .map(|&(x, y, z, slot)| {
+            (
+                i32::from(x),
+                i32::from(y),
+                i32::from(z),
+                p.palette[slot as usize].clone(),
+            )
+        })
+        .collect();
 
     // Anchor on the tallest column (the mast) so callers can place it precisely.
     let mut anchor = (0, 0);
@@ -607,5 +724,46 @@ mod tests {
         assert!(map_structure_block("minecraft:iron_bars[north=true]").is_some());
         assert!(map_structure_block("minecraft:air").is_none());
         assert!(map_structure_block("minecraft:diamond_block").is_none());
+    }
+
+    /// Gzipped Sponge v2 with `entries` single-byte indices, all sandstone.
+    fn schem_bytes(width: i16, height: i16, length: i16, entries: usize) -> Vec<u8> {
+        use std::io::Write;
+        let mut palette = HashMap::new();
+        palette.insert("minecraft:sandstone".to_string(), Value::Int(0));
+        let mut root = HashMap::new();
+        root.insert("Width".to_string(), Value::Short(width));
+        root.insert("Height".to_string(), Value::Short(height));
+        root.insert("Length".to_string(), Value::Short(length));
+        root.insert("Palette".to_string(), Value::Compound(palette));
+        root.insert(
+            "BlockData".to_string(),
+            Value::ByteArray(fastnbt::ByteArray::new(vec![0i8; entries])),
+        );
+        let nbt = fastnbt::to_bytes(&Value::Compound(root)).unwrap();
+        let mut out = Vec::new();
+        let mut enc = flate2::write::GzEncoder::new(&mut out, flate2::Compression::fast());
+        enc.write_all(&nbt).unwrap();
+        enc.finish().unwrap();
+        out
+    }
+
+    // BlockData must match the declared volume. A stream that runs long or short
+    // would otherwise fold into out-of-range Y instead of failing.
+    #[test]
+    fn block_data_length_must_match_the_volume() {
+        let p = load_palettized(&schem_bytes(2, 3, 2, 12)).expect("exact volume loads");
+        assert_eq!(p.voxels.len(), 12);
+        for &(_, y, _, _) in &p.voxels {
+            assert!((0..3).contains(&y), "y {y} outside the declared height");
+        }
+        assert!(
+            load_palettized(&schem_bytes(2, 3, 2, 13)).is_err(),
+            "too long"
+        );
+        assert!(
+            load_palettized(&schem_bytes(2, 3, 2, 11)).is_err(),
+            "too short"
+        );
     }
 }

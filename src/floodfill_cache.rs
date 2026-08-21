@@ -5,7 +5,7 @@
 //! sequential processing.
 
 use crate::coordinate_system::cartesian::XZBBox;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill::{flood_fill_area, MAX_FLOOD_FILL_AREA};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
@@ -18,6 +18,33 @@ use std::time::Duration;
 /// the coordinate list — a single refcount bump instead of a `Vec::clone` that
 /// would memcpy 8 bytes per cell (large forests/farmland easily hit 100k+ cells).
 pub type FloodFillResult = Arc<Vec<(i32, i32)>>;
+
+/// Whether a way is a closed ring whose bounding box is past the flood fill's cap.
+///
+/// Handlers that paint an outline before filling pair this with an empty fill to decide
+/// whether to paint at all. Three different things fill to nothing and only one of them is a
+/// refusal: an open way like a ridge renders as a line by design, a sliver too thin to hold a
+/// lattice point has no interior to find, and a ring past the cap was given up on. Only the
+/// last should drop its outline, since a border around ground nothing filled reads as a bug.
+pub fn is_oversized_ring(way: &ProcessedWay) -> bool {
+    let closed = way.nodes.len() >= 4
+        && way.nodes.first().map(|n| (n.x, n.z)) == way.nodes.last().map(|n| (n.x, n.z));
+    if !closed {
+        return false;
+    }
+
+    let (mut min_x, mut max_x) = (i32::MAX, i32::MIN);
+    let (mut min_z, mut max_z) = (i32::MAX, i32::MIN);
+    for n in &way.nodes {
+        min_x = min_x.min(n.x);
+        max_x = max_x.max(n.x);
+        min_z = min_z.min(n.z);
+        max_z = max_z.max(n.z);
+    }
+
+    let area = (max_x as i64 - min_x as i64 + 1) * (max_z as i64 - min_z as i64 + 1);
+    area > MAX_FLOOD_FILL_AREA
+}
 
 /// Returns a reference to a process-wide shared empty flood-fill result.
 ///
@@ -334,6 +361,11 @@ impl FloodFillCache {
         cache
     }
 
+    /// Cached fill for a way id, None when absent (no computation).
+    pub fn get_cached(&self, way_id: u64) -> Option<&FloodFillResult> {
+        self.way_cache.get(&way_id)
+    }
+
     /// Gets cached flood fill result for a way, or computes it if not cached.
     ///
     /// Note: Combined ways created from relations (e.g., in `generate_natural_from_relation`)
@@ -429,9 +461,10 @@ impl FloodFillCache {
         // Relations first (outer fills, courtyards clear), ways second so courtyard buildings re-mark.
         for element in elements {
             if let ProcessedElement::Relation(rel) = element {
-                let is_building = rel.tags.contains_key("building")
+                let is_building = (rel.tags.contains_key("building")
                     || rel.tags.contains_key("building:part")
-                    || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                    || rel.tags.get("type").map(|t| t.as_str()) == Some("building"))
+                    && !crate::element_processing::buildings::is_underground_building(&rel.tags);
                 if !is_building {
                     continue;
                 }
@@ -446,7 +479,9 @@ impl FloodFillCache {
 
         for element in elements {
             if let ProcessedElement::Way(way) = element {
-                if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+                    && !crate::element_processing::buildings::is_underground_building(&way.tags)
+                {
                     if let Some(cached) = self.way_cache.get(&way.id) {
                         for &(x, z) in cached.iter() {
                             footprints.set(x, z);
@@ -464,15 +499,6 @@ impl FloodFillCache {
     /// Call this after processing an element to release its cached data.
     pub fn remove_way(&mut self, way_id: u64) {
         self.way_cache.remove(&way_id);
-    }
-
-    /// Removes all cached flood fill results for ways in a relation.
-    ///
-    /// Relations contain multiple ways, so we need to remove all of them.
-    pub fn remove_relation_ways(&mut self, way_ids: &[u64]) {
-        for &id in way_ids {
-            self.way_cache.remove(&id);
-        }
     }
 }
 
@@ -553,5 +579,72 @@ pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
         Err(_) => {
             // Thread pool already configured
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::osm_parser::ProcessedNode;
+    use std::collections::HashMap;
+
+    fn way(points: &[(i32, i32)]) -> ProcessedWay {
+        ProcessedWay {
+            id: 1,
+            nodes: points
+                .iter()
+                .map(|&(x, z)| ProcessedNode {
+                    id: 0,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_ring_past_the_cap_is_oversized() {
+        assert!(is_oversized_ring(&way(&[
+            (0, 0),
+            (6000, 0),
+            (6000, 6000),
+            (0, 6000),
+            (0, 0)
+        ])));
+    }
+
+    #[test]
+    fn an_open_way_is_never_oversized() {
+        // A ridge or cliff traced as a line fills to nothing by design, however far it runs.
+        assert!(!is_oversized_ring(&way(&[
+            (0, 0),
+            (6000, 2000),
+            (3000, 6000),
+            (6000, 6000)
+        ])));
+    }
+
+    #[test]
+    fn a_thin_sliver_ring_is_not_oversized() {
+        assert!(!is_oversized_ring(&way(&[
+            (0, 0),
+            (400, 0),
+            (400, 1),
+            (0, 1),
+            (0, 0)
+        ])));
+    }
+
+    #[test]
+    fn a_normal_ring_is_not_oversized() {
+        assert!(!is_oversized_ring(&way(&[
+            (0, 0),
+            (300, 0),
+            (300, 300),
+            (0, 300),
+            (0, 0)
+        ])));
     }
 }

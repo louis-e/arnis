@@ -1,5 +1,9 @@
 //! Reclassify ESA built-up cells under OSM bridges to the nearest non-bridge
 //! class via BFS, preferring water so river-bridge footprints become LC_WATER.
+//!
+//! This runs after the elevation grid was leveled, so water only reaches cells close
+//! to the surface it descends from, and those are sunk onto it. Anything higher, such
+//! as a dam crest carrying a bridge road, takes a land class instead.
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 
@@ -11,6 +15,9 @@ use crate::land_cover::{compute_water_distance, LandCoverData, LC_BUILT_UP, LC_W
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 
 const MAX_BFS_RINGS: usize = 64;
+/// How far above the water a bridge cell may sit and still become water. Decks are
+/// already smoothed and pulled down before this runs; a dam crest is far higher.
+const WATER_HEIGHT_TOLERANCE_BLOCKS: f32 = 6.0;
 const DEFAULT_RAIL_HALF_WIDTH: i32 = 1;
 const DEFAULT_GENERIC_HALF_WIDTH: i32 = 1;
 // Margin past highway_block_range to cover deck + parapets, not just the lane centreline.
@@ -19,6 +26,7 @@ const NEIGHBOURS: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
 pub fn apply_bridge_land_cover_repair(
     land_cover: &mut LandCoverData,
+    heights: &mut [Vec<f32>],
     world_width: usize,
     world_height: usize,
     elements: &[ProcessedElement],
@@ -30,6 +38,14 @@ pub fn apply_bridge_land_cover_repair(
     if width < 2 || height < 2 || world_width < 2 || world_height < 2 {
         return;
     }
+    if heights.len() < height || heights.iter().take(height).any(|r| r.len() < width) {
+        return;
+    }
+    // Water may descend to a cell only from a surface it sits close to.
+    let water_reachable = |idx: usize, level: f32| -> bool {
+        let h = heights[idx / width][idx % width];
+        !h.is_finite() || !level.is_finite() || h <= level + WATER_HEIGHT_TOLERANCE_BLOCKS
+    };
     if !elements
         .iter()
         .any(|e| matches!(e, ProcessedElement::Way(w) if is_bridge_way(w)))
@@ -93,7 +109,9 @@ pub fn apply_bridge_land_cover_repair(
     let height_i32 = height as i32;
 
     let mut assigned: HashMap<u32, u8> = HashMap::with_capacity(bridge_indices.len());
-    let mut current: VecDeque<(u32, u8)> = VecDeque::new();
+    // Surface Y a water assignment descends from (seed water cell's height).
+    let mut water_level: HashMap<u32, f32> = HashMap::new();
+    let mut current: VecDeque<(u32, u8, f32)> = VecDeque::new();
     // Pass 1: seed water-adjacent bridge cells first so water propagates first.
     for &b_idx in &bridge_indices {
         let bi = b_idx as usize;
@@ -110,8 +128,13 @@ pub fn apply_bridge_land_cover_repair(
                 continue;
             }
             if land_cover.grid[nz as usize][nx as usize] == LC_WATER {
+                let level = heights[nz as usize][nx as usize];
+                if !water_reachable(bi, level) {
+                    continue;
+                }
                 assigned.insert(b_idx, LC_WATER);
-                current.push_back((b_idx, LC_WATER));
+                water_level.insert(b_idx, level);
+                current.push_back((b_idx, LC_WATER, level));
                 break;
             }
         }
@@ -139,15 +162,15 @@ pub fn apply_bridge_land_cover_repair(
                 continue;
             }
             assigned.insert(b_idx, cls);
-            current.push_back((b_idx, cls));
+            current.push_back((b_idx, cls, f32::NAN));
             break;
         }
     }
 
-    let mut next: VecDeque<(u32, u8)> = VecDeque::new();
+    let mut next: VecDeque<(u32, u8, f32)> = VecDeque::new();
     let mut depth = 1usize;
     while !current.is_empty() && depth < MAX_BFS_RINGS {
-        while let Some((idx, cls)) = current.pop_front() {
+        while let Some((idx, cls, level)) = current.pop_front() {
             let bi = idx as usize;
             let x = (bi % width) as i32;
             let z = (bi / width) as i32;
@@ -161,10 +184,16 @@ pub fn apply_bridge_land_cover_repair(
                 if !get_bit(&bridge_mask, nidx_usize) {
                     continue;
                 }
+                if cls == LC_WATER && !water_reachable(nidx_usize, level) {
+                    continue;
+                }
                 let nidx = nidx_usize as u32;
                 if let Entry::Vacant(e) = assigned.entry(nidx) {
                     e.insert(cls);
-                    next.push_back((nidx, cls));
+                    if cls == LC_WATER {
+                        water_level.insert(nidx, level);
+                    }
+                    next.push_back((nidx, cls, level));
                 }
             }
         }
@@ -190,6 +219,13 @@ pub fn apply_bridge_land_cover_repair(
         mutated += 1;
         if new_class == LC_WATER {
             to_water += 1;
+            // Sink the cell onto the surface it now belongs to (never raise).
+            if let Some(&level) = water_level.get(&b_idx) {
+                let h = &mut heights[z][x];
+                if level.is_finite() && h.is_finite() && *h > level {
+                    *h = level;
+                }
+            }
         }
         if (old_class == LC_WATER) != (new_class == LC_WATER) {
             water_changed = true;

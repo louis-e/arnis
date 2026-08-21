@@ -1,14 +1,19 @@
 //! Writes a locked filled-map item showing the whole generated world (Java only).
 
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::decals::render::{render as render_decal, PreviewRaster};
+use crate::decals::DecalRegistry;
 use crate::map_item_palette::{nearest_map_color, TRANSPARENT};
 use crate::map_renderer::PreviewAccumulator;
+use crate::progress::emit_gui_progress_update;
 use fastnbt::{ByteArray, Value};
 use flate2::read::GzDecoder;
 use image::RgbImage;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAP_SIZE: i32 = 128;
 // Fallback when the world DataVersion cannot be read.
@@ -16,14 +21,6 @@ const DATA_VERSION: i32 = crate::world_editor::java::DATA_VERSION;
 
 /// arnismc.com branding image, placed as a locked map at spawn.
 static BRANDING_MAP_PNG: &[u8] = include_bytes!("../assets/branding/arnismc_map.png");
-
-/// Fixed decal map ids, reserved after the preview (0), branding (1), and decal maps.
-pub const BUS_STOP_MAP_ID: i32 = 2;
-pub const RECYCLING_MAP_ID: i32 = 3;
-pub const HYDRANT_MAP_ID: i32 = 4;
-static BUS_STOP_PNG: &[u8] = include_bytes!("../assets/decorations/bus_stop.png");
-static RECYCLING_PNG: &[u8] = include_bytes!("../assets/decorations/recycling.png");
-static HYDRANT_PNG: &[u8] = include_bytes!("../assets/decorations/hydrant.png");
 
 // The map must carry the same DataVersion as the world so a newer client upgrades it
 // with the rest of the save rather than treating it as a stale file.
@@ -266,11 +263,11 @@ fn write_map_dat_files(data_dir: &Path, map_id: i32, map_dat: &Value) -> Result<
     write_gzip_nbt(&data_dir.join(format!("{map_id}.dat")), map_dat)
 }
 
-// Quantize a bundled PNG to a locked 128x128 map.
+// Quantize a bundled PNG to a locked 128x128 map; alpha below 128 stays transparent.
 fn image_map_dat(png: &[u8], data_version: i32) -> Result<Value, String> {
     let img = image::load_from_memory(png)
         .map_err(|e| format!("decode image: {e}"))?
-        .to_rgb8();
+        .to_rgba8();
     let img = if img.width() == MAP_SIZE as u32 && img.height() == MAP_SIZE as u32 {
         img
     } else {
@@ -286,6 +283,9 @@ fn image_map_dat(png: &[u8], data_version: i32) -> Result<Value, String> {
     for j in 0..MAP_SIZE {
         for i in 0..MAP_SIZE {
             let p = img.get_pixel(i as u32, j as u32);
+            if p.0[3] < 128 {
+                continue;
+            }
             colors[(j * MAP_SIZE + i) as usize] = nearest_map_color(p.0[0], p.0[1], p.0[2]) as i8;
         }
     }
@@ -372,26 +372,74 @@ pub fn write_branding_map_only(world_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Writes the fixed decal maps so their in-world frames resolve.
-pub fn write_decoration_maps(world_path: &Path) -> Result<(), String> {
+/// Writes one locked map per decal tile and bumps the id counter past them.
+pub fn write_decal_maps(
+    world_path: &Path,
+    registry: &DecalRegistry,
+    preview: Option<&PreviewAccumulator>,
+) -> Result<usize, String> {
+    if registry.is_empty() {
+        return Ok(0);
+    }
     let data_version = world_data_version(world_path);
     let data_dir = world_path.join("data");
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
 
+    let preview_img = preview.map(|p| (p.render_image(), p.min_x(), p.min_z(), p.step()));
+    let raster = preview_img
+        .as_ref()
+        .map(|(img, min_x, min_z, step)| PreviewRaster {
+            img,
+            min_x: *min_x,
+            min_z: *min_z,
+            step: *step,
+        });
+
+    // Render, encode and gzip are independent per decal.
+    let entries: Vec<_> = registry.iter().collect();
+    // Fills the 97-99.5 band; on large areas this outlasts the region write.
+    // Counted in map tiles, not entries: an entry spans 1 to 6 tiles and both the
+    // render and the write scale with that.
+    let total_tiles = registry.tile_count().max(1) as usize;
+    let tiles_done = AtomicUsize::new(0);
+    let emit_step = (total_tiles / 20).max(1);
+    let results: Vec<Result<(i32, usize), String>> = entries
+        .par_iter()
+        .map(|(key, entry)| {
+            let canvas = render_decal(key, raster.as_ref());
+            let mut highest = i32::MIN;
+            let mut written = 0usize;
+            for row in 0..entry.rows {
+                for col in 0..entry.cols {
+                    let id = entry.tile_id(col, row);
+                    let dat = build_map_dat(canvas.tile(col, row), 0, false, 0, 0, data_version);
+                    write_map_dat_files(&data_dir, id, &dat)?;
+                    highest = highest.max(id);
+                    written += 1;
+                }
+            }
+            // Bucket-crossing test, not a modulo: `written` can jump a whole step.
+            let before = tiles_done.fetch_add(written, Ordering::Relaxed);
+            let after = before + written;
+            if after / emit_step != before / emit_step || after >= total_tiles {
+                let f = (after as f64 / total_tiles as f64).min(1.0);
+                emit_gui_progress_update(97.0 + f * 2.5, "Finalizing world...");
+            }
+            Ok((highest, written))
+        })
+        .collect();
     let mut highest = next_map_id(&data_dir) - 1;
-    for (id, png) in [
-        (BUS_STOP_MAP_ID, BUS_STOP_PNG),
-        (RECYCLING_MAP_ID, RECYCLING_PNG),
-        (HYDRANT_MAP_ID, HYDRANT_PNG),
-    ] {
-        write_map_dat_files(&data_dir, id, &image_map_dat_or_blank(png, data_version))?;
-        highest = highest.max(id);
+    let mut written = 0usize;
+    for r in results {
+        let (h, w) = r?;
+        highest = highest.max(h);
+        written += w;
     }
 
     let idcounts = build_idcounts(highest, data_version);
     write_gzip_nbt(&data_dir.join("idcounts.dat"), &idcounts)?;
     write_gzip_nbt(&data_dir.join("last_id.dat"), &idcounts)?;
-    Ok(())
+    Ok(written)
 }
 
 #[cfg(test)]
@@ -529,13 +577,21 @@ mod tests {
     }
 
     #[test]
-    fn writes_decoration_maps_with_reserved_ids() {
+    fn writes_decal_maps_with_registry_ids() {
+        use crate::decals::{DecalKey, TextStyle};
         let tmp = tempfile::tempdir().unwrap();
         let world =
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
-        write_decoration_maps(&world).unwrap();
+        let mut keys = std::collections::BTreeSet::new();
+        keys.insert(DecalKey::Pictogram("bus_stop"));
+        keys.insert(DecalKey::Pictogram("recycling"));
+        keys.insert(DecalKey::text(TextStyle::Fascia, "Bakery", 2));
+        let registry = DecalRegistry::from_keys(keys);
+        let written = write_decal_maps(&world, &registry, None).unwrap();
+        // Two pictograms plus a two-tile fascia.
+        assert_eq!(written, 4);
 
-        for id in [BUS_STOP_MAP_ID, RECYCLING_MAP_ID, HYDRANT_MAP_ID] {
+        for id in DecalRegistry::FIRST_ID..=registry.max_id() {
             let Value::Compound(root) =
                 read_gzip_nbt(&world.join(format!("data/map_{id}.dat"))).unwrap()
             else {
@@ -550,8 +606,23 @@ mod tests {
             };
             assert_eq!(colors.len(), 16384);
         }
+        // Pictogram corners are transparent, the plate is not.
+        let bus = registry.get(&DecalKey::Pictogram("bus_stop")).unwrap();
+        let Value::Compound(root) =
+            read_gzip_nbt(&world.join(format!("data/map_{}.dat", bus.base_id))).unwrap()
+        else {
+            panic!("bus root");
+        };
+        let Some(Value::Compound(data)) = root.get("data") else {
+            panic!("bus data");
+        };
+        let Some(Value::ByteArray(colors)) = data.get("colors") else {
+            panic!("bus colors");
+        };
+        assert_eq!(colors[0], TRANSPARENT as i8);
+        assert_ne!(colors[64 * 128 + 64], TRANSPARENT as i8);
 
-        // idcounts must reach the highest reserved id so user maps never overwrite the decals.
+        // idcounts must reach the highest assigned id so user maps never overwrite the decals.
         let Value::Compound(idroot) = read_gzip_nbt(&world.join("data/idcounts.dat")).unwrap()
         else {
             panic!("idcounts root");
@@ -559,7 +630,7 @@ mod tests {
         let Some(Value::Compound(iddata)) = idroot.get("data") else {
             panic!("idcounts data");
         };
-        assert_eq!(iddata.get("map"), Some(&Value::Int(HYDRANT_MAP_ID)));
+        assert_eq!(iddata.get("map"), Some(&Value::Int(registry.max_id())));
     }
 
     fn inventory_items(world: &std::path::Path) -> Vec<Value> {

@@ -1,6 +1,14 @@
 import { licenseText } from './license.js';
 import { fetchLanguage, invalidJSON } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
+import {
+  initSettingsStore,
+  setDynamicDefault,
+  refreshSettingsState,
+  localizeSettingsStore,
+  cancelSettingsResetConfirm,
+  flushSettingsStore,
+} from './settings-store.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -39,6 +47,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  // After initSettings(), so the slider label and rotation handlers exist
+  // before restored values are applied. Labels get localized a few lines below.
+  initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
   initTooltips();
@@ -104,6 +116,7 @@ async function applyLocalization(localization) {
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
+    "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
@@ -127,20 +140,34 @@ async function applyLocalization(localization) {
     "span[data-localize='bake_lighting']": "bake_lighting",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
-    "span[data-localize='save_path']": "save_path",
+    "span[data-localize='java_save_path']": "java_save_path",
+    "span[data-localize='bedrock_save_path']": "bedrock_save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
+    "span[data-localize='canopy_height']": "canopy_height",
+    "span[data-localize='max_tree_size']": "max_tree_size",
+    "button[data-localize='tree_size_small']": "tree_size_small",
+    "button[data-localize='tree_size_medium']": "tree_size_medium",
+    "button[data-localize='tree_size_big']": "tree_size_big",
+    "button[data-localize='tree_size_tall']": "tree_size_tall",
+    "button[data-localize='tree_size_giant']": "tree_size_giant",
     "span[data-localize='gamemode']": "gamemode",
     "button[data-localize='gamemode_survival']": "gamemode_survival",
     "button[data-localize='gamemode_creative']": "gamemode_creative",
     "button[data-localize='gamemode_spectator']": "gamemode_spectator",
     "span[data-localize='world_time']": "world_time",
     "span[data-localize='map_item']": "map_item",
+    "span[data-localize='signage']": "signage",
+    "button[data-localize='signage_none']": "signage_none",
+    "button[data-localize='signage_basic']": "signage_basic",
+    "button[data-localize='signage_full']": "signage_full",
     "div[data-localize='settings_section_generation']": "settings_section_generation",
     "div[data-localize='settings_section_world']": "settings_section_world",
     "div[data-localize='settings_section_map']": "settings_section_map",
     "div[data-localize='settings_section_application']": "settings_section_application",
     "span[data-localize='clear_tile_cache']": "clear_tile_cache",
     "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
+    // Row label only; settings-store.js owns the button text.
+    "span[data-localize='reset_all_settings']": "reset_all_settings",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -159,6 +186,9 @@ async function applyLocalization(localization) {
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
+
+  // settings-store.js creates these buttons and owns their text.
+  localizeSettingsStore(localization);
 
   // Re-apply current bbox selection info text with new language
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
@@ -421,14 +451,38 @@ const ETA_RISE_ABS = 2; // shown rises by at most max(2s, 10%) per update
 const ETA_RISE_FRAC = 0.1; // => smooth, monotonic-feeling countdown
 
 // Progress bands [lo, hi) and per-regime RELATIVE time weights (not % widths).
+// Measured on Heidelberg 1/2.5/5/10 km runs (terrain + land cover + Overture):
+// the finalize tail (map item, signage map tiles, world settings) is as long as
+// the region write on small areas and several times longer on large ones, so it
+// gets its own band rather than hiding behind the last save percent.
 const ETA_PHASES = [
   { id: "terrain", lo: 20, hi: 70 },
   { id: "ground", lo: 70, hi: 90 },
-  { id: "save", lo: 90, hi: 100 },
+  { id: "save", lo: 90, hi: 97 },
+  { id: "finalize", lo: 97, hi: 100 },
 ];
-const ETA_WPRIOR = { nonStreaming: [37, 2, 10], streaming: [60, 0.3, 0.2] };
+const ETA_WPRIOR = {
+  nonStreaming: [37, 2, 11, 20],
+  streaming: [60, 0.3, 0.5, 3.0],
+};
+// Signage map tiles are what makes the finalize band long, and they are Java-only.
+// Without them the tail is just the map item and level.dat settings.
+const ETA_WFINALIZE_NO_SIGNAGE = 1.5;
 
 let eta = null;
+// Set from the generate handler; decides the finalize weight for the next run.
+let etaSignageExpected = true;
+
+function setEtaSignageExpected(expected) {
+  etaSignageExpected = !!expected;
+}
+
+// Copy of the regime prior with the finalize weight adjusted for this run.
+function etaWeightsFor(streaming) {
+  const w = (streaming ? ETA_WPRIOR.streaming : ETA_WPRIOR.nonStreaming).slice();
+  if (!etaSignageExpected) w[3] = ETA_WFINALIZE_NO_SIGNAGE;
+  return w;
+}
 
 function etaPhaseIdx(p) {
   for (let i = 0; i < ETA_PHASES.length; i++) if (p < ETA_PHASES[i].hi) return i;
@@ -522,7 +576,7 @@ function updateEta(progress, streaming) {
   const now = performance.now();
   if (!eta) {
     eta = {
-      streamingKnown: false, wprior: ETA_WPRIOR.nonStreaming, phaseIdx: -1,
+      streamingKnown: false, wprior: etaWeightsFor(false), phaseIdx: -1,
       phaseStartT: now, phaseStartProgress: null, movedInPhase: false,
       samples: [], doneSec: 0, doneWeight: 0, est: null, shown: null,
       lastTickAt: now, lastProgress: null, lastIncreaseAt: now, tickHandle: null,
@@ -530,7 +584,7 @@ function updateEta(progress, streaming) {
   }
   if (streaming != null && !eta.streamingKnown) {
     eta.streamingKnown = true;
-    eta.wprior = streaming ? ETA_WPRIOR.streaming : ETA_WPRIOR.nonStreaming;
+    eta.wprior = etaWeightsFor(streaming);
   }
 
   const idx = etaPhaseIdx(progress), ph = ETA_PHASES[idx];
@@ -573,9 +627,8 @@ function updateEta(progress, streaming) {
   if (G != null) G = Math.min(1000, Math.max(0.02, G));
 
   let raw = null;
-  if (ph.id === "save" && rate) {
-    raw = Math.max(0, remCur); // snap to the real region-write rate, no future term
-  } else if (remCur != null) {
+  if (remCur != null) {
+    // In the last band this is just the measured rate; earlier ones budget the rest.
     raw = Math.max(0, remCur);
     if (G != null) for (let j = idx + 1; j < ETA_PHASES.length; j++) raw += eta.wprior[j] * G;
   }
@@ -680,6 +733,35 @@ function initEasterEggs() {
   });
 }
 
+// Language implied by the browser, ignoring any stored preference.
+function detectBrowserLanguage(availableOptions) {
+  const currentLang = navigator.language || 'en';
+  if (availableOptions.includes(currentLang)) return currentLang;
+  const base = currentLang.split('-')[0];
+  if (availableOptions.includes(base)) return base;
+  return 'en';
+}
+
+// Gives the settings store the save path defaults. Not awaited, since startup
+// must not block on a filesystem probe; on failure the revert stays hidden.
+function resolveDefaultSavePath() {
+  const resolve = (command, name) => {
+    Promise.resolve()
+      .then(() => invoke(command))
+      .then((detected) => {
+        if (typeof detected === 'string' && detected) {
+          setDynamicDefault(name, detected);
+        }
+      })
+      .catch(() => {
+        // No detectable default, so that row keeps no revert button.
+      });
+  };
+
+  resolve('gui_get_default_save_path', 'savePath');
+  resolve('gui_get_default_bedrock_save_path', 'bedrockSavePath');
+}
+
 function initSettings() {
   // Settings
   const settingsModal = document.getElementById("settings-modal");
@@ -696,6 +778,9 @@ function initSettings() {
   // Close settings modal
   function closeSettings() {
     settingsModal.style.display = "none";
+    // Webview teardown events are not guaranteed, so commit here.
+    flushSettingsStore();
+    cancelSettingsResetConfirm();
   }
 
   // Close settings and license modals on escape key
@@ -720,21 +805,51 @@ function initSettings() {
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
 
-  // Update slider value display
-  slider.addEventListener("input", () => {
-    sliderValue.textContent = parseFloat(slider.value).toFixed(2);
-  });
-  // Double-click to reset world scale to default (1.00)
+  // Mirrors OBJECT_SKIP_SCALE in src/args.rs
+  const OBJECT_SKIP_SCALE = 0.3;
+  const scaleObjectsNote = document.getElementById("scale-objects-note");
+
+  function refreshScaleDisplay() {
+    const value = parseFloat(slider.value);
+    sliderValue.textContent = value.toFixed(2);
+    if (scaleObjectsNote) {
+      scaleObjectsNote.style.display = value < OBJECT_SKIP_SCALE ? "" : "none";
+    }
+  }
+
+  slider.addEventListener("input", refreshScaleDisplay);
+  // Double-click to reset world scale to default (1.00).
+  // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
     slider.value = 1;
-    sliderValue.textContent = "1.00";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    slider.dispatchEvent(new Event("change", { bubbles: true }));
   });
+  refreshScaleDisplay();
 
   // Game mode segmented control
   const gamemodeGroup = document.getElementById("gamemode-group");
   gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // Signage segmented control
+  const signageGroup = document.getElementById("signage-group");
+  signageGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      signageGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // Max tree size segmented control
+  const maxTreeSizeGroup = document.getElementById("max-tree-size-group");
+  maxTreeSizeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      maxTreeSizeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -753,7 +868,8 @@ function initSettings() {
   });
   timeSlider.addEventListener("dblclick", () => {
     timeSlider.value = 720;
-    timeValue.textContent = formatClock(720);
+    timeSlider.dispatchEvent(new Event("input", { bubbles: true }));
+    timeSlider.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   // Rotation angle input
@@ -763,6 +879,8 @@ function initSettings() {
     if (isNaN(val)) val = 0;
     val = Math.min(Math.max(val, -90), 90);
     rotationInput.value = val.toFixed(2);
+    // The bbox handlers set this from code, which fires no input event.
+    refreshSettingsState();
     // Tell the map iframe to update the rotation mask overlay
     const mapFrame = document.querySelector('.map-container');
     if (mapFrame && mapFrame.contentWindow) {
@@ -795,29 +913,22 @@ function initSettings() {
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
-  
+
+  // The default here is the browser language, not an HTML attribute.
+  setDynamicDefault('language', detectBrowserLanguage(availableOptions));
+
   // Check for saved language preference first
   const savedLanguage = localStorage.getItem('arnis-language');
-  let languageToSet = 'en'; // Default to English
-  
+  let languageToSet;
+
   if (savedLanguage && availableOptions.includes(savedLanguage)) {
     // Use saved language if it exists and is available
     languageToSet = savedLanguage;
   } else {
     // Otherwise use browser language
-    const currentLang = navigator.language;
-    
-    // Try to match the exact language code first
-    if (availableOptions.includes(currentLang)) {
-      languageToSet = currentLang;
-    }
-    // Try to match just the base language code
-    else if (availableOptions.includes(currentLang.split('-')[0])) {
-      languageToSet = currentLang.split('-')[0];
-    }
-    // languageToSet remains 'en' as default
+    languageToSet = detectBrowserLanguage(availableOptions);
   }
-  
+
   languageSelect.value = languageToSet;
 
   // Handle language change
@@ -1042,6 +1153,8 @@ function initTelemetryConsent() {
     if (telemetryToggle) {
       telemetryToggle.checked = true;
     }
+    // Set from code, so no change event fired.
+    refreshSettingsState();
   };
 
   window.rejectTelemetry = () => {
@@ -1052,6 +1165,7 @@ function initTelemetryConsent() {
     if (telemetryToggle) {
       telemetryToggle.checked = false;
     }
+    refreshSettingsState();
   };
 
   // Utility for other scripts to read consent
@@ -1242,80 +1356,104 @@ function initTooltips() {
   }
 }
 
-/// Save path management
+/// Save path management, one path per world format
 let savePath = "";
+let bedrockSavePath = "";
+
+const SAVE_PATHS = {
+  java: {
+    storageKey: 'arnis-save-path',
+    defaultCommand: 'gui_get_default_save_path',
+    inputId: 'save-path-input',
+    browseId: 'save-path-browse',
+    get: () => savePath,
+    set: (value) => { savePath = value; },
+  },
+  bedrock: {
+    storageKey: 'arnis-bedrock-save-path',
+    defaultCommand: 'gui_get_default_bedrock_save_path',
+    inputId: 'bedrock-save-path-input',
+    browseId: 'bedrock-save-path-browse',
+    get: () => bedrockSavePath,
+    set: (value) => { bedrockSavePath = value; },
+  },
+};
 
 async function initSavePath() {
-  // Check if user has a saved path in localStorage
-  const saved = localStorage.getItem('arnis-save-path');
+  for (const config of Object.values(SAVE_PATHS)) {
+    config.set(await resolveStoredSavePath(config));
+    const input = document.getElementById(config.inputId);
+    if (input) {
+      input.value = config.get();
+    }
+  }
+}
+
+async function resolveStoredSavePath({ storageKey, defaultCommand }) {
+  const saved = localStorage.getItem(storageKey);
   if (saved) {
     // Validate the saved path still exists (handles upgrades / moved directories)
     try {
       const normalized = await invoke('gui_set_save_path', { path: saved });
-      savePath = normalized;
-      localStorage.setItem('arnis-save-path', savePath);
+      localStorage.setItem(storageKey, normalized);
+      return normalized;
     } catch (_) {
-      // Saved path is no longer valid – re-detect
-      console.warn("Stored save path no longer valid, re-detecting...");
-      localStorage.removeItem('arnis-save-path');
-      try {
-        savePath = await invoke('gui_get_default_save_path');
-        localStorage.setItem('arnis-save-path', savePath);
-      } catch (error) {
-        console.error("Failed to detect save path:", error);
-      }
-    }
-  } else {
-    // Auto-detect on first run
-    try {
-      savePath = await invoke('gui_get_default_save_path');
-      localStorage.setItem('arnis-save-path', savePath);
-    } catch (error) {
-      console.error("Failed to detect save path:", error);
+      console.warn(`Stored path ${storageKey} no longer valid, re-detecting...`);
+      localStorage.removeItem(storageKey);
     }
   }
 
-  // Populate the save path input in settings
-  const savePathInput = document.getElementById('save-path-input');
-  if (savePathInput) {
-    savePathInput.value = savePath;
+  try {
+    const detected = await invoke(defaultCommand);
+    localStorage.setItem(storageKey, detected);
+    return detected;
+  } catch (error) {
+    console.error(`Failed to detect path for ${storageKey}:`, error);
+    return "";
   }
 }
 
 function initSavePathSetting() {
-  const savePathInput = document.getElementById('save-path-input');
-  if (!savePathInput) return;
+  for (const config of Object.values(SAVE_PATHS)) {
+    initSavePathRow(config);
+  }
+}
 
-  savePathInput.value = savePath;
+function initSavePathRow({ storageKey, inputId, browseId, get, set }) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+
+  input.value = get();
 
   // Manual text input – validate on change, revert if invalid
-  savePathInput.addEventListener('change', async () => {
-    const newPath = savePathInput.value.trim();
+  input.addEventListener('change', async () => {
+    const newPath = input.value.trim();
     if (!newPath) {
-      savePathInput.value = savePath;
+      input.value = get();
       return;
     }
 
     try {
       const validated = await invoke('gui_set_save_path', { path: newPath });
-      savePath = validated;
-      localStorage.setItem('arnis-save-path', savePath);
+      set(validated);
+      input.value = validated;
+      localStorage.setItem(storageKey, validated);
     } catch (_) {
       // Invalid path – silently revert to previous value
-      savePathInput.value = savePath;
+      input.value = get();
     }
   });
 
   // Folder picker button
-  const browseBtn = document.getElementById('save-path-browse');
+  const browseBtn = document.getElementById(browseId);
   if (browseBtn) {
     browseBtn.addEventListener('click', async () => {
       try {
-        const picked = await invoke('gui_pick_save_directory', { startPath: savePath });
+        const picked = await invoke('gui_pick_save_directory', { startPath: get() });
         if (picked) {
-          savePath = picked;
-          savePathInput.value = savePath;
-          localStorage.setItem('arnis-save-path', savePath);
+          set(picked);
+          input.value = picked;
+          localStorage.setItem(storageKey, picked);
         }
       } catch (error) {
         console.error("Folder picker failed:", error);
@@ -1618,11 +1756,16 @@ let generationButtonEnabled = true;
  * @returns {Promise<void>}
  */
 async function startGeneration() {
-  try {
-    if (generationButtonEnabled === false) {
-      return;
-    }
+  if (generationButtonEnabled === false) {
+    return;
+  }
+  // Claim the guard before the first await. gui_create_world and gui_start_generation are
+  // both awaited round-trips, so leaving the claim until after them lets a second click
+  // through and starts a parallel run against the same process-global world floor.
+  generationButtonEnabled = false;
+  let started = false;
 
+  try {
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
       const bboxSelectionInfo = document.getElementById('bbox-selection-info');
       setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
@@ -1670,6 +1813,9 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
+    var canopy_height = document.getElementById("canopy-height-toggle").checked;
+    var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
+    var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
     var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
@@ -1717,6 +1863,8 @@ async function startGeneration() {
     var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
     var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
     var mapItem = document.getElementById("map-item-toggle").checked;
+    var signageBtn = document.querySelector("#signage-group .segment.active");
+    var signage = signageBtn ? signageBtn.dataset.signage : "basic";
     // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
     var clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
     var worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
@@ -1725,6 +1873,7 @@ async function startGeneration() {
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
         selectedWorld: worldPath,
+        bedrockSavePath: bedrockSavePath,
         worldScale: scale,
         groundLevel: ground_level,
         terrainEnabled: terrain,
@@ -1732,6 +1881,8 @@ async function startGeneration() {
         interiorEnabled: interior,
         fillgroundEnabled: fill_ground,
         legacyTreesEnabled: legacy_trees,
+        maxTreeSize: maxTreeSize,
+        canopyHeightEnabled: canopy_height,
         overtureEnabled: overture,
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,
@@ -1747,19 +1898,26 @@ async function startGeneration() {
         rotationAngle: rotationAngle,
         gamemode: gamemode,
         worldTime: worldTime,
-        mapItem: mapItem
+        mapItem: mapItem,
+        signage: signage
     });
 
     console.log("Generation process started.");
     // Show GPU indicator if enabled
     document.getElementById("gpu-indicator").style.display = gpu_accel ? "" : "none";
+    setEtaSignageExpected(signage !== "none" && getEffectiveWorldFormat() === "java");
     resetEta();
-    generationButtonEnabled = false;
+    started = true;
     window.arnisPreview3D?.setGenerationRunning(true);
   } catch (error) {
     console.error("Error starting generation:", error);
-    generationButtonEnabled = true;
-    window.arnisPreview3D?.setGenerationRunning(false);
+  } finally {
+    // Hand the guard back unless a run actually started; once it has, the Done!/Error!
+    // progress message releases it instead.
+    if (!started) {
+      generationButtonEnabled = true;
+      window.arnisPreview3D?.setGenerationRunning(false);
+    }
   }
 }
 

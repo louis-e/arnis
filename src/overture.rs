@@ -5,6 +5,12 @@
 //! filling gaps in areas with sparse OSM coverage (e.g., rural Africa,
 //! parts of Asia).
 //!
+//! OSM-sourced rows are not discarded outright: Overture conflates heights and
+//! floor counts from Microsoft, Esri and USGS 3DEP lidar onto them, so their
+//! `sources[].record_id` back-reference is used to fill `height` /
+//! `building:levels` on OSM buildings that carry neither tag. That enrichment
+//! is strictly additive - an existing OSM tag is never overwritten.
+//!
 //! Data is read from GeoParquet files hosted on Azure Blob Storage using
 //! HTTP Range requests (same pattern as land_cover.rs COG reading).
 
@@ -27,21 +33,271 @@ use std::time::Duration;
 /// Overture STAC catalog root; releases live at /<release>/collections.parquet.
 const OVERTURE_STAC_ROOT: &str = "https://stac.overturemaps.org";
 
-/// Used when /catalog.json discovery fails; bump occasionally to a recent release.
-const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-05-20.0";
+/// Bucket listing used to discover release names; only the newest few stay online.
+const OVERTURE_RELEASE_LIST_URL: &str =
+    "https://overturemaps-us-west-2.s3.amazonaws.com/?list-type=2&prefix=release/&delimiter=/";
+
+/// Used when release discovery fails; bump occasionally to a recent release.
+const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-07-22.0";
+
+/// How many releases to request before giving up, so a broken host cannot stall the fetch.
+const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
 
 /// High bit marker for Overture IDs to avoid collision with OSM IDs.
 /// OSM IDs are sequential positive u64 (currently up to ~12 billion, well under 2^34).
 /// Setting bit 63 guarantees no collision.
 const OVERTURE_ID_HIGH_BIT: u64 = 0x8000_0000_0000_0000;
 
-/// Maximum number of Overture buildings to add (safety limit for huge areas)
-const MAX_OVERTURE_BUILDINGS: usize = 100_000;
+/// Budget of Overture footprints, as a rate per km² of the requested area plus a
+/// floor and a ceiling. The cap exists so a large request cannot exhaust memory.
+///
+/// It scales with area only so that the cap stops binding on ordinary requests: a
+/// flat 100k was already spent before a mid-size city was finished. It does NOT fix
+/// how the overflow is distributed. Rows arrive in spatial order and the budget is a
+/// running total, so whatever exceeds it is still a contiguous block of districts
+/// with no footprints. Raising the number moves that threshold; it does not remove
+/// it, which is why hitting the cap is now reported rather than passed over.
+const OVERTURE_BUILDINGS_PER_KM2: f64 = 1_000.0;
+const MIN_OVERTURE_BUILDINGS: usize = 100_000;
+/// Roughly the supported area ceiling at the rate above. Past this the memory held
+/// by the raw rows and their expanded ways is the binding constraint, not coverage.
+const MAX_OVERTURE_BUILDINGS: usize = 500_000;
+
+/// Attempts per HTTP range read before a row group is given up on. One partition
+/// is hundreds of range requests, and a dropped row group takes a contiguous block
+/// of the map's footprints with it, so a transient failure must not settle it.
+const OVERTURE_RANGE_ATTEMPTS: u32 = 3;
+
+/// Once a partition has lost this many row groups the host is not having a bad
+/// moment, it is unhealthy. Retrying the rest only multiplies the wall clock by
+/// the attempt count, so the remaining reads get a single try.
+const OVERTURE_UNHEALTHY_FAILURES: usize = 3;
 
 /// HTTP client timeout for Overture data fetching
 const HTTP_TIMEOUT_SECS: u64 = 120;
 
+/// Cap on how many OSM buildings can receive Overture attribute hints. Hints are
+/// a few bytes each, so this only guards against a runaway area.
+const MAX_OSM_HINTS: usize = 500_000;
+
+/// Plausibility window for an Overture height (metres) before it may be written
+/// onto an OSM building. ML-derived heights occasionally emit sub-metre slivers
+/// or absurd towers; those are dropped rather than turned into blocks.
+const HINT_MIN_HEIGHT_M: f64 = 2.5;
+const HINT_MAX_HEIGHT_M: f64 = 500.0;
+
 // ─── Internal data types ─────────────────────────────────────────────────
+
+/// Back-reference from an Overture row to the OSM element it was conflated from,
+/// parsed out of `sources[].record_id` (e.g. `"w519166507@9"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OsmRef {
+    /// "way" or "relation" - matches `ProcessedElement::kind()`.
+    kind: &'static str,
+    id: u64,
+}
+
+/// Attributes Overture holds for an OSM building that OSM itself does not.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct OsmAttributeHint {
+    height_m: Option<f64>,
+    num_floors: Option<i32>,
+}
+
+impl OsmAttributeHint {
+    /// Drop values the generator would refuse to use, so the hint budget is
+    /// spent only on attributes that can actually reach a building. This is the
+    /// single place those rules live; `apply` trusts what it is given.
+    fn usable(self) -> Self {
+        Self {
+            // ML-derived heights occasionally emit sub-metre slivers or absurd
+            // towers; neither should become blocks.
+            height_m: self
+                .height_m
+                .filter(|h| (HINT_MIN_HEIGHT_M..=HINT_MAX_HEIGHT_M).contains(h)),
+            // A single floor adds nothing over the generator's own inference,
+            // and the upper bound guards against parse noise.
+            num_floors: self.num_floors.filter(|f| (2..200).contains(f)),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.height_m.is_none() && self.num_floors.is_none()
+    }
+}
+
+/// `OsmRef` -> attributes, built from the OSM-sourced Overture rows that the
+/// footprint pass discards.
+#[derive(Debug, Default)]
+pub struct OvertureHints {
+    hints: HashMap<OsmRef, OsmAttributeHint>,
+}
+
+impl OvertureHints {
+    pub fn len(&self) -> usize {
+        self.hints.len()
+    }
+
+    fn insert(&mut self, key: OsmRef, hint: OsmAttributeHint) {
+        self.insert_capped(key, hint, MAX_OSM_HINTS);
+    }
+
+    fn insert_capped(&mut self, key: OsmRef, hint: OsmAttributeHint, cap: usize) {
+        // Most Overture rows carry no height at all; storing those would spend
+        // the budget on entries that could never enrich anything.
+        let hint = hint.usable();
+        if hint.is_empty() {
+            return;
+        }
+
+        // Only a new key costs budget. An already-tracked building must stay
+        // completable, otherwise a full map would freeze half-filled entries.
+        let at_capacity = self.hints.len() >= cap;
+        match self.hints.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                // Overture is one row per building, but a partition boundary can
+                // repeat a row; keep the first, richer entry rather than letting
+                // a later partial one clobber it.
+                let slot = slot.get_mut();
+                if slot.height_m.is_none() {
+                    slot.height_m = hint.height_m;
+                }
+                if slot.num_floors.is_none() {
+                    slot.num_floors = hint.num_floors;
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                if !at_capacity {
+                    slot.insert(hint);
+                }
+            }
+        }
+    }
+
+    /// Fill `height` / `building:levels` on OSM buildings that carry neither.
+    ///
+    /// Strictly additive: an element that already has either tag is left alone,
+    /// so OSM mappers always win over Overture's conflated values. Returns the
+    /// number of elements that were enriched.
+    pub fn apply(&self, elements: &mut [ProcessedElement]) -> usize {
+        if self.hints.is_empty() {
+            return 0;
+        }
+
+        let mut enriched = 0;
+        for element in elements.iter_mut() {
+            let key = OsmRef {
+                kind: match element {
+                    ProcessedElement::Way(_) => "way",
+                    ProcessedElement::Relation(_) => "relation",
+                    // Overture buildings are areas; a node reference cannot be a footprint.
+                    ProcessedElement::Node(_) => continue,
+                },
+                id: element.id(),
+            };
+            let Some(hint) = self.hints.get(&key) else {
+                continue;
+            };
+
+            let tags: &mut HashMap<String, String> = match element {
+                ProcessedElement::Way(way) => &mut way.tags,
+                ProcessedElement::Relation(relation) => &mut relation.tags,
+                ProcessedElement::Node(_) => continue,
+            };
+
+            // Only buildings; Overture's building theme has no other feature type.
+            if !tags.contains_key("building") && !tags.contains_key("building:part") {
+                continue;
+            }
+            // Any existing vertical tag means OSM already knows better.
+            if tags.contains_key("height") || tags.contains_key("building:levels") {
+                continue;
+            }
+
+            // Every stored hint holds at least one validated value (see `insert`).
+            if let Some(floors) = hint.num_floors {
+                tags.insert("building:levels".to_string(), floors.to_string());
+            }
+            if let Some(h) = hint.height_m {
+                tags.insert("height".to_string(), format!("{h:.1}"));
+            }
+            // Marks the provenance for debugging and for the licence notice.
+            tags.insert(
+                "arnis:height_source".to_string(),
+                "overture_maps".to_string(),
+            );
+            enriched += 1;
+        }
+        enriched
+    }
+}
+
+/// Pull the OSM back-reference out of an Overture `sources` value.
+///
+/// The column is `list<struct<property, dataset, record_id, update_time, ...>>`.
+/// Walks the nested value rather than pattern-matching a formatted string, and
+/// returns `None` for any shape it does not recognise so a schema change can
+/// only cost the enrichment, never the footprint pass.
+fn parse_osm_ref(field: &parquet::record::Field) -> Option<OsmRef> {
+    fn walk(field: &parquet::record::Field, out: &mut Option<OsmRef>) {
+        if out.is_some() {
+            return;
+        }
+        match field {
+            parquet::record::Field::ListInternal(list) => {
+                for element in list.elements() {
+                    walk(element, out);
+                    if out.is_some() {
+                        return;
+                    }
+                }
+            }
+            parquet::record::Field::Group(row) => {
+                let mut dataset: Option<&str> = None;
+                let mut record_id: Option<&str> = None;
+                for (name, sub) in row.get_column_iter() {
+                    match (name.as_str(), sub) {
+                        ("dataset", parquet::record::Field::Str(v)) => dataset = Some(v),
+                        ("record_id", parquet::record::Field::Str(v)) => record_id = Some(v),
+                        // A nested group/list (some writers wrap the list element)
+                        _ => walk(sub, out),
+                    }
+                    if out.is_some() {
+                        return;
+                    }
+                }
+                if dataset.is_some_and(|d| d.eq_ignore_ascii_case("OpenStreetMap")) {
+                    if let Some(parsed) = record_id.and_then(parse_record_id) {
+                        *out = Some(parsed);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut out = None;
+    walk(field, &mut out);
+    out
+}
+
+/// `"w519166507@9"` -> way 519166507. Also accepts `r`/`n` prefixes and a
+/// missing `@version` suffix.
+fn parse_record_id(record_id: &str) -> Option<OsmRef> {
+    let record_id = record_id.trim();
+    let mut chars = record_id.chars();
+    let kind = match chars.next()? {
+        'w' | 'W' => "way",
+        'r' | 'R' => "relation",
+        // Nodes cannot carry a building footprint; ignore rather than mismatch.
+        'n' | 'N' => return None,
+        _ => return None,
+    };
+    let rest = chars.as_str();
+    let digits = rest.split('@').next()?;
+    let id: u64 = digits.parse().ok()?;
+    Some(OsmRef { kind, id })
+}
 
 /// A building parsed from Overture Maps GeoParquet data.
 pub(crate) struct OvertureBuilding {
@@ -51,6 +307,8 @@ pub(crate) struct OvertureBuilding {
     pub(crate) exterior_ring: Vec<(f64, f64)>,
     /// Whether the primary source is OpenStreetMap
     is_osm_sourced: bool,
+    /// The OSM element this row was conflated from, when it could be parsed.
+    osm_ref: Option<OsmRef>,
     /// Building height in meters (if available)
     pub(crate) height: Option<f64>,
     /// Minimum height in meters (bottom of building, for elevated parts)
@@ -75,22 +333,33 @@ pub(crate) struct OvertureBuilding {
 
 // ─── Public API ──────────────────────────────────────────────────────────
 
-/// Fetch non-OSM building footprints from Overture Maps for the given bbox.
+/// What a generation-path Overture fetch produces.
+#[derive(Default)]
+pub struct OvertureData {
+    /// Non-OSM footprints, ready to merge into the element list.
+    pub elements: Vec<ProcessedElement>,
+    /// Attributes for OSM buildings that OSM itself leaves untagged.
+    pub hints: OvertureHints,
+}
+
+/// Fetch Overture Maps building data for the given bbox.
 ///
 /// Returns `ProcessedWay` elements with OSM-compatible tags, ready to merge
-/// with the main element list. Returns an empty Vec on any failure (non-fatal).
+/// with the main element list, plus attribute hints keyed on the OSM elements
+/// Overture conflated. Returns empty data on any failure (non-fatal).
 ///
-/// Buildings whose primary source is "OpenStreetMap" are excluded to avoid
-/// duplicates with the existing OSM data pipeline.
-pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool) -> Vec<ProcessedElement> {
+/// Buildings whose primary source is "OpenStreetMap" are excluded from
+/// `elements` to avoid duplicates with the existing OSM data pipeline; their
+/// conflated heights survive in `hints`.
+pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool) -> OvertureData {
     match fetch_overture_buildings_inner(bbox, scale, debug) {
-        Ok(elements) => elements,
+        Ok(data) => data,
         Err(e) => {
             eprintln!(
                 "{} Failed to fetch Overture Maps data: {e}",
                 "Warning:".yellow().bold()
             );
-            Vec::new()
+            OvertureData::default()
         }
     }
 }
@@ -195,16 +464,40 @@ pub(crate) fn overture_client() -> Result<Client, Box<dyn std::error::Error>> {
         .build()?)
 }
 
+/// Everything one Overture pass yields: the footprints to add, plus the
+/// attribute hints harvested from the OSM-sourced rows that are not added.
+#[derive(Default)]
+pub(crate) struct OvertureCollection {
+    pub(crate) buildings: Vec<OvertureBuilding>,
+    pub(crate) hints: OvertureHints,
+}
+
+/// How many Overture footprints this bbox is allowed to contribute.
+fn overture_building_budget(bbox: &LLBBox) -> usize {
+    ((bbox.area_km2() * OVERTURE_BUILDINGS_PER_KM2) as usize)
+        .clamp(MIN_OVERTURE_BUILDINGS, MAX_OVERTURE_BUILDINGS)
+}
+
 /// Collects raw Overture buildings overlapping the bbox. The generation path
 /// drops OSM-sourced entries (duplicates of the Overpass data); the 3D
 /// preview keeps them for full coverage.
+///
+/// Either way the OSM-sourced rows are mined for `height` / `num_floors` hints
+/// first, so the enrichment costs no extra requests. Hints never count towards
+/// `max_buildings` - that cap governs added footprints only.
+///
+/// `report_gaps` warns about coverage the caller did not get: skipped partitions,
+/// unreadable row groups, and a spent budget. Only the generation path wants this.
+/// For the 3D preview `max_buildings` is a deliberate render budget rather than a
+/// data problem, and its fetch repeats on every pan.
 pub(crate) fn collect_overture_buildings(
     client: &Client,
     bbox: &LLBBox,
     include_osm_sourced: bool,
     max_buildings: usize,
+    report_gaps: bool,
     debug: bool,
-) -> Result<Vec<OvertureBuilding>, Box<dyn std::error::Error>> {
+) -> Result<OvertureCollection, Box<dyn std::error::Error>> {
     // List partition files whose geographic bounds overlap our bbox
     // (single ~230 KB STAC download instead of 512 HTTP requests)
     let partition_urls = list_partition_files(client, bbox, debug)?;
@@ -212,7 +505,7 @@ pub(crate) fn collect_overture_buildings(
         if debug {
             println!("No Overture partitions overlap the bbox");
         }
-        return Ok(Vec::new());
+        return Ok(OvertureCollection::default());
     }
 
     if debug {
@@ -224,12 +517,17 @@ pub(crate) fn collect_overture_buildings(
 
     // Process each partition file: read footer, check for bbox overlap, fetch matching rows
     let mut all_buildings: Vec<OvertureBuilding> = Vec::new();
+    let mut hints = OvertureHints::default();
+    // Rows are stored in spatial order, so anything skipped here is a contiguous
+    // block of the map with no ML footprints. Reported below rather than only
+    // under --debug, since the world itself gives no hint that it happened.
+    let mut lost_partitions = 0usize;
+    let mut lost_row_groups = 0usize;
+    let mut capped = false;
 
     for (i, url) in partition_urls.iter().enumerate() {
         if all_buildings.len() >= max_buildings {
-            if debug {
-                println!("Reached building limit ({max_buildings}), stopping");
-            }
+            capped = true;
             break;
         }
 
@@ -242,14 +540,30 @@ pub(crate) fn collect_overture_buildings(
         }
 
         match process_partition_file(client, url, bbox, debug) {
-            Ok(buildings) => {
-                all_buildings.extend(
-                    buildings
-                        .into_iter()
-                        .filter(|b| include_osm_sourced || !b.is_osm_sourced),
-                );
+            Ok((buildings, failed_row_groups)) => {
+                lost_row_groups += failed_row_groups;
+                for building in buildings {
+                    // Harvest first: an OSM-sourced row is a duplicate footprint
+                    // but still carries conflated Microsoft / Esri / 3DEP values.
+                    if building.is_osm_sourced {
+                        if let Some(key) = building.osm_ref {
+                            hints.insert(
+                                key,
+                                OsmAttributeHint {
+                                    height_m: building.height,
+                                    num_floors: building.num_floors,
+                                },
+                            );
+                        }
+                        if !include_osm_sourced {
+                            continue;
+                        }
+                    }
+                    all_buildings.push(building);
+                }
             }
             Err(e) => {
+                lost_partitions += 1;
                 if debug {
                     eprintln!("Warning: Failed to process partition {url}: {e}");
                 }
@@ -260,25 +574,53 @@ pub(crate) fn collect_overture_buildings(
 
     // The loop only checks the cap between partitions; a single dense
     // partition can overshoot it, so enforce the exact cap here.
+    capped |= all_buildings.len() > max_buildings;
     all_buildings.truncate(max_buildings);
 
-    Ok(all_buildings)
+    if report_gaps && (lost_partitions > 0 || lost_row_groups > 0) {
+        eprintln!(
+            "{} Overture Maps data incomplete: {lost_partitions} partition(s) and \
+             {lost_row_groups} row group(s) could not be read. Buildings are missing \
+             from the areas they cover.",
+            "Warning:".yellow().bold()
+        );
+    }
+    if report_gaps && capped {
+        eprintln!(
+            "{} Reached the Overture Maps building limit ({max_buildings}); footprints \
+             beyond it were dropped, which leaves whole districts without them. \
+             Use a smaller area for full coverage.",
+            "Warning:".yellow().bold()
+        );
+    }
+
+    Ok(OvertureCollection {
+        buildings: all_buildings,
+        hints,
+    })
 }
 
 fn fetch_overture_buildings_inner(
     bbox: &LLBBox,
     scale: f64,
     debug: bool,
-) -> Result<Vec<ProcessedElement>, Box<dyn std::error::Error>> {
+) -> Result<OvertureData, Box<dyn std::error::Error>> {
     let client = overture_client()?;
 
     emit_gui_progress_update(6.0, "Downloading data...");
 
-    let all_buildings =
-        collect_overture_buildings(&client, bbox, false, MAX_OVERTURE_BUILDINGS, debug)?;
+    let budget = overture_building_budget(bbox);
+    let OvertureCollection {
+        buildings: all_buildings,
+        hints,
+    } = collect_overture_buildings(&client, bbox, false, budget, true, debug)?;
 
     if debug {
-        println!("Overture: {} non-OSM buildings found", all_buildings.len());
+        println!(
+            "Overture: {} non-OSM buildings found, {} attribute hints for OSM buildings",
+            all_buildings.len(),
+            hints.len()
+        );
     }
 
     // Convert to ProcessedElements and clip to xzbbox (matching OSM clipping)
@@ -286,7 +628,7 @@ fn fetch_overture_buildings_inner(
 
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
-        .take(MAX_OVERTURE_BUILDINGS)
+        .take(budget)
         .filter_map(|building| {
             let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
             let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
@@ -298,22 +640,114 @@ fn fetch_overture_buildings_inner(
         })
         .collect();
 
-    Ok(elements)
+    Ok(OvertureData { elements, hints })
 }
 
-/// Resolve the current STAC collections URL via /catalog.json's `latest` field,
-/// falling back to the bundled release if discovery fails.
-fn resolve_stac_url(client: &Client) -> String {
-    let release = client
-        .get(format!("{OVERTURE_STAC_ROOT}/catalog.json"))
-        .send()
-        .ok()
-        .filter(|r| r.status().is_success())
-        .and_then(|r| r.text().ok())
-        .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
-        .and_then(|v| v.get("latest").and_then(|s| s.as_str().map(String::from)))
-        .unwrap_or_else(|| OVERTURE_STAC_RELEASE_FALLBACK.to_string());
-    format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet")
+/// Sorts `YYYY-MM-DD.N` release names, comparing the revision numerically.
+fn release_sort_key(release: &str) -> (&str, u32) {
+    match release.split_once('.') {
+        Some((date, rev)) => (date, rev.parse().unwrap_or(0)),
+        None => (release, 0),
+    }
+}
+
+/// Extract release names from an S3 `ListObjectsV2` response, newest first.
+fn parse_release_listing(body: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    // Releases arrive as <Prefix>release/2026-07-22.0/</Prefix>; the echoed request prefix strips to empty.
+    let mut xml = Reader::from_str(body);
+    let mut releases: Vec<String> = Vec::new();
+    let mut in_prefix = false;
+    loop {
+        match xml.read_event()? {
+            Event::Start(e) if e.local_name().as_ref() == b"Prefix" => in_prefix = true,
+            Event::End(e) if e.local_name().as_ref() == b"Prefix" => in_prefix = false,
+            Event::Text(e) if in_prefix => {
+                let text = e.xml10_content()?;
+                if let Some(name) = text.trim().strip_prefix("release/") {
+                    let name = name.trim_end_matches('/');
+                    if !name.is_empty() {
+                        releases.push(name.to_string());
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    releases.sort_by(|a, b| release_sort_key(b).cmp(&release_sort_key(a)));
+    releases.dedup();
+    Ok(releases)
+}
+
+/// Release names currently published in the bucket, newest first.
+fn discover_releases(client: &Client) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let body = client
+        .get(OVERTURE_RELEASE_LIST_URL)
+        .send()?
+        .error_for_status()?
+        .text()?;
+    parse_release_listing(&body)
+}
+
+/// Downloads the STAC index from the newest release that serves one, oldest tried last.
+fn fetch_stac_catalog(
+    client: &Client,
+    debug: bool,
+) -> Result<reqwest::blocking::Response, Box<dyn std::error::Error>> {
+    let releases = match discover_releases(client) {
+        Ok(releases) => releases,
+        Err(e) => {
+            if debug {
+                println!("Overture release discovery failed ({e}), using bundled release");
+            }
+            Vec::new()
+        }
+    };
+
+    // Reserve the last attempt for the fallback so it stays reachable on a long listing.
+    let mut candidates: Vec<String> = releases
+        .into_iter()
+        .take(OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(1))
+        .collect();
+    if !candidates
+        .iter()
+        .any(|r| r == OVERTURE_STAC_RELEASE_FALLBACK)
+    {
+        candidates.push(OVERTURE_STAC_RELEASE_FALLBACK.to_string());
+    }
+
+    if debug {
+        println!("Overture releases to try: {}", candidates.join(", "));
+    }
+
+    let mut last_error = String::from("no Overture release candidates");
+    for release in &candidates {
+        let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
+        match client.get(&url).send() {
+            Ok(response) if response.status().is_success() => {
+                if debug {
+                    println!("Using Overture release {release}");
+                }
+                return Ok(response);
+            }
+            Ok(response) => {
+                last_error = format!(
+                    "STAC catalog download failed with status {} (url: {url})",
+                    response.status()
+                );
+            }
+            Err(e) => last_error = format!("STAC catalog request failed: {e} (url: {url})"),
+        }
+        if debug {
+            println!("Overture release {release} unavailable: {last_error}");
+        }
+    }
+
+    Err(last_error.into())
 }
 
 /// List partition file URLs that overlap the target bbox.
@@ -328,17 +762,7 @@ fn list_partition_files(
     debug: bool,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     // Resolve the current release dynamically; old releases are retired and 404.
-    let stac_url = resolve_stac_url(client);
-    let response = client.get(&stac_url).send()?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "STAC catalog download failed with status {} (url: {stac_url})",
-            response.status()
-        )
-        .into());
-    }
-
-    let stac_bytes = response.bytes()?;
+    let stac_bytes = fetch_stac_catalog(client, debug)?.bytes()?;
     let reader = SerializedFileReader::new(stac_bytes)?;
 
     let target_min_lng = bbox.min().lng();
@@ -460,12 +884,15 @@ fn list_partition_files(
 /// 1. Read the Parquet file footer via HTTP Range request
 /// 2. Check row group statistics for bbox overlap
 /// 3. Download and parse matching row groups
+///
+/// Returns the buildings plus the number of row groups that could not be read,
+/// so the caller can report the coverage that was lost rather than hide it.
 fn process_partition_file(
     client: &Client,
     url: &str,
     bbox: &LLBBox,
     debug: bool,
-) -> Result<Vec<OvertureBuilding>, Box<dyn std::error::Error>> {
+) -> Result<(Vec<OvertureBuilding>, usize), Box<dyn std::error::Error>> {
     // Step 1: Get file size via HEAD request
     let head_resp = client.head(url).send()?;
     if !head_resp.status().is_success() {
@@ -513,7 +940,7 @@ fn process_partition_file(
     // Step 3: Filter row groups by bbox overlap
     let matching_groups = filter_row_groups_by_bbox(&metadata, bbox);
     if matching_groups.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
 
     if debug {
@@ -537,14 +964,25 @@ fn process_partition_file(
 
     // Pre-fetch each matching row group's byte range
     let mut downloaded_bytes: u64 = footer_len + 8;
+    let mut failed_row_groups = 0usize;
+    let mut downloaded: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for &rg_idx in &matching_groups {
         let (rg_offset, rg_len) = row_group_byte_range(&metadata, rg_idx);
-        match fetch_range(client, url, rg_offset, rg_len) {
+        // Each attempt can burn the full HTTP timeout, and there are hundreds of
+        // these, so stop paying for retries once the host has proved unhealthy.
+        let attempts = if failed_row_groups >= OVERTURE_UNHEALTHY_FAILURES {
+            1
+        } else {
+            OVERTURE_RANGE_ATTEMPTS
+        };
+        match fetch_range_with_attempts(client, url, rg_offset, rg_len, attempts) {
             Ok(rg_data) => {
                 downloaded_bytes += rg_len;
+                downloaded.insert(rg_idx);
                 sparse.add_range(rg_offset, bytes::Bytes::from(rg_data));
             }
             Err(e) => {
+                failed_row_groups += 1;
                 if debug {
                     eprintln!("Warning: Failed to download row group {rg_idx}: {e}");
                 }
@@ -582,6 +1020,12 @@ fn process_partition_file(
         ) {
             Ok(rg_buildings) => buildings.extend(rg_buildings),
             Err(e) => {
+                // A row group whose bytes never arrived fails here too; count it
+                // once by only charging the groups that did download.
+                if !downloaded.contains(&rg_idx) {
+                    continue;
+                }
+                failed_row_groups += 1;
                 if debug {
                     eprintln!("Warning: Failed to parse row group {rg_idx}: {e}");
                 }
@@ -589,7 +1033,7 @@ fn process_partition_file(
         }
     }
 
-    Ok(buildings)
+    Ok((buildings, failed_row_groups))
 }
 
 /// Filter row groups whose bbox statistics overlap the target area.
@@ -775,6 +1219,7 @@ fn parse_overture_row(
     let mut id: Option<String> = None;
     let mut geometry_bytes: Option<Vec<u8>> = None;
     let mut sources_str: Option<String> = None;
+    let mut osm_ref: Option<OsmRef> = None;
     let mut height: Option<f64> = None;
     let mut min_height: Option<f64> = None;
     let mut num_floors: Option<i32> = None;
@@ -806,6 +1251,10 @@ fn parse_overture_row(
             "sources" => {
                 // Sources is a complex nested struct; convert to string for analysis
                 sources_str = Some(format!("{field}"));
+                // Best-effort structured read for the OSM back-reference. The
+                // string test above stays authoritative for dedup so a schema
+                // change cannot resurrect duplicate footprints.
+                osm_ref = parse_osm_ref(field);
             }
             "height" => {
                 if let parquet::record::Field::Double(v) = field {
@@ -918,6 +1367,7 @@ fn parse_overture_row(
         id,
         exterior_ring,
         is_osm_sourced: is_osm,
+        osm_ref,
         height,
         min_height,
         num_floors,
@@ -1391,33 +1841,376 @@ fn row_group_byte_range(metadata: &ParquetMetaData, rg_idx: usize) -> (u64, u64)
     (min_offset, max_end.saturating_sub(min_offset))
 }
 
-/// Fetch a byte range from a URL via HTTP Range request.
+/// Fetch a byte range from a URL via HTTP Range request, retrying transient failures.
 fn fetch_range(
     client: &Client,
     url: &str,
     start: u64,
     length: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fetch_range_with_attempts(client, url, start, length, OVERTURE_RANGE_ATTEMPTS)
+}
+
+/// As [`fetch_range`], with the retry budget chosen by the caller.
+fn fetch_range_with_attempts(
+    client: &Client,
+    url: &str,
+    start: u64,
+    length: u64,
+    max_attempts: u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if length == 0 {
         return Err("fetch_range called with length 0".into());
     }
     let end = start + length - 1;
-    let response = client
-        .get(url)
-        .header("Range", format!("bytes={start}-{end}"))
-        .send()?;
+    let mut last_error = String::new();
 
-    let status = response.status();
-    if status.as_u16() != 206 {
-        return Err(format!("HTTP {status} fetching range from {url} (expected 206)").into());
+    for attempt in 0..max_attempts.max(1) {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(500 << (attempt - 1)));
+        }
+        let response = match client
+            .get(url)
+            .header("Range", format!("bytes={start}-{end}"))
+            .send()
+        {
+            Ok(response) => response,
+            Err(e) => {
+                last_error = format!("range request to {url} failed: {e}");
+                continue;
+            }
+        };
+
+        let status = response.status();
+        if status.as_u16() != 206 {
+            last_error = format!("HTTP {status} fetching range from {url} (expected 206)");
+            // Only an overloaded or rate-limiting host can answer differently next time.
+            if !(status.is_server_error() || status.as_u16() == 429) {
+                break;
+            }
+            continue;
+        }
+
+        match response.bytes() {
+            Ok(body) => return Ok(body.to_vec()),
+            Err(e) => last_error = format!("range body from {url} could not be read: {e}"),
+        }
     }
 
-    Ok(response.bytes()?.to_vec())
+    Err(last_error.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::osm_parser::{ProcessedRelation, ProcessedWay};
+
+    fn hint_way(id: u64, tags: &[(&str, &str)]) -> ProcessedElement {
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes: Vec::new(),
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    fn hints_with(key: OsmRef, hint: OsmAttributeHint) -> OvertureHints {
+        let mut hints = OvertureHints::default();
+        hints.insert(key, hint);
+        hints
+    }
+
+    #[test]
+    fn record_id_parses_way_and_relation_with_and_without_version() {
+        assert_eq!(
+            parse_record_id("w519166507@9"),
+            Some(OsmRef {
+                kind: "way",
+                id: 519166507
+            })
+        );
+        assert_eq!(
+            parse_record_id("r12345"),
+            Some(OsmRef {
+                kind: "relation",
+                id: 12345
+            })
+        );
+        // Nodes cannot be footprints, and junk must not resolve to some way.
+        assert_eq!(parse_record_id("n2757802019@1"), None);
+        assert_eq!(parse_record_id("519166507"), None);
+        assert_eq!(parse_record_id("w"), None);
+        assert_eq!(parse_record_id("wabc@1"), None);
+        assert_eq!(parse_record_id(""), None);
+    }
+
+    #[test]
+    fn hint_fills_height_only_when_osm_has_none() {
+        let key = OsmRef {
+            kind: "way",
+            id: 42,
+        };
+        let hints = hints_with(
+            key,
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: Some(6),
+            },
+        );
+
+        let mut elements = vec![hint_way(42, &[("building", "yes")])];
+        assert_eq!(hints.apply(&mut elements), 1);
+        let tags = elements[0].tags();
+        assert_eq!(tags.get("height").map(String::as_str), Some("18.0"));
+        assert_eq!(tags.get("building:levels").map(String::as_str), Some("6"));
+        assert_eq!(
+            tags.get("arnis:height_source").map(String::as_str),
+            Some("overture_maps")
+        );
+    }
+
+    #[test]
+    fn existing_osm_height_or_levels_is_never_overwritten() {
+        let key = OsmRef {
+            kind: "way",
+            id: 42,
+        };
+        let hints = hints_with(
+            key,
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: Some(6),
+            },
+        );
+
+        // A height tag blocks the whole hint.
+        let mut tagged_height = vec![hint_way(42, &[("building", "yes"), ("height", "7")])];
+        assert_eq!(hints.apply(&mut tagged_height), 0);
+        assert_eq!(
+            tagged_height[0].tags().get("height").map(String::as_str),
+            Some("7")
+        );
+
+        // So does a levels tag, since it is the other vertical source.
+        let mut tagged_levels = vec![hint_way(
+            42,
+            &[("building", "yes"), ("building:levels", "2")],
+        )];
+        assert_eq!(hints.apply(&mut tagged_levels), 0);
+        assert!(!tagged_levels[0].tags().contains_key("height"));
+    }
+
+    #[test]
+    fn hints_skip_non_buildings_and_unmatched_ids() {
+        let hints = hints_with(
+            OsmRef {
+                kind: "way",
+                id: 42,
+            },
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: None,
+            },
+        );
+
+        // Right id, but not a building.
+        let mut not_a_building = vec![hint_way(42, &[("highway", "residential")])];
+        assert_eq!(hints.apply(&mut not_a_building), 0);
+
+        // Building, but a different id.
+        let mut other_id = vec![hint_way(43, &[("building", "yes")])];
+        assert_eq!(hints.apply(&mut other_id), 0);
+
+        // Same numeric id on a relation must not collect a way's hint.
+        let mut relation = vec![ProcessedElement::Relation(ProcessedRelation {
+            id: 42,
+            tags: [("building".to_string(), "yes".to_string())]
+                .into_iter()
+                .collect(),
+            members: Vec::new(),
+        })];
+        assert_eq!(hints.apply(&mut relation), 0);
+    }
+
+    #[test]
+    fn implausible_heights_are_dropped() {
+        let key = OsmRef {
+            kind: "way",
+            id: 42,
+        };
+
+        // Sub-metre ML sliver: rejected, and with no floors nothing is applied.
+        let sliver = hints_with(
+            key,
+            OsmAttributeHint {
+                height_m: Some(0.4),
+                num_floors: None,
+            },
+        );
+        assert_eq!(sliver.len(), 0, "the sliver must not even be stored");
+        let mut elements = vec![hint_way(42, &[("building", "yes")])];
+        assert_eq!(sliver.apply(&mut elements), 0);
+        assert!(!elements[0].tags().contains_key("height"));
+
+        // Absurd tower: same treatment.
+        let absurd = hints_with(
+            key,
+            OsmAttributeHint {
+                height_m: Some(4000.0),
+                num_floors: None,
+            },
+        );
+        let mut elements = vec![hint_way(42, &[("building", "yes")])];
+        assert_eq!(absurd.apply(&mut elements), 0);
+
+        // A single floor adds nothing over the generator's own inference.
+        let one_floor = hints_with(
+            key,
+            OsmAttributeHint {
+                height_m: None,
+                num_floors: Some(1),
+            },
+        );
+        let mut elements = vec![hint_way(42, &[("building", "yes")])];
+        assert_eq!(one_floor.apply(&mut elements), 0);
+    }
+
+    #[test]
+    fn unusable_rows_do_not_occupy_the_hint_budget() {
+        let mut hints = OvertureHints::default();
+        // Most Overture rows carry no height or floor count at all.
+        hints.insert(
+            OsmRef { kind: "way", id: 1 },
+            OsmAttributeHint {
+                height_m: None,
+                num_floors: None,
+            },
+        );
+        // Values the generator would reject are just as useless.
+        hints.insert(
+            OsmRef { kind: "way", id: 2 },
+            OsmAttributeHint {
+                height_m: Some(0.4),
+                num_floors: Some(1),
+            },
+        );
+        assert_eq!(hints.len(), 0);
+
+        // A row with one usable value is still worth keeping.
+        hints.insert(
+            OsmRef { kind: "way", id: 3 },
+            OsmAttributeHint {
+                height_m: Some(0.4),
+                num_floors: Some(4),
+            },
+        );
+        assert_eq!(hints.len(), 1);
+    }
+
+    #[test]
+    fn a_full_map_still_completes_the_buildings_it_tracks() {
+        let tracked = OsmRef { kind: "way", id: 1 };
+        let mut hints = OvertureHints::default();
+        hints.insert_capped(
+            tracked,
+            OsmAttributeHint {
+                height_m: None,
+                num_floors: Some(4),
+            },
+            1,
+        );
+        assert_eq!(hints.len(), 1);
+
+        // At capacity a new building is refused ...
+        hints.insert_capped(
+            OsmRef { kind: "way", id: 2 },
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: None,
+            },
+            1,
+        );
+        assert_eq!(hints.len(), 1);
+
+        // ... but one already tracked can still be completed by a later row.
+        hints.insert_capped(
+            tracked,
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: None,
+            },
+            1,
+        );
+
+        let mut elements = vec![hint_way(1, &[("building", "yes")])];
+        assert_eq!(hints.apply(&mut elements), 1);
+        assert_eq!(
+            elements[0].tags().get("height").map(String::as_str),
+            Some("18.0")
+        );
+        assert_eq!(
+            elements[0]
+                .tags()
+                .get("building:levels")
+                .map(String::as_str),
+            Some("4")
+        );
+    }
+
+    #[test]
+    fn duplicate_rows_do_not_clobber_a_richer_hint() {
+        let key = OsmRef {
+            kind: "way",
+            id: 42,
+        };
+        let mut hints = OvertureHints::default();
+        hints.insert(
+            key,
+            OsmAttributeHint {
+                height_m: Some(18.0),
+                num_floors: Some(6),
+            },
+        );
+        // A second, emptier row for the same building must not erase the first.
+        hints.insert(
+            key,
+            OsmAttributeHint {
+                height_m: None,
+                num_floors: None,
+            },
+        );
+
+        let mut elements = vec![hint_way(42, &[("building", "yes")])];
+        assert_eq!(hints.apply(&mut elements), 1);
+        assert_eq!(
+            elements[0].tags().get("height").map(String::as_str),
+            Some("18.0")
+        );
+    }
+
+    #[test]
+    fn test_parse_release_listing() {
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>overturemaps-us-west-2</Name><Prefix>release/</Prefix><KeyCount>2</KeyCount><MaxKeys>1000</MaxKeys><Delimiter>/</Delimiter><IsTruncated>false</IsTruncated><CommonPrefixes><Prefix>release/2026-06-17.0/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>release/2026-07-22.0/</Prefix></CommonPrefixes></ListBucketResult>"#;
+
+        assert_eq!(
+            parse_release_listing(body).unwrap(),
+            vec!["2026-07-22.0", "2026-06-17.0"]
+        );
+    }
+
+    #[test]
+    fn test_release_sort_key_orders_revisions_numerically() {
+        let mut releases = vec!["2026-07-22.9", "2026-06-17.0", "2026-07-22.10"];
+        releases.sort_by(|a, b| release_sort_key(b).cmp(&release_sort_key(a)));
+        assert_eq!(
+            releases,
+            vec!["2026-07-22.10", "2026-07-22.9", "2026-06-17.0"]
+        );
+    }
 
     #[test]
     fn test_gers_id_to_u64_high_bit() {
@@ -1526,5 +2319,41 @@ mod tests {
         assert_eq!(coords.len(), 4);
         assert_eq!(coords[0], (10.0, 20.0)); // Z is ignored
         assert_eq!(coords[1], (11.0, 20.0));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    // A small city keeps the old flat allowance.
+    #[test]
+    fn a_small_area_gets_the_floor() {
+        let bbox = LLBBox::new(41.49, -81.70, 41.52, -81.65).unwrap();
+        assert_eq!(overture_building_budget(&bbox), MIN_OVERTURE_BUILDINGS);
+    }
+
+    // Between the floor and the ceiling the budget must track the rate, not sit on
+    // a clamp. A flat 100k was already spent before a mid-size metro was finished,
+    // which is what leaves the districts read last with no footprints (issue #1257).
+    #[test]
+    fn a_mid_size_area_tracks_the_per_km2_rate() {
+        // ~0.15 deg lat by ~0.20 deg lng at 41.5 deg N, about 280 km²: inside the
+        // floor and the ceiling, which meet at 100 km² and 500 km² respectively.
+        let bbox = LLBBox::new(41.40, -81.80, 41.55, -81.60).unwrap();
+        let budget = overture_building_budget(&bbox);
+        assert!(
+            budget > MIN_OVERTURE_BUILDINGS && budget < MAX_OVERTURE_BUILDINGS,
+            "budget {budget} sat on a clamp instead of tracking the rate"
+        );
+        let expected = (bbox.area_km2() * OVERTURE_BUILDINGS_PER_KM2) as usize;
+        assert_eq!(budget, expected);
+    }
+
+    // The cap still exists: a continent must not be allowed to exhaust memory.
+    #[test]
+    fn a_continent_is_clamped_to_the_ceiling() {
+        let bbox = LLBBox::new(30.0, -120.0, 50.0, -80.0).unwrap();
+        assert_eq!(overture_building_budget(&bbox), MAX_OVERTURE_BUILDINGS);
     }
 }

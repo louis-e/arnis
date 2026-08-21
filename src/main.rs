@@ -5,12 +5,15 @@ mod bedrock_block_map;
 mod bench;
 mod biome;
 mod block_definitions;
+mod block_palette;
 mod bresenham;
+mod canopy;
 mod climate;
 mod clipping;
 mod colors;
 mod coordinate_system;
 mod data_processing;
+mod decals;
 mod deterministic_rng;
 mod element_processing;
 mod elevation;
@@ -20,6 +23,7 @@ mod floodfill_cache;
 mod ground;
 mod ground_generation;
 mod land_cover;
+mod landmarks;
 mod luanti_block_map;
 mod map_item;
 mod map_item_palette;
@@ -27,6 +31,7 @@ mod map_preview;
 mod map_renderer;
 mod map_transformation;
 mod models_3d;
+mod net;
 mod ore_generation;
 mod osm_parser;
 mod overture;
@@ -75,7 +80,22 @@ mod progress {
     }
 }
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
+use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+/// Reattach to the console this process was launched from, so terminal output
+/// works in both CLI and GUI runs.
+///
+/// Deliberately no `FreeConsole` first: a windows-subsystem process starts with
+/// no console of its own, so `AttachConsole` alone reaches the parent terminal.
+/// Freeing first can only invalidate the inherited handles, and a `FreeConsole`
+/// that succeeds followed by a reattach that fails leaves stdout/stderr pointing
+/// at a dead console, which turns every later `println!` into a panic.
+#[cfg(target_os = "windows")]
+fn attach_parent_console() {
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
 
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
@@ -117,6 +137,14 @@ fn run_cli() {
         std::process::exit(1);
     }
 
+    // Open up the world floor before anything touches the editor. The bundled packs already
+    // grant the full engine range; without this the lower half of it goes unused. The ceiling
+    // goes with it: chunk serialization needs the whole dimension span, not just the floor.
+    world_editor::set_world_bounds(
+        ground::extended_min_y_for(&args),
+        ground::world_top_y_for(&args),
+    );
+
     if args.legacy_terrain {
         eprintln!(
             "{} --terrain is deprecated: terrain is now on by default. \
@@ -132,15 +160,69 @@ fn run_cli() {
         );
     }
 
+    // Resolve the effective bounding box ONCE, up front, and thread the concrete value to every
+    // consumer below (the CLI bbox is now optional). Precedence: explicit --bbox > file <bounds>
+    // element > node-coordinate extent.
+    //
+    // A local .osm/.xml file is the only bbox source when --bbox is omitted, so it must be loaded
+    // BEFORE the parallel fetch scope (Overture + land cover need the bbox) and before the bedrock
+    // world-name / area-size steps below. The parsed data is kept in `preloaded_osm` so the file
+    // isn't read twice. The Overpass and terrain-only paths already know the bbox from --bbox.
+    let skip_objects = args.skip_objects();
+    let (mut preloaded_osm, effective_bbox) = match (skip_objects, args.file.as_deref()) {
+        (false, Some(file)) => {
+            let (data, file_bounds) = match retrieve_data::fetch_data_from_file(file) {
+                Ok(loaded) => loaded,
+                Err(e) => {
+                    eprintln!("{} Failed to load OSM file: {}", "Error:".red().bold(), e);
+                    std::process::exit(1);
+                }
+            };
+            let bbox = match osm_parser::resolve_bbox(args.bbox, file_bounds, &data) {
+                Some(bbox) => bbox,
+                None => {
+                    eprintln!(
+                        "{} could not derive a bounding box from '{file}' (no <bounds> element and no usable node extent); pass --bbox explicitly.",
+                        "Error:".red().bold()
+                    );
+                    std::process::exit(1);
+                }
+            };
+            // Report where a derived bbox came from (an explicit --bbox is echoed by the parse step).
+            if args.bbox.is_none() {
+                let source = if file_bounds.is_some() {
+                    "file <bounds> element"
+                } else {
+                    "node coordinate extent"
+                };
+                println!(
+                    "Derived bounding box from {source}: {},{},{},{}",
+                    bbox.min().lat(),
+                    bbox.min().lng(),
+                    bbox.max().lat(),
+                    bbox.max().lng()
+                );
+            }
+            (Some(data), bbox)
+        }
+        _ => {
+            // Overpass or terrain-only: --bbox is required (enforced by validate_args above).
+            let bbox = args.bbox.unwrap_or_else(|| {
+                eprintln!(
+                    "{} A bounding box is required. Provide --bbox, or --file with a local .osm/.xml file.",
+                    "Error:".red().bold()
+                );
+                std::process::exit(1);
+            });
+            (None, bbox)
+        }
+    };
+
     // Heads-up for very large areas: generation is long and memory-heavy, and big
     // requests load the public OpenStreetMap / elevation servers. Non-blocking.
     {
         const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
-        let b = &args.bbox;
-        let mid_lat = ((b.min().lat() + b.max().lat()) / 2.0).to_radians();
-        let width_m = (b.max().lng() - b.min().lng()) * 111_320.0 * mid_lat.cos();
-        let height_m = (b.max().lat() - b.min().lat()) * 111_320.0;
-        let area_km2 = (width_m * height_m).abs() / 1_000_000.0;
+        let area_km2 = effective_bbox.area_km2();
         if area_km2 > MAX_RECOMMENDED_AREA_KM2 {
             eprintln!(
                 "{} Large area selected (~{:.0} km²). Generation may take a long time and \
@@ -168,7 +250,8 @@ fn run_cli() {
             .path
             .clone()
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
-        let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
+        let (output_path, lvl_name) =
+            world_utils::build_bedrock_output(&effective_bbox, output_dir);
         (output_path, Some(lvl_name))
     } else if args.luanti {
         let base_dir = args
@@ -225,9 +308,16 @@ fn run_cli() {
     // its own internal Bench for the block-placement phases.
     let mut bench = bench::Bench::new(args.benchmark);
 
-    // Terrain-only skips every object source: no Overpass query, no Overture footprints.
-    let skip_objects = args.skip_objects();
-    if skip_objects {
+    // Terrain-only (or a scale too small to render objects) skips every object source:
+    // no Overpass query, no Overture footprints. Land cover is still fetched.
+    if args.skip_objects_due_to_scale() {
+        println!(
+            "{} Scale {:.2} is below {:.2}: skipping OpenStreetMap and Overture objects (terrain and land cover only)",
+            "[1/7]".bold(),
+            args.scale,
+            args::OBJECT_SKIP_SCALE
+        );
+    } else if skip_objects {
         println!(
             "{} Terrain-only mode: skipping OpenStreetMap and Overture objects",
             "[1/7]".bold()
@@ -239,56 +329,89 @@ fn run_cli() {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
     }
     let fetch_start = std::time::Instant::now();
-    let (raw_data, overture_elements, mut ground) = std::thread::scope(|s| {
+    let (raw_data, overture_data, mut ground) = std::thread::scope(|s| {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let elements = if args.overture && !skip_objects {
-                overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+            let data = if args.overture && !skip_objects {
+                overture::fetch_overture_buildings(&effective_bbox, args.scale, args.debug)
             } else {
-                Vec::new()
+                overture::OvertureData::default()
             };
-            (elements, t.elapsed())
+            (data, t.elapsed())
         });
         let ground_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let ground = ground::generate_ground_data(&args);
+            let ground = ground::generate_ground_data(&args, effective_bbox);
             (ground, t.elapsed())
         });
 
         let t = std::time::Instant::now();
+        // A local file was already parsed up front (to derive the bbox), so reuse that data.
+        // Terrain-only carries no objects. Otherwise fetch from Overpass, in parallel with the
+        // Overture and land-cover fetches spawned above.
         let raw_data = if skip_objects {
             osm_parser::OsmData::empty()
+        } else if let Some(data) = preloaded_osm.take() {
+            data
         } else {
-            match &args.file {
-                Some(file) => retrieve_data::fetch_data_from_file(file),
-                None => retrieve_data::fetch_data_from_overpass(
-                    args.bbox,
-                    args.debug,
-                    args.downloader.as_str(),
-                    args.save_json_file.as_deref(),
-                ),
-            }
+            retrieve_data::fetch_data_from_overpass(
+                effective_bbox,
+                args.debug,
+                args.downloader.as_str(),
+                args.save_json_file.as_deref(),
+            )
             .expect("Failed to fetch data")
         };
         bench.report("osm_fetch", t.elapsed());
 
-        let (overture_elements, overture_dur) =
-            overture_handle.join().expect("Overture fetch panicked");
+        // A panicked worker already reported itself through the panic hook, so
+        // degrade instead of taking the whole run down with it.
+        let (overture_data, overture_dur) = overture_handle.join().unwrap_or_else(|_| {
+            eprintln!(
+                "{} Overture fetch failed, continuing without Overture buildings.",
+                "Warning:".yellow().bold()
+            );
+            (overture::OvertureData::default(), std::time::Duration::ZERO)
+        });
         bench.report("overture_fetch", overture_dur);
-        let (ground, ground_dur) = ground_handle.join().expect("Terrain fetch panicked");
+        let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {
+            eprintln!("{} Terrain fetch failed.", "Error:".red().bold());
+            std::process::exit(1);
+        });
         bench.report("terrain_total", ground_dur);
 
-        (raw_data, overture_elements, ground)
+        (raw_data, overture_data, ground)
     });
     bench.report("fetch_total", fetch_start.elapsed());
     bench.reset();
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.projection);
+        osm_parser::parse_osm_data(
+            raw_data,
+            effective_bbox,
+            args.scale,
+            args.debug,
+            args.projection,
+        );
     bench.mark("parse_osm");
 
     // Merge the Overture buildings now that the OSM elements are parsed.
+    let overture::OvertureData {
+        elements: overture_elements,
+        hints: overture_hints,
+    } = overture_data;
+
+    // Fill height/levels on OSM buildings that have neither, before the
+    // footprints are merged (Overture's own ways carry their tags already).
+    let enriched = overture_hints.apply(&mut parsed_elements);
+    if enriched > 0 {
+        println!(
+            "  Filled heights on {} OSM buildings from Overture Maps",
+            enriched.to_string().bright_white().bold()
+        );
+    }
+
     if !overture_elements.is_empty() {
         let before_count = parsed_elements.len();
         let unique_overture =
@@ -299,7 +422,7 @@ fn run_cli() {
             "  Added {} buildings from Overture Maps",
             added.to_string().bright_white().bold()
         );
-    } else if args.overture && !skip_objects {
+    } else if args.overture && !skip_objects && enriched == 0 {
         println!("  No additional buildings from Overture Maps for this area");
     }
 
@@ -309,6 +432,7 @@ fn run_cli() {
 
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
     }
@@ -365,14 +489,16 @@ fn run_cli() {
 
             let (transformer, pre_rot_bbox) = match args.projection {
                 projection::ProjectionKind::WebMercator => {
-                    let origin_lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
-                    let origin_lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
+                    let origin_lat =
+                        (effective_bbox.min().lat() + effective_bbox.max().lat()) / 2.0;
+                    let origin_lon =
+                        (effective_bbox.min().lng() + effective_bbox.max().lng()) / 2.0;
                     let proj =
                         projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
-                    CoordTransformer::with_projection(&args.bbox, args.scale, &proj)
+                    CoordTransformer::with_projection(&effective_bbox, args.scale, &proj)
                 }
                 projection::ProjectionKind::Local => {
-                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                    CoordTransformer::llbbox_to_xzbbox(&effective_bbox, args.scale)
                 }
             }
             .unwrap_or_else(|e| {
@@ -427,7 +553,7 @@ fn run_cli() {
     match data_processing::generate_world_with_options(
         parsed_elements,
         xzbbox,
-        args.bbox,
+        effective_bbox,
         ground,
         &args,
         generation_options,
@@ -469,13 +595,8 @@ fn run_cli() {
 }
 
 fn main() {
-    // If on Windows, free and reattach to the parent console when using as a CLI tool
-    // Either of these can fail, but if they do it is not an issue, so the return value is ignored
     #[cfg(target_os = "windows")]
-    unsafe {
-        let _ = FreeConsole();
-        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
-    }
+    attach_parent_console();
 
     // Only run CLI mode if the user supplied args.
     #[cfg(feature = "gui")]

@@ -6,7 +6,7 @@ use crate::block_definitions::{
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::deterministic_rng::coord_rng;
 use crate::progress::emit_gui_progress_update;
-use crate::world_editor::{WorldEditor, MIN_Y};
+use crate::world_editor::{terrain_floor_y, WorldEditor};
 use colored::Colorize;
 use rand::Rng;
 
@@ -111,8 +111,10 @@ pub fn generate_ores_region(
             let mut rng = coord_rng(chunk_x, chunk_z, 0xC0DE);
 
             for ore in ORES {
-                // Fill the whole stone column down to the floor at the ore's usual density.
-                let y_min = MIN_Y + 1;
+                // Fill the stone column down to the terrain floor at the ore's usual density.
+                // The terrain floor, not the world floor: an extended floor would otherwise
+                // multiply `span` (and with it the vein count) roughly 33x.
+                let y_min = terrain_floor_y() + 1;
                 let y_max = (ground_y - ore.depth_min).max(y_min);
                 if y_min > y_max {
                     continue;

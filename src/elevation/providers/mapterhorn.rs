@@ -514,6 +514,8 @@ fn download_tile(
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
 
+        // Acquired per attempt so the backoff sleep above never holds a slot.
+        let _permit = crate::net::request_permit();
         let response = match client.get(&url).send() {
             Ok(r) => r,
             Err(e) => {

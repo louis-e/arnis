@@ -5,7 +5,7 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
-use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
+use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -49,6 +49,13 @@ pub fn generate_leisure(
             }
         }
 
+        // Resolve the fill before painting the edge, for the same reason as in natural.rs:
+        // a closed ring the fill refused must not leave a border around unfilled ground.
+        let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+        if filled_area.is_empty() && is_oversized_ring(element) {
+            return;
+        }
+
         // Process leisure area nodes
         for node in &element.nodes {
             if let Some(prev) = previous_node {
@@ -81,17 +88,17 @@ pub fn generate_leisure(
 
         // Flood-fill the interior of the leisure area using cache
         if corner_count > 0 {
-            let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
-
             // Use deterministic RNG seeded by element ID for consistent results across region boundaries
             let mut rng = element_rng(element.id);
 
             for &(x, z) in filled_area.iter() {
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
-                // Add decorative elements for parks and gardens
+                // Land-cover water is skipped because a park often spans its
+                // own lake, and the carve after this leaves plants floating.
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    && !editor.is_lc_water(x, z)
                 {
                     let random_choice: i32 = rng.random_range(0..1000);
 
@@ -117,13 +124,18 @@ pub fn generate_leisure(
                             editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                         }
                         105..120 => {
-                            // Tree
-                            Tree::create(
-                                editor,
-                                (x, 1, z),
-                                Some(building_footprints),
-                                Some(bridge_surface),
-                            );
+                            // Only where land cover says woody, else a park
+                            // canopies its own meadows. 1/1000 for specimens.
+                            if random_choice == 105 || editor.land_cover_backs_trees(x, z) {
+                                Tree::create(
+                                    editor,
+                                    (x, 1, z),
+                                    Some(building_footprints),
+                                    Some(bridge_surface),
+                                );
+                            } else {
+                                editor.set_block(GRASS, x, 1, z, None, None);
+                            }
                         }
                         _ => {}
                     }
@@ -168,7 +180,7 @@ pub fn generate_leisure_from_relation(
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
 ) {
-    if rel.tags.get("leisure") == Some(&"park".to_string()) {
+    if rel.tags.get("leisure").map(String::as_str) == Some("park") {
         // Process each outer member way individually using cached flood fill.
         // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation

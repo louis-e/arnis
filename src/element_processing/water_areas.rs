@@ -1,26 +1,49 @@
+use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::floodfill_cache::RoadMaskBitmap;
+use crate::ground::Ground;
 use crate::water_depth::{carve_water_column, BigWaterField};
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
-    osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
+    osm_parser::{
+        ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
+    },
     world_editor::WorldEditor,
 };
+use fnv::FnvHashMap;
+use rayon::prelude::*;
 
 pub fn generate_water_area_from_way(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    _xzbbox: &XZBBox,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
+    surfaces: &StillWaterSurfaces,
 ) {
-    let outers = [element.nodes.clone()];
+    let Some(outers) = way_rings(element) else {
+        return;
+    };
+    let surface = surfaces.get("way", element.id);
+    generate_water_areas(
+        editor,
+        &outers,
+        &[],
+        bwf,
+        road_mask,
+        tunnel_footprint,
+        surface,
+    );
+}
+
+/// Outer rings of a water way, or None if the ring is not usable.
+fn way_rings(element: &ProcessedWay) -> Option<Vec<Vec<ProcessedNode>>> {
+    let outers = vec![element.nodes.clone()];
     if !verify_closed_rings(&outers) {
         println!("Skipping way {} due to invalid polygon", element.id);
-        return;
+        return None;
     }
-
-    generate_water_areas(editor, &outers, &[], bwf, road_mask);
+    Some(outers)
 }
 
 pub fn generate_water_areas_from_relation(
@@ -29,7 +52,30 @@ pub fn generate_water_areas_from_relation(
     xzbbox: &XZBBox,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
+    surfaces: &StillWaterSurfaces,
 ) {
+    let Some((outers, inners)) = relation_rings(element, xzbbox) else {
+        return;
+    };
+    let surface = surfaces.get("relation", element.id);
+    generate_water_areas(
+        editor,
+        &outers,
+        &inners,
+        bwf,
+        road_mask,
+        tunnel_footprint,
+        surface,
+    );
+}
+
+/// Outer and inner rings of a water relation, or None if it is not water or unusable.
+#[allow(clippy::type_complexity)]
+fn relation_rings(
+    element: &ProcessedRelation,
+    xzbbox: &XZBBox,
+) -> Option<(Vec<Vec<ProcessedNode>>, Vec<Vec<ProcessedNode>>)> {
     // Check if this is a water relation (either with water tag or natural=water)
     let is_water = element.tags.contains_key("water")
         || element
@@ -39,13 +85,13 @@ pub fn generate_water_areas_from_relation(
             .unwrap_or(false);
 
     if !is_water {
-        return;
+        return None;
     }
 
     // Don't handle water below layer 0
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().map(|x| x < 0).unwrap_or(false) {
-            return;
+            return None;
         }
     }
 
@@ -105,23 +151,23 @@ pub fn generate_water_areas_from_relation(
 
         // If no valid outer loops remain, skip the relation
         if outers.is_empty() {
-            return;
+            return None;
         }
 
         // Verify again after filtering and closing
         if !verify_closed_rings(&outers) {
             println!("Skipping relation {} due to invalid polygon", element.id);
-            return;
+            return None;
         }
     }
 
     super::merge_way_segments(&mut inners);
     if !verify_closed_rings(&inners) {
         println!("Skipping relation {} due to invalid polygon", element.id);
-        return;
+        return None;
     }
 
-    generate_water_areas(editor, &outers, &inners, bwf, road_mask);
+    Some((outers, inners))
 }
 
 fn generate_water_areas(
@@ -130,6 +176,8 @@ fn generate_water_areas(
     inners: &[Vec<ProcessedNode>],
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
+    still_surface: Option<i32>,
 ) {
     // Calculate polygon bounding box to limit fill area
     let mut poly_min_x = i32::MAX;
@@ -169,7 +217,17 @@ fn generate_water_areas(
         .collect();
 
     scanline_fill_water(
-        min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf, road_mask,
+        min_x,
+        min_z,
+        max_x,
+        max_z,
+        &outers_xz,
+        &inners_xz,
+        editor,
+        bwf,
+        road_mask,
+        tunnel_footprint,
+        still_surface,
     );
 
     // Scatter boats over open water; grid on a global lattice with independent rolls, so the set is identical across parallel tiles.
@@ -389,11 +447,243 @@ fn subtract_spans(a: &[(i32, i32)], b: &[(i32, i32)]) -> Vec<(i32, i32)> {
     result
 }
 
+/// Polygon edges prepared for scanline filling: one edge list per outer ring
+/// (unioned per row, so overlapping outer rings still fill correctly) and the
+/// combined inner-ring edges (subtracted).
+struct PolygonEdges {
+    outer_groups: Vec<Vec<ScanlineEdge>>,
+    inner: Vec<ScanlineEdge>,
+}
+
+impl PolygonEdges {
+    fn new(outers: &[Vec<XZPoint>], inners: &[Vec<XZPoint>]) -> Self {
+        Self {
+            outer_groups: outers.iter().map(|ring| collect_ring_edges(ring)).collect(),
+            inner: collect_all_ring_edges(inners),
+        }
+    }
+
+    /// Filled x-spans of row `z`, clamped to `[min_x, max_x]`.
+    fn row_spans(&self, z: i32, min_x: i32, max_x: i32) -> Vec<(i32, i32)> {
+        let z_f = z as f64;
+        let mut outer_spans: Vec<(i32, i32)> = Vec::new();
+        for ring_edges in &self.outer_groups {
+            let ring_spans = compute_scanline_spans(ring_edges, z_f, min_x, max_x);
+            if !ring_spans.is_empty() {
+                outer_spans = union_spans(&outer_spans, &ring_spans);
+            }
+        }
+        if outer_spans.is_empty() || self.inner.is_empty() {
+            return outer_spans;
+        }
+        let inner_spans = compute_scanline_spans(&self.inner, z_f, min_x, max_x);
+        if inner_spans.is_empty() {
+            outer_spans
+        } else {
+            subtract_spans(&outer_spans, &inner_spans)
+        }
+    }
+}
+
+/// Filled spans of a polygon for a range of rows, computed once.
+struct SpanRows {
+    rows: Vec<Vec<(i32, i32)>>,
+    z0: i32,
+}
+
+impl SpanRows {
+    fn build(edges: &PolygonEdges, z0: i32, z1: i32, min_x: i32, max_x: i32) -> Self {
+        let rows = (z0..=z1)
+            .map(|z| edges.row_spans(z, min_x, max_x))
+            .collect();
+        Self { rows, z0 }
+    }
+
+    fn get(&self, z: i32) -> &[(i32, i32)] {
+        match usize::try_from(z - self.z0) {
+            Ok(i) if i < self.rows.len() => &self.rows[i],
+            _ => &[],
+        }
+    }
+
+    fn contains(&self, x: i32, z: i32) -> bool {
+        let spans = self.get(z);
+        spans
+            .binary_search_by(|&(a, b)| {
+                if x < a {
+                    std::cmp::Ordering::Greater
+                } else if x > b {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .is_ok()
+    }
+
+    /// True if `(x, z)` and its four neighbours `margin` cells away are all inside.
+    fn contains_interior(&self, x: i32, z: i32, margin: i32) -> bool {
+        self.contains(x - margin, z)
+            && self.contains(x + margin, z)
+            && self.contains(x, z - margin)
+            && self.contains(x, z + margin)
+    }
+}
+
+/// How far a still body's surface may sit above the terrain before the column is left as
+/// land. Past this the carve and its backfill no longer reach the ground.
+const MAX_STILL_FILL_DROP: i32 = 20;
+
+/// How far from the polygon edge a column must be to count as interior rather than bank.
+/// Matches the water-level snap radius, so a snapped bank cell is never mistaken for one.
+const INTERIOR_MARGIN: i32 = 4;
+
+/// Share of a polygon's columns that must be ESA water to trust ESA's leveled surface.
+const STILL_SURFACE_MIN_LC_SHARE: f64 = 0.3;
+/// ...and at least this many such columns.
+const STILL_SURFACE_MIN_LC_COLUMNS: usize = 64;
+/// Rough cap on the number of columns sampled for the surface statistics.
+const STILL_SURFACE_MAX_SAMPLES: usize = 250_000;
+
+/// Water surface Y of every still OSM water body, resolved once per element.
+#[derive(Default)]
+pub struct StillWaterSurfaces(FnvHashMap<(&'static str, u64), i32>);
+
+impl StillWaterSurfaces {
+    fn get(&self, kind: &'static str, id: u64) -> Option<i32> {
+        self.0.get(&(kind, id)).copied()
+    }
+}
+
+/// Resolve every water polygon's surface before the tile fan-out, so a body spanning
+/// many tiles is measured once and every tile agrees.
+pub fn prescan_still_surfaces(
+    elements: &[ProcessedElement],
+    ground: &Ground,
+    xzbbox: &XZBBox,
+) -> StillWaterSurfaces {
+    if !ground.has_land_cover() || !ground.elevation_enabled {
+        return StillWaterSurfaces::default();
+    }
+    let entries: Vec<((&'static str, u64), i32)> = elements
+        .par_iter()
+        .filter_map(|element| {
+            let (key, outers, inners) = match element {
+                ProcessedElement::Way(way) if is_water_area_way(way) => {
+                    (("way", way.id), way_rings(way)?, Vec::new())
+                }
+                ProcessedElement::Relation(rel) => {
+                    let (outers, inners) = relation_rings(rel, xzbbox)?;
+                    (("relation", rel.id), outers, inners)
+                }
+                _ => return None,
+            };
+            let to_xz = |rings: &[Vec<ProcessedNode>]| -> Vec<Vec<XZPoint>> {
+                rings
+                    .iter()
+                    .map(|r| r.iter().map(|n| n.xz()).collect())
+                    .collect()
+            };
+            let surface = still_surface_level(ground, &to_xz(&outers), &to_xz(&inners), xzbbox)?;
+            Some((key, surface))
+        })
+        .collect();
+    StillWaterSurfaces(entries.into_iter().collect())
+}
+
+/// Ways this renderer actually receives. `natural=water` and `landuse=reservoir` ways are
+/// taken by the natural and landuse arms of the dispatch first, so a surface resolved for
+/// them would never be read. Relations are not routed that way and keep the full predicate.
+fn is_water_area_way(way: &ProcessedWay) -> bool {
+    matches!(
+        way.tags.get("waterway").map(String::as_str),
+        Some("dock" | "riverbank")
+    )
+}
+
+/// The single water-surface Y of a polygon that ESA also sees as one still body.
+///
+/// OSM draws water at full pool while ESA and the DEM have today's water, so a
+/// drawn-down reservoir has columns well above it. Filling those at their own height
+/// terraces water up the exposed bank. When enough of the polygon is ESA water sitting
+/// at one leveled Y, that Y is the surface. Rivers are leveled per cell and never pass
+/// the single-Y test, so they keep the per-column fill.
+fn still_surface_level(
+    ground: &Ground,
+    outers: &[Vec<XZPoint>],
+    inners: &[Vec<XZPoint>],
+    xzbbox: &XZBBox,
+) -> Option<i32> {
+    let (mut min_x, mut min_z) = (i32::MAX, i32::MAX);
+    let (mut max_x, mut max_z) = (i32::MIN, i32::MIN);
+    for ring in outers {
+        for p in ring {
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_z = min_z.min(p.z);
+            max_z = max_z.max(p.z);
+        }
+    }
+    let min_x = min_x.max(xzbbox.min_x());
+    let min_z = min_z.max(xzbbox.min_z());
+    let max_x = max_x.min(xzbbox.max_x());
+    let max_z = max_z.min(xzbbox.max_z());
+    if min_x > max_x || min_z > max_z {
+        return None;
+    }
+
+    // Sample on a lattice so the cost follows the sample count, not the area.
+    let area = (i64::from(max_x - min_x) + 1) * (i64::from(max_z - min_z) + 1);
+    let stride = ((area as f64 / STILL_SURFACE_MAX_SAMPLES as f64)
+        .sqrt()
+        .ceil() as i32)
+        .max(1);
+    let edges = PolygonEdges::new(outers, inners);
+    let (off_x, off_z) = (xzbbox.min_x(), xzbbox.min_z());
+    let mut total = 0usize;
+    let mut lc_levels: Vec<i32> = Vec::new();
+    let mut z = min_z;
+    while z <= max_z {
+        for (start, end) in edges.row_spans(z, min_x, max_x) {
+            // Keep the lattice anchored to the world grid so it does not shift per polygon.
+            let mut x = start + (stride - start.rem_euclid(stride)).rem_euclid(stride);
+            while x <= end {
+                total += 1;
+                let coord = XZPoint::new(x - off_x, z - off_z);
+                if ground.cover_class(coord) == crate::land_cover::LC_WATER {
+                    lc_levels.push(ground.level(coord));
+                }
+                x += stride;
+            }
+        }
+        z += stride;
+    }
+    if lc_levels.len() < STILL_SURFACE_MIN_LC_COLUMNS
+        || (lc_levels.len() as f64) < STILL_SURFACE_MIN_LC_SHARE * total as f64
+    {
+        return None;
+    }
+    let n = lc_levels.len();
+    let (q1, q3) = (n / 4, (n * 3) / 4);
+    lc_levels.select_nth_unstable(q1);
+    let q1_val = lc_levels[q1];
+    lc_levels.select_nth_unstable(q3);
+    let q3_val = lc_levels[q3];
+    if q1_val != q3_val {
+        return None;
+    }
+    lc_levels.select_nth_unstable(n / 2);
+    Some(lc_levels[n / 2])
+}
+
 /// Fills water blocks using scanline rasterization.
 ///
 /// For each row z in [min_z, max_z], computes which x positions are inside
 /// any outer polygon ring but outside all inner polygon rings, and places
 /// water blocks at those positions.
+///
+/// With `still_surface`, columns above that Y are skipped and the rest filled at it.
+/// Otherwise each column is filled at its own water level.
 #[allow(clippy::too_many_arguments)]
 fn scanline_fill_water(
     min_x: i32,
@@ -405,55 +695,130 @@ fn scanline_fill_water(
     editor: &mut WorldEditor,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
+    still_surface: Option<i32>,
 ) {
-    // Collect edges per outer ring so we can union their spans correctly,
-    // even if multiple outer rings happen to overlap (invalid OSM, but
-    // we handle it gracefully).
-    let outer_edge_groups: Vec<Vec<ScanlineEdge>> =
-        outers.iter().map(|ring| collect_ring_edges(ring)).collect();
-    let inner_edges = collect_all_ring_edges(inners);
+    let edges = PolygonEdges::new(outers, inners);
+    // Widened by the interior margin so the interior test reads cached spans too.
+    let m = INTERIOR_MARGIN;
+    let spans = SpanRows::build(&edges, min_z - m, max_z + m, min_x - m, max_x + m);
 
     for z in min_z..=max_z {
-        let z_f = z as f64;
-
-        // Compute spans for each outer ring and union them together
-        let mut outer_spans: Vec<(i32, i32)> = Vec::new();
-        for ring_edges in &outer_edge_groups {
-            let ring_spans = compute_scanline_spans(ring_edges, z_f, min_x, max_x);
-            if !ring_spans.is_empty() {
-                outer_spans = union_spans(&outer_spans, &ring_spans);
-            }
-        }
-        if outer_spans.is_empty() {
-            continue;
-        }
-
-        let fill_spans = if inner_edges.is_empty() {
-            outer_spans
-        } else {
-            let inner_spans = compute_scanline_spans(&inner_edges, z_f, min_x, max_x);
-            if inner_spans.is_empty() {
-                outer_spans
-            } else {
-                subtract_spans(&outer_spans, &inner_spans)
-            }
-        };
-
-        for (start, end) in fill_spans {
+        for &(span_start, span_end) in spans.get(z) {
+            let (start, end) = (span_start.max(min_x), span_end.min(max_x));
             for x in start..=end {
                 // Keep road/bridge surfaces (carve would overwrite them).
                 if road_mask.contains(x, z) {
                     continue;
                 }
-                let water_y = editor.get_water_level(x, z);
                 let ground_y = editor.get_ground_level(x, z);
-                // Skip hillside blocks the polygon claims above the waterline.
-                if ground_y > water_y {
+                let water_y = match still_surface {
+                    Some(surface) => {
+                        // Exposed bank above the body's surface, or terrain so far below it
+                        // that the fill would hang a slab over open air: no water.
+                        if ground_y > surface || surface - ground_y > MAX_STILL_FILL_DROP {
+                            continue;
+                        }
+                        surface
+                    }
+                    None => {
+                        let water_y = editor.get_water_level(x, z);
+                        if ground_y > water_y {
+                            // A lower neighbour within the snap radius: a bank the
+                            // polygon overclaims (skip), or well inside the polygon a
+                            // DEM step that stays water rather than a strip of grass.
+                            if !spans.contains_interior(x, z, m) {
+                                continue;
+                            }
+                            ground_y
+                        } else {
+                            water_y
+                        }
+                    }
+                };
+                // Over a bore, fill down to the terrain but never carve into it.
+                if tunnel_footprint.contains(x, z) {
+                    for y in (ground_y + 1).min(water_y)..=water_y {
+                        editor.set_block_absolute(WATER, x, y, z, None, Some(&[]));
+                    }
                     continue;
                 }
                 // depth_at gives the carved depth (0 without land-cover water data).
                 carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask, bwf);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::floodfill_cache::CoordinateBitmap;
+    use std::collections::HashMap as StdMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn ring(id: u64, min: i32, max: i32) -> ProcessedWay {
+        let corner = |i: u64, x: i32, z: i32| ProcessedNode {
+            id: i,
+            tags: StdMap::new(),
+            x,
+            z,
+        };
+        let mut tags = StdMap::new();
+        tags.insert("natural".to_string(), "water".to_string());
+        ProcessedWay {
+            id,
+            nodes: vec![
+                corner(1, min, min),
+                corner(2, max, min),
+                corner(3, max, max),
+                corner(4, min, max),
+                corner(1, min, min),
+            ],
+            tags,
+        }
+    }
+
+    /// A still surface sits up to `MAX_STILL_FILL_DROP` over the terrain, so laying
+    /// only the top block over a bore leaves the body hanging on air.
+    #[test]
+    fn water_over_a_bore_fills_down_to_the_terrain() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let ground = crate::ground::Ground::new_elevation_test(vec![vec![0.0f32; 80]; 80], 80, 80);
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+        editor.set_ground(Arc::new(ground.clone()));
+
+        let mut footprint = CoordinateBitmap::new(&xzbbox);
+        for x in 30..=40 {
+            for z in 30..=40 {
+                footprint.set(x, z);
+            }
+        }
+        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let road_mask = CoordinateBitmap::new_empty();
+        let surface = 5;
+        let mut surfaces = FnvHashMap::default();
+        surfaces.insert(("way", 1u64), surface);
+
+        generate_water_area_from_way(
+            &mut editor,
+            &ring(1, 20, 60),
+            &bwf,
+            &road_mask,
+            &footprint,
+            &StillWaterSurfaces(surfaces),
+        );
+
+        for y in 1..=surface {
+            assert!(
+                editor.check_for_block_absolute(35, y, 35, Some(&[WATER]), None),
+                "gap under the surface at y={y}"
+            );
+        }
+        // The bore itself is untouched below the terrain.
+        assert!(!editor.block_exists_absolute(35, -1, 35));
     }
 }

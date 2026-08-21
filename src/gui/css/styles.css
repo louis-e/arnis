@@ -762,6 +762,8 @@ input[type="range"] {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* One line per setting name, the control beside it gives up the width. */
+  white-space: nowrap;
 }
 
 /* Tooltip icon (question mark in circle) */
@@ -927,6 +929,12 @@ input[type="range"] {
   font-weight: 600;
 }
 
+/* Five segments do not fit beside a label at the normal size. */
+.segmented-control.is-compact .segment {
+  padding: 5px 7px;
+  font-size: 0.78em;
+}
+
 #world-time-value {
   min-width: 42px;
   text-align: right;
@@ -988,7 +996,8 @@ input[type="range"] {
    brief class-driven background flash rather than a separate status
    label — keeps the row visually consistent with the checkbox and
    slider rows next to it. */
-.clear-cache-button {
+.clear-cache-button,
+.settings-reset-button {
   background: none;
   border: 1px solid #fecc44;
   border-radius: 4px;
@@ -1005,7 +1014,8 @@ input[type="range"] {
               border-color 0.4s ease, opacity 0.2s ease;
 }
 
-.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error) {
+.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error),
+.settings-reset-button:hover:not(:disabled):not(.is-confirming) {
   background: rgba(254, 204, 68, 0.15);
 }
 
@@ -1027,6 +1037,78 @@ input[type="range"] {
   background: rgba(207, 102, 121, 0.85);
   color: #ffffff;
   border-color: #cf6679;
+}
+
+/* Per-setting revert button, inside the row label after the tooltip icon. */
+/* Same 16px box and round hover target as .tooltip-icon so they read as a pair. */
+/* The resets undo the global button rule, like .save-path-browse does. */
+/* No border: this is content-box in some engines and it would shrink the glyph. */
+/* Hidden with visibility, not display, so the label cannot shift mid-drag. */
+.setting-revert {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.settings-row.is-modified .setting-revert {
+  visibility: visible;
+  opacity: 1;
+}
+
+.setting-revert:hover {
+  background: rgba(254, 204, 68, 0.3);
+}
+
+.setting-revert:focus-visible {
+  outline: 1px solid #fecc44;
+  outline-offset: 1px;
+}
+
+/* Slightly inset in the 16px box and softened, to sit at the same visual
+   weight as the tooltip icon's translucent disc rather than outshine it. */
+.setting-revert svg {
+  width: 13px;
+  height: 13px;
+  fill: rgba(254, 204, 68, 0.75);
+  display: block;
+  transition: fill 0.15s ease;
+}
+
+.setting-revert:hover svg {
+  fill: #fecc44;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setting-revert {
+    transition: none;
+  }
+}
+
+/* Disabled while nothing differs from the defaults. */
+.settings-reset-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  border-color: rgba(254, 204, 68, 0.35);
+}
+
+/* Awaiting the second click. Same warm red as .clear-cache-button.is-error. */
+.settings-reset-button.is-confirming {
+  background: rgba(207, 102, 121, 0.85);
+  border-color: #cf6679;
+  color: #ffffff;
 }
 
 .license-button-row {

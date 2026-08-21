@@ -153,6 +153,35 @@
           </div>
         </div>
 
+        <!-- Real Tree Cover Toggle (Meta/WRI global canopy height map) -->
+        <div class="settings-row">
+          <label for="canopy-height-toggle">
+            <span data-localize="canopy_height">Real Tree Cover</span>
+            <span class="tooltip-icon" data-tooltip="Uses a global canopy height map so trees stand where real ones do, at roughly their real height. Off falls back to land cover, which treats every wooded cell as full forest.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="canopy-height-toggle" name="canopy-height-toggle" checked>
+          </div>
+        </div>
+
+        <!-- Max Tree Size -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="max_tree_size">Max Tree Size</span>
+            <span class="tooltip-icon" data-tooltip="Tallest tree allowed, in blocks: Small 6, Medium 12, Big 20, Tall 28, Giant above. Anything over the cap drops to a smaller species where its group has one.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control is-compact" id="max-tree-size-group">
+              <button type="button" class="segment" data-max-tree-size="small" data-localize="tree_size_small">Small</button>
+              <button type="button" class="segment" data-max-tree-size="medium" data-localize="tree_size_medium">Medium</button>
+              <button type="button" class="segment" data-max-tree-size="big" data-localize="tree_size_big">Big</button>
+              <button type="button" class="segment" data-max-tree-size="tall" data-localize="tree_size_tall">Tall</button>
+              <!-- data-default marks the shipped default; the active class is moved by JS -->
+              <button type="button" class="segment active" data-default data-max-tree-size="giant" data-localize="tree_size_giant">Giant</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Legacy Trees Toggle -->
         <div class="settings-row">
           <label for="legacy-trees-toggle">
@@ -176,7 +205,8 @@
           <div class="settings-control">
             <div class="segmented-control" id="gamemode-group">
               <button type="button" class="segment" data-gamemode="survival" data-localize="gamemode_survival">Survival</button>
-              <button type="button" class="segment active" data-gamemode="creative" data-localize="gamemode_creative">Creative</button>
+              <!-- data-default marks the shipped default; the active class is moved by JS -->
+              <button type="button" class="segment active" data-default data-gamemode="creative" data-localize="gamemode_creative">Creative</button>
               <button type="button" class="segment" data-gamemode="spectator" data-localize="gamemode_spectator">Spectator</button>
             </div>
           </div>
@@ -202,6 +232,21 @@
           </label>
           <div class="settings-control">
             <input type="checkbox" id="map-item-toggle" name="map-item-toggle" checked>
+          </div>
+        </div>
+
+        <!-- Signage level -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="signage">Signage</span>
+            <span class="tooltip-icon" data-tooltip="Readable image signs (Java only). Basic covers public signage: street names, traffic signs, transit stops and billboards. Full adds shop name plates, house numbers and crossing signs.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="signage-group">
+              <button type="button" class="segment" data-signage="none" data-localize="signage_none">None</button>
+              <button type="button" class="segment active" data-default data-signage="basic" data-localize="signage_basic">Basic</button>
+              <button type="button" class="segment" data-signage="full" data-localize="signage_full">Full</button>
+            </div>
           </div>
         </div>
 
@@ -276,9 +321,12 @@
             <span class="tooltip-icon" data-tooltip="Scale factor for the generated world (1.0 = real-world scale)">?</span>
           </label>
           <div class="settings-control">
-            <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
+            <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.05" max="2.5" step="0.05" value="1">
             <span id="slider-value">1.00</span>
           </div>
+        </div>
+        <div class="settings-row" id="scale-objects-note" style="display: none;">
+          <span data-localize="world_scale_objects_skipped">Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.</span>
         </div>
 
         <!-- Rotation Angle -->
@@ -339,15 +387,29 @@
         <!-- Section: Application -->
         <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
-        <!-- Save Path -->
+        <!-- Java Save Path -->
         <div class="settings-row">
           <label for="save-path-input">
-            <span data-localize="save_path">Save Path</span>
+            <span data-localize="java_save_path">Java Save Path</span>
             <span class="tooltip-icon" data-tooltip="Directory where new Minecraft Java worlds are created">?</span>
           </label>
           <div class="settings-control save-path-control">
             <input type="text" id="save-path-input" name="save-path-input" class="save-path-input" placeholder="Minecraft saves directory">
             <button type="button" id="save-path-browse" class="save-path-browse" title="Browse...">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Bedrock Save Path -->
+        <div class="settings-row">
+          <label for="bedrock-save-path-input">
+            <span data-localize="bedrock_save_path">Bedrock Save Path</span>
+            <span class="tooltip-icon" data-tooltip="Directory the generated Bedrock .mcworld file is saved to. Open that file to import the world into Minecraft.">?</span>
+          </label>
+          <div class="settings-control save-path-control">
+            <input type="text" id="bedrock-save-path-input" name="bedrock-save-path-input" class="save-path-input" placeholder="Bedrock .mcworld directory">
+            <button type="button" id="bedrock-save-path-browse" class="save-path-browse" title="Browse...">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
             </button>
           </div>
@@ -402,6 +464,18 @@
           </label>
           <div class="settings-control">
             <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
+          </div>
+        </div>
+
+        <!-- Mirrors the Clear Tile Cache row above. Button text is owned by
+             settings-store.js, which swaps in a confirm label on the first click. -->
+        <div class="settings-row">
+          <label for="reset-settings-button">
+            <span data-localize="reset_all_settings">Reset all settings</span>
+            <span class="tooltip-icon" data-tooltip="Restore every setting on this page to its default. Worlds you already generated are not affected.">?</span>
+          </label>
+          <div class="settings-control">
+            <button type="button" id="reset-settings-button" class="settings-reset-button" disabled>Reset</button>
           </div>
         </div>
 

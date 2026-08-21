@@ -1,14 +1,16 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
 use crate::block_definitions::{
-    Block, AIR, CLAY, COARSE_DIRT, DIRT, GRAVEL, KELP, KELP_PLANT, MAGMA_BLOCK, SAND, SANDSTONE,
-    SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER,
+    Block, AIR, BLUE_FLOWER, CLAY, COARSE_DIRT, DEAD_BUSH, DIRT, FERN, GRASS, GRAVEL, KELP,
+    KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MAGMA_BLOCK, OAK_LEAVES, RED_FLOWER, SAND,
+    SANDSTONE, SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::LC_WATER;
-use crate::world_editor::{WorldEditor, MIN_Y};
+use crate::world_editor::{min_y, WorldEditor};
 
 /// Flat shoal width in chamfer-DT units; slope only starts past it.
 const SHOAL_DT_UNITS: u16 = 9;
@@ -368,10 +370,11 @@ pub fn carve_water_column(
     // Clamp to the valid tier range, and keep the bed above bedrock.
     let depth = depth
         .clamp(0, MAX_WATER_DEPTH)
-        .min((water_y - MIN_Y - 2).max(0));
+        .min((water_y - min_y() - 2).max(0));
     for dy in 0..=depth {
         editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
     }
+    clear_stranded_vegetation(editor, x, z, water_y);
     let bed_y = water_y - depth - 1;
 
     // Keep the bed plain near causeways so blobs/dunes/veg don't clutter piers.
@@ -433,16 +436,16 @@ pub fn carve_water_column(
         _ => (GRAVEL, STONE),
     };
 
-    if bed_y > MIN_Y {
+    if bed_y > min_y() {
         editor.set_block_absolute(top_block, x, bed_y, z, None, Some(&[]));
     }
     // Supports the gravity-affected bed; dropped onto bedrock at the lowest carve.
-    if bed_y - 1 > MIN_Y {
+    if bed_y - 1 > min_y() {
         editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
     }
     // Backfill stone so neighbour side-faces never expose air under varied beds.
-    let fill_to = (bed_y - 2).max(MIN_Y + 1);
-    let fill_from = (bed_y - 12).max(MIN_Y + 1);
+    let fill_to = (bed_y - 2).max(min_y() + 1);
+    let fill_from = (bed_y - 12).max(min_y() + 1);
     if fill_from <= fill_to {
         editor.fill_column_absolute(STONE, x, z, fill_from, fill_to, true);
     }
@@ -457,6 +460,85 @@ pub fn carve_water_column(
     };
     if depth >= 3 && !near_bridge {
         place_underwater_vegetation(editor, x, z, water_y, bed_y + bump, depth);
+    }
+}
+
+/// Loose plants scattered at ground+1, so removing one strands nothing else.
+const SURFACE_VEGETATION: &[Block] = &[
+    GRASS,
+    TALL_GRASS_BOTTOM,
+    TALL_GRASS_TOP,
+    FERN,
+    LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER,
+    DEAD_BUSH,
+    RED_FLOWER,
+    YELLOW_FLOWER,
+    BLUE_FLOWER,
+    WHITE_FLOWER,
+    OAK_LEAVES,
+];
+
+/// Strip plants left floating on a freshly carved water surface, leaving piers
+/// alone. Reading first avoids filling a section with air per water cell.
+fn clear_stranded_vegetation(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32) {
+    for y in water_y + 1..=water_y + 2 {
+        if editor.get_block_absolute(x, y, z).is_some() {
+            editor.set_block_absolute(AIR, x, y, z, Some(SURFACE_VEGETATION), None);
+        }
+    }
+    // A trunk rooted on the new surface has to go whole. Trees are placed
+    // before the polygon that floods them, and the land-cover water mask is
+    // coarser than the carve, so the guards on the tree paths can miss it.
+    if editor
+        .get_block_absolute(x, water_y + 1, z)
+        .is_some_and(is_trunk)
+    {
+        clear_tree_from(editor, x, water_y + 1, z);
+    }
+}
+
+fn is_trunk(block: Block) -> bool {
+    let name = block.name();
+    name.ends_with("_log") || name.ends_with("_stem")
+}
+
+fn is_tree_part(block: Block) -> bool {
+    is_trunk(block) || block.name().ends_with("_leaves")
+}
+
+/// Largest tree the flood will take out. A giant schematic is well under this,
+/// and the cap stops a canopy that touches its neighbour from unzipping a wood.
+const MAX_TREE_BLOCKS: usize = 4096;
+
+/// Erase the tree connected to (x, y, z). Clearing only the two plant layers
+/// would leave the canopy hanging in the air over the water. Blocks are set to
+/// air as they are visited, so a revisit sees air and stops; no visited set.
+fn clear_tree_from(editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+    let mut stack = vec![(x, y, z)];
+    let mut cleared = 0usize;
+    while let Some((cx, cy, cz)) = stack.pop() {
+        if cleared >= MAX_TREE_BLOCKS {
+            break;
+        }
+        if !editor
+            .get_block_absolute(cx, cy, cz)
+            .is_some_and(is_tree_part)
+        {
+            continue;
+        }
+        editor.set_block_absolute(AIR, cx, cy, cz, None, Some(&[]));
+        cleared += 1;
+        for (dx, dy, dz) in [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ] {
+            stack.push((cx + dx, cy + dy, cz + dz));
+        }
     }
 }
 
@@ -648,10 +730,15 @@ pub fn carve_lc_water_region(
             if ground.cover_class(coord) != LC_WATER {
                 continue;
             }
-            let water_y = ground.water_level(coord);
-            // Skip land bumps an over-claiming water polygon sits above.
-            if editor.get_ground_level(x, z) > water_y {
-                continue;
+            let mut water_y = ground.water_level(coord);
+            let ground_y = editor.get_ground_level(x, z);
+            if ground_y > water_y {
+                // A bank cell the snap pulled below its terrain: skip. Interior water
+                // above a dip is a step inside the body: keep it at its own level.
+                if !ground.is_interior_water(coord) {
+                    continue;
+                }
+                water_y = ground_y;
             }
             carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask, bwf);
         }

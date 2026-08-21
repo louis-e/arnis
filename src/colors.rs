@@ -99,15 +99,14 @@ fn color_name_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
     })
 }
 
-pub fn rgb_distance(from: &RGBTuple, to: &RGBTuple) -> u32 {
-    // i32 because .pow(2) returns the same data type as self and 255^2 wouldn't fit
-    let difference: (i32, i32, i32) = (
-        from.0 as i32 - to.0 as i32,
-        from.1 as i32 - to.1 as i32,
-        from.2 as i32 - to.2 as i32,
-    );
-    let distance: i32 = difference.0.pow(2) + difference.1.pow(2) + difference.2.pow(2);
-    distance as u32
+/// Squared distance between two colors already in Oklab. Callers that compare one color
+/// against a whole palette convert it once and use this.
+#[inline]
+pub fn oklab_distance_lab(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
+    let dl = a.0 - b.0;
+    let da = a.1 - b.1;
+    let db = a.2 - b.2;
+    dl * dl + da * da + db * db
 }
 
 /// Squared perceptual distance (Oklab) between two sRGB colors.
@@ -120,6 +119,12 @@ pub fn oklab_distance(from: &RGBTuple, to: &RGBTuple) -> f32 {
     dl * dl + da * da + db * db
 }
 
+/// Oklab components (L, a, b) of an sRGB color, for callers that need to
+/// weight the axes differently (e.g. hue-faithful tag-colour matching).
+pub fn oklab_components(color: &RGBTuple) -> (f32, f32, f32) {
+    rgb_to_oklab(color.0, color.1, color.2)
+}
+
 #[inline]
 fn srgb_to_linear(c: u8) -> f32 {
     let c = c as f32 / 255.0;
@@ -130,8 +135,10 @@ fn srgb_to_linear(c: u8) -> f32 {
     }
 }
 
+/// sRGB to Oklab; callers comparing many colors against one input convert once and use
+/// `oklab_distance_lab`.
 #[inline]
-fn rgb_to_oklab(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+pub fn rgb_to_oklab(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     let r = srgb_to_linear(r);
     let g = srgb_to_linear(g);
     let b = srgb_to_linear(b);

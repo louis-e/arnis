@@ -273,6 +273,11 @@ const WILLOW_LEAVES_FILL: [(Coord, Coord); 5] = [
 const MAX_CANOPY_RADIUS: i32 = 3;
 const CANOPY_SPAN: usize = (MAX_CANOPY_RADIUS * 2 + 1) as usize;
 const CANOPY_CELLS: usize = CANOPY_SPAN * CANOPY_SPAN;
+/// Below this scale even the smallest tree model is taller than the terrain it stands on
+/// (at scale 0.1 a 15-block schematic tree is a 150 m tree), so a proportional blob is used.
+pub const MICRO_TREE_MAX_SCALE: f64 = 0.35;
+/// Nominal mature-tree height in meters, scaled against the equally-scaled terrain.
+const NOMINAL_TREE_HEIGHT_M: f64 = 25.0;
 // Sentinel for a canopy column with no building under it.
 const NO_ROOF: i32 = i32::MIN;
 
@@ -451,16 +456,10 @@ impl Tree {
         false
     }
 
-    /// Creates a tree at the specified coordinates.
-    pub fn create(
-        editor: &mut WorldEditor,
-        (x, y, z): Coord,
-        building_footprints: Option<&BuildingFootprintBitmap>,
-        bridge_surface: Option<&BridgeSurfaceMap>,
-    ) {
+    /// The species mix for a scattered tree, keyed on the column.
+    fn random_type(x: i32, z: i32) -> TreeType {
         let mut rng = coord_rng(x, z, 0);
-
-        let tree_type = match rng.random_range(1..=100) {
+        match rng.random_range(1..=100) {
             1..=20 => TreeType::Oak,
             21..=32 => TreeType::Spruce,
             33..=44 => TreeType::Birch,
@@ -476,15 +475,45 @@ impl Tree {
             93..=98 => TreeType::FloweringOak,
             99..=100 => TreeType::Mangrove,
             _ => unreachable!(),
-        };
+        }
+    }
 
-        Self::create_of_type(
+    /// Creates a tree at the specified coordinates.
+    pub fn create(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+    ) {
+        let tree_type = Self::random_type(x, z);
+        Self::build(
             editor,
             (x, y, z),
             tree_type,
             building_footprints,
             bridge_surface,
             false,
+            false,
+        );
+    }
+
+    /// Creates a tree the canopy map asked for. The map already fixed the
+    /// density, so the pack must not thin it again.
+    pub fn create_from_canopy(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+    ) {
+        let tree_type = Self::random_type(x, z);
+        Self::build(
+            editor,
+            (x, y, z),
+            tree_type,
+            building_footprints,
+            bridge_surface,
+            false,
+            true,
         );
     }
 
@@ -496,6 +525,27 @@ impl Tree {
         building_footprints: Option<&BuildingFootprintBitmap>,
         bridge_surface: Option<&BridgeSurfaceMap>,
         allow_on_paved: bool,
+    ) {
+        Self::build(
+            editor,
+            (x, y, z),
+            tree_type,
+            building_footprints,
+            bridge_surface,
+            allow_on_paved,
+            false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        tree_type: TreeType,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+        allow_on_paved: bool,
+        density_decided: bool,
     ) {
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
@@ -545,6 +595,13 @@ impl Tree {
         // One base_y for the whole tree so the canopy doesn't warp to follow terrain.
         let base_y = editor.get_absolute_y(x, y, z);
 
+        // Both tree models are fixed block sizes, so at low scale they tower over the world.
+        let scale = editor.scale();
+        if scale < MICRO_TREE_MAX_SCALE {
+            Self::create_micro(editor, x, base_y, z, &tree, scale, &blacklist);
+            return;
+        }
+
         // Schematic pack active: stamp a model instead of the procedural tree (checks above still apply).
         if let Some(region) = editor.tree_pack() {
             // same paving rule as above; is_lc_water still blocks water
@@ -564,9 +621,20 @@ impl Tree {
             };
             let hint = habitat_for_tree_type(tree_type);
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
-            if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y) {
-                // The slot can be a few blocks off (x,z); re-check it isn't road/water/bridge.
+            // Read at the slot, not the request, so the hint describes the
+            // column the trunk lands in.
+            let (hx, hz) = crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
+            let req = crate::trees::region::SlotRequest {
+                want_size: editor.canopy_size_hint(hx, hz),
+                density_decided,
+            };
+            if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y, req) {
+                // The slot can be a few blocks off (x,z), so every check that
+                // rejected the request has to run again on the moved trunk.
+                // Without the footprint one a tree asked for beside a building
+                // gets snapped onto its roof.
                 if editor.is_lc_water(sx, sz)
+                    || building_footprints.is_some_and(|f| f.contains(sx, sz))
                     || editor.check_for_block(sx, 0, sz, Some(road_water))
                     || bridge_surface.is_some_and(|b| b.contains(sx, sz))
                 {
@@ -749,6 +817,41 @@ impl Tree {
                     placer.place_core(editor, x + dx, top - n, z + dz);
                 }
             }
+        }
+    }
+
+    /// A few-block shrub that keeps real-world proportions at low scale, reusing the
+    /// type's own log/leaf palette so it still reads as forest cover from altitude.
+    fn create_micro(
+        editor: &mut WorldEditor,
+        x: i32,
+        base_y: i32,
+        z: i32,
+        tree: &Tree,
+        scale: f64,
+        blacklist: &[Block],
+    ) {
+        let height = ((NOMINAL_TREE_HEIGHT_M * scale).round() as i32).clamp(1, 8);
+        let trunk = (height - 1).max(0);
+        for dy in 0..trunk {
+            editor.set_block_absolute(tree.log_block, x, base_y + dy, z, None, Some(blacklist));
+        }
+        let top = base_y + trunk;
+        editor.set_block_absolute(tree.leaves_block, x, top, z, None, Some(blacklist));
+        if height >= 3 {
+            for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                editor.set_block_absolute(
+                    tree.leaves_block,
+                    x + dx,
+                    top,
+                    z + dz,
+                    None,
+                    Some(blacklist),
+                );
+            }
+        }
+        if height >= 5 {
+            editor.set_block_absolute(tree.leaves_block, x, top + 1, z, None, Some(blacklist));
         }
     }
 
@@ -1468,6 +1571,63 @@ mod tests {
         assert!(
             !has_trunk(&editor),
             "trees must never stand on water, even when paving is allowed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+
+    /// Tallest block placed in the column at (x, z), or None if the column is empty.
+    fn tree_top(editor: &WorldEditor, x: i32, z: i32) -> Option<i32> {
+        (0..40)
+            .rev()
+            .find(|&y| editor.block_exists_absolute(x, y, z))
+    }
+
+    fn place_at_scale(scale: f64) -> Option<i32> {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let llbbox = LLBBox::new(46.0, 7.7, 46.01, 7.71).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_projection_info("local", scale);
+        Tree::create_of_type(&mut editor, (16, 0, 16), TreeType::Oak, None, None, false);
+        tree_top(&editor, 16, 16)
+    }
+
+    #[test]
+    fn trees_shrink_with_the_world_scale() {
+        // At scale 1.0 a full model is placed: a real tree, many blocks tall.
+        let full = place_at_scale(1.0).expect("a tree must be placed at scale 1.0");
+        assert!(
+            full >= 5,
+            "scale 1.0 must place a full-size tree, got {full} blocks"
+        );
+
+        // At scale 0.1 one block is 10 m. A 25 m tree must be ~3 blocks, not ~15
+        // (which would be a 150 m tree towering over the terrain).
+        let micro = place_at_scale(0.1).expect("a tree must still be placed at scale 0.1");
+        assert!(
+            micro <= 4,
+            "scale 0.1 must place a proportional shrub, got {micro} blocks (~{} m)",
+            micro * 10
+        );
+        assert!(
+            micro < full,
+            "a low-scale tree must be shorter than a full one"
+        );
+    }
+
+    #[test]
+    fn micro_tree_height_tracks_scale_monotonically() {
+        let a = place_at_scale(0.1).unwrap();
+        let b = place_at_scale(0.2).unwrap();
+        let c = place_at_scale(0.3).unwrap();
+        assert!(
+            a <= b && b <= c,
+            "height must grow with scale: {a} <= {b} <= {c}"
         );
     }
 }

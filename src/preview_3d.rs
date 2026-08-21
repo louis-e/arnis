@@ -94,10 +94,20 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
         crate::elevation::SourceMode::GlobalOnly
     };
 
-    // ground_level 0 keeps the meter->Y affine trivially invertible below.
-    let elevation =
-        fetch_elevation_data(&bbox, preview_scale, 0, false, 0, None, source_mode, false)
-            .map_err(|e| format!("Elevation fetch failed: {e}"))?;
+    // ground_level 0 keeps the meter->Y affine trivially invertible below; passing the same
+    // value as min_ground_level disables the terrain sink, which would break that invariant.
+    let elevation = fetch_elevation_data(
+        &bbox,
+        preview_scale,
+        0,
+        0,
+        false,
+        0,
+        None,
+        source_mode,
+        false,
+    )
+    .map_err(|e| format!("Elevation fetch failed: {e}"))?;
 
     let gw = elevation.width;
     let gh = elevation.height;
@@ -194,9 +204,21 @@ pub fn build_buildings_geojson(bbox_text: &str) -> Result<String, String> {
     }
 
     let client = overture::overture_client().map_err(|e| e.to_string())?;
-    let buildings =
-        overture::collect_overture_buildings(&client, &bbox, true, BUILDINGS_MAX_FEATURES, false)
-            .map_err(|e| e.to_string())?;
+    // The preview keeps OSM-sourced footprints for full coverage, so the
+    // attribute hints alongside them are not needed here.
+    let buildings = overture::collect_overture_buildings(
+        &client,
+        &bbox,
+        true,
+        BUILDINGS_MAX_FEATURES,
+        // report_gaps: the feature cap here is a render budget, not missing data,
+        // and this fetch repeats on every pan.
+        false,
+        // debug
+        false,
+    )
+    .map_err(|e| e.to_string())?
+    .buildings;
 
     let features: Vec<serde_json::Value> = buildings
         .iter()

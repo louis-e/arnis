@@ -27,6 +27,7 @@ jobs:
             asset_name: arnis-mac-arm64
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
 
     steps:
     - uses: actions/checkout@v7

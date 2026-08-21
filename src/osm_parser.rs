@@ -68,6 +68,10 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
         if k == "start_date" {
             return keep_start_date;
         }
+        // The house number feeds the door plate; the rest of addr:* stays out.
+        if k == "addr:housenumber" {
+            return true;
+        }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
     });
     tags
@@ -114,6 +118,266 @@ impl OsmData {
             remark: None,
         }
     }
+
+    /// Bounding box spanning every node with coordinates, or None when the data has no
+    /// locatable nodes (or they are collinear/degenerate). Used as the fallback bbox for
+    /// local `.osm` files that omit the `<bounds>` element.
+    pub fn bounds(&self) -> Option<LLBBox> {
+        let mut min_lat = f64::INFINITY;
+        let mut min_lng = f64::INFINITY;
+        let mut max_lat = f64::NEG_INFINITY;
+        let mut max_lng = f64::NEG_INFINITY;
+        let mut found = false;
+        for element in &self.elements {
+            if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
+                min_lat = min_lat.min(lat);
+                max_lat = max_lat.max(lat);
+                min_lng = min_lng.min(lon);
+                max_lng = max_lng.max(lon);
+                found = true;
+            }
+        }
+        if !found {
+            return None;
+        }
+        // LLBBox::new rejects a zero-area (min == max) box; treat that as "no usable bounds".
+        LLBBox::new(min_lat, min_lng, max_lat, max_lng).ok()
+    }
+}
+
+/// Parses a raw OSM XML (`.osm`) document into the same [`OsmData`] shape produced by the
+/// Overpass `[out:json]` path, so the entire downstream pipeline is reused unchanged.
+///
+/// Returns the parsed data plus the `<bounds>` element as an [`LLBBox`] when the document
+/// carries one. The caller decides bbox precedence via [`resolve_bbox`]; surfacing the
+/// explicit `<bounds>` here keeps it from being silently replaced by the node-extent fallback.
+pub fn parse_osm_xml(
+    reader: impl std::io::BufRead,
+) -> Result<(OsmData, Option<LLBBox>), Box<dyn std::error::Error>> {
+    use quick_xml::events::{BytesStart, Event};
+    use quick_xml::reader::Reader;
+
+    // Single-attribute lookup, decoding XML entities in the value. Element attribute
+    // counts are tiny, re-scan is cheap.
+    fn attr_string(
+        e: &BytesStart,
+        key: &[u8],
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        for attr in e.attributes() {
+            let attr = attr?;
+            if attr.key.into_inner() == key {
+                // normalized_value resolves predefined entities (&amp; -> & etc.); Implicit1_0
+                // applies XML 1.0 attribute-value normalization for OSM files.
+                return Ok(Some(
+                    attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
+                        .into_owned(),
+                ));
+            }
+        }
+        Ok(None)
+    }
+    fn attr_u64(e: &BytesStart, key: &[u8]) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+        match attr_string(e, key)? {
+            Some(s) => Ok(Some(s.trim().parse()?)),
+            None => Ok(None),
+        }
+    }
+    fn attr_f64(e: &BytesStart, key: &[u8]) -> Result<Option<f64>, Box<dyn std::error::Error>> {
+        match attr_string(e, key)? {
+            Some(s) => Ok(Some(s.trim().parse()?)),
+            None => Ok(None),
+        }
+    }
+
+    // The node/way/relation currently being assembled from its child events.
+    enum Building {
+        Node {
+            id: u64,
+            lat: Option<f64>,
+            lon: Option<f64>,
+            tags: HashMap<String, String>,
+        },
+        Way {
+            id: u64,
+            nodes: Vec<u64>,
+            tags: HashMap<String, String>,
+        },
+        Relation {
+            id: u64,
+            members: Vec<OsmMember>,
+            tags: HashMap<String, String>,
+        },
+    }
+
+    // Mirror Overpass JSON: an element with no tags deserializes to `None`, not an empty map.
+    fn finish(b: Building) -> OsmElement {
+        let opt = |t: HashMap<String, String>| if t.is_empty() { None } else { Some(t) };
+        match b {
+            Building::Node { id, lat, lon, tags } => OsmElement {
+                r#type: "node".to_string(),
+                id,
+                lat,
+                lon,
+                nodes: None,
+                tags: opt(tags),
+                members: Vec::new(),
+            },
+            Building::Way { id, nodes, tags } => OsmElement {
+                r#type: "way".to_string(),
+                id,
+                lat: None,
+                lon: None,
+                nodes: Some(nodes),
+                tags: opt(tags),
+                members: Vec::new(),
+            },
+            Building::Relation { id, members, tags } => OsmElement {
+                r#type: "relation".to_string(),
+                id,
+                lat: None,
+                lon: None,
+                nodes: None,
+                tags: opt(tags),
+                members,
+            },
+        }
+    }
+
+    // Handles a start/empty tag. `is_empty` is true for self-closing tags (no child events,
+    // so node/way/relation are finalized immediately rather than on a matching end tag).
+    fn on_open(
+        e: &BytesStart,
+        is_empty: bool,
+        elements: &mut Vec<OsmElement>,
+        bounds: &mut Option<LLBBox>,
+        building: &mut Option<Building>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match e.name().into_inner() {
+            b"bounds" => {
+                if let (Some(minlat), Some(minlon), Some(maxlat), Some(maxlon)) = (
+                    attr_f64(e, b"minlat")?,
+                    attr_f64(e, b"minlon")?,
+                    attr_f64(e, b"maxlat")?,
+                    attr_f64(e, b"maxlon")?,
+                ) {
+                    // Propagate LLBBox::new's validation error
+                    *bounds = Some(LLBBox::new(minlat, minlon, maxlat, maxlon)?);
+                }
+            }
+            b"node" => {
+                let id = attr_u64(e, b"id")?.ok_or("OSM node missing required id attribute")?;
+                let node = Building::Node {
+                    id,
+                    lat: attr_f64(e, b"lat")?,
+                    lon: attr_f64(e, b"lon")?,
+                    tags: HashMap::new(),
+                };
+                if is_empty {
+                    elements.push(finish(node));
+                } else {
+                    *building = Some(node);
+                }
+            }
+            b"way" => {
+                let id = attr_u64(e, b"id")?.ok_or("OSM way missing required id attribute")?;
+                let way = Building::Way {
+                    id,
+                    nodes: Vec::new(),
+                    tags: HashMap::new(),
+                };
+                if is_empty {
+                    elements.push(finish(way));
+                } else {
+                    *building = Some(way);
+                }
+            }
+            b"relation" => {
+                let id = attr_u64(e, b"id")?.ok_or("OSM relation missing required id attribute")?;
+                let relation = Building::Relation {
+                    id,
+                    members: Vec::new(),
+                    tags: HashMap::new(),
+                };
+                if is_empty {
+                    elements.push(finish(relation));
+                } else {
+                    *building = Some(relation);
+                }
+            }
+            b"tag" => {
+                if let Some(b) = building.as_mut() {
+                    if let (Some(k), Some(v)) = (attr_string(e, b"k")?, attr_string(e, b"v")?) {
+                        match b {
+                            Building::Node { tags, .. }
+                            | Building::Way { tags, .. }
+                            | Building::Relation { tags, .. } => {
+                                tags.insert(k, v);
+                            }
+                        }
+                    }
+                }
+            }
+            b"nd" => {
+                if let Some(Building::Way { nodes, .. }) = building.as_mut() {
+                    if let Some(node_ref) = attr_u64(e, b"ref")? {
+                        nodes.push(node_ref);
+                    }
+                }
+            }
+            b"member" => {
+                if let Some(Building::Relation { members, .. }) = building.as_mut() {
+                    members.push(OsmMember {
+                        r#type: attr_string(e, b"type")?.unwrap_or_default(),
+                        r#ref: attr_u64(e, b"ref")?.unwrap_or_default(),
+                        r#role: attr_string(e, b"role")?.unwrap_or_default(),
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    let mut xml = Reader::from_reader(reader);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut elements: Vec<OsmElement> = Vec::new();
+    let mut bounds: Option<LLBBox> = None;
+    let mut building: Option<Building> = None;
+
+    loop {
+        match xml.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) => on_open(&e, false, &mut elements, &mut bounds, &mut building)?,
+            Event::Empty(e) => on_open(&e, true, &mut elements, &mut bounds, &mut building)?,
+            Event::End(e) => {
+                if matches!(e.name().into_inner(), b"node" | b"way" | b"relation") {
+                    if let Some(b) = building.take() {
+                        elements.push(finish(b));
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok((
+        OsmData {
+            elements,
+            remark: None,
+        },
+        bounds,
+    ))
+}
+
+/// Resolves the effective bounding box with precedence: explicit `--bbox` > file `<bounds>`
+/// element > node-coordinate extent. Returns None only when no source yields a usable box.
+pub fn resolve_bbox(
+    explicit: Option<LLBBox>,
+    file_bounds: Option<LLBBox>,
+    data: &OsmData,
+) -> Option<LLBBox> {
+    explicit.or(file_bounds).or_else(|| data.bounds())
 }
 
 struct SplitOsmData {
@@ -302,6 +566,81 @@ fn first_year(v: &str) -> Option<i32> {
     None
 }
 
+// Brutalist styles are masonry for StyleHint but post-war for ArchEra.
+const ORNATE_STYLES: &[&str] = &[
+    "artdeco",
+    "artnouveau",
+    "gothic",
+    "neogothic",
+    "gothicrevival",
+    "neoclassicism",
+    "neoclassical",
+    "classicism",
+    "classicalrevival",
+    "greekrevival",
+    "baroque",
+    "neobaroque",
+    "rococo",
+    "barocco",
+    "historicism",
+    "eclectic",
+    "renaissance",
+    "neorenaissance",
+    "romanesque",
+    "neoromanesque",
+    "romanesquerevival",
+    "victorian",
+    "georgian",
+    "federal",
+    "italianate",
+    "beauxarts",
+    "wilhelminianstyle",
+    "queenanne",
+];
+const BRUTALIST_STYLES: &[&str] = &["brutalist", "constructivism", "stalinistneoclassicism"];
+const MODERN_STYLES: &[&str] = &[
+    "modern",
+    "contemporary",
+    "modernism",
+    "functionalism",
+    "newobjectivity",
+    "postmodern",
+    "bauhaus",
+];
+const MASONRY_MATERIALS: &[&str] = &[
+    "brick",
+    "bricks",
+    "redbrick",
+    "silicatebrick",
+    "stone",
+    "naturalstone",
+    "sandstone",
+    "limestone",
+    "masonry",
+    "granite",
+    "marble",
+    "terracotta",
+    "adobe",
+    "stucco",
+    "pebbledash",
+];
+const MASONRY_CLADDING: &[&str] = &[
+    "brick",
+    "brickmonolith",
+    "plaster",
+    "rendered",
+    "rendering",
+    "stone",
+    "tiling",
+];
+const CONCRETE_MATERIALS: &[&str] = &[
+    "concrete",
+    "reinforcedconcrete",
+    "concretereinforced",
+    "concretemasonryunit",
+];
+const PANEL_MATERIALS: &[&str] = &["panel", "panels", "prefab", "prefabricated", "panelhouse"];
+
 /// Picks a facade style for a building from its OSM tags, or None to leave it to the random roll.
 pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     let material = tags
@@ -328,36 +667,13 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     {
         return StyleHint::Masonry;
     }
-    const MASONRY: &[&str] = &[
-        "brick",
-        "bricks",
-        "redbrick",
-        "silicatebrick",
-        "stone",
-        "naturalstone",
-        "sandstone",
-        "limestone",
-        "masonry",
-        "granite",
-        "marble",
-        "terracotta",
-        "adobe",
-        "stucco",
-        "pebbledash",
-    ];
-    if material.as_deref().is_some_and(|m| MASONRY.contains(&m)) {
+    if material
+        .as_deref()
+        .is_some_and(|m| MASONRY_MATERIALS.contains(&m))
+    {
         return StyleHint::Masonry;
     }
     if let Some(c) = tags.get("building:cladding") {
-        const MASONRY_CLADDING: &[&str] = &[
-            "brick",
-            "brickmonolith",
-            "plaster",
-            "rendered",
-            "rendering",
-            "stone",
-            "tiling",
-        ];
         if MASONRY_CLADDING.contains(&norm_tag(c).as_str()) {
             return StyleHint::Masonry;
         }
@@ -367,49 +683,7 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
         .or_else(|| tags.get("architecture"))
         .map(|a| norm_tag(a));
     if let Some(a) = arch.as_deref() {
-        const HISTORIC_STYLES: &[&str] = &[
-            "artdeco",
-            "artnouveau",
-            "gothic",
-            "neogothic",
-            "gothicrevival",
-            "neoclassicism",
-            "neoclassical",
-            "classicism",
-            "classicalrevival",
-            "greekrevival",
-            "baroque",
-            "neobaroque",
-            "rococo",
-            "barocco",
-            "historicism",
-            "eclectic",
-            "renaissance",
-            "neorenaissance",
-            "romanesque",
-            "neoromanesque",
-            "romanesquerevival",
-            "victorian",
-            "georgian",
-            "federal",
-            "italianate",
-            "beauxarts",
-            "brutalist",
-            "constructivism",
-            "stalinistneoclassicism",
-            "wilhelminianstyle",
-            "queenanne",
-        ];
-        const MODERN_STYLES: &[&str] = &[
-            "modern",
-            "contemporary",
-            "modernism",
-            "functionalism",
-            "newobjectivity",
-            "postmodern",
-            "bauhaus",
-        ];
-        if HISTORIC_STYLES.contains(&a) {
+        if ORNATE_STYLES.contains(&a) || BRUTALIST_STYLES.contains(&a) {
             return StyleHint::Masonry;
         }
         if MODERN_STYLES.contains(&a) {
@@ -427,16 +701,102 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
     }
 
     // Concrete frame reads as a solid facade with windows: the contemporary middle style.
-    const CONCRETE: &[&str] = &[
-        "concrete",
-        "reinforcedconcrete",
-        "concretereinforced",
-        "concretemasonryunit",
-    ];
-    if material.as_deref().is_some_and(|m| CONCRETE.contains(&m)) {
+    if material
+        .as_deref()
+        .is_some_and(|m| CONCRETE_MATERIALS.contains(&m))
+    {
         return StyleHint::Contemporary;
     }
     StyleHint::None
+}
+
+/// Architectural era, consumed by low-rise styling. Recomputed from tags
+/// per building, unlike the seed-packed `StyleHint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchEra {
+    Unknown,
+    /// Explicit heritage or ornate-architecture signals.
+    HistoricOrnate,
+    /// Pre-1945 masonry-era fabric without ornate signals.
+    TraditionalPreWar,
+    /// 1945–1979: panel, prefab, brutalist.
+    PostWarPanel,
+    /// 1980+: concrete/glass contemporary.
+    Contemporary,
+}
+
+/// Classifies a building's era from its tags; `Unknown` when nothing signals.
+pub fn building_arch_era(tags: &HashMap<String, String>) -> ArchEra {
+    // Explicit heritage signals → ornate. `no` is a negation, not a signal.
+    let present_and_not_no =
+        |key: &str| tags.get(key).is_some_and(|v| !v.eq_ignore_ascii_case("no"));
+    if present_and_not_no("historic")
+        || present_and_not_no("heritage")
+        || tags.contains_key("ref:nrhp")
+        || present_and_not_no("listed_status")
+    {
+        return ArchEra::HistoricOrnate;
+    }
+
+    let arch = tags
+        .get("building:architecture")
+        .or_else(|| tags.get("architecture"))
+        .map(|a| norm_tag(a));
+    if let Some(a) = arch.as_deref() {
+        if ORNATE_STYLES.contains(&a) {
+            return ArchEra::HistoricOrnate;
+        }
+        if BRUTALIST_STYLES.contains(&a) {
+            return ArchEra::PostWarPanel;
+        }
+        if MODERN_STYLES.contains(&a) {
+            return ArchEra::Contemporary;
+        }
+    }
+
+    for key in ["start_date", "construction_date", "year_of_construction"] {
+        if let Some(y) = tags.get(key).and_then(|v| first_year(v)) {
+            return if y < 1945 {
+                ArchEra::TraditionalPreWar
+            } else if y < 1980 {
+                ArchEra::PostWarPanel
+            } else {
+                ArchEra::Contemporary
+            };
+        }
+    }
+
+    let material = tags
+        .get("building:material")
+        .or_else(|| tags.get("building:facade:material"))
+        .or_else(|| tags.get("facade:material"))
+        .map(|m| norm_tag(m));
+    if let Some(m) = material.as_deref() {
+        if PANEL_MATERIALS.contains(&m) {
+            return ArchEra::PostWarPanel;
+        }
+        if MASONRY_MATERIALS.contains(&m) {
+            return ArchEra::TraditionalPreWar;
+        }
+        if CONCRETE_MATERIALS.contains(&m) || m == "glass" || m == "mirror" {
+            return ArchEra::Contemporary;
+        }
+    }
+    if let Some(c) = tags.get("building:cladding") {
+        if MASONRY_CLADDING.contains(&norm_tag(c).as_str()) {
+            return ArchEra::TraditionalPreWar;
+        }
+    }
+    ArchEra::Unknown
+}
+
+/// Fallback era for untagged `building:part`s from the packed group-seed hint.
+pub fn arch_era_from_hint(hint: StyleHint) -> ArchEra {
+    match hint {
+        StyleHint::Masonry => ArchEra::TraditionalPreWar,
+        StyleHint::Contemporary | StyleHint::Glass => ArchEra::Contemporary,
+        StyleHint::None => ArchEra::Unknown,
+    }
 }
 
 pub fn parse_osm_data(
@@ -468,9 +828,10 @@ pub fn parse_osm_data(
             CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
         }
     }
+    // Panics rather than exits: the GUI calls this from a Tauri blocking task, where an
+    // exit would take the whole app down. Bad scales are rejected up front by validate_scale.
     .unwrap_or_else(|e| {
-        eprintln!("Error in defining coordinate transformation:\n{e}");
-        panic!();
+        panic!("Error in defining coordinate transformation:\n{e}");
     });
 
     if debug {
@@ -507,6 +868,15 @@ pub fn parse_osm_data(
         &data.nodes,
         &relation_ways,
         &mut part_groups,
+    ));
+    // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
+    // separate building:part relations) are invisible to both passes above: the membership
+    // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
+    // Judge them spatially so a relation outline covered by part relations is dropped.
+    outline_suppression.extend(compute_spatial_relation_part_suppression(
+        &data.relations,
+        &data.ways,
+        &data.nodes,
     ));
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
@@ -545,6 +915,15 @@ pub fn parse_osm_data(
         }
     }
 
+    // A way whose node list is not fully resolvable is silently shortened below.
+    // For a road that only bends it; for an area it breaks the ring, and an
+    // unclosed ring flood-fills to nothing, so the whole polygon disappears
+    // without a word. Counted here so an incomplete source is reported once
+    // rather than discovered by looking at the finished world.
+    let mut unresolved_node_refs: u64 = 0;
+    let mut total_node_refs: u64 = 0;
+    let mut ways_missing_nodes: u64 = 0;
+
     // Second pass: process ways and clip them to bbox
     for element in data.ways {
         if ways_map.contains_key(&element.id) {
@@ -552,10 +931,16 @@ pub fn parse_osm_data(
         }
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
+            let before = unresolved_node_refs;
             for &node_id in node_ids {
-                if let Some(node) = nodes_map.get(&node_id) {
-                    nodes.push(node.clone());
+                total_node_refs += 1;
+                match nodes_map.get(&node_id) {
+                    Some(node) => nodes.push(node.clone()),
+                    None => unresolved_node_refs += 1,
                 }
+            }
+            if unresolved_node_refs > before {
+                ways_missing_nodes += 1;
             }
         }
 
@@ -585,6 +970,22 @@ pub fn parse_osm_data(
         };
 
         processed_elements.push(ProcessedElement::Way(processed));
+    }
+
+    if unresolved_node_refs > 0 {
+        let percent = unresolved_node_refs as f64 / total_node_refs.max(1) as f64 * 100.0;
+        eprintln!(
+            "{}",
+            format!(
+                "Warning: {unresolved_node_refs} of {total_node_refs} way node references \
+                 ({percent:.1}%) could not be resolved, affecting {ways_missing_nodes} ways. \
+                 Buildings and other areas that lost a corner cannot be filled and will not \
+                 appear in the world. Expected near the edges of a clipped local file; from \
+                 the API it means the response was incomplete."
+            )
+            .yellow()
+            .bold()
+        );
     }
 
     // Third pass: process relations and clip member ways
@@ -699,6 +1100,9 @@ pub fn parse_osm_data(
 
 // Parts replace the outline only when they cover at least this much of it.
 const MIN_PART_COVERAGE: f64 = 0.5;
+
+// Grid cell size (degrees) for the spatial index that buckets nearby outline bboxes.
+const SUPPRESSION_GRID_CELL_DEG: f64 = 0.0005;
 
 // A part covers the outline's ground footprint only if it starts at ground level.
 // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
@@ -865,6 +1269,103 @@ fn compute_outline_suppression(
     suppressed
 }
 
+// Shoelace area of a closed lat/lon ring; lon scaled by cos(lat) so only the ratio matters.
+fn ring_area(r: &[(f64, f64)]) -> f64 {
+    if r.len() < 3 {
+        return 0.0;
+    }
+    let lon_scale = r[0].0.to_radians().cos();
+    let mut a = 0.0;
+    for i in 0..r.len() {
+        let (lat_a, lon_a) = r[i];
+        let (lat_b, lon_b) = r[(i + 1) % r.len()];
+        a += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
+    }
+    (a / 2.0).abs()
+}
+
+// Ray-cast point-in-polygon test on a lat/lon ring.
+fn point_in_ring(lat: f64, lon: f64, r: &[(f64, f64)]) -> bool {
+    let n = r.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (yi, xi) = r[i];
+        let (yj, xj) = r[j];
+        if (yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Stitches way segments (each a node-id sequence) into closed rings of (lat,lon) points by
+/// matching shared endpoint node ids. A multipolygon outer boundary is frequently split across
+/// several member ways (e.g. an ellipse mapped as 4 arcs), so segments must be joined before
+/// their area/containment can be measured. Segments that never close into a ring, or whose
+/// nodes lack coordinates, are dropped (degenerate geometry is skipped, never panics).
+fn stitch_rings(
+    segments: Vec<Vec<u64>>,
+    node_ll: &HashMap<u64, (f64, f64)>,
+) -> Vec<Vec<(f64, f64)>> {
+    let mut open: Vec<Vec<u64>> = segments.into_iter().filter(|s| s.len() >= 2).collect();
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+
+    while let Some(mut ring) = open.pop() {
+        // Grow this ring by attaching segments at either end until it closes or stalls.
+        // `ring` is never empty here, so the pattern always binds; we exit via the breaks below.
+        while let (Some(&head), Some(&tail)) = (ring.first(), ring.last()) {
+            if ring.len() >= 4 && head == tail {
+                break; // closed ring
+            }
+            // Find a remaining segment that shares an endpoint node with either ring end.
+            let Some(i) = open.iter().position(|seg| match (seg.first(), seg.last()) {
+                (Some(&sf), Some(&sl)) => sf == tail || sl == tail || sf == head || sl == head,
+                _ => false,
+            }) else {
+                break; // nothing connects: leave this ring open (it will be discarded)
+            };
+            let seg = open.swap_remove(i);
+            let (sf, sl) = (seg[0], seg[seg.len() - 1]);
+            if sf == tail {
+                ring.extend(seg.into_iter().skip(1)); // drop the shared node
+            } else if sl == tail {
+                let mut s = seg;
+                s.reverse();
+                ring.extend(s.into_iter().skip(1));
+            } else if sl == head {
+                let mut s = seg;
+                s.pop(); // drop the shared node
+                s.extend(ring);
+                ring = s;
+            } else {
+                // sf == head
+                let mut s = seg;
+                s.reverse();
+                s.pop();
+                s.extend(ring);
+                ring = s;
+            }
+        }
+
+        if ring.len() >= 4 && ring.first() == ring.last() {
+            let pts: Vec<(f64, f64)> = ring
+                .iter()
+                .filter_map(|id| node_ll.get(id).copied())
+                .collect();
+            // A closed node ring may still lose points if some node lacked coordinates.
+            if pts.len() >= 4 {
+                rings.push(pts);
+            }
+        }
+    }
+    rings
+}
+
 /// Suppresses relation-less S3DB outlines: a building polygon that spatially contains building:part polygons.
 /// Ways in `relation_ways` belong to a type=building relation and are judged by the relation pass instead.
 fn compute_spatial_part_suppression(
@@ -925,38 +1426,7 @@ fn compute_spatial_part_suppression(
             .unwrap_or_default()
     };
 
-    // shoelace area, lon scaled by cos(lat)
-    let area = |r: &[(f64, f64)]| -> f64 {
-        if r.len() < 3 {
-            return 0.0;
-        }
-        let lon_scale = r[0].0.to_radians().cos();
-        let mut a = 0.0;
-        for i in 0..r.len() {
-            let (lat_a, lon_a) = r[i];
-            let (lat_b, lon_b) = r[(i + 1) % r.len()];
-            a += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
-        }
-        (a / 2.0).abs()
-    };
-
-    let point_in_ring = |lat: f64, lon: f64, r: &[(f64, f64)]| -> bool {
-        let n = r.len();
-        if n < 3 {
-            return false;
-        }
-        let mut inside = false;
-        let mut j = n - 1;
-        for i in 0..n {
-            let (yi, xi) = r[i];
-            let (yj, xj) = r[j];
-            if (yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi {
-                inside = !inside;
-            }
-            j = i;
-        }
-        inside
-    };
+    // area (shoelace) and point_in_ring are shared module-level helpers (see above).
 
     struct OutlineGeom {
         id: u64,
@@ -965,14 +1435,18 @@ fn compute_spatial_part_suppression(
     }
 
     // grid of outline bboxes so each part only tests nearby outlines
-    const CELL: f64 = 0.0005;
-    let cell = |lat: f64, lon: f64| ((lat / CELL).floor() as i64, (lon / CELL).floor() as i64);
+    let cell = |lat: f64, lon: f64| {
+        (
+            (lat / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+            (lon / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+        )
+    };
 
     let mut geoms: Vec<OutlineGeom> = Vec::new();
     let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
     for id in outline_ids {
         let r = ring(id);
-        let a = area(&r);
+        let a = ring_area(&r);
         if a <= 0.0 {
             continue;
         }
@@ -1003,7 +1477,7 @@ fn compute_spatial_part_suppression(
     let mut covered: HashMap<usize, f64> = HashMap::new();
     for pid in part_ids {
         let r = ring(pid);
-        let pa = area(&r);
+        let pa = ring_area(&r);
         if pa <= 0.0 {
             continue;
         }
@@ -1048,6 +1522,216 @@ fn compute_spatial_part_suppression(
         let g = &geoms[gi];
         if cov / g.area >= MIN_PART_COVERAGE {
             suppressed.insert(("way", g.id));
+        }
+    }
+    suppressed
+}
+
+/// Suppresses S3DB outlines expressed as MULTIPOLYGON RELATIONS: a building relation whose
+/// ground footprint is spatially covered (>= MIN_PART_COVERAGE) by independent building:part
+/// RELATIONS, each of which still renders on its own via the relation path. Mirrors
+/// `compute_spatial_part_suppression` but sources footprints from relations rather than
+/// closed ways.
+///
+/// Two relation specifics drive the extra work here:
+///   * A relation's outer boundary is frequently SPLIT across several member ways (the
+///     Colosseum ellipse = 4 outer arcs, #1191), so the segments are stitched into closed rings
+///     before area/containment (see `stitch_rings`). Inner rings are ignored: gross outer
+///     area biases safely toward suppressing a genuinely covered outline, matching the
+///     way-based pass.
+///   * Association is SPATIAL (part centroid inside the outline footprint), never membership:
+///     the parts are separate relations, not members of the outline relation, so the
+///     membership pass (`compute_outline_suppression`) never links them.
+fn compute_spatial_relation_part_suppression(
+    relations: &[OsmElement],
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+) -> OutlineSuppression {
+    let is_part = |tags: &HashMap<String, String>| {
+        tags.get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+    };
+    // Only relations the parser actually turns into a ProcessedElement::Relation can render.
+    // Anything else must be ignored here: crediting a part that will never be drawn could
+    // suppress an outline and leave the building missing entirely.
+    // Keep this in sync with the relation type filter in `parse_osm_data`.
+    let is_renderable = |tags: &HashMap<String, String>| {
+        matches!(
+            tags.get("type").map(|t| t.as_str()),
+            Some("multipolygon") | Some("building")
+        )
+    };
+    // A relation's footprint is bounded by its outer/outline member ways; inner rings (holes)
+    // and non-boundary roles are excluded.
+    let is_outer_role =
+        |r: &str| r.eq_ignore_ascii_case("outer") || r.eq_ignore_ascii_case("outline");
+
+    // Resolve only the geometry we need: the outer member ways of every building /
+    // building:part relation, plus the nodes those ways reference.
+    let mut needed_ways: HashSet<u64> = HashSet::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        if !is_renderable(tags) || !(tags.contains_key("building") || is_part(tags)) {
+            continue;
+        }
+        for m in &rel.members {
+            if m.r#type == "way" && is_outer_role(m.role.trim()) {
+                needed_ways.insert(m.r#ref);
+            }
+        }
+    }
+    if needed_ways.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
+    let mut needed_nodes: HashSet<u64> = HashSet::new();
+    for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
+        if let Some(ns) = w.nodes.as_ref() {
+            way_nodes.insert(w.id, ns);
+            needed_nodes.extend(ns.iter().copied());
+        }
+    }
+    let node_ll: HashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| needed_nodes.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+
+    // Stitch a relation's outer member ways into closed rings of (lat,lon).
+    let rel_rings = |rel: &OsmElement| -> Vec<Vec<(f64, f64)>> {
+        let segments: Vec<Vec<u64>> = rel
+            .members
+            .iter()
+            .filter(|m| m.r#type == "way" && is_outer_role(m.role.trim()))
+            .filter_map(|m| way_nodes.get(&m.r#ref).map(|ns| (*ns).clone()))
+            .collect();
+        stitch_rings(segments, &node_ll)
+    };
+
+    struct RelOutline {
+        id: u64,
+        rings: Vec<Vec<(f64, f64)>>,
+        area: f64,
+    }
+    struct RelPart {
+        area: f64,
+        centroid: (f64, f64),
+        ground: bool,
+    }
+
+    // Classify each relation and assemble its footprint. building:part=no marks the OUTLINE
+    // (not a part, e.g. the Colosseum outline); an outline candidate carries `building` and is
+    // not itself a part.
+    let mut outlines: Vec<RelOutline> = Vec::new();
+    let mut parts: Vec<RelPart> = Vec::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        if !is_renderable(tags) {
+            continue;
+        }
+        let part = is_part(tags);
+        let outline = !part && tags.contains_key("building");
+        if !part && !outline {
+            continue;
+        }
+        let rings = rel_rings(rel);
+        let area: f64 = rings.iter().map(|r| ring_area(r)).sum();
+        if area <= 0.0 {
+            continue; // no closed ring could be assembled (degenerate/open geometry): skip
+        }
+        if outline {
+            outlines.push(RelOutline {
+                id: rel.id,
+                rings,
+                area,
+            });
+        } else {
+            // Gross outer area; centroid = vertex average over all assembled rings. The
+            // closing node is counted (first == last), matching the way-based pass exactly.
+            let (mut sla, mut slo, mut cnt) = (0.0, 0.0, 0usize);
+            for ring in &rings {
+                for &(la, lo) in ring {
+                    sla += la;
+                    slo += lo;
+                    cnt += 1;
+                }
+            }
+            if cnt == 0 {
+                continue;
+            }
+            parts.push(RelPart {
+                area,
+                centroid: (sla / cnt as f64, slo / cnt as f64),
+                ground: part_covers_ground(tags),
+            });
+        }
+    }
+    if outlines.is_empty() || parts.is_empty() {
+        return HashSet::new();
+    }
+
+    // grid of outline bboxes so each part only tests nearby outlines
+    let cell = |lat: f64, lon: f64| {
+        (
+            (lat / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+            (lon / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+        )
+    };
+
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (gi, g) in outlines.iter().enumerate() {
+        let (mut min_la, mut min_lo, mut max_la, mut max_lo) =
+            (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for ring in &g.rings {
+            for &(la, lo) in ring {
+                min_la = min_la.min(la);
+                max_la = max_la.max(la);
+                min_lo = min_lo.min(lo);
+                max_lo = max_lo.max(lo);
+            }
+        }
+        let (c0a, c0o) = cell(min_la, min_lo);
+        let (c1a, c1o) = cell(max_la, max_lo);
+        for ca in c0a..=c1a {
+            for co in c0o..=c1o {
+                grid.entry((ca, co)).or_default().push(gi);
+            }
+        }
+    }
+
+    // Add each ground-level part's gross area to every outline whose footprint contains the
+    // part centroid (matches the way-based pass, which credits every containing outline).
+    let mut covered: HashMap<usize, f64> = HashMap::new();
+    for p in &parts {
+        // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
+        // that float above the ground, so they can't stand in for the ground footprint.
+        if !p.ground {
+            continue;
+        }
+        let (cla, clo) = p.centroid;
+        let Some(cands) = grid.get(&cell(cla, clo)) else {
+            continue;
+        };
+        for &gi in cands {
+            if outlines[gi]
+                .rings
+                .iter()
+                .any(|r| point_in_ring(cla, clo, r))
+            {
+                *covered.entry(gi).or_insert(0.0) += p.area;
+            }
+        }
+    }
+
+    // PartGroups (building:part WAY id -> shared style seed) is intentionally left unchanged:
+    // it is consumed only in the Way render arm, whereas a building:part RELATION renders via
+    // the relation arm and carries its own tags, so a relation-keyed seed would have no consumer.
+    let mut suppressed: OutlineSuppression = HashSet::new();
+    for (gi, cov) in covered {
+        let g = &outlines[gi];
+        if cov / g.area >= MIN_PART_COVERAGE {
+            suppressed.insert(("relation", g.id));
         }
     }
     suppressed
@@ -1442,5 +2126,379 @@ mod outline_suppression_tests {
         let mut groups = PartGroups::new();
         compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut groups);
         assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
+    }
+
+    // --- compute_spatial_relation_part_suppression (multipolygon-relation outlines) ---
+
+    // An axis-aligned square footprint (corner at origin, side `side`) built as FOUR OPEN outer
+    // ways sharing endpoint node ids, plus the four corner nodes. Exercises the ring stitcher.
+    fn split_square(
+        way_ids: [u64; 4],
+        node_ids: [u64; 4],
+        side: f64,
+    ) -> (Vec<OsmElement>, Vec<OsmElement>) {
+        let corners = [(0.0, 0.0), (0.0, side), (side, side), (side, 0.0)];
+        let nodes: Vec<OsmElement> = node_ids
+            .iter()
+            .zip(corners.iter())
+            .map(|(&id, &(lat, lon))| node(id, lat, lon))
+            .collect();
+        let ways: Vec<OsmElement> = (0..4)
+            .map(|i| OsmElement {
+                r#type: "way".into(),
+                id: way_ids[i],
+                lat: None,
+                lon: None,
+                nodes: Some(vec![node_ids[i], node_ids[(i + 1) % 4]]),
+                tags: None,
+                members: Vec::new(),
+            })
+            .collect();
+        (ways, nodes)
+    }
+
+    /// Defaults to `type=multipolygon`, since that is what the parser actually renders;
+    /// pass an explicit `type` to model a relation the parser would drop.
+    fn relation_el(id: u64, tags: &[(&str, &str)], members: Vec<OsmMember>) -> OsmElement {
+        let mut map = tagmap(tags);
+        map.entry("type".to_string())
+            .or_insert_with(|| "multipolygon".to_string());
+        OsmElement {
+            r#type: "relation".into(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: None,
+            tags: Some(map),
+            members,
+        }
+    }
+
+    fn outer_members(way_ids: &[u64]) -> Vec<OsmMember> {
+        way_ids
+            .iter()
+            .map(|&id| member("way", id, "outer"))
+            .collect()
+    }
+
+    // The Colosseum case: a multipolygon building outline (building=amphitheatre, building:part=no)
+    // whose ellipse is SPLIT across four outer ways, spatially covered by an independent
+    // building:part RELATION. The outline relation is suppressed; the part relation survives.
+    #[test]
+    fn suppresses_outline_covered_by_part_relations() {
+        // Small footprints keep the outline-bbox grid tiny; only the coverage ratio matters.
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0016); // 0.0016^2 / 0.002^2 = 0.64
+        assert!((0.0016_f64 / 0.002).powi(2) >= MIN_PART_COVERAGE);
+
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre"), ("building:part", "no")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        let part = relation_el(2, &[("building:part", "yes")], outer_members(&[200]));
+
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+        let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+        assert!(s.contains(&("relation", 1)));
+        assert!(!s.contains(&("relation", 2)));
+    }
+
+    // parse_osm_data only turns type=multipolygon / type=building relations into renderable
+    // elements. A part of any other type is never drawn, so letting it count toward coverage
+    // would suppress the outline and leave nothing at all in its place.
+    #[test]
+    fn part_relation_the_parser_never_renders_cannot_suppress_the_outline() {
+        for part_type in ["site", "group", "boundary"] {
+            let (outline_ways, outline_nodes) =
+                split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+            let (part_way, part_nodes) = square_way(200, 2000, 0.0016);
+            // Geometry alone would clear the threshold; only the type must stop it.
+            assert!((0.0016_f64 / 0.002).powi(2) >= MIN_PART_COVERAGE);
+
+            let outline = relation_el(
+                1,
+                &[("building", "amphitheatre"), ("building:part", "no")],
+                outer_members(&[100, 101, 102, 103]),
+            );
+            let part = relation_el(
+                2,
+                &[("type", part_type), ("building:part", "yes")],
+                outer_members(&[200]),
+            );
+
+            let mut ways = outline_ways;
+            ways.push(part_way);
+            let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+            let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+            assert!(
+                !s.contains(&("relation", 1)),
+                "outline suppressed by a type={part_type} part that never renders"
+            );
+        }
+    }
+
+    // Same stitched multi-way outline, but the only part covers ~36% (< MIN_PART_COVERAGE),
+    // so the outline relation must survive.
+    #[test]
+    fn does_not_suppress_outline_with_insufficient_part_coverage() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0012); // 0.0012^2 / 0.002^2 = 0.36
+        assert!((0.0012_f64 / 0.002).powi(2) < MIN_PART_COVERAGE);
+
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        let part = relation_el(2, &[("building:part", "yes")], outer_members(&[200]));
+
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+        let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+        assert!(!s.contains(&("relation", 1)));
+    }
+
+    // A plain building outline relation with NO building:part relations is never suppressed.
+    #[test]
+    fn plain_outline_relation_without_parts_is_kept() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+
+        let s =
+            compute_spatial_relation_part_suppression(&[outline], &outline_ways, &outline_nodes);
+        assert!(s.is_empty());
+    }
+
+    // An amphitheatre whose only cover is an ELEVATED part relation (min_height > 0): that raised
+    // volume floats above the ground, so it can't stand in for the footprint. The outline is kept
+    // even though the part's geometric coverage (~64%) clears MIN_PART_COVERAGE.
+    #[test]
+    fn relation_outline_covered_only_by_elevated_part_is_kept() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0016); // 0.0016^2 / 0.002^2 = 0.64
+        assert!((0.0016_f64 / 0.002).powi(2) >= MIN_PART_COVERAGE);
+
+        let outline = relation_el(
+            1,
+            &[("building", "amphitheatre"), ("building:part", "no")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        // min_height marks the part as elevated, so part_covers_ground() returns false.
+        let part = relation_el(
+            2,
+            &[("building:part", "yes"), ("min_height", "54")],
+            outer_members(&[200]),
+        );
+
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+
+        let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
+        assert!(!s.contains(&("relation", 1)));
+    }
+}
+
+#[cfg(test)]
+mod osm_xml_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn parse(xml: &str) -> (OsmData, Option<LLBBox>) {
+        parse_osm_xml(Cursor::new(xml.as_bytes())).expect("valid OSM XML")
+    }
+
+    fn find<'a>(data: &'a OsmData, kind: &str, id: u64) -> &'a OsmElement {
+        data.elements
+            .iter()
+            .find(|e| e.r#type == kind && e.id == id)
+            .unwrap_or_else(|| panic!("missing {kind} {id}"))
+    }
+
+    // Testing every element kind: tagged node, bare node, way (nd refs + tags),
+    // relation (member + tags), and a <bounds> element.
+    const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <bounds minlat="1.0" minlon="2.0" maxlat="3.0" maxlon="4.0"/>
+  <node id="10" lat="1.5" lon="2.5"><tag k="amenity" v="cafe"/></node>
+  <node id="11" lat="1.6" lon="2.6"/>
+  <way id="20">
+    <nd ref="10"/>
+    <nd ref="11"/>
+    <tag k="building" v="yes"/>
+    <tag k="name" v="Ben &amp; Jerry"/>
+  </way>
+  <relation id="30">
+    <member type="way" ref="20" role="outer"/>
+    <tag k="type" v="multipolygon"/>
+  </relation>
+</osm>"#;
+
+    #[test]
+    fn parses_bounds_into_llbbox() {
+        let (_, bounds) = parse(SAMPLE);
+        assert_eq!(bounds, Some(LLBBox::new(1.0, 2.0, 3.0, 4.0).unwrap()));
+    }
+
+    #[test]
+    fn parses_expected_element_count() {
+        let (data, _) = parse(SAMPLE);
+        // 2 nodes + 1 way + 1 relation; <bounds> is not an element.
+        assert_eq!(data.elements.len(), 4);
+    }
+
+    #[test]
+    fn parses_node_with_and_without_tags() {
+        let (data, _) = parse(SAMPLE);
+
+        let tagged = find(&data, "node", 10);
+        assert_eq!(tagged.lat, Some(1.5));
+        assert_eq!(tagged.lon, Some(2.5));
+        assert_eq!(
+            tagged.tags.as_ref().unwrap().get("amenity"),
+            Some(&"cafe".to_string())
+        );
+
+        // A node with no <tag> children mirrors Overpass JSON: tags is None, not an empty map.
+        let bare = find(&data, "node", 11);
+        assert_eq!(bare.lat, Some(1.6));
+        assert!(bare.tags.is_none());
+    }
+
+    #[test]
+    fn parses_way_node_refs_and_tags() {
+        let (data, _) = parse(SAMPLE);
+        let way = find(&data, "way", 20);
+        assert_eq!(way.nodes, Some(vec![10, 11]));
+        let tags = way.tags.as_ref().unwrap();
+        assert_eq!(tags.get("building"), Some(&"yes".to_string()));
+        // XML entities in attribute values are unescaped.
+        assert_eq!(tags.get("name"), Some(&"Ben & Jerry".to_string()));
+    }
+
+    #[test]
+    fn parses_relation_members_and_tags() {
+        let (data, _) = parse(SAMPLE);
+        let relation = find(&data, "relation", 30);
+        assert_eq!(relation.members.len(), 1);
+        let member = &relation.members[0];
+        assert_eq!(member.r#type, "way");
+        assert_eq!(member.r#ref, 20);
+        assert_eq!(member.r#role, "outer");
+        assert_eq!(
+            relation.tags.as_ref().unwrap().get("type"),
+            Some(&"multipolygon".to_string())
+        );
+    }
+
+    // Without a <bounds> element, the parser returns None and OsmData::bounds() derives the
+    // node-coordinate extent instead.
+    const NO_BOUNDS: &str = r#"<osm version="0.6">
+  <node id="1" lat="10.0" lon="20.0"/>
+  <node id="2" lat="12.0" lon="24.0"/>
+  <node id="3" lat="11.0" lon="22.0"/>
+</osm>"#;
+
+    #[test]
+    fn missing_bounds_falls_back_to_node_extent() {
+        let (data, bounds) = parse(NO_BOUNDS);
+        assert!(bounds.is_none());
+        assert_eq!(
+            data.bounds(),
+            Some(LLBBox::new(10.0, 20.0, 12.0, 24.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn bounds_is_none_without_located_nodes() {
+        let data = OsmData::empty();
+        assert!(data.bounds().is_none());
+    }
+
+    #[test]
+    fn resolve_bbox_precedence() {
+        let explicit = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let file = LLBBox::new(5.0, 5.0, 6.0, 6.0).unwrap();
+        let (data_with_bounds, _) = parse(SAMPLE);
+        let (data_no_bounds, _) = parse(NO_BOUNDS);
+        let node_extent = data_no_bounds.bounds().unwrap();
+
+        // 1--bbox wins over a file <bounds>
+        assert_eq!(
+            resolve_bbox(Some(explicit), Some(file), &data_with_bounds),
+            Some(explicit)
+        );
+        // file <bounds> used when --bbox is absent
+        assert_eq!(
+            resolve_bbox(None, Some(file), &data_with_bounds),
+            Some(file)
+        );
+        // node-extent fallback when neither --bbox nor <bounds> is present
+        assert_eq!(resolve_bbox(None, None, &data_no_bounds), Some(node_extent));
+        // nothing resolvable -> None
+        assert_eq!(resolve_bbox(None, None, &OsmData::empty()), None);
+    }
+}
+
+#[cfg(test)]
+mod arch_era_tests {
+    use super::*;
+
+    fn tags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn era_derivation_table() {
+        use ArchEra::*;
+        let cases: &[(&[(&str, &str)], ArchEra)] = &[
+            (&[("historic", "yes")], HistoricOrnate),
+            (&[("heritage", "2")], HistoricOrnate),
+            (&[("historic", "no")], Unknown),
+            (&[("building:architecture", "art_deco")], HistoricOrnate),
+            (&[("building:architecture", "brutalist")], PostWarPanel),
+            (&[("building:architecture", "bauhaus")], Contemporary),
+            (&[("start_date", "1890")], TraditionalPreWar),
+            (&[("start_date", "1965")], PostWarPanel),
+            (&[("start_date", "2003-05")], Contemporary),
+            (&[("building:material", "panel")], PostWarPanel),
+            (&[("building:material", "brick")], TraditionalPreWar),
+            (&[("building:material", "concrete")], Contemporary),
+            (&[("building:cladding", "plaster")], TraditionalPreWar),
+            (&[("building", "house")], Unknown),
+            // heritage beats a modern start_date
+            (&[("heritage", "1"), ("start_date", "1995")], HistoricOrnate),
+        ];
+        for (pairs, expected) in cases {
+            assert_eq!(building_arch_era(&tags(pairs)), *expected, "tags {pairs:?}");
+        }
+    }
+
+    #[test]
+    fn part_hint_fallback_mapping() {
+        assert_eq!(
+            arch_era_from_hint(StyleHint::Masonry),
+            ArchEra::TraditionalPreWar
+        );
+        assert_eq!(arch_era_from_hint(StyleHint::Glass), ArchEra::Contemporary);
+        assert_eq!(arch_era_from_hint(StyleHint::None), ArchEra::Unknown);
     }
 }

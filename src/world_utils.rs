@@ -233,9 +233,12 @@ pub const TALL_DATAPACK_NAME: &str = "arnis_tall";
 /// Install the bundled tall-world datapack into a Java world and register it
 /// in `level.dat`'s `Data.DataPacks.Enabled` so it auto-activates on first
 /// load. The base `data/` tree uses the legacy flat dimension_type schema
-/// (formats 61-88, i.e. 1.21.4-1.21.10); overlays carry the attributes schema
-/// for 1.21.11-era (formats 90-100) and 26.1.x (format 101.x), since the
-/// schema is mutually incompatible across those eras.
+/// (formats below 90, so up to 1.21.10); overlays carry the attributes schema
+/// for formats 90-100 and the clock/`default_clock` schema for 101 and up,
+/// since the schema is mutually incompatible across those eras.
+/// Overlays must declare their range only via
+/// `min_format`/`max_format`; the deprecated `formats` key makes 1.21.9+ drop
+/// the whole overlays section and fall back to the legacy tree.
 pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
     const PACK_MCMETA: &[u8] = include_bytes!("../assets/minecraft/datapack_tall/pack.mcmeta");
     const OVERWORLD_JSON: &[u8] = include_bytes!(
@@ -509,6 +512,129 @@ mod tests {
         assert_eq!(data.get("DayTime"), Some(&Value::Long(13000)));
         if let Some(Value::Compound(player)) = data.get("Player") {
             assert_eq!(player.get("playerGameType"), Some(&Value::Int(0)));
+        }
+    }
+
+    /// Highest format that still allows the deprecated `formats` key.
+    const LAST_PRE_MINOR_DATA_FORMAT: u64 = 81;
+
+    fn install_pack_for_test(tmp: &std::path::Path) -> PathBuf {
+        let world = PathBuf::from(create_new_world(tmp).unwrap());
+        install_tall_datapack(&world).unwrap();
+        world.join("datapacks").join(TALL_DATAPACK_NAME)
+    }
+
+    fn read_json(path: &Path) -> serde_json::Value {
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// Picks the overlay covering `format`, or the base `data/` tree if none does.
+    fn resolve_overworld(dp_root: &Path, format: u64) -> serde_json::Value {
+        let mcmeta = read_json(&dp_root.join("pack.mcmeta"));
+        let dir = mcmeta["overlays"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| {
+                let min = e["min_format"][0].as_u64().unwrap();
+                let max = e["max_format"][0].as_u64().unwrap();
+                (min..=max).contains(&format)
+            })
+            .map(|e| e["directory"].as_str().unwrap().to_string())
+            .unwrap_or_default();
+
+        let mut path = dp_root.to_path_buf();
+        if !dir.is_empty() {
+            path.push(dir);
+        }
+        read_json(&path.join("data/minecraft/dimension_type/overworld.json"))
+    }
+
+    #[test]
+    fn tall_datapack_overlays_omit_deprecated_formats_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dp_root = install_pack_for_test(tmp.path());
+        let mcmeta = read_json(&dp_root.join("pack.mcmeta"));
+
+        let entries = mcmeta["overlays"]["entries"].as_array().unwrap();
+        assert!(!entries.is_empty());
+
+        let lowest = entries
+            .iter()
+            .map(|e| e["min_format"][0].as_u64().unwrap())
+            .min()
+            .unwrap();
+        assert!(
+            lowest > LAST_PRE_MINOR_DATA_FORMAT,
+            "an overlay reaching <= {LAST_PRE_MINOR_DATA_FORMAT} would make `formats` mandatory again"
+        );
+
+        for entry in entries {
+            let dir = entry["directory"].as_str().unwrap();
+            assert!(
+                entry.get("formats").is_none(),
+                "overlay {dir} carries the deprecated `formats` key, 1.21.9+ drops all overlays"
+            );
+            assert!(
+                entry.get("min_format").is_some(),
+                "overlay {dir} lacks min_format"
+            );
+            assert!(
+                entry.get("max_format").is_some(),
+                "overlay {dir} lacks max_format"
+            );
+            assert!(
+                dp_root.join(dir).is_dir(),
+                "overlay dir {dir} was not installed"
+            );
+        }
+
+        // Root declares support down to 61, so it has to keep the old keys.
+        assert_eq!(mcmeta["pack"]["min_format"][0].as_u64().unwrap(), 61);
+        assert!(mcmeta["pack"]["pack_format"].is_number());
+        assert!(mcmeta["pack"]["supported_formats"].is_object());
+    }
+
+    #[test]
+    fn tall_datapack_resolves_correct_schema_per_pack_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dp_root = install_pack_for_test(tmp.path());
+
+        // (data pack format, Minecraft version)
+        for (format, label) in [(61, "1.21.4"), (88, "1.21.10")] {
+            let dim = resolve_overworld(&dp_root, format);
+            assert!(
+                dim["natural"].is_boolean(),
+                "{label}: legacy schema needs `natural`"
+            );
+            assert!(
+                dim["bed_works"].is_boolean(),
+                "{label}: legacy schema needs `bed_works`"
+            );
+        }
+
+        // Without `timelines` the day/night cycle freezes on 1.21.11.
+        let dim = resolve_overworld(&dp_root, 94);
+        assert_eq!(dim["timelines"], "#minecraft:in_overworld");
+        assert!(dim["attributes"].is_object());
+
+        // 26.1 drives `/time` through `default_clock` and requires `has_ender_dragon_fight`.
+        for (format, label) in [(101, "26.1"), (107, "26.2")] {
+            let dim = resolve_overworld(&dp_root, format);
+            assert_eq!(dim["default_clock"], "minecraft:overworld", "{label}");
+            assert_eq!(dim["timelines"], "#minecraft:in_overworld", "{label}");
+            assert!(
+                dim["has_ender_dragon_fight"].is_boolean(),
+                "{label}: required field missing, dimension_type won't parse"
+            );
+        }
+
+        // Every era still needs the extended build height.
+        for format in [61, 88, 94, 101, 107, 999] {
+            let dim = resolve_overworld(&dp_root, format);
+            assert_eq!(dim["min_y"], -2032, "format {format}");
+            assert_eq!(dim["height"], 4064, "format {format}");
+            assert_eq!(dim["logical_height"], 4064, "format {format}");
         }
     }
 }

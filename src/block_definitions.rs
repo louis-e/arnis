@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::colors::RGBTuple;
-
 // Enums for stair properties
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StairFacing {
@@ -50,11 +48,6 @@ impl StairShape {
         }
     }
 }
-
-// Type definitions for better readability
-type ColorTuple = (u8, u8, u8);
-type BlockOptions = &'static [Block];
-type ColorBlockMapping = (ColorTuple, BlockOptions);
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
@@ -133,9 +126,9 @@ impl Block {
             13 => "cobblestone",
             14 => "polished_blackstone_bricks",
             15 => "cracked_stone_bricks",
-            16 => "lever",
+            16 => "cyan_concrete",
             17 => "cobblestone_stairs",
-            18 => "cyan_concrete",
+            18 => "magma_block",
             19 => "dark_oak_planks",
             20 => "deepslate_bricks",
             21 => "diorite",
@@ -156,8 +149,8 @@ impl Block {
             36 => "iron_bars",
             37 => "iron_block",
             38 => "waxed_cut_copper_stairs",
-            39 => "ladder",
-            40 => "light_blue_concrete",
+            39 => "yellow_concrete",
+            40 => "snow",
             41 => "light_blue_terracotta",
             42 => "light_gray_concrete",
             43 => "moss_block",
@@ -183,11 +176,11 @@ impl Block {
             63 => "deepslate_brick_stairs",
             64 => "polished_deepslate_stairs",
             65 => "quartz_bricks",
-            66 => "rail",
+            66 => "kelp",
             67 => "poppy",
             68 => "red_nether_bricks",
             69 => "red_terracotta",
-            70 => "red_wool",
+            70 => "tall_seagrass",
             71 => "sand",
             72 => "sandstone",
             73 => "scaffolding",
@@ -210,27 +203,26 @@ impl Block {
             90 => "white_stained_glass",
             91 => "white_terracotta",
             92 => "white_wool",
-            93 => "yellow_concrete",
+            93 => "tall_seagrass",
             94 => "dandelion",
-            95 => "yellow_wool",
-            96 => "lime_concrete",
+            95 => "sea_pickle",
+            96 => "soul_sand",
             97 => "red_nether_brick_stairs",
-            98 => "blue_concrete",
-            99 => "purple_concrete",
+            98 => "sandstone_wall",
+            99 => "cut_sandstone_slab",
             100 => "red_concrete",
-            101 => "magenta_concrete",
+            101 => "iron_trapdoor",
             102 => "waxed_oxidized_cut_copper_stairs",
             103 => "waxed_oxidized_copper",
             104 => "yellow_terracotta",
             105 => "carrots",
-            106 => "dark_oak_door",
-            107 => "dark_oak_door",
+            106..=107 => "dark_oak_door",
             108 => "potatoes",
             109 => "wheat",
             110 => "bedrock",
             111 => "snow_block",
             112 => "andesite_stairs",
-            113 => "oak_sign",
+            113 => "jungle_trapdoor",
             114 => "andesite_wall",
             115 => "stone_brick_wall",
             116..=125 => "rail",
@@ -252,26 +244,26 @@ impl Block {
             142 => "bookshelf",
             143 => "oak_pressure_plate",
             144 => "oak_stairs",
-            145 => "white_wall_banner",
-            146 => "blue_wall_banner",
-            147 => "black_wall_banner",
-            148 => "red_wall_banner",
-            149 => "green_wall_banner",
+            145 => "orange_concrete",
+            146 => "purple_concrete",
+            147 => "birch_fence_gate",
+            148 => "dark_oak_fence_gate",
+            149 => "light_blue_concrete",
             150 => "mossy_stone_bricks",
             151 => "deepslate",
             152 => "tuff",
             153 => "cobbled_deepslate",
-            154 => "water_cauldron",
+            154 => "lantern",
             155 => "chest",
-            156 => "red_carpet",
+            156 => "stone_button",
             157 => "anvil",
             158 => "note_block",
-            159 => "oak_door",
+            159 => "polished_deepslate_wall",
             160 => "brewing_stand",
             161 => "red_bed", // North head
             162 => "red_bed", // North foot
-            163 => "red_bed", // East head
-            164 => "red_bed", // East foot
+            163 => "black_stained_glass",
+            164 => "polished_andesite_slab",
             165 => "red_bed", // South head
             166 => "red_bed", // South foot
             167 => "red_bed", // West head
@@ -280,7 +272,7 @@ impl Block {
             170 => "light_gray_stained_glass",
             171 => "brown_stained_glass",
             172 => "tinted_glass",
-            173 => "oak_trapdoor",
+            173 => "magenta_concrete",
             174 => "brown_concrete",
             175 => "black_terracotta",
             176 => "brown_terracotta",
@@ -297,35 +289,34 @@ impl Block {
             187 => "nether_brick_stairs",
             188 => "barrel",
             189 => "fern",
-            190 => "cobweb",
-            191 => "chiseled_bookshelf",
-            192 => "chiseled_bookshelf",
-            193 => "chiseled_bookshelf",
-            194 => "chiseled_bookshelf",
+            190 => "lime_concrete",
+            191 => "blue_concrete",
+            192 => "gray_stained_glass_pane",
+            193 => "oak_fence_gate",
+            194 => "spruce_fence_gate",
             195 => "waxed_copper_block",
-            196 => "damaged_anvil",
-            197 => "large_fern",
-            198 => "large_fern",
+            196 => "glass_pane",
+            197..=198 => "large_fern",
             199 => "waxed_exposed_copper",
-            200 => "end_rod",
+            200 => "stone_stairs",
             201 => "lightning_rod",
-            202 => "gold_block",
+            202 => "flower_pot",
             203 => "sea_lantern",
             204 => "waxed_exposed_chiseled_copper",
-            205 => "orange_wool",
-            206 => "blue_wool",
+            205 => "warped_slab",
+            206 => "warped_stairs",
             207 => "green_concrete",
             208 => "brick_wall",
             209 => "redstone_block",
             210 => "chain",
-            211 => "chain",
-            212 => "spruce_door",
-            213 => "spruce_door",
+            211 => "warped_trapdoor",
+            212 => "stripped_warped_stem",
+            213 => "stripped_warped_hyphae",
             214 => "smooth_stone_slab",
             215 => "waxed_exposed_cut_copper",
             216 => "light_gray_terracotta",
             217 => "oak_slab",
-            218 => "oak_door",
+            218 => "redstone_lamp",
             219 => "dark_oak_log",
             220 => "dark_oak_leaves",
             221 => "jungle_log",
@@ -363,53 +354,53 @@ impl Block {
             253 => "cyan_terracotta",
             254 => "black_wool",
             255 => "light_gray_wall_banner",
-            256 => "magma_block",
-            257 => "snow",
-            258 => "kelp",
-            259 => "tall_seagrass",
-            260 => "tall_seagrass",
-            261 => "sea_pickle",
-            265 => "soul_sand",
-            266 => "sandstone_wall",
-            267 => "cut_sandstone_slab",
+            256 => "lever",
+            257 => "grindstone",
+            258 => "rail",
+            259 => "red_wool",
+            260 => "ladder",
+            261 => "yellow_wool",
+            265 => "cobblestone_slab",
+            266 => "nether_brick_fence",
+            267 => "birch_fence",
             268 => "smooth_quartz_slab",
             269 => "smooth_quartz_stairs",
             270 => "blackstone_stairs",
             271 => "blackstone_wall",
             272 => "diorite_wall",
-            273 => "iron_trapdoor",
-            274 => "jungle_trapdoor",
-            275 => "birch_fence",
+            273 => "polished_deepslate_slab",
+            274 => "oak_sign",
+            275 => "blue_wall_banner",
             276 => "jungle_fence",
-            277 => "birch_fence_gate",
-            278 => "dark_oak_fence_gate",
+            277 => "black_wall_banner",
+            278 => "red_wall_banner",
             279 => "birch_door",
             280 => "birch_pressure_plate",
             281 => "stone_pressure_plate",
             282 => "blast_furnace",
             283 => "dispenser",
             284 => "hopper",
-            285 => "grindstone",
-            286 => "lantern",
+            285 => "green_wall_banner",
+            286 => "water_cauldron",
             287 => "lodestone",
             288 => "redstone_torch",
-            289 => "stone_button",
+            289 => "red_carpet",
             290 => "chiseled_polished_blackstone",
             291 => "mossy_stone_brick_wall",
             292 => "bamboo_stairs",
-            293 => "polished_deepslate_wall",
-            294 => "black_stained_glass",
-            295 => "polished_andesite_slab",
+            293 => "oak_door",
+            294 => "red_bed", // East head
+            295 => "red_bed", // East foot
             296 => "end_stone_brick_wall",
             297 => "bamboo_slab",
             298 => "chiseled_deepslate",
-            299 => "polished_deepslate_slab",
+            299 => "oak_trapdoor",
             300 => "birch_button",
-            301 => "cobblestone_slab",
+            301 => "cobweb",
             302 => "dark_oak_slab",
             303 => "jungle_slab",
             304 => "jungle_stairs",
-            305 => "nether_brick_fence",
+            305 => "chiseled_bookshelf",
             306 => "oak_button",
             307 => "powered_rail",
             308 => "spruce_fence",
@@ -419,23 +410,23 @@ impl Block {
             312 => "cobbled_deepslate_stairs",
             313 => "dark_oak_fence",
             314 => "dark_oak_pressure_plate",
-            316 => "gray_stained_glass_pane",
+            316 => "chiseled_bookshelf",
             317 => "gray_wall_banner",
             318 => "gray_wool",
             319 => "nether_wart_block",
-            320 => "oak_fence_gate",
+            320 => "chiseled_bookshelf",
             321 => "polished_basalt",
             322 => "polished_blackstone_button",
             323 => "polished_blackstone_pressure_plate",
             324 => "red_nether_brick_slab",
             325 => "spruce_button",
-            326 => "spruce_fence_gate",
+            326 => "chiseled_bookshelf",
             327 => "acacia_trapdoor",
             328 => "composter",
             329 => "cyan_carpet",
             330 => "dark_oak_button",
             331 => "end_stone_brick_slab",
-            332 => "glass_pane",
+            332 => "damaged_anvil",
             333 => "green_carpet",
             334 => "light_blue_carpet",
             335 => "nether_brick_wall",
@@ -448,7 +439,7 @@ impl Block {
             342 => "mossy_cobblestone_slab",
             343 => "mossy_stone_brick_slab",
             344 => "prismarine",
-            345 => "stone_stairs",
+            345 => "end_rod",
             346 => "tripwire_hook",
             347 => "spruce_wall_sign",
             348 => "granite_stairs",
@@ -462,19 +453,17 @@ impl Block {
             356 => "chiseled_quartz_block",
             357 => "quartz_pillar",
             358 => "redstone_wall_torch",
-            359 => "flower_pot",
-            360 => "warped_slab",
-            361 => "warped_stairs",
-            362 => "warped_trapdoor",
-            363 => "orange_concrete",
-            364 => "stripped_warped_stem",
-            365 => "stripped_warped_hyphae",
-            366 => "redstone_lamp",
+            359 => "gold_block",
+            360 => "orange_wool",
+            361 => "blue_wool",
+            362 => "chain",
+            363 => "white_wall_banner",
+            364..=365 => "spruce_door",
+            366 => "oak_door",
             _ => return None,
         })
-        // Note: ids are u16. Prefer a free slot below 256 for commonly placed
-        // blocks: sections holding only sub-256 ids store one byte per cell,
-        // while any id >= 256 forces that section to the wider two-byte storage.
+        // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
+        // see the comment above the constant list before picking an id.
     }
 
     pub fn properties(&self) -> Option<Value> {
@@ -484,66 +473,54 @@ impl Block {
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
-
             49 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
-
-            231 => Some(Value::Compound({
-                let mut map: HashMap<String, Value> = HashMap::new();
-                map.insert("persistent".to_string(), Value::String("true".to_string()));
+            // Tall seagrass lower/upper halves.
+            70 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
                 map
             })),
-
+            93 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Waterlogged sea pickle cluster.
+            95 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("pickles".to_string(), Value::String("2".to_string()));
+                map.insert("waterlogged".to_string(), Value::String("true".to_string()));
+                map
+            })),
             105 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),
-
             106 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("half".to_string(), Value::String("lower".to_string()));
                 map
             })),
-
             107 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
-
             108 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),
-
             109 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),
-
-            113 => Some(Value::Compound({
-                let mut map: HashMap<String, Value> = HashMap::new();
-                map.insert("rotation".to_string(), Value::String("6".to_string()));
-                map.insert(
-                    "waterlogged".to_string(),
-                    Value::String("false".to_string()),
-                );
-                map
-            })),
-
-            // Oak door lower
-            159 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("half".to_string(), Value::String("lower".to_string()));
-                map
-            })),
-
             116 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert(
@@ -552,13 +529,11 @@ impl Block {
                 );
                 map
             })),
-
             117 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("east_west".to_string()));
                 map
             })),
-
             118 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert(
@@ -567,7 +542,6 @@ impl Block {
                 );
                 map
             })),
-
             119 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert(
@@ -576,7 +550,6 @@ impl Block {
                 );
                 map
             })),
-
             120 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert(
@@ -585,7 +558,6 @@ impl Block {
                 );
                 map
             })),
-
             121 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert(
@@ -594,25 +566,21 @@ impl Block {
                 );
                 map
             })),
-
             122 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("north_east".to_string()));
                 map
             })),
-
             123 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("north_west".to_string()));
                 map
             })),
-
             124 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("south_east".to_string()));
                 map
             })),
-
             125 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("south_west".to_string()));
@@ -640,20 +608,6 @@ impl Block {
             162 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("north".to_string()));
-                map.insert("part".to_string(), Value::String("foot".to_string()));
-                map.insert("occupied".to_string(), Value::String("false".to_string()));
-                map
-            })),
-            163 => Some(Value::Compound({
-                let mut map: HashMap<String, Value> = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map.insert("part".to_string(), Value::String("head".to_string()));
-                map.insert("occupied".to_string(), Value::String("false".to_string()));
-                map
-            })),
-            164 => Some(Value::Compound({
-                let mut map: HashMap<String, Value> = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
                 map.insert("part".to_string(), Value::String("foot".to_string()));
                 map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
@@ -686,32 +640,6 @@ impl Block {
                 map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
-            173 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("half".to_string(), Value::String("top".to_string()));
-                map
-            })),
-            191 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("north".to_string()));
-                map
-            })),
-            192 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map
-            })),
-            193 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("south".to_string()));
-                map
-            })),
-            194 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("west".to_string()));
-                map
-            })),
-
             197 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("lower".to_string()));
@@ -722,27 +650,9 @@ impl Block {
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
-
             210 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("axis".to_string(), Value::String("x".to_string()));
-                map
-            })),
-            211 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("axis".to_string(), Value::String("z".to_string()));
-                map
-            })),
-            // Spruce door lower
-            212 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("half".to_string(), Value::String("lower".to_string()));
-                map
-            })),
-            // Spruce door upper
-            213 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
             // Smooth stone slab (bottom by default)
@@ -755,12 +665,6 @@ impl Block {
             217 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("type".to_string(), Value::String("top".to_string()));
-                map
-            })),
-            // Oak door upper
-            218 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
             // Dark oak leaves
@@ -787,10 +691,9 @@ impl Block {
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
-            // Quartz slab (top half) used as window sill
-            240 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("type".to_string(), Value::String("top".to_string()));
+            231 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
             // Open oak trapdoor facing north (hangs flat against wall, looks like shutter)
@@ -801,24 +704,91 @@ impl Block {
                 map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
-            // Tall seagrass lower/upper halves.
-            259 => Some(Value::Compound({
+            // Quartz slab (top half) used as window sill
+            240 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("type".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            274 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("rotation".to_string(), Value::String("6".to_string()));
+                map.insert(
+                    "waterlogged".to_string(),
+                    Value::String("false".to_string()),
+                );
+                map
+            })),
+
+            // Oak door lower
+            293 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("lower".to_string()));
                 map
             })),
-            260 => Some(Value::Compound({
+            294 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("part".to_string(), Value::String("head".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
+                map
+            })),
+            295 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("part".to_string(), Value::String("foot".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
+                map
+            })),
+            299 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            305 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map
+            })),
+            316 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map
+            })),
+            320 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map
+            })),
+            326 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
+                map
+            })),
+            362 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("axis".to_string(), Value::String("z".to_string()));
+                map
+            })),
+            // Spruce door lower
+            364 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            // Spruce door upper
+            365 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
-            // Waterlogged sea pickle cluster.
-            261 => Some(Value::Compound({
+            // Oak door upper
+            366 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("pickles".to_string(), Value::String("2".to_string()));
-                map.insert("waterlogged".to_string(), Value::String("true".to_string()));
+                map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
+
             _ => None,
         }
     }
@@ -878,8 +848,33 @@ pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
     stair
 }
 
-// Lazy static blocks
+/// Ids below this are stored one byte per cell; a single id at or above it
+/// widens the whole 16x16x16 section to two bytes per cell.
+///
+/// See [`crate::world_editor::BlockStorage`], which keeps the narrow `Full`
+/// representation only while every id in the section stays under this limit.
+pub const BYTE_ID_LIMIT: u16 = 256;
 
+// Lazy static blocks
+//
+// The id space is split at BYTE_ID_LIMIT, and the split is deliberate:
+//
+//   0..255   blocks the world generator places in bulk -- terrain, land cover,
+//            climate, ores, roads, building shells and their fittings.
+//   256..    the long decorative tail: blocks that only arrive through a
+//            bundled .schem prop, a one-off landmark, or a rare interior
+//            detail, plus entries kept solely so a block name resolves.
+//
+// A section pays for the wide representation as soon as it holds one id from
+// the upper range, so a single common block sitting up there costs 4 KB in
+// every section it touches. Measured over seven sample areas, keeping the
+// split honest holds the wide-section rate near 0.5%; letting it drift took it
+// to 8.7% (up to 26% in dense cities), roughly 90 MB of avoidable peak RAM.
+//
+// When adding a block: give it a low id only if the generator can emit it
+// across many chunks. Props, landmark materials and one-off decorations belong
+// above the limit. `palette_split_is_sane` in the tests below guards the parts
+// of this that can be checked mechanically.
 pub const AIR: Block = Block::new(1);
 pub const ANDESITE: Block = Block::new(2);
 pub const BIRCH_LEAVES: Block = Block::new(3);
@@ -895,9 +890,9 @@ pub const COBBLESTONE_WALL: Block = Block::new(12);
 pub const COBBLESTONE: Block = Block::new(13);
 pub const POLISHED_BLACKSTONE_BRICKS: Block = Block::new(14);
 pub const CRACKED_STONE_BRICKS: Block = Block::new(15);
-pub const LEVER: Block = Block::new(16);
+pub const LEVER: Block = Block::new(256);
 
-pub const CYAN_CONCRETE: Block = Block::new(18);
+pub const CYAN_CONCRETE: Block = Block::new(16);
 pub const DARK_OAK_PLANKS: Block = Block::new(19);
 pub const DEEPSLATE_BRICKS: Block = Block::new(20);
 pub const DIORITE: Block = Block::new(21);
@@ -918,8 +913,8 @@ pub const HAY_BALE: Block = Block::new(35);
 pub const IRON_BARS: Block = Block::new(36);
 pub const IRON_BLOCK: Block = Block::new(37);
 
-pub const LADDER: Block = Block::new(39);
-pub const LIGHT_BLUE_CONCRETE: Block = Block::new(40);
+pub const LADDER: Block = Block::new(260);
+pub const LIGHT_BLUE_CONCRETE: Block = Block::new(149);
 pub const LIGHT_BLUE_TERRACOTTA: Block = Block::new(41);
 pub const LIGHT_GRAY_CONCRETE: Block = Block::new(42);
 pub const MOSS_BLOCK: Block = Block::new(43);
@@ -943,11 +938,11 @@ pub const POLISHED_DIORITE: Block = Block::new(60);
 pub const POLISHED_GRANITE: Block = Block::new(61);
 
 pub const QUARTZ_BRICKS: Block = Block::new(65);
-pub const RAIL: Block = Block::new(66);
+pub const RAIL: Block = Block::new(258);
 pub const RED_FLOWER: Block = Block::new(67);
 
 pub const RED_TERRACOTTA: Block = Block::new(69);
-pub const RED_WOOL: Block = Block::new(70);
+pub const RED_WOOL: Block = Block::new(259);
 pub const SAND: Block = Block::new(71);
 pub const SANDSTONE: Block = Block::new(72);
 pub const SCAFFOLDING: Block = Block::new(73);
@@ -970,15 +965,15 @@ pub const WHITE_FLOWER: Block = Block::new(89);
 pub const WHITE_STAINED_GLASS: Block = Block::new(90);
 pub const WHITE_TERRACOTTA: Block = Block::new(91);
 pub const WHITE_WOOL: Block = Block::new(92);
-pub const YELLOW_CONCRETE: Block = Block::new(93);
+pub const YELLOW_CONCRETE: Block = Block::new(39);
 pub const YELLOW_FLOWER: Block = Block::new(94);
-pub const YELLOW_WOOL: Block = Block::new(95);
-pub const LIME_CONCRETE: Block = Block::new(96);
+pub const YELLOW_WOOL: Block = Block::new(261);
+pub const LIME_CONCRETE: Block = Block::new(190);
 
-pub const BLUE_CONCRETE: Block = Block::new(98);
-pub const PURPLE_CONCRETE: Block = Block::new(99);
+pub const BLUE_CONCRETE: Block = Block::new(191);
+pub const PURPLE_CONCRETE: Block = Block::new(146);
 pub const RED_CONCRETE: Block = Block::new(100);
-pub const MAGENTA_CONCRETE: Block = Block::new(101);
+pub const MAGENTA_CONCRETE: Block = Block::new(173);
 
 pub const YELLOW_TERRACOTTA: Block = Block::new(104);
 pub const WAXED_OXIDIZED_COPPER: Block = Block::new(103);
@@ -1003,7 +998,7 @@ pub const WAXED_CUT_COPPER_STAIRS: Block = Block::new(38);
 pub const WAXED_OXIDIZED_CUT_COPPER_STAIRS: Block = Block::new(102);
 pub const SNOW_BLOCK: Block = Block::new(111);
 
-pub const SIGN: Block = Block::new(113);
+pub const SIGN: Block = Block::new(274);
 pub const ANDESITE_WALL: Block = Block::new(114);
 pub const STONE_BRICK_WALL: Block = Block::new(115);
 pub const CARROTS: Block = Block::new(105);
@@ -1041,26 +1036,26 @@ pub const WHITE_CARPET: Block = Block::new(141);
 pub const BOOKSHELF: Block = Block::new(142);
 pub const OAK_PRESSURE_PLATE: Block = Block::new(143);
 pub const OAK_STAIRS: Block = Block::new(144);
-pub const WHITE_WALL_BANNER: Block = Block::new(145);
-pub const BLUE_WALL_BANNER: Block = Block::new(146);
-pub const BLACK_WALL_BANNER: Block = Block::new(147);
-pub const RED_WALL_BANNER: Block = Block::new(148);
-pub const GREEN_WALL_BANNER: Block = Block::new(149);
+pub const WHITE_WALL_BANNER: Block = Block::new(363);
+pub const BLUE_WALL_BANNER: Block = Block::new(275);
+pub const BLACK_WALL_BANNER: Block = Block::new(277);
+pub const RED_WALL_BANNER: Block = Block::new(278);
+pub const GREEN_WALL_BANNER: Block = Block::new(285);
 pub const MOSSY_STONE_BRICKS: Block = Block::new(150);
 pub const DEEPSLATE: Block = Block::new(151);
 pub const TUFF: Block = Block::new(152);
 pub const COBBLED_DEEPSLATE: Block = Block::new(153);
-pub const WATER_CAULDRON: Block = Block::new(154);
+pub const WATER_CAULDRON: Block = Block::new(286);
 pub const CHEST: Block = Block::new(155);
-pub const RED_CARPET: Block = Block::new(156);
+pub const RED_CARPET: Block = Block::new(289);
 pub const ANVIL: Block = Block::new(157);
 pub const NOTE_BLOCK: Block = Block::new(158);
-pub const OAK_DOOR: Block = Block::new(159);
+pub const OAK_DOOR: Block = Block::new(293);
 pub const BREWING_STAND: Block = Block::new(160);
 pub const RED_BED_NORTH_HEAD: Block = Block::new(161);
 pub const RED_BED_NORTH_FOOT: Block = Block::new(162);
-pub const RED_BED_EAST_HEAD: Block = Block::new(163);
-pub const RED_BED_EAST_FOOT: Block = Block::new(164);
+pub const RED_BED_EAST_HEAD: Block = Block::new(294);
+pub const RED_BED_EAST_FOOT: Block = Block::new(295);
 pub const RED_BED_SOUTH_HEAD: Block = Block::new(165);
 pub const RED_BED_SOUTH_FOOT: Block = Block::new(166);
 pub const RED_BED_WEST_HEAD: Block = Block::new(167);
@@ -1069,7 +1064,7 @@ pub const GRAY_STAINED_GLASS: Block = Block::new(169);
 pub const LIGHT_GRAY_STAINED_GLASS: Block = Block::new(170);
 pub const BROWN_STAINED_GLASS: Block = Block::new(171);
 pub const TINTED_GLASS: Block = Block::new(172);
-pub const OAK_TRAPDOOR: Block = Block::new(173);
+pub const OAK_TRAPDOOR: Block = Block::new(299);
 pub const BROWN_CONCRETE: Block = Block::new(174);
 pub const BLACK_TERRACOTTA: Block = Block::new(175);
 pub const BROWN_TERRACOTTA: Block = Block::new(176);
@@ -1086,37 +1081,37 @@ pub const POLISHED_ANDESITE_STAIRS: Block = Block::new(186);
 pub const NETHER_BRICK_STAIRS: Block = Block::new(187);
 pub const BARREL: Block = Block::new(188);
 pub const FERN: Block = Block::new(189);
-pub const COBWEB: Block = Block::new(190);
-pub const CHISELLED_BOOKSHELF_NORTH: Block = Block::new(191);
-pub const CHISELLED_BOOKSHELF_EAST: Block = Block::new(192);
-pub const CHISELLED_BOOKSHELF_SOUTH: Block = Block::new(193);
-pub const CHISELLED_BOOKSHELF_WEST: Block = Block::new(194);
+pub const COBWEB: Block = Block::new(301);
+pub const CHISELLED_BOOKSHELF_NORTH: Block = Block::new(305);
+pub const CHISELLED_BOOKSHELF_EAST: Block = Block::new(316);
+pub const CHISELLED_BOOKSHELF_SOUTH: Block = Block::new(320);
+pub const CHISELLED_BOOKSHELF_WEST: Block = Block::new(326);
 // Backwards-compatible alias (defaults to north-facing)
 pub const CHISELLED_BOOKSHELF: Block = CHISELLED_BOOKSHELF_NORTH;
 
-pub const DAMAGED_ANVIL: Block = Block::new(196);
+pub const DAMAGED_ANVIL: Block = Block::new(332);
 pub const LARGE_FERN_LOWER: Block = Block::new(197);
 pub const LARGE_FERN_UPPER: Block = Block::new(198);
 
-pub const END_ROD: Block = Block::new(200);
+pub const END_ROD: Block = Block::new(345);
 pub const LIGHTNING_ROD: Block = Block::new(201);
-pub const GOLD_BLOCK: Block = Block::new(202);
+pub const GOLD_BLOCK: Block = Block::new(359);
 pub const SEA_LANTERN: Block = Block::new(203);
 
-pub const ORANGE_WOOL: Block = Block::new(205);
-pub const BLUE_WOOL: Block = Block::new(206);
+pub const ORANGE_WOOL: Block = Block::new(360);
+pub const BLUE_WOOL: Block = Block::new(361);
 pub const GREEN_CONCRETE: Block = Block::new(207);
 pub const BRICK_WALL: Block = Block::new(208);
 pub const REDSTONE_BLOCK: Block = Block::new(209);
 pub const CHAIN_X: Block = Block::new(210);
-pub const CHAIN_Z: Block = Block::new(211);
-pub const SPRUCE_DOOR_LOWER: Block = Block::new(212);
-pub const SPRUCE_DOOR_UPPER: Block = Block::new(213);
+pub const CHAIN_Z: Block = Block::new(362);
+pub const SPRUCE_DOOR_LOWER: Block = Block::new(364);
+pub const SPRUCE_DOOR_UPPER: Block = Block::new(365);
 pub const SMOOTH_STONE_SLAB: Block = Block::new(214);
 
 pub const LIGHT_GRAY_TERRACOTTA: Block = Block::new(216);
 pub const OAK_SLAB_TOP: Block = Block::new(217);
-pub const OAK_DOOR_UPPER: Block = Block::new(218);
+pub const OAK_DOOR_UPPER: Block = Block::new(366);
 pub const DARK_OAK_LOG: Block = Block::new(219);
 pub const DARK_OAK_LEAVES: Block = Block::new(220);
 pub const JUNGLE_LOG: Block = Block::new(221);
@@ -1159,54 +1154,54 @@ pub const LAPIS_ORE: Block = Block::new(251);
 // Underwater bed palette + vegetation (ported from the Teddy fork; ids kept verbatim).
 pub const SEAGRASS: Block = Block::new(238);
 pub const KELP_PLANT: Block = Block::new(239);
-pub const MAGMA_BLOCK: Block = Block::new(256);
-pub const SNOW_LAYER: Block = Block::new(257);
-pub const KELP: Block = Block::new(258);
-pub const TALL_SEAGRASS_BOTTOM: Block = Block::new(259);
-pub const TALL_SEAGRASS_TOP: Block = Block::new(260);
-pub const SEA_PICKLE: Block = Block::new(261);
-pub const SOUL_SAND: Block = Block::new(265);
+pub const MAGMA_BLOCK: Block = Block::new(18);
+pub const SNOW_LAYER: Block = Block::new(40);
+pub const KELP: Block = Block::new(66);
+pub const TALL_SEAGRASS_BOTTOM: Block = Block::new(70);
+pub const TALL_SEAGRASS_TOP: Block = Block::new(93);
+pub const SEA_PICKLE: Block = Block::new(95);
+pub const SOUL_SAND: Block = Block::new(96);
 // Structure-schematic blocks, placed with their original block-states.
-pub const SANDSTONE_WALL: Block = Block::new(266);
-pub const CUT_SANDSTONE_SLAB: Block = Block::new(267);
+pub const SANDSTONE_WALL: Block = Block::new(98);
+pub const CUT_SANDSTONE_SLAB: Block = Block::new(99);
 pub const SMOOTH_QUARTZ_SLAB: Block = Block::new(268);
 pub const SMOOTH_QUARTZ_STAIRS: Block = Block::new(269);
 pub const BLACKSTONE_STAIRS: Block = Block::new(270);
 pub const BLACKSTONE_WALL: Block = Block::new(271);
 pub const DIORITE_WALL: Block = Block::new(272);
-pub const IRON_TRAPDOOR: Block = Block::new(273);
-pub const JUNGLE_TRAPDOOR: Block = Block::new(274);
-pub const BIRCH_FENCE: Block = Block::new(275);
+pub const IRON_TRAPDOOR: Block = Block::new(101);
+pub const JUNGLE_TRAPDOOR: Block = Block::new(113);
+pub const BIRCH_FENCE: Block = Block::new(267);
 pub const JUNGLE_FENCE: Block = Block::new(276);
-pub const BIRCH_FENCE_GATE: Block = Block::new(277);
-pub const DARK_OAK_FENCE_GATE: Block = Block::new(278);
+pub const BIRCH_FENCE_GATE: Block = Block::new(147);
+pub const DARK_OAK_FENCE_GATE: Block = Block::new(148);
 pub const BIRCH_DOOR: Block = Block::new(279);
 pub const BIRCH_PRESSURE_PLATE: Block = Block::new(280);
 pub const STONE_PRESSURE_PLATE: Block = Block::new(281);
 pub const BLAST_FURNACE: Block = Block::new(282);
 pub const DISPENSER: Block = Block::new(283);
 pub const HOPPER: Block = Block::new(284);
-pub const GRINDSTONE: Block = Block::new(285);
-pub const LANTERN: Block = Block::new(286);
+pub const GRINDSTONE: Block = Block::new(257);
+pub const LANTERN: Block = Block::new(154);
 pub const LODESTONE: Block = Block::new(287);
 pub const REDSTONE_TORCH: Block = Block::new(288);
-pub const STONE_BUTTON: Block = Block::new(289);
+pub const STONE_BUTTON: Block = Block::new(156);
 pub const CHISELED_POLISHED_BLACKSTONE: Block = Block::new(290);
 pub const MOSSY_STONE_BRICK_WALL: Block = Block::new(291);
 pub const BAMBOO_STAIRS: Block = Block::new(292);
-pub const POLISHED_DEEPSLATE_WALL: Block = Block::new(293);
-pub const BLACK_STAINED_GLASS: Block = Block::new(294);
-pub const POLISHED_ANDESITE_SLAB: Block = Block::new(295);
+pub const POLISHED_DEEPSLATE_WALL: Block = Block::new(159);
+pub const BLACK_STAINED_GLASS: Block = Block::new(163);
+pub const POLISHED_ANDESITE_SLAB: Block = Block::new(164);
 pub const END_STONE_BRICK_WALL: Block = Block::new(296);
 pub const BAMBOO_SLAB: Block = Block::new(297);
 pub const CHISELED_DEEPSLATE: Block = Block::new(298);
-pub const POLISHED_DEEPSLATE_SLAB: Block = Block::new(299);
+pub const POLISHED_DEEPSLATE_SLAB: Block = Block::new(273);
 pub const BIRCH_BUTTON: Block = Block::new(300);
-pub const COBBLESTONE_SLAB: Block = Block::new(301);
+pub const COBBLESTONE_SLAB: Block = Block::new(265);
 pub const DARK_OAK_SLAB: Block = Block::new(302);
 pub const JUNGLE_SLAB: Block = Block::new(303);
 pub const JUNGLE_STAIRS: Block = Block::new(304);
-pub const NETHER_BRICK_FENCE: Block = Block::new(305);
+pub const NETHER_BRICK_FENCE: Block = Block::new(266);
 pub const OAK_BUTTON: Block = Block::new(306);
 pub const POWERED_RAIL: Block = Block::new(307);
 pub const SPRUCE_FENCE: Block = Block::new(308);
@@ -1216,23 +1211,23 @@ pub const COBBLED_DEEPSLATE_SLAB: Block = Block::new(311);
 pub const COBBLED_DEEPSLATE_STAIRS: Block = Block::new(312);
 pub const DARK_OAK_FENCE: Block = Block::new(313);
 pub const DARK_OAK_PRESSURE_PLATE: Block = Block::new(314);
-pub const GRAY_STAINED_GLASS_PANE: Block = Block::new(316);
+pub const GRAY_STAINED_GLASS_PANE: Block = Block::new(192);
 pub const GRAY_WALL_BANNER: Block = Block::new(317);
 pub const GRAY_WOOL: Block = Block::new(318);
 pub const NETHER_WART_BLOCK: Block = Block::new(319);
-pub const OAK_FENCE_GATE: Block = Block::new(320);
+pub const OAK_FENCE_GATE: Block = Block::new(193);
 pub const POLISHED_BASALT: Block = Block::new(321);
 pub const POLISHED_BLACKSTONE_BUTTON: Block = Block::new(322);
 pub const POLISHED_BLACKSTONE_PRESSURE_PLATE: Block = Block::new(323);
 pub const RED_NETHER_BRICK_SLAB: Block = Block::new(324);
 pub const SPRUCE_BUTTON: Block = Block::new(325);
-pub const SPRUCE_FENCE_GATE: Block = Block::new(326);
+pub const SPRUCE_FENCE_GATE: Block = Block::new(194);
 pub const ACACIA_TRAPDOOR: Block = Block::new(327);
 pub const COMPOSTER: Block = Block::new(328);
 pub const CYAN_CARPET: Block = Block::new(329);
 pub const DARK_OAK_BUTTON: Block = Block::new(330);
 pub const END_STONE_BRICK_SLAB: Block = Block::new(331);
-pub const GLASS_PANE: Block = Block::new(332);
+pub const GLASS_PANE: Block = Block::new(196);
 pub const GREEN_CARPET: Block = Block::new(333);
 pub const LIGHT_BLUE_CARPET: Block = Block::new(334);
 pub const NETHER_BRICK_WALL: Block = Block::new(335);
@@ -1245,7 +1240,7 @@ pub const LIGHT_GRAY_CARPET: Block = Block::new(341);
 pub const MOSSY_COBBLESTONE_SLAB: Block = Block::new(342);
 pub const MOSSY_STONE_BRICK_SLAB: Block = Block::new(343);
 pub const PRISMARINE: Block = Block::new(344);
-pub const STONE_STAIRS: Block = Block::new(345);
+pub const STONE_STAIRS: Block = Block::new(200);
 pub const TRIPWIRE_HOOK: Block = Block::new(346);
 // Tombstone and wind-turbine schematic blocks.
 pub const SPRUCE_WALL_SIGN: Block = Block::new(347);
@@ -1260,14 +1255,14 @@ pub const SOUL_LANTERN: Block = Block::new(355);
 pub const CHISELED_QUARTZ_BLOCK: Block = Block::new(356);
 pub const QUARTZ_PILLAR: Block = Block::new(357);
 pub const REDSTONE_WALL_TORCH: Block = Block::new(358);
-pub const EMPTY_FLOWER_POT: Block = Block::new(359);
-pub const WARPED_SLAB: Block = Block::new(360);
-pub const WARPED_STAIRS: Block = Block::new(361);
-pub const WARPED_TRAPDOOR: Block = Block::new(362);
-pub const STRIPPED_WARPED_STEM: Block = Block::new(364);
-pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(365);
-pub const ORANGE_CONCRETE: Block = Block::new(363);
-pub const REDSTONE_LAMP: Block = Block::new(366);
+pub const EMPTY_FLOWER_POT: Block = Block::new(202);
+pub const WARPED_SLAB: Block = Block::new(205);
+pub const WARPED_STAIRS: Block = Block::new(206);
+pub const WARPED_TRAPDOOR: Block = Block::new(211);
+pub const STRIPPED_WARPED_STEM: Block = Block::new(212);
+pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(213);
+pub const ORANGE_CONCRETE: Block = Block::new(145);
+pub const REDSTONE_LAMP: Block = Block::new(218);
 // Reuses the retired open-trapdoor slot; sub-256 ids keep sections one byte per cell.
 pub const SUGAR_CANE: Block = Block::new(237);
 
@@ -1341,6 +1336,10 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         // Greys and concretes
         GRAY_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         LIGHT_GRAY_CONCRETE => STONE_BRICK_STAIRS,
+        BLACK_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        LIGHT_BLUE_CONCRETE => POLISHED_DIORITE_STAIRS,
+        CYAN_CONCRETE => DEEPSLATE_BRICK_STAIRS,
+        GREEN_CONCRETE => MOSSY_COBBLESTONE_STAIRS,
 
         // Nether brick family
         NETHER_BRICK => NETHER_BRICK_STAIRS,
@@ -1467,37 +1466,12 @@ pub static RELIGIOUS_WINDOW_OPTIONS: [Block; 5] = [
     WHITE_STAINED_GLASS,
 ];
 
-// Window types for different building styles (non-deterministic, for backwards compatibility)
-pub fn get_window_block_for_building_type(building_type: &str) -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-    get_window_block_for_building_type_with_rng(building_type, &mut rng)
-}
+// Farm window options, plain glazing since barns don't get tinted variety.
+pub static FARM_WINDOW_OPTIONS: [Block; 3] = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
 
-/// Deterministic window block selection using provided RNG
-pub fn get_window_block_for_building_type_with_rng(
-    building_type: &str,
-    rng: &mut impl rand::Rng,
-) -> Block {
-    match building_type {
-        "residential" | "house" | "apartment" | "apartments" => {
-            RESIDENTIAL_WINDOW_OPTIONS[rng.random_range(0..RESIDENTIAL_WINDOW_OPTIONS.len())]
-        }
-        "hospital" | "school" | "university" => {
-            INSTITUTIONAL_WINDOW_OPTIONS[rng.random_range(0..INSTITUTIONAL_WINDOW_OPTIONS.len())]
-        }
-        "hotel" | "restaurant" => {
-            HOSPITALITY_WINDOW_OPTIONS[rng.random_range(0..HOSPITALITY_WINDOW_OPTIONS.len())]
-        }
-        "industrial" | "warehouse" => {
-            INDUSTRIAL_WINDOW_OPTIONS[rng.random_range(0..INDUSTRIAL_WINDOW_OPTIONS.len())]
-        }
-        "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
-            RELIGIOUS_WINDOW_OPTIONS[rng.random_range(0..RELIGIOUS_WINDOW_OPTIONS.len())]
-        }
-        _ => WINDOW_VARIATIONS[rng.random_range(0..WINDOW_VARIATIONS.len())],
-    }
-}
+// Historic window options (clear, slightly aged glazing).
+pub static HISTORIC_WINDOW_OPTIONS: [Block; 3] =
+    [GLASS, LIGHT_GRAY_STAINED_GLASS, WHITE_STAINED_GLASS];
 
 // Floor block options for buildings
 pub static FLOOR_BLOCK_OPTIONS: [Block; 8] = [
@@ -1521,172 +1495,6 @@ pub fn get_random_floor_block() -> Block {
 /// Deterministic floor block selection using provided RNG
 pub fn get_floor_block_with_rng(rng: &mut impl rand::Rng) -> Block {
     FLOOR_BLOCK_OPTIONS[rng.random_range(0..FLOOR_BLOCK_OPTIONS.len())]
-}
-
-// Define all predefined colors with their blocks
-static DEFINED_COLORS: &[ColorBlockMapping] = &[
-    ((233, 107, 57), &[BRICK, NETHER_BRICK]),
-    (
-        (18, 12, 13),
-        &[POLISHED_BLACKSTONE_BRICKS, BLACKSTONE, DEEPSLATE_BRICKS],
-    ),
-    ((76, 127, 153), &[LIGHT_BLUE_TERRACOTTA]),
-    (
-        (0, 0, 0),
-        &[DEEPSLATE_BRICKS, BLACKSTONE, POLISHED_BLACKSTONE],
-    ),
-    (
-        (186, 195, 142),
-        &[
-            END_STONE_BRICKS,
-            SANDSTONE,
-            SMOOTH_SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-        ],
-    ),
-    (
-        (57, 41, 35),
-        &[BROWN_TERRACOTTA, BROWN_CONCRETE, MUD_BRICKS, BRICK],
-    ),
-    (
-        (112, 108, 138),
-        &[LIGHT_BLUE_TERRACOTTA, GRAY_TERRACOTTA, GRAY_CONCRETE],
-    ),
-    (
-        (122, 92, 66),
-        &[MUD_BRICKS, BROWN_TERRACOTTA, SANDSTONE, BRICK],
-    ),
-    ((24, 13, 14), &[NETHER_BRICK, BLACKSTONE, DEEPSLATE_BRICKS]),
-    (
-        (159, 82, 36),
-        &[
-            BROWN_TERRACOTTA,
-            BRICK,
-            POLISHED_GRANITE,
-            BROWN_CONCRETE,
-            NETHERITE_BLOCK,
-            POLISHED_DEEPSLATE,
-        ],
-    ),
-    (
-        (128, 128, 128),
-        &[
-            POLISHED_ANDESITE,
-            LIGHT_GRAY_CONCRETE,
-            SMOOTH_STONE,
-            STONE_BRICKS,
-        ],
-    ),
-    (
-        (174, 173, 174),
-        &[
-            POLISHED_ANDESITE,
-            LIGHT_GRAY_CONCRETE,
-            SMOOTH_STONE,
-            STONE_BRICKS,
-        ],
-    ),
-    ((141, 101, 142), &[STONE_BRICKS, BRICK, MUD_BRICKS]),
-    (
-        (142, 60, 46),
-        &[
-            BLACK_TERRACOTTA,
-            NETHERITE_BLOCK,
-            NETHER_BRICK,
-            POLISHED_GRANITE,
-            POLISHED_DEEPSLATE,
-            BROWN_TERRACOTTA,
-        ],
-    ),
-    (
-        (153, 83, 28),
-        &[
-            BLACK_TERRACOTTA,
-            POLISHED_GRANITE,
-            BROWN_CONCRETE,
-            BROWN_TERRACOTTA,
-            STONE_BRICKS,
-        ],
-    ),
-    (
-        (224, 216, 175),
-        &[
-            SMOOTH_SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-            POLISHED_ANDESITE,
-            SMOOTH_STONE,
-        ],
-    ),
-    (
-        (188, 182, 179),
-        &[
-            SMOOTH_SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-            QUARTZ_BRICKS,
-            POLISHED_ANDESITE,
-            SMOOTH_STONE,
-        ],
-    ),
-    (
-        (35, 86, 85),
-        &[
-            POLISHED_BLACKSTONE_BRICKS,
-            BLUE_TERRACOTTA,
-            LIGHT_BLUE_TERRACOTTA,
-        ],
-    ),
-    (
-        (255, 255, 255),
-        &[WHITE_CONCRETE, QUARTZ_BRICKS, QUARTZ_BLOCK],
-    ),
-    (
-        (209, 177, 161),
-        &[
-            WHITE_TERRACOTTA,
-            SMOOTH_SANDSTONE,
-            SMOOTH_STONE,
-            SANDSTONE,
-            LIGHT_GRAY_CONCRETE,
-        ],
-    ),
-    ((191, 147, 42), &[SMOOTH_SANDSTONE, SANDSTONE, SMOOTH_STONE]),
-    // Oxidized-copper green
-    ((85, 158, 134), &[WAXED_OXIDIZED_COPPER]),
-    // Terracotta-tile orange-red
-    (
-        (178, 76, 50),
-        &[RED_TERRACOTTA, ORANGE_TERRACOTTA, BRICK, NETHER_BRICK],
-    ),
-    (
-        (210, 110, 60),
-        &[ORANGE_TERRACOTTA, BRICK, BROWN_TERRACOTTA, RED_TERRACOTTA],
-    ),
-    // Saturated tag colours, the muted entries above would wash these out
-    ((36, 137, 199), &[LIGHT_BLUE_CONCRETE]),
-    ((45, 47, 143), &[BLUE_CONCRETE, BLUE_TERRACOTTA]),
-    ((21, 119, 136), &[CYAN_CONCRETE]),
-    ((73, 91, 36), &[GREEN_CONCRETE]),
-    ((120, 200, 30), &[LIME_CONCRETE]),
-    ((241, 175, 21), &[YELLOW_CONCRETE]),
-    ((186, 133, 35), &[YELLOW_TERRACOTTA]),
-    ((200, 30, 30), &[RED_CONCRETE]),
-    ((100, 32, 156), &[PURPLE_CONCRETE]),
-    ((169, 48, 159), &[MAGENTA_CONCRETE]),
-    ((224, 97, 1), &[ORANGE_CONCRETE]),
-    ((90, 90, 90), &[GRAY_CONCRETE, POLISHED_DEEPSLATE]),
-];
-
-// Function to randomly select building wall block with alternatives
-pub fn get_building_wall_block_for_color(color: RGBTuple, rng: &mut impl rand::Rng) -> Block {
-    let closest_color = DEFINED_COLORS
-        .iter()
-        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
-
-    if let Some((_, options)) = closest_color {
-        options[rng.random_range(0..options.len())]
-    } else {
-        get_fallback_building_block(rng)
-    }
 }
 
 // Function to get a random fallback building block when no color attribute is specified
@@ -1917,49 +1725,6 @@ mod material_tests {
     }
 
     #[test]
-    fn saturated_colours_map_to_matching_blocks() {
-        let cases = [
-            ((0, 128, 0), GREEN_CONCRETE),
-            ((255, 255, 0), YELLOW_CONCRETE),
-            ((255, 0, 0), RED_CONCRETE),
-            ((128, 0, 128), PURPLE_CONCRETE),
-            ((255, 128, 0), ORANGE_CONCRETE),
-            ((24, 116, 205), LIGHT_BLUE_CONCRETE),
-        ];
-        for (rgb, expected) in cases {
-            assert_eq!(
-                get_building_wall_block_for_color(rgb, &mut rng()),
-                expected,
-                "colour {rgb:?} should map to {expected:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn muted_colours_keep_muted_blocks() {
-        let saturated = [
-            GREEN_CONCRETE,
-            LIME_CONCRETE,
-            YELLOW_CONCRETE,
-            RED_CONCRETE,
-            PURPLE_CONCRETE,
-            MAGENTA_CONCRETE,
-            ORANGE_CONCRETE,
-            LIGHT_BLUE_CONCRETE,
-            BLUE_CONCRETE,
-            CYAN_CONCRETE,
-        ];
-        // beige, pale rose, brick red
-        for rgb in [(187, 173, 142), (209, 177, 161), (176, 74, 58)] {
-            let b = get_building_wall_block_for_color(rgb, &mut rng());
-            assert!(
-                !saturated.contains(&b),
-                "colour {rgb:?} got saturated {b:?}"
-            );
-        }
-    }
-
-    #[test]
     fn underscore_and_space_normalization_holds() {
         // The normalizer strips spaces/underscores/hyphens and lowercases.
         assert_eq!(
@@ -1977,4 +1742,252 @@ mod material_tests {
         assert!(get_wall_block_for_material("notamaterial", &mut rng()).is_none());
         assert!(get_roof_block_for_material("notamaterial", &mut rng()).is_none());
     }
+
+    /// Blocks the generator can lay down across whole buildings and streets must
+    /// stay under [`BYTE_ID_LIMIT`]; one stray high id widens every section that
+    /// holds it from 4 KB to 8 KB. This covers the tables that can be enumerated
+    /// mechanically -- the material palettes, the window and floor pickers, and
+    /// the material -> stair/slab/wall derivations over the whole id space.
+    #[test]
+    fn palette_split_is_sane() {
+        fn check(block: Block, source: &str) {
+            assert!(
+                block.id() < BYTE_ID_LIMIT,
+                "{source} can place {} (id {}), at or above BYTE_ID_LIMIT; \
+                 that widens every section it lands in",
+                block.name(),
+                block.id(),
+            );
+        }
+
+        for (table, source) in [
+            (&WINDOW_VARIATIONS[..], "WINDOW_VARIATIONS"),
+            (
+                &RESIDENTIAL_WINDOW_OPTIONS[..],
+                "RESIDENTIAL_WINDOW_OPTIONS",
+            ),
+            (
+                &INSTITUTIONAL_WINDOW_OPTIONS[..],
+                "INSTITUTIONAL_WINDOW_OPTIONS",
+            ),
+            (
+                &HOSPITALITY_WINDOW_OPTIONS[..],
+                "HOSPITALITY_WINDOW_OPTIONS",
+            ),
+            (&INDUSTRIAL_WINDOW_OPTIONS[..], "INDUSTRIAL_WINDOW_OPTIONS"),
+            (&RELIGIOUS_WINDOW_OPTIONS[..], "RELIGIOUS_WINDOW_OPTIONS"),
+            (&FLOOR_BLOCK_OPTIONS[..], "FLOOR_BLOCK_OPTIONS"),
+        ] {
+            for &block in table {
+                check(block, source);
+            }
+        }
+
+        for block in crate::block_palette::all_building_palette_blocks() {
+            check(block, "block_palette");
+        }
+
+        // Every wall material derives its own stairs, slabs and wall pieces, so
+        // walk the whole low range rather than a sample of it. Materials that
+        // already sit in the wide range need no check: they widen the section
+        // themselves, so where their trim lands makes no difference.
+        for id in 0..BYTE_ID_LIMIT {
+            let material = Block::from_raw_id(id);
+            if material.try_name().is_none() {
+                continue;
+            }
+            check(
+                get_stair_block_for_material(material),
+                "get_stair_block_for_material",
+            );
+            check(
+                get_slab_block_for_material(material),
+                "get_slab_block_for_material",
+            );
+            check(
+                get_wall_piece_for_material(material),
+                "get_wall_piece_for_material",
+            );
+        }
+
+        // The random pickers draw from inline option arrays, so sample each one
+        // often enough to reach every entry.
+        for seed in 0..64 {
+            let mut r = ChaCha8Rng::seed_from_u64(seed);
+            check(
+                get_fallback_building_block(&mut r),
+                "get_fallback_building_block",
+            );
+            check(get_castle_wall_block(&mut r), "get_castle_wall_block");
+            check(get_floor_block_with_rng(&mut r), "get_floor_block_with_rng");
+            for material in WALL_MATERIALS {
+                if let Some(block) = get_wall_block_for_material(material, &mut r) {
+                    check(block, "get_wall_block_for_material");
+                }
+            }
+            for material in ROOF_MATERIALS {
+                if let Some(block) = get_roof_block_for_material(material, &mut r) {
+                    check(block, "get_roof_block_for_material");
+                }
+            }
+        }
+    }
+
+    /// Every `building:material` / `roof:material` value the mappers recognise.
+    /// Keep in sync when adding an arm, so `palette_split_is_sane` keeps covering it.
+    const WALL_MATERIALS: &[&str] = &[
+        "brick",
+        "bricks",
+        "redbrick",
+        "stone",
+        "naturalstone",
+        "hard",
+        "limestone",
+        "sandstone",
+        "marble",
+        "granite",
+        "slate",
+        "concrete",
+        "reinforcedconcrete",
+        "cementblock",
+        "cement",
+        "breezeblock",
+        "concreteblock",
+        "concreteblocks",
+        "block",
+        "concretemasonryunit",
+        "plaster",
+        "stucco",
+        "render",
+        "rendering",
+        "limerender",
+        "plastered",
+        "wood",
+        "timber",
+        "timberframe",
+        "halftimber",
+        "halftimbered",
+        "loghouse",
+        "logs",
+        "bamboo",
+        "reed",
+        "metal",
+        "steel",
+        "iron",
+        "aluminium",
+        "aluminum",
+        "corrugatedsteel",
+        "corrugatediron",
+        "corrugatedmetal",
+        "tin",
+        "sheetmetal",
+        "metalsheet",
+        "metalplates",
+        "copper",
+        "oxidisedcopper",
+        "oxidizedcopper",
+        "patina",
+        "verdigris",
+        "glass",
+        "mirror",
+        "solarpanels",
+        "tiles",
+        "tile",
+        "rooftiles",
+        "ceramictiles",
+        "ceramic",
+        "terracotta",
+        "mud",
+        "adobe",
+        "earth",
+        "clay",
+        "rammedearth",
+        "cob",
+        "loam",
+        "thatch",
+        "straw",
+        "asbestos",
+        "asbestoscement",
+        "fibrecement",
+        "fibercement",
+        "vinyl",
+        "siding",
+        "vinylsiding",
+        "weatherboard",
+        "weatherboarding",
+        "clapboard",
+        "panel",
+        "panels",
+        "panelling",
+        "paneling",
+        "panelhouse",
+        "prefab",
+        "prefabricated",
+        "plastic",
+        "light",
+        "mixed",
+        "masonry",
+        "pebbledash",
+    ];
+
+    const ROOF_MATERIALS: &[&str] = &[
+        "glass",
+        "glazing",
+        "acrylicglass",
+        "tile",
+        "tiles",
+        "rooftiles",
+        "ceramic",
+        "ceramictiles",
+        "claytile",
+        "claytiles",
+        "terracotta",
+        "slate",
+        "slates",
+        "metal",
+        "steel",
+        "aluminium",
+        "aluminum",
+        "corrugatedsteel",
+        "corrugatediron",
+        "corrugatedmetal",
+        "tin",
+        "zinc",
+        "lead",
+        "sheetmetal",
+        "metalsheet",
+        "copper",
+        "concrete",
+        "reinforcedconcrete",
+        "wood",
+        "timber",
+        "shingle",
+        "shingles",
+        "woodshingle",
+        "woodshingles",
+        "thatch",
+        "straw",
+        "reed",
+        "reeds",
+        "palmleaves",
+        "asphalt",
+        "bitumen",
+        "tar",
+        "tarpaper",
+        "rolledasphalt",
+        "rolledroofing",
+        "asphaltshingle",
+        "stone",
+        "gravel",
+        "grass",
+        "green",
+        "vegetation",
+        "greenroof",
+        "sod",
+        "eternit",
+        "asbestos",
+        "fibrecement",
+        "fibercement",
+        "plastic",
+    ];
 }

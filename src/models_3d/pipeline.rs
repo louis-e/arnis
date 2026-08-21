@@ -15,17 +15,17 @@ pub struct Models3dPipeline {
 }
 
 impl Models3dPipeline {
-    pub fn prescan(elements: &[ProcessedElement], args: &Args) -> Self {
-        let three_dmr = three_dmr::prescan(elements, args.rotation);
-        let wikidata = wikidata::prescan(
-            elements,
-            &three_dmr.suppressed_ids,
-            args.rotation,
-            args.scale,
-        );
+    /// `already_suppressed` holds elements a landmark model already claims.
+    pub fn prescan(
+        elements: &[ProcessedElement],
+        args: &Args,
+        already_suppressed: &HashSet<(&'static str, u64)>,
+    ) -> Self {
+        let three_dmr = three_dmr::prescan(elements, already_suppressed, args.rotation);
 
-        let mut combined: HashSet<(&'static str, u64)> = HashSet::new();
+        let mut combined: HashSet<(&'static str, u64)> = already_suppressed.clone();
         combined.extend(three_dmr.suppressed_ids.iter().copied());
+        let wikidata = wikidata::prescan(elements, &combined, args.rotation, args.scale);
         combined.extend(wikidata.suppressed_ids.iter().copied());
 
         let stadium = custom::stadium::prescan(elements, &combined, args.scale);

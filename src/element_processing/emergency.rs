@@ -54,12 +54,14 @@ fn generate_fire_hydrant(editor: &mut WorldEditor, node: &ProcessedNode) {
 
     let abs_y = editor.get_absolute_y(x, 1, z);
 
-    if editor.map_decals_enabled() {
-        // Hydrant sign on all four sides.
-        for facing in [2i8, 3, 4, 5] {
-            editor.place_map_decal(x, abs_y, z, facing, crate::map_item::HYDRANT_MAP_ID);
+    if let Some(key) = crate::element_processing::signage::furniture_pictogram(&node.tags) {
+        if editor.signage().is_some_and(|s| s.registry.contains(&key)) {
+            // Hydrant sign on all four sides.
+            for facing in [2i8, 3, 4, 5] {
+                editor.place_decal(x, abs_y, z, facing, &key);
+            }
+            return;
         }
-        return;
     }
 
     // Non-Java fallback: red banners with an orange flame-like pattern on all four sides.
