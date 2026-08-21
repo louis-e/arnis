@@ -77,6 +77,9 @@
   "gamemode_creative": "Luova",
   "gamemode_spectator": "Katselija",
   "world_time": "Maailman aika",
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Maailmankarttaesine"
   "map_item": "Maailmankarttaesine",
   "signage": "Kyltit",
   "signage_none": "Ei mitään",

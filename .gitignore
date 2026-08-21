@@ -20,6 +20,7 @@
 *.njsproj
 *.sln
 *.ps1
+!/bench_gpu.ps1
 
 # System files
 .DS_Store
@@ -33,6 +34,7 @@ Thumbs.db
 /*debug*.png
 /terrain-tile-cache
 /arnis-tile-cache
+/GLB
 
 /gen/
 /build/
@@ -52,3 +54,4 @@ gen/
 /flake/*
 !/flake/flake.nix
 !/flake/flake.lock
+world/*

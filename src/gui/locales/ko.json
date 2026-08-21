@@ -77,6 +77,9 @@
   "gamemode_creative": "크리에이티브",
   "gamemode_spectator": "관전자",
   "world_time": "월드 시간",
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "월드 지도 아이템"
   "map_item": "월드 지도 아이템",
   "signage": "표지판",
   "signage_none": "없음",

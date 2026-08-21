@@ -69,6 +69,7 @@
           <div class="progress-section">
             <img src="" alt="" class="secret-parrot" id="secret-parrot">
             <span id="progress-info" class="progress-info-text"></span>
+            <span id="gpu-indicator" class="gpu-indicator" style="display:none;" data-localize="gpu_active">(using GPU acceleration)</span>
             <div class="progress-row">
               <div class="progress-bar-container">
                 <div class="progress-bar" id="progress-bar"></div>
@@ -271,6 +272,26 @@
           </div>
         </div>
 
+        <!-- Tianditu Elevation Toggle + Token -->
+        <div class="settings-row">
+          <label for="tianditu-elevation-toggle">
+            <span data-localize="tianditu_elevation">Tianditu Elevation</span>
+            <span class="tooltip-icon" data-tooltip="Use Tianditu (天地图) high-resolution elevation data for China. Requires a free API key from console.tianditu.gov.cn. When enabled and a token is provided, Tianditu is preferred over other elevation sources for areas within China.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="tianditu-elevation-toggle" name="tianditu-elevation-toggle">
+          </div>
+        </div>
+        <div class="settings-row" id="tianditu-token-row">
+          <label for="tianditu-token-input">
+            <span data-localize="tianditu_token">Tianditu Token</span>
+            <span class="tooltip-icon" data-tooltip="Your Tianditu (天地图) API key. Register at console.tianditu.gov.cn (free). The token is stored locally and sent to the elevation provider during generation.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="password" id="tianditu-token-input" name="tianditu-token-input" class="tianditu-token-input" placeholder="Enter Tianditu API key" maxlength="64">
+          </div>
+        </div>
+
         <!-- Bake Lighting Toggle -->
         <div class="settings-row">
           <label for="bake-lighting-toggle">
@@ -279,6 +300,17 @@
           </label>
           <div class="settings-control">
             <input type="checkbox" id="bake-lighting-toggle" name="bake-lighting-toggle">
+          </div>
+        </div>
+
+        <!-- GPU Acceleration Toggle -->
+        <div class="settings-row">
+          <label for="gpu-accel-toggle">
+            <span data-localize="gpu_acceleration">GPU Acceleration</span>
+            <span class="tooltip-icon" data-tooltip="Use GPU compute shaders (wgpu) to accelerate elevation post-processing. Requires a compatible GPU with Vulkan, Metal, or DX12 support. Falls back to CPU automatically if unavailable.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="gpu-accel-toggle" name="gpu-accel-toggle">
           </div>
         </div>
 

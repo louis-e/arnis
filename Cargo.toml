@@ -17,6 +17,7 @@ overflow-checks = true
 [features]
 default = ["gui"]
 gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "tauri-build"]
+gpu = ["dep:wgpu", "dep:pollster"]
 
 [build-dependencies]
 tauri-build = {version = "2", optional = true}
@@ -67,6 +68,8 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 rusty-leveldb = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
+wgpu = { version = "22", optional = true }
+pollster = { version = "0.4", optional = true }
 quick-xml = "0.41.0"
 
 [target.'cfg(windows)'.dependencies]

@@ -1,0 +1,2 @@
+scenario,wall_cpu_s,wall_gpu_s,gen_cpu_ms,gen_gpu_ms,repair_cpu_ms,repair_gpu_ms,speedup
+large,165.4,63.9,52128,41617,23012,4717,1.25
