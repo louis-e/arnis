@@ -137,6 +137,26 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_z: 22.0,
         reach_m: 30,
     },
+    Landmark {
+        name: "Tokyo Tower",
+        qid: "Q183536",
+        osm_ids: &[("relation", 4_247_312)],
+        schematic: include_bytes!("../assets/structures/landmarks/tokyo_tower.schem"),
+        // Centroid of the tower's OSM multipolygon, at 1 block per metre north-up.
+        lat: 35.658_563_9,
+        lon: 139.745_44,
+        anchor_x: 44.0,
+        anchor_z: 44.0,
+        ground_y: 0,
+        ground_offset: 0,
+        // All structure; the park between the legs is part of the model bbox.
+        interior_marker: &[],
+        ground_overlap: 0,
+        // Covers the Foot Town base building without reaching into Shiba Park.
+        suppress_half_x: 50.0,
+        suppress_half_z: 50.0,
+        reach_m: 63,
+    },
 ];
 
 /// A landmark resolved to a spot in this world.
@@ -692,6 +712,29 @@ mod tests {
     const TOWER: &str = "Q599148";
     const SWIM_HALL: &str = "Q3882013";
     const EVENT_HALL: &str = "Q48849";
+    const TOKYO_TOWER: &str = "Q183536";
+
+    // A 333 m model only fits the world if it starts near the terrain floor:
+    // at the default base (-62) the tip lands around Y 270, well under 319.
+    #[test]
+    fn tokyo_tower_reaches_full_height_within_world_ceiling() {
+        let landmark = landmark(TOKYO_TOWER);
+        let model = Model::load(landmark).expect("tokyo tower parses");
+        assert_eq!(
+            model.max_y, 332,
+            "model must carry the full 333 m silhouette"
+        );
+        let worst_base = crate::world_editor::min_y() + 2;
+        assert!(
+            worst_base + model.max_y < crate::world_editor::DEFAULT_MAX_Y,
+            "tip would clamp against the world ceiling"
+        );
+        // The anchor is pinned to the multipolygon centroid, so the legs must
+        // splay symmetrically around it.
+        let span_x = (model.max_x - model.min_x + 1) as f64;
+        let span_z = (model.max_z - model.min_z + 1) as f64;
+        assert!((span_x - 89.0).abs() < 1.0 && (span_z - 89.0).abs() < 1.0);
+    }
 
     #[test]
     fn every_landmark_asset_parses() {
