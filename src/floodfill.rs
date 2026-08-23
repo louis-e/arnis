@@ -160,11 +160,11 @@ fn scanline_fill_area(
         }
         crossings.sort_unstable_by(f64::total_cmp);
 
-        for pair in crossings.chunks_exact(2) {
+        for &[left, right] in crossings.as_chunks::<2>().0 {
             // Strictly between the crossings, so a cell sitting exactly on the edge is left to
             // the caller's outline pass, the same way geo::Contains treats the boundary.
-            let xs = (pair[0].floor() as i32).saturating_add(1).max(min_x);
-            let xe = (pair[1].ceil() as i32).saturating_sub(1).min(max_x);
+            let xs = (left.floor() as i32).saturating_add(1).max(min_x);
+            let xe = (right.ceil() as i32).saturating_sub(1).min(max_x);
             if xe < xs {
                 continue;
             }
