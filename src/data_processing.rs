@@ -614,6 +614,11 @@ pub fn generate_world_with_options(
     // Resolved once here: a body spanning many tiles must not be measured per tile.
     let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, &xzbbox);
 
+    // Field parcels align to their access roads and sunflowers favour the low ground,
+    // so both grids are built once here, before any element or ground processing runs.
+    crate::road_bearings::set_from_elements(&elements);
+    crate::lowland::set_from_ground(&ground, &xzbbox);
+
     println!("{} Processing data...", "[4/7]".bold());
     emit_gui_progress_update(19.5, "Processing data...");
 

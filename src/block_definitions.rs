@@ -460,6 +460,21 @@ impl Block {
             363 => "white_wall_banner",
             364..=365 => "spruce_door",
             366 => "oak_door",
+            // Farmland texturing (src/element_processing/field_texture.rs)
+            367 => "packed_mud",
+            368 => "rooted_dirt",
+            369 => "moss_carpet",
+            370 => "azalea",
+            371 => "pumpkin",
+            372 => "beetroots",
+            373 => "sunflower",
+            374 => "sunflower",
+            375 => "allium",
+            376 => "cornflower",
+            377 => "lily_of_the_valley",
+            378 => "orange_tulip",
+            379 => "pink_tulip",
+            380 => "oxeye_daisy",
             _ => return None,
         })
         // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
@@ -784,6 +799,23 @@ impl Block {
             })),
             // Oak door upper
             366 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Beetroots only reach age 3. Crop plots override this with the plot's own
+            // growth level; the default here keeps a bare placement ripe.
+            372 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("age".to_string(), Value::String("3".to_string()));
+                map
+            })),
+            373 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            374 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
@@ -1265,6 +1297,37 @@ pub const ORANGE_CONCRETE: Block = Block::new(145);
 pub const REDSTONE_LAMP: Block = Block::new(218);
 // Reuses the retired open-trapdoor slot; sub-256 ids keep sections one byte per cell.
 pub const SUGAR_CANE: Block = Block::new(237);
+
+// Farmland texturing palette (src/element_processing/field_texture.rs). Packed mud,
+// rooted dirt and moss carpet are used because they never regrow grass in-game, so a
+// worked or disturbed patch stays disturbed after the world is loaded.
+pub const PACKED_MUD: Block = Block::new(367);
+pub const ROOTED_DIRT: Block = Block::new(368);
+pub const MOSS_CARPET: Block = Block::new(369);
+pub const AZALEA: Block = Block::new(370);
+pub const PUMPKIN: Block = Block::new(371);
+pub const BEETROOTS: Block = Block::new(372);
+pub const SUNFLOWER_LOWER: Block = Block::new(373);
+pub const SUNFLOWER_UPPER: Block = Block::new(374);
+pub const ALLIUM: Block = Block::new(375);
+pub const CORNFLOWER: Block = Block::new(376);
+pub const LILY_OF_THE_VALLEY: Block = Block::new(377);
+pub const ORANGE_TULIP: Block = Block::new(378);
+pub const PINK_TULIP: Block = Block::new(379);
+pub const OXEYE_DAISY: Block = Block::new(380);
+
+/// Flower species a flower parcel draws from. Each parcel uses a 2-3 species subset,
+/// since real meadows are a few species, not ten.
+pub static FIELD_FLOWERS: [Block; 8] = [
+    RED_FLOWER,    // poppy
+    YELLOW_FLOWER, // dandelion
+    ALLIUM,
+    CORNFLOWER,
+    LILY_OF_THE_VALLEY,
+    ORANGE_TULIP,
+    PINK_TULIP,
+    OXEYE_DAISY,
+];
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
