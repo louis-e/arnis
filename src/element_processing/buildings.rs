@@ -1631,13 +1631,16 @@ pub(crate) fn calculate_start_y_offset(
     min_level_offset: i32,
 ) -> i32 {
     if args.terrain() {
-        let mut max_ground_level = args.ground_level;
+        // Seeded from the terrain itself, never from args.ground_level: with the extended
+        // floor the scaler sinks the terrain base far below it, and a seeded max would
+        // strand every low-lying building up at the requested ground level.
+        let mut max_ground_level: Option<i32> = None;
         for node in &element.nodes {
             if let Some(level) = editor.terrain_level(node.x, node.z) {
-                max_ground_level = max_ground_level.max(level);
+                max_ground_level = Some(max_ground_level.map_or(level, |m: i32| m.max(level)));
             }
         }
-        max_ground_level + min_level_offset
+        max_ground_level.unwrap_or(args.ground_level) + min_level_offset
     } else {
         min_level_offset
     }
@@ -11865,5 +11868,37 @@ mod facade_dump {
                 println!("y{y:>2} |{line}|");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod start_y_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::element_processing::building_test_support::{rect_way, test_editor};
+    use clap::Parser as _;
+
+    fn offset_for(terrain_y: i32) -> i32 {
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        editor.set_ground(std::sync::Arc::new(crate::ground::Ground::new_flat(
+            terrain_y,
+        )));
+        let way = rect_way(1, 10, 10, 20, 20, &[("building", "yes")]);
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        calculate_start_y_offset(&editor, &way, &args, 0)
+    }
+
+    /// With the extended floor the scaler sinks the terrain base far below the default
+    /// -62, and buildings must follow it down instead of floating at the old level.
+    #[test]
+    fn sunk_terrain_base_does_not_strand_buildings() {
+        assert_eq!(offset_for(-1500), -1500);
+    }
+
+    #[test]
+    fn vanilla_terrain_is_unchanged() {
+        assert_eq!(offset_for(-62), -62);
+        assert_eq!(offset_for(80), 80);
     }
 }
