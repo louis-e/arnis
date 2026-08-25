@@ -44,7 +44,7 @@ pub fn generate_landuse(
         "vineyard" => COARSE_DIRT,
         "brownfield" => COARSE_DIRT,
         "farmyard" => COARSE_DIRT,
-        "salt_pond" | "salt_flat" => DIORITE.
+        "salt_pond" | "salt_flat" => DIORITE,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
