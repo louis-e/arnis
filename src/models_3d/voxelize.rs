@@ -272,10 +272,10 @@ pub fn voxelize_glb(
                 let vertex_colors: Option<Vec<[f32; 4]>> =
                     reader.read_colors(0).map(|c| c.into_rgba_f32().collect());
 
-                for tri in indices.chunks_exact(3) {
-                    let ia = tri[0] as usize;
-                    let ib = tri[1] as usize;
-                    let ic = tri[2] as usize;
+                for &[a0, b0, c0] in indices.as_chunks::<3>().0 {
+                    let ia = a0 as usize;
+                    let ib = b0 as usize;
+                    let ic = c0 as usize;
                     let a = positions[ia];
                     let b = positions[ib];
                     let c = positions[ic];
