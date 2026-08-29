@@ -1,6 +1,7 @@
 import { licenseText } from './license.js';
 import { fetchLanguage, invalidJSON } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
+import { openStreamPanel, hideStreamPanel } from './stream.js';
 import {
   initSettingsStore,
   setDynamicDefault,
@@ -68,6 +69,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 // Expose language functions to window for use by language-selector.js
+// Replaced by initStreamMode() with the version that also stops the server.
+// Until then the panel cannot be open, so hiding it is the whole job — this
+// only exists so the close button never throws.
+window.closeStreamPanel = () => hideStreamPanel();
+
 window.fetchLanguage = fetchLanguage;
 window.applyLocalization = applyLocalization;
 window.initFooter = initFooter;
@@ -1231,6 +1237,11 @@ function initStreamMode() {
       // The server may have been given port 0, or simply landed elsewhere;
       // show the user what it actually bound. Compared against the field's own
       // text, so the field is corrected whatever it currently reads.
+      // The panel covers the whole window, so leave nothing open behind it.
+      if (typeof window.closeSettings === 'function') {
+        window.closeSettings();
+      }
+      openStreamPanel(boundPort);
       if (Number.isFinite(boundPort) && portInput.value !== String(boundPort)) {
         portInput.value = String(boundPort);
         // Bubbles to settings-store, which persists the bound port and keeps
@@ -1242,6 +1253,7 @@ function initStreamMode() {
     } catch (error) {
       // Rust returns whole sentences here (the 35-character status bar is
       // deliberately not in the path), so show the text as-is.
+      hideStreamPanel();
       showError(typeof error === 'string' ? error : 'Could not start stream mode.');
       setToggleSilently(false);
     } finally {
@@ -1254,6 +1266,9 @@ function initStreamMode() {
   };
 
   const stop = async () => {
+    // Close first: the panel is the thing the user asked to be rid of, and the
+    // command is detached on the Rust side anyway.
+    hideStreamPanel();
     toggle.disabled = true;
     try {
       await invoke('gui_stream_stop');
@@ -1274,10 +1289,23 @@ function initStreamMode() {
     }
   });
 
-  // Closing the stream window is the other way to end stream mode. Rust emits
-  // this once the window is gone and the server is down.
-  window.__TAURI__.event.listen('stream-mode-stopped', () => {
+  // Closing the panel is the other way to end stream mode. It drives the same
+  // toggle, so the UI and the server can never disagree about what is running.
+  const closeStreamPanel = () => {
+    if (!toggle.checked) {
+      hideStreamPanel();
+      return;
+    }
     setToggleSilently(false);
+    stop();
+  };
+  window.closeStreamPanel = closeStreamPanel;
+
+  document.addEventListener('keydown', (event) => {
+    const modal = document.getElementById('stream-modal');
+    if (event.key === 'Escape' && modal && modal.style.display === 'flex') {
+      closeStreamPanel();
+    }
   });
 
   // Nothing is running yet, whatever the stored value said.

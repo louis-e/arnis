@@ -1,100 +1,85 @@
-/* Stream mode window.
+/* Stream Mode panel.
 
-   One screen, one job: say "Arnis is live" from across the room while
-   Minecraft has the foreground. Everything here is centred on the red radar
-   ping; the text below it is supporting detail, not a dashboard.
+   A modal in the main Arnis window, sized to fill it, because nothing else in
+   Arnis is usable while the server runs. It reuses the shared `.modal` /
+   `.modal-content` / `.settings-header` / `.close-button` rules from
+   styles.css and only adds what is specific to this panel, so it stays in the
+   application's visual language rather than inventing a second one.
 
-   The ping's tempo is the single knob stream.js turns: it writes
-   `--pulse-interval` on <body> and the ring animation duration follows.
-   `data-state` on <body> ("waiting" | "connected" | "busy" | "stopped")
-   carries everything else. */
+   One job: say "Arnis is live" at a glance, from behind Minecraft. The red
+   radar ping is the whole point; everything else is one line of supporting
+   text. Its tempo is the single knob stream.js turns, by writing
+   `--stream-pulse` on the panel. `data-stream-state` on the same element
+   ("waiting" | "connected" | "busy" | "stopped") carries the rest. */
 
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+.stream-content {
+  /* Fills the Arnis window rather than the 400px the settings modal uses.
+     `.modal-content` already supplies the panel background, border, radius and
+     shadow, so the look matches the rest of the app. */
+  width: min(92vw, 900px);
+  height: calc(100vh - 48px);
+  max-height: calc(100vh - 48px);
 
-  --live-red: #e5243b;
-  --live-grey: #6b6b6b;
+  /* Default tempo, overridden per state below. */
+  --stream-pulse: 2.4s;
+  --stream-red: #e5243b;
 }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  overflow: hidden;
-  /* Matches the dark scheme the rest of the app paints itself in. */
-  background-color: #151515;
-  color: #f6f6f6;
-  cursor: default;
-  user-select: none;
-}
-
-body {
-  /* Waiting is the state the window opens in, so it is the default here too. */
-  --pulse-interval: 2.4s;
-}
-
-.stream {
-  height: 100%;
+.stream-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   text-align: center;
-  padding: 24px;
-  box-sizing: border-box;
+  gap: 4px;
 }
 
 /* Live indicator */
 
-.live {
+.stream-live {
   position: relative;
-  width: 180px;
-  height: 180px;
+  width: 190px;
+  height: 190px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 34px;
+  margin-bottom: 36px;
   flex-shrink: 0;
 }
 
-.dot {
-  width: 72px;
-  height: 72px;
+.stream-dot {
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
-  background-color: var(--live-red);
-  box-shadow: 0 0 46px rgba(229, 36, 59, 0.45);
-  /* Waiting for a client reads as "on, but nothing is happening". */
+  background-color: var(--stream-red);
+  box-shadow: 0 0 46px rgba(229, 36, 59, 0.4);
+  /* Waiting reads as "on, but nothing is happening yet". */
   opacity: 0.6;
   transition: opacity 0.45s ease, background-color 0.45s ease,
     box-shadow 0.45s ease;
 }
 
-.ring {
+.stream-ring {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 3px solid var(--live-red);
+  border: 3px solid var(--stream-red);
   opacity: 0;
   transform: scale(0.4);
-  animation: stream-ping var(--pulse-interval) cubic-bezier(0, 0, 0.2, 1)
-    infinite;
+  animation: stream-ping var(--stream-pulse) cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-/* Second ring rides half an interval behind the first, so the pings stay
-   evenly spaced whatever the interval currently is. */
-.ring-delayed {
-  animation-delay: calc(var(--pulse-interval) / -2);
+/* Half an interval behind the first, so the pings stay evenly spaced whatever
+   the current tempo is. */
+.stream-ring-delayed {
+  animation-delay: calc(var(--stream-pulse) / -2);
 }
 
 @keyframes stream-ping {
   0% {
-    /* Starts exactly at the dot's edge: 72px of 180px. */
+    /* Starts exactly at the dot's edge: 76px of 190px. */
     transform: scale(0.4);
     opacity: 0.75;
   }
@@ -105,76 +90,86 @@ body {
   }
 }
 
-body[data-state="connected"] .dot,
-body[data-state="busy"] .dot {
+.stream-content[data-stream-state="connected"] {
+  --stream-pulse: 1.6s;
+}
+
+.stream-content[data-stream-state="busy"] {
+  --stream-pulse: 0.9s;
+}
+
+.stream-content[data-stream-state="connected"] .stream-dot,
+.stream-content[data-stream-state="busy"] .stream-dot {
   opacity: 1;
 }
 
-body[data-state="stopped"] .dot {
-  background-color: var(--live-grey);
+/* Motion stopping is the strongest available "something is wrong" signal. */
+.stream-content[data-stream-state="stopped"] .stream-dot {
+  background-color: #6b6b6b;
   box-shadow: none;
   opacity: 0.5;
 }
 
-body[data-state="stopped"] .ring {
+.stream-content[data-stream-state="stopped"] .stream-ring {
   animation-play-state: paused;
   opacity: 0;
 }
 
-/* Text */
+/* Text. Colours follow the modal's own palette, not a new one. */
 
-.title {
+.stream-address {
   margin: 0;
-  font-size: 2.6em;
-  font-weight: 600;
-  letter-spacing: 0.32em;
-  /* Letter-spacing pads the right edge; pull the block back into centre. */
-  text-indent: 0.32em;
-  text-transform: uppercase;
-}
-
-.address {
-  margin: 14px 0 0;
-  font-size: 1.15em;
+  font-size: 1.2em;
   letter-spacing: 0.06em;
-  color: #d8d8d8;
+  color: #f2f2f2;
 }
 
-.client {
-  margin: 6px 0 0;
-  font-size: 1em;
-  color: #b6b6b6;
+.stream-client {
+  margin: 8px 0 0;
+  color: #e0e0e0;
 }
 
-body[data-state="stopped"] .client {
-  color: var(--live-grey);
+.stream-content[data-stream-state="stopped"] .stream-client {
+  color: #c4c4c4;
 }
 
-.counters {
-  margin: 18px 0 0;
-  font-size: 0.82em;
-  letter-spacing: 0.04em;
-  color: #7d7d7d;
+.stream-counters {
+  margin: 16px 0 0;
+  font-size: 0.84em;
+  letter-spacing: 0.03em;
+  color: #d0d0d0;
+  min-height: 1.2em;
 }
 
-.hint {
-  margin: 30px 0 0;
-  font-size: 0.9em;
-  color: #9a9a9a;
+.stream-footer {
+  text-align: center;
 }
 
-/* Reduced motion: no expanding rings, just a slow fade on the dot so the
-   window still reads as live rather than as a static screenshot. */
+.stream-hint {
+  margin: 0;
+  font-size: 0.86em;
+  color: #e9e9e9;
+}
+
+/* The Settings row's inline error, shown when the server refuses to start. */
+.stream-error-row {
+  color: #ffd9d9;
+  font-size: 0.86em;
+  padding: 2px 0 6px;
+}
+
+/* Reduced motion: no expanding rings, just a slow fade on the dot, so the
+   panel still reads as live rather than as a screenshot. */
 @media (prefers-reduced-motion: reduce) {
-  .ring {
+  .stream-ring {
     display: none;
   }
 
-  .dot {
-    animation: stream-breathe var(--pulse-interval) ease-in-out infinite;
+  .stream-dot {
+    animation: stream-breathe var(--stream-pulse) ease-in-out infinite;
   }
 
-  body[data-state="stopped"] .dot {
+  .stream-content[data-stream-state="stopped"] .stream-dot {
     animation-play-state: paused;
   }
 

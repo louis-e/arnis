@@ -726,99 +726,35 @@ fn gui_get_platform() -> &'static str {
     }
 }
 
-/// Window label of the fullscreen "stream mode is live" window.
+/// Starts stream mode on `port`.
 ///
-/// This exact string must also appear in `capabilities/default.json`'s `windows`
-/// list. A window whose label is not listed there is granted no permissions at
-/// all, and every `invoke` from it fails with a permission error.
-const STREAM_WINDOW_LABEL: &str = "stream";
-
-/// Emitted once the stream window has closed, so the Settings toggle in the main
-/// window can flip itself back off without polling for it.
-const STREAM_STOPPED_EVENT: &str = "stream-mode-stopped";
-
-/// Opens (or re-focuses) the fullscreen stream-mode window.
+/// Returns the port actually bound, which is what the stream panel displays and
+/// what the Settings field is corrected to. Passing `0` asks the OS for a free
+/// port, so the returned value is not always the requested one.
 ///
-/// The window is the only affordance the user has for ending stream mode, so
-/// closing it stops the server; the `Destroyed` handler below is what ties the
-/// two together, whether the close came from the window chrome, the OS or
-/// [`gui_stream_stop`].
-fn open_stream_window(app: &tauri::AppHandle) -> Result<(), String> {
-    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
-
-    // A window left over from a previous start already owns the label, which
-    // would make the builder fail. Reuse it instead of reporting an error.
-    if let Some(existing) = app.get_webview_window(STREAM_WINDOW_LABEL) {
-        let _ = existing.set_focus();
-        return Ok(());
-    }
-
-    let window = WebviewWindowBuilder::new(
-        app,
-        STREAM_WINDOW_LABEL,
-        WebviewUrl::App("stream.html".into()),
-    )
-    .title("Arnis - Stream Mode")
-    .fullscreen(true)
-    .build()
-    .map_err(|e| format!("Stream mode started, but its window could not be opened: {e}"))?;
-
-    let app_handle = app.clone();
-    window.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
-            // Detached on purpose: this handler runs on the Tauri event-loop thread, and stopping
-            // waits for the in-flight tile job to finish. Doing that inline freezes the whole
-            // application for the length of an OSM fetch plus a generation.
-            crate::stream::stop_if_running_detached();
-            if let Err(e) = tauri::Emitter::emit(&app_handle, STREAM_STOPPED_EVENT, ()) {
-                eprintln!("Failed to emit {STREAM_STOPPED_EVENT}: {e}");
-            }
-        }
-    });
-
-    Ok(())
-}
-
-/// Starts stream mode on `port` and opens the fullscreen live-indicator window.
-///
-/// Returns the port actually bound, which is what that window displays. The
-/// error strings come straight out of `crate::stream::start_global` and are
+/// The error strings come straight out of `crate::stream::start_global` and are
 /// already whole sentences meant for the user, so they are returned to the
 /// frontend verbatim rather than going through `progress::emit_gui_error`,
 /// which truncates to 35 characters.
 #[tauri::command]
-fn gui_stream_start(app: tauri::AppHandle, port: u16) -> Result<u16, String> {
+fn gui_stream_start(port: u16) -> Result<u16, String> {
     let config = crate::stream::StreamConfig {
         port,
         ..Default::default()
     };
-    let bound_port = crate::stream::start_global(config)?;
-
-    if let Err(e) = open_stream_window(&app) {
-        // Without the window there is no way to stop the server from the GUI,
-        // so a half-started stream mode is worse than none. Undo the start.
-        crate::stream::stop_if_running();
-        return Err(e);
-    }
-
-    Ok(bound_port)
+    crate::stream::start_global(config)
 }
 
-/// Stops stream mode and closes its window. A no-op when nothing is running, so
-/// the frontend can call it without first checking.
+/// Stops stream mode. A no-op when nothing is running, so the frontend can call
+/// it without first checking.
+///
+/// Detached: stopping waits for the in-flight tile job to finish, which can take
+/// as long as an OSM fetch plus a full generation. The panel closes immediately
+/// and the next start joins the pending stop before binding, so a stop/start
+/// cycle cannot race on the port.
 #[tauri::command]
-fn gui_stream_stop(app: tauri::AppHandle) -> Result<(), String> {
-    use tauri::Manager;
-
-    if let Some(window) = app.get_webview_window(STREAM_WINDOW_LABEL) {
-        // Closing fires the `Destroyed` handler, which stops the server and
-        // emits STREAM_STOPPED_EVENT.
-        if let Err(e) = window.close() {
-            eprintln!("Failed to close the stream mode window: {e}");
-        }
-    }
-    // Belt and braces: the window may already be gone, or may never have opened.
-    crate::stream::stop_if_running();
+fn gui_stream_stop() -> Result<(), String> {
+    crate::stream::stop_if_running_detached();
     Ok(())
 }
 

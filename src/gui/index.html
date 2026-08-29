@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="./css/styles.css" />
   <link rel="stylesheet" href="./css/preview3d.css" />
+  <link rel="stylesheet" href="./css/stream.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
   <script src="./js/preview3d.js" defer></script>
@@ -516,6 +517,36 @@
     </div>
 
     <!-- 3D Terrain Preview Modal -->
+    <!-- Stream Mode panel. Fills the Arnis window while the server runs, because
+         nothing else in Arnis is usable in this state. English-only on purpose:
+         a test in gui.rs asserts all 19 locale files share one key set, so a new
+         key would mean editing all of them for a prototype UI. -->
+    <div id="stream-modal" class="modal" style="display: none;">
+      <div class="modal-content stream-content">
+        <div class="settings-header">
+          <h2>Stream Mode</h2>
+          <span class="close-button" onclick="closeStreamPanel()" title="Stop stream mode">&times;</span>
+        </div>
+
+        <div class="stream-body">
+          <!-- The centrepiece: readable at a glance from behind Minecraft. -->
+          <div class="stream-live" aria-hidden="true">
+            <span class="stream-ring"></span>
+            <span class="stream-ring stream-ring-delayed"></span>
+            <span class="stream-dot"></span>
+          </div>
+
+          <p class="stream-address" id="stream-address" dir="ltr">127.0.0.1</p>
+          <p class="stream-client" id="stream-client">Waiting for Minecraft to connect...</p>
+          <p class="stream-counters" id="stream-counters"></p>
+        </div>
+
+        <div class="settings-footer stream-footer">
+          <p class="stream-hint">Closing this panel stops stream mode.</p>
+        </div>
+      </div>
+    </div>
+
     <div id="preview3d-modal" class="modal" style="display: none;">
       <div class="preview3d-content">
         <div class="preview3d-header">

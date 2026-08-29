@@ -27,9 +27,9 @@ continuously and cover several real-world places at once - you can start in New 
 Munich without leaving the world.
 
 Enable it in **Settings -> Stream Mode**. Arnis binds a server to `127.0.0.1` only (never a network
-interface, so no firewall prompt) and opens a fullscreen window showing that it is live. **Closing
-that window stops stream mode.** The port defaults to `41234` and there is an off-by-default
-"Start on launch" option.
+interface, so no firewall prompt) and fills its window with a live indicator showing that the server
+is running. **Closing that panel stops stream mode.** The port defaults to `41234` and there is an
+off-by-default "Start on launch" option.
 
 The mod finds Arnis through a discovery file at `<config dir>/arnis/stream.json`, which carries the
 port, process id, protocol version and a session token. Arnis deletes it on a clean shutdown.
