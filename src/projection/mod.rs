@@ -1,9 +1,24 @@
+//! Map projections from WGS84 geographic coordinates to Minecraft XZ.
+//!
+//! Every projection here shares one figure of the Earth ([`EARTH_RADIUS`]) and
+//! one orientation convention: increasing X points east, and north maps to
+//! **negative** Z.
+
+pub mod transverse_mercator;
 pub mod web_mercator;
 
+pub use transverse_mercator::TransverseMercatorProjection;
 pub use web_mercator::WebMercatorProjection;
 
 use std::fmt;
 use std::str::FromStr;
+
+/// Mean Earth radius in meters (spherical approximation of WGS84).
+///
+/// The single radius constant for the whole crate's projection math — callers
+/// that need it (`coordinate_system::transformation`, the projections
+/// themselves) must use this one rather than redeclaring their own.
+pub const EARTH_RADIUS: f64 = 6_371_000.0;
 
 /// Trait for converting between WGS84 geographic coordinates and a projected
 /// coordinate system used in Minecraft world generation.

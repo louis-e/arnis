@@ -1,24 +1,19 @@
 use super::cartesian::{XZBBox, XZPoint};
 use super::geographic::{LLBBox, LLPoint};
-
-/// Earth radius in meters (WGS84 spherical approximation), matching the
-/// value used in `crate::projection::web_mercator`.
-const EARTH_RADIUS: f64 = 6_371_000.0;
+use crate::projection::Projection;
 
 /// Internal mode discriminator so `transform_point` can dispatch between the
-/// legacy linear interpolation and Web Mercator projection.
-#[allow(dead_code)]
+/// legacy linear interpolation and a real map projection.
 enum ProjectionMode {
     /// Existing linear-interpolation mode (no geographic projection).
     Local,
-    /// Web Mercator projection with a local origin offset.
-    WebMercator {
-        origin_lat: f64,
-        origin_lon: f64,
-        scale: f64,
-        cos_lat_ref: f64,
-        z_offset: f64,
-    },
+    /// A real map projection, owned so the transformer can outlive the
+    /// borrow it was built from.
+    ///
+    /// The projection math lives in `crate::projection` and is reached only
+    /// through the trait: this file must never inline a copy of it, which is
+    /// how the two used to silently disagree.
+    Projected(Box<dyn Projection + Send + Sync>),
 }
 
 /// Transform geographic space (within llbbox) to a local tangential cartesian space (within xzbbox)
@@ -72,16 +67,24 @@ impl CoordTransformer {
         ))
     }
 
-    /// Create a `CoordTransformer` using a Web Mercator projection.
+    /// Create a `CoordTransformer` driven by a real map projection.
     ///
     /// The bounding box is computed by projecting all four corners of the
     /// `llbbox` and taking the axis-aligned envelope. The returned `XZBBox`
     /// represents the Minecraft world extents for the projected area.
-    pub fn with_projection(
+    ///
+    /// `projection` is cloned into the transformer, so `transform_point` uses
+    /// exactly the projection given here — the same one that defined the
+    /// bounding box. `scale` is only validated here; the blocks-per-meter
+    /// factor that is actually applied is the one the projection carries.
+    pub fn with_projection<P>(
         llbbox: &LLBBox,
         scale: f64,
-        projection: &dyn crate::projection::Projection,
-    ) -> Result<(CoordTransformer, XZBBox), String> {
+        projection: &P,
+    ) -> Result<(CoordTransformer, XZBBox), String>
+    where
+        P: Projection + Clone + Send + Sync + 'static,
+    {
         if scale <= 0.0 {
             return Err("Scale must be > 0.0".to_string());
         }
@@ -104,17 +107,6 @@ impl CoordTransformer {
         let xzbbox = XZBBox::rect_from_min_max(x_min, z_min, x_max, z_max)
             .map_err(|e| format!("Failed to create XZBBox from projection: {}", e))?;
 
-        let origin_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
-        let origin_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
-        let cos_lat_ref = origin_lat.to_radians().cos();
-
-        // z_offset chosen so that forward(origin_lat, _) gives z = 0.
-        let z_offset = EARTH_RADIUS
-            * (std::f64::consts::FRAC_PI_4 + origin_lat.to_radians() / 2.0)
-                .tan()
-                .ln()
-            * scale;
-
         Ok((
             CoordTransformer {
                 len_lat: llbbox.max().lat() - llbbox.min().lat(),
@@ -123,13 +115,7 @@ impl CoordTransformer {
                 scale_factor_z: (z_max - z_min) as f64,
                 min_lat: llbbox.min().lat(),
                 min_lng: llbbox.min().lng(),
-                mode: ProjectionMode::WebMercator {
-                    origin_lat,
-                    origin_lon,
-                    scale,
-                    cos_lat_ref,
-                    z_offset,
-                },
+                mode: ProjectionMode::Projected(Box::new(projection.clone())),
             },
             xzbbox,
         ))
@@ -148,21 +134,8 @@ impl CoordTransformer {
 
                 XZPoint::new(x, z)
             }
-            ProjectionMode::WebMercator {
-                origin_lon,
-                scale,
-                cos_lat_ref,
-                z_offset,
-                ..
-            } => {
-                let x =
-                    EARTH_RADIUS * (llpoint.lng() - origin_lon).to_radians() * cos_lat_ref * scale;
-                let z = -EARTH_RADIUS
-                    * (std::f64::consts::FRAC_PI_4 + llpoint.lat().to_radians() / 2.0)
-                        .tan()
-                        .ln()
-                    * scale
-                    + z_offset;
+            ProjectionMode::Projected(projection) => {
+                let (x, z) = projection.forward(llpoint.lat(), llpoint.lng());
 
                 XZPoint::new(x as i32, z as i32)
             }
@@ -413,6 +386,82 @@ mod test {
             "north should have smaller z: south.z={}, north.z={}",
             ps.z,
             pn.z,
+        );
+    }
+
+    /// The Local path is the default production path: it must not move by a
+    /// single block. These are the exact values it produced before the
+    /// projection layer was refactored, for the Arnis bbox
+    /// (54.627053, 9.927928) - (54.634902, 9.937563).
+    #[test]
+    fn test_local_transform_known_values() {
+        let llbbox = get_llbbox_arnis();
+        let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, 1.0).unwrap();
+
+        assert_eq!(transformer.scale_factor_x(), 620.0);
+        assert_eq!(transformer.scale_factor_z(), 872.0);
+        assert_eq!(xzbbox.min_x(), 0);
+        assert_eq!(xzbbox.min_z(), 0);
+        assert_eq!(xzbbox.max_x(), 620);
+        assert_eq!(xzbbox.max_z(), 872);
+
+        for ((lat, lng), expected) in [
+            ((54.6300, 9.9300), (133, 544)),
+            ((54.6285, 9.9350), (455, 711)),
+        ] {
+            let pt = transformer.transform_point(LLPoint::new(lat, lng).unwrap());
+            assert_eq!(
+                (pt.x, pt.z),
+                expected,
+                "local transform moved for ({lat}, {lng})"
+            );
+        }
+    }
+
+    /// `with_projection` must use the projection it was handed, not one it
+    /// invents from the bbox centre. `landmarks.rs` deliberately passes a
+    /// projection whose origin is not the bbox centre.
+    #[test]
+    fn test_with_projection_honours_foreign_origin() {
+        let llbbox = get_llbbox_arnis();
+        // Origin far away from the bbox: the null island.
+        let proj = crate::projection::WebMercatorProjection::new(0.0, 0.0, 1.0);
+        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
+
+        let llpoint = LLPoint::new(54.63, 9.93).unwrap();
+        let (expected_x, expected_z) = proj.forward(llpoint.lat(), llpoint.lng());
+        let pt = transformer.transform_point(llpoint);
+
+        assert_eq!(pt.x, expected_x as i32);
+        assert_eq!(pt.z, expected_z as i32);
+    }
+
+    /// `with_projection` is projection-agnostic: a transverse Mercator anchor
+    /// pins its geographic origin to a chosen Minecraft position.
+    #[test]
+    fn test_with_projection_accepts_transverse_mercator() {
+        let llbbox = get_llbbox_arnis();
+        let anchor_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
+        let anchor_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
+        let proj = crate::projection::TransverseMercatorProjection::with_origin(
+            anchor_lat, anchor_lon, 1.0, 5000.0, -3000.0,
+        );
+
+        let (transformer, xzbbox) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
+
+        let llpoint = LLPoint::new(anchor_lat, anchor_lon).unwrap();
+        let (ex, ez) = proj.forward(anchor_lat, anchor_lon);
+        assert!((ex - 5000.0).abs() < 1e-6, "anchor x drifted: {ex}");
+        assert!((ez + 3000.0).abs() < 1e-6, "anchor z drifted: {ez}");
+
+        // `transform_point` truncates towards zero, so compare against the cast
+        // rather than against the exact anchor coordinates.
+        let pt = transformer.transform_point(llpoint);
+        assert_eq!(pt.x, ex as i32);
+        assert_eq!(pt.z, ez as i32);
+        assert!(
+            xzbbox.contains(&pt),
+            "anchor should sit inside its own bbox"
         );
     }
 

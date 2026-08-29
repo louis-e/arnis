@@ -1,75 +1,94 @@
-use super::Projection;
+//! Web Mercator projection with a local origin offset.
 
-/// Mean Earth radius in meters (WGS84 spherical approximation).
-const EARTH_RADIUS: f64 = 6_371_000.0;
+use super::{Projection, EARTH_RADIUS};
 
-/// Web Mercator projection with a local origin offset so that the reference
-/// point maps to `(0, 0)` in the projected coordinate system.
+/// Web Mercator (the EPSG:3857 formulas) with a local origin offset, so that
+/// the reference point maps to `(0, 0)` in Minecraft coordinates.
 ///
-/// Orientation follows Minecraft conventions: increasing X points east,
-/// and **north maps to negative Z**.
+/// Both axes are expressed in *Mercator* meters:
+///
+/// ```text
+/// x = R * (lon - origin_lon)_rad            * scale
+/// z = -(R * ln(tan(pi/4 + lat/2)) - N0)     * scale
+/// ```
+///
+/// Using Mercator meters on *both* axes is what makes the projection conformal
+/// and locally isotropic: at any given point, one block of X and one block of Z
+/// cover the same ground distance, so nothing is sheared or squashed. An
+/// earlier version of this file mixed true ground meters on X with Mercator
+/// meters on Z, which stretched everything north-south by `1/cos(lat)` — a
+/// factor of 1.63 at 52 degrees N.
+///
+/// The price of conformality is that Web Mercator's scale factor is
+/// `1/cos(latitude)`: geometry is uniformly *oversized* away from the equator,
+/// by about 1.49x at 48 degrees N and 1.32x at 40.7 degrees N. Shapes stay
+/// correct, but a 10 m wall becomes ~15 m of blocks. This projection is
+/// therefore suitable for GLOBAL PLACEMENT — every point on Earth gets one
+/// consistent world position, so separately generated areas line up — but not
+/// for undistorted local geometry. Use
+/// [`crate::projection::TransverseMercatorProjection`] when true-to-life local
+/// dimensions matter.
+///
+/// Because of that oversizing, the projected world is larger than the bounding
+/// box's ground size on both axes. Anything that maps a block onto a raster of
+/// the bbox — the elevation and land-cover grids — must therefore be built for
+/// the *projected* extent, not for a haversine ground distance; see
+/// `crate::ground::projected_world_extent`.
+///
+/// Orientation follows Minecraft conventions: increasing X points east, and
+/// **north maps to negative Z**.
+#[derive(Debug, Clone, Copy)]
 pub struct WebMercatorProjection {
-    /// Reference latitude in degrees.
-    pub(crate) origin_lat: f64,
-    /// Reference longitude in degrees.
+    /// Reference longitude in degrees (the projection's origin meridian).
     pub(crate) origin_lon: f64,
-    /// Scale factor (blocks per meter). Default `1.0`.
+    /// Scale factor (blocks per Mercator meter). Default `1.0`.
     pub(crate) scale: f64,
-    /// Pre-computed Z offset so that `forward(origin_lat, _)` yields `z = 0`.
-    pub(crate) z_offset: f64,
+    /// Mercator northing of the reference latitude, in unscaled meters. The
+    /// origin latitude is folded into this value; `inverse(0.0, 0.0)` gives it
+    /// back exactly.
+    pub(crate) origin_northing: f64,
+}
+
+/// Mercator northing of `lat` (degrees) in unscaled meters.
+fn mercator_northing(lat: f64) -> f64 {
+    EARTH_RADIUS
+        * (std::f64::consts::FRAC_PI_4 + lat.to_radians() / 2.0)
+            .tan()
+            .ln()
 }
 
 impl WebMercatorProjection {
-    /// Create a new projection centred on `(origin_lat, origin_lon)`.
+    /// Create a new projection centred on `(origin_lat, origin_lon)`, so that
+    /// `forward(origin_lat, origin_lon)` is exactly `(0.0, 0.0)`.
     ///
     /// `scale` is expressed in blocks-per-meter (use `1.0` for 1:1).
     pub fn new(origin_lat: f64, origin_lon: f64, scale: f64) -> Self {
-        // Pre-compute z_offset so that forward(origin_lat, _) gives z = 0.
-        let lat_rad = origin_lat.to_radians();
-        let raw_z =
-            -EARTH_RADIUS * (std::f64::consts::FRAC_PI_4 + lat_rad / 2.0).tan().ln() * scale;
-        let z_offset = -raw_z;
-
         Self {
-            origin_lat,
             origin_lon,
             scale,
-            z_offset,
+            origin_northing: mercator_northing(origin_lat),
         }
     }
 }
 
 impl Projection for WebMercatorProjection {
     fn forward(&self, lat: f64, lon: f64) -> (f64, f64) {
-        let lat_ref_rad = self.origin_lat.to_radians();
-        let lat_rad = lat.to_radians();
-        let lon_diff_rad = (lon - self.origin_lon).to_radians();
-
-        let x = EARTH_RADIUS * lon_diff_rad * lat_ref_rad.cos() * self.scale;
-
-        let z =
-            -EARTH_RADIUS * (std::f64::consts::FRAC_PI_4 + lat_rad / 2.0).tan().ln() * self.scale
-                + self.z_offset;
+        let x = EARTH_RADIUS * (lon - self.origin_lon).to_radians() * self.scale;
+        let z = -(mercator_northing(lat) - self.origin_northing) * self.scale;
 
         (x, z)
     }
 
     fn inverse(&self, x: f64, z: f64) -> (f64, f64) {
-        let lat_ref_rad = self.origin_lat.to_radians();
+        // x = R * dlon_rad * scale
+        let lon = self.origin_lon + (x / (EARTH_RADIUS * self.scale)).to_degrees();
 
-        // Recover longitude from x.
-        let lon_diff_rad = x / (EARTH_RADIUS * lat_ref_rad.cos() * self.scale);
-        let lon = self.origin_lon + lon_diff_rad.to_degrees();
+        // z = -(northing - origin_northing) * scale
+        let northing = self.origin_northing - z / self.scale;
+        // northing = R * ln(tan(pi/4 + lat/2))
+        let lat_rad = 2.0 * ((northing / EARTH_RADIUS).exp().atan() - std::f64::consts::FRAC_PI_4);
 
-        // Recover latitude from z.
-        let raw_z = z - self.z_offset;
-        // raw_z = -R * ln(tan(pi/4 + lat/2)) * scale
-        // => ln(tan(pi/4 + lat/2)) = -raw_z / (R * scale)
-        let y = (-raw_z) / (EARTH_RADIUS * self.scale);
-        let lat_rad = 2.0 * (y.exp().atan() - std::f64::consts::FRAC_PI_4);
-        let lat = lat_rad.to_degrees();
-
-        (lat, lon)
+        (lat_rad.to_degrees(), lon)
     }
 }
 
@@ -101,6 +120,9 @@ mod tests {
             (48.8500, 2.3400),
             (49.0, 2.5),
             (48.0, 2.0),
+            // Web Mercator is a global projection: the round trip must hold
+            // on the other side of the planet too.
+            (-33.8688, 151.2093),
         ];
 
         for (lat, lon) in test_points {
@@ -157,6 +179,46 @@ mod tests {
         assert!(
             (z2 - 2.0 * z1).abs() < 1e-6,
             "z should scale linearly: z1={z1}, z2={z2}"
+        );
+    }
+
+    /// The regression test for the bug this file used to have (true ground
+    /// meters on X, Mercator meters on Z). In a conformal Mercator an
+    /// equal-angle step east and north must come out in the ratio
+    /// `cos(origin_lat)`; the broken version produced `cos^2(origin_lat)`
+    /// (0.433 instead of 0.658 at 48.86 degrees N), i.e. a 1.52x north-south
+    /// stretch.
+    #[test]
+    fn test_isotropic_equal_angle_steps() {
+        let p = proj();
+        let step_deg = 1e-4;
+
+        let (dx, _) = p.forward(ORIGIN_LAT, ORIGIN_LON + step_deg);
+        let (_, dz) = p.forward(ORIGIN_LAT + step_deg, ORIGIN_LON);
+
+        let ratio = dx / dz.abs();
+        let expected = ORIGIN_LAT.to_radians().cos();
+        assert!(
+            (ratio - expected).abs() < 1e-5,
+            "dx/|dz| for equal-angle steps should be cos(origin_lat)={expected}, got {ratio}"
+        );
+    }
+
+    /// Web Mercator oversizes by `1/cos(lat)`. That is expected and documented;
+    /// this pins the magnitude so the trade-off cannot silently change.
+    #[test]
+    fn test_oversize_factor_is_one_over_cos_lat() {
+        let p = proj();
+
+        // 1000 m of real ground distance due north of the origin.
+        let dlat_deg = (1000.0 / EARTH_RADIUS).to_degrees();
+        let (_, z) = p.forward(ORIGIN_LAT + dlat_deg, ORIGIN_LON);
+
+        let expected = 1000.0 / ORIGIN_LAT.to_radians().cos();
+        assert!(
+            (z.abs() - expected).abs() < 1.0,
+            "1000 m north should project to ~{expected} blocks, got {}",
+            z.abs()
         );
     }
 }
