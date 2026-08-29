@@ -22,7 +22,9 @@ pub use common::{
     base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
     world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
 };
-pub(crate) use common::{BlockStorage, RegionToModify, SectionToModify, MAX_BLOCK_ID};
+pub(crate) use common::{
+    BlockStorage, ChunkToModify, RegionToModify, SectionToModify, MAX_BLOCK_ID,
+};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -387,6 +389,16 @@ impl<'a> WorldEditor<'a> {
     pub fn set_ground_origin(&mut self, origin_x: i32, origin_z: i32) {
         self.ground_origin_x = origin_x;
         self.ground_origin_z = origin_z;
+    }
+
+    /// World-space origin every `Ground` lookup subtracts.
+    ///
+    /// `(0, 0)` for an unrotated world under the default Local projection, whose bbox starts at
+    /// the origin. It is NOT `(0, 0)` for a rotated world — `rotate_world` stores the enlarged
+    /// AABB without renormalising, so a 45-degree rotation puts the min at roughly `-0.207 * side`
+    /// — nor for a projected world, whose bbox sits wherever the projection puts it.
+    pub(crate) fn ground_origin(&self) -> (i32, i32) {
+        (self.ground_origin_x, self.ground_origin_z)
     }
 
     /// Sets the ground reference for elevation-based block placement
@@ -826,6 +838,7 @@ impl<'a> WorldEditor<'a> {
             self.ground.clone(),
             self.bake_lighting,
             self.preview.clone(),
+            self.ground_origin(),
         )
     }
 

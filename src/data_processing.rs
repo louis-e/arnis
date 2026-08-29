@@ -28,6 +28,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Where a generation run sends its output.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GenerationSink {
+    /// Write a world to disk in the configured format (the existing behaviour).
+    #[default]
+    Disk,
+    /// Keep everything in memory and hand the caller the block tree.
+    Memory,
+}
+
 /// Generation options that can be passed separately from CLI Args
 #[derive(Clone)]
 pub struct GenerationOptions {
@@ -37,6 +47,62 @@ pub struct GenerationOptions {
     pub spawn_point: Option<(i32, i32)>,
     pub luanti_game: Option<crate::luanti_block_map::LuantiGame>,
     pub ground_level: i32,
+    /// Output destination. Owned by the entry point rather than the caller:
+    /// `generate_world_with_options` forces `Disk`, `generate_world_in_memory` forces `Memory`.
+    pub sink: GenerationSink,
+}
+
+/// The disk-coupled behaviours of a generation run, resolved once from the sink.
+///
+/// Every field is a real coupling inside `generate_world_core`: each one either writes into
+/// `options.path`, reads `level.dat` back out of it, or mutates process-global state that only
+/// makes sense for a run that ends in a world folder. `GenerationSink::Memory` turns them all off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SinkPolicy {
+    /// Allow region eviction / stream-to-disk (`should_stream_to_disk` + `FlushWorker`).
+    /// Eviction frees regions after writing them, so a Memory run would hand back a hollow world.
+    allow_eviction: bool,
+    /// Run the signage pre-pass and enable map decals. `signage::build_context` renders map tiles
+    /// that are only meaningful next to a world folder, and `save()` is what writes them.
+    signage: bool,
+    /// Build and finalize the map-preview accumulator. `map_preview::begin_preview_epoch()` bumps a
+    /// GLOBAL epoch, so running it would silently cancel a GUI preview the user is still waiting on.
+    map_preview: bool,
+    /// Place the map item / branding map. Both resolve spawn via `map_item::read_spawn_xz`, which
+    /// reads `level.dat` off disk in the middle of generation.
+    map_item_and_branding: bool,
+    /// Honour `args.debug` for the in-loop debug messages.
+    ///
+    /// NOTE: the debug PNG dumps to bare relative filenames (`src/ground.rs:957-960`) run during
+    /// `Ground` construction, *before* this function, and `Args` is not `Clone`, so they cannot be
+    /// suppressed from here. A Memory-mode caller must build its `Args` with `debug: false`.
+    debug: bool,
+    /// Write the world itself: `editor.save()`, level.dat, world settings, map/preview files.
+    write_world: bool,
+}
+
+impl SinkPolicy {
+    /// Resolve the policy for a sink.
+    fn for_sink(sink: GenerationSink) -> Self {
+        match sink {
+            GenerationSink::Disk => Self {
+                allow_eviction: true,
+                signage: true,
+                map_preview: true,
+                map_item_and_branding: true,
+                debug: true,
+                write_world: true,
+            },
+            GenerationSink::Memory => Self {
+                allow_eviction: false,
+                signage: false,
+                map_preview: false,
+                map_item_and_branding: false,
+                debug: false,
+                write_world: false,
+            },
+        }
+    }
 }
 
 /// Shoelace area of a way's projected ring, in blocks squared.
@@ -503,27 +569,264 @@ fn should_stream_to_disk(num_regions: usize) -> bool {
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
 }
 
+/// What `generate_world_core` hands back: the finished editor plus the few pieces of state the
+/// disk entry point still needs for its post-save phase (map item, signage tiles, preview PNG).
+///
+/// The editor borrows the caller's `XZBBox`, which is why the core takes it by reference and the
+/// entry points own it.
+struct CoreOutput<'a> {
+    /// The generated world, not yet saved.
+    editor: WorldEditor<'a>,
+    /// The policy the core ran under.
+    policy: SinkPolicy,
+    /// Preview accumulator, if any feature that consumes one was enabled.
+    preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
+    /// Preview epoch, `None` when the preview was skipped (Memory mode never bumps the epoch).
+    preview_epoch: Option<u64>,
+    /// Signage registry, if the signage pre-pass ran.
+    signage_ctx: Option<Arc<signage::SignageContext>>,
+    /// Kept alive for the post-generation spawn-Y fixup.
+    ground: Arc<Ground>,
+    /// Resolved map-item / branding decisions (already sink-gated).
+    wants_map_item: bool,
+    place_branding: bool,
+    /// Benchmark clock, carried across so the post-save phases stay on the same timeline.
+    bench: crate::bench::Bench,
+}
+
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 #[allow(clippy::too_many_arguments)]
 pub fn generate_world_with_options(
-    mut elements: Vec<ProcessedElement>,
+    elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    mut options: GenerationOptions,
+    outline_suppression: OutlineSuppression,
+    part_groups: PartGroups,
+) -> Result<PathBuf, String> {
+    options.sink = GenerationSink::Disk;
+    let output_path = options.path.clone();
+    let world_format = options.format;
+    let generation_start = args.benchmark.then(std::time::Instant::now);
+
+    let CoreOutput {
+        mut editor,
+        policy,
+        preview,
+        preview_epoch,
+        signage_ctx,
+        ground,
+        wants_map_item,
+        place_branding,
+        mut bench,
+    } = generate_world_core(
+        elements,
+        &xzbbox,
+        llbbox,
+        ground,
+        args,
+        options,
+        outline_suppression,
+        part_groups,
+    )?;
+
+    // Save world. The sink gate is what keeps `generate_world_in_memory` from ever writing a
+    // world folder; this entry point forces `GenerationSink::Disk`, so it always saves.
+    if policy.write_world {
+        if let Err(e) = editor.save() {
+            return Err(e.to_string());
+        }
+    }
+    bench.mark("save");
+
+    // Map item, signage tiles and world settings are often longer than the region
+    // write, so they get their own band instead of a frozen bar at the end of save.
+    emit_gui_progress_update(97.0, "Finalizing world...");
+
+    if wants_map_item {
+        if let Some(p) = preview.as_ref() {
+            match crate::map_item::write_map_item(&output_path, p, &xzbbox) {
+                Ok(()) => println!("World map item added to the player inventory."),
+                Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
+            }
+        }
+    } else if place_branding {
+        if let Err(e) = crate::map_item::write_branding_map_only(&output_path) {
+            eprintln!("Warning: Failed to create arnismc.com map: {e}");
+        }
+    }
+
+    if let Some(ctx) = &signage_ctx {
+        let t = args.benchmark.then(std::time::Instant::now);
+        match crate::map_item::write_decal_maps(&output_path, &ctx.registry, preview.as_deref()) {
+            Ok(n) => println!("Wrote {n} signage map tiles."),
+            Err(e) => eprintln!("Warning: Failed to create signage maps: {e}"),
+        }
+        if let Some(t) = t {
+            eprintln!("[BENCHMARK] signage_maps_ms={}", t.elapsed().as_millis());
+        }
+        println!("{}", ctx.summary(args.debug));
+    }
+
+    // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.
+    if let (Some(p), Some(preview_epoch)) = (preview.filter(|_| args.map_preview), preview_epoch) {
+        let png_path = map_preview::preview_output_path(&output_path, world_format);
+        let result = map_preview::PreviewResult {
+            png_path: png_path.clone(),
+            min_lat: llbbox.min().lat(),
+            max_lat: llbbox.max().lat(),
+            min_lon: llbbox.min().lng(),
+            max_lon: llbbox.max().lng(),
+            min_mc_x: xzbbox.min_x(),
+            max_mc_x: xzbbox.max_x(),
+            min_mc_z: xzbbox.min_z(),
+            max_mc_z: xzbbox.max_z(),
+        };
+        let finalize = move || {
+            // Skip if a newer generation already started.
+            if !map_preview::epoch_is_current(preview_epoch) {
+                return;
+            }
+            match p.finalize(&png_path) {
+                Ok(path) => {
+                    if map_preview::record_preview_result(preview_epoch, result) {
+                        println!("Map preview saved to: {}", path.display());
+                        emit_map_preview_ready();
+                    }
+                }
+                Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
+            }
+        };
+        if crate::progress::is_running_with_gui() {
+            std::thread::spawn(finalize);
+        } else {
+            finalize();
+        }
+    }
+    bench.mark("map_preview");
+
+    if let Some(start) = generation_start {
+        let gen_ms = start.elapsed().as_millis();
+        eprintln!("[BENCHMARK] generation_time_ms={gen_ms}");
+    }
+
+    emit_gui_progress_update(99.5, "Finalizing world...");
+
+    if world_format == WorldFormat::JavaAnvil {
+        if let Err(e) = crate::world_utils::apply_java_world_settings(
+            &output_path,
+            args.gamemode,
+            args.world_time,
+        ) {
+            eprintln!("Warning: Failed to apply world settings: {e}");
+        }
+    }
+
+    // Update player spawn Y coordinate based on terrain height after generation
+    #[cfg(feature = "gui")]
+    if world_format == WorldFormat::JavaAnvil {
+        use crate::gui::update_player_spawn_y_after_generation;
+
+        // Always update spawn Y since we now always set a spawn point (user-selected or default).
+        // Use output_path (the actual "Arnis World N" folder holding level.dat), not args.path —
+        // for CLI runs args.path is the parent --output-dir, so level.dat sits one level deeper.
+        // `xzbbox` is post-rotation, which is what `ground` is indexed against.
+        if let Err(e) =
+            update_player_spawn_y_after_generation(&output_path, &xzbbox, ground.as_ref())
+        {
+            let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
+            eprintln!("Warning: {}", warning_msg);
+            #[cfg(feature = "gui")]
+            send_log(LogLevel::Warning, &warning_msg);
+        }
+    }
+    // `ground` exists only to feed the GUI-only spawn-Y fixup above.
+    #[cfg(not(feature = "gui"))]
+    drop(ground);
+
+    // For Bedrock format, emit event to open the mcworld file
+    if world_format == WorldFormat::BedrockMcWorld {
+        if let Some(path_str) = output_path.to_str() {
+            emit_show_in_folder(path_str);
+        }
+    }
+
+    // For Java worlds saved to the Desktop (GUI falls back there when .minecraft/saves
+    // is missing), open the folder in the file explorer so the user can find the world.
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(desktop) = dirs::desktop_dir() {
+            if output_path.starts_with(&desktop) {
+                if let Some(path_str) = output_path.to_str() {
+                    emit_show_in_folder(path_str);
+                }
+            }
+        }
+    }
+
+    Ok(output_path)
+}
+
+/// Run the exact same generation pipeline as [`generate_world_with_options`], but keep the result
+/// in memory and hand back the block tree instead of writing a world folder.
+///
+/// Everything that needs an output directory (or that mutates global preview state) is switched off
+/// via [`SinkPolicy`]; see its field docs for the full list. Two consequences are worth naming:
+/// signs that would have rendered as map decals come out as plain blocks, and nothing is evicted,
+/// so peak RAM is the whole area at once — keep the requested area small.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_world_in_memory(
+    elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    mut options: GenerationOptions,
+    outline_suppression: OutlineSuppression,
+    part_groups: PartGroups,
+) -> Result<crate::world_editor::WorldToModify, String> {
+    options.sink = GenerationSink::Memory;
+    let output = generate_world_core(
+        elements,
+        &xzbbox,
+        llbbox,
+        ground,
+        args,
+        options,
+        outline_suppression,
+        part_groups,
+    )?;
+    let mut world = output.editor.into_world();
+    // Only `save()` does this on the disk path, so without it every uniform section stays a live
+    // 4 KiB `Full(Vec<u8>)` allocation.
+    world.compact_sections();
+    Ok(world)
+}
+
+/// The generation pipeline itself, shared verbatim by both entry points.
+///
+/// Returns the populated editor; the caller decides whether it goes to disk or stays in RAM.
+#[allow(clippy::too_many_arguments)]
+fn generate_world_core<'a>(
+    mut elements: Vec<ProcessedElement>,
+    xzbbox: &'a XZBBox,
     llbbox: LLBBox,
     ground: Ground,
     args: &Args,
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
     part_groups: PartGroups,
-) -> Result<PathBuf, String> {
+) -> Result<CoreOutput<'a>, String> {
+    let policy = SinkPolicy::for_sink(options.sink);
     let output_path = options.path.clone();
     let world_format = options.format;
-    let generation_start = args.benchmark.then(std::time::Instant::now);
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
         WorldEditor::new_luanti(
             options.path,
-            &xzbbox,
+            xzbbox,
             llbbox,
             options
                 .luanti_game
@@ -535,7 +838,7 @@ pub fn generate_world_with_options(
     } else {
         WorldEditor::new_with_format_and_name(
             options.path,
-            &xzbbox,
+            xzbbox,
             llbbox,
             options.format,
             options.level_name.clone(),
@@ -546,18 +849,22 @@ pub fn generate_world_with_options(
     editor.set_bake_lighting(args.bake_lighting);
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
-    editor.set_start_with_map(args.map_item);
-    editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
+    editor.set_start_with_map(args.map_item && policy.map_item_and_branding);
+    // Memory mode drops map decals with the signage pre-pass below: a decal is a map tile that
+    // only exists once the world folder is written, so signs that would render as decals come
+    // out as plain blocks instead.
+    editor.set_map_decals(world_format == WorldFormat::JavaAnvil && policy.signage);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
 
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
     // threads only read the registry. Java only; other formats keep banner fallbacks.
     let signage_start = args.benchmark.then(std::time::Instant::now);
-    let signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
-        == WorldFormat::JavaAnvil)
-        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox))
-        .flatten()
-        .map(Arc::new);
+    // `signage::build_context` renders map tiles that need a world folder, so Memory mode skips it.
+    let signage_ctx: Option<Arc<signage::SignageContext>> =
+        (world_format == WorldFormat::JavaAnvil && policy.signage)
+            .then(|| signage::build_context(&elements, args, llbbox, xzbbox))
+            .flatten()
+            .map(Arc::new);
     if let (Some(t), Some(_)) = (signage_start, signage_ctx.as_ref()) {
         eprintln!("[BENCHMARK] signage_prepass_ms={}", t.elapsed().as_millis());
     }
@@ -577,22 +884,28 @@ pub fn generate_world_with_options(
     });
 
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
-    let preview_epoch = map_preview::begin_preview_epoch();
+    // `begin_preview_epoch` bumps a GLOBAL epoch, which would cancel a GUI preview the user is
+    // still waiting on, so Memory mode never calls it and carries `None` instead.
+    let preview_epoch = policy.map_preview.then(map_preview::begin_preview_epoch);
     // The map item consumes the same accumulator, so either feature enables it.
     // Without the PNG the map item only needs 128px, so a small frame suffices
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
-    let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil;
+    // Both map-item and branding resolve spawn through `map_item::read_spawn_xz`, which reads
+    // level.dat off disk mid-generation, so both are off in Memory mode.
+    let wants_map_item =
+        args.map_item && world_format == WorldFormat::JavaAnvil && policy.map_item_and_branding;
     // Branding map ships on every Java world.
-    let place_branding = world_format == WorldFormat::JavaAnvil;
-    let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
+    let place_branding = world_format == WorldFormat::JavaAnvil && policy.map_item_and_branding;
+    let wants_png =
+        args.map_preview && world_format != WorldFormat::LuantiWorld && policy.map_preview;
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
         Arc::new(if wants_png {
-            PreviewAccumulator::new(&xzbbox)
+            PreviewAccumulator::new(xzbbox)
         } else if wants_local_maps {
             // "You are here" boards crop this, so give them a little more resolution.
-            PreviewAccumulator::new_capped(&xzbbox, 1024)
+            PreviewAccumulator::new_capped(xzbbox, 1024)
         } else {
-            PreviewAccumulator::new_capped(&xzbbox, 512)
+            PreviewAccumulator::new_capped(xzbbox, 512)
         })
     });
     if let Some(p) = &preview {
@@ -610,9 +923,9 @@ pub fn generate_world_with_options(
     let mut bench = crate::bench::Bench::new(args.benchmark);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
-    let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+    let big_water_field = crate::water_depth::compute_big_water_field(&ground, xzbbox);
     // Resolved once here: a body spanning many tiles must not be measured per tile.
-    let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, &xzbbox);
+    let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, xzbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
     emit_gui_progress_update(19.5, "Processing data...");
@@ -638,18 +951,18 @@ pub fn generate_world_with_options(
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
-    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
+    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, xzbbox);
 
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
     let building_passages =
-        highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
+        highways::collect_building_passage_coords(&elements, xzbbox, args.scale);
 
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    let road_mask = highways::collect_road_surface_coords(&elements, &editor, &xzbbox, args.scale);
+    let road_mask = highways::collect_road_surface_coords(&elements, &editor, xzbbox, args.scale);
 
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
@@ -678,19 +991,19 @@ pub fn generate_world_with_options(
         railways::collect_rail_bridge_internal_endpoints(&elements);
 
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
-    let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
+    let rail_mask = railways::collect_at_grade_rail_mask(&elements, xzbbox);
 
-    let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
+    let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, xzbbox);
 
     // Tunnel bore footprints, so the water depth-carve and vegetation stay off them.
     let mut tunnel_footprint = highways::collect_tunnel_footprint(
         &elements,
         &editor,
         &tunnel_internal_endpoints,
-        &xzbbox,
+        xzbbox,
         args.scale,
     );
-    railways::add_tunnel_footprint(&elements, &xzbbox, &mut tunnel_footprint);
+    railways::add_tunnel_footprint(&elements, xzbbox, &mut tunnel_footprint);
     let tunnel_portals = highways::collect_tunnel_portals(
         &elements,
         &editor,
@@ -700,7 +1013,7 @@ pub fn generate_world_with_options(
     );
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
-    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+    let landmarks = crate::landmarks::prescan(&elements, xzbbox, llbbox, args);
 
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
@@ -742,7 +1055,7 @@ pub fn generate_world_with_options(
 
     // Decide between sequential and parallel processing based on world size.
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
-    let tiles = tile::create_tiles(&xzbbox, tile::DEFAULT_TILE_SIZE);
+    let tiles = tile::create_tiles(xzbbox, tile::DEFAULT_TILE_SIZE);
 
     // Tile editors are created as JavaAnvil (WorldEditor::new), so their
     // format-dependent block-entity schema (banners) only matches Java output.
@@ -773,8 +1086,10 @@ pub fn generate_world_with_options(
         // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
         // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
         // are kept via region deferral.
-        eviction_active =
-            matches!(world_format, WorldFormat::JavaAnvil) && should_stream_to_disk(tiles.len());
+        // Eviction frees each region after writing it, so Memory mode must never enable it.
+        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
+            && policy.allow_eviction
+            && should_stream_to_disk(tiles.len());
 
         // Regions any 3D placement may write to: kept resident (not evicted in-loop)
         // so the post-merge placement pass lands in RAM, then flushed at finalize.
@@ -908,7 +1223,7 @@ pub fn generate_world_with_options(
                             // World bbox (not tile) for relation/area ring clipping: clipping to
                             // the tile can drop a relation whose ring fails to close. The tile
                             // editor still bounds the actual writes.
-                            &xzbbox,
+                            xzbbox,
                             &big_water_field,
                             &bridge_structures,
                             &bridge_surface,
@@ -934,7 +1249,7 @@ pub fn generate_world_with_options(
                         &mut tile_editor,
                         ground.as_ref(),
                         args,
-                        &xzbbox,
+                        xzbbox,
                         &building_footprints,
                         &tunnel_footprint,
                         &bridge_surface,
@@ -957,7 +1272,7 @@ pub fn generate_world_with_options(
                     crate::water_depth::carve_lc_water_region(
                         &mut tile_editor,
                         ground.as_ref(),
-                        &xzbbox,
+                        xzbbox,
                         &big_water_field,
                         &road_mask,
                         &tunnel_footprint,
@@ -1166,7 +1481,7 @@ pub fn generate_world_with_options(
                 last_emitted_progress = current_progress_prcs;
             }
 
-            if args.debug {
+            if args.debug && policy.debug {
                 process_pb.set_message(format!(
                     "(Element ID: {} / Type: {})",
                     element.id(),
@@ -1190,7 +1505,7 @@ pub fn generate_world_with_options(
                 &road_mask,
                 &rail_mask,
                 &tunnel_footprint,
-                &xzbbox,
+                xzbbox,
                 &big_water_field,
                 &bridge_structures,
                 &bridge_surface,
@@ -1230,7 +1545,7 @@ pub fn generate_world_with_options(
             &mut editor,
             ground.as_ref(),
             args,
-            &xzbbox,
+            xzbbox,
             &building_footprints,
             &tunnel_footprint,
             &bridge_surface,
@@ -1240,13 +1555,13 @@ pub fn generate_world_with_options(
 
     if ground_on_merged {
         if args.fillground {
-            crate::ore_generation::generate_ores(&mut editor, &xzbbox);
+            crate::ore_generation::generate_ores(&mut editor, xzbbox);
         }
         // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
         crate::water_depth::carve_lc_water_pass(
             &mut editor,
             ground.as_ref(),
-            &xzbbox,
+            xzbbox,
             &big_water_field,
             &road_mask,
             &tunnel_footprint,
@@ -1338,140 +1653,81 @@ pub fn generate_world_with_options(
         }
     }
 
-    // Save world
-    if let Err(e) = editor.save() {
-        return Err(e.to_string());
-    }
-    bench.mark("save");
-
-    // Map item, signage tiles and world settings are often longer than the region
-    // write, so they get their own band instead of a frozen bar at the end of save.
-    emit_gui_progress_update(97.0, "Finalizing world...");
-
-    if wants_map_item {
-        if let Some(p) = preview.as_ref() {
-            match crate::map_item::write_map_item(&output_path, p, &xzbbox) {
-                Ok(()) => println!("World map item added to the player inventory."),
-                Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
-            }
-        }
-    } else if place_branding {
-        if let Err(e) = crate::map_item::write_branding_map_only(&output_path) {
-            eprintln!("Warning: Failed to create arnismc.com map: {e}");
-        }
-    }
-
-    if let Some(ctx) = &signage_ctx {
-        let t = args.benchmark.then(std::time::Instant::now);
-        match crate::map_item::write_decal_maps(&output_path, &ctx.registry, preview.as_deref()) {
-            Ok(n) => println!("Wrote {n} signage map tiles."),
-            Err(e) => eprintln!("Warning: Failed to create signage maps: {e}"),
-        }
-        if let Some(t) = t {
-            eprintln!("[BENCHMARK] signage_maps_ms={}", t.elapsed().as_millis());
-        }
-        println!("{}", ctx.summary(args.debug));
-    }
-
-    // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.
-    if let Some(p) = preview.filter(|_| args.map_preview) {
-        let png_path = map_preview::preview_output_path(&output_path, world_format);
-        let result = map_preview::PreviewResult {
-            png_path: png_path.clone(),
-            min_lat: llbbox.min().lat(),
-            max_lat: llbbox.max().lat(),
-            min_lon: llbbox.min().lng(),
-            max_lon: llbbox.max().lng(),
-            min_mc_x: xzbbox.min_x(),
-            max_mc_x: xzbbox.max_x(),
-            min_mc_z: xzbbox.min_z(),
-            max_mc_z: xzbbox.max_z(),
-        };
-        let finalize = move || {
-            // Skip if a newer generation already started.
-            if !map_preview::epoch_is_current(preview_epoch) {
-                return;
-            }
-            match p.finalize(&png_path) {
-                Ok(path) => {
-                    if map_preview::record_preview_result(preview_epoch, result) {
-                        println!("Map preview saved to: {}", path.display());
-                        emit_map_preview_ready();
-                    }
-                }
-                Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
-            }
-        };
-        if crate::progress::is_running_with_gui() {
-            std::thread::spawn(finalize);
-        } else {
-            finalize();
-        }
-    }
-    bench.mark("map_preview");
-
-    if let Some(start) = generation_start {
-        let gen_ms = start.elapsed().as_millis();
-        eprintln!("[BENCHMARK] generation_time_ms={gen_ms}");
-    }
-
-    emit_gui_progress_update(99.5, "Finalizing world...");
-
-    if world_format == WorldFormat::JavaAnvil {
-        if let Err(e) = crate::world_utils::apply_java_world_settings(
-            &output_path,
-            args.gamemode,
-            args.world_time,
-        ) {
-            eprintln!("Warning: Failed to apply world settings: {e}");
-        }
-    }
-
-    // Update player spawn Y coordinate based on terrain height after generation
-    #[cfg(feature = "gui")]
-    if world_format == WorldFormat::JavaAnvil {
-        use crate::gui::update_player_spawn_y_after_generation;
-
-        // Always update spawn Y since we now always set a spawn point (user-selected or default).
-        // Use output_path (the actual "Arnis World N" folder holding level.dat), not args.path —
-        // for CLI runs args.path is the parent --output-dir, so level.dat sits one level deeper.
-        // `xzbbox` is post-rotation, which is what `ground` is indexed against.
-        if let Err(e) =
-            update_player_spawn_y_after_generation(&output_path, &xzbbox, ground.as_ref())
-        {
-            let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
-            eprintln!("Warning: {}", warning_msg);
-            #[cfg(feature = "gui")]
-            send_log(LogLevel::Warning, &warning_msg);
-        }
-    }
-
-    // For Bedrock format, emit event to open the mcworld file
-    if world_format == WorldFormat::BedrockMcWorld {
-        if let Some(path_str) = output_path.to_str() {
-            emit_show_in_folder(path_str);
-        }
-    }
-
-    // For Java worlds saved to the Desktop (GUI falls back there when .minecraft/saves
-    // is missing), open the folder in the file explorer so the user can find the world.
-    if world_format == WorldFormat::JavaAnvil {
-        if let Some(desktop) = dirs::desktop_dir() {
-            if output_path.starts_with(&desktop) {
-                if let Some(path_str) = output_path.to_str() {
-                    emit_show_in_folder(path_str);
-                }
-            }
-        }
-    }
-
-    Ok(output_path)
+    Ok(CoreOutput {
+        editor,
+        policy,
+        preview,
+        preview_epoch,
+        signage_ctx,
+        ground,
+        wants_map_item,
+        place_branding,
+        bench,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::osm_parser::ProcessedMember;
+
+    // --- Generation sink ---------------------------------------------------------------
+    //
+    // COVERED: `SinkPolicy` is the single place the sink is turned into decisions, and these
+    // tests pin every one of them: eviction, signage/map decals, map preview (and its global
+    // epoch), map item + branding map, debug output and world writing. Disk keeps all of them,
+    // Memory keeps none, so the disk path cannot change behaviour by adding the sink.
+    //
+    // NOT COVERED: an end-to-end run of both sinks compared through
+    // `WorldToModify::content_hash()`. A real generation needs Overpass and elevation fixtures
+    // and retunes the process-global WORLD_MIN_Y / TERRAIN_FLOOR_Y / BASE_CHUNK_Y atomics, so it
+    // cannot run as a unit test next to the rest of the suite. That oracle is still available by
+    // hand: `ARNIS_BLOCK_HASH=1` makes `generate_world_core` print `[BENCHMARK] block_hash=<hex>`
+    // under either sink, and the two must be equal for the same area and `Args`.
+
+    #[test]
+    fn disk_sink_keeps_every_side_effect_enabled() {
+        let p = SinkPolicy::for_sink(GenerationSink::Disk);
+        assert!(p.allow_eviction);
+        assert!(p.signage);
+        assert!(p.map_preview);
+        assert!(p.map_item_and_branding);
+        assert!(p.debug);
+        assert!(p.write_world);
+    }
+
+    #[test]
+    fn memory_sink_disables_every_disk_coupling() {
+        let p = SinkPolicy::for_sink(GenerationSink::Memory);
+        assert!(
+            !p.allow_eviction,
+            "eviction frees each region after writing it, leaving a hollow world"
+        );
+        assert!(
+            !p.signage,
+            "the signage pre-pass renders map tiles that need a world folder"
+        );
+        assert!(
+            !p.map_preview,
+            "begin_preview_epoch bumps a global epoch and would cancel a live GUI preview"
+        );
+        assert!(
+            !p.map_item_and_branding,
+            "both resolve spawn via read_spawn_xz, which reads level.dat off disk"
+        );
+        assert!(!p.debug, "debug dumps write bare relative filenames");
+        assert!(!p.write_world, "nothing may touch the output directory");
+    }
+
+    #[test]
+    fn disk_is_the_default_sink() {
+        // Every pre-existing construction site relies on Disk being the unchanged behaviour.
+        assert_eq!(GenerationSink::default(), GenerationSink::Disk);
+        assert_ne!(
+            SinkPolicy::for_sink(GenerationSink::Disk),
+            SinkPolicy::for_sink(GenerationSink::Memory)
+        );
+    }
 
     fn square(id: u64, size: i32, tags: &[(&str, &str)]) -> ProcessedWay {
         let corners = [(0, 0), (size, 0), (size, size), (0, size)];

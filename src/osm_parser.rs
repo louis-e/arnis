@@ -799,6 +799,12 @@ pub fn arch_era_from_hint(hint: StyleHint) -> ArchEra {
     }
 }
 
+/// Parse raw OSM data into processed elements, projecting geographic coordinates with the
+/// projection kind selected by `projection`.
+///
+/// The projection origin is derived from the bounding box midpoint, so the resulting Minecraft
+/// coordinates are relative to *this* bbox. Callers that need one absolute world frame shared by
+/// several separately-fetched areas must use [`parse_osm_data_pinned`] instead.
 pub fn parse_osm_data(
     osm_data: OsmData,
     bbox: LLBBox,
@@ -834,6 +840,59 @@ pub fn parse_osm_data(
         panic!("Error in defining coordinate transformation:\n{e}");
     });
 
+    parse_osm_data_with_transformer(data, coord_transformer, xzbbox, debug)
+}
+
+/// Parse raw OSM data through an explicit, caller-owned projection instance.
+///
+/// This exists for stream mode, where every tile has to land in ONE absolute Minecraft frame: an
+/// anchor pins a real-world position to a fixed world position and hands the same pinned
+/// projection to every tile it owns. [`parse_osm_data`] cannot do that — it derives the projection
+/// origin from the bbox midpoint, so the same real place would land at different coordinates in
+/// each tile and every tile boundary would become a seam.
+///
+/// The supplied projection always wins; nothing here consults the bbox midpoint. The returned
+/// `XZBBox` is the envelope of the projected bbox corners, in absolute world coordinates.
+#[allow(dead_code)] // Consumed by the stream tile generator.
+pub fn parse_osm_data_pinned(
+    osm_data: OsmData,
+    bbox: LLBBox,
+    scale: f64,
+    debug: bool,
+    projection: &crate::projection::TransverseMercatorProjection,
+) -> (
+    Vec<ProcessedElement>,
+    XZBBox,
+    OutlineSuppression,
+    PartGroups,
+) {
+    println!("{} Parsing data...", "[2/7]".bold());
+    println!("Bounding box: {bbox:?}");
+
+    let data = SplitOsmData::from_raw_osm_data(osm_data);
+
+    let (coord_transformer, xzbbox) = CoordTransformer::with_projection(&bbox, scale, projection)
+        // Same rationale as `parse_osm_data`: the only reachable cause is a scale the caller
+        // already validated, and an exit here would take a GUI/server process down with it.
+        .unwrap_or_else(|e| {
+            panic!("Error in defining coordinate transformation:\n{e}");
+        });
+
+    parse_osm_data_with_transformer(data, coord_transformer, xzbbox, debug)
+}
+
+/// The parse itself, once the coordinate frame has been settled by one of the entry points above.
+fn parse_osm_data_with_transformer(
+    data: SplitOsmData,
+    coord_transformer: CoordTransformer,
+    xzbbox: XZBBox,
+    debug: bool,
+) -> (
+    Vec<ProcessedElement>,
+    XZBBox,
+    OutlineSuppression,
+    PartGroups,
+) {
     if debug {
         println!("Total elements: {}", data.total_count());
         println!("Scale factor X: {}", coord_transformer.scale_factor_x());
