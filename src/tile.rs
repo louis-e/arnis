@@ -1,8 +1,8 @@
 //! Tile subdivision and element assignment for parallel world generation.
 //!
-//! Divides the world bounding box into fixed-size tiles (default 512×512 blocks,
-//! aligned with Minecraft region boundaries). Each tile can be processed independently
-//! on a separate CPU core.
+//! Divides the world bounding box into a grid of fixed-size tiles (default
+//! 512×512 blocks, which aligns with Minecraft region boundaries). Each tile can
+//! be processed independently on a separate CPU core.
 
 use crate::coordinate_system::cartesian::XZBBox;
 #[cfg(test)]
@@ -54,16 +54,26 @@ pub const TILE_EDITOR_HALO: i32 = 64;
 const MAX_LINEAR_HALF_WIDTH_M: f64 = 40.0;
 
 /// Subdivide the world bounding box into tiles of the given size.
-/// Tiles at the edge may be smaller than the full tile size.
+///
+/// The grid is aligned to multiples of `tile_size` measured from the world origin,
+/// so every tile corner is a multiple of `tile_size` and a tile is addressable from
+/// (grid origin, tile size) alone. With the default 512 this is exactly a Minecraft
+/// region boundary and the emitted tiles are unchanged. Tiles at the edge of the
+/// grid are clamped to the aligned extent and may be smaller than the full tile size.
+///
+/// Panics if `tile_size` is not positive.
 pub fn create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
+    assert!(tile_size > 0, "tile_size must be positive, got {tile_size}");
+
     let mut tiles = Vec::new();
 
-    // Align tile grid to region boundaries (multiples of 512 from world origin)
-    // This ensures each tile maps cleanly to Minecraft regions
-    let aligned_min_x = (xzbbox.min_x() >> 9) << 9; // floor to nearest 512
-    let aligned_min_z = (xzbbox.min_z() >> 9) << 9;
-    let aligned_max_x = ((xzbbox.max_x() + 512) >> 9) << 9; // ceil to nearest 512 region
-    let aligned_max_z = ((xzbbox.max_z() + 512) >> 9) << 9;
+    // Align the tile grid to multiples of tile_size (floor for min, ceil for max).
+    // For the default 512 these are exactly the old `>> 9 << 9` region-aligned
+    // expressions, so the production grid is bit-for-bit what it always was.
+    let aligned_min_x = xzbbox.min_x().div_euclid(tile_size) * tile_size;
+    let aligned_min_z = xzbbox.min_z().div_euclid(tile_size) * tile_size;
+    let aligned_max_x = (xzbbox.max_x().div_euclid(tile_size) + 1) * tile_size; // exclusive
+    let aligned_max_z = (xzbbox.max_z().div_euclid(tile_size) + 1) * tile_size;
 
     let mut z = aligned_min_z;
     while z < aligned_max_z {
@@ -120,20 +130,75 @@ fn aabb_intersects(aabb: (i32, i32, i32, i32), bounds: &TileBounds) -> bool {
     min_x < bounds.max_x && max_x >= bounds.min_x && min_z < bounds.max_z && max_z >= bounds.min_z
 }
 
-/// Inclusive region-cell range (rx0, rx1, rz0, rz1) whose halo-expanded tiles an
-/// AABB can intersect. Conservative superset of the matching tiles: for any tile
-/// in this range the AABB passes `aabb_intersects(.expanded(halo))`, and any tile
-/// outside it cannot. Lets element assignment touch only the relevant region
-/// cells instead of scanning every tile.
-#[inline]
-fn region_range(aabb: (i32, i32, i32, i32), halo: i32) -> (i32, i32, i32, i32) {
-    let (min_x, max_x, min_z, max_z) = aabb;
-    (
-        (min_x - halo) >> 9,
-        (max_x + halo) >> 9,
-        (min_z - halo) >> 9,
-        (max_z + halo) >> 9,
-    )
+/// The uniform grid a tile list sits on: the corner tiles are measured from, the
+/// per-axis spacing between neighbouring tiles, and the cell -> tile index lookup.
+///
+/// Derived from the tiles themselves so every tile size works. Keying on fixed
+/// 512-block region cells only ever worked for `tile_size == 512`: smaller tiles
+/// collided on one key (all but one tile became unreachable and rendered bare
+/// ground) and larger tiles had no entry for the cells past their min corner.
+struct TileGrid {
+    origin_x: i32,
+    origin_z: i32,
+    step_x: i32,
+    step_z: i32,
+    /// Grid cell (x, z) -> index into the tile slice.
+    cells: HashMap<(i32, i32), usize>,
+}
+
+impl TileGrid {
+    /// Build the grid of a tile list produced by [`create_tiles`].
+    /// None when the list is empty.
+    fn new(tiles: &[TileBounds]) -> Option<TileGrid> {
+        let origin_x = tiles.iter().map(|t| t.min_x).min()?;
+        let origin_z = tiles.iter().map(|t| t.min_z).min()?;
+        // Edge tiles can be clamped short of the tile size, so the spacing is the
+        // widest tile; every tile then still lies wholly inside its own cell, which
+        // is all the range scan below relies on.
+        let step_x = tiles.iter().map(|t| t.max_x - t.min_x).max()?.max(1);
+        let step_z = tiles.iter().map(|t| t.max_z - t.min_z).max()?.max(1);
+
+        let mut grid = TileGrid {
+            origin_x,
+            origin_z,
+            step_x,
+            step_z,
+            cells: HashMap::with_capacity(tiles.len()),
+        };
+        for (i, tile) in tiles.iter().enumerate() {
+            let cell = grid.cell_of(tile.min_x, tile.min_z);
+            grid.cells.insert(cell, i);
+        }
+        Some(grid)
+    }
+
+    /// Grid cell containing a block coordinate.
+    #[inline]
+    fn cell_of(&self, x: i32, z: i32) -> (i32, i32) {
+        (
+            x.saturating_sub(self.origin_x).div_euclid(self.step_x),
+            z.saturating_sub(self.origin_z).div_euclid(self.step_z),
+        )
+    }
+
+    /// Index of the tile occupying a grid cell, if a tile was created there.
+    #[inline]
+    fn tile_at(&self, cell: (i32, i32)) -> Option<usize> {
+        self.cells.get(&cell).copied()
+    }
+
+    /// Inclusive cell range (cx0, cx1, cz0, cz1) whose halo-expanded tiles an AABB
+    /// can intersect. Conservative superset of the matching tiles: for any tile in
+    /// this range the AABB may pass `aabb_intersects(.expanded(halo))`, and any tile
+    /// outside it cannot. Lets element assignment touch only the relevant cells
+    /// instead of scanning every tile.
+    #[inline]
+    fn cell_range(&self, aabb: (i32, i32, i32, i32), halo: i32) -> (i32, i32, i32, i32) {
+        let (min_x, max_x, min_z, max_z) = aabb;
+        let (cx0, cz0) = self.cell_of(min_x.saturating_sub(halo), min_z.saturating_sub(halo));
+        let (cx1, cz1) = self.cell_of(max_x.saturating_add(halo), max_z.saturating_add(halo));
+        (cx0, cx1, cz0, cz1)
+    }
 }
 
 /// Check if a way's bounding box intersects with the given bounds.
@@ -172,22 +237,21 @@ fn is_linear_element(way: &ProcessedWay) -> bool {
 ///   editor halo their geometry overlaps (renders large polygons fully and gives
 ///   per-tile ground generation complete neighbour data across strict boundaries)
 /// - Linear elements (roads, railways): assigned to ALL tiles they intersect
+///
+/// Works for any tile size: the lookup is keyed on the tile grid the `tiles` list
+/// itself describes, not on fixed 512-block region cells.
 pub fn assign_elements_to_tiles(
     elements: &[ProcessedElement],
     tiles: &[TileBounds],
     scale: f64,
 ) -> Vec<Vec<usize>> {
     let mut tile_elements: Vec<Vec<usize>> = vec![Vec::new(); tiles.len()];
+    let Some(grid) = TileGrid::new(tiles) else {
+        return tile_elements;
+    };
     // Cover the widest rendered linear element (aeroway 40m * scale) so a tile whose
     // strict bounds receive its blocks is assigned it (else per-tile ground overwrites).
     let linear_halo = TILE_EDITOR_HALO.max((MAX_LINEAR_HALF_WIDTH_M * scale).ceil() as i32);
-
-    // Region-coord -> tile index, for O(1) node assignment (tiles are 512-region-aligned).
-    let tile_grid: HashMap<(i32, i32), usize> = tiles
-        .iter()
-        .enumerate()
-        .map(|(i, t)| ((t.min_x >> 9, t.min_z >> 9), i))
-        .collect();
 
     for (elem_idx, element) in elements.iter().enumerate() {
         match element {
@@ -202,10 +266,10 @@ pub fn assign_elements_to_tiles(
                         node.z - reach,
                         node.z + reach,
                     );
-                    let (rx0, rx1, rz0, rz1) = region_range(aabb, 0);
-                    for rx in rx0..=rx1 {
-                        for rz in rz0..=rz1 {
-                            if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
+                    let (cx0, cx1, cz0, cz1) = grid.cell_range(aabb, 0);
+                    for cx in cx0..=cx1 {
+                        for cz in cz0..=cz1 {
+                            if let Some(tile_idx) = grid.tile_at((cx, cz)) {
                                 if aabb_intersects(aabb, &tiles[tile_idx]) {
                                     tile_elements[tile_idx].push(elem_idx);
                                 }
@@ -214,10 +278,11 @@ pub fn assign_elements_to_tiles(
                     }
                     continue;
                 }
-                // A node belongs to the strict tile whose region contains it; the owning
-                // tile's editor halo handles canopy overflow. (Strict + non-overlapping, so
-                // this matches scanning for the first containing tile, in O(1).)
-                if let Some(&tile_idx) = tile_grid.get(&(node.x >> 9, node.z >> 9)) {
+                // A node belongs to the strict tile whose grid cell contains it; the
+                // owning tile's editor halo handles canopy overflow. (Strict +
+                // non-overlapping, so this matches scanning for the first containing
+                // tile, in O(1).)
+                if let Some(tile_idx) = grid.tile_at(grid.cell_of(node.x, node.z)) {
                     if tiles[tile_idx].contains(node.x, node.z) {
                         tile_elements[tile_idx].push(elem_idx);
                     }
@@ -225,17 +290,17 @@ pub fn assign_elements_to_tiles(
             }
             ProcessedElement::Way(way) => {
                 // Linear elements render to their half-width; areas to the editor halo.
-                // Only the region cells the AABB+halo can reach are checked (vs all tiles).
+                // Only the grid cells the AABB+halo can reach are checked (vs all tiles).
                 let Some(aabb) = way_aabb(way) else { continue };
                 let halo = if is_linear_element(way) {
                     linear_halo
                 } else {
                     TILE_EDITOR_HALO
                 };
-                let (rx0, rx1, rz0, rz1) = region_range(aabb, halo);
-                for rx in rx0..=rx1 {
-                    for rz in rz0..=rz1 {
-                        if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
+                let (cx0, cx1, cz0, cz1) = grid.cell_range(aabb, halo);
+                for cx in cx0..=cx1 {
+                    for cz in cz0..=cz1 {
+                        if let Some(tile_idx) = grid.tile_at((cx, cz)) {
                             if aabb_intersects(aabb, &tiles[tile_idx].expanded(halo)) {
                                 tile_elements[tile_idx].push(elem_idx);
                             }
@@ -245,7 +310,7 @@ pub fn assign_elements_to_tiles(
             }
             ProcessedElement::Relation(rel) => {
                 // Every tile any member way's AABB+halo overlaps, restricted to the
-                // region cells the union AABB+halo can reach.
+                // grid cells the union AABB+halo can reach.
                 // Cache member AABBs once: relation_intersects_bounds used to walk
                 // every member's nodes again for every candidate tile.
                 let member_aabbs: Vec<(i32, i32, i32, i32)> = rel
@@ -260,10 +325,10 @@ pub fn assign_elements_to_tiles(
                 ) else {
                     continue;
                 };
-                let (rx0, rx1, rz0, rz1) = region_range(aabb, TILE_EDITOR_HALO);
-                for rx in rx0..=rx1 {
-                    for rz in rz0..=rz1 {
-                        if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
+                let (cx0, cx1, cz0, cz1) = grid.cell_range(aabb, TILE_EDITOR_HALO);
+                for cx in cx0..=cx1 {
+                    for cz in cz0..=cz1 {
+                        if let Some(tile_idx) = grid.tile_at((cx, cz)) {
                             let expanded = tiles[tile_idx].expanded(TILE_EDITOR_HALO);
                             if member_aabbs
                                 .iter()
@@ -287,6 +352,9 @@ mod tests {
     use super::*;
     use crate::osm_parser::{ProcessedMember, ProcessedMemberRole, ProcessedNode};
     use std::sync::Arc;
+
+    // Tile sizes the grid must handle: below, at and above the 512 region size.
+    const TILE_SIZES: [i32; 4] = [128, 256, 512, 1024];
 
     // Deterministic LCG so the fixture is reproducible without rand/Date.
     struct Lcg(u64);
@@ -322,56 +390,14 @@ mod tests {
         ProcessedWay { id, nodes, tags }
     }
 
-    // Reference O(elements * tiles) assignment matching the original scan exactly.
-    fn brute_force(
-        elements: &[ProcessedElement],
-        tiles: &[TileBounds],
-        scale: f64,
-    ) -> Vec<Vec<usize>> {
-        let mut out: Vec<Vec<usize>> = vec![Vec::new(); tiles.len()];
-        let linear_halo = TILE_EDITOR_HALO.max((MAX_LINEAR_HALF_WIDTH_M * scale).ceil() as i32);
-        for (ei, e) in elements.iter().enumerate() {
-            match e {
-                ProcessedElement::Node(n) => {
-                    for (ti, t) in tiles.iter().enumerate() {
-                        if t.contains(n.x, n.z) {
-                            out[ti].push(ei);
-                            break;
-                        }
-                    }
-                }
-                ProcessedElement::Way(w) => {
-                    let halo = if is_linear_element(w) {
-                        linear_halo
-                    } else {
-                        TILE_EDITOR_HALO
-                    };
-                    for (ti, t) in tiles.iter().enumerate() {
-                        if way_intersects_bounds(w, &t.expanded(halo)) {
-                            out[ti].push(ei);
-                        }
-                    }
-                }
-                ProcessedElement::Relation(r) => {
-                    for (ti, t) in tiles.iter().enumerate() {
-                        if relation_intersects_bounds(r, &t.expanded(TILE_EDITOR_HALO)) {
-                            out[ti].push(ei);
-                        }
-                    }
-                }
-            }
-        }
-        out
+    fn test_bbox() -> XZBBox {
+        XZBBox::rect_from_min_max(-700, -300, 1800, 1500).unwrap()
     }
 
-    // The fast region-range assignment must produce byte-identical output to the
-    // exhaustive scan, including per-tile element order, for arbitrary geometry.
-    #[test]
-    fn assignment_matches_brute_force_scan() {
+    // Mixed fixture: scattered nodes (incl. on tile boundaries and outside the bbox),
+    // ways from tiny to multi-tile spanning, and multi-member relations.
+    fn fixture_elements() -> Vec<ProcessedElement> {
         let mut rng = Lcg(0x9E3779B97F4A7C15);
-        let bbox = XZBBox::rect_from_min_max(-700, -300, 1800, 1500).unwrap();
-        let tiles = create_tiles(&bbox, DEFAULT_TILE_SIZE);
-
         let mut elements: Vec<ProcessedElement> = Vec::new();
         let mut id = 0u64;
 
@@ -439,10 +465,225 @@ mod tests {
             }));
         }
 
-        for &scale in &[1.0_f64, 2.5, 5.0] {
-            let fast = assign_elements_to_tiles(&elements, &tiles, scale);
-            let brute = brute_force(&elements, &tiles, scale);
-            assert_eq!(fast, brute, "mismatch at scale {scale}");
+        elements
+    }
+
+    // Reference O(elements * tiles) assignment matching the original scan exactly.
+    fn brute_force(
+        elements: &[ProcessedElement],
+        tiles: &[TileBounds],
+        scale: f64,
+    ) -> Vec<Vec<usize>> {
+        let mut out: Vec<Vec<usize>> = vec![Vec::new(); tiles.len()];
+        let linear_halo = TILE_EDITOR_HALO.max((MAX_LINEAR_HALF_WIDTH_M * scale).ceil() as i32);
+        for (ei, e) in elements.iter().enumerate() {
+            match e {
+                ProcessedElement::Node(n) => {
+                    for (ti, t) in tiles.iter().enumerate() {
+                        if t.contains(n.x, n.z) {
+                            out[ti].push(ei);
+                            break;
+                        }
+                    }
+                }
+                ProcessedElement::Way(w) => {
+                    let halo = if is_linear_element(w) {
+                        linear_halo
+                    } else {
+                        TILE_EDITOR_HALO
+                    };
+                    for (ti, t) in tiles.iter().enumerate() {
+                        if way_intersects_bounds(w, &t.expanded(halo)) {
+                            out[ti].push(ei);
+                        }
+                    }
+                }
+                ProcessedElement::Relation(r) => {
+                    for (ti, t) in tiles.iter().enumerate() {
+                        if relation_intersects_bounds(r, &t.expanded(TILE_EDITOR_HALO)) {
+                            out[ti].push(ei);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    // The pre-parameterisation tile grid, verbatim: floors/ceils to 512-block region
+    // cells regardless of tile_size. The oracle for "512 output must not change".
+    fn region_aligned_create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
+        let mut tiles = Vec::new();
+        let aligned_min_x = (xzbbox.min_x() >> 9) << 9;
+        let aligned_min_z = (xzbbox.min_z() >> 9) << 9;
+        let aligned_max_x = ((xzbbox.max_x() + 512) >> 9) << 9;
+        let aligned_max_z = ((xzbbox.max_z() + 512) >> 9) << 9;
+
+        let mut z = aligned_min_z;
+        while z < aligned_max_z {
+            let mut x = aligned_min_x;
+            while x < aligned_max_x {
+                let tile_max_x = (x + tile_size).min(aligned_max_x);
+                let tile_max_z = (z + tile_size).min(aligned_max_z);
+                if tile_max_x > xzbbox.min_x()
+                    && x <= xzbbox.max_x()
+                    && tile_max_z > xzbbox.min_z()
+                    && z <= xzbbox.max_z()
+                {
+                    tiles.push(TileBounds {
+                        min_x: x,
+                        min_z: z,
+                        max_x: tile_max_x,
+                        max_z: tile_max_z,
+                    });
+                }
+                x += tile_size;
+            }
+            z += tile_size;
+        }
+        tiles
+    }
+
+    fn tile_tuples(tiles: &[TileBounds]) -> Vec<(i32, i32, i32, i32)> {
+        tiles
+            .iter()
+            .map(|t| (t.min_x, t.min_z, t.max_x, t.max_z))
+            .collect()
+    }
+
+    // Every node coordinate of an element, for the "inside the world bbox" check.
+    fn element_coords(element: &ProcessedElement) -> Vec<(i32, i32)> {
+        match element {
+            ProcessedElement::Node(n) => vec![(n.x, n.z)],
+            ProcessedElement::Way(w) => w.nodes.iter().map(|n| (n.x, n.z)).collect(),
+            ProcessedElement::Relation(r) => r
+                .members
+                .iter()
+                .flat_map(|m| m.way.nodes.iter().map(|n| (n.x, n.z)))
+                .collect(),
+        }
+    }
+
+    // The fast grid assignment must produce byte-identical output to the exhaustive
+    // scan, including per-tile element order, for arbitrary geometry — at every tile
+    // size, not just 512. Sizes below 512 used to collide several tiles on one region
+    // key (all but one silently unassigned); sizes above 512 left the cells past a
+    // tile's min corner unmapped.
+    #[test]
+    fn assignment_matches_brute_force_scan() {
+        let bbox = test_bbox();
+        let elements = fixture_elements();
+
+        for tile_size in TILE_SIZES {
+            let tiles = create_tiles(&bbox, tile_size);
+            assert!(!tiles.is_empty(), "no tiles at tile size {tile_size}");
+            for &scale in &[1.0_f64, 2.5, 5.0] {
+                let fast = assign_elements_to_tiles(&elements, &tiles, scale);
+                let brute = brute_force(&elements, &tiles, scale);
+                assert_eq!(
+                    fast, brute,
+                    "mismatch at tile size {tile_size}, scale {scale}"
+                );
+            }
+        }
+    }
+
+    // Production passes DEFAULT_TILE_SIZE, so the 512 grid must be exactly the
+    // region-aligned grid emitted before tile size became a real parameter.
+    #[test]
+    fn default_tile_size_grid_is_unchanged() {
+        let bboxes = [
+            (-700, -300, 1800, 1500),
+            (0, 0, 511, 511),
+            (0, 0, 512, 512),
+            (-1, -1, 1, 1),
+            (-2048, -1025, -1500, -600),
+            (100, 200, 5000, 4000),
+        ];
+        for (min_x, min_z, max_x, max_z) in bboxes {
+            let bbox = XZBBox::rect_from_min_max(min_x, min_z, max_x, max_z).unwrap();
+            let now = create_tiles(&bbox, DEFAULT_TILE_SIZE);
+            let before = region_aligned_create_tiles(&bbox, DEFAULT_TILE_SIZE);
+            assert_eq!(
+                tile_tuples(&now),
+                tile_tuples(&before),
+                "512 tile grid changed for bbox ({min_x}, {min_z}, {max_x}, {max_z})"
+            );
+        }
+    }
+
+    // The grid is aligned to the requested tile size and covers the whole bbox.
+    #[test]
+    fn grid_is_aligned_to_tile_size() {
+        let bbox = test_bbox();
+        for tile_size in TILE_SIZES {
+            let tiles = create_tiles(&bbox, tile_size);
+            for t in &tiles {
+                assert_eq!(
+                    t.min_x.rem_euclid(tile_size),
+                    0,
+                    "tile min_x {} not aligned to {tile_size}",
+                    t.min_x
+                );
+                assert_eq!(
+                    t.min_z.rem_euclid(tile_size),
+                    0,
+                    "tile min_z {} not aligned to {tile_size}",
+                    t.min_z
+                );
+                assert!(t.max_x > t.min_x && t.max_z > t.min_z);
+            }
+            // Every corner of the bbox lands in exactly one tile.
+            for &(x, z) in &[
+                (bbox.min_x(), bbox.min_z()),
+                (bbox.max_x(), bbox.min_z()),
+                (bbox.min_x(), bbox.max_z()),
+                (bbox.max_x(), bbox.max_z()),
+            ] {
+                let hits = tiles.iter().filter(|t| t.contains(x, z)).count();
+                assert_eq!(
+                    hits, 1,
+                    "({x}, {z}) hit {hits} tiles at tile size {tile_size}"
+                );
+            }
+        }
+    }
+
+    // The bug this file had: with a mis-keyed lookup whole tiles received no elements
+    // at all. Nothing inside the world bbox may end up assigned to zero tiles.
+    #[test]
+    fn in_bbox_elements_are_never_orphaned() {
+        let bbox = test_bbox();
+        let elements = fixture_elements();
+
+        for tile_size in TILE_SIZES {
+            let tiles = create_tiles(&bbox, tile_size);
+            let assignments = assign_elements_to_tiles(&elements, &tiles, 1.0);
+
+            let mut assigned = vec![false; elements.len()];
+            for tile in &assignments {
+                for &elem_idx in tile {
+                    assigned[elem_idx] = true;
+                }
+            }
+
+            for (elem_idx, element) in elements.iter().enumerate() {
+                let coords = element_coords(element);
+                let inside = !coords.is_empty()
+                    && coords.iter().all(|&(x, z)| {
+                        x >= bbox.min_x()
+                            && x <= bbox.max_x()
+                            && z >= bbox.min_z()
+                            && z <= bbox.max_z()
+                    });
+                if inside {
+                    assert!(
+                        assigned[elem_idx],
+                        "element {elem_idx} lies inside the world bbox but was assigned to \
+                         no tile at tile size {tile_size}"
+                    );
+                }
+            }
         }
     }
 }

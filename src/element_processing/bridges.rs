@@ -5,7 +5,7 @@ use crate::element_processing::bridge_styles::{
 use crate::element_processing::highways::highway_block_range;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const LAYER_HEIGHT_STEP: i32 = 6;
 const FLAT_TERRAIN_DIP_THRESHOLD: i32 = 4;
@@ -22,7 +22,7 @@ fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BridgeMemberInfo {
     pub deck_y: i32,
     // Some(terrain_y) = ramp from that terrain up to deck_y at this endpoint.
@@ -67,7 +67,7 @@ impl BridgeMemberInfo {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BridgeRampInfo {
     // True if way.nodes[0] is the bridge-side end; false if way.nodes[len-1] is.
     pub bridge_side_at_start: bool,
@@ -244,10 +244,21 @@ impl BridgeStructureMap {
             }
         }
 
-        // Group bridge ways by root.
-        let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+        // Group bridge ways by root. Which member ends up as a set's root depends on the
+        // order the unions above ran in, and that order comes from HashMap iteration, so the
+        // root is not a stable key. Index groups by first appearance instead: disjoint groups
+        // have distinct lowest members, so visiting them in that order is identical on every
+        // run. The ramp claims below are first-come-wins and therefore order-sensitive.
+        let mut root_to_group: HashMap<usize, usize> = HashMap::new();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
         for i in 0..bridge_ways.len() {
-            groups.entry(uf.find(i)).or_default().push(i);
+            let root = uf.find(i);
+            let next_slot = groups.len();
+            let slot = *root_to_group.entry(root).or_insert(next_slot);
+            if slot == next_slot {
+                groups.push(Vec::new());
+            }
+            groups[slot].push(i);
         }
 
         // Build node -> non-bridge highway ways index for ramp detection.
@@ -272,9 +283,11 @@ impl BridgeStructureMap {
         // Track ramp ways to make sure each ramp attaches to only one structure.
         let mut claimed_ramp_ways: HashSet<u64> = HashSet::new();
 
-        for group_indices in groups.values() {
+        for group_indices in &groups {
             // Count endpoint occurrences across the group to identify boundary vs internal.
-            let mut endpoint_counts: HashMap<(i32, i32), usize> = HashMap::new();
+            // Ordered so the first-come-wins ramp claiming below visits endpoints identically
+            // on every run.
+            let mut endpoint_counts: BTreeMap<(i32, i32), usize> = BTreeMap::new();
             for &idx in group_indices {
                 let way = bridge_ways[idx];
                 let s = &way.nodes[0];
@@ -588,7 +601,7 @@ fn majority_style(
 fn decide_internal_ramp(
     xz: (i32, i32),
     deck_y: i32,
-    endpoint_counts: &HashMap<(i32, i32), usize>,
+    endpoint_counts: &BTreeMap<(i32, i32), usize>,
     boundary_with_external_ramp: &HashMap<(i32, i32), bool>,
     editor: &WorldEditor,
 ) -> Option<i32> {
@@ -1042,5 +1055,87 @@ mod tests {
 
         assert!(member.structure_has_module);
         assert!(member.module_idx.is_some());
+    }
+
+    fn layered_bridge_way(
+        id: u64,
+        highway: &str,
+        layer: &str,
+        x1: i32,
+        z1: i32,
+        x2: i32,
+        z2: i32,
+    ) -> ProcessedWay {
+        let mut way = straight_bridge_way(id, highway, x1, z1, x2, z2);
+        way.tags.insert("layer".to_string(), layer.to_string());
+        way
+    }
+
+    // A non-bridge highway on layer 1: a ramp candidate a bridge structure can claim.
+    fn ramp_way(id: u64, x1: i32, z1: i32, x2: i32, z2: i32) -> ProcessedWay {
+        let mut way = straight_bridge_way(id, "primary", x1, z1, x2, z2);
+        way.tags.remove("bridge");
+        way.tags.insert("layer".to_string(), "1".to_string());
+        way
+    }
+
+    // Four separate bridge structures in a row, each adjacent pair joined by one ramp way
+    // that either of them could claim. Ramp claiming is first-come-wins across structures,
+    // so the outcome depends entirely on the order the structures are visited in.
+    fn contested_ramp_elements() -> Vec<ProcessedElement> {
+        vec![
+            ProcessedElement::Way(layered_bridge_way(1, "primary", "1", 10, 50, 50, 50)),
+            ProcessedElement::Way(ramp_way(101, 50, 50, 60, 50)),
+            ProcessedElement::Way(layered_bridge_way(2, "primary", "2", 60, 50, 100, 50)),
+            ProcessedElement::Way(ramp_way(102, 100, 50, 110, 50)),
+            ProcessedElement::Way(layered_bridge_way(3, "primary", "1", 110, 50, 150, 50)),
+            ProcessedElement::Way(ramp_way(103, 150, 50, 160, 50)),
+            ProcessedElement::Way(layered_bridge_way(4, "primary", "3", 160, 50, 200, 50)),
+        ]
+    }
+
+    // Key-sorted dump of every decision the pass records, so comparing two builds is
+    // itself order-independent.
+    fn fingerprint(structures: &BridgeStructureMap) -> String {
+        let mut out = String::new();
+        let mut member_ids: Vec<u64> = structures.members.keys().copied().collect();
+        member_ids.sort_unstable();
+        for id in member_ids {
+            let member = &structures.members[&id];
+            out.push_str(&format!("member {id}: {member:?}\n"));
+        }
+        let mut ramp_ids: Vec<u64> = structures.ramps.keys().copied().collect();
+        ramp_ids.sort_unstable();
+        for id in ramp_ids {
+            let ramp = &structures.ramps[&id];
+            out.push_str(&format!("ramp {id}: {ramp:?}\n"));
+        }
+        out
+    }
+
+    #[test]
+    fn structure_map_is_deterministic_across_rebuilds() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(220.0, 100.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let ways = contested_ramp_elements();
+        let outlines = BridgeOutlineIndex::build(&ways);
+
+        let structures = BridgeStructureMap::build(&ways, &editor, &outlines);
+        // Guard against a trivially empty fingerprint making this pass for the wrong
+        // reason: every bridge is a member and every contested ramp is claimed once.
+        assert_eq!(structures.members.len(), 4, "expected four bridge members");
+        assert_eq!(structures.ramps.len(), 3, "expected three claimed ramps");
+        let first = fingerprint(&structures);
+
+        // Every build allocates fresh HashMaps, and their iteration order differs from
+        // instance to instance, so repeating the build shakes out any decision that still
+        // depends on that order.
+        for attempt in 1..24 {
+            let again = fingerprint(&BridgeStructureMap::build(&ways, &editor, &outlines));
+            assert_eq!(
+                first, again,
+                "bridge structure build {attempt} disagreed with the first build"
+            );
+        }
     }
 }
