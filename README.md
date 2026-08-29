@@ -19,6 +19,37 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
 Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
 
+## :satellite: Stream Mode (experimental)
+
+Stream mode turns Arnis into a local server instead of a one-shot world generator. A companion
+Minecraft mod connects to it and asks for terrain as the player explores, so a single world can grow
+continuously and cover several real-world places at once - you can start in New York and teleport to
+Munich without leaving the world.
+
+Enable it in **Settings -> Stream Mode**. Arnis binds a server to `127.0.0.1` only (never a network
+interface, so no firewall prompt) and opens a fullscreen window showing that it is live. **Closing
+that window stops stream mode.** The port defaults to `41234` and there is an off-by-default
+"Start on launch" option.
+
+The mod finds Arnis through a discovery file at `<config dir>/arnis/stream.json`, which carries the
+port, process id, protocol version and a session token. Arnis deletes it on a clean shutdown.
+
+Real-world locations are placed as **anchors**: each anchor pins a latitude/longitude to a position
+in the Minecraft world and covers a patch around it (500 km by default). Inside a patch, coordinates
+use a transverse Mercator projection centred on that anchor, so 1 block is 1 metre and buildings are
+their real size. Anchors themselves are laid out with Web Mercator, which puts the patches in roughly
+correct global relation to each other. Overlapping patches are rejected.
+
+Arnis stores none of this: the Minecraft world owns the anchors and the vertical mapping, and sends
+them in the handshake.
+
+The wire protocol is documented in [`docs/stream-protocol.md`](docs/stream-protocol.md) and is
+deliberately generic - it is not Minecraft-specific, and another client (for example a Luanti
+exporter) could implement it. Tile sizing and the benchmark harness behind the default are covered
+in [`docs/stream-tile-size.md`](docs/stream-tile-size.md).
+
+Stream mode is additive: normal world generation is completely unaffected by it.
+
 ## 📚 Documentation
 
 <img src="assets/git/documentation.png" width="100%" alt="Banner">
