@@ -1,10 +1,12 @@
 /* Stream Mode panel.
 
    A modal in the main Arnis window, sized to fill it, because nothing else in
-   Arnis is usable while the server runs. It reuses the shared `.modal` /
-   `.modal-content` / `.settings-header` / `.close-button` rules from
-   styles.css and only adds what is specific to this panel, so it stays in the
-   application's visual language rather than inventing a second one.
+   Arnis is usable while the server runs. Structure and chrome come from the
+   shared `.modal` / `.modal-content` / `.settings-header` / `.close-button`
+   rules in styles.css -- same geometry, same header, same close button as the
+   Settings modal -- so it belongs to the application rather than inventing a
+   second set of patterns. Only the surface is its own: dark in both colour
+   schemes, so the indicator stays readable at a glance.
 
    One job: say "Arnis is live" at a glance, from behind Minecraft. The red
    radar ping is the whole point; everything else is one line of supporting
@@ -13,16 +15,37 @@
    ("waiting" | "connected" | "busy" | "stopped") carries the rest. */
 
 .stream-content {
-  /* Fills the Arnis window rather than the 400px the settings modal uses.
-     `.modal-content` already supplies the panel background, border, radius and
-     shadow, so the look matches the rest of the app. */
-  width: min(92vw, 900px);
+  /* Fills the Arnis window rather than the 400px the settings modal uses, and
+     stretches with it: no max width, so on a maximised window the panel spans
+     left to right instead of sitting as a column in the middle.
+     `.modal-content` supplies the border radius and shadow; the surface is
+     overridden below. */
+  width: calc(100vw - 48px);
+  max-width: none;
   height: calc(100vh - 48px);
   max-height: calc(100vh - 48px);
+  box-sizing: border-box;
+
+  /* Dark surface, in both colour schemes. The rest of the app follows
+     `prefers-color-scheme`, but this panel is a lit indicator meant to be read
+     across a room, so it is dark either way -- which means every colour inside
+     it has to be set explicitly rather than inherited, or light-scheme text
+     would come out near-black on near-black. */
+  background-color: #151515;
+  border-color: #2f2f2f;
+  color: #f2f2f2;
 
   /* Default tempo, overridden per state below. */
   --stream-pulse: 2.4s;
   --stream-red: #e5243b;
+}
+
+.stream-content h2 {
+  color: #f6f6f6;
+}
+
+.stream-content p {
+  color: inherit;
 }
 
 .stream-body {
@@ -115,29 +138,30 @@
   opacity: 0;
 }
 
-/* Text. Colours follow the modal's own palette, not a new one. */
+/* Text. Set explicitly, since the panel is dark in both colour schemes and
+   cannot inherit the light-scheme defaults. */
 
 .stream-address {
   margin: 0;
   font-size: 1.2em;
   letter-spacing: 0.06em;
-  color: #f2f2f2;
+  color: #d8d8d8;
 }
 
 .stream-client {
   margin: 8px 0 0;
-  color: #e0e0e0;
+  color: #b6b6b6;
 }
 
 .stream-content[data-stream-state="stopped"] .stream-client {
-  color: #c4c4c4;
+  color: #6b6b6b;
 }
 
 .stream-counters {
   margin: 16px 0 0;
   font-size: 0.84em;
   letter-spacing: 0.03em;
-  color: #d0d0d0;
+  color: #7d7d7d;
   min-height: 1.2em;
 }
 
@@ -148,7 +172,7 @@
 .stream-hint {
   margin: 0;
   font-size: 0.86em;
-  color: #e9e9e9;
+  color: #9a9a9a;
 }
 
 /* The Settings row's inline error, shown when the server refuses to start. */
