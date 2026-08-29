@@ -41,6 +41,7 @@ mod preview_3d;
 mod progress;
 mod projection;
 mod retrieve_data;
+mod stream;
 mod structures;
 #[cfg(feature = "gui")]
 mod telemetry;
@@ -74,6 +75,10 @@ mod progress {
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
     pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
     pub fn emit_map_preview_ready() {}
+    // Stream mode's generation worker mutes the pipeline's progress emits around every job, the
+    // same way the 3D preview does. With no GUI there is nothing to mute, but the call site is
+    // shared, so the stub has to exist.
+    pub fn set_progress_suppressed(_suppressed: bool) {}
     pub fn emit_show_in_folder(_path: &str) {}
     pub fn is_running_with_gui() -> bool {
         false
@@ -547,6 +552,7 @@ fn run_cli() {
         spawn_point,
         luanti_game,
         ground_level: args.ground_level,
+        sink: data_processing::GenerationSink::Disk,
     };
 
     // Generate world
