@@ -1,13 +1,26 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::deterministic_rng::element_rng;
+use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
+
+// Salts folded into the element id so that independent decisions taken at the
+// same block never share one draw sequence. Every scatter below is seeded from
+// the absolute (x, z) rather than streamed from a single per-element RNG, so a
+// block decorates identically no matter which tile generated it. The values are
+// arbitrary; only their distinctness matters.
+
+/// Ground cover and decoration scattered over an area cell.
+const SALT_SCATTER: u64 = 0xc2b2_ae3d_27d4_eb4f;
+/// Whether a tree spawns on this block.
+const SALT_TREE: u64 = 0x1656_67b1_9e37_79f9;
+/// Which species the tree on this block is.
+const SALT_TREE_TYPE: u64 = 0xff51_afd7_ed55_8ccd;
 
 pub fn generate_natural(
     editor: &mut WorldEditor,
@@ -233,9 +246,6 @@ pub fn generate_natural(
                     trees
                 };
 
-                // Use deterministic RNG seeded by element ID for consistent results across region boundaries
-                let mut rng = element_rng(way.id);
-
                 // Blocks that natural areas should not overwrite
                 let protected_blocks: &[Block] = &[
                     BLACK_CONCRETE,
@@ -295,7 +305,7 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            if rng.random_bool(0.6) {
+                            if coord_rng(x, z, way.id ^ SALT_SCATTER).random_bool(0.6) {
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }
@@ -303,7 +313,8 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice = rng.random_range(0..500);
+                            let random_choice =
+                                coord_rng(x, z, way.id ^ SALT_SCATTER).random_range(0..500);
                             if random_choice < 33 {
                                 if random_choice <= 2 {
                                     editor.set_block(COBBLESTONE, x, 0, z, None, None);
@@ -318,6 +329,7 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let random_choice = rng.random_range(0..500);
                             if random_choice == 0 {
                                 Tree::create(
@@ -354,11 +366,14 @@ pub fn generate_natural(
                             }
                             let density = crate::ground_generation::value_noise_01(x, z, 32);
                             let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
-                            let spawn_tree = rng.random_range(0..tree_threshold) == 0;
+                            let spawn_tree = coord_rng(x, z, way.id ^ SALT_TREE)
+                                .random_range(0..tree_threshold)
+                                == 0;
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let random_choice: i32 = rng.random_range(0..30);
                             if spawn_tree {
                                 let tree_type = *trees_ok_to_generate
-                                    .choose(&mut rng)
+                                    .choose(&mut coord_rng(x, z, way.id ^ SALT_TREE_TYPE))
                                     .unwrap_or(&TreeType::Oak);
                                 Tree::create_of_type(
                                     editor,
@@ -382,14 +397,16 @@ pub fn generate_natural(
                         }
                         "sand"
                             if editor.check_for_block(x, 0, z, Some(&[SAND]))
-                                && rng.random_range(0..100) == 1 =>
+                                && coord_rng(x, z, way.id ^ SALT_SCATTER).random_range(0..100)
+                                    == 1 =>
                         {
                             editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                         }
-                        "shoal" if rng.random_bool(0.05) => {
+                        "shoal" if coord_rng(x, z, way.id ^ SALT_SCATTER).random_bool(0.05) => {
                             editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
                         }
                         "wetland" => {
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let wetland_type = element
                                 .tags()
                                 .get("wetland")
@@ -476,7 +493,11 @@ pub fn generate_natural(
                             }
                         }
                         "mountain_range" => {
-                            // Create block clusters instead of random placement
+                            // Create block clusters instead of random placement.
+                            // The whole cluster is drawn from this cell's stream,
+                            // so a cluster centred outside a tile still lands the
+                            // same way inside it.
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let cluster_chance = rng.random_range(0..1000);
 
                             if cluster_chance < 50 {
@@ -549,6 +570,7 @@ pub fn generate_natural(
                         }
                         "saddle" => {
                             // Saddle areas - lowest point between peaks, mix of stone and grass
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let terrain_chance = rng.random_range(0..100);
                             if terrain_chance < 30 {
                                 // 30% chance for exposed stone
@@ -567,6 +589,7 @@ pub fn generate_natural(
                         }
                         "ridge" => {
                             // Ridge areas - elevated crest, mostly rocky with some vegetation
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let ridge_chance = rng.random_range(0..100);
                             if ridge_chance < 60 {
                                 // 60% chance for stone/rocky terrain
@@ -600,7 +623,8 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let tundra_chance = rng.random_range(0..100);
+                            let tundra_chance =
+                                coord_rng(x, z, way.id ^ SALT_SCATTER).random_range(0..100);
                             if tundra_chance < 40 {
                                 // 40% chance for grass (sedges, grasses)
                                 editor.set_block(GRASS, x, 1, z, None, None);
@@ -615,6 +639,7 @@ pub fn generate_natural(
                         }
                         "cliff" => {
                             // Cliff areas - predominantly stone with minimal vegetation
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let cliff_chance = rng.random_range(0..100);
                             if cliff_chance < 90 {
                                 // 90% chance for stone variants
@@ -635,6 +660,7 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
+                            let mut rng = coord_rng(x, z, way.id ^ SALT_SCATTER);
                             let hill_chance = rng.random_range(0..1000);
                             if hill_chance == 0 {
                                 // 0.1% chance for rare trees
@@ -857,6 +883,131 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
+    use crate::element_processing::building_test_support::{rect_way, test_editor};
+    use clap::Parser as _;
+
+    // A tile is generated with a margin and only its inner part is kept, so the
+    // seam test below renders one 64x16 area three ways: once whole, and once
+    // per 32-wide half with a 16-block margin on the seam side. A decoration
+    // anchored just outside a half still lands inside it thanks to the margin,
+    // so the two inner halves must reassemble into exactly the whole.
+    const AREA_MAX_X: i32 = 63;
+    const AREA_MAX_Z: i32 = 15;
+    const HALF: i32 = 32;
+    const MARGIN: i32 = 16;
+
+    /// Every block the editor holds in `min_x..=max_x` over the test area, in a
+    /// fixed (x, z, y) walk order. Test editors have no elevation data, so
+    /// ground level is 0 and offset Y equals absolute Y.
+    fn snapshot(editor: &WorldEditor, min_x: i32, max_x: i32) -> Vec<(i32, i32, i32, u16)> {
+        let mut out: Vec<(i32, i32, i32, u16)> = Vec::new();
+        for x in min_x..=max_x {
+            for z in 0..=AREA_MAX_Z {
+                // Widest vertical span these processors write: a couple of
+                // blocks below ground, and the tallest procedural tree tops
+                // out around +31.
+                for y in -8..=40 {
+                    if let Some(block) = editor.get_block_absolute(x, y, z) {
+                        out.push((x, y, z, block.id()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// An empty bridge deck map, the shape these processors expect when no
+    /// bridge is anywhere near.
+    fn empty_bridge_surface(xzbbox: &XZBBox) -> BridgeSurfaceMap {
+        let editor = test_editor(xzbbox);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            crate::element_processing::bridges::BridgeStructureMap::build(&[], &editor, &outlines);
+        BridgeSurfaceMap::build(&[], &structures, 1.0)
+    }
+
+    fn seam_test_args() -> Args {
+        Args::parse_from(["arnis", "--bbox", "1,2,3,4"])
+    }
+
+    /// Asserts the two inner halves reassemble into the whole, and that the
+    /// render is varied enough for a misalignment to have shown up.
+    fn assert_seam_free(
+        label: &str,
+        whole: Vec<(i32, i32, i32, u16)>,
+        halves: Vec<(i32, i32, i32, u16)>,
+    ) {
+        assert!(!whole.is_empty(), "{label} rendered nothing");
+        let distinct: std::collections::BTreeSet<u16> = whole.iter().map(|b| b.3).collect();
+        assert!(
+            distinct.len() >= 2,
+            "{label} rendered a single block type, so the seam check is vacuous"
+        );
+        assert_eq!(
+            whole, halves,
+            "{label} renders differently either side of a tile seam"
+        );
+    }
+
+    fn render_natural(
+        xzbbox: &XZBBox,
+        way: &ProcessedWay,
+        min_x: i32,
+        max_x: i32,
+    ) -> Vec<(i32, i32, i32, u16)> {
+        let bridges = empty_bridge_surface(xzbbox);
+        let footprints = BuildingFootprintBitmap::new_empty();
+        let mut editor = test_editor(xzbbox);
+        generate_natural(
+            &mut editor,
+            &ProcessedElement::Way(way.clone()),
+            &seam_test_args(),
+            &FloodFillCache::new(),
+            &footprints,
+            &bridges,
+        );
+        snapshot(&editor, min_x, max_x)
+    }
+
+    /// Scatter is addressed by absolute position, so splitting an area at a
+    /// tile seam must not shift a single block.
+    #[test]
+    fn scatter_is_identical_across_a_tile_seam() {
+        let whole_bbox = XZBBox::rect_from_min_max(0, 0, AREA_MAX_X, AREA_MAX_Z).unwrap();
+        let left_bbox = XZBBox::rect_from_min_max(0, 0, HALF - 1 + MARGIN, AREA_MAX_Z).unwrap();
+        let right_bbox =
+            XZBBox::rect_from_min_max(HALF - MARGIN, 0, AREA_MAX_X, AREA_MAX_Z).unwrap();
+
+        for natural_type in [
+            "grassland",
+            "heath",
+            "scrub",
+            "wood",
+            "tree_row",
+            "wetland",
+            "mountain_range",
+            "saddle",
+            "ridge",
+            "tundra",
+            "cliff",
+            "hill",
+        ] {
+            let way = rect_way(
+                9001,
+                0,
+                0,
+                AREA_MAX_X,
+                AREA_MAX_Z,
+                &[("natural", natural_type)],
+            );
+
+            let whole = render_natural(&whole_bbox, &way, 0, AREA_MAX_X);
+            let mut halves = render_natural(&left_bbox, &way, 0, HALF - 1);
+            halves.extend(render_natural(&right_bbox, &way, HALF, AREA_MAX_X));
+
+            assert_seam_free(&format!("natural={natural_type}"), whole, halves);
+        }
+    }
 
     #[test]
     fn wetland_mosaic_deterministic_and_nondegenerate() {
