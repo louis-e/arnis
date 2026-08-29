@@ -52,6 +52,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
   resolveDefaultSavePath();
   initTelemetryConsent();
+  // After initSettingsStore(), so the restored toggle state is already in the
+  // DOM before initStreamMode() reconciles it with the (never running yet)
+  // server and takes ownership of the change event.
+  initStreamMode();
   initClearCacheButton();
   initTooltips();
   handleBboxInput();
@@ -1163,6 +1167,129 @@ function initTelemetryConsent() {
     const v = localStorage.getItem(key);
     return v === null ? null : v === 'true';
   };
+}
+
+// Stream mode: a local TCP server that generates terrain on demand for the
+// Arnis Minecraft mod, plus a fullscreen "live" window. Rust owns both; this
+// only drives the master toggle in Settings.
+//
+// The toggle is a persisted setting *and* a live server switch, which is a
+// slight mismatch: a restored "on" would otherwise start stream mode on every
+// launch, which is what the separate "Start on launch" toggle is for. So this
+// runs after settings-store's restore, forces the toggle to match reality
+// (nothing is running this early in startup), and only then starts listening
+// for changes. Autostart, if enabled, goes through the same code path as a
+// user click, so there is one place where stream mode is started.
+function initStreamMode() {
+  const toggle = document.getElementById('stream-mode-toggle');
+  const portInput = document.getElementById('stream-port-input');
+  const errorRow = document.getElementById('stream-mode-error');
+  if (!toggle || !portInput) {
+    return;
+  }
+
+  const showError = (message) => {
+    if (!errorRow) return;
+    errorRow.textContent = message;
+    errorRow.style.display = message ? '' : 'none';
+  };
+
+  // Reads the port field. Returns null when it is empty, not a whole number, or
+  // outside the range a TCP port can take. Substituting a different port here
+  // would leave the field showing something the server is not listening on, so
+  // the caller reports the problem instead.
+  const readPort = () => {
+    const raw = portInput.value.trim();
+    if (raw === '') return null;
+    const port = Number(raw);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
+    return port;
+  };
+
+  // Set from code, so no change event fires and the handler below stays out of
+  // it. refreshSettingsState() keeps the per-setting revert buttons honest.
+  const setToggleSilently = (on) => {
+    if (toggle.checked === on) return;
+    toggle.checked = on;
+    refreshSettingsState();
+  };
+
+  const start = async () => {
+    showError('');
+    const requested = readPort();
+    if (requested === null) {
+      // Refuse rather than bind a port the field does not show. The toggle is
+      // still enabled here, so settings-store's delegated change handler sees
+      // the corrected state.
+      showError('Enter a port between 1024 and 65535.');
+      setToggleSilently(false);
+      return;
+    }
+    toggle.disabled = true;
+    try {
+      const boundPort = await invoke('gui_stream_start', { port: requested });
+      // The server may have been given port 0, or simply landed elsewhere;
+      // show the user what it actually bound. Compared against the field's own
+      // text, so the field is corrected whatever it currently reads.
+      if (Number.isFinite(boundPort) && portInput.value !== String(boundPort)) {
+        portInput.value = String(boundPort);
+        // Bubbles to settings-store, which persists the bound port and keeps
+        // the row's revert button honest. Cannot re-enter start(): the master
+        // toggle's change listener is on the toggle, not on an ancestor.
+        portInput.dispatchEvent(new Event('input', { bubbles: true }));
+        portInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } catch (error) {
+      // Rust returns whole sentences here (the 35-character status bar is
+      // deliberately not in the path), so show the text as-is.
+      showError(typeof error === 'string' ? error : 'Could not start stream mode.');
+      setToggleSilently(false);
+    } finally {
+      toggle.disabled = false;
+      // settings-store skips disabled controls, and its delegated change
+      // handler already ran while this one was disabled, so recompute the
+      // revert buttons now that the toggle is back.
+      refreshSettingsState();
+    }
+  };
+
+  const stop = async () => {
+    toggle.disabled = true;
+    try {
+      await invoke('gui_stream_stop');
+      showError('');
+    } catch (error) {
+      showError(typeof error === 'string' ? error : 'Could not stop stream mode.');
+    } finally {
+      toggle.disabled = false;
+      refreshSettingsState();
+    }
+  };
+
+  toggle.addEventListener('change', () => {
+    if (toggle.checked) {
+      start();
+    } else {
+      stop();
+    }
+  });
+
+  // Closing the stream window is the other way to end stream mode. Rust emits
+  // this once the window is gone and the server is down.
+  window.__TAURI__.event.listen('stream-mode-stopped', () => {
+    setToggleSilently(false);
+  });
+
+  // Nothing is running yet, whatever the stored value said.
+  setToggleSilently(false);
+
+  const autostart = document.getElementById('stream-autostart-toggle');
+  if (autostart && autostart.checked) {
+    // Through the toggle, so the UI and the server can never disagree.
+    toggle.checked = true;
+    refreshSettingsState();
+    start();
+  }
 }
 
 // Wires the "Clear Tile Cache" button in the Application settings panel

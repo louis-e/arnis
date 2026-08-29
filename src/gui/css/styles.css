@@ -766,6 +766,25 @@ input[type="range"] {
   white-space: nowrap;
 }
 
+/* Failure text under the Stream Mode toggle. Stream mode errors are whole
+   sentences (a port already in use, a window that would not open), so they get
+   a full-width row rather than the 35-character status bar. */
+.stream-error-row {
+  color: #ff8a80;
+  font-size: 0.8em;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  margin-top: -2px;
+}
+
+/* The port is a short number; the wide text-input default looks broken. */
+.stream-port-control input[type="number"] {
+  width: 90px !important;
+  max-width: 90px !important;
+  text-align: center;
+}
+
 /* Tooltip icon (question mark in circle) */
 .tooltip-icon {
   display: inline-flex;

@@ -48,6 +48,13 @@ const SETTINGS = [
   // is intentionally absent.
   { id: 'tile-theme-select', kind: 'select', store: EXTERNAL },
 
+  // Stream Mode. The master toggle is a live server switch as well as a stored
+  // preference: restoring it dispatches change, which is what actually starts
+  // stream mode on the next launch when the user left it on.
+  { id: 'stream-mode-toggle', kind: 'checkbox', store: OWN },
+  { id: 'stream-port-input', kind: 'number', store: OWN },
+  { id: 'stream-autostart-toggle', kind: 'checkbox', store: OWN },
+
   // Application
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },
   { id: 'bedrock-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'bedrockSavePath' },

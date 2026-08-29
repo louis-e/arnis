@@ -1,0 +1,191 @@
+/* Stream mode window.
+
+   One screen, one job: say "Arnis is live" from across the room while
+   Minecraft has the foreground. Everything here is centred on the red radar
+   ping; the text below it is supporting detail, not a dashboard.
+
+   The ping's tempo is the single knob stream.js turns: it writes
+   `--pulse-interval` on <body> and the ring animation duration follows.
+   `data-state` on <body> ("waiting" | "connected" | "busy" | "stopped")
+   carries everything else. */
+
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --live-red: #e5243b;
+  --live-grey: #6b6b6b;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Matches the dark scheme the rest of the app paints itself in. */
+  background-color: #151515;
+  color: #f6f6f6;
+  cursor: default;
+  user-select: none;
+}
+
+body {
+  /* Waiting is the state the window opens in, so it is the default here too. */
+  --pulse-interval: 2.4s;
+}
+
+.stream {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* Live indicator */
+
+.live {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 34px;
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background-color: var(--live-red);
+  box-shadow: 0 0 46px rgba(229, 36, 59, 0.45);
+  /* Waiting for a client reads as "on, but nothing is happening". */
+  opacity: 0.6;
+  transition: opacity 0.45s ease, background-color 0.45s ease,
+    box-shadow 0.45s ease;
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid var(--live-red);
+  opacity: 0;
+  transform: scale(0.4);
+  animation: stream-ping var(--pulse-interval) cubic-bezier(0, 0, 0.2, 1)
+    infinite;
+}
+
+/* Second ring rides half an interval behind the first, so the pings stay
+   evenly spaced whatever the interval currently is. */
+.ring-delayed {
+  animation-delay: calc(var(--pulse-interval) / -2);
+}
+
+@keyframes stream-ping {
+  0% {
+    /* Starts exactly at the dot's edge: 72px of 180px. */
+    transform: scale(0.4);
+    opacity: 0.75;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+body[data-state="connected"] .dot,
+body[data-state="busy"] .dot {
+  opacity: 1;
+}
+
+body[data-state="stopped"] .dot {
+  background-color: var(--live-grey);
+  box-shadow: none;
+  opacity: 0.5;
+}
+
+body[data-state="stopped"] .ring {
+  animation-play-state: paused;
+  opacity: 0;
+}
+
+/* Text */
+
+.title {
+  margin: 0;
+  font-size: 2.6em;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  /* Letter-spacing pads the right edge; pull the block back into centre. */
+  text-indent: 0.32em;
+  text-transform: uppercase;
+}
+
+.address {
+  margin: 14px 0 0;
+  font-size: 1.15em;
+  letter-spacing: 0.06em;
+  color: #d8d8d8;
+}
+
+.client {
+  margin: 6px 0 0;
+  font-size: 1em;
+  color: #b6b6b6;
+}
+
+body[data-state="stopped"] .client {
+  color: var(--live-grey);
+}
+
+.counters {
+  margin: 18px 0 0;
+  font-size: 0.82em;
+  letter-spacing: 0.04em;
+  color: #7d7d7d;
+}
+
+.hint {
+  margin: 30px 0 0;
+  font-size: 0.9em;
+  color: #9a9a9a;
+}
+
+/* Reduced motion: no expanding rings, just a slow fade on the dot so the
+   window still reads as live rather than as a static screenshot. */
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    display: none;
+  }
+
+  .dot {
+    animation: stream-breathe var(--pulse-interval) ease-in-out infinite;
+  }
+
+  body[data-state="stopped"] .dot {
+    animation-play-state: paused;
+  }
+
+  @keyframes stream-breathe {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+
+    50% {
+      opacity: 1;
+    }
+  }
+}

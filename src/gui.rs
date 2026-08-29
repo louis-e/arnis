@@ -165,7 +165,10 @@ pub fn run_gui() {
             gui_get_3d_model_attributions,
             gui_get_terrain_preview,
             gui_get_preview_landcover,
-            gui_get_preview_buildings
+            gui_get_preview_buildings,
+            gui_stream_start,
+            gui_stream_stop,
+            gui_stream_status
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -723,6 +726,111 @@ fn gui_get_platform() -> &'static str {
     }
 }
 
+/// Window label of the fullscreen "stream mode is live" window.
+///
+/// This exact string must also appear in `capabilities/default.json`'s `windows`
+/// list. A window whose label is not listed there is granted no permissions at
+/// all, and every `invoke` from it fails with a permission error.
+const STREAM_WINDOW_LABEL: &str = "stream";
+
+/// Emitted once the stream window has closed, so the Settings toggle in the main
+/// window can flip itself back off without polling for it.
+const STREAM_STOPPED_EVENT: &str = "stream-mode-stopped";
+
+/// Opens (or re-focuses) the fullscreen stream-mode window.
+///
+/// The window is the only affordance the user has for ending stream mode, so
+/// closing it stops the server; the `Destroyed` handler below is what ties the
+/// two together, whether the close came from the window chrome, the OS or
+/// [`gui_stream_stop`].
+fn open_stream_window(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+    // A window left over from a previous start already owns the label, which
+    // would make the builder fail. Reuse it instead of reporting an error.
+    if let Some(existing) = app.get_webview_window(STREAM_WINDOW_LABEL) {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        STREAM_WINDOW_LABEL,
+        WebviewUrl::App("stream.html".into()),
+    )
+    .title("Arnis - Stream Mode")
+    .fullscreen(true)
+    .build()
+    .map_err(|e| format!("Stream mode started, but its window could not be opened: {e}"))?;
+
+    let app_handle = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            // Detached on purpose: this handler runs on the Tauri event-loop thread, and stopping
+            // waits for the in-flight tile job to finish. Doing that inline freezes the whole
+            // application for the length of an OSM fetch plus a generation.
+            crate::stream::stop_if_running_detached();
+            if let Err(e) = tauri::Emitter::emit(&app_handle, STREAM_STOPPED_EVENT, ()) {
+                eprintln!("Failed to emit {STREAM_STOPPED_EVENT}: {e}");
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Starts stream mode on `port` and opens the fullscreen live-indicator window.
+///
+/// Returns the port actually bound, which is what that window displays. The
+/// error strings come straight out of `crate::stream::start_global` and are
+/// already whole sentences meant for the user, so they are returned to the
+/// frontend verbatim rather than going through `progress::emit_gui_error`,
+/// which truncates to 35 characters.
+#[tauri::command]
+fn gui_stream_start(app: tauri::AppHandle, port: u16) -> Result<u16, String> {
+    let config = crate::stream::StreamConfig {
+        port,
+        ..Default::default()
+    };
+    let bound_port = crate::stream::start_global(config)?;
+
+    if let Err(e) = open_stream_window(&app) {
+        // Without the window there is no way to stop the server from the GUI,
+        // so a half-started stream mode is worse than none. Undo the start.
+        crate::stream::stop_if_running();
+        return Err(e);
+    }
+
+    Ok(bound_port)
+}
+
+/// Stops stream mode and closes its window. A no-op when nothing is running, so
+/// the frontend can call it without first checking.
+#[tauri::command]
+fn gui_stream_stop(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    if let Some(window) = app.get_webview_window(STREAM_WINDOW_LABEL) {
+        // Closing fires the `Destroyed` handler, which stops the server and
+        // emits STREAM_STOPPED_EVENT.
+        if let Err(e) = window.close() {
+            eprintln!("Failed to close the stream mode window: {e}");
+        }
+    }
+    // Belt and braces: the window may already be gone, or may never have opened.
+    crate::stream::stop_if_running();
+    Ok(())
+}
+
+/// Live counters and client state for the stream window, polled once a second.
+///
+/// Returns `Err` when stream mode is not running; the stream window treats that
+/// as "the server went away" and shows its stopped state.
+#[tauri::command]
+fn gui_stream_status() -> Result<crate::stream::StreamStatusSnapshot, String> {
+    crate::stream::global_status().ok_or_else(|| "Stream mode is not running.".to_string())
+}
+
 /// Wipe both the elevation-tile and ESA-land-cover on-disk caches, so
 /// subsequent generations re-download from the upstream providers. This
 /// is what the "Clean tile cache" button in the GUI's Application
@@ -931,32 +1039,11 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Set while a generation owns the process. The world floor, terrain floor and filler-chunk
-/// base are process globals read from deep inside the block writers, and the terrain floor
-/// is derived from the bbox's own elevation, so a second run would retune all three under the
-/// first one's feet. The progress channel and world path are shared besides.
-static GENERATION_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Owns `GENERATION_ACTIVE` for the length of one generation and clears it on drop, including
-/// on the early-return paths before the worker is spawned.
-struct GenerationSlot;
-
-impl GenerationSlot {
-    /// `None` when a generation is already running.
-    fn acquire() -> Option<Self> {
-        use std::sync::atomic::Ordering;
-        GENERATION_ACTIVE
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .ok()
-            .map(|_| Self)
-    }
-}
-
-impl Drop for GenerationSlot {
-    fn drop(&mut self) {
-        GENERATION_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
-    }
-}
+// The guard that keeps two generations from running at once. It used to live here, but stream
+// mode generates through the same pipeline and mutates the same process globals, so the slot has
+// to be one slot that both can take -- see `crate::stream::GenerationSlot`. Behaviour here is
+// unchanged: `gui_start_generation` claims it and holds it for the length of the run.
+use crate::stream::GenerationSlot;
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -1244,6 +1331,7 @@ fn gui_start_generation(
                 spawn_point: mc_spawn_point,
                 luanti_game,
                 ground_level,
+                sink: crate::data_processing::GenerationSink::Disk,
             };
 
             // Create an Args instance with the chosen bounding box
@@ -1483,27 +1571,6 @@ fn gui_start_generation(
     });
 
     Ok(())
-}
-
-#[cfg(test)]
-mod generation_slot_tests {
-    use super::GenerationSlot;
-
-    #[test]
-    fn second_generation_is_refused_until_the_first_finishes() {
-        // The world floor, terrain floor and filler base are process globals, so a second
-        // concurrent run would retune them under the first one's feet.
-        let first = GenerationSlot::acquire().expect("the first generation must get the slot");
-        assert!(
-            GenerationSlot::acquire().is_none(),
-            "a second generation must be refused while the first holds the slot"
-        );
-        drop(first);
-        assert!(
-            GenerationSlot::acquire().is_some(),
-            "the slot must be free again once the first generation finishes"
-        );
-    }
 }
 
 #[cfg(test)]

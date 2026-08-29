@@ -352,6 +352,48 @@
           </div>
         </div>
 
+        <!-- Section: Stream Mode -->
+        <!-- English-only on purpose: this is a prototype feature, and every
+             data-localize key has to exist in all 19 locale files (enforced by
+             the locale_tests key-set test in gui.rs). Localize once it settles. -->
+        <div class="settings-section-header">Stream Mode</div>
+
+        <!-- Stream Mode master toggle -->
+        <div class="settings-row">
+          <label for="stream-mode-toggle">
+            <span>Stream Mode</span>
+            <span class="tooltip-icon" data-tooltip="Runs a local server that generates terrain on demand for the Arnis Minecraft mod. Opens a dedicated window; Arnis cannot generate worlds normally while it is running.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="stream-mode-toggle" name="stream-mode-toggle">
+          </div>
+        </div>
+
+        <!-- Filled in and shown by main.js when starting or stopping fails. -->
+        <div class="settings-row stream-error-row" id="stream-mode-error" style="display: none;"></div>
+
+        <!-- Stream Mode Port -->
+        <div class="settings-row">
+          <label for="stream-port-input">
+            <span>Port</span>
+            <span class="tooltip-icon" data-tooltip="TCP port the stream server listens on, bound to 127.0.0.1 only. Change it if something else already uses this port.">?</span>
+          </label>
+          <div class="settings-control stream-port-control">
+            <input type="number" id="stream-port-input" name="stream-port-input" min="1024" max="65535" step="1" value="41234">
+          </div>
+        </div>
+
+        <!-- Start Stream Mode on launch -->
+        <div class="settings-row">
+          <label for="stream-autostart-toggle">
+            <span>Start on launch</span>
+            <span class="tooltip-icon" data-tooltip="Start stream mode automatically every time Arnis opens.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="stream-autostart-toggle" name="stream-autostart-toggle">
+          </div>
+        </div>
+
         <!-- Section: Application -->
         <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
