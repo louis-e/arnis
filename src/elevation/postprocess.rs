@@ -1,6 +1,7 @@
 use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_WATER};
 use rayon::prelude::*;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
 /// Maximum Y coordinate in Minecraft (vanilla build height limit).
 const MAX_Y: i32 = 319;
@@ -1598,28 +1599,46 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     }
 }
 
-/// Scale raw elevation (meters) to Minecraft Y coordinates, keeping f64 precision.
-/// `extended_max_y` is the cap when `disable_height_limit` is on (Java datapack:
-/// 2031; Bedrock BP: 512); ignored otherwise.
-/// Scales real-world metre heights to Minecraft Y. Also returns the affine
-/// parameters `(min_height_m, blocks_per_meter)` so a real-world elevation can
-/// be converted back to a Minecraft Y threshold (e.g. for the snow line), plus the
-/// terrain base actually used (see `min_ground_level`).
+/// An absolute elevation-to-Y mapping supplied by the caller, bypassing per-bbox normalisation.
+/// `y = sea_level_y + round(elevation_m * blocks_per_meter)`, clamped to the world bounds.
+#[derive(Clone, Copy, Debug)]
+pub struct AbsoluteVerticalMapping {
+    /// Minecraft Y that 0 m elevation maps to.
+    pub sea_level_y: i32,
+    /// Vertical exaggeration: Minecraft blocks per real-world metre.
+    pub blocks_per_meter: f64,
+}
+
+/// Output of [`scale_to_minecraft`].
 ///
-/// `min_ground_level` is the lowest base the terrain may sink to. The base only sinks when
-/// the relief genuinely does not fit above `ground_level`, so a small bbox is not dropped
-/// into the basement just because the world floor was extended.
-pub fn scale_to_minecraft(
-    blurred_heights: &[Vec<f64>],
-    scale: f64,
-    ground_level: i32,
-    min_ground_level: i32,
-    disable_height_limit: bool,
-    extended_max_y: i32,
-) -> (Vec<Vec<f64>>, f64, f64, i32) {
-    // Derive min/max
-    let (min_height, max_height) = blurred_heights
-        .par_iter()
+/// The affine it describes is `y = ground_level + (h_m - reference_m) * blocks_per_meter`.
+/// Anything inverting the metre->Y mapping (the snow line, montane trees, the 3D preview)
+/// must use these three fields together — never `source_min_m`, which is raw source data.
+#[derive(Clone, Debug)]
+pub struct ScaledTerrain {
+    /// Heights in Minecraft Y, same shape as the input grid.
+    pub heights: Vec<Vec<f64>>,
+    /// Elevation in metres that maps to `ground_level`. Equals `source_min_m` on the
+    /// normalised path; `0.0` under an absolute mapping, whose origin is sea level.
+    pub reference_m: f64,
+    /// Lowest finite source elevation in metres (`0.0` for an all-NaN grid).
+    pub source_min_m: f64,
+    /// Highest finite source elevation in metres (`0.0` for an all-NaN grid).
+    pub source_max_m: f64,
+    /// Slope of the affine, in blocks per metre.
+    pub blocks_per_meter: f64,
+    /// Terrain base actually used: the requested ground level, or lower if the relief
+    /// needed the extended floor (normalised path); the sea level Y (absolute path).
+    pub ground_level: i32,
+    /// True when at least one cell was clamped against the world's Y bounds. Only ever
+    /// set under an absolute mapping — the normalised path sizes itself to fit.
+    pub clipped: bool,
+}
+
+/// Lowest and highest finite value in the grid. A grid with no finite sample at all
+/// leaves the reduce sentinels `(f64::MAX, f64::MIN)` behind; callers must check.
+fn finite_min_max(grid: &[Vec<f64>]) -> (f64, f64) {
+    grid.par_iter()
         .map(|row| {
             let mut lo = f64::MAX;
             let mut hi = f64::MIN;
@@ -1634,7 +1653,50 @@ pub fn scale_to_minecraft(
         .reduce(
             || (f64::MAX, f64::MIN),
             |(lo1, hi1), (lo2, hi2)| (lo1.min(lo2), hi1.max(hi2)),
-        );
+        )
+}
+
+/// Scale raw elevation (meters) to Minecraft Y coordinates, keeping f64 precision.
+/// `extended_max_y` is the cap when `disable_height_limit` is on (Java datapack:
+/// 2031; Bedrock BP: 512); ignored otherwise.
+/// Scales real-world metre heights to Minecraft Y, returning the affine parameters
+/// alongside the grid so a real-world elevation can be converted back to a Minecraft Y
+/// threshold (e.g. for the snow line), plus the terrain base actually used.
+///
+/// `min_ground_level` is the lowest base the terrain may sink to. The base only sinks when
+/// the relief genuinely does not fit above `ground_level`, so a small bbox is not dropped
+/// into the basement just because the world floor was extended.
+///
+/// `vertical` switches the whole mapping. `None` keeps the historical behaviour: the grid's
+/// own min/max are reduced, the relief is normalised into the available Y budget and the base
+/// may sink. All three of those are global to the request, so two adjacent areas generated
+/// separately get different affines and their terrain does not line up. `Some(mapping)` skips
+/// every one of them and maps each cell absolutely, which is what tiled generation needs;
+/// cells outside the world bounds are clamped and [`ScaledTerrain::clipped`] reports it.
+pub fn scale_to_minecraft(
+    blurred_heights: &[Vec<f64>],
+    scale: f64,
+    ground_level: i32,
+    min_ground_level: i32,
+    disable_height_limit: bool,
+    extended_max_y: i32,
+    vertical: Option<AbsoluteVerticalMapping>,
+) -> ScaledTerrain {
+    // Derive min/max
+    let (min_height, max_height) = finite_min_max(blurred_heights);
+
+    // Raw source range in metres, reported independently of whichever mapping runs below.
+    // An all-NaN grid leaves the reduce sentinels behind (min = f64::MAX, finite but bogus),
+    // so collapse that case to zero rather than leaking them.
+    let (source_min_m, source_max_m) = if min_height.is_finite() && min_height <= max_height {
+        (min_height, max_height)
+    } else {
+        (0.0, 0.0)
+    };
+
+    if let Some(mapping) = vertical {
+        return scale_absolute(blurred_heights, mapping, source_min_m, source_max_m);
+    }
 
     let (min_height, height_range) =
         if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {
@@ -1721,7 +1783,80 @@ pub fn scale_to_minecraft(
     } else {
         0.0
     };
-    (mc_heights, min_height, blocks_per_meter, ground_level)
+    ScaledTerrain {
+        heights: mc_heights,
+        reference_m: min_height,
+        source_min_m,
+        source_max_m,
+        blocks_per_meter,
+        ground_level,
+        clipped: false,
+    }
+}
+
+/// Map every cell through a caller-supplied absolute affine.
+///
+/// No min/max normalisation, no range compression, no base sinking — all three depend on the
+/// grid as a whole, which is exactly what makes independently generated neighbouring areas
+/// disagree at their shared edge. Here a metre height maps to the same Y no matter which grid
+/// it arrived in, so two tiles of the same terrain line up seamlessly.
+fn scale_absolute(
+    heights_m: &[Vec<f64>],
+    mapping: AbsoluteVerticalMapping,
+    source_min_m: f64,
+    source_max_m: f64,
+) -> ScaledTerrain {
+    // One block of headroom above the world floor: the floor itself is bedrock.
+    let lower = (crate::world_editor::min_y() + 1) as f64;
+    // The world ceiling. Taken from the section range because `world_max_y()` itself is not
+    // re-exported from `world_editor`; the two agree exactly, since a world's ceiling is
+    // always the top block of its highest section (`set_world_bounds` asserts it).
+    let (_, max_section) = crate::world_editor::world_section_range();
+    let upper = (i32::from(max_section) * 16 + 15) as f64;
+    let sea = mapping.sea_level_y as f64;
+    let clipped = AtomicBool::new(false);
+
+    let mc_heights: Vec<Vec<f64>> = heights_m
+        .par_iter()
+        .map(|row| {
+            let mut row_clipped = false;
+            let scaled: Vec<f64> = row
+                .iter()
+                .map(|&h| {
+                    if !h.is_finite() {
+                        // Same as the normalised path: non-finite sentinels survive so the
+                        // downstream `is_finite` checks still see them.
+                        return h;
+                    }
+                    let y = sea + (h * mapping.blocks_per_meter).round();
+                    if y < lower {
+                        row_clipped = true;
+                        lower
+                    } else if y > upper {
+                        row_clipped = true;
+                        upper
+                    } else {
+                        y
+                    }
+                })
+                .collect();
+            if row_clipped {
+                clipped.store(true, AtomicOrdering::Relaxed);
+            }
+            scaled
+        })
+        .collect();
+
+    ScaledTerrain {
+        heights: mc_heights,
+        // The absolute affine is anchored at 0 m = sea level, not at the grid's own minimum.
+        reference_m: 0.0,
+        source_min_m,
+        source_max_m,
+        blocks_per_meter: mapping.blocks_per_meter,
+        ground_level: mapping.sea_level_y,
+        clipped: clipped.into_inner(),
+    }
 }
 
 #[cfg(test)]
@@ -1944,7 +2079,8 @@ mod tests {
 
         // At scale 0.1 the relief needs 444 blocks, which already fits above -62.
         // The base must NOT sink: doing so would bury a shallow world in the basement.
-        let (_mc, _min_m, bpm, base) = scale_to_minecraft(&grid, 0.1, -62, -2030, true, 2031);
+        let scaled = scale_to_minecraft(&grid, 0.1, -62, -2030, true, 2031, None);
+        let (bpm, base) = (scaled.blocks_per_meter, scaled.ground_level);
         assert_eq!(base, -62, "base must not sink when the relief already fits");
         assert!(
             (bpm - 0.1).abs() < 1e-9,
@@ -1953,7 +2089,8 @@ mod tests {
 
         // At scale 1.0 the relief needs 4441 blocks; only 2078 exist above -62, so the
         // base sinks to reach the datapack's lower half.
-        let (_mc, _min_m, bpm, base) = scale_to_minecraft(&grid, 1.0, -62, -2030, true, 2031);
+        let scaled = scale_to_minecraft(&grid, 1.0, -62, -2030, true, 2031, None);
+        let (bpm, base) = (scaled.blocks_per_meter, scaled.ground_level);
         assert_eq!(
             base, -2030,
             "base must sink to the floor when the relief needs it"
@@ -1971,7 +2108,7 @@ mod tests {
         // disable_height_limit gate holds regardless: an explicit --ground-level is honoured
         // and the relief is compressed to fit, as before.
         let grid = swiss_grid();
-        let (_mc, _min_m, _bpm, base) = scale_to_minecraft(&grid, 1.0, 100, -62, false, 0);
+        let base = scale_to_minecraft(&grid, 1.0, 100, -62, false, 0, None).ground_level;
         assert_eq!(
             base, 100,
             "vanilla must not sink below an explicit ground level"
@@ -1982,7 +2119,8 @@ mod tests {
     fn without_the_extended_floor_the_alps_are_compressed() {
         // Vanilla: 319 - 15 + 62 = 366 blocks for 4441 m of relief.
         let grid = swiss_grid();
-        let (_mc, _min_m, bpm, base) = scale_to_minecraft(&grid, 1.0, -62, -62, false, 0);
+        let scaled = scale_to_minecraft(&grid, 1.0, -62, -62, false, 0, None);
+        let (bpm, base) = (scaled.blocks_per_meter, scaled.ground_level);
         assert_eq!(base, -62);
         assert!(
             (bpm - 366.0 / 4441.0).abs() < 1e-6,
@@ -1995,7 +2133,9 @@ mod tests {
         // Zero-relief terrain must still report its true elevation so the snow
         // line can tell a high plateau from a low one.
         let grid = vec![vec![4500.0_f64; 4]; 4];
-        let (mc, min_m, blocks_per_meter, _base) = scale_to_minecraft(&grid, 1.0, 64, 64, false, 0);
+        let scaled = scale_to_minecraft(&grid, 1.0, 64, 64, false, 0, None);
+        let (mc, min_m, blocks_per_meter) =
+            (scaled.heights, scaled.reference_m, scaled.blocks_per_meter);
         assert_eq!(min_m, 4500.0);
         assert_eq!(blocks_per_meter, 0.0);
         // Every cell flattens to ground level.
@@ -2006,8 +2146,8 @@ mod tests {
     fn scale_all_nan_grid_min_height_zero() {
         // No finite samples must not leak the f64::MAX reduce sentinel as min.
         let grid = vec![vec![f64::NAN; 4]; 4];
-        let (_mc, min_m, blocks_per_meter, _base) =
-            scale_to_minecraft(&grid, 1.0, 64, 64, false, 0);
+        let scaled = scale_to_minecraft(&grid, 1.0, 64, 64, false, 0, None);
+        let (min_m, blocks_per_meter) = (scaled.reference_m, scaled.blocks_per_meter);
         assert_eq!(min_m, 0.0);
         assert_eq!(blocks_per_meter, 0.0);
     }
@@ -2025,5 +2165,258 @@ mod tests {
                 assert!(!h.is_nan(), "NaN values should be filled");
             }
         }
+    }
+    /// Verbatim copy of the pre-`AbsoluteVerticalMapping` scaler (minus its logging), kept as
+    /// the oracle for the `None` path: the refactor must not have moved a single block.
+    fn legacy_scale_to_minecraft(
+        blurred_heights: &[Vec<f64>],
+        scale: f64,
+        ground_level: i32,
+        min_ground_level: i32,
+        disable_height_limit: bool,
+        extended_max_y: i32,
+    ) -> (Vec<Vec<f64>>, f64, f64, i32) {
+        let (min_height, max_height) = blurred_heights
+            .iter()
+            .map(|row| {
+                let mut lo = f64::MAX;
+                let mut hi = f64::MIN;
+                for &h in row {
+                    if h.is_finite() {
+                        lo = lo.min(h);
+                        hi = hi.max(h);
+                    }
+                }
+                (lo, hi)
+            })
+            .fold((f64::MAX, f64::MIN), |(lo1, hi1), (lo2, hi2)| {
+                (lo1.min(lo2), hi1.max(hi2))
+            });
+
+        let (min_height, height_range) =
+            if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {
+                let real_min = if min_height.is_finite() && min_height <= max_height {
+                    min_height
+                } else {
+                    0.0
+                };
+                (real_min, 0.0_f64)
+            } else {
+                (min_height, max_height - min_height)
+            };
+
+        let effective_max_y = if disable_height_limit {
+            extended_max_y
+        } else {
+            MAX_Y
+        };
+        let upper_clamp = (effective_max_y - TERRAIN_HEIGHT_BUFFER) as f64;
+        let ideal_scaled_range: f64 = height_range * scale;
+        let ceiling = effective_max_y - TERRAIN_HEIGHT_BUFFER;
+
+        let ground_level = if disable_height_limit
+            && min_ground_level < ground_level
+            && ideal_scaled_range.is_finite()
+        {
+            let needed = ideal_scaled_range.ceil() as i32;
+            (ceiling.saturating_sub(needed)).clamp(min_ground_level, ground_level)
+        } else {
+            ground_level
+        };
+
+        let available_y_range: f64 = (ceiling - ground_level) as f64;
+        let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
+            ideal_scaled_range
+        } else {
+            height_range * (available_y_range / height_range)
+        };
+
+        let mc_heights: Vec<Vec<f64>> = blurred_heights
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&h| {
+                        let relative_height: f64 = if height_range > 0.0 {
+                            (h - min_height) / height_range
+                        } else {
+                            0.0
+                        };
+                        let mc_y = ground_level as f64 + relative_height * scaled_range;
+                        mc_y.clamp(ground_level as f64, upper_clamp)
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let blocks_per_meter = if height_range > 0.0 {
+            scaled_range / height_range
+        } else {
+            0.0
+        };
+        (mc_heights, min_height, blocks_per_meter, ground_level)
+    }
+
+    /// Two grids are equal cell for cell, treating NaN as equal to NaN: the non-finite
+    /// sentinels are part of the contract, so they have to survive identically too.
+    fn grids_match(a: &[Vec<f64>], b: &[Vec<f64>]) -> bool {
+        a.len() == b.len()
+            && a.iter().zip(b).all(|(ra, rb)| {
+                ra.len() == rb.len()
+                    && ra
+                        .iter()
+                        .zip(rb)
+                        .all(|(x, y)| x == y || (x.is_nan() && y.is_nan()))
+            })
+    }
+
+    /// A ridge with a NaN hole, so the comparison covers the sentinel path as well.
+    fn ridge_with_hole() -> Vec<Vec<f64>> {
+        let mut grid: Vec<Vec<f64>> = (0..9)
+            .map(|z| {
+                (0..7)
+                    .map(|x| 120.0 + (x as f64) * 37.5 - (z as f64) * 11.25)
+                    .collect()
+            })
+            .collect();
+        grid[4][3] = f64::NAN;
+        grid
+    }
+
+    #[test]
+    fn normalised_path_is_byte_identical_to_the_legacy_scaler() {
+        let grids = [
+            ridge_with_hole(),
+            swiss_grid(),
+            vec![vec![4500.0_f64; 4]; 4],
+            vec![vec![f64::NAN; 4]; 4],
+        ];
+        // (scale, ground_level, min_ground_level, disable_height_limit, extended_max_y)
+        let cases = [
+            (1.0, -62, -62, false, 0),
+            (0.1, -62, -2030, true, 2031),
+            (1.0, -62, -2030, true, 2031),
+            (1.0, 100, -62, false, 0),
+            (2.5, 64, 64, false, 0),
+        ];
+        for grid in &grids {
+            for &(scale, gl, mgl, dhl, emy) in &cases {
+                let (want_heights, want_min_m, want_bpm, want_base) =
+                    legacy_scale_to_minecraft(grid, scale, gl, mgl, dhl, emy);
+                let got = scale_to_minecraft(grid, scale, gl, mgl, dhl, emy, None);
+                assert!(
+                    grids_match(&got.heights, &want_heights),
+                    "heights diverged for scale {scale} ground_level {gl}"
+                );
+                assert_eq!(got.reference_m, want_min_m);
+                assert_eq!(got.blocks_per_meter, want_bpm);
+                assert_eq!(got.ground_level, want_base);
+                assert!(!got.clipped, "the normalised path never clips");
+            }
+        }
+    }
+
+    #[test]
+    fn normalised_path_reports_the_raw_source_range() {
+        // Range accessors must read the real metres, not the post-compression Y span.
+        let got = scale_to_minecraft(&swiss_grid(), 1.0, -62, -62, false, 0, None);
+        assert_eq!((got.source_min_m, got.source_max_m), (193.0, 4634.0));
+        // An all-NaN grid must not leak the f64::MAX reduce sentinel.
+        let all_nan = vec![vec![f64::NAN; 3]; 3];
+        let nan = scale_to_minecraft(&all_nan, 1.0, 64, 64, false, 0, None);
+        assert_eq!((nan.source_min_m, nan.source_max_m), (0.0, 0.0));
+    }
+
+    #[test]
+    fn absolute_mapping_is_sea_level_plus_metres() {
+        // blocks_per_meter 1.0: every cell must land exactly on sea_level + its elevation,
+        // with no normalisation against the grid's own minimum.
+        let grid: Vec<Vec<f64>> = (0..4)
+            .map(|z| (0..5).map(|x| 100.0 + x as f64 + z as f64 * 10.0).collect())
+            .collect();
+        let mapping = AbsoluteVerticalMapping {
+            sea_level_y: 62,
+            blocks_per_meter: 1.0,
+        };
+        let got = scale_to_minecraft(&grid, 1.0, 0, 0, false, 0, Some(mapping));
+        for (z, row) in grid.iter().enumerate() {
+            for (x, &h) in row.iter().enumerate() {
+                assert_eq!(got.heights[z][x], 62.0 + h, "cell ({x},{z})");
+            }
+        }
+        assert!(!got.clipped);
+        assert_eq!(got.blocks_per_meter, 1.0);
+        assert_eq!(got.ground_level, 62);
+        // The affine is anchored at sea level, not at the grid minimum.
+        assert_eq!(got.reference_m, 0.0);
+        assert_eq!((got.source_min_m, got.source_max_m), (100.0, 134.0));
+    }
+
+    #[test]
+    fn absolute_mapping_flags_clamped_cells() {
+        // Elevations far outside any world height, so this holds whatever the world bounds
+        // currently are (they are a process-global that other tests retune).
+        let grid = vec![vec![-1.0e6, 0.0, 1.0e6]];
+        let mapping = AbsoluteVerticalMapping {
+            sea_level_y: 62,
+            blocks_per_meter: 1.0,
+        };
+        let got = scale_to_minecraft(&grid, 1.0, 0, 0, false, 0, Some(mapping));
+        assert!(
+            got.clipped,
+            "cells outside the world bounds must report clipping"
+        );
+        assert_eq!(got.heights[0][1], 62.0, "in-range cells are untouched");
+        for &y in &got.heights[0] {
+            assert!(
+                (-2032.0..=2031.0).contains(&y),
+                "clamped output {y} escaped the widest legal world"
+            );
+        }
+        // Nothing to clamp -> no flag.
+        let flat = [vec![0.0, 5.0]];
+        let clean = scale_to_minecraft(&flat, 1.0, 0, 0, false, 0, Some(mapping));
+        assert!(!clean.clipped);
+    }
+
+    #[test]
+    fn absolute_mapping_gives_disjoint_grids_identical_ys() {
+        // The anti-seam oracle. One terrain function, sampled by two independent grids that
+        // share no cell and differ in size and relief. Under the normalised path each grid
+        // would derive its own min/max and the shared terrain would land at different Ys;
+        // under an absolute mapping the Y for a given metre height is grid-independent.
+        let terrain = |x: usize| 40.0 + (x as f64) * 3.5;
+        let west: Vec<Vec<f64>> = vec![(0..12).map(terrain).collect(); 3];
+        let east: Vec<Vec<f64>> = vec![(40..64).map(terrain).collect(); 5];
+        let mapping = AbsoluteVerticalMapping {
+            sea_level_y: 62,
+            blocks_per_meter: 0.5,
+        };
+
+        let west_out = scale_to_minecraft(&west, 1.0, 0, 0, false, 0, Some(mapping));
+        let east_out = scale_to_minecraft(&east, 1.0, 0, 0, false, 0, Some(mapping));
+
+        // Same absolute affine on both sides.
+        assert_eq!(west_out.blocks_per_meter, east_out.blocks_per_meter);
+        assert_eq!(west_out.ground_level, east_out.ground_level);
+
+        let expected = |x: usize| 62.0 + (terrain(x) * 0.5).round();
+        for (x, &y) in west_out.heights[0].iter().enumerate() {
+            assert_eq!(y, expected(x), "west cell {x}");
+        }
+        for (i, x) in (40..64).enumerate() {
+            assert_eq!(east_out.heights[0][i], expected(x), "east cell {x}");
+        }
+
+        // And the normalised path really does disagree, which is the bug this replaces.
+        let west_norm = scale_to_minecraft(&west, 1.0, 62, 62, false, 0, None);
+        let east_norm = scale_to_minecraft(&east, 1.0, 62, 62, false, 0, None);
+        assert_eq!(
+            west_norm.heights[0][0], east_norm.heights[0][0],
+            "both normalised grids pin their own minimum to ground level..."
+        );
+        assert_ne!(
+            west_norm.heights[0][0], west_out.heights[0][0],
+            "...which is exactly the per-grid affine the absolute mapping removes"
+        );
     }
 }

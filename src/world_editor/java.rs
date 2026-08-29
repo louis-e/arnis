@@ -201,6 +201,7 @@ impl<'a> WorldEditor<'a> {
             self.ground.as_deref(),
             self.bake_lighting,
             self.preview.as_deref(),
+            self.ground_origin(),
             region_x,
             region_z,
             region_to_modify,
@@ -239,6 +240,7 @@ fn write_region_to_disk(
     ground: Option<&crate::ground::Ground>,
     bake_lighting: bool,
     preview: Option<&crate::map_renderer::PreviewAccumulator>,
+    ground_origin: (i32, i32),
     region_x: i32,
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
@@ -266,8 +268,13 @@ fn write_region_to_disk(
                 other: strip_orphan_block_entities(chunk_to_modify),
             };
 
-            let biome_value =
-                crate::biome::build_chunk_biome_nbt(abs_chunk_x, abs_chunk_z, ground, center_lat);
+            let biome_value = crate::biome::build_chunk_biome_nbt(
+                abs_chunk_x,
+                abs_chunk_z,
+                ground,
+                center_lat,
+                ground_origin,
+            );
             let chunk_nbt = create_chunk_nbt(&chunk, bake_lighting, &biome_value);
             ser_buffer.clear();
             fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
@@ -288,6 +295,7 @@ fn write_region_to_disk(
                         abs_chunk_z,
                         ground,
                         center_lat,
+                        ground_origin,
                     );
                     let ser_buffer = WorldEditor::create_base_chunk(
                         abs_chunk_x,
@@ -312,6 +320,8 @@ pub(crate) struct RegionWriteCtx {
     ground: Option<std::sync::Arc<crate::ground::Ground>>,
     bake_lighting: bool,
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
+    /// `WorldEditor::ground_origin`, subtracted before every `Ground` lookup.
+    ground_origin: (i32, i32),
 }
 
 impl RegionWriteCtx {
@@ -321,6 +331,7 @@ impl RegionWriteCtx {
         ground: Option<std::sync::Arc<crate::ground::Ground>>,
         bake_lighting: bool,
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
+        ground_origin: (i32, i32),
     ) -> Self {
         Self {
             world_dir,
@@ -328,6 +339,7 @@ impl RegionWriteCtx {
             ground,
             bake_lighting,
             preview,
+            ground_origin,
         }
     }
 
@@ -343,6 +355,7 @@ impl RegionWriteCtx {
             self.ground.as_deref(),
             self.bake_lighting,
             self.preview.as_deref(),
+            self.ground_origin,
             region_x,
             region_z,
             region_to_modify,
@@ -1204,7 +1217,7 @@ mod tests {
     }
 
     fn plains_biome() -> Value {
-        crate::biome::build_chunk_biome_nbt(0, 0, None, 0.0)
+        crate::biome::build_chunk_biome_nbt(0, 0, None, 0.0, (0, 0))
     }
 
     #[test]

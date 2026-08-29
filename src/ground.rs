@@ -3,9 +3,13 @@ use crate::canopy::{self, CanopyData};
 use crate::coordinate_system::{
     cartesian::{XZBBox, XZPoint},
     geographic::LLBBox,
+    transformation::CoordTransformer,
 };
-use crate::elevation::compute_grid_dims;
-use crate::elevation_data::{fetch_elevation_data, ElevationData};
+use crate::elevation::{
+    compute_grid_dims, compute_grid_dims_for_extent, fetch_elevation_data_with,
+    AbsoluteVerticalMapping, ElevationOptions,
+};
+use crate::elevation_data::ElevationData;
 use crate::land_cover::{self, LandCoverData};
 use crate::osm_parser::ProcessedElement;
 #[cfg(feature = "gui")]
@@ -88,7 +92,18 @@ impl Ground {
         self.ground_level
     }
 
-    #[cfg(test)]
+    /// True when the terrain hit the world's Y bounds and was clamped, so the caller can
+    /// report the clipping instead of silently serving truncated terrain. Only ever true
+    /// under an absolute vertical mapping; the normalised path fits itself to the budget.
+    // Reported over the wire by the stream server; no in-process caller yet.
+    #[allow(dead_code)]
+    pub fn terrain_clipped(&self) -> bool {
+        self.elevation_data.as_ref().is_some_and(|d| d.clipped())
+    }
+
+    /// Flat ground with no elevation, land cover or canopy — and so no network fetch at all.
+    ///
+    /// Used by stream mode's flat-ground configuration and by tests.
     pub fn new_flat(ground_level: i32) -> Self {
         Self {
             elevation_enabled: false,
@@ -110,8 +125,17 @@ impl Ground {
         scale: f64,
         ground_level: i32,
         canopy_height: bool,
+        world_extent: Option<(usize, usize)>,
     ) -> Self {
-        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        // `world_extent` wins when the caller already projected the bbox, for the reason spelled
+        // out on [`projected_world_extent`]: `cover_class` maps a block onto the land-cover grid
+        // by `block / (world_extent - 1)`, so an extent guessed from haversine distance under a
+        // projection that oversizes clamps the far edges of the world onto the last grid row and
+        // column. `None` keeps the historical bbox-derived extent.
+        let (world_w, world_h, grid_w, grid_h) = match world_extent {
+            Some((w, h)) => compute_grid_dims_for_extent(w, h),
+            None => compute_grid_dims(bbox, scale),
+        };
         // Canopy depends on neither, so it downloads alongside the land cover.
         let (land_cover, canopy) = std::thread::scope(|s| {
             let job =
@@ -188,6 +212,9 @@ impl Ground {
                 min_height_m: 0.0,
                 blocks_per_meter: 1.0,
                 ground_level: 0,
+                source_min_m: 0.0,
+                source_max_m: 0.0,
+                clipped: false,
             }),
             land_cover: None,
             canopy: None,
@@ -210,13 +237,24 @@ impl Ground {
         aws_only_elevation: bool,
         benchmark: bool,
         canopy_height: bool,
+        world_extent: Option<(usize, usize)>,
+        vertical: Option<AbsoluteVerticalMapping>,
     ) -> Self {
         let mut bench = crate::bench::Bench::new(benchmark);
         // Fetch land cover FIRST so we can feed it into the elevation
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
-        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        //
+        // `world_extent` wins when the caller already projected the bbox: everything
+        // downstream (`get_data_coordinates`, `cover_class`, `water_blend`) maps a block to a
+        // grid cell by `block / (world_extent - 1)`, so an extent guessed from haversine
+        // distance under a projection that stretches northing clamps the whole northern band
+        // of the world onto the last elevation and land-cover row.
+        let (world_w, world_h, grid_w, grid_h) = match world_extent {
+            Some((w, h)) => compute_grid_dims_for_extent(w, h),
+            None => compute_grid_dims(bbox, scale),
+        };
         // Canopy needs neither of the other two, so it downloads behind both.
         std::thread::scope(|scope| {
             let canopy_job = canopy_height
@@ -251,7 +289,7 @@ impl Ground {
             } else {
                 crate::elevation::SourceMode::Auto
             };
-            match fetch_elevation_data(
+            match fetch_elevation_data_with(
                 bbox,
                 scale,
                 water_floor,
@@ -261,6 +299,10 @@ impl Ground {
                 land_cover.as_mut(),
                 source_mode,
                 benchmark,
+                ElevationOptions {
+                    world_extent,
+                    vertical,
+                },
             ) {
                 Ok(elevation_data) => {
                     let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
@@ -936,7 +978,63 @@ impl Ground {
     }
 }
 
+/// The world's true extent in blocks, `(width_x, height_z)`, under `projection`.
+///
+/// Everything downstream maps a block onto the elevation and land-cover grids by the ratio
+/// `block / (world_extent - 1)` and clamps it to `1.0` (`Ground::get_data_coordinates`,
+/// `Ground::cover_class`), so the extent the grids are built for has to be the extent the
+/// *projection* actually produces. Web Mercator is conformal, not equidistant: it oversizes
+/// by `1/cos(lat)` on both axes, so a world at 49 degrees N is about 1.5x larger than the
+/// bbox's haversine ground size — which is what [`compute_grid_dims`] infers. Handing the
+/// smaller number to the grids clamps the eastern and northern bands of the world onto the
+/// last grid column and row: a flat terrain stripe with repeated land cover and biomes over
+/// roughly half the world.
+///
+/// Returns `None` for [`ProjectionKind::Local`](crate::projection::ProjectionKind::Local),
+/// the default. Its extent *is* the haversine one by construction — both
+/// `CoordTransformer::llbbox_to_xzbbox` and `compute_grid_dims` derive it from the same
+/// `geo_distance` — so the default flow keeps deriving it exactly as it always has.
+pub(crate) fn projected_world_extent(
+    projection: crate::projection::ProjectionKind,
+    bbox: &LLBBox,
+    scale: f64,
+) -> Option<(usize, usize)> {
+    match projection {
+        crate::projection::ProjectionKind::Local => None,
+        crate::projection::ProjectionKind::WebMercator => {
+            // The same origin and the same envelope-of-the-projected-corners that
+            // `osm_parser::parse_osm_data` builds for the objects, so the terrain grid and the
+            // objects that stand on it agree on how big the world is.
+            let origin_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+            let origin_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+            let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, scale);
+            let xzbbox = match CoordTransformer::with_projection(bbox, scale, &proj) {
+                Ok((_, xzbbox)) => xzbbox,
+                Err(e) => {
+                    // The parse will fail on the same bbox moments later; degrade to the
+                    // historical extent rather than taking the terrain fetch down with it.
+                    eprintln!(
+                        "{} could not project the bounding box ({e}); \
+                         falling back to its ground size for the terrain grid.",
+                        "Warning:".yellow().bold()
+                    );
+                    return None;
+                }
+            };
+            // Block positions span min..=max inclusive, so the count is the span plus one.
+            Some((
+                (xzbbox.max_x() - xzbbox.min_x() + 1).max(1) as usize,
+                (xzbbox.max_z() - xzbbox.min_z() + 1).max(1) as usize,
+            ))
+        }
+    }
+}
+
 pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
+    // Under a projection that does not preserve ground distance the world is larger than the
+    // bbox's haversine size, and the grids have to be told or their far edges clamp. `None`
+    // under the default Local projection keeps the grids deriving the extent as before.
+    let world_extent = projected_world_extent(args.projection, &bbox, args.scale);
     if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
         let ground = Ground::new_enabled(
@@ -949,6 +1047,11 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
             args.aws_only_elevation,
             args.benchmark,
             args.canopy_height,
+            // Whole-world generation: the extent is the projected bbox's own (`None` under the
+            // default Local projection, whose grids already derive it correctly), and the
+            // vertical mapping is normalised per request as it always was.
+            world_extent,
+            None,
         );
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
@@ -962,8 +1065,13 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         return ground;
     }
     println!("{} Fetching land cover...", "[3/7]".bold());
-    let ground =
-        Ground::new_flat_with_land_cover(&bbox, args.scale, args.ground_level, args.canopy_height);
+    let ground = Ground::new_flat_with_land_cover(
+        &bbox,
+        args.scale,
+        args.ground_level,
+        args.canopy_height,
+        world_extent,
+    );
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     ground
@@ -1036,6 +1144,9 @@ mod tests {
                 min_height_m: 0.0,
                 blocks_per_meter: 1.0,
                 ground_level: 0,
+                source_min_m: 0.0,
+                source_max_m: 0.0,
+                clipped: false,
             }),
             land_cover: None,
             canopy: None,
@@ -1147,11 +1258,151 @@ mod tests {
             min_height_m: min_m,
             blocks_per_meter: bpm,
             ground_level: 0,
+            source_min_m: min_m,
+            source_max_m: min_m,
+            clipped: false,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
         assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);
         // Flat terrain: never below the line, always above it.
         assert_eq!(snow_threshold_for(&ed(100.0, 0.0), 46.0, 64), i32::MAX);
         assert_eq!(snow_threshold_for(&ed(4000.0, 0.0), 46.0, 64), i32::MIN);
+    }
+    /// The bbox from the review report: Paris, 2.32,48.85 -> 2.38,48.87.
+    fn paris_bbox() -> LLBBox {
+        LLBBox::new(48.85, 2.32, 48.87, 2.38).expect("valid bbox")
+    }
+
+    /// Projected width and height of `bbox` under the Web Mercator projection the parser
+    /// builds, in blocks (positions span min..=max inclusive).
+    fn web_mercator_projected_extent(bbox: &LLBBox, scale: f64) -> (usize, usize) {
+        let origin_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+        let origin_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+        let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, scale);
+        let (_, xzbbox) =
+            CoordTransformer::with_projection(bbox, scale, &proj).expect("projectable bbox");
+        (
+            (xzbbox.max_x() - xzbbox.min_x() + 1) as usize,
+            (xzbbox.max_z() - xzbbox.min_z() + 1) as usize,
+        )
+    }
+
+    /// The extent `generate_ground_data` hands to the grids, with `None` resolved the way
+    /// `Ground::new_enabled` and `fetch_elevation_data_with` resolve it.
+    fn effective_world_extent(
+        projection: crate::projection::ProjectionKind,
+        bbox: &LLBBox,
+        scale: f64,
+    ) -> (usize, usize) {
+        let (w, h, _, _) = match projected_world_extent(projection, bbox, scale) {
+            Some((w, h)) => compute_grid_dims_for_extent(w, h),
+            None => compute_grid_dims(bbox, scale),
+        };
+        (w, h)
+    }
+
+    /// The world the terrain grids are built for must be the world the projection produces.
+    /// Web Mercator oversizes by `1/cos(lat)`, so deriving the extent from the bbox's
+    /// haversine ground size (what this path used to do) leaves the elevation and land-cover
+    /// grids believing a 49 degrees N world is a third narrower and a third shorter than it is.
+    #[test]
+    fn web_mercator_grid_extent_matches_the_projected_world() {
+        use crate::projection::ProjectionKind;
+
+        let bbox = paris_bbox();
+        let scale = 1.0;
+        let (projected_w, projected_h) = web_mercator_projected_extent(&bbox, scale);
+
+        let (world_w, world_h) = effective_world_extent(ProjectionKind::WebMercator, &bbox, scale);
+        assert!(
+            world_w.abs_diff(projected_w) <= 2,
+            "elevation grid world_width {world_w} should match the projected width {projected_w}"
+        );
+        assert!(
+            world_h.abs_diff(projected_h) <= 2,
+            "elevation grid world_height {world_h} should match the projected height {projected_h}"
+        );
+
+        // Not vacuous: the haversine size the grids used to be built for is materially smaller
+        // on BOTH axes at this latitude (about 4390 x 2223 against 6672 x 3381).
+        let (hav_w, hav_h, _, _) = compute_grid_dims(&bbox, scale);
+        assert!(
+            projected_w > hav_w + hav_w / 8,
+            "precondition: projected width {projected_w} must exceed the haversine {hav_w}"
+        );
+        assert!(
+            projected_h > hav_h + hav_h / 8,
+            "precondition: projected height {projected_h} must exceed the haversine {hav_h}"
+        );
+    }
+
+    /// The consequence of the mismatch, at the level the world actually sees it: with the
+    /// haversine extent every block past that width samples the last elevation column, so the
+    /// eastern third of the world is a flat repeat of one column. With the projected extent it
+    /// keeps rising.
+    #[test]
+    fn web_mercator_far_edge_does_not_clamp_onto_the_last_grid_column() {
+        use crate::projection::ProjectionKind;
+
+        let bbox = paris_bbox();
+        let scale = 1.0;
+        let (world_w, world_h) = effective_world_extent(ProjectionKind::WebMercator, &bbox, scale);
+        let (hav_w, hav_h, _, _) = compute_grid_dims(&bbox, scale);
+
+        // A grid that rises strictly west to east, so a clamped lookup shows up as a repeat.
+        let heights: Vec<Vec<f32>> = (0..4)
+            .map(|_| (0..8).map(|x| (x as f32) * 10.0).collect())
+            .collect();
+
+        let east_edge = XZPoint::new(world_w as i32 - 1, 0);
+        let inland = XZPoint::new(hav_w as i32 - 1, 0);
+
+        // What the old extent produced: both points clamp to x_ratio 1.0, same height.
+        let clamped = Ground::new_elevation_test(heights.clone(), hav_w, hav_h);
+        assert_eq!(
+            clamped.level(east_edge),
+            clamped.level(inland),
+            "precondition: the haversine extent flattens everything past its own width"
+        );
+
+        // With the projected extent the eastern edge is genuinely the eastern edge.
+        let correct = Ground::new_elevation_test(heights, world_w, world_h);
+        assert!(
+            correct.level(east_edge) > correct.level(inland),
+            "east edge {} should sit above the inland column {}",
+            correct.level(east_edge),
+            correct.level(inland)
+        );
+    }
+
+    /// The default projection must keep deriving its extent exactly as before: `None`, i.e.
+    /// the bbox's haversine size, which is by construction what the Local transformer's own
+    /// XZBBox spans. This is what keeps the default generate-to-disk flow bit-identical.
+    #[test]
+    fn local_grid_extent_is_the_haversine_extent_unchanged() {
+        use crate::projection::ProjectionKind;
+
+        let bbox = paris_bbox();
+        for scale in [0.5, 1.0, 2.0] {
+            assert_eq!(
+                projected_world_extent(ProjectionKind::Local, &bbox, scale),
+                None,
+                "the default projection must not override the bbox-derived extent"
+            );
+
+            let (world_w, world_h) = effective_world_extent(ProjectionKind::Local, &bbox, scale);
+            let (_, xzbbox) =
+                CoordTransformer::llbbox_to_xzbbox(&bbox, scale).expect("valid transformer");
+            assert_eq!(
+                world_w,
+                (xzbbox.max_x() - xzbbox.min_x() + 1) as usize,
+                "local world width must span the local XZBBox exactly (scale {scale})"
+            );
+            assert_eq!(
+                world_h,
+                (xzbbox.max_z() - xzbbox.min_z() + 1) as usize,
+                "local world height must span the local XZBBox exactly (scale {scale})"
+            );
+        }
     }
 }

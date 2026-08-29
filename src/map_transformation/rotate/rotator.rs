@@ -464,6 +464,52 @@ mod tests {
         assert!(new_area > orig_area);
     }
 
+    /// A rotated world's bbox does NOT start at the origin, so biome sampling has to subtract the
+    /// ground origin like every other `Ground` lookup does.
+    ///
+    /// Before biomes took a `ground_origin`, `build_chunk_biome_nbt` fed raw world coordinates
+    /// into `Ground`, which is only correct at an origin of (0, 0). A rotated world therefore had
+    /// its biomes offset from the land cover they are derived from, and the columns past the grid
+    /// edge clamped onto the last row. This pins both halves: that the rotated origin is really
+    /// non-zero, and that the biome sample agrees with the block-level lookups on the same column.
+    #[test]
+    fn rotated_world_biomes_follow_the_rotated_ground_grid() {
+        let mut elements = Vec::new();
+        let mut xzbbox = XZBBox::rect_from_xz_lengths(1000.0, 600.0).unwrap();
+        let mut ground = Ground::new_flat(-62);
+
+        rotate_world(45.0, &mut elements, &mut xzbbox, &mut ground).unwrap();
+
+        let origin = (xzbbox.min_x(), xzbbox.min_z());
+        assert!(
+            origin.0 < 0 || origin.1 < 0,
+            "a 45-degree rotation must push the bbox minimum negative, got {origin:?}"
+        );
+
+        // Sampling with the real origin must address the same grid cell the block-level lookups
+        // use; sampling with (0, 0) addresses a different one, which is the bug.
+        let (cx, cz) = (xzbbox.min_x() >> 4, xzbbox.min_z() >> 4);
+        let with_origin = crate::biome::chunk_biome_palette(cx, cz, Some(&ground), 54.0, origin);
+        let world_x = cx * 16 + 2;
+        let world_z = cz * 16 + 2;
+        let expected = crate::biome::biome_for_class(
+            ground.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
+                world_x - origin.0,
+                world_z - origin.1,
+            )),
+            ground.climate(),
+            54.0,
+            ground.water_distance(crate::coordinate_system::cartesian::XZPoint::new(
+                world_x - origin.0,
+                world_z - origin.1,
+            )),
+        );
+        assert_eq!(
+            with_origin[0], expected,
+            "biome sampling must use the same origin-relative coordinates as cover_class"
+        );
+    }
+
     // Elevation on, no land cover: the height grid must be rotated, not dropped.
     #[test]
     fn elevation_only_rotation_keeps_a_varied_height_grid() {
