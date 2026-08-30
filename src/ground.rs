@@ -49,6 +49,57 @@ pub struct Ground {
     snow_threshold_y: i32,
     /// Climate at the bbox center, driving arid/polar surface palettes and biomes.
     climate: crate::climate::Climate,
+    /// Dryland character and relief, derived once from the grids on first use.
+    profile: once_cell::sync::OnceCell<RegionProfile>,
+    /// Slope values that mean 27, 37 and 45 degrees here. `slope` is measured in
+    /// Minecraft Y over a fixed horizontal span, so the vertical exaggeration has
+    /// to be divided back out, or the same real cliff tiers differently depending
+    /// on how much relief the bbox happened to contain.
+    slope_tiers: [i32; 3],
+}
+
+/// Slope tiers at 1:1 vertical exaggeration, which is what every bbox whose
+/// relief fits the vertical budget already had.
+pub const SLOPE_TIERS_1_1: [i32; 3] = [4, 6, 8];
+
+/// `slope` is max-min of four samples 4 blocks out, so it is 8 * vex * tan(angle).
+fn slope_tiers_for(blocks_per_meter: f64, scale: f64) -> [i32; 3] {
+    if !(blocks_per_meter.is_finite() && scale.is_finite())
+        || blocks_per_meter <= 0.0
+        || scale <= 0.0
+    {
+        return SLOPE_TIERS_1_1;
+    }
+    let vex = (blocks_per_meter / scale).clamp(0.0, 1.0);
+    let t = |tan: f64| (8.0 * vex * tan).round() as i32;
+    let t27 = t(0.5095).max(2);
+    let t37 = t(0.7536).max(t27 + 1);
+    let t45 = t(1.0).max(t37 + 1);
+    [t27, t37, t45]
+}
+
+/// Whole-bbox character, sampled once. Both fields come from grids Arnis
+/// already holds, so this costs one strided pass and no extra memory.
+#[derive(Clone, Copy, Debug)]
+pub struct RegionProfile {
+    pub dryland: crate::climate::Dryland,
+    /// Share of non-water land cover classified bare, which is what separates
+    /// rock desert from grass steppe inside the same Koppen class.
+    pub bare_fraction: f32,
+    /// Minecraft Y of the lowest and highest sampled terrain.
+    pub y_min: i32,
+    pub y_max: i32,
+    /// The same relief in real metres. Minecraft Y is compressed when the relief
+    /// does not fit the vertical budget, so blocks alone understate a big canyon.
+    pub relief_m: f32,
+    /// Metres above sea level at the foot of the bbox. Rock desert is a low to
+    /// mid altitude landform; above this you are in alpine terrain whatever the
+    /// climate class says.
+    pub base_elevation_m: f32,
+    /// Relief per kilometre of bbox diagonal. Absolute relief grows with the bbox,
+    /// so only the gradient separates a dissected canyon from a dune field
+    /// regardless of how much ground the user selected.
+    pub relief_gradient: f32,
 }
 
 /// Climatic snow line in metres by absolute latitude, piecewise-linear through
@@ -101,6 +152,8 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
         }
     }
 
@@ -133,6 +186,8 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::classify(bbox),
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
         }
     }
 
@@ -153,6 +208,8 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
         }
     }
 
@@ -196,6 +253,8 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
         }
     }
 
@@ -268,6 +327,7 @@ impl Ground {
                     // inverts that exact affine, so a mismatched base misplaces every snow cap.
                     let base = elevation_data.ground_level;
                     let snow_threshold_y = snow_threshold_for(&elevation_data, lat, base);
+                    let slope_tiers = slope_tiers_for(elevation_data.blocks_per_meter, scale);
                     let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
                     Self {
                         elevation_enabled: true,
@@ -280,6 +340,8 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y,
                         climate: crate::climate::Climate::classify(bbox),
+                        profile: once_cell::sync::OnceCell::new(),
+                        slope_tiers,
                     }
                 }
                 Err(e) => {
@@ -308,6 +370,8 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
                         climate: crate::climate::Climate::classify(bbox),
+                        profile: once_cell::sync::OnceCell::new(),
+                        slope_tiers: SLOPE_TIERS_1_1,
                     }
                 }
             }
@@ -325,6 +389,149 @@ impl Ground {
     #[inline(always)]
     pub fn climate(&self) -> crate::climate::Climate {
         self.climate
+    }
+
+    /// Slope values meaning 27 / 37 / 45 degrees for this bbox.
+    #[inline(always)]
+    pub fn slope_tiers(&self) -> [i32; 3] {
+        self.slope_tiers
+    }
+
+    /// Whole-bbox character, computed on first use and cached.
+    pub fn region_profile(&self) -> RegionProfile {
+        *self.profile.get_or_init(|| self.compute_region_profile())
+    }
+
+    fn compute_region_profile(&self) -> RegionProfile {
+        // Stride the grids: the fractions and extremes wanted here are stable
+        // long before every cell is read, and a full pass over a 16k x 16k grid
+        // is not worth paying for.
+        const STRIDE: usize = 8;
+        let mut bare = 0u64;
+        let mut land = 0u64;
+        if let Some(ref lc) = self.land_cover {
+            for z in (0..lc.height).step_by(STRIDE) {
+                let row = &lc.grid[z];
+                for x in (0..lc.width).step_by(STRIDE) {
+                    match row[x] {
+                        land_cover::LC_WATER => {}
+                        land_cover::LC_BARE | land_cover::LC_SNOW_ICE => {
+                            bare += 1;
+                            land += 1;
+                        }
+                        _ => land += 1,
+                    }
+                }
+            }
+        }
+        let bare_fraction = if land == 0 {
+            0.0
+        } else {
+            bare as f64 / land as f64
+        };
+
+        // Percentiles, not extremes: one DEM spike or pit would otherwise squeeze
+        // the whole stratigraphic column. Two strided passes over a fixed 512-bin
+        // histogram, so this costs 2 KB of stack and no allocation.
+        const BINS: usize = 512;
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        if let Some(ref ed) = self.elevation_data {
+            for z in (0..ed.height).step_by(STRIDE) {
+                let row = &ed.heights[z];
+                for x in (0..ed.width).step_by(STRIDE) {
+                    let v = row[x];
+                    if v.is_finite() {
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+            }
+        }
+        let (y_min, y_max) = if !lo.is_finite() || !hi.is_finite() {
+            (self.ground_level, self.ground_level)
+        } else if hi - lo < 1.0 {
+            (lo as i32, hi as i32)
+        } else {
+            let ed = self.elevation_data.as_ref().expect("range implies a grid");
+            let scale = BINS as f32 / (hi - lo);
+            let mut hist = [0u32; BINS];
+            let mut n = 0u64;
+            for z in (0..ed.height).step_by(STRIDE) {
+                let row = &ed.heights[z];
+                for x in (0..ed.width).step_by(STRIDE) {
+                    let v = row[x];
+                    if !v.is_finite() {
+                        continue;
+                    }
+                    let b = (((v - lo) * scale) as usize).min(BINS - 1);
+                    hist[b] += 1;
+                    n += 1;
+                }
+            }
+            let bin_y = |target: u64| {
+                let mut acc = 0u64;
+                for (i, &c) in hist.iter().enumerate() {
+                    acc += c as u64;
+                    if acc >= target {
+                        return (lo + i as f32 / scale) as i32;
+                    }
+                }
+                hi as i32
+            };
+            let a = bin_y(n / 50);
+            let b = bin_y(n - n / 50);
+            if a < b {
+                (a, b)
+            } else {
+                (lo as i32, hi as i32)
+            }
+        };
+
+        let bpm = self
+            .elevation_data
+            .as_ref()
+            .map(|ed| ed.blocks_per_meter)
+            .filter(|b| *b > 0.0)
+            .unwrap_or(1.0);
+        let relief_m = ((y_max - y_min) as f64 / bpm) as f32;
+        let span_m = self
+            .land_cover
+            .as_ref()
+            .filter(|lc| lc.cells_per_meter > 0.0)
+            .map(|lc| {
+                let w = lc.width as f64 / lc.cells_per_meter;
+                let h = lc.height as f64 / lc.cells_per_meter;
+                (w * w + h * h).sqrt()
+            })
+            .unwrap_or_else(|| {
+                let (w, h) = self.world_dims();
+                ((w * w + h * h) as f64).sqrt()
+            });
+        let relief_gradient = if span_m > 1.0 {
+            (relief_m as f64 / (span_m / 1000.0)) as f32
+        } else {
+            0.0
+        };
+
+        let base_elevation_m = self
+            .elevation_data
+            .as_ref()
+            .map(|ed| ed.min_height_m as f32)
+            .unwrap_or(0.0);
+
+        RegionProfile {
+            dryland: self.climate.dryland(
+                bare_fraction,
+                relief_gradient as f64,
+                base_elevation_m as f64,
+            ),
+            base_elevation_m,
+            bare_fraction: bare_fraction as f32,
+            relief_m,
+            relief_gradient,
+            y_min,
+            y_max,
+        }
     }
 
     /// Returns whether land cover data is available
@@ -1044,6 +1251,8 @@ mod tests {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
         }
     }
 
@@ -1124,6 +1333,27 @@ mod tests {
                 .collect(),
         );
         assert_eq!(cliff.water_level(XZPoint::new(7, 8)), 30);
+    }
+
+    #[test]
+    fn slope_tiers_are_unchanged_at_one_to_one() {
+        // Every bbox whose relief fits the vertical budget must be bit-identical.
+        assert_eq!(slope_tiers_for(1.0, 1.0), SLOPE_TIERS_1_1);
+        assert_eq!(slope_tiers_for(2.0, 2.0), SLOPE_TIERS_1_1);
+        assert_eq!(slope_tiers_for(0.0, 1.0), SLOPE_TIERS_1_1);
+        assert_eq!(slope_tiers_for(f64::NAN, 1.0), SLOPE_TIERS_1_1);
+    }
+
+    #[test]
+    fn slope_tiers_shrink_when_relief_is_compressed() {
+        // A 1340 m canyon squeezed into ~360 blocks: a real 45 deg wall scores
+        // about 2, so the 1:1 tiers would never call it rock.
+        let t = slope_tiers_for(0.27, 1.0);
+        assert!(t[2] < SLOPE_TIERS_1_1[2], "cliff tier should drop: {t:?}");
+        assert!(
+            t[0] >= 2 && t[0] < t[1] && t[1] < t[2],
+            "tiers must stay ordered: {t:?}"
+        );
     }
 
     #[test]

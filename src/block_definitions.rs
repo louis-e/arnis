@@ -307,7 +307,7 @@ impl Block {
             206 => "warped_stairs",
             207 => "green_concrete",
             208 => "brick_wall",
-            209 => "redstone_block",
+            209 => "red_sand",
             210 => "chain",
             211 => "warped_trapdoor",
             212 => "stripped_warped_stem",
@@ -459,6 +459,7 @@ impl Block {
             362 => "chain",
             363 => "white_wall_banner",
             364..=365 => "spruce_door",
+            367 => "redstone_block",
             366 => "oak_door",
             _ => return None,
         })
@@ -943,6 +944,7 @@ pub const RED_FLOWER: Block = Block::new(67);
 
 pub const RED_TERRACOTTA: Block = Block::new(69);
 pub const RED_WOOL: Block = Block::new(259);
+pub const RED_SAND: Block = Block::new(209);
 pub const SAND: Block = Block::new(71);
 pub const SANDSTONE: Block = Block::new(72);
 pub const SCAFFOLDING: Block = Block::new(73);
@@ -1102,7 +1104,7 @@ pub const ORANGE_WOOL: Block = Block::new(360);
 pub const BLUE_WOOL: Block = Block::new(361);
 pub const GREEN_CONCRETE: Block = Block::new(207);
 pub const BRICK_WALL: Block = Block::new(208);
-pub const REDSTONE_BLOCK: Block = Block::new(209);
+pub const REDSTONE_BLOCK: Block = Block::new(367);
 pub const CHAIN_X: Block = Block::new(210);
 pub const CHAIN_Z: Block = Block::new(362);
 pub const SPRUCE_DOOR_LOWER: Block = Block::new(364);

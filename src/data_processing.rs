@@ -602,6 +602,9 @@ pub fn generate_world_with_options(
     let ground = Arc::new(ground);
     // Materialize the lazy water-blend mask now, before world memory peaks.
     ground.warm_water_blend();
+    // Same for the region profile: the parallel ground and save passes both read it,
+    // and a lazy first touch there would block every other thread on the grid walk.
+    ground.region_profile();
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     // Uses the ground's real base, not args: the montane check measures blocks above it, and
     // the base sinks when the relief needs the extended floor.
@@ -1273,6 +1276,11 @@ pub fn generate_world_with_options(
     if !eviction_active && !tunnel_cells.is_empty() {
         highways::carve_highway_tunnel_interior(&mut editor, &tunnel_cells);
     }
+
+    // After the tile merge: a neighbouring tile's halo writes land after that
+    // tile's own per-column cleanup ran. Writes to already-flushed regions are
+    // dropped by the editor, so this is safe under eviction too.
+    ground_generation::clear_stranded_soil_plants(&mut editor, ground.as_ref(), &xzbbox);
 
     // Run after ground generation so anchor Y reflects the final terrain.
     if let Some(p) = models_3d_pipeline.as_ref() {

@@ -3,8 +3,7 @@
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::land_cover::{
-    coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
-    LC_TREE_COVER,
+    coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER,
 };
 
 // Global Koppen-Geiger grid, 0.1 deg, 1 byte/cell (class 1..30, 0 = ocean/nodata).
@@ -21,6 +20,44 @@ fn koppen_class(lat: f64, lon: f64) -> u8 {
     let row = (((90.0 - lat) / KOPPEN_RES).floor() as isize).clamp(0, KOPPEN_ROWS as isize - 1);
     KOPPEN[row as usize * KOPPEN_COLS + col as usize]
 }
+
+/// Pick 0..n once per patch of roughly `size` blocks. Warped first, or the
+/// patches come out as axis-aligned squares.
+#[inline]
+pub(crate) fn patch_pick(x: i32, z: i32, size: i32, n: u64) -> u64 {
+    let w = coord_hash(x >> 2, z >> 2);
+    let ox = (w % 7) as i32 - 3;
+    let oz = ((w >> 8) % 7) as i32 - 3;
+    let size = size.max(1);
+    coord_hash((x + ox).div_euclid(size), (z + oz).div_euclid(size)) % n
+}
+
+/// Dryland character of the bbox. Koppen alone cannot separate grass steppe
+/// from rock desert: Moab and the Kazakh steppe are both BSk.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Dryland {
+    /// Not a dryland, or vegetated enough that the baseline palettes are right.
+    None,
+    /// Barren hot desert: sand seas and their sandstone floors.
+    Sand,
+    /// Barren arid rock country: banded sedimentary strata, no turf.
+    Rock,
+}
+
+/// Probed: Kazakh steppe 0.1%, Anatolian grassland 8.8%, Zion 20%, Moab 65%.
+pub const BARE_FRACTION_DRY: f64 = 0.12;
+
+/// Metres per km of bbox diagonal. Probed: Taklamakan 12.6 and Craters of the
+/// Moon 12.2 below, Painted Desert 17.0 and Badlands NP 25.3 above.
+pub const RELIEF_GRADIENT_ROCK: f64 = 15.0;
+
+/// Above this a barren dissected bbox is alpine, not badlands. Only altitude
+/// separates Zard Kuh 2713 m and Damavand 4265 m from Zion 1297 m.
+pub const MAX_ROCK_BASE_M: f64 = 2200.0;
+
+/// Ds*/Dw* canyon country keeps scrub, so bare stays under half. Near-total
+/// bare there is scree or volcanics: St Helens 0.71, Craters 0.94.
+pub const DRY_CONTINENTAL_BARE_CEILING: f64 = 0.55;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Climate {
@@ -60,24 +97,57 @@ impl Climate {
         Climate::from_class(koppen_class(lat, lon))
     }
 
+    /// Bareness separates the Sahara from the Kazakh steppe; relief separates
+    /// the Taklamakan from Monument Valley. Polar and temperate stay out, which
+    /// is what keeps Iceland's black basalt off this palette.
+    pub fn dryland(self, bare_fraction: f64, relief_gradient: f64, base_m: f64) -> Dryland {
+        if bare_fraction < BARE_FRACTION_DRY {
+            return Dryland::None;
+        }
+        // Hot desert keeps sand. Probing found no case where banding beat it.
+        if matches!(self, Climate::HotDesert) {
+            return Dryland::Sand;
+        }
+        // Higher than this and a barren dissected bbox is alpine scree.
+        if base_m > MAX_ROCK_BASE_M || relief_gradient < RELIEF_GRADIENT_ROCK {
+            return Dryland::None;
+        }
+        match self {
+            Climate::DryContinental if bare_fraction >= DRY_CONTINENTAL_BARE_CEILING => {
+                Dryland::None
+            }
+            Climate::ColdSteppe | Climate::ColdDesert | Climate::DryContinental => Dryland::Rock,
+            _ => Dryland::None,
+        }
+    }
+
     /// Surface palette (surface, under) for veg/bare cover, or None to keep the baseline.
     pub fn surface_palette(self, cover: u8, x: i32, z: i32) -> Option<(Block, Block)> {
-        // DryContinental (Grand Canyon) keeps baseline blocks; only its biome is adapted.
-        if matches!(
-            self,
-            Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental
-        ) {
+        // DryContinental keeps baseline blocks; only its biome is adapted.
+        if matches!(self, Climate::Temperate | Climate::DryContinental) {
             return None;
         }
-        let veg = matches!(
-            cover,
-            LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_CROPLAND | LC_MOSS
-        );
-        let bare = cover == LC_BARE || cover == LC_SNOW_ICE;
+        // Overwriting cropland also stops the crop scatter firing, so Finnish
+        // and Kazakh fields came out as bare ground.
+        let veg = matches!(cover, LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_MOSS)
+            || (cover == LC_CROPLAND
+                && !matches!(
+                    self,
+                    Climate::Boreal | Climate::ColdSteppe | Climate::HotSteppe
+                ));
+        // Ice is handled in the cascade, which owns the isolated-pixel guard.
+        let bare = cover == LC_BARE;
         if !veg && !bare {
             return None;
         }
-        let h = coord_hash(x, z);
+        // Sand against its own sandstones is a small enough colour step to draw
+        // per block. Every other mix here would read as speckle, so it is picked
+        // once per patch.
+        let h = if matches!(self, Climate::HotDesert) {
+            coord_hash(x, z)
+        } else {
+            patch_pick(x, z, 9, 60)
+        };
         let pal = match self {
             Climate::IceCap => {
                 if h.is_multiple_of(6) {
@@ -95,10 +165,12 @@ impl Climate {
                 0..=4 => (SAND, SANDSTONE),
                 _ => (COARSE_DIRT, DIRT),
             },
-            Climate::HotSteppe => match h % 10 {
-                0..=2 => (SAND, SANDSTONE),
-                3..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
+            // A soil ramp instead: sand against coarse dirt is dE 0.37, far past
+            // where an interleaved mosaic is legible, and sand carries no plants.
+            Climate::HotSteppe => match h % 20 {
+                0..=10 => (GRASS_BLOCK, DIRT),
+                11..=16 => (COARSE_DIRT, DIRT),
+                _ => (DIRT, DIRT),
             },
             Climate::ColdDesert if bare => match h % 12 {
                 0..=4 => (GRAVEL, STONE),
@@ -137,7 +209,24 @@ impl Climate {
                 4..=5 => (MOSS_BLOCK, DIRT),
                 _ => (GRASS_BLOCK, DIRT),
             },
-            Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental => return None,
+            // Savanna dry season: soil shows between the tussocks. Keyed on this
+            // column's own cover class, so wooded and farmed savanna are untouched.
+            // Every block here passes supports_vegetation and supports_trees, so no
+            // grass tuft and no scattered acacia is lost.
+            Climate::TropicalSavanna => match cover {
+                LC_TREE_COVER => match h % 20 {
+                    0..=15 => (GRASS_BLOCK, DIRT),
+                    16..=17 => (COARSE_DIRT, DIRT),
+                    _ => (DIRT, DIRT),
+                },
+                LC_GRASSLAND | LC_SHRUBLAND | LC_MOSS => match h % 20 {
+                    0..=12 => (GRASS_BLOCK, DIRT),
+                    13..=16 => (COARSE_DIRT, DIRT),
+                    _ => (DIRT, DIRT),
+                },
+                _ => return None,
+            },
+            Climate::Temperate | Climate::DryContinental => return None,
         };
         Some(pal)
     }
@@ -157,6 +246,54 @@ mod tests {
     }
 
     #[test]
+    fn dryland_separates_the_probed_landscapes() {
+        use Climate::*;
+        // (climate, bare, gradient m/km, base elevation m, expected).
+        // Every row is a real `--probe` measurement against a named place.
+        let cases = [
+            // Rock desert: the landforms this exists for.
+            (DryContinental, 0.409, 137.9, 729.0, Dryland::Rock), // Grand Canyon
+            (DryContinental, 0.200, 218.2, 1297.0, Dryland::Rock), // Zion
+            (ColdDesert, 0.915, 105.7, 1579.0, Dryland::Rock),    // Monument Valley
+            (ColdSteppe, 0.522, 48.2, 1365.0, Dryland::Rock),     // Moab / Arches
+            (ColdSteppe, 0.281, 17.0, 1712.0, Dryland::Rock),     // Painted Desert
+            (ColdSteppe, 0.843, 25.3, 827.0, Dryland::Rock),      // Badlands NP
+            (ColdSteppe, 0.228, 42.6, 1069.0, Dryland::Rock),     // Cappadocia
+            (ColdDesert, 0.731, 58.6, 873.0, Dryland::Rock),      // Petra
+            (ColdDesert, 0.963, 118.3, 1643.0, Dryland::Rock),    // Sinai
+            // Hot desert keeps sand, dissected or not.
+            (HotDesert, 0.997, 24.0, 704.0, Dryland::Sand), // Erg Chebbi
+            (HotDesert, 0.988, 37.5, 546.0, Dryland::Sand), // Sossusvlei
+            (HotDesert, 0.917, 97.0, 900.0, Dryland::Sand), // Wadi Rum
+            // Each of these is caught by a different gate, and each would look
+            // badly wrong rendered as red banded rock.
+            (DryContinental, 0.706, 140.5, 1128.0, Dryland::None), // St Helens pumice
+            (ColdSteppe, 0.428, 60.3, 2432.0, Dryland::None),      // Great Sand Dunes
+            (DryContinental, 0.935, 12.2, 1715.0, Dryland::None),  // Craters of the Moon
+            (DryContinental, 1.000, 322.9, 4265.0, Dryland::None), // Damavand
+            (DryContinental, 0.526, 211.4, 2713.0, Dryland::None), // Zard Kuh
+            (ColdDesert, 1.000, 12.6, 1115.0, Dryland::None),      // Taklamakan sand sea
+            (ColdDesert, 1.000, 0.0, 3654.0, Dryland::None),       // Salar de Uyuni
+            (ColdSteppe, 1.000, 0.0, 903.0, Dryland::None),        // Lake Tuz salt pan
+            (ColdSteppe, 0.001, 7.0, 440.0, Dryland::None),        // Kazakh steppe
+            (ColdSteppe, 0.088, 0.6, 1000.0, Dryland::None),       // Anatolian grassland
+            (Tundra, 0.035, 231.7, 1523.0, Dryland::None),         // Zermatt
+            (Tundra, 0.998, 91.2, 700.0, Dryland::None),           // Askja basalt
+            (IceCap, 0.000, 86.7, 100.0, Dryland::None),           // Antarctic dry valleys
+            (Temperate, 0.000, 67.5, 192.0, Dryland::None),        // Yorkshire Dales
+            (Temperate, 0.001, 5.3, 502.0, Dryland::None),         // Munich
+            (HotDesert, 0.143, 7.3, 443.0, Dryland::Sand),         // Phoenix suburbs
+        ];
+        for (climate, bare, grad, base, want) in cases {
+            assert_eq!(
+                climate.dryland(bare, grad, base),
+                want,
+                "{climate:?} bare={bare} grad={grad} base={base}"
+            );
+        }
+    }
+
+    #[test]
     fn temperate_never_overrides() {
         assert!(Climate::Temperate.surface_palette(LC_BARE, 1, 2).is_none());
     }
@@ -167,6 +304,43 @@ mod tests {
             .surface_palette(LC_GRASSLAND, 7, 7)
             .unwrap();
         assert!(matches!(s, SAND | SANDSTONE | SMOOTH_SANDSTONE));
+    }
+
+    #[test]
+    fn clustering_preserves_the_mix_proportions() {
+        // patch_pick's range is 60, which every arm's modulus divides, so moving
+        // from a per-block hash to a per-patch one must not shift the ratios.
+        let mut grass = 0;
+        let mut n = 0;
+        for x in 0..600 {
+            for z in 0..600 {
+                if let Some((surf, _)) = Climate::ColdSteppe.surface_palette(LC_GRASSLAND, x, z) {
+                    n += 1;
+                    if surf == GRASS_BLOCK {
+                        grass += 1;
+                    }
+                }
+            }
+        }
+        let frac = grass as f64 / n as f64;
+        assert!(
+            (0.60..0.80).contains(&frac),
+            "grass share drifted to {frac}"
+        );
+    }
+
+    #[test]
+    fn patches_are_contiguous_not_speckle() {
+        // A per-block draw flips material on almost every step; a patch draw holds.
+        let mut flips = 0;
+        for x in 0..400 {
+            let a = Climate::Tundra.surface_palette(LC_GRASSLAND, x, 7);
+            let b = Climate::Tundra.surface_palette(LC_GRASSLAND, x + 1, 7);
+            if a != b {
+                flips += 1;
+            }
+        }
+        assert!(flips < 80, "still speckling: {flips} flips over 400 blocks");
     }
 
     #[test]

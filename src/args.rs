@@ -132,6 +132,10 @@ pub struct Args {
     #[arg(long, hide = true)]
     pub benchmark: bool,
 
+    /// Report the terrain classification for the bbox and exit, without generating.
+    #[arg(long, hide = true)]
+    pub probe: bool,
+
     /// Bake per-chunk lighting so distant chunks render lit in LOD mods
     /// (Voxy/Chunky) without visiting them. Slower; off by default.
     #[arg(long, default_value_t = false)]

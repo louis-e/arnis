@@ -1,6 +1,6 @@
 //! Land-cover-driven biome assignment for Java Anvil chunks (1.18+).
 
-use crate::climate::Climate;
+use crate::climate::{Climate, Dryland};
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::ground::Ground;
 use crate::land_cover::{
@@ -11,12 +11,19 @@ use fastnbt::{LongArray, Value};
 use std::collections::HashMap;
 
 /// Minecraft biome for an ESA class + climate; temperate keeps the latitude-driven mapping.
-pub fn biome_for_class(lc: u8, climate: Climate, lat_deg: f64, water_dist: u8) -> &'static str {
+pub fn biome_for_class(
+    lc: u8,
+    climate: Climate,
+    lat_deg: f64,
+    water_dist: u8,
+    dryland: Dryland,
+) -> &'static str {
     if lc == LC_WATER {
         let abs_lat = lat_deg.abs();
         let cold = matches!(climate, Climate::IceCap | Climate::Tundra | Climate::Boreal);
-        let deep = water_dist >= 12;
-        if water_dist < 8 {
+        // The BFS caps at 15, so 0 means open water past the cap, not land.
+        let deep = water_dist == 0 || water_dist >= 12;
+        if water_dist > 0 && water_dist < 8 {
             return if cold {
                 "minecraft:frozen_river"
             } else {
@@ -47,6 +54,19 @@ pub fn biome_for_class(lc: u8, climate: Climate, lat_deg: f64, water_dist: u8) -
         } else {
             "minecraft:cold_ocean"
         };
+    }
+    // Badlands only on bare cover: its foliage tint browns some leaves and not
+    // others, and bare cells carry no vegetation for it to disagree with.
+    if dryland == Dryland::Rock {
+        match lc {
+            LC_BARE | LC_SNOW_ICE => return "minecraft:badlands",
+            LC_BUILT_UP | LC_CROPLAND | LC_WETLAND => {}
+            _ => return "minecraft:savanna",
+        }
+    }
+    // A glacier in a cold-desert bbox was being written as desert.
+    if lc == LC_SNOW_ICE {
+        return "minecraft:snowy_plains";
     }
     match climate {
         Climate::HotDesert | Climate::ColdDesert => "minecraft:desert",
@@ -115,6 +135,7 @@ pub fn build_chunk_biome_nbt(
 
     if let Some(g) = ground {
         let climate = g.climate();
+        let dryland = g.region_profile().dryland;
         for zi in 0..4i32 {
             for xi in 0..4i32 {
                 let world_x = chunk_x * 16 + xi * 4 + 2;
@@ -122,7 +143,8 @@ pub fn build_chunk_biome_nbt(
                 let coord = XZPoint::new(world_x, world_z);
                 let lc = g.cover_class(coord);
                 let wd = g.water_distance(coord);
-                names[(zi * 4 + xi) as usize] = biome_for_class(lc, climate, center_lat_deg, wd);
+                names[(zi * 4 + xi) as usize] =
+                    biome_for_class(lc, climate, center_lat_deg, wd, dryland);
             }
         }
     }
@@ -195,6 +217,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn open_water_past_the_bfs_cap_is_ocean_not_river() {
+        // water_distance BFS-caps at 15 and leaves the interior of a big body at 0.
+        for climate in [Climate::Temperate, Climate::Boreal] {
+            let mid = biome_for_class(LC_WATER, climate, 55.0, 0, Dryland::None);
+            assert!(
+                mid.contains("ocean"),
+                "uncapped open water should be ocean, got {mid}"
+            );
+        }
+        // A genuine shore cell still reads as river.
+        assert_eq!(
+            biome_for_class(LC_WATER, Climate::Temperate, 55.0, 3, Dryland::None),
+            "minecraft:river"
+        );
+    }
+
+    #[test]
     fn bits_per_index_table() {
         assert_eq!(bits_per_index(1), 0);
         assert_eq!(bits_per_index(2), 1);
@@ -251,19 +290,19 @@ mod tests {
     fn latitude_drives_tree_biome() {
         let t = Climate::Temperate;
         assert_eq!(
-            biome_for_class(LC_TREE_COVER, t, 0.0, 0),
+            biome_for_class(LC_TREE_COVER, t, 0.0, 0, Dryland::None),
             "minecraft:jungle"
         );
         assert_eq!(
-            biome_for_class(LC_TREE_COVER, t, 40.0, 0),
+            biome_for_class(LC_TREE_COVER, t, 40.0, 0, Dryland::None),
             "minecraft:forest"
         );
         assert_eq!(
-            biome_for_class(LC_TREE_COVER, t, 60.0, 0),
+            biome_for_class(LC_TREE_COVER, t, 60.0, 0, Dryland::None),
             "minecraft:taiga"
         );
         assert_eq!(
-            biome_for_class(LC_TREE_COVER, t, -60.0, 0),
+            biome_for_class(LC_TREE_COVER, t, -60.0, 0, Dryland::None),
             "minecraft:taiga"
         );
     }
@@ -271,11 +310,11 @@ mod tests {
     #[test]
     fn climate_drives_arid_polar_biome() {
         assert_eq!(
-            biome_for_class(LC_GRASSLAND, Climate::HotDesert, 25.0, 0),
+            biome_for_class(LC_GRASSLAND, Climate::HotDesert, 25.0, 0, Dryland::None),
             "minecraft:desert"
         );
         assert_eq!(
-            biome_for_class(LC_GRASSLAND, Climate::IceCap, 75.0, 0),
+            biome_for_class(LC_GRASSLAND, Climate::IceCap, 75.0, 0, Dryland::None),
             "minecraft:snowy_plains"
         );
     }
@@ -283,26 +322,32 @@ mod tests {
     #[test]
     fn water_biomes_by_climate_and_distance() {
         let t = Climate::Temperate;
-        assert_eq!(biome_for_class(LC_WATER, t, 0.0, 1), "minecraft:river");
-        assert_eq!(biome_for_class(LC_WATER, t, 0.0, 8), "minecraft:warm_ocean");
         assert_eq!(
-            biome_for_class(LC_WATER, t, 35.0, 8),
+            biome_for_class(LC_WATER, t, 0.0, 1, Dryland::None),
+            "minecraft:river"
+        );
+        assert_eq!(
+            biome_for_class(LC_WATER, t, 0.0, 8, Dryland::None),
+            "minecraft:warm_ocean"
+        );
+        assert_eq!(
+            biome_for_class(LC_WATER, t, 35.0, 8, Dryland::None),
             "minecraft:lukewarm_ocean"
         );
         assert_eq!(
-            biome_for_class(LC_WATER, t, 35.0, 12),
+            biome_for_class(LC_WATER, t, 35.0, 12, Dryland::None),
             "minecraft:deep_lukewarm_ocean"
         );
         assert_eq!(
-            biome_for_class(LC_WATER, t, 50.0, 8),
+            biome_for_class(LC_WATER, t, 50.0, 8, Dryland::None),
             "minecraft:cold_ocean"
         );
         assert_eq!(
-            biome_for_class(LC_WATER, Climate::IceCap, 70.0, 1),
+            biome_for_class(LC_WATER, Climate::IceCap, 70.0, 1, Dryland::None),
             "minecraft:frozen_river"
         );
         assert_eq!(
-            biome_for_class(LC_WATER, Climate::IceCap, 70.0, 8),
+            biome_for_class(LC_WATER, Climate::IceCap, 70.0, 8, Dryland::None),
             "minecraft:frozen_ocean"
         );
     }
@@ -310,11 +355,11 @@ mod tests {
     #[test]
     fn tropical_shrub_is_sparse_jungle() {
         assert_eq!(
-            biome_for_class(LC_SHRUBLAND, Climate::Temperate, 5.0, 0),
+            biome_for_class(LC_SHRUBLAND, Climate::Temperate, 5.0, 0, Dryland::None),
             "minecraft:sparse_jungle"
         );
         assert_eq!(
-            biome_for_class(LC_SHRUBLAND, Climate::Temperate, 45.0, 0),
+            biome_for_class(LC_SHRUBLAND, Climate::Temperate, 45.0, 0, Dryland::None),
             "minecraft:savanna"
         );
     }

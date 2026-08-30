@@ -41,7 +41,9 @@ mod preview_3d;
 mod progress;
 mod projection;
 mod retrieve_data;
+mod strata;
 mod structures;
+mod surface;
 #[cfg(feature = "gui")]
 mod telemetry;
 #[cfg(test)]
@@ -344,6 +346,25 @@ fn run_cli() {
             let ground = ground::generate_ground_data(&args, effective_bbox);
             (ground, t.elapsed())
         });
+
+        if args.probe {
+            let (ground, _) = ground_handle.join().expect("ground thread panicked");
+            let p = ground.region_profile();
+            let [t27, t37, t45] = ground.slope_tiers();
+            println!(
+                "PROBE climate={:?} bare={:.3} dryland={:?} base={:.0}m relief={:.0}m grad={:.1}m/km tiers={},{},{}",
+                ground.climate(),
+                p.bare_fraction,
+                p.dryland,
+                p.base_elevation_m,
+                p.relief_m,
+                p.relief_gradient,
+                t27,
+                t37,
+                t45,
+            );
+            std::process::exit(0);
+        }
 
         let t = std::time::Instant::now();
         // A local file was already parsed up front (to derive the bbox), so reuse that data.

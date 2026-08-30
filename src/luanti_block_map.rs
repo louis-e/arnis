@@ -362,7 +362,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         206 => return conv_stair(props, "mcl_stairs:stair_warped"), // WARPED_STAIRS
         207 => "mcl_colorblocks:concrete_green",
         208 => "mcl_walls:brick",
-        209 => "mcl_redstone_torch:redstoneblock",
+        209 => "mcl_core:redsand",
         210 | 362 => "mcl_lanterns:chain",
         211 => {
             return conv_trapdoor(
@@ -432,6 +432,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         246 => "mcl_flowers:tulip_red",
         247 => "mcl_flowers:dandelion",
         248 => "mcl_flowers:blue_orchid",
+        367 => "mcl_redstone_torch:redstoneblock",
         249 => "mcl_core:stone_with_diamond",
         250 => "mcl_core:stone_with_redstone",
         251 => "mcl_core:stone_with_lapis",

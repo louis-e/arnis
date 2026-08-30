@@ -997,36 +997,58 @@ fn tunnel_portal_faces(
 // Phase 2: carve the interior, then lay the road last so no carve can eat it.
 pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[HighwayTunnelCell]) {
     // What the bore may swallow: its placeholder, ground fill, approach paving, cut surfaces.
-    const CARVE_WL: &[Block] = &[
-        STONE_BRICKS,
-        CRACKED_STONE_BRICKS,
-        MOSSY_STONE_BRICKS,
-        STONE,
-        WATER,
-        GRAY_CONCRETE_POWDER,
-        CYAN_TERRACOTTA,
-        GRAY_CONCRETE,
-        BLACK_CONCRETE,
-        LIGHT_GRAY_CONCRETE,
-        WHITE_CONCRETE,
-        GRASS_BLOCK,
-        DIRT,
-        COARSE_DIRT,
-        PODZOL,
-        MUD,
-        CLAY,
-        SAND,
-        SANDSTONE,
-        GRAVEL,
-        ANDESITE,
-        COBBLESTONE,
-        TUFF,
-        DEEPSLATE,
-        SNOW_BLOCK,
-        SNOW_LAYER,
-        MOSS_BLOCK,
-        FARMLAND,
-    ];
+    // Anything the ground pass can leave as a natural surface, plus the paving and
+    // placeholders a bore legitimately cuts. A closed list here silently left
+    // uncarved plugs whenever a new surface material was added.
+    fn carve_accepts(b: Block) -> bool {
+        matches!(
+            b,
+            GRASS_BLOCK
+                | DIRT
+                | COARSE_DIRT
+                | PODZOL
+                | MOSS_BLOCK
+                | MUD
+                | FARMLAND
+                | SAND
+                | RED_SAND
+                | GRAVEL
+                | CLAY
+                | STONE
+                | ANDESITE
+                | TUFF
+                | GRANITE
+                | COBBLESTONE
+                | DEEPSLATE
+                | COBBLED_DEEPSLATE
+                | BLACKSTONE
+                | SANDSTONE
+                | SMOOTH_SANDSTONE
+                | TERRACOTTA
+                | ORANGE_TERRACOTTA
+                | RED_TERRACOTTA
+                | BROWN_TERRACOTTA
+                | GRAY_TERRACOTTA
+                | LIGHT_GRAY_TERRACOTTA
+                | WHITE_TERRACOTTA
+                | SNOW_BLOCK
+                | PACKED_ICE
+        ) || matches!(
+            b,
+            STONE_BRICKS
+                | CRACKED_STONE_BRICKS
+                | MOSSY_STONE_BRICKS
+                | WATER
+                | SNOW_LAYER
+                | DIRT_PATH
+                | GRAY_CONCRETE_POWDER
+                | CYAN_TERRACOTTA
+                | GRAY_CONCRETE
+                | BLACK_CONCRETE
+                | LIGHT_GRAY_CONCRETE
+                | WHITE_CONCRETE
+        )
+    }
     // Whitelist for laying the floor over carved air, placeholder, or fill stone.
     // SEA_LANTERN so a crossing bore's light is paved over, not embedded.
     const ROAD_WL: &[Block] = &[
@@ -1057,7 +1079,14 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
                         .min(editor.terrain_level(cx, cz).unwrap_or(cell.carve_top))
                 };
                 for y in (cell.road_y + 1)..=top {
-                    editor.set_block_absolute(AIR, cx, y, cz, Some(CARVE_WL), None);
+                    if editor
+                        .get_block_absolute(cx, y, cz)
+                        .is_none_or(carve_accepts)
+                    {
+                        // Blacklisting AIR takes the overwrite path and skips
+                        // rewriting what is already carved.
+                        editor.set_block_absolute(AIR, cx, y, cz, None, Some(&[AIR]));
+                    }
                 }
             }
         }
