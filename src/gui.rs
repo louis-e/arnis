@@ -978,6 +978,9 @@ fn gui_start_generation(
     use_3d_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
+    tianditu_elevation: bool,
+    tianditu_token: String,
+    gpu_accel: bool,
     bake_lighting_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
@@ -1014,6 +1017,20 @@ fn gui_start_generation(
 
     // Send generation click telemetry
     telemetry::send_generation_click();
+
+    // Pass Tianditu token to the elevation subsystem if provided
+    if tianditu_elevation && !tianditu_token.is_empty() {
+        std::env::set_var("TIANDITU_TOKEN", &tianditu_token);
+    } else {
+        std::env::remove_var("TIANDITU_TOKEN");
+    }
+
+    // Signal GPU-accelerated path when requested by the user.
+    if gpu_accel {
+        std::env::set_var("ARNIS_GPU", "1");
+    } else {
+        std::env::remove_var("ARNIS_GPU");
+    }
 
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
@@ -1510,10 +1527,10 @@ mod generation_slot_tests {
 mod locale_tests {
     use std::collections::BTreeSet;
 
-    // en-US is the source of truth, every other locale must match its key set
+    // en-US is the source of truth, every other locale must match its key set.
+    // en.json is not a real locale — it redirects the JS fallback to en-US.
     const LOCALES: &[(&str, &str)] = &[
         ("en-US", include_str!("gui/locales/en-US.json")),
-        ("en", include_str!("gui/locales/en.json")),
         ("ar", include_str!("gui/locales/ar.json")),
         ("de", include_str!("gui/locales/de.json")),
         ("es", include_str!("gui/locales/es.json")),

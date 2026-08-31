@@ -77,6 +77,9 @@
   "gamemode_creative": "Kreativ",
   "gamemode_spectator": "Zuschauer",
   "world_time": "Weltzeit",
+  "tianditu_elevation": "Tianditu Elevation",
+  "tianditu_token": "Tianditu Token",  "gpu_acceleration": "GPU Acceleration",
+  "gpu_active": "(using GPU acceleration)",  "map_item": "Weltkarte im Inventar"
   "map_item": "Weltkarte im Inventar",
   "signage": "Beschilderung",
   "signage_none": "Keine",

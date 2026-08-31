@@ -1246,9 +1246,6 @@ fn smooth_built_up_gaussian(
         return;
     }
 
-    let h = heights.len();
-    let w = heights[0].len();
-
     // Early out: if there are no built-up cells, nothing to do.
     let built_up_count: usize = lc_grid
         .iter()
@@ -1299,25 +1296,31 @@ fn smooth_built_up_gaussian(
 
     // Blend through the feathered mask. Water-surface cells are skipped so
     // the leveled water surface from the previous pass survives intact.
-    let mut total_influenced = 0usize;
-    for y in 0..h {
-        for x in 0..w {
-            if is_water_surface[y][x] {
-                continue;
+    // Rows are independent — parallelise (this is a full-grid pass).
+    let total_influenced: usize = heights
+        .par_iter_mut()
+        .enumerate()
+        .map(|(y, row)| {
+            let mut row_influenced = 0usize;
+            for (x, cell) in row.iter_mut().enumerate() {
+                if is_water_surface[y][x] {
+                    continue;
+                }
+                let m = feathered_mask[y][x].clamp(0.0, 1.0);
+                if m <= 1.0e-4 {
+                    continue;
+                }
+                let orig = *cell;
+                let blur = blurred_heights[y][x];
+                if !orig.is_finite() || !blur.is_finite() {
+                    continue;
+                }
+                *cell = (1.0 - m) * orig + m * blur;
+                row_influenced += 1;
             }
-            let m = feathered_mask[y][x].clamp(0.0, 1.0);
-            if m <= 1.0e-4 {
-                continue;
-            }
-            let orig = heights[y][x];
-            let blur = blurred_heights[y][x];
-            if !orig.is_finite() || !blur.is_finite() {
-                continue;
-            }
-            heights[y][x] = (1.0 - m) * orig + m * blur;
-            total_influenced += 1;
-        }
-    }
+            row_influenced
+        })
+        .sum();
 
     eprintln!(
         "Land cover repair: built-up Gaussian smoothing σ={:.2} cells applied to {} built-up + feathered cells ({} core built-up cells)",
@@ -1329,6 +1332,27 @@ fn smooth_built_up_gaussian(
 /// Edges are handled by renormalizing weights over the valid samples so the
 /// blur doesn't darken the border of the grid.
 pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+    #[cfg(feature = "gpu")]
+    {
+        if std::env::var("ARNIS_GPU").as_deref() == Ok("1") {
+            eprintln!(
+                "[GPU] attempting gaussian_blur ({}x{})",
+                grid.len(),
+                grid[0].len()
+            );
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma)
+            }));
+            match result {
+                Ok(Some(r)) => {
+                    eprintln!("[GPU] gaussian_blur succeeded");
+                    return r;
+                }
+                Ok(None) => eprintln!("[GPU] gaussian_blur returned None, falling back to CPU"),
+                Err(_) => eprintln!("[GPU] gaussian_blur panicked, falling back to CPU"),
+            }
+        }
+    }
     gaussian_blur_grid_reported(grid, sigma, &|_| {})
 }
 
@@ -1343,6 +1367,23 @@ fn gaussian_blur_grid_reported(
     sigma: f64,
     report: &dyn Fn(f64),
 ) -> Vec<Vec<f64>> {
+    // Try GPU-accelerated path first.
+    #[cfg(feature = "gpu")]
+    {
+        if std::env::var("ARNIS_GPU").as_deref() == Ok("1") {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::elevation::gpu::gpu_gaussian_blur_2d(grid, sigma)
+            }));
+            match result {
+                Ok(Some(r)) => {
+                    report(1.0);
+                    return r;
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
+    }
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel = create_gaussian_kernel(kernel_size, sigma);
     let half = kernel_size as i32 / 2;
