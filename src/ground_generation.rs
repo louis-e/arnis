@@ -198,6 +198,8 @@ pub fn generate_ground_region(
     let strata = crate::strata::Strata::new(profile.y_min, profile.y_max);
     // 27 / 37 / 45 degrees, corrected for this bbox's vertical exaggeration.
     let [t27, t37, t45] = ground.slope_tiers();
+    // One land-cover cell in world blocks; stepping by less samples the same cell.
+    let cover_span = ground.cover_cell_span();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -548,14 +550,19 @@ pub fn generate_ground_region(
                                         }
                                     }
                                 } else if cover == land_cover::LC_SNOW_ICE
-                                    && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(
-                                        |(dx, dz)| {
-                                            ground.cover_class(XZPoint::new(
-                                                x + dx - xzbbox.min_x(),
-                                                z + dz - xzbbox.min_z(),
-                                            )) == land_cover::LC_SNOW_ICE
-                                        },
-                                    )
+                                    && [
+                                        (-cover_span, 0),
+                                        (cover_span, 0),
+                                        (0, -cover_span),
+                                        (0, cover_span),
+                                    ]
+                                    .iter()
+                                    .any(|(dx, dz)| {
+                                        ground.cover_class(XZPoint::new(
+                                            x + dx - xzbbox.min_x(),
+                                            z + dz - xzbbox.min_z(),
+                                        )) == land_cover::LC_SNOW_ICE
+                                    })
                                 {
                                     // Permanent ice, one authority for every climate.
                                     // A lone class-70 cell is winter imagery, not a
@@ -1470,29 +1477,41 @@ pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzb
     // write. So the scan runs read-only across threads and the handful of writes
     // are applied serially afterwards, which keeps the pass off the critical path
     // without changing what it does.
-    // Shared reborrow: the scan only reads, and the writes come after it ends.
-    let reader: &WorldEditor = editor;
-    let stranded: Vec<(i32, i32, i32)> = (xzbbox.min_x()..=xzbbox.max_x())
-        .into_par_iter()
-        .flat_map_iter(|x| {
-            (xzbbox.min_z()..=xzbbox.max_z()).filter_map(move |z| {
-                if !ground.is_in_rotated_bounds(x, z) {
-                    return None;
-                }
-                let ground_y = reader.get_ground_level(x, z);
-                plant_is_stranded(reader, x, ground_y, z).then_some((x, ground_y, z))
+    // Swept in bands of columns so the hit list stays bounded by the band and not
+    // by the bbox: a country-scale area runs to hundreds of millions of columns,
+    // and collecting every hit in one vector would size it by the whole world.
+    const BAND: i32 = 1024;
+    let mut cleared = 0u64;
+    let mut x0 = xzbbox.min_x();
+    loop {
+        let x1 = x0.saturating_add(BAND - 1).min(xzbbox.max_x());
+        // Shared reborrow: the scan only reads, and the writes come after it ends.
+        let reader: &WorldEditor = editor;
+        let stranded: Vec<(i32, i32, i32)> = (x0..=x1)
+            .into_par_iter()
+            .flat_map_iter(|x| {
+                (xzbbox.min_z()..=xzbbox.max_z()).filter_map(move |z| {
+                    if !ground.is_in_rotated_bounds(x, z) {
+                        return None;
+                    }
+                    let ground_y = reader.get_ground_level(x, z);
+                    plant_is_stranded(reader, x, ground_y, z).then_some((x, ground_y, z))
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    for &(x, ground_y, z) in &stranded {
-        clear_plant_above(editor, x, ground_y, z);
+        for &(x, ground_y, z) in &stranded {
+            clear_plant_above(editor, x, ground_y, z);
+        }
+        cleared += stranded.len() as u64;
+
+        if x1 >= xzbbox.max_x() {
+            break;
+        }
+        x0 = x1 + 1;
     }
-    if !stranded.is_empty() {
-        println!(
-            "Cleared {} plants left on ground that cannot hold them",
-            stranded.len()
-        );
+    if cleared > 0 {
+        println!("Cleared {cleared} plants left on ground that cannot hold them");
     }
 }
 
@@ -1550,7 +1569,12 @@ fn rock_desert_floor_cover(
         return None;
     }
     match cover {
-        land_cover::LC_BUILT_UP | land_cover::LC_CROPLAND | land_cover::LC_WETLAND => None,
+        // Mangroves are a wetland class as well: they carry their own mud surface
+        // and vegetation path, which the rock-desert floor would overwrite.
+        land_cover::LC_BUILT_UP
+        | land_cover::LC_CROPLAND
+        | land_cover::LC_WETLAND
+        | land_cover::LC_MANGROVES => None,
         land_cover::LC_TREE_COVER => Some(FloorCover::Wooded),
         // A canopy measurement outranks the cover class: it is the finer signal,
         // and a tree the canopy map found needs rootable ground whatever ESA

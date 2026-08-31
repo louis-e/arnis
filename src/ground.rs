@@ -72,9 +72,17 @@ fn slope_tiers_for(blocks_per_meter: f64, scale: f64) -> [i32; 3] {
     }
     let vex = (blocks_per_meter / scale).clamp(0.0, 1.0);
     let t = |tan: f64| (8.0 * vex * tan).round() as i32;
-    let t27 = t(0.5095).max(2);
-    let t37 = t(0.7536).max(t27 + 1);
-    let t45 = t(1.0).max(t37 + 1);
+    // Floors of 1, and tiers may collide rather than being forced apart. The
+    // comparison is a strict `slope > t`, so a floor of 2 demands slope 3, and
+    // under heavy compression a real 45 deg face only measures 2 -- the tier meant
+    // to catch a cliff would step straight over it. Letting 37 and 45 land on the
+    // same value loses the middle tier when the metric can no longer separate
+    // them, which is better than pushing the cliff tier out of reach entirely.
+    // Below vex ~0.2 the integer metric has too few steps left to tell a cliff
+    // from a hillside at all; that is a limit of the measurement, not of these.
+    let t27 = t(0.5095).max(1);
+    let t37 = t(0.7536).max(t27);
+    let t45 = t(1.0).max(t37);
     [t27, t37, t45]
 }
 
@@ -690,6 +698,23 @@ impl Ground {
             Some(d) => (d.world_width, d.world_height),
             None => (self.world_width, self.world_height),
         }
+    }
+
+    /// World blocks spanned by one land-cover cell, at least 1.
+    ///
+    /// [`Self::cover_class`] maps world coordinates onto the land-cover grid by
+    /// ratio, and that grid is coarser than the world (ESA cells are 10 m). A
+    /// neighbour check written in single blocks therefore keeps landing back on
+    /// the same cell and compares it with itself; step by this instead.
+    #[inline]
+    pub fn cover_cell_span(&self) -> i32 {
+        let Some(ref lc) = self.land_cover else {
+            return 1;
+        };
+        let (world_w, world_h) = self.world_dims();
+        let sx = world_w / lc.width.max(1);
+        let sz = world_h / lc.height.max(1);
+        (sx.min(sz) as i32).max(1)
     }
 
     /// Returns the ESA WorldCover land cover class at the given coordinates.
@@ -1351,9 +1376,25 @@ mod tests {
         let t = slope_tiers_for(0.27, 1.0);
         assert!(t[2] < SLOPE_TIERS_1_1[2], "cliff tier should drop: {t:?}");
         assert!(
-            t[0] >= 2 && t[0] < t[1] && t[1] < t[2],
+            t[0] >= 1 && t[0] <= t[1] && t[1] <= t[2],
             "tiers must stay ordered: {t:?}"
         );
+    }
+
+    #[test]
+    fn a_real_cliff_still_reads_as_rock_when_relief_is_compressed() {
+        // The point of the correction is that a real angle keeps its meaning, so
+        // test the angle, not the tier ordering. `slope` is the integer drop over
+        // the 8-block sample span, so a 45 deg face measures 8 * vex, and it has
+        // to clear t27 or the whole cascade treats a cliff as a hillside.
+        for vex in [1.0, 0.75, 0.535, 0.4, 0.3, 0.27] {
+            let tiers = slope_tiers_for(vex, 1.0);
+            let measured = (8.0 * vex) as i32;
+            assert!(
+                measured > tiers[0],
+                "vex {vex}: a 45 deg face measures {measured} and misses t27 in {tiers:?}"
+            );
+        }
     }
 
     #[test]

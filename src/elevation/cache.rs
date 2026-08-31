@@ -4,9 +4,14 @@ use std::path::PathBuf;
 const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 
 /// Maximum age for cached tiles in days before they are cleaned up.
-/// Elevation sources update on multi-year cycles, so a month is conservative.
-/// Also bounds the staleness of Mapterhorn's negative 404 markers.
-const TILE_CACHE_MAX_AGE_DAYS: u64 = 30;
+///
+/// Elevation sources update on multi-year cycles, so this is about disk, not
+/// staleness. A refetch is the dominant cold cost of a run -- a small
+/// high-resolution bbox pulls hundreds of tiles -- and repeat generations of the
+/// same area are the normal working pattern, so a quarter is a better trade than
+/// a month. Coverage growth is not bound by this: Mapterhorn's negative 404
+/// markers carry their own 30-day expiry and are re-probed on read.
+const TILE_CACHE_MAX_AGE_DAYS: u64 = 90;
 
 /// Returns the tile cache directory path for a specific provider.
 /// Uses the OS-standard cache directory (e.g. AppData/Local on Windows, ~/.cache on Linux).
