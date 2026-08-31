@@ -198,8 +198,6 @@ pub fn generate_ground_region(
     let strata = crate::strata::Strata::new(profile.y_min, profile.y_max);
     // 27 / 37 / 45 degrees, corrected for this bbox's vertical exaggeration.
     let [t27, t37, t45] = ground.slope_tiers();
-    // One land-cover cell in world blocks; stepping by less samples the same cell.
-    let cover_span = ground.cover_cell_span();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -550,19 +548,7 @@ pub fn generate_ground_region(
                                         }
                                     }
                                 } else if cover == land_cover::LC_SNOW_ICE
-                                    && [
-                                        (-cover_span, 0),
-                                        (cover_span, 0),
-                                        (0, -cover_span),
-                                        (0, cover_span),
-                                    ]
-                                    .iter()
-                                    .any(|(dx, dz)| {
-                                        ground.cover_class(XZPoint::new(
-                                            x + dx - xzbbox.min_x(),
-                                            z + dz - xzbbox.min_z(),
-                                        )) == land_cover::LC_SNOW_ICE
-                                    })
+                                    && ground.has_cover_neighbour(coord, land_cover::LC_SNOW_ICE)
                                 {
                                     // Permanent ice, one authority for every climate.
                                     // A lone class-70 cell is winter imagery, not a
@@ -1472,6 +1458,53 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
 /// writes into its neighbour's 64-block halo, so a plant can merge in after that
 /// neighbour already cleaned its own columns. This sweeps the merged world.
 pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzbbox: &XZBBox) {
+    let cleared = sweep_stranded_plants(
+        editor,
+        ground,
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
+    );
+    if cleared > 0 {
+        println!("Cleared {cleared} plants left on ground that cannot hold them");
+    }
+}
+
+/// Sweep one region's columns, for the streaming path.
+///
+/// A region is swept once every tile that can write into it has merged and while
+/// it is still resident. After the flush its writes are dropped, so this is the
+/// only moment the halo race can be repaired there at all.
+pub fn clear_stranded_plants_in_region(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    region: (i32, i32),
+) -> u64 {
+    /// Blocks per region side, matching the `>> 9` the editor evicts on.
+    const REGION_BLOCKS: i32 = 512;
+    let x0 = region.0.saturating_mul(REGION_BLOCKS);
+    let z0 = region.1.saturating_mul(REGION_BLOCKS);
+    sweep_stranded_plants(
+        editor,
+        ground,
+        x0.max(xzbbox.min_x()),
+        x0.saturating_add(REGION_BLOCKS - 1).min(xzbbox.max_x()),
+        z0.max(xzbbox.min_z()),
+        z0.saturating_add(REGION_BLOCKS - 1).min(xzbbox.max_z()),
+    )
+}
+
+/// Clear every stranded plant in a rectangle of columns; returns how many.
+fn sweep_stranded_plants(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+) -> u64 {
     // Scanning is the expensive half: it costs one terrain-height interpolation
     // per column over the whole bbox, and almost none of them turn out to need a
     // write. So the scan runs read-only across threads and the handful of writes
@@ -1481,16 +1514,19 @@ pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzb
     // by the bbox: a country-scale area runs to hundreds of millions of columns,
     // and collecting every hit in one vector would size it by the whole world.
     const BAND: i32 = 1024;
+    if min_x > max_x || min_z > max_z {
+        return 0;
+    }
     let mut cleared = 0u64;
-    let mut x0 = xzbbox.min_x();
+    let mut x0 = min_x;
     loop {
-        let x1 = x0.saturating_add(BAND - 1).min(xzbbox.max_x());
+        let x1 = x0.saturating_add(BAND - 1).min(max_x);
         // Shared reborrow: the scan only reads, and the writes come after it ends.
         let reader: &WorldEditor = editor;
         let stranded: Vec<(i32, i32, i32)> = (x0..=x1)
             .into_par_iter()
             .flat_map_iter(|x| {
-                (xzbbox.min_z()..=xzbbox.max_z()).filter_map(move |z| {
+                (min_z..=max_z).filter_map(move |z| {
                     if !ground.is_in_rotated_bounds(x, z) {
                         return None;
                     }
@@ -1505,26 +1541,33 @@ pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzb
         }
         cleared += stranded.len() as u64;
 
-        if x1 >= xzbbox.max_x() {
+        if x1 >= max_x {
             break;
         }
         x0 = x1 + 1;
     }
-    if cleared > 0 {
-        println!("Cleared {cleared} plants left on ground that cannot hold them");
-    }
+    cleared
 }
 
 /// Whether a plant stands here on ground that cannot hold it.
 fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> bool {
     // Plant first: almost every column has air there, so most exit after one
     // lookup instead of two.
-    editor
-        .get_block_absolute(x, ground_y + 1, z)
-        .is_some_and(|b| crate::surface::SOIL_PLANTS.contains(&b))
-        && !editor
-            .get_block_absolute(x, ground_y, z)
-            .is_some_and(crate::surface::supports_vegetation)
+    let Some(plant) = editor.get_block_absolute(x, ground_y + 1, z) else {
+        return false;
+    };
+    let footing: fn(crate::block_definitions::Block) -> bool = if plant == DEAD_BUSH {
+        // A dead bush stands on terracotta and sand as well, which is most of a
+        // rock-desert floor, so testing it against soil would uproot it wrongly.
+        crate::surface::supports_dead_bush
+    } else if crate::surface::SOIL_PLANTS.contains(&plant) {
+        crate::surface::supports_vegetation
+    } else {
+        return false;
+    };
+    !editor
+        .get_block_absolute(x, ground_y, z)
+        .is_some_and(footing)
 }
 
 /// Clear the plant above this column, upper half included.
@@ -1538,7 +1581,7 @@ fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
         x,
         ground_y + 1,
         z,
-        Some(crate::surface::SOIL_PLANTS),
+        Some(crate::surface::CLEARABLE_PLANTS),
         None,
     );
     editor.set_block_absolute(

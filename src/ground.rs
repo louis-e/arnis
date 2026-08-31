@@ -700,14 +700,31 @@ impl Ground {
         }
     }
 
-    /// World blocks spanned by one land-cover cell, at least 1.
+    /// True when a land-cover cell one cell away carries `class`.
     ///
-    /// [`Self::cover_class`] maps world coordinates onto the land-cover grid by
-    /// ratio, and that grid is coarser than the world (ESA cells are 10 m). A
-    /// neighbour check written in single blocks therefore keeps landing back on
-    /// the same cell and compares it with itself; step by this instead.
+    /// Steps a whole land-cover cell: [`Self::cover_class`] maps world coordinates
+    /// onto a coarser grid (ESA cells are 10 m), so a single-block step lands back
+    /// on the same cell and the cell answers for itself. Samples outside the world
+    /// are rejected rather than sampled, because `cover_class` clamps them to the
+    /// edge cell, which lets a cell on the boundary answer for itself the same way.
+    pub fn has_cover_neighbour(&self, coord: XZPoint, class: u8) -> bool {
+        let span = self.cover_cell_span();
+        let (world_w, world_h) = self.world_dims();
+        [(-span, 0), (span, 0), (0, -span), (0, span)]
+            .iter()
+            .any(|(dx, dz)| {
+                let (nx, nz) = (coord.x + dx, coord.z + dz);
+                nx >= 0
+                    && nz >= 0
+                    && (nx as usize) < world_w
+                    && (nz as usize) < world_h
+                    && self.cover_class(XZPoint::new(nx, nz)) == class
+            })
+    }
+
+    /// World blocks spanned by one land-cover cell, at least 1.
     #[inline]
-    pub fn cover_cell_span(&self) -> i32 {
+    fn cover_cell_span(&self) -> i32 {
         let Some(ref lc) = self.land_cover else {
             return 1;
         };

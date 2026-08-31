@@ -730,6 +730,8 @@ pub fn generate_world_with_options(
     let mut hash_acc: u64 = 0;
     let mut real_regions: HashSet<(i32, i32)> = HashSet::new();
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
+    // Plants the streaming path cleared region-by-region, reported like the resident sweep.
+    let mut evicted_cleared: u64 = 0;
     // Background writer for eviction; None unless eviction is active.
     let mut flush_worker: Option<FlushWorker> = None;
     // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
@@ -1045,19 +1047,29 @@ pub fn generate_world_with_options(
                             let d = (rt.0 + dx, rt.1 + dz);
                             if let Some(c) = remaining.get_mut(&d) {
                                 *c -= 1;
-                                if *c == 0
-                                    && !evicted_regions.contains(&d)
-                                    && !model_regions.contains(&d)
-                                    && Some(d) != spawn_region
-                                {
-                                    if hash_check {
-                                        hash_acc = hash_acc
-                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                if *c == 0 && !evicted_regions.contains(&d) {
+                                    // Every tile that can write into this region has
+                                    // merged and it is still resident, so this is the
+                                    // one moment the halo race can be repaired here.
+                                    // Deferred and spawn regions are swept too: they
+                                    // are flushed later, but never re-merged.
+                                    evicted_cleared +=
+                                        ground_generation::clear_stranded_plants_in_region(
+                                            &mut editor,
+                                            ground.as_ref(),
+                                            &xzbbox,
+                                            d,
+                                        );
+                                    if !model_regions.contains(&d) && Some(d) != spawn_region {
+                                        if hash_check {
+                                            hash_acc = hash_acc
+                                                .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                        }
+                                        if let Some(w) = flush_worker.as_ref() {
+                                            editor.flush_region_via(w, d.0, d.1)?;
+                                        }
+                                        evicted_regions.insert(d);
                                     }
-                                    if let Some(w) = flush_worker.as_ref() {
-                                        editor.flush_region_via(w, d.0, d.1)?;
-                                    }
-                                    evicted_regions.insert(d);
                                 }
                             }
                         }
@@ -1278,11 +1290,14 @@ pub fn generate_world_with_options(
     }
 
     // After the tile merge: a neighbouring tile's halo writes land after that
-    // tile's own per-column cleanup ran. Under eviction the regions are already
-    // flushed, so every read and write here is dropped and the walk is pure cost;
-    // the in-tile pass is all that runs there, same as the tunnel carves above.
+    // tile's own per-column cleanup ran. Under eviction this cannot run here --
+    // the regions are already flushed and every write would be dropped -- so it
+    // ran per region inside the merge loop instead, at the moment each region was
+    // complete and still resident.
     if !eviction_active {
         ground_generation::clear_stranded_soil_plants(&mut editor, ground.as_ref(), &xzbbox);
+    } else if evicted_cleared > 0 {
+        println!("Cleared {evicted_cleared} plants left on ground that cannot hold them");
     }
 
     // Run after ground generation so anchor Y reflects the final terrain.

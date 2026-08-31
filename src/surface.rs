@@ -56,6 +56,23 @@ pub const SOIL_PLANTS: &[Block] = &[
     WHITE_FLOWER,
 ];
 
+/// Everything the stranded-plant sweep may clear at ground+1: the soil plants,
+/// plus the dead bush, which stands on a wider set of blocks and so needs its own
+/// footing test rather than a place in [`SOIL_PLANTS`].
+pub const CLEARABLE_PLANTS: &[Block] = &[
+    GRASS,
+    FERN,
+    TALL_GRASS_BOTTOM,
+    TALL_GRASS_TOP,
+    LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER,
+    RED_FLOWER,
+    BLUE_FLOWER,
+    YELLOW_FLOWER,
+    WHITE_FLOWER,
+    DEAD_BUSH,
+];
+
 /// Upper halves of the two-block plants above. Clearing a stranded plant by its
 /// lower half alone leaves one of these floating a block off the ground.
 pub const SOIL_PLANT_TOPS: &[Block] = &[TALL_GRASS_TOP, LARGE_FERN_UPPER];
@@ -259,6 +276,24 @@ mod tests {
                 lower.name()
             );
         }
+    }
+
+    #[test]
+    fn the_sweep_can_clear_everything_it_can_strand() {
+        // The sweep decides a plant is stranded with one predicate and removes it
+        // with a whitelist. Anything the first recognises that the second omits
+        // gets detected and then left standing.
+        for p in SOIL_PLANTS {
+            assert!(
+                CLEARABLE_PLANTS.contains(p),
+                "{} can be found stranded but never cleared",
+                p.name()
+            );
+        }
+        assert!(
+            CLEARABLE_PLANTS.contains(&DEAD_BUSH),
+            "dead bush is checked against supports_dead_bush but never cleared"
+        );
     }
 
     #[test]

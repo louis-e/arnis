@@ -236,6 +236,28 @@ fn run_cli() {
         }
     }
 
+    // Report the terrain classification and stop. Placed before the output path
+    // is built and before any object fetch starts: a diagnostic must not create a
+    // world it will never write to, nor pull Overture data it will never use.
+    if args.probe {
+        let ground = ground::generate_ground_data(&args, effective_bbox);
+        let p = ground.region_profile();
+        let [t27, t37, t45] = ground.slope_tiers();
+        println!(
+            "PROBE climate={:?} bare={:.3} dryland={:?} base={:.0}m relief={:.0}m grad={:.1}m/km tiers={},{},{}",
+            ground.climate(),
+            p.bare_fraction,
+            p.dryland,
+            p.base_elevation_m,
+            p.relief_m,
+            p.relief_gradient,
+            t27,
+            t37,
+            t45,
+        );
+        return;
+    }
+
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
@@ -346,25 +368,6 @@ fn run_cli() {
             let ground = ground::generate_ground_data(&args, effective_bbox);
             (ground, t.elapsed())
         });
-
-        if args.probe {
-            let (ground, _) = ground_handle.join().expect("ground thread panicked");
-            let p = ground.region_profile();
-            let [t27, t37, t45] = ground.slope_tiers();
-            println!(
-                "PROBE climate={:?} bare={:.3} dryland={:?} base={:.0}m relief={:.0}m grad={:.1}m/km tiers={},{},{}",
-                ground.climate(),
-                p.bare_fraction,
-                p.dryland,
-                p.base_elevation_m,
-                p.relief_m,
-                p.relief_gradient,
-                t27,
-                t37,
-                t45,
-            );
-            std::process::exit(0);
-        }
 
         let t = std::time::Instant::now();
         // A local file was already parsed up front (to derive the bbox), so reuse that data.

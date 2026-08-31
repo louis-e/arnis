@@ -362,6 +362,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.
         match &args.path {
+            // --probe reports the terrain classification and exits without
+            // writing a world, so it has nothing to put in an output directory.
+            None if args.probe => {}
             None => {
                 return Err(
                     "The --output-dir argument is required for Java Edition. Provide the directory where the world should be created. Use --bedrock for Bedrock Edition output."
