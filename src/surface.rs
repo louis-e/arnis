@@ -163,9 +163,10 @@ mod tests {
 
     #[test]
     fn desert_floor_emits_recognised_ground() {
-        for wooded in [false, true] {
+        use crate::strata::FloorCover;
+        for cover in [FloorCover::Bare, FloorCover::Sparse, FloorCover::Wooded] {
             for (x, z) in spread() {
-                let (surf, under) = crate::strata::desert_floor(x, z, wooded);
+                let (surf, under) = crate::strata::desert_floor(x, z, cover);
                 check(surf, "desert_floor");
                 check(under, "desert_floor under");
             }
@@ -184,15 +185,39 @@ mod tests {
     }
 
     #[test]
-    fn wooded_desert_floor_can_root_a_tree() {
-        // The canyon rim carries pinyon-juniper, so its floor has to pass the
-        // tree gate or the rim comes out bald.
+    fn vegetated_desert_floor_keeps_ground_its_plants_can_use() {
+        use crate::strata::FloorCover;
+        // Where the data says something grows, the surface has to pass the plant
+        // and tree gates, or classifying a bbox as rock desert silently deletes
+        // the vegetation its own land cover promised.
+        let total = spread().count();
         let rootable = spread()
-            .filter(|&(x, z)| supports_trees(crate::strata::desert_floor(x, z, true).0))
+            .filter(|&(x, z)| {
+                supports_trees(crate::strata::desert_floor(x, z, FloorCover::Wooded).0)
+            })
             .count();
         assert!(
-            rootable * 2 > spread().count(),
-            "most wooded rock-desert columns should be rootable"
+            rootable * 2 > total,
+            "most wooded rock-desert columns should root a tree, got {rootable}/{total}"
+        );
+        let growable = spread()
+            .filter(|&(x, z)| {
+                supports_vegetation(crate::strata::desert_floor(x, z, FloorCover::Sparse).0)
+            })
+            .count();
+        assert!(
+            growable * 2 > total,
+            "most shrub/grass rock-desert columns should grow a plant, got {growable}/{total}"
+        );
+        // Measured-bare stays the rock desert proper: mostly not plantable.
+        let bare_growable = spread()
+            .filter(|&(x, z)| {
+                supports_vegetation(crate::strata::desert_floor(x, z, FloorCover::Bare).0)
+            })
+            .count();
+        assert!(
+            bare_growable * 2 < total,
+            "bare rock desert should stay mostly bare, got {bare_growable}/{total}"
         );
     }
 

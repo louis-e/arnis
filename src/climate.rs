@@ -36,10 +36,8 @@ pub(crate) fn patch_pick(x: i32, z: i32, size: i32, n: u64) -> u64 {
 /// from rock desert: Moab and the Kazakh steppe are both BSk.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Dryland {
-    /// Not a dryland, or vegetated enough that the baseline palettes are right.
+    /// Not a dryland, or one whose own palette already suits it.
     None,
-    /// Barren hot desert: sand seas and their sandstone floors.
-    Sand,
     /// Barren arid rock country: banded sedimentary strata, no turf.
     Rock,
 }
@@ -104,9 +102,10 @@ impl Climate {
         if bare_fraction < BARE_FRACTION_DRY {
             return Dryland::None;
         }
-        // Hot desert keeps sand. Probing found no case where banding beat it.
+        // Hot desert keeps its own sand palette: probing found no case where
+        // banding beat it, so there is nothing for this classifier to add.
         if matches!(self, Climate::HotDesert) {
-            return Dryland::Sand;
+            return Dryland::None;
         }
         // Higher than this and a barren dissected bbox is alpine scree.
         if base_m > MAX_ROCK_BASE_M || relief_gradient < RELIEF_GRADIENT_ROCK {
@@ -261,10 +260,10 @@ mod tests {
             (ColdSteppe, 0.228, 42.6, 1069.0, Dryland::Rock),     // Cappadocia
             (ColdDesert, 0.731, 58.6, 873.0, Dryland::Rock),      // Petra
             (ColdDesert, 0.963, 118.3, 1643.0, Dryland::Rock),    // Sinai
-            // Hot desert keeps sand, dissected or not.
-            (HotDesert, 0.997, 24.0, 704.0, Dryland::Sand), // Erg Chebbi
-            (HotDesert, 0.988, 37.5, 546.0, Dryland::Sand), // Sossusvlei
-            (HotDesert, 0.917, 97.0, 900.0, Dryland::Sand), // Wadi Rum
+            // Hot desert keeps its own sand palette, dissected or not.
+            (HotDesert, 0.997, 24.0, 704.0, Dryland::None), // Erg Chebbi
+            (HotDesert, 0.988, 37.5, 546.0, Dryland::None), // Sossusvlei
+            (HotDesert, 0.917, 97.0, 900.0, Dryland::None), // Wadi Rum
             // Each of these is caught by a different gate, and each would look
             // badly wrong rendered as red banded rock.
             (DryContinental, 0.706, 140.5, 1128.0, Dryland::None), // St Helens pumice
@@ -282,7 +281,7 @@ mod tests {
             (IceCap, 0.000, 86.7, 100.0, Dryland::None),           // Antarctic dry valleys
             (Temperate, 0.000, 67.5, 192.0, Dryland::None),        // Yorkshire Dales
             (Temperate, 0.001, 5.3, 502.0, Dryland::None),         // Munich
-            (HotDesert, 0.143, 7.3, 443.0, Dryland::Sand),         // Phoenix suburbs
+            (HotDesert, 0.143, 7.3, 443.0, Dryland::None),         // Phoenix suburbs
         ];
         for (climate, bare, grad, base, want) in cases {
             assert_eq!(

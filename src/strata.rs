@@ -76,14 +76,47 @@ const BANDS: [Band; 9] = [
     },
 ];
 
+/// What a column's own land cover says about vegetation, which decides how much
+/// soil the rock-desert floor keeps. The bbox is classified as a whole, but the
+/// cover is measured per cell, so a shrubland pocket inside Moab still gets
+/// ground its scrub can root in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FloorCover {
+    /// Measured bare: the rock desert proper, soil only in the sand-flat pockets.
+    Bare,
+    /// Grass, shrub or moss: soil dominant, with rock and sand still showing
+    /// through, so the scatter passes have somewhere to put tussocks and scrub.
+    Sparse,
+    /// Tree cover, or a canopy measurement: soil dominant enough that the trees
+    /// the data promises have somewhere to stand.
+    Wooded,
+}
+
 /// Flat rock-desert ground. A coarse patch picks the formation, a finer one
-/// picks within it. Wooded cover keeps soil so trees can still root.
-pub fn desert_floor(x: i32, z: i32, wooded: bool) -> (Block, Block) {
+/// picks within it.
+///
+/// Only [`FloorCover::Bare`] is the full rock palette. The vegetated levels keep
+/// soil, because the surface is what gates every later plant and tree pass: laying
+/// rock on a cell the land cover calls grassland silently deletes its vegetation.
+pub fn desert_floor(x: i32, z: i32, cover: FloorCover) -> (Block, Block) {
     let within = patch_pick(x, z, 12, 10);
-    if wooded {
+    if cover == FloorCover::Wooded {
         return match within {
             0..=7 => (COARSE_DIRT, DIRT),
             _ => (TERRACOTTA, SANDSTONE),
+        };
+    }
+    if cover == FloorCover::Sparse {
+        // Rock members drawn from the same facies as the bare floor below, so a
+        // shrubland patch reads as the same country and not a different formation.
+        let facies = value_noise_01(x, z, 56);
+        return match within {
+            0..=5 => (COARSE_DIRT, DIRT),
+            6 => (DIRT, DIRT),
+            7..=8 if facies < 0.60 => (TERRACOTTA, SANDSTONE),
+            7..=8 => (RED_SAND, SANDSTONE),
+            _ if facies < 0.44 => (ORANGE_TERRACOTTA, SANDSTONE),
+            _ => (SANDSTONE, SANDSTONE),
         };
     }
     // Smoothstep noise, not a lattice hash: at formation scale a hash draws
@@ -307,7 +340,12 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for x in 0..200 {
             for z in 0..200 {
-                let (surf, under) = desert_floor(x, z, (x + z) % 3 == 0);
+                let cover = match (x + z) % 3 {
+                    0 => FloorCover::Wooded,
+                    1 => FloorCover::Sparse,
+                    _ => FloorCover::Bare,
+                };
+                let (surf, under) = desert_floor(x, z, cover);
                 assert!(surf.id() < BYTE_ID_LIMIT && under.id() < BYTE_ID_LIMIT);
                 seen.insert(surf.id());
             }

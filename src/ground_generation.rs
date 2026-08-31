@@ -557,19 +557,14 @@ pub fn generate_ground_region(
                                     // glacier, so it still blends with its neighbours
                                     // through the land-cover default below.
                                     (SNOW_BLOCK, SNOW_BLOCK)
-                                } else if dryland == Dryland::Rock
-                                    && cover != land_cover::LC_BUILT_UP
-                                    && cover != land_cover::LC_CROPLAND
-                                    && cover != land_cover::LC_WETLAND
+                                } else if let Some(fc) =
+                                    rock_desert_floor_cover(dryland, ground, coord, cover)
                                 {
-                                    // Rock desert floor. Built-up, cropland and
-                                    // wetland keep their own surfaces: those are
-                                    // where people changed the ground.
-                                    crate::strata::desert_floor(
-                                        x,
-                                        z,
-                                        cover == land_cover::LC_TREE_COVER,
-                                    )
+                                    // Rock desert floor, at the vegetation level this
+                                    // column's own data implies. Built-up, cropland and
+                                    // wetland return None and keep their own surfaces:
+                                    // those are where people changed the ground.
+                                    crate::strata::desert_floor(x, z, fc)
                                 } else if let Some(p) = climate.surface_palette(cover, x, z) {
                                     p
                                 } else {
@@ -789,13 +784,12 @@ pub fn generate_ground_region(
                                         BLACK_CONCRETE,
                                     ]),
                                 );
-                            } else if (dryland == Dryland::Rock
-                                && !matches!(
-                                    ground.cover_class(coord),
-                                    land_cover::LC_BUILT_UP
-                                        | land_cover::LC_CROPLAND
-                                        | land_cover::LC_WETLAND
-                                ))
+                            } else if rock_desert_floor_cover(
+                                dryland,
+                                ground,
+                                coord,
+                                ground.cover_class(coord),
+                            ) == Some(crate::strata::FloorCover::Bare)
                                 || surface_block == SNOW_BLOCK
                             {
                                 // OSM paints natural=scrub, grassland and its catch-all as
@@ -804,6 +798,10 @@ pub fn generate_ground_region(
                                 // that turns whole valleys green -- Monument Valley came out
                                 // 81 % grass. Replace only the soils OSM could have laid
                                 // down, so roads, buildings and water are untouched.
+                                //
+                                // Only on measured-bare columns: where the land cover or the
+                                // canopy map says something grows here, OSM agrees with them
+                                // and its surface is kept.
                                 editor.set_block_absolute(
                                     surface_block,
                                     x,
@@ -1535,6 +1533,42 @@ fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
         Some(crate::surface::SOIL_PLANT_TOPS),
         None,
     );
+}
+
+/// The rock-desert floor level for a column, or `None` where the rock-desert
+/// palette does not apply at all.
+///
+/// The bbox is classified as a whole, but vegetation is measured per cell, so a
+/// wooded or grassy pocket inside a rock desert keeps ground its plants can root
+/// in. Built-up, cropland and wetland are where people changed the ground and
+/// keep their own surfaces.
+fn rock_desert_floor_cover(
+    dryland: Dryland,
+    ground: &Ground,
+    coord: XZPoint,
+    cover: u8,
+) -> Option<crate::strata::FloorCover> {
+    use crate::strata::FloorCover;
+    if dryland != Dryland::Rock {
+        return None;
+    }
+    match cover {
+        land_cover::LC_BUILT_UP | land_cover::LC_CROPLAND | land_cover::LC_WETLAND => None,
+        land_cover::LC_TREE_COVER => Some(FloorCover::Wooded),
+        // A canopy measurement outranks the cover class: it is the finer signal,
+        // and a tree the canopy map found needs rootable ground whatever ESA
+        // called the cell.
+        _ if ground
+            .canopy_height_m(coord)
+            .is_some_and(|h| h >= crate::canopy::CANOPY_MIN_M) =>
+        {
+            Some(FloorCover::Wooded)
+        }
+        land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND | land_cover::LC_MOSS => {
+            Some(FloorCover::Sparse)
+        }
+        _ => Some(FloorCover::Bare),
+    }
 }
 
 /// Clear one plant standing on ground that cannot hold it.

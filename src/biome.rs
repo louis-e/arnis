@@ -240,7 +240,7 @@ mod tests {
     fn permanent_ice_keeps_its_biome_in_rock_desert() {
         // The ground pass lays SNOW_BLOCK on LC_SNOW_ICE whatever `dryland` says,
         // so badlands here would leave a glacier under a desert sky.
-        for dryland in [Dryland::None, Dryland::Rock, Dryland::Sand] {
+        for dryland in [Dryland::None, Dryland::Rock] {
             assert_eq!(
                 biome_for_class(LC_SNOW_ICE, Climate::ColdDesert, 40.0, 0, dryland),
                 "minecraft:snowy_plains",
