@@ -35,6 +35,7 @@ use crate::world_editor::{min_y, terrain_floor_y};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
+use rayon::prelude::*;
 
 /// Per-chunk cache of ground Y values.
 ///
@@ -1306,19 +1307,7 @@ pub fn generate_ground_region(
 
                     // A plant left on rock or sand drops on the first block update.
                     // Runs after every surface branch, including the steep override.
-                    if editor
-                        .get_block_absolute(x, ground_y, z)
-                        .is_some_and(|b| !crate::surface::supports_vegetation(b))
-                    {
-                        editor.set_block_absolute(
-                            AIR,
-                            x,
-                            ground_y + 1,
-                            z,
-                            Some(crate::surface::SOIL_PLANTS),
-                            None,
-                        );
-                    }
+                    clear_stranded_plant(editor, x, ground_y, z);
 
                     // Post-processing: remove stray vegetation from road surfaces.
                     // Despite guards in natural/landuse processing, overlapping elements
@@ -1481,39 +1470,76 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
 /// writes into its neighbour's 64-block halo, so a plant can merge in after that
 /// neighbour already cleaned its own columns. This sweeps the merged world.
 pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzbbox: &XZBBox) {
-    let mut cleared = 0u64;
-    for x in xzbbox.min_x()..=xzbbox.max_x() {
-        for z in xzbbox.min_z()..=xzbbox.max_z() {
-            if !ground.is_in_rotated_bounds(x, z) {
-                continue;
-            }
-            // Plant first: almost every column has air there, so most exit after
-            // one lookup instead of two.
-            let ground_y = editor.get_ground_level(x, z);
-            if !editor
-                .get_block_absolute(x, ground_y + 1, z)
-                .is_some_and(|b| crate::surface::SOIL_PLANTS.contains(&b))
-            {
-                continue;
-            }
-            if editor
-                .get_block_absolute(x, ground_y, z)
-                .is_some_and(crate::surface::supports_vegetation)
-            {
-                continue;
-            }
-            editor.set_block_absolute(
-                AIR,
-                x,
-                ground_y + 1,
-                z,
-                Some(crate::surface::SOIL_PLANTS),
-                None,
-            );
-            cleared += 1;
-        }
+    // Scanning is the expensive half: it costs one terrain-height interpolation
+    // per column over the whole bbox, and almost none of them turn out to need a
+    // write. So the scan runs read-only across threads and the handful of writes
+    // are applied serially afterwards, which keeps the pass off the critical path
+    // without changing what it does.
+    // Shared reborrow: the scan only reads, and the writes come after it ends.
+    let reader: &WorldEditor = editor;
+    let stranded: Vec<(i32, i32, i32)> = (xzbbox.min_x()..=xzbbox.max_x())
+        .into_par_iter()
+        .flat_map_iter(|x| {
+            (xzbbox.min_z()..=xzbbox.max_z()).filter_map(move |z| {
+                if !ground.is_in_rotated_bounds(x, z) {
+                    return None;
+                }
+                let ground_y = reader.get_ground_level(x, z);
+                plant_is_stranded(reader, x, ground_y, z).then_some((x, ground_y, z))
+            })
+        })
+        .collect();
+
+    for &(x, ground_y, z) in &stranded {
+        clear_plant_above(editor, x, ground_y, z);
     }
-    if cleared > 0 {
-        println!("Cleared {cleared} plants left on ground that cannot hold them");
+    if !stranded.is_empty() {
+        println!(
+            "Cleared {} plants left on ground that cannot hold them",
+            stranded.len()
+        );
+    }
+}
+
+/// Whether a plant stands here on ground that cannot hold it.
+fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> bool {
+    // Plant first: almost every column has air there, so most exit after one
+    // lookup instead of two.
+    editor
+        .get_block_absolute(x, ground_y + 1, z)
+        .is_some_and(|b| crate::surface::SOIL_PLANTS.contains(&b))
+        && !editor
+            .get_block_absolute(x, ground_y, z)
+            .is_some_and(crate::surface::supports_vegetation)
+}
+
+/// Clear the plant above this column, upper half included.
+///
+/// Two-block plants have to go whole: the upper half sits a block higher, and
+/// taking only the lower half leaves it floating, which is what the road cleanup
+/// further up has always handled by hand.
+fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
+    editor.set_block_absolute(
+        AIR,
+        x,
+        ground_y + 1,
+        z,
+        Some(crate::surface::SOIL_PLANTS),
+        None,
+    );
+    editor.set_block_absolute(
+        AIR,
+        x,
+        ground_y + 2,
+        z,
+        Some(crate::surface::SOIL_PLANT_TOPS),
+        None,
+    );
+}
+
+/// Clear one plant standing on ground that cannot hold it.
+fn clear_stranded_plant(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
+    if plant_is_stranded(editor, x, ground_y, z) {
+        clear_plant_above(editor, x, ground_y, z);
     }
 }

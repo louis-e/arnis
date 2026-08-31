@@ -55,18 +55,21 @@ pub fn biome_for_class(
             "minecraft:cold_ocean"
         };
     }
+    // Permanent ice keeps its own biome in every climate, rock desert included:
+    // the ground pass lays SNOW_BLOCK here whatever `dryland` says, and badlands
+    // would put that glacier under a desert sky with snowfall switched off.
+    // Also fixes a glacier in a cold-desert bbox being written as desert.
+    if lc == LC_SNOW_ICE {
+        return "minecraft:snowy_plains";
+    }
     // Badlands only on bare cover: its foliage tint browns some leaves and not
     // others, and bare cells carry no vegetation for it to disagree with.
     if dryland == Dryland::Rock {
         match lc {
-            LC_BARE | LC_SNOW_ICE => return "minecraft:badlands",
+            LC_BARE => return "minecraft:badlands",
             LC_BUILT_UP | LC_CROPLAND | LC_WETLAND => {}
             _ => return "minecraft:savanna",
         }
-    }
-    // A glacier in a cold-desert bbox was being written as desert.
-    if lc == LC_SNOW_ICE {
-        return "minecraft:snowy_plains";
     }
     match climate {
         Climate::HotDesert | Climate::ColdDesert => "minecraft:desert",
@@ -230,6 +233,24 @@ mod tests {
         assert_eq!(
             biome_for_class(LC_WATER, Climate::Temperate, 55.0, 3, Dryland::None),
             "minecraft:river"
+        );
+    }
+
+    #[test]
+    fn permanent_ice_keeps_its_biome_in_rock_desert() {
+        // The ground pass lays SNOW_BLOCK on LC_SNOW_ICE whatever `dryland` says,
+        // so badlands here would leave a glacier under a desert sky.
+        for dryland in [Dryland::None, Dryland::Rock, Dryland::Sand] {
+            assert_eq!(
+                biome_for_class(LC_SNOW_ICE, Climate::ColdDesert, 40.0, 0, dryland),
+                "minecraft:snowy_plains",
+                "{dryland:?} should not repaint permanent ice"
+            );
+        }
+        // Bare rock in the same region still reads as badlands.
+        assert_eq!(
+            biome_for_class(LC_BARE, Climate::ColdDesert, 40.0, 0, Dryland::Rock),
+            "minecraft:badlands"
         );
     }
 

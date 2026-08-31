@@ -1278,9 +1278,12 @@ pub fn generate_world_with_options(
     }
 
     // After the tile merge: a neighbouring tile's halo writes land after that
-    // tile's own per-column cleanup ran. Writes to already-flushed regions are
-    // dropped by the editor, so this is safe under eviction too.
-    ground_generation::clear_stranded_soil_plants(&mut editor, ground.as_ref(), &xzbbox);
+    // tile's own per-column cleanup ran. Under eviction the regions are already
+    // flushed, so every read and write here is dropped and the walk is pure cost;
+    // the in-tile pass is all that runs there, same as the tunnel carves above.
+    if !eviction_active {
+        ground_generation::clear_stranded_soil_plants(&mut editor, ground.as_ref(), &xzbbox);
+    }
 
     // Run after ground generation so anchor Y reflects the final terrain.
     if let Some(p) = models_3d_pipeline.as_ref() {

@@ -48,11 +48,17 @@ pub const SOIL_PLANTS: &[Block] = &[
     FERN,
     TALL_GRASS_BOTTOM,
     TALL_GRASS_TOP,
+    LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER,
     RED_FLOWER,
     BLUE_FLOWER,
     YELLOW_FLOWER,
     WHITE_FLOWER,
 ];
+
+/// Upper halves of the two-block plants above. Clearing a stranded plant by its
+/// lower half alone leaves one of these floating a block off the ground.
+pub const SOIL_PLANT_TOPS: &[Block] = &[TALL_GRASS_TOP, LARGE_FERN_UPPER];
 
 /// Every block the ground pass may leave as a column's surface. Only the
 /// coverage test reads this; it is the contract each palette has to satisfy.
@@ -198,6 +204,36 @@ mod tests {
         assert!(supports_dead_bush(TERRACOTTA));
         assert!(supports_dead_bush(ORANGE_TERRACOTTA));
         assert!(supports_dead_bush(SAND));
+    }
+
+    #[test]
+    fn every_two_block_plant_has_its_top_listed() {
+        // Clearing a stranded plant reads SOIL_PLANTS at ground+1 and
+        // SOIL_PLANT_TOPS at ground+2. A two-block plant whose upper half is
+        // missing from the second list gets decapitated and left floating.
+        for top in SOIL_PLANT_TOPS {
+            assert!(
+                SOIL_PLANTS.contains(top),
+                "{} is cleared at ground+2 but never recognised at ground+1",
+                top.name()
+            );
+        }
+        for (lower, upper) in [
+            (TALL_GRASS_BOTTOM, TALL_GRASS_TOP),
+            (LARGE_FERN_LOWER, LARGE_FERN_UPPER),
+        ] {
+            assert!(
+                SOIL_PLANTS.contains(&lower),
+                "{} is placed on soil but never cleared",
+                lower.name()
+            );
+            assert!(
+                SOIL_PLANT_TOPS.contains(&upper),
+                "{} would be left floating when {} is cleared",
+                upper.name(),
+                lower.name()
+            );
+        }
     }
 
     #[test]
