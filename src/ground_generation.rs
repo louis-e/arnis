@@ -477,10 +477,15 @@ pub fn generate_ground_region(
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
+                            // Read once per column. The surface cascade, the OSM-soil
+                            // replacement and the vegetation pass all need the cover class,
+                            // and the rock-desert level costs a canopy lookup on top of it.
+                            let cover = ground.cover_class(coord);
+                            let rock_floor = rock_desert_floor_cover(dryland, ground, coord, cover);
+
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
-                                let cover = ground.cover_class(coord);
 
                                 // Steep terrain overrides land cover classification.
                                 //
@@ -557,9 +562,7 @@ pub fn generate_ground_region(
                                     // glacier, so it still blends with its neighbours
                                     // through the land-cover default below.
                                     (SNOW_BLOCK, SNOW_BLOCK)
-                                } else if let Some(fc) =
-                                    rock_desert_floor_cover(dryland, ground, coord, cover)
-                                {
+                                } else if let Some(fc) = rock_floor {
                                     // Rock desert floor, at the vegetation level this
                                     // column's own data implies. Built-up, cropland and
                                     // wetland return None and keep their own surfaces:
@@ -784,12 +787,7 @@ pub fn generate_ground_region(
                                         BLACK_CONCRETE,
                                     ]),
                                 );
-                            } else if rock_desert_floor_cover(
-                                dryland,
-                                ground,
-                                coord,
-                                ground.cover_class(coord),
-                            ) == Some(crate::strata::FloorCover::Bare)
+                            } else if rock_floor == Some(crate::strata::FloorCover::Bare)
                                 || surface_block == SNOW_BLOCK
                             {
                                 // OSM paints natural=scrub, grassland and its catch-all as
@@ -994,7 +992,6 @@ pub fn generate_ground_region(
                                 );
                             }
                             if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
-                                let cover = ground.cover_class(coord);
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
