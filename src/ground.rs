@@ -755,63 +755,54 @@ impl Ground {
         }
     }
 
-    /// True when a land-cover cell one cell away carries `class`. Steps a whole
-    /// cell per axis, and rejects samples the caller must not read back: outside
-    /// the world, or in rotation padding, both of which `cover_class` would clamp
-    /// onto this cell so it answers for itself.
+    /// True when a land-cover cell one cell away carries `class`.
+    ///
+    /// Probes in grid space. Stepping in blocks cannot do this: the world to
+    /// grid map rounds, so a coordinate on a half-cell boundary can land back
+    /// on the cell it started from and answer for itself.
     pub fn has_cover_neighbour(&self, coord: XZPoint, class: u8) -> bool {
-        let (sx, sz) = self.cover_cell_span();
+        let Some(ref lc) = self.land_cover else {
+            return false;
+        };
+        let Some((gx, gz)) = self.cover_cell_index(coord) else {
+            return false;
+        };
         let (world_w, world_h) = self.world_dims();
-        [(-sx, 0), (sx, 0), (0, -sz), (0, sz)]
+        [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
             .iter()
             .any(|(dx, dz)| {
-                let (nx, nz) = (coord.x + dx, coord.z + dz);
-                nx >= 0
-                    && nz >= 0
-                    && (nx as usize) < world_w
-                    && (nz as usize) < world_h
-                    && self.local_in_rotated_bounds(nx, nz)
-                    && self.cover_class(XZPoint::new(nx, nz)) == class
+                let (nx, nz) = (gx as i32 + dx, gz as i32 + dz);
+                if nx < 0 || nz < 0 || nx as usize >= lc.width || nz as usize >= lc.height {
+                    return false;
+                }
+                let (nx, nz) = (nx as usize, nz as usize);
+                // Rotation padding holds clamped copies of the selection edge,
+                // which would be this same measurement read twice.
+                let wx = (nx as f64 / (lc.width - 1).max(1) as f64 * (world_w - 1) as f64).round();
+                let wz = (nz as f64 / (lc.height - 1).max(1) as f64 * (world_h - 1) as f64).round();
+                self.local_in_rotated_bounds(wx as i32, wz as i32) && lc.grid[nz][nx] == class
             })
     }
 
-    /// World blocks spanned by one land-cover cell on each axis, at least 1.
-    /// Kept per axis: a capped rotation can leave the grid coarser in z than in
-    /// x, and one shared step would stay inside this cell on the coarser one.
+    /// Grid cell a world coordinate samples, or `None` without land cover.
     #[inline]
-    fn cover_cell_span(&self) -> (i32, i32) {
-        let Some(ref lc) = self.land_cover else {
-            return (1, 1);
-        };
+    fn cover_cell_index(&self, coord: XZPoint) -> Option<(usize, usize)> {
+        let lc = self.land_cover.as_ref()?;
         let (world_w, world_h) = self.world_dims();
-        // cover_class maps world -> grid by nearest neighbour over (grid - 1)
-        // steps, so the gap between sampled cells is the ceiling, not the floor.
-        let span = |world: usize, grid: usize| {
-            if grid <= 1 {
-                world.max(1)
-            } else {
-                world.saturating_sub(1).div_ceil(grid - 1).max(1)
-            }
-        };
-        (
-            span(world_w, lc.width) as i32,
-            span(world_h, lc.height) as i32,
-        )
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
+        let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
+        Some((x, z))
     }
 
     /// Returns the ESA WorldCover land cover class at the given coordinates.
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
     pub fn cover_class(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-            lc.grid[z][x]
-        } else {
-            0
+        match (self.land_cover.as_ref(), self.cover_cell_index(coord)) {
+            (Some(lc), Some((x, z))) => lc.grid[z][x],
+            _ => 0,
         }
     }
 
@@ -1510,8 +1501,7 @@ mod tests {
             "a lone snow cell must not find itself across the coarse z axis"
         );
 
-        // 8 blocks over 3 cells: floor division gives a step of 2, and world 2
-        // and 4 both round to cell 1, so the probe never leaves the cell.
+        // 8 blocks over 3 cells, where any block-space step rounds back.
         let mut g = ground_with(vec![vec![0.0; 8]; 8]);
         let mut grid = vec![vec![LC_GRASSLAND; 3]; 3];
         grid[1][1] = LC_SNOW_ICE;
@@ -1560,6 +1550,33 @@ mod tests {
             !g.has_cover_neighbour(snow, LC_SNOW_ICE),
             "padding outside the selection must not count as a neighbour"
         );
+    }
+
+    // No world size and grid size may let a lone cell answer for itself.
+    #[test]
+    fn a_lone_cover_cell_never_finds_itself() {
+        use crate::land_cover::{LC_GRASSLAND, LC_SNOW_ICE};
+
+        for world in [8usize, 23, 27, 45, 64] {
+            for grid in [1usize, 2, 3, 11, 12, 14, 32] {
+                let mut g = ground_with(vec![vec![0.0; world]; world]);
+                let (cx, cz) = (grid / 2, grid / 2);
+                let mut grid_v = vec![vec![LC_GRASSLAND; grid]; grid];
+                grid_v[cz][cx] = LC_SNOW_ICE;
+                g.land_cover = Some(lc_of(grid_v, grid, grid));
+                for x in 0..world as i32 {
+                    for z in 0..world as i32 {
+                        let c = XZPoint::new(x, z);
+                        if g.cover_class(c) == LC_SNOW_ICE {
+                            assert!(
+                                !g.has_cover_neighbour(c, LC_SNOW_ICE),
+                                "world {world} grid {grid} at ({x},{z}) found itself"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // An unmeasured cell hands the decision back to the land cover.
