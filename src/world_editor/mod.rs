@@ -22,7 +22,10 @@ pub use common::{
     base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
     world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
 };
-pub(crate) use common::{BlockStorage, RegionToModify, SectionToModify, MAX_BLOCK_ID};
+pub(crate) use common::{
+    reset_section_counters, section_counters, BlockStorage, RegionToModify, SectionToModify,
+    MAX_BLOCK_ID,
+};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -2160,46 +2163,163 @@ const _: () = {
     }
 };
 
-/// Background writer for stream-to-disk eviction. Regions taken off the merge
-/// thread are compacted + serialized + written on a separate thread, overlapping
-/// disk I/O with the next tile batch's compute. A bounded channel applies
-/// backpressure so at most `capacity` evicted regions sit in RAM awaiting write.
+/// Thread count and queue depth for the flush pool. `threads` is throughput,
+/// `capacity` is RAM. One region is evicted per merged tile, so a batch produces a
+/// burst of that size; `capacity + threads >= tile_batch` stops the producer stalling.
+pub(crate) fn flush_pool_params(tile_batch: usize, available_mb: u64) -> (usize, usize) {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    // `capacity + threads + 1` regions are alive at once, so budget the total rather
+    // than each knob. 26 MB/region matches should_stream_to_disk; measured is ~7.
+    const PER_REGION_MB: u64 = 26;
+    let budget = if available_mb > 0 {
+        // A tenth of free RAM, floored so the pool always beats the old single writer.
+        ((available_mb / 10 / PER_REGION_MB) as usize).clamp(5, 15)
+    } else {
+        15
+    };
+
+    let mut threads = cores.div_ceil(4).clamp(2, 6);
+    threads = threads.min(budget.saturating_sub(2).max(1));
+    if let Some(n) = std::env::var("ARNIS_FLUSH_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        threads = n.clamp(1, 32);
+    }
+
+    // Evictions arrive one per merged tile, so a batch lands as a burst of that size.
+    let mut capacity = tile_batch.saturating_sub(threads).clamp(3, 8);
+    capacity = capacity.min(budget.saturating_sub(threads + 1).max(1));
+    if let Some(q) = std::env::var("ARNIS_FLUSH_QUEUE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        capacity = q.clamp(1, 64);
+    }
+    (threads, capacity)
+}
+
+/// Resident block-storage bytes of a region, as queued (before `compact()`).
+fn region_storage_bytes(region: &common::RegionToModify) -> u64 {
+    let mut bytes = 0u64;
+    for chunk in region.chunks.values() {
+        for section in chunk.sections.values() {
+            bytes += match &section.storage {
+                BlockStorage::Uniform(_) => 0,
+                BlockStorage::Full(_) => 4096,
+                BlockStorage::FullWide(_) => 8192,
+            };
+        }
+    }
+    bytes
+}
+
+/// Background writer pool for stream-to-disk eviction. Regions taken off the merge
+/// thread are compacted, serialized and written here, overlapping I/O with the next
+/// batch's compute. At most `capacity + threads + 1` regions are alive at once; the
+/// `+1` is the one the producer holds across `send`.
 pub(crate) struct FlushWorker {
     tx: Option<std::sync::mpsc::SyncSender<(i32, i32, common::RegionToModify)>>,
-    handle: Option<std::thread::JoinHandle<Result<(), String>>>,
+    handles: Vec<std::thread::JoinHandle<Result<(), String>>>,
     // Real write error from the worker, so a failed handoff surfaces the cause
     // (disk full, permissions, ...) instead of a generic "terminated early".
     error: Arc<Mutex<Option<String>>>,
+    // With a shared receiver the channel only closes when the LAST worker exits,
+    // so a dead worker has to be advertised explicitly or errors go unnoticed.
+    failed: Arc<std::sync::atomic::AtomicBool>,
+    stall_ns: std::sync::atomic::AtomicU64,
+    write_ns: Arc<std::sync::atomic::AtomicU64>,
+    regions: Arc<std::sync::atomic::AtomicUsize>,
+    bytes: std::sync::atomic::AtomicU64,
+    bench: bool,
 }
 
 impl FlushWorker {
-    pub(crate) fn spawn(ctx: java::RegionWriteCtx, capacity: usize) -> Self {
+    pub(crate) fn spawn(
+        ctx: java::RegionWriteCtx,
+        capacity: usize,
+        threads: usize,
+        bench: bool,
+    ) -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
+        let threads = threads.max(1);
         let (tx, rx) =
             std::sync::mpsc::sync_channel::<(i32, i32, common::RegionToModify)>(capacity.max(1));
+        let rx = Arc::new(Mutex::new(rx));
+        let ctx = Arc::new(ctx);
         let error = Arc::new(Mutex::new(None));
-        let error_w = Arc::clone(&error);
-        let handle = std::thread::spawn(move || -> Result<(), String> {
-            while let Ok((rxx, rzz, mut region)) = rx.recv() {
-                for chunk in region.chunks.values_mut() {
-                    for section in chunk.sections.values_mut() {
-                        section.compact();
+        let failed = Arc::new(AtomicBool::new(false));
+        let write_ns = Arc::new(AtomicU64::new(0));
+        let regions = Arc::new(AtomicUsize::new(0));
+
+        let handles = (0..threads)
+            .map(|_| {
+                let rx = Arc::clone(&rx);
+                let ctx = Arc::clone(&ctx);
+                let error_w = Arc::clone(&error);
+                let failed_w = Arc::clone(&failed);
+                let write_ns = Arc::clone(&write_ns);
+                let regions = Arc::clone(&regions);
+                std::thread::spawn(move || -> Result<(), String> {
+                    loop {
+                        // Lock spans recv() only, never a write.
+                        let item = {
+                            let guard = rx.lock().unwrap_or_else(|p| p.into_inner());
+                            guard.recv()
+                        };
+                        let Ok((rxx, rzz, mut region)) = item else {
+                            return Ok(());
+                        };
+                        let started = bench.then(std::time::Instant::now);
+                        for chunk in region.chunks.values_mut() {
+                            for section in chunk.sections.values_mut() {
+                                section.compact();
+                            }
+                        }
+                        let result = ctx.write(rxx, rzz, &region);
+                        if let Some(t) = started {
+                            write_ns.fetch_add(
+                                t.elapsed().as_nanos() as u64,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
+                            regions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        if let Err(e) = result {
+                            let msg = e.to_string();
+                            if let Ok(mut slot) = error_w.lock() {
+                                if slot.is_none() {
+                                    *slot = Some(msg.clone());
+                                }
+                            }
+                            failed_w.store(true, std::sync::atomic::Ordering::Release);
+                            return Err(msg);
+                        }
                     }
-                }
-                if let Err(e) = ctx.write(rxx, rzz, &region) {
-                    let msg = e.to_string();
-                    if let Ok(mut slot) = error_w.lock() {
-                        *slot = Some(msg.clone());
-                    }
-                    return Err(msg);
-                }
-            }
-            Ok(())
-        });
+                })
+            })
+            .collect();
+
         Self {
             tx: Some(tx),
-            handle: Some(handle),
+            handles,
             error,
+            failed,
+            stall_ns: AtomicU64::new(0),
+            write_ns,
+            regions,
+            bytes: AtomicU64::new(0),
+            bench,
         }
+    }
+
+    fn error_msg(&self) -> String {
+        self.error
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .unwrap_or_else(|| "flush worker terminated early".to_string())
     }
 
     /// Enqueue a region; blocks when the channel is full (backpressure). On
@@ -2211,29 +2331,77 @@ impl FlushWorker {
         rz: i32,
         region: common::RegionToModify,
     ) -> Result<(), (common::RegionToModify, String)> {
+        use std::sync::atomic::Ordering;
         let Some(tx) = self.tx.as_ref() else {
             return Err((region, "flush worker already finished".to_string()));
         };
-        match tx.send((rx, rz, region)) {
+        if self.failed.load(Ordering::Acquire) {
+            return Err((region, self.error_msg()));
+        }
+        if self.bench {
+            self.bytes
+                .fetch_add(region_storage_bytes(&region), Ordering::Relaxed);
+        }
+        let started = self.bench.then(std::time::Instant::now);
+        let sent = tx.send((rx, rz, region));
+        if let Some(t) = started {
+            self.stall_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        match sent {
             Ok(()) => Ok(()),
-            Err(std::sync::mpsc::SendError((_, _, region))) => {
-                let err = self
-                    .error
-                    .lock()
-                    .ok()
-                    .and_then(|slot| slot.clone())
-                    .unwrap_or_else(|| "flush worker terminated early".to_string());
-                Err((region, err))
-            }
+            Err(std::sync::mpsc::SendError((_, _, region))) => Err((region, self.error_msg())),
         }
     }
 
     /// Close the queue and wait for all pending writes; propagates the first error.
     pub(crate) fn finish(mut self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
         drop(self.tx.take());
-        match self.handle.take() {
-            Some(h) => h.join().map_err(|_| "flush worker panicked".to_string())?,
+        let mut first: Option<String> = None;
+        for handle in self.handles.drain(..) {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    first.get_or_insert(e);
+                }
+                Err(_) => {
+                    first.get_or_insert_with(|| "flush worker panicked".to_string());
+                }
+            }
+        }
+        if self.bench {
+            eprintln!(
+                "[BENCHMARK] flush_stall_ms={}",
+                self.stall_ns.load(Ordering::Relaxed) / 1_000_000
+            );
+            eprintln!(
+                "[BENCHMARK] flush_write_ms={}",
+                self.write_ns.load(Ordering::Relaxed) / 1_000_000
+            );
+            eprintln!(
+                "[BENCHMARK] flush_regions={}",
+                self.regions.load(Ordering::Relaxed)
+            );
+            eprintln!(
+                "[BENCHMARK] flush_bytes_mb={}",
+                self.bytes.load(Ordering::Relaxed) / (1024 * 1024)
+            );
+        }
+        match first {
+            Some(e) => Err(e),
             None => Ok(()),
+        }
+    }
+}
+
+impl Drop for FlushWorker {
+    /// The error paths drop the worker instead of calling `finish`, and the GUI
+    /// deletes the world directory right after; detached writers would race it.
+    fn drop(&mut self) {
+        drop(self.tx.take());
+        for handle in self.handles.drain(..) {
+            let _ = handle.join();
         }
     }
 }
@@ -2252,6 +2420,99 @@ mod eviction_guard_tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
+
+    fn flush_test_ctx(dir: &std::path::Path) -> java::RegionWriteCtx {
+        java::RegionWriteCtx::new(
+            dir.to_path_buf(),
+            LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
+            None,
+            false,
+            None,
+        )
+    }
+
+    /// One region with a single non-AIR block, so the writer has real work to do.
+    fn flush_test_region() -> common::RegionToModify {
+        let mut region = common::RegionToModify::default();
+        let chunk = region.chunks.entry((0, 0)).or_default();
+        let section = chunk.sections.entry(0).or_default();
+        section.storage.set(0, SMOOTH_STONE);
+        region
+    }
+
+    #[test]
+    fn flush_pool_writes_every_region_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 4, 4, false);
+        for i in 0..32 {
+            assert!(worker.send(i, 0, flush_test_region()).is_ok());
+        }
+        worker.finish().unwrap();
+
+        for i in 0..32 {
+            let path = dir.path().join("region").join(format!("r.{i}.0.mca"));
+            let len = std::fs::metadata(&path)
+                .unwrap_or_else(|e| panic!("{path:?}: {e}"))
+                .len();
+            assert!(len > 0, "{path:?} is empty");
+        }
+    }
+
+    #[test]
+    fn flush_pool_reports_the_real_first_error() {
+        // A file where the region directory should go, so create_dir_all fails.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("region"), b"not a directory").unwrap();
+        let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 2, 3, false);
+        // Some sends may fail once a worker has died; the surfaced error must be the cause.
+        for i in 0..16 {
+            if let Err((_, msg)) = worker.send(i, 0, flush_test_region()) {
+                assert!(
+                    !msg.contains("terminated early"),
+                    "expected the real I/O cause, got {msg:?}"
+                );
+            }
+        }
+        let err = worker.finish().unwrap_err();
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn flush_pool_fails_fast_after_a_worker_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("region"), b"not a directory").unwrap();
+        let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 1, 2, false);
+        // Keep sending until the failure is observed; with a shared receiver this only
+        // works because `failed` is published explicitly.
+        let mut refused = false;
+        for i in 0..64 {
+            if worker.send(i, 0, flush_test_region()).is_err() {
+                refused = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(
+            refused,
+            "send kept accepting regions after every worker died"
+        );
+        let _ = worker.finish();
+    }
+
+    #[test]
+    fn dropping_a_flush_worker_joins_its_threads() {
+        // The error paths drop instead of calling finish, and the GUI deletes the world
+        // directory straight after; a detached writer would race that removal.
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 4, 3, false);
+            for i in 0..12 {
+                assert!(worker.send(i, 0, flush_test_region()).is_ok());
+            }
+        }
+        // Drop returned, so every write has landed and the directory is safe to remove.
+        std::fs::remove_dir_all(dir.path().join("region")).unwrap();
+    }
 
     // Writing an entity or chest to an already-evicted region must NOT resurrect it,
     // or the truncating final save wipes the region's real ground (the empty-spawn-chunk bug).

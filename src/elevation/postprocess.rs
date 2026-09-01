@@ -1442,6 +1442,115 @@ fn gaussian_blur_grid_reported(
     out
 }
 
+/// Blur a binary `grid == target` mask straight to f32. Same kernel and f64
+/// arithmetic as `gaussian_blur_grid` on the equivalent mask, so it is bit-identical;
+/// it just skips the full-grid f64 copies that were the process memory peak.
+/// `width`/`height` clamp per row exactly as the caller's `.take()` did, which the
+/// edge renormalisation depends on.
+pub(crate) fn gaussian_blur_mask_to_f32(
+    grid: &[Vec<u8>],
+    target: u8,
+    width: usize,
+    height: usize,
+    sigma: f64,
+) -> Vec<Vec<f32>> {
+    let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
+    let kernel = create_gaussian_kernel(kernel_size, sigma);
+    let half = kernel_size as i32 / 2;
+
+    let h = grid.len().min(height);
+    if h == 0 {
+        return Vec::new();
+    }
+    let w = grid[0].len().min(width);
+    if w == 0 {
+        return vec![Vec::new(); h];
+    }
+
+    const CHUNKS: usize = 10;
+
+    // Horizontal pass: rows are independent, mask read on the fly.
+    let row_chunk = h.div_ceil(CHUNKS);
+    let mut after_h: Vec<Vec<f64>> = Vec::with_capacity(h);
+    for rows in grid[..h].chunks(row_chunk) {
+        let mut part: Vec<Vec<f64>> = rows
+            .par_iter()
+            .map(|row| {
+                let len = row.len().min(width);
+                let row_len = len as i32;
+                (0..len)
+                    .map(|i| {
+                        let mut sum = 0.0;
+                        let mut wsum = 0.0;
+                        for (j, &k) in kernel.iter().enumerate() {
+                            let idx = i as i32 + j as i32 - half;
+                            if idx >= 0 && idx < row_len {
+                                let v = if row[idx as usize] == target {
+                                    1.0
+                                } else {
+                                    0.0
+                                };
+                                sum += v * k;
+                                wsum += k;
+                            }
+                        }
+                        if wsum > 0.0 {
+                            sum / wsum
+                        } else {
+                            f64::NAN
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        after_h.append(&mut part);
+    }
+
+    // Vertical pass: f64 throughout, cast only on store.
+    let col_chunk = w.div_ceil(CHUNKS);
+    let mut out: Vec<Vec<f32>> = vec![vec![0.0; w]; h];
+    let mut x0 = 0usize;
+    while x0 < w {
+        let x1 = (x0 + col_chunk).min(w);
+        let blurred: Vec<(usize, Vec<f32>)> = (x0..x1)
+            .into_par_iter()
+            .map(|x| {
+                let column: Vec<f64> = after_h.iter().map(|row| row[x]).collect();
+                let col_len = column.len() as i32;
+                let col: Vec<f32> = (0..column.len())
+                    .map(|y| {
+                        let mut sum = 0.0;
+                        let mut wsum = 0.0;
+                        for (j, &k) in kernel.iter().enumerate() {
+                            let idx = y as i32 + j as i32 - half;
+                            if idx >= 0 && idx < col_len {
+                                let v = column[idx as usize];
+                                if v.is_finite() {
+                                    sum += v * k;
+                                    wsum += k;
+                                }
+                            }
+                        }
+                        if wsum > 0.0 {
+                            (sum / wsum) as f32
+                        } else {
+                            f64::NAN as f32
+                        }
+                    })
+                    .collect();
+                (x, col)
+            })
+            .collect();
+        for (x, col) in blurred {
+            for (y, v) in col.into_iter().enumerate() {
+                out[y][x] = v;
+            }
+        }
+        x0 = x1;
+    }
+    out
+}
+
 fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
     let mut kernel = vec![0.0; size];
     // Centre tap, so the kernel is symmetric and the blur does not shift by half a cell.
@@ -1722,6 +1831,72 @@ pub fn scale_to_minecraft(
         0.0
     };
     (mc_heights, min_height, blocks_per_meter, ground_level)
+}
+
+#[cfg(test)]
+mod mask_blur_tests {
+    use super::*;
+
+    fn reference(
+        grid: &[Vec<u8>],
+        target: u8,
+        width: usize,
+        height: usize,
+        sigma: f64,
+    ) -> Vec<Vec<f32>> {
+        let binary: Vec<Vec<f64>> = grid
+            .iter()
+            .take(height)
+            .map(|row| {
+                row.iter()
+                    .take(width)
+                    .map(|&c| if c == target { 1.0 } else { 0.0 })
+                    .collect()
+            })
+            .collect();
+        gaussian_blur_grid(&binary, sigma)
+            .into_iter()
+            .map(|row| row.into_iter().map(|v| v as f32).collect())
+            .collect()
+    }
+
+    fn check(grid: &[Vec<u8>], width: usize, height: usize, sigma: f64) {
+        let got = gaussian_blur_mask_to_f32(grid, 1, width, height, sigma);
+        let want = reference(grid, 1, width, height, sigma);
+        assert_eq!(got.len(), want.len());
+        for (y, (a, b)) in got.iter().zip(want.iter()).enumerate() {
+            assert_eq!(a.len(), b.len(), "row {y} length");
+            for (x, (p, q)) in a.iter().zip(b.iter()).enumerate() {
+                assert_eq!(p.to_bits(), q.to_bits(), "cell ({x},{y})");
+            }
+        }
+    }
+
+    fn grid(w: usize, h: usize, seed: u64) -> Vec<Vec<u8>> {
+        let mut s = seed;
+        (0..h)
+            .map(|_| {
+                (0..w)
+                    .map(|_| {
+                        s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        ((s >> 60) % 2) as u8
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mask_blur_is_bit_identical_to_building_the_f64_mask() {
+        check(&grid(37, 29, 1), 37, 29, 3.0);
+        check(&grid(64, 8, 7), 64, 8, 1.5);
+    }
+
+    #[test]
+    fn mask_blur_clamps_oversized_grids_like_the_take_did() {
+        // Both dimensions larger than the requested extent.
+        check(&grid(50, 40, 3), 37, 29, 3.0);
+    }
 }
 
 #[cfg(test)]

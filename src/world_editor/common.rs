@@ -173,6 +173,30 @@ pub(crate) struct PaletteItem {
     pub properties: Option<Value>,
 }
 
+/// Section build counts for `--benchmark`. Gated, because `to_section` runs millions
+/// of times across every save thread and an unconditional `fetch_add` would contend.
+static BUILT_SECTIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SLOW_PATH_SECTIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SECTION_COUNTERS_ON: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Enable and zero the counters, so a second run in one process starts clean.
+pub(crate) fn reset_section_counters(on: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    BUILT_SECTIONS.store(0, Relaxed);
+    SLOW_PATH_SECTIONS.store(0, Relaxed);
+    SECTION_COUNTERS_ON.store(on, Relaxed);
+}
+
+/// Sections built and sections that took the property slow path.
+pub(crate) fn section_counters() -> (u64, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (
+        BUILT_SECTIONS.load(Relaxed),
+        SLOW_PATH_SECTIONS.load(Relaxed),
+    )
+}
+
 /// Block storage strategy for a 16×16×16 section.
 ///
 /// **Memory optimisation**: instead of always allocating a 4 096-byte array,
@@ -195,6 +219,7 @@ pub(crate) struct PaletteItem {
 ///
 /// Both are heap-allocated via `Vec`, so the inline size inside the parent
 /// `FnvHashMap` entry is only 24 bytes.
+#[derive(Clone)]
 pub(crate) enum BlockStorage {
     /// Every position is the same block (commonly AIR).
     Uniform(Block),
@@ -392,6 +417,10 @@ impl SectionToModify {
 
     /// Convert to Java Edition section format
     pub fn to_section(&self, y: i8) -> Section {
+        let count = SECTION_COUNTERS_ON.load(std::sync::atomic::Ordering::Relaxed);
+        if count {
+            BUILT_SECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         // Fast path: Uniform section → single palette entry, no data array needed.
         // Only valid when no per-index properties exist, otherwise we must
         // fall through to the general path so every index is checked.
@@ -477,29 +506,67 @@ impl SectionToModify {
             };
         }
 
-        // Slow path: mixed blocks with per-index properties.
-        // Single pass: build palette and per-block index array simultaneously.
+        if count {
+            SLOW_PATH_SECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // Slow path: mixed blocks with per-index properties. Few cells carry any, so
+        // resolve them up front into small ids (0 = none). That keys the per-cell lookup
+        // on (Block, u16) and renders each compound's Debug string once, not 4096 times.
+        let mut cell_props = [0u16; 4096];
+        if !self.properties.is_empty() {
+            // Borrowed for the whole call, so no Arc can be freed and its address reused.
+            let mut props_by_ptr: FnvHashMap<usize, u16> = FnvHashMap::default();
+            let mut props_by_repr: FnvHashMap<String, u16> = FnvHashMap::default();
+            let mut next_id: u16 = 1;
+            for (&i, p) in &self.properties {
+                if i >= 4096 {
+                    continue;
+                }
+                let id = match props_by_ptr.entry(Arc::as_ptr(p) as usize) {
+                    std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        // Distinct Arcs with equal Debug output must still collapse.
+                        let id = *props_by_repr.entry(format!("{p:?}")).or_insert_with(|| {
+                            let id = next_id;
+                            next_id += 1;
+                            id
+                        });
+                        e.insert(id);
+                        id
+                    }
+                };
+                cell_props[i] = id;
+            }
+        }
+
         let mut unique_blocks: Vec<(Block, Option<Arc<Value>>)> = Vec::new();
-        let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
-        let mut indices = Vec::with_capacity(4096);
+        let mut plain_palette = [u16::MAX; MAX_BLOCK_ID];
+        let mut props_palette: FnvHashMap<(Block, u16), u16> = FnvHashMap::default();
+        let mut indices = [0u16; 4096];
 
         for (i, block) in self.storage.iter().enumerate() {
-            let properties = self.properties.get(&i);
-
-            // Create a key for the lookup (block + properties debug string)
-            let props_key = properties.map(|p| format!("{p:?}"));
-            let lookup_key = (block, props_key);
-
-            let palette_index = match palette_lookup.entry(lookup_key) {
-                std::collections::hash_map::Entry::Occupied(e) => *e.get(),
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    let idx = unique_blocks.len();
-                    e.insert(idx);
-                    unique_blocks.push((block, properties.cloned()));
-                    idx
+            let props_id = cell_props[i];
+            let id = block.id() as usize;
+            // An id past the array falls through to the map rather than panicking.
+            let palette_index = if props_id == 0 && id < MAX_BLOCK_ID {
+                if plain_palette[id] == u16::MAX {
+                    plain_palette[id] = unique_blocks.len() as u16;
+                    unique_blocks.push((block, None));
+                }
+                plain_palette[id]
+            } else {
+                match props_palette.entry((block, props_id)) {
+                    std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        let idx = unique_blocks.len() as u16;
+                        e.insert(idx);
+                        unique_blocks.push((block, self.properties.get(&i).cloned()));
+                        idx
+                    }
                 }
             };
-            indices.push(palette_index);
+            indices[i] = palette_index;
         }
 
         let mut bits_per_block = 4; // minimum allowed
@@ -1184,6 +1251,21 @@ impl WorldToModify {
         self_section: &mut SectionToModify,
         other_section: &SectionToModify,
     ) {
+        // Wholesale moves need both sides property-free: a clone would drop the
+        // source's properties, and the per-index loop is what clears stale ones.
+        let no_props = other_section.properties.is_empty() && self_section.properties.is_empty();
+        let dest_all_air = matches!(&self_section.storage, BlockStorage::Uniform(b) if *b == AIR);
+        if no_props && dest_all_air {
+            match &other_section.storage {
+                BlockStorage::Uniform(block) if *block == AIR => {}
+                _ => {
+                    debug_assert!(self_section.properties.is_empty());
+                    self_section.storage = other_section.storage.clone();
+                }
+            }
+            return;
+        }
+
         match &other_section.storage {
             BlockStorage::Uniform(block) if *block == AIR => {}
             BlockStorage::Uniform(block) => {
@@ -1226,6 +1308,28 @@ impl WorldToModify {
         self_section: &mut SectionToModify,
         other_section: &SectionToModify,
     ) {
+        // A uniform non-AIR source overwrites every index, so it needs no empty destination.
+        // A mixed source preserves halo data at its AIR indices, so it does.
+        let no_props = other_section.properties.is_empty() && self_section.properties.is_empty();
+        if no_props {
+            let dest_all_air =
+                matches!(&self_section.storage, BlockStorage::Uniform(b) if *b == AIR);
+            match &other_section.storage {
+                BlockStorage::Uniform(block) if *block == AIR => return,
+                BlockStorage::Uniform(block) => {
+                    debug_assert!(self_section.properties.is_empty());
+                    self_section.storage = BlockStorage::Uniform(*block);
+                    return;
+                }
+                _ if dest_all_air => {
+                    debug_assert!(self_section.properties.is_empty());
+                    self_section.storage = other_section.storage.clone();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match &other_section.storage {
             BlockStorage::Uniform(block) if *block == AIR => {
                 // Auth tile is entirely AIR in this section; keep all halo data.
@@ -1335,6 +1439,280 @@ impl WorldToModify {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod merge_reference {
+    //! Verbatim pre-fast-path mergers, so the optimized ones can be diffed against them.
+    use super::*;
+
+    pub fn write_if_air(self_section: &mut SectionToModify, other_section: &SectionToModify) {
+        match &other_section.storage {
+            BlockStorage::Uniform(block) if *block == AIR => {}
+            BlockStorage::Uniform(block) => {
+                let block = *block;
+                for idx in 0..4096usize {
+                    if self_section.storage.get(idx) == AIR {
+                        self_section.storage.set(idx, block);
+                        if let Some(props) = other_section.properties.get(&idx) {
+                            self_section.properties.insert(idx, props.clone());
+                        } else {
+                            self_section.properties.remove(&idx);
+                        }
+                    }
+                }
+            }
+            _ => {
+                for (idx, block) in other_section.storage.iter().enumerate() {
+                    if block == AIR {
+                        continue;
+                    }
+                    if self_section.storage.get(idx) == AIR {
+                        self_section.storage.set(idx, block);
+                        if let Some(props) = other_section.properties.get(&idx) {
+                            self_section.properties.insert(idx, props.clone());
+                        } else {
+                            self_section.properties.remove(&idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn auth_overwrite_nonair(
+        self_section: &mut SectionToModify,
+        other_section: &SectionToModify,
+    ) {
+        match &other_section.storage {
+            BlockStorage::Uniform(block) if *block == AIR => {}
+            BlockStorage::Uniform(block) => {
+                let block = *block;
+                for idx in 0..4096usize {
+                    self_section.storage.set(idx, block);
+                    if let Some(props) = other_section.properties.get(&idx) {
+                        self_section.properties.insert(idx, props.clone());
+                    } else {
+                        self_section.properties.remove(&idx);
+                    }
+                }
+            }
+            _ => {
+                for (idx, block) in other_section.storage.iter().enumerate() {
+                    if block == AIR {
+                        continue;
+                    }
+                    self_section.storage.set(idx, block);
+                    if let Some(props) = other_section.properties.get(&idx) {
+                        self_section.properties.insert(idx, props.clone());
+                    } else {
+                        self_section.properties.remove(&idx);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod to_section_tests {
+    use super::*;
+
+    type ReferencePalette = (Vec<(Block, Option<Arc<Value>>)>, Vec<usize>);
+
+    /// The pre-optimization slow path, kept so the palette can be diffed against it.
+    fn reference_palette(section: &SectionToModify) -> ReferencePalette {
+        let mut unique_blocks: Vec<(Block, Option<Arc<Value>>)> = Vec::new();
+        let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
+        let mut indices = Vec::with_capacity(4096);
+        for (i, block) in section.storage.iter().enumerate() {
+            let properties = section.properties.get(&i);
+            let props_key = properties.map(|p| format!("{p:?}"));
+            let palette_index = match palette_lookup.entry((block, props_key)) {
+                std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let idx = unique_blocks.len();
+                    e.insert(idx);
+                    unique_blocks.push((block, properties.cloned()));
+                    idx
+                }
+            };
+            indices.push(palette_index);
+        }
+        (unique_blocks, indices)
+    }
+
+    /// Mixes shared Arcs, distinct-but-equal Arcs, and property-free cells.
+    fn section_with_props(seed: u64) -> SectionToModify {
+        let mut s = SectionToModify::default();
+        let mut rng = seed;
+        let mut next = || {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (rng >> 33) as usize
+        };
+        for _ in 0..400 {
+            s.storage.set(next() % 4096, STONE);
+        }
+        for _ in 0..60 {
+            s.storage.set(next() % 4096, SMOOTH_STONE);
+        }
+        // One Arc reused across cells, plus separate Arcs with identical contents.
+        let shared = Arc::new(Value::String("half=top".to_string()));
+        for _ in 0..12 {
+            s.properties.insert(next() % 4096, Arc::clone(&shared));
+        }
+        for _ in 0..12 {
+            s.properties.insert(
+                next() % 4096,
+                Arc::new(Value::String("half=top".to_string())),
+            );
+        }
+        for k in 0..8 {
+            s.properties.insert(
+                next() % 4096,
+                Arc::new(Value::String(format!("facing={k}"))),
+            );
+        }
+        s
+    }
+
+    #[test]
+    fn slow_path_palette_matches_the_pre_optimization_reference() {
+        for seed in 0..40u64 {
+            let s = section_with_props(seed);
+            let (want_blocks, want_indices) = reference_palette(&s);
+            let got = s.to_section(0);
+
+            assert_eq!(
+                got.block_states.palette.len(),
+                want_blocks.len(),
+                "palette length, seed {seed}"
+            );
+            for (i, (block, stored)) in want_blocks.iter().enumerate() {
+                let item = &got.block_states.palette[i];
+                assert_eq!(
+                    item.name,
+                    format!("{}:{}", block.namespace(), block.name()),
+                    "palette[{i}] name, seed {seed}"
+                );
+                let want_props = stored
+                    .as_ref()
+                    .map(|p| (**p).clone())
+                    .or_else(|| block.properties());
+                assert_eq!(
+                    item.properties, want_props,
+                    "palette[{i}] props, seed {seed}"
+                );
+            }
+
+            // Same logical index per cell, decoded from the packed long array.
+            let mut bits = 4;
+            while (1 << bits) < want_blocks.len() {
+                bits += 1;
+            }
+            let data = got.block_states.data.as_ref().expect("packed data");
+            let longs: &[i64] = data;
+            let per_long = 64 / bits;
+            for (i, want) in want_indices.iter().enumerate() {
+                let long = longs[i / per_long];
+                let shift = (i % per_long) * bits;
+                let got_idx = ((long >> shift) & ((1i64 << bits) - 1)) as usize;
+                assert_eq!(got_idx, *want, "cell {i}, seed {seed}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod merge_fast_path_tests {
+    use super::*;
+
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
+            self.0 >> 33
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// Random section: varies storage variant, AIR density and property presence.
+    fn section(rng: &mut Lcg, shape: u64, with_props: bool) -> SectionToModify {
+        let mut s = SectionToModify::default();
+        match shape {
+            0 => {}
+            1 => s.storage = BlockStorage::Uniform(STONE),
+            2 => {
+                // Wide id forces FullWide.
+                s.storage
+                    .set(rng.below(4096) as usize, Block::from_raw_id(BYTE_ID_LIMIT));
+                for _ in 0..64 {
+                    s.storage.set(rng.below(4096) as usize, STONE);
+                }
+            }
+            _ => {
+                for _ in 0..(1 + rng.below(600)) {
+                    s.storage.set(rng.below(4096) as usize, STONE);
+                }
+            }
+        }
+        if with_props {
+            for _ in 0..(1 + rng.below(6)) {
+                let idx = rng.below(4096) as usize;
+                s.properties
+                    .insert(idx, Arc::new(Value::String(format!("p{}", idx % 3))));
+            }
+        }
+        s
+    }
+
+    fn dup(s: &SectionToModify) -> SectionToModify {
+        SectionToModify {
+            storage: s.storage.clone(),
+            properties: s.properties.clone(),
+        }
+    }
+
+    fn same(a: &SectionToModify, b: &SectionToModify) -> bool {
+        if (0..4096).any(|i| a.storage.get(i) != b.storage.get(i)) {
+            return false;
+        }
+        if a.properties.len() != b.properties.len() {
+            return false;
+        }
+        a.properties
+            .iter()
+            .all(|(k, v)| b.properties.get(k).is_some_and(|w| **v == **w))
+    }
+
+    #[test]
+    fn section_mergers_match_the_pre_fast_path_reference() {
+        let mut rng = Lcg(0x5eed);
+        for case in 0..4000u64 {
+            let dst_props = case % 3 == 0;
+            let src_props = case % 5 == 0;
+            let (dst_shape, src_shape) = (rng.below(4), rng.below(4));
+            let dst = section(&mut rng, dst_shape, dst_props);
+            let src = section(&mut rng, src_shape, src_props);
+
+            let (mut a, mut b) = (dup(&dst), dup(&dst));
+            WorldToModify::merge_section_write_if_air(&mut a, &src);
+            merge_reference::write_if_air(&mut b, &src);
+            assert!(same(&a, &b), "write_if_air diverged on case {case}");
+
+            let (mut a, mut b) = (dup(&dst), dup(&dst));
+            WorldToModify::merge_section_auth_overwrite_nonair(&mut a, &src);
+            merge_reference::auth_overwrite_nonair(&mut b, &src);
+            assert!(
+                same(&a, &b),
+                "auth_overwrite_nonair diverged on case {case}"
+            );
         }
     }
 }
