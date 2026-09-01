@@ -543,6 +543,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         363 => "mcl_banners:hanging_banner", // WHITE_WALL_BANNER
         364 | 365 => return conv_door(props, block.id(), "spruce"),
         366 => return conv_door(props, block.id(), "oak"),
+        367 => "mcl_end:end_stone", // END_STONE
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

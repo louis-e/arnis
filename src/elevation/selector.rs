@@ -1,7 +1,9 @@
+use crate::celestial::CelestialBody;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
 use crate::elevation::providers::mapterhorn::Mapterhorn;
+use crate::elevation::providers::planetary::PlanetaryDem;
 use crate::elevation::providers::usgs_3dep::Usgs3dep;
 
 /// How the caller wants the elevation source chosen.
@@ -13,6 +15,16 @@ pub enum SourceMode {
     GlobalOnly,
     /// Legacy AWS tiles only (--aws-only-elevation / "Legacy terrain" toggle).
     AwsOnly,
+    /// NASA PDS raster for a non-Earth body. No fallback: an Earth provider would
+    /// return sea-level noise for these coordinates.
+    Planetary(CelestialBody),
+}
+
+impl SourceMode {
+    /// Whether the Earth fallback chain may be appended after the selection.
+    pub fn allows_earth_fallback(self) -> bool {
+        !matches!(self, SourceMode::Planetary(_))
+    }
 }
 
 /// Check if two EPSG:4326 bounding boxes overlap.
@@ -35,6 +47,7 @@ pub fn select_provider(bbox: &LLBBox, mode: SourceMode) -> Box<dyn ElevationProv
             println!("Using Mapterhorn terrain tiles (global)");
             return Box::new(Mapterhorn);
         }
+        SourceMode::Planetary(body) => return Box::new(PlanetaryDem { body }),
         SourceMode::Auto => {}
     }
 

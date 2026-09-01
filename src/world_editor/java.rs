@@ -4,7 +4,7 @@
 
 use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
-use crate::block_definitions::GRASS_BLOCK;
+use crate::block_definitions::Block;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
@@ -25,25 +25,29 @@ pub(crate) const DATA_VERSION: i32 = 3955;
 /// Cached base chunk sections (a grass plane at the terrain base).
 /// Keyed by that base: it sinks when the relief needs the extended floor, and a GUI process
 /// can generate several worlds in a row, so a plain OnceLock would go stale.
-static BASE_CHUNK_SECTIONS: Mutex<Option<(i32, Arc<Vec<Section>>)>> = Mutex::new(None);
+/// Cached filler-chunk sections, keyed by the base Y and block they came from.
+type BaseChunkCache = Option<(i32, Block, Arc<Vec<Section>>)>;
+
+static BASE_CHUNK_SECTIONS: Mutex<BaseChunkCache> = Mutex::new(None);
 
 /// Get or create the cached base chunk sections for the current terrain base.
 fn get_base_chunk_sections() -> Arc<Vec<Section>> {
     let base_y = crate::world_editor::base_chunk_y();
+    let block = crate::world_editor::base_chunk_block();
     let mut cache = BASE_CHUNK_SECTIONS.lock().unwrap();
-    if let Some((cached_y, ref sections)) = *cache {
-        if cached_y == base_y {
+    if let Some((cached_y, cached_block, ref sections)) = *cache {
+        if cached_y == base_y && cached_block == block {
             return Arc::clone(sections);
         }
     }
     let mut chunk = ChunkToModify::default();
     for x in 0..16 {
         for z in 0..16 {
-            chunk.set_block(x, base_y, z, GRASS_BLOCK);
+            chunk.set_block(x, base_y, z, block);
         }
     }
     let sections = Arc::new(chunk.sections().collect::<Vec<Section>>());
-    *cache = Some((base_y, Arc::clone(&sections)));
+    *cache = Some((base_y, block, Arc::clone(&sections)));
     sections
 }
 

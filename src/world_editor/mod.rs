@@ -19,8 +19,9 @@ pub(crate) use common::WorldToModify;
 #[cfg(test)]
 pub(crate) use common::FLOOR_TEST_LOCK;
 pub use common::{
-    base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
-    world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
+    base_chunk_block, base_chunk_y, min_y, set_base_chunk_block, set_base_chunk_y,
+    set_terrain_floor_y, set_world_bounds, terrain_floor_y, world_section_range, DEFAULT_MAX_Y,
+    DEFAULT_MIN_Y,
 };
 pub(crate) use common::{
     reset_section_counters, section_counters, BlockStorage, RegionToModify, SectionToModify,

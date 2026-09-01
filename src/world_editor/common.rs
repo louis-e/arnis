@@ -5,7 +5,7 @@
 
 use crate::block_definitions::*;
 
-use std::sync::atomic::{AtomicI32, Ordering as MemOrdering};
+use std::sync::atomic::{AtomicI32, AtomicU16, Ordering as MemOrdering};
 
 /// Default (vanilla 1.18+) world floor.
 pub const DEFAULT_MIN_Y: i32 = -64;
@@ -108,7 +108,7 @@ pub fn terrain_floor_y() -> i32 {
 
 static BASE_CHUNK_Y: AtomicI32 = AtomicI32::new(DEFAULT_GROUND_LEVEL);
 
-/// Y of the grass plane used for out-of-bbox filler chunks. Follows the terrain base, which
+/// Y of the plane used for out-of-bbox filler chunks. Follows the terrain base, which
 /// sinks when the relief needs the extended floor; otherwise the filler would be a plane
 /// floating up to ~2000 blocks above the terrain it is supposed to border.
 pub fn set_base_chunk_y(y: i32) {
@@ -118,6 +118,18 @@ pub fn set_base_chunk_y(y: i32) {
 #[inline]
 pub fn base_chunk_y() -> i32 {
     BASE_CHUNK_Y.load(MemOrdering::Relaxed)
+}
+
+static BASE_CHUNK_BLOCK: AtomicU16 = AtomicU16::new(crate::block_definitions::GRASS_BLOCK.id());
+
+/// Surface block for those filler chunks; grass would ring a lunar world in green.
+pub fn set_base_chunk_block(block: crate::block_definitions::Block) {
+    BASE_CHUNK_BLOCK.store(block.id(), MemOrdering::Relaxed);
+}
+
+#[inline]
+pub fn base_chunk_block() -> crate::block_definitions::Block {
+    crate::block_definitions::Block::from_raw_id(BASE_CHUNK_BLOCK.load(MemOrdering::Relaxed))
 }
 /// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
 /// Vanilla limit is 319, but data packs can extend this up to 2031.
