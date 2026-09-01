@@ -262,6 +262,9 @@ fn process_element(
                 if signage {
                     signage::generate_building_signage(editor, way, anchor);
                 }
+            } else if crate::structures::jetbridge::claims(way) {
+                // Ahead of the highway branch, or the corridor tag paints asphalt on the apron.
+                crate::structures::jetbridge::generate_jet_bridge(editor, way, building_footprints);
             } else if way.tags.contains_key("highway") {
                 highways::generate_highways(
                     editor,
@@ -709,6 +712,9 @@ pub fn generate_world_with_options(
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
 
+    // Runway segments merge across ways, so planes prescan here and stamp after the merge.
+    let planes = crate::structures::plane::prescan(&elements, args);
+
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
     let models_3d_pipeline = args.use_3d.then(|| {
@@ -794,6 +800,7 @@ pub fn generate_world_with_options(
                 .map(|p| p.deferred_region_keys(args.scale))
                 .unwrap_or_default();
             regions.extend(landmarks.deferred_region_keys(args.scale));
+            regions.extend(planes.deferred_region_keys());
             regions
         } else {
             HashSet::new()
@@ -1298,6 +1305,7 @@ pub fn generate_world_with_options(
     if let Some(p) = models_3d_pipeline.as_ref() {
         p.place(&mut editor, args);
     }
+    crate::structures::plane::place_plane_models(&mut editor, &planes);
     // Last, because they clear their own footprint.
     let landmarks_start = args.benchmark.then(std::time::Instant::now);
     landmarks.place(&mut editor, args);

@@ -461,6 +461,24 @@ impl Block {
             364..=365 => "spruce_door",
             366 => "oak_door",
             367 => "end_stone",
+            // Aeroplane livery + jetbridge blocks (bundled .schem props only).
+            368 => "purpur_block",
+            369 => "purpur_slab",
+            370 => "purpur_stairs",
+            371 => "crimson_planks",
+            372 => "crimson_slab",
+            373 => "crimson_stairs",
+            374 => "cherry_planks",
+            375 => "cherry_slab",
+            376 => "cherry_stairs",
+            377 => "dark_prismarine",
+            378 => "dark_prismarine_slab",
+            379 => "dark_prismarine_stairs",
+            380 => "waxed_exposed_cut_copper_slab",
+            381 => "pale_oak_trapdoor",
+            382 => "coal_block",
+            383 => "blackstone_slab",
+            384 => "iron_door",
             _ => return None,
         })
         // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
@@ -1270,6 +1288,25 @@ pub const ORANGE_CONCRETE: Block = Block::new(145);
 pub const REDSTONE_LAMP: Block = Block::new(218);
 // Reuses the retired open-trapdoor slot; sub-256 ids keep sections one byte per cell.
 pub const SUGAR_CANE: Block = Block::new(237);
+
+// Aeroplane livery and jetbridge blocks. Above BYTE_ID_LIMIT, they only arrive through props.
+pub const PURPUR_BLOCK: Block = Block::new(368);
+pub const PURPUR_SLAB: Block = Block::new(369);
+pub const PURPUR_STAIRS: Block = Block::new(370);
+pub const CRIMSON_PLANKS: Block = Block::new(371);
+pub const CRIMSON_SLAB: Block = Block::new(372);
+pub const CRIMSON_STAIRS: Block = Block::new(373);
+pub const CHERRY_PLANKS: Block = Block::new(374);
+pub const CHERRY_SLAB: Block = Block::new(375);
+pub const CHERRY_STAIRS: Block = Block::new(376);
+pub const DARK_PRISMARINE: Block = Block::new(377);
+pub const DARK_PRISMARINE_SLAB: Block = Block::new(378);
+pub const DARK_PRISMARINE_STAIRS: Block = Block::new(379);
+pub const WAXED_EXPOSED_CUT_COPPER_SLAB: Block = Block::new(380);
+pub const PALE_OAK_TRAPDOOR: Block = Block::new(381);
+pub const COAL_BLOCK: Block = Block::new(382);
+pub const BLACKSTONE_SLAB: Block = Block::new(383);
+pub const IRON_DOOR: Block = Block::new(384);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
