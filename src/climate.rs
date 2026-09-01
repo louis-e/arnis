@@ -3,7 +3,7 @@
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::land_cover::{
-    coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER,
+    coord_hash, LC_BARE, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE, LC_TREE_COVER,
 };
 
 // Global Koppen-Geiger grid, 0.1 deg, 1 byte/cell (class 1..30, 0 = ocean/nodata).
@@ -124,16 +124,10 @@ impl Climate {
         if matches!(self, Climate::Temperate | Climate::DryContinental) {
             return None;
         }
-        // Overwriting cropland also stops the crop scatter firing, so Finnish
-        // and Kazakh fields came out as bare ground.
-        let veg = matches!(cover, LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_MOSS)
-            || (cover == LC_CROPLAND
-                && !matches!(
-                    self,
-                    Climate::Boreal | Climate::ColdSteppe | Climate::HotSteppe
-                ));
-        // Ice is handled in the cascade, which owns the isolated-pixel guard.
-        let bare = cover == LC_BARE;
+        // Cropland keeps the fallback farmland in every climate: the crop scatter
+        // only runs on farmland, so a palette here left fields as bare ground.
+        let veg = matches!(cover, LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_MOSS);
+        let bare = cover == LC_BARE || cover == LC_SNOW_ICE;
         if !veg && !bare {
             return None;
         }

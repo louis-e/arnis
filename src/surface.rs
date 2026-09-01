@@ -430,6 +430,25 @@ mod tests {
         assert!(supports_vegetation(PODZOL) && supports_vegetation(MOSS_BLOCK));
     }
 
+    // The ground pass rescues exactly this pair when it laid the block itself.
+    #[test]
+    fn only_podzol_and_moss_separate_the_two_plant_gates() {
+        for b in [GRASS_BLOCK, DIRT, COARSE_DIRT, MUD, FARMLAND] {
+            assert!(
+                takes_wild_plants(b) && supports_vegetation(b),
+                "{}",
+                b.name()
+            );
+        }
+        for b in [PODZOL, MOSS_BLOCK] {
+            assert!(
+                supports_vegetation(b) && !takes_wild_plants(b),
+                "{} must stay the ambiguous pair",
+                b.name()
+            );
+        }
+    }
+
     #[test]
     fn sand_never_grows_plants() {
         assert!(!supports_vegetation(SAND));

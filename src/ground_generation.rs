@@ -546,10 +546,13 @@ pub fn generate_ground_region(
                                             _ => (GRAVEL, STONE),          // 17% scree
                                         }
                                     }
-                                } else if cover == land_cover::LC_SNOW_ICE
+                                } else if dryland == Dryland::Rock
+                                    && cover == land_cover::LC_SNOW_ICE
                                     && ground.has_cover_neighbour(coord, land_cover::LC_SNOW_ICE)
                                 {
-                                    // A lone cell is winter imagery, not a glacier.
+                                    // Only to keep the rock floor off a glacier. Every other
+                                    // climate keeps its own snow surface. A lone cell is
+                                    // winter imagery, not a glacier.
                                     (SNOW_BLOCK, SNOW_BLOCK)
                                 } else if let Some(fc) = rock_floor {
                                     // At the vegetation level the column's data implies.
@@ -773,8 +776,9 @@ pub fn generate_ground_region(
                                         BLACK_CONCRETE,
                                     ]),
                                 );
-                            } else if rock_floor == Some(crate::strata::FloorCover::Bare)
-                                || surface_block == SNOW_BLOCK
+                            } else if dryland == Dryland::Rock
+                                && (rock_floor == Some(crate::strata::FloorCover::Bare)
+                                    || surface_block == SNOW_BLOCK)
                             {
                                 // OSM paints scrub and grassland as GRASS_BLOCK whatever
                                 // the climate and runs first, so an if-absent write loses
@@ -788,7 +792,6 @@ pub fn generate_ground_region(
                                     Some(&[GRASS_BLOCK, PODZOL, MOSS_BLOCK]),
                                     None,
                                 );
-                                editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
                             }
@@ -927,13 +930,17 @@ pub fn generate_ground_region(
                             // Place vegetation from ESA land cover classification
                             // Only if nothing was already placed above ground by OSM processing
                             // and the ground block is a natural surface (not a road, building slab, etc.)
-                            // Where Arnis may scatter, which is narrower than what
-                            // Minecraft holds up: podzol means cemetery, stone quarry.
+                            // Podzol and moss are boreal forest floor when this pass laid
+                            // them and a cemetery or a puddle ring when an OSM pass did, so
+                            // the gates ask who owns the column, not just which block it is.
                             let ground_block = editor.get_block_absolute(x, ground_y, z);
+                            let ours = ground_block.is_some_and(|b| {
+                                b == surface_block && crate::surface::supports_vegetation(b)
+                            });
                             let ground_is_natural =
-                                ground_block.is_some_and(crate::surface::takes_wild_plants);
+                                ours || ground_block.is_some_and(crate::surface::takes_wild_plants);
                             let ground_allows_trees =
-                                ground_block.is_some_and(crate::surface::takes_wild_trees);
+                                ours || ground_block.is_some_and(crate::surface::takes_wild_trees);
                             // Rock desert only: outside it TERRACOTTA is a clay pitch
                             // or a tartan track, not desert floor.
                             let ground_takes_dead_bush = dryland == Dryland::Rock

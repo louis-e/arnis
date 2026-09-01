@@ -729,11 +729,13 @@ impl Ground {
     }
 
     /// True when a land-cover cell one cell away carries `class`. Steps a whole
-    /// cell, and rejects samples outside the world rather than clamping them.
+    /// cell per axis, and rejects samples the caller must not read back: outside
+    /// the world, or in rotation padding, both of which `cover_class` would clamp
+    /// onto this cell so it answers for itself.
     pub fn has_cover_neighbour(&self, coord: XZPoint, class: u8) -> bool {
-        let span = self.cover_cell_span();
+        let (sx, sz) = self.cover_cell_span();
         let (world_w, world_h) = self.world_dims();
-        [(-span, 0), (span, 0), (0, -span), (0, span)]
+        [(-sx, 0), (sx, 0), (0, -sz), (0, sz)]
             .iter()
             .any(|(dx, dz)| {
                 let (nx, nz) = (coord.x + dx, coord.z + dz);
@@ -741,20 +743,24 @@ impl Ground {
                     && nz >= 0
                     && (nx as usize) < world_w
                     && (nz as usize) < world_h
+                    && self.local_in_rotated_bounds(nx, nz)
                     && self.cover_class(XZPoint::new(nx, nz)) == class
             })
     }
 
-    /// World blocks spanned by one land-cover cell, at least 1.
+    /// World blocks spanned by one land-cover cell on each axis, at least 1.
+    /// Kept per axis: a capped rotation can leave the grid coarser in z than in
+    /// x, and one shared step would stay inside this cell on the coarser one.
     #[inline]
-    fn cover_cell_span(&self) -> i32 {
+    fn cover_cell_span(&self) -> (i32, i32) {
         let Some(ref lc) = self.land_cover else {
-            return 1;
+            return (1, 1);
         };
         let (world_w, world_h) = self.world_dims();
-        let sx = world_w / lc.width.max(1);
-        let sz = world_h / lc.height.max(1);
-        (sx.min(sz) as i32).max(1)
+        (
+            (world_w / lc.width.max(1)).max(1) as i32,
+            (world_h / lc.height.max(1)).max(1) as i32,
+        )
     }
 
     /// Returns the ESA WorldCover land cover class at the given coordinates.
@@ -1302,6 +1308,17 @@ mod tests {
     use crate::coordinate_system::cartesian::XZPoint;
     use crate::elevation_data::ElevationData;
 
+    fn lc_of(grid: Vec<Vec<u8>>, width: usize, height: usize) -> LandCoverData {
+        LandCoverData {
+            water_distance: vec![vec![0; width]; height],
+            grid,
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width,
+            height,
+            cells_per_meter: 1.0,
+        }
+    }
+
     fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
         let h = heights.len();
         let w = heights[0].len();
@@ -1422,6 +1439,63 @@ mod tests {
             "padding must not widen the span: {} vs {}",
             padded.relief_gradient,
             plain.relief_gradient
+        );
+    }
+
+    // A cover grid coarser in z than in x: one shared step would stay inside the
+    // same cell there and let a lone snow cell answer for itself.
+    #[test]
+    fn cover_neighbour_steps_a_whole_cell_on_each_axis() {
+        use crate::land_cover::{LC_GRASSLAND, LC_SNOW_ICE};
+
+        let mut g = ground_with(vec![vec![0.0; 8]; 8]);
+        let mut grid = vec![vec![LC_GRASSLAND; 8]; 4];
+        grid[1][2] = LC_SNOW_ICE;
+        g.land_cover = Some(lc_of(grid, 8, 4));
+
+        let snow = XZPoint::new(2, 2);
+        assert_eq!(g.cover_class(snow), LC_SNOW_ICE, "probe hits the snow cell");
+        assert!(
+            !g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "a lone snow cell must not find itself across the coarse z axis"
+        );
+    }
+
+    // Rotation padding holds clamped copies of the selection edge, so a neighbour
+    // read out there is the same measurement twice.
+    #[test]
+    fn cover_neighbour_rejects_rotation_padding() {
+        use crate::land_cover::{LC_GRASSLAND, LC_SNOW_ICE};
+
+        // Two snow cells side by side in x, so the probe genuinely reaches one.
+        let mut g = ground_with(vec![vec![0.0; 8]; 8]);
+        let mut grid = vec![vec![LC_GRASSLAND; 8]; 8];
+        grid[2][2] = LC_SNOW_ICE;
+        grid[2][3] = LC_SNOW_ICE;
+        g.land_cover = Some(lc_of(grid, 8, 8));
+
+        let snow = XZPoint::new(2, 2);
+        assert!(
+            g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "unmasked, the probe must reach the neighbouring snow cell"
+        );
+
+        // Selection stops at x = 2, so that neighbour is padding.
+        g.rotation_mask = Some(RotationMask {
+            cx: 0.0,
+            cz: 0.0,
+            neg_sin: 0.0,
+            cos: 1.0,
+            world_min_x: 0,
+            world_min_z: 0,
+            orig_min_x: 0,
+            orig_max_x: 2,
+            orig_min_z: 0,
+            orig_max_z: 7,
+        });
+        assert!(
+            !g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "padding outside the selection must not count as a neighbour"
         );
     }
 
