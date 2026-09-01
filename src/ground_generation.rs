@@ -1013,7 +1013,9 @@ pub fn generate_ground_region(
                                     Some(building_footprints),
                                     Some(bridge_surface),
                                 );
-                                occupied_above = true;
+                                // The build declines on a footprint, a bridge or
+                                // forbidden ground, so ask rather than assume.
+                                occupied_above = editor.block_exists_absolute(x, ground_y + 1, z);
                             }
                             if has_land_cover && !occupied_above {
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
