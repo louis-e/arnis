@@ -2164,8 +2164,10 @@ const _: () = {
 };
 
 /// Thread count and queue depth for the flush pool. `threads` is throughput,
-/// `capacity` is RAM. One region is evicted per merged tile, so a batch produces a
-/// burst of that size; `capacity + threads >= tile_batch` stops the producer stalling.
+/// `capacity` is RAM. One region is evicted per merged tile, so covering a whole
+/// batch without backpressure would need `capacity + threads >= tile_batch`. That is
+/// the target, not a guarantee: both are clamped and capped by the RAM budget below,
+/// so a wide batch still stalls the producer some. `flush_stall_ms` measures it.
 pub(crate) fn flush_pool_params(tile_batch: usize, available_mb: u64) -> (usize, usize) {
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -2338,10 +2340,12 @@ impl FlushWorker {
         if self.failed.load(Ordering::Acquire) {
             return Err((region, self.error_msg()));
         }
-        if self.bench {
-            self.bytes
-                .fetch_add(region_storage_bytes(&region), Ordering::Relaxed);
-        }
+        // Measured before the move, but only counted once the region is actually queued.
+        let bytes = if self.bench {
+            region_storage_bytes(&region)
+        } else {
+            0
+        };
         let started = self.bench.then(std::time::Instant::now);
         let sent = tx.send((rx, rz, region));
         if let Some(t) = started {
@@ -2349,7 +2353,10 @@ impl FlushWorker {
                 .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         match sent {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.bytes.fetch_add(bytes, Ordering::Relaxed);
+                Ok(())
+            }
             Err(std::sync::mpsc::SendError((_, _, region))) => Err((region, self.error_msg())),
         }
     }
