@@ -1511,27 +1511,28 @@ mod locale_tests {
     use std::collections::BTreeSet;
 
     // en-US is the source of truth, every other locale must match its key set
-    const LOCALES: &[(&str, &str)] = &[
-        ("en-US", include_str!("gui/locales/en-US.json")),
-        ("en", include_str!("gui/locales/en.json")),
-        ("ar", include_str!("gui/locales/ar.json")),
-        ("de", include_str!("gui/locales/de.json")),
-        ("es", include_str!("gui/locales/es.json")),
-        ("fi", include_str!("gui/locales/fi.json")),
-        ("fr-FR", include_str!("gui/locales/fr-FR.json")),
-        ("hu", include_str!("gui/locales/hu.json")),
-        ("ja", include_str!("gui/locales/ja.json")),
-        ("ko", include_str!("gui/locales/ko.json")),
-        ("lt", include_str!("gui/locales/lt.json")),
-        ("lv", include_str!("gui/locales/lv.json")),
-        ("pl", include_str!("gui/locales/pl.json")),
-        ("pt-BR", include_str!("gui/locales/pt-BR.json")),
-        ("ru", include_str!("gui/locales/ru.json")),
-        ("sl", include_str!("gui/locales/sl.json")),
-        ("sv", include_str!("gui/locales/sv.json")),
-        ("ua", include_str!("gui/locales/ua.json")),
-        ("zh-CN", include_str!("gui/locales/zh-CN.json")),
-    ];
+const LOCALES: &[(&str, &str)] = &[
+    ("en-US", include_str!("gui/locales/en-US.json")),
+    ("en", include_str!("gui/locales/en.json")),
+    ("ar", include_str!("gui/locales/ar.json")),
+    ("de", include_str!("gui/locales/de.json")),
+    ("es", include_str!("gui/locales/es.json")),
+    ("fi", include_str!("gui/locales/fi.json")),
+    ("fr-FR", include_str!("gui/locales/fr-FR.json")),
+    ("hu", include_str!("gui/locales/hu.json")),
+    ("ja", include_str!("gui/locales/ja.json")),
+    ("ka-GE", include_str!("gui/locales/ka-GE.json")),
+    ("ko", include_str!("gui/locales/ko.json")),
+    ("lt", include_str!("gui/locales/lt.json")),
+    ("lv", include_str!("gui/locales/lv.json")),
+    ("pl", include_str!("gui/locales/pl.json")),
+    ("pt-BR", include_str!("gui/locales/pt-BR.json")),
+    ("ru", include_str!("gui/locales/ru.json")),
+    ("sl", include_str!("gui/locales/sl.json")),
+    ("sv", include_str!("gui/locales/sv.json")),
+    ("ua", include_str!("gui/locales/ua.json")),
+    ("zh-CN", include_str!("gui/locales/zh-CN.json")),
+];
 
     fn locale_keys(name: &str, raw: &str) -> BTreeSet<String> {
         let value: serde_json::Value = serde_json::from_str(raw)
