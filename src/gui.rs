@@ -1547,6 +1547,7 @@ mod locale_tests {
         ("fr-FR", include_str!("gui/locales/fr-FR.json")),
         ("hu", include_str!("gui/locales/hu.json")),
         ("ja", include_str!("gui/locales/ja.json")),
+        ("ka-GE", include_str!("gui/locales/ka-GE.json")),
         ("ko", include_str!("gui/locales/ko.json")),
         ("lt", include_str!("gui/locales/lt.json")),
         ("lv", include_str!("gui/locales/lv.json")),
