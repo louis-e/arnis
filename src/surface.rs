@@ -56,6 +56,15 @@ pub const SOIL_PLANTS: &[Block] = &[
     WHITE_FLOWER,
 ];
 
+/// Crops need farmland specifically, not any soil: they pop off plain dirt or
+/// grass the same way they pop off stone.
+pub const fn supports_crops(b: Block) -> bool {
+    matches!(b, FARMLAND)
+}
+
+/// Placed on farmland at ground+1, before the ground pass can replace it.
+pub const CROPS: &[Block] = &[WHEAT, CARROTS, POTATOES];
+
 /// Everything the stranded-plant sweep may clear at ground+1: the soil plants,
 /// plus the dead bush, which stands on a wider set of blocks and so needs its own
 /// footing test rather than a place in [`SOIL_PLANTS`].
@@ -71,6 +80,9 @@ pub const CLEARABLE_PLANTS: &[Block] = &[
     YELLOW_FLOWER,
     WHITE_FLOWER,
     DEAD_BUSH,
+    WHEAT,
+    CARROTS,
+    POTATOES,
 ];
 
 /// Upper halves of the two-block plants above. Clearing a stranded plant by its
@@ -294,6 +306,17 @@ mod tests {
             CLEARABLE_PLANTS.contains(&DEAD_BUSH),
             "dead bush is checked against supports_dead_bush but never cleared"
         );
+        for c in CROPS {
+            assert!(
+                CLEARABLE_PLANTS.contains(c),
+                "{} is checked against supports_crops but never cleared",
+                c.name()
+            );
+            assert!(
+                !supports_crops(GRASS_BLOCK) && supports_crops(FARMLAND),
+                "crops must require farmland, not any soil"
+            );
+        }
     }
 
     #[test]

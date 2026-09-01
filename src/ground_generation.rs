@@ -1560,6 +1560,10 @@ fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> boo
         // A dead bush stands on terracotta and sand as well, which is most of a
         // rock-desert floor, so testing it against soil would uproot it wrongly.
         crate::surface::supports_dead_bush
+    } else if crate::surface::CROPS.contains(&plant) {
+        // Farmland only. The ground pass can replace the farmland a crop was
+        // planted on, and a crop on plain soil drops just like one on stone.
+        crate::surface::supports_crops
     } else if crate::surface::SOIL_PLANTS.contains(&plant) {
         crate::surface::supports_vegetation
     } else {

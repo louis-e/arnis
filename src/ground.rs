@@ -23,6 +23,10 @@ pub struct RotationMask {
     /// sin/cos of the *negative* angle (inverse rotation)
     pub neg_sin: f64,
     pub cos: f64,
+    /// World origin of the enlarged post-rotation bbox, so a grid index can be
+    /// turned back into the absolute coordinate this mask is expressed in.
+    pub world_min_x: i32,
+    pub world_min_z: i32,
     /// Original axis-aligned bounding box before rotation
     pub orig_min_x: i32,
     pub orig_max_x: i32,
@@ -415,12 +419,30 @@ impl Ground {
         // long before every cell is read, and a full pass over a 16k x 16k grid
         // is not worth paying for.
         const STRIDE: usize = 8;
+        // Rotation leaves every grid spanning the enlarged axis-aligned rectangle,
+        // and the triangular padding outside the original selection is filled with
+        // clamped edge samples, which are duplicates of the boundary. Counting it
+        // would let rotating the same bbox change its classification on its own.
+        let (world_w, world_h) = self.world_dims();
+        let rotated = self.rotation_mask.is_some();
+        let in_selection = |gx: usize, gw: usize, gz: usize, gh: usize| {
+            if !rotated {
+                return true;
+            }
+            let scale = |g: usize, grid: usize, world: usize| {
+                ((g as f64 / (grid - 1).max(1) as f64) * (world - 1) as f64).round() as i32
+            };
+            self.local_in_rotated_bounds(scale(gx, gw, world_w), scale(gz, gh, world_h))
+        };
         let mut bare = 0u64;
         let mut land = 0u64;
         if let Some(ref lc) = self.land_cover {
             for z in (0..lc.height).step_by(STRIDE) {
                 let row = &lc.grid[z];
                 for x in (0..lc.width).step_by(STRIDE) {
+                    if !in_selection(x, lc.width, z, lc.height) {
+                        continue;
+                    }
                     match row[x] {
                         land_cover::LC_WATER => {}
                         land_cover::LC_BARE | land_cover::LC_SNOW_ICE => {
@@ -447,6 +469,9 @@ impl Ground {
             for z in (0..ed.height).step_by(STRIDE) {
                 let row = &ed.heights[z];
                 for x in (0..ed.width).step_by(STRIDE) {
+                    if !in_selection(x, ed.width, z, ed.height) {
+                        continue;
+                    }
                     let v = row[x];
                     if v.is_finite() {
                         lo = lo.min(v);
@@ -467,6 +492,9 @@ impl Ground {
             for z in (0..ed.height).step_by(STRIDE) {
                 let row = &ed.heights[z];
                 for x in (0..ed.width).step_by(STRIDE) {
+                    if !in_selection(x, ed.width, z, ed.height) {
+                        continue;
+                    }
                     let v = row[x];
                     if !v.is_finite() {
                         continue;
@@ -1035,6 +1063,16 @@ impl Ground {
         self.rotation_mask = Some(mask);
     }
 
+    /// [`Self::is_in_rotated_bounds`] for a ground-local coordinate, which is what
+    /// the grids are indexed in.
+    #[inline]
+    pub fn local_in_rotated_bounds(&self, lx: i32, lz: i32) -> bool {
+        match self.rotation_mask {
+            None => true,
+            Some(ref m) => self.is_in_rotated_bounds(lx + m.world_min_x, lz + m.world_min_z),
+        }
+    }
+
     /// Returns `true` if the coordinate is inside the rotated original bbox.
     /// When no rotation was applied, always returns `true`.
     #[inline(always)]
@@ -1296,6 +1334,64 @@ mod tests {
             profile: once_cell::sync::OnceCell::new(),
             slope_tiers: SLOPE_TIERS_1_1,
         }
+    }
+
+    #[test]
+    fn rotation_padding_stays_out_of_the_region_profile() {
+        use crate::land_cover::{LandCoverData, LC_BARE, LC_TREE_COVER};
+
+        // A 64x64 world whose left half is bare and right half is wooded, so the
+        // honest bare fraction is 0.5. A rotation mask that keeps only the left
+        // half stands in for the triangular padding a real rotation leaves behind:
+        // if the profile counted it, the fraction would stay at 0.5 instead of
+        // rising to 1.0, and the classification would follow the padding.
+        let n = 64usize;
+        let grid: Vec<Vec<u8>> = (0..n)
+            .map(|_| {
+                (0..n)
+                    .map(|x| if x < n / 2 { LC_BARE } else { LC_TREE_COVER })
+                    .collect()
+            })
+            .collect();
+        let make = |mask: Option<RotationMask>| {
+            let mut g = ground_with(vec![vec![0.0; n]; n]);
+            g.land_cover = Some(LandCoverData {
+                grid: grid.clone(),
+                water_distance: vec![vec![0; n]; n],
+                water_blend_cache: once_cell::sync::OnceCell::new(),
+                width: n,
+                height: n,
+                cells_per_meter: 1.0,
+            });
+            g.rotation_mask = mask;
+            g
+        };
+
+        let unmasked = make(None).region_profile().bare_fraction;
+        assert!(
+            (unmasked - 0.5).abs() < 0.05,
+            "half-bare world should read ~0.5, got {unmasked}"
+        );
+
+        // Identity rotation, bounds covering only the bare half.
+        let masked = make(Some(RotationMask {
+            cx: 0.0,
+            cz: 0.0,
+            neg_sin: 0.0,
+            cos: 1.0,
+            world_min_x: 0,
+            world_min_z: 0,
+            orig_min_x: 0,
+            orig_max_x: (n / 2 - 1) as i32,
+            orig_min_z: 0,
+            orig_max_z: (n - 1) as i32,
+        }))
+        .region_profile()
+        .bare_fraction;
+        assert!(
+            masked > 0.95,
+            "only the bare half is inside the selection, so it should read ~1.0, got {masked}"
+        );
     }
 
     // An unmeasured cell hands the decision back to the land cover.
