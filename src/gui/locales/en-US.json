@@ -41,6 +41,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Language",
   "map_theme": "Map Theme",
+  "custom_map_source": "Custom Map Source",
   "terrain": "Terrain",
   "generation_mode": "Generation Mode",
   "celestial_body": "World",

@@ -34,6 +34,7 @@
   "placeholder_ground": "Raven tal",
   "language": "Jezik",
   "map_theme": "Tema zemljevida",
+  "custom_map_source": "Lasten vir zemljevida",
   "terrain": "Teren",
   "celestial_body": "Svet",
   "body_earth": "Zemlja",

@@ -34,6 +34,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Språk",
   "map_theme": "Karttema",
+  "custom_map_source": "Egen kartkälla",
   "terrain": "Terräng",
   "celestial_body": "Värld",
   "body_earth": "Jorden",

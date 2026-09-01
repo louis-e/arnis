@@ -34,6 +34,7 @@
   "placeholder_ground": "Zemes līmenis",
   "language": "Valoda",
   "map_theme": "Kartes tēma",
+  "custom_map_source": "Pielāgots kartes avots",
   "terrain": "Reljefs",
   "celestial_body": "Pasaule",
   "body_earth": "Zeme",

@@ -34,6 +34,7 @@
   "placeholder_ground": "Wysokość",
   "language": "Język",
   "map_theme": "Motyw mapy",
+  "custom_map_source": "Własne źródło mapy",
   "terrain": "Teren",
   "celestial_body": "Świat",
   "body_earth": "Ziemia",

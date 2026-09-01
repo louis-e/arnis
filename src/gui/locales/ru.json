@@ -34,6 +34,7 @@
   "placeholder_ground": "Уровень земли",
   "language": "Язык",
   "map_theme": "Тема Карты",
+  "custom_map_source": "Свой источник карты",
   "terrain": "Рельеф",
   "celestial_body": "Мир",
   "body_earth": "Земля",
