@@ -1294,6 +1294,7 @@ $(document).ready(function () {
 
     // Listen for messages from parent window
     window.addEventListener('message', function(event) {
+        if (event.source !== window.parent) return;
         if (event.data && event.data.type === 'changeTileTheme') {
             changeTileTheme(event.data.theme);
         }
