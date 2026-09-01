@@ -1532,9 +1532,17 @@ impl BuildingConfig {
     }
 
     /// Position within the 6-block window cycle (0-2 = window strip, 3-5 = wall pier).
+    /// `u` is the along-wall ordinate, not a world-space sum; `bx + bz` would make
+    /// the period depend on the wall angle.
     #[inline]
-    fn window_col(&self, bx: i32, bz: i32) -> i32 {
-        (bx + bz + self.window_phase).rem_euclid(6)
+    fn window_col(&self, u: i32) -> i32 {
+        (u + self.window_phase).rem_euclid(6)
+    }
+
+    /// Index of the 6-block bay containing `u`. Same lattice as `window_col`.
+    #[inline]
+    fn window_bay(&self, u: i32) -> i32 {
+        (u + self.window_phase).div_euclid(6)
     }
 
     /// Number of darker plinth rows at the wall base (2 from roughly three floors up).
@@ -3446,11 +3454,13 @@ fn build_wall_ring(
 
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
-    for node in nodes {
+    for (node_idx, node) in nodes.iter().enumerate() {
         let x = node.x;
         let z = node.z;
 
         if let Some(prev) = previous_node {
+            let seg_axis_x = segment_axis_x(prev.0, prev.1, x, z);
+            let start_axis_x = segment_start_axis_x(nodes, node_idx, seg_axis_x);
             let bresenham_points = bresenham_line(
                 prev.0,
                 config.start_y_offset,
@@ -3460,7 +3470,7 @@ fn build_wall_ring(
                 z,
             );
 
-            for (bx, _, bz) in bresenham_points {
+            for (pt_idx, (bx, _, bz)) in bresenham_points.into_iter().enumerate() {
                 // Passages only apply to ground-level buildings; elevated
                 // building:part elements (min_level > 0) receive an empty bitmap
                 // via effective_passages, so this is always false for them.
@@ -3508,6 +3518,7 @@ fn build_wall_ring(
                 };
 
                 let col = ColumnFacade {
+                    wall_u: wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz),
                     party: facade.is_party(bx, bz),
                     street: !facade.has_any_street || facade.is_street(bx, bz),
                 };
@@ -3692,7 +3703,7 @@ fn determine_wall_block_at_position(
     config: &BuildingConfig,
     col: ColumnFacade,
 ) -> Block {
-    let chosen = determine_wall_block_at_position_pristine(bx, h, bz, config, col);
+    let chosen = determine_wall_block_at_position_pristine(h, config, col);
     let chosen = apply_block_variety(chosen, bx, h, bz, config);
     apply_condition_variation(chosen, bx, h, bz, config)
 }
@@ -4014,9 +4025,7 @@ fn weathered_variant(block: Block, rng: &mut impl Rng) -> Block {
 }
 
 fn determine_wall_block_at_position_pristine(
-    bx: i32,
     h: i32,
-    bz: i32,
     config: &BuildingConfig,
     col: ColumnFacade,
 ) -> Block {
@@ -4062,7 +4071,7 @@ fn determine_wall_block_at_position_pristine(
         // only in the middle two rows of each 4-row floor
         let is_slit = above_floor
             && (floor_row == 1 || floor_row == 2)
-            && (bx + bz + config.window_phase).rem_euclid(4) == 1;
+            && (col.wall_u + config.window_phase).rem_euclid(4) == 1;
 
         if is_slit {
             config.window_block
@@ -4077,7 +4086,7 @@ fn determine_wall_block_at_position_pristine(
     } else if config.category == BuildingCategory::GridSkyscraper {
         // Big glass panes separated by concrete mullions at floor lines and every 5th column.
         let mullion =
-            !above_floor || floor_row == 0 || (bx + bz + config.window_phase).rem_euclid(5) == 0;
+            !above_floor || floor_row == 0 || (col.wall_u + config.window_phase).rem_euclid(5) == 0;
         if mullion {
             config.wall_block
         } else {
@@ -4085,14 +4094,14 @@ fn determine_wall_block_at_position_pristine(
         }
     } else if config.is_tall_building && config.use_vertical_windows {
         // Tall building pattern, vertical window strips alternating with wall columns
-        if above_floor && (bx + bz + config.window_phase).rem_euclid(2) == 0 {
+        if above_floor && (col.wall_u + config.window_phase).rem_euclid(2) == 0 {
             config.window_block
         } else {
             config.wall_block
         }
     } else {
         // Regular building pattern
-        let window_col = config.window_col(bx, bz);
+        let window_col = config.window_col(col.wall_u);
 
         // Storefront glazing: wider full-glass bays across the whole ground floor.
         if config.has_storefront
@@ -4363,6 +4372,51 @@ fn gable_axis_snap(nodes: &[ProcessedNode]) -> bool {
     rect_area > 0.0 && polygon_area / rect_area >= 0.78
 }
 
+/// Whether a wall segment steps along X, matching bresenham_line's driving axis.
+/// Not derivable from compute_outward_normal, which snaps the opposite way.
+#[inline]
+fn segment_axis_x(x1: i32, z1: i32, x2: i32, z2: i32) -> bool {
+    (x2 - x1).abs() >= (z2 - z1).abs()
+}
+
+/// Axis for a segment's first point, a vertex shared with the previous segment.
+/// Both visits use that previous segment's axis so every pass agrees on the column.
+#[inline]
+fn segment_start_axis_x(nodes: &[ProcessedNode], i: usize, own_axis_x: bool) -> bool {
+    let n = nodes.len();
+    let closed = n >= 3 && nodes[0].x == nodes[n - 1].x && nodes[0].z == nodes[n - 1].z;
+    let here = &nodes[i - 1];
+    let mut j = i - 1;
+    // A zero-length edge has no direction, so walk back to the last one that moved.
+    for _ in 0..n {
+        let prev_idx = if j >= 1 {
+            j - 1
+        } else if closed {
+            n - 2
+        } else {
+            // Open polyline start: nothing else touches this vertex.
+            return own_axis_x;
+        };
+        let prev = &nodes[prev_idx];
+        if prev.x != here.x || prev.z != here.z {
+            return segment_axis_x(prev.x, prev.z, here.x, here.z);
+        }
+        j = prev_idx;
+    }
+    own_axis_x
+}
+
+/// Along-wall ordinate of a segment's idx-th point. Only the first uses start_axis_x.
+#[inline]
+fn wall_ordinate(idx: usize, start_axis_x: bool, seg_axis_x: bool, bx: i32, bz: i32) -> i32 {
+    let axis_x = if idx == 0 { start_axis_x } else { seg_axis_x };
+    if axis_x {
+        bx
+    } else {
+        bz
+    }
+}
+
 /// Computes the axis-aligned outward normal for a wall segment defined by
 /// `(x1,z1)→(x2,z2)`, given the building centroid `(cx,cz)`.
 ///
@@ -4452,7 +4506,7 @@ fn generate_residential_window_decorations(
     let mut previous_node: Option<(i32, i32)> = None;
     let mut seg_idx = 0usize;
 
-    for node in &element.nodes {
+    for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
             // Rear facades get thinner dressing than street-facing ones.
@@ -4477,11 +4531,16 @@ fn generate_residential_window_decorations(
             // normal inside the XZ plane.
             let (tan_x, tan_z) = (-out_nz, out_nx);
 
+            let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+            let start_axis_x = segment_start_axis_x(&element.nodes, node_idx, seg_axis_x);
+            // Constant along the segment, so parallel facades draw different rolls.
+            let seg_cross = if seg_axis_x { z1 } else { x1 };
+
             // Walk the bresenham points of this wall segment
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
 
-            for (bx, _, bz) in &points {
+            for (pt_idx, (bx, _, bz)) in points.iter().enumerate() {
                 let bx = *bx;
                 let bz = *bz;
 
@@ -4493,7 +4552,8 @@ fn generate_residential_window_decorations(
                     continue;
                 }
 
-                let mod6 = config.window_col(bx, bz); // always 0..5
+                let wu = wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz);
+                let mod6 = config.window_col(wu); // always 0..5
 
                 // --- Shutters ---
                 // mod6 == 3 or 5 are the wall blocks flanking a window strip.
@@ -4511,9 +4571,9 @@ fn generate_residential_window_decorations(
                             | WindowArchetype::ArchedTraditional
                     )
                 {
-                    let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
+                    let centre_u = if mod6 == 3 { wu - 2 } else { wu + 2 };
                     let shutter_roll =
-                        coord_rng(centre_sum, centre_sum, element.id).random_range(0u32..100);
+                        coord_rng(centre_u, seg_cross, element.id).random_range(0u32..100);
                     let shutter_max = match config.detail {
                         DetailTier::Minimal => 0,
                         DetailTier::Standard => 25,
@@ -4561,14 +4621,14 @@ fn generate_residential_window_decorations(
                             let floor_idx = h / config.floor_cycle;
 
                             // Shared roll seeded from the window centre.
-                            let centre_sum = match mod6 {
-                                0 => bx + bz + 1,
-                                1 => bx + bz,
-                                _ => bx + bz - 1,
+                            let centre_u = match mod6 {
+                                0 => wu + 1,
+                                1 => wu,
+                                _ => wu - 1,
                             };
                             let decoration_roll = coord_rng(
-                                centre_sum.wrapping_add(floor_idx * 3),
-                                centre_sum.wrapping_add(floor_idx * 5),
+                                centre_u.wrapping_add(floor_idx * 3),
+                                seg_cross.wrapping_add(floor_idx * 5),
                                 element.id,
                             )
                             .random_range(0u32..100);
@@ -4587,8 +4647,7 @@ fn generate_residential_window_decorations(
                                     BalconyBand::EveryBay => facade.is_street(bx, bz),
                                     BalconyBand::Alternating => {
                                         facade.is_street(bx, bz)
-                                            && (bx + bz + config.window_phase).div_euclid(6) % 2
-                                                == 0
+                                            && config.window_bay(wu).rem_euclid(2) == 0
                                     }
                                 };
 
@@ -4967,7 +5026,7 @@ fn generate_wall_depth_features(
 
     let mut previous_node: Option<(i32, i32)> = None;
 
-    for node in &element.nodes {
+    for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
             let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
@@ -4978,6 +5037,9 @@ fn generate_wall_depth_features(
             }
 
             let facing = facing_for_normal(out_nx, out_nz);
+
+            let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+            let start_axis_x = segment_start_axis_x(&element.nodes, node_idx, seg_axis_x);
 
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
@@ -5018,7 +5080,8 @@ fn generate_wall_depth_features(
                     0
                 };
 
-                let mod6 = config.window_col(bx, bz);
+                let wu = wall_ordinate(idx, start_axis_x, seg_axis_x, bx, bz);
+                let mod6 = config.window_col(wu);
 
                 match config.wall_depth_style {
                     WallDepthStyle::SubtlePilasters => {
@@ -5098,6 +5161,7 @@ fn generate_wall_depth_features(
                             bx,
                             bz,
                             mod6,
+                            wu,
                             out_nx,
                             out_nz,
                             facing,
@@ -5168,7 +5232,7 @@ fn generate_window_frames(
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut seg_idx = 0usize;
-    for node in &element.nodes {
+    for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
             // Rear facades keep the band but get half the dressing.
@@ -5187,9 +5251,13 @@ fn generate_window_frames(
             let band_stair = make_upside_down_stair(style.band_material(), facing);
             let shutter = shutter_block.map(|b| make_open_trapdoor(b, facing));
 
+            let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+            let start_axis_x = segment_start_axis_x(&element.nodes, node_idx, seg_axis_x);
+            let seg_cross = if seg_axis_x { z1 } else { x1 };
+
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
-            for (bx, _, bz) in &points {
+            for (pt_idx, (bx, _, bz)) in points.iter().enumerate() {
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
@@ -5197,7 +5265,8 @@ fn generate_window_frames(
                 {
                     continue;
                 }
-                let col = config.window_col(bx, bz);
+                let wu = wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz);
+                let col = config.window_col(wu);
                 let lx = bx + out_nx;
                 let lz = bz + out_nz;
 
@@ -5293,10 +5362,10 @@ fn generate_window_frames(
                             }
                         } else if let Some(button) = style.stud_button() {
                             // Button studs on the band front at the window edges.
-                            let centre = bx + bz + if col == 0 { 1 } else { -1 };
+                            let centre_u = wu + if col == 0 { 1 } else { -1 };
                             let stud_roll = coord_rng(
-                                centre,
-                                centre.wrapping_add(h),
+                                centre_u,
+                                seg_cross.wrapping_add(h),
                                 config.element_id ^ 0x0000_B417_0000_0004,
                             )
                             .random_range(0u32..100);
@@ -5323,10 +5392,10 @@ fn generate_window_frames(
                                 if config.floor_row(h) != 3 {
                                     continue;
                                 }
-                                let centre = bx + bz + if col == 0 { 1 } else { -1 };
+                                let centre_u = wu + if col == 0 { 1 } else { -1 };
                                 let roll = coord_rng(
-                                    centre,
-                                    centre.wrapping_add(h),
+                                    centre_u,
+                                    seg_cross.wrapping_add(h),
                                     config.element_id ^ 0x0000_7A96_0000_0005,
                                 )
                                 .random_range(0u32..100);
@@ -5415,7 +5484,7 @@ fn generate_facade_cornices(
     let top_h = config.start_y_offset + config.building_height;
 
     let mut previous_node: Option<(i32, i32)> = None;
-    for node in &element.nodes {
+    for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
             let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
@@ -5425,10 +5494,12 @@ fn generate_facade_cornices(
             }
             let facing = facing_for_normal(out_nx, out_nz);
             let cornice_stair = make_upside_down_stair(config.accent_block, facing);
+            let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+            let start_axis_x = segment_start_axis_x(&element.nodes, node_idx, seg_axis_x);
 
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
-            for (bx, _, bz) in &points {
+            for (pt_idx, (bx, _, bz)) in points.iter().enumerate() {
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
@@ -5436,7 +5507,10 @@ fn generate_facade_cornices(
                 {
                     continue;
                 }
-                if window_trim && config.window_col(bx, bz) >= 3 {
+                if window_trim
+                    && config.window_col(wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz))
+                        >= 3
+                {
                     continue;
                 }
                 let lx = bx + out_nx;
@@ -5485,7 +5559,7 @@ fn generate_archetype_window_headers(
     let top_h = config.start_y_offset + config.building_height;
 
     let mut previous_node: Option<(i32, i32)> = None;
-    for node in &element.nodes {
+    for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
             let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
@@ -5495,10 +5569,12 @@ fn generate_archetype_window_headers(
             }
             let facing = facing_for_normal(out_nx, out_nz);
             let header_stair = make_upside_down_stair(config.wall_block, facing);
+            let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+            let start_axis_x = segment_start_axis_x(&element.nodes, node_idx, seg_axis_x);
 
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
-            for (bx, _, bz) in &points {
+            for (pt_idx, (bx, _, bz)) in points.iter().enumerate() {
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
@@ -5506,7 +5582,8 @@ fn generate_archetype_window_headers(
                 {
                     continue;
                 }
-                let mod6 = config.window_col(bx, bz);
+                let mod6 =
+                    config.window_col(wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz));
                 // Arch shoulders sit over the window edge columns.
                 if mod6 != 0 && mod6 != 2 {
                     continue;
@@ -5558,7 +5635,7 @@ fn generate_storefront_awnings(
     let awning_y = config.ground_floor_top() + config.abs_terrain_offset;
 
     let mut previous_node: Option<(i32, i32)> = None;
-    for node in &element.nodes {
+    for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
             let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
@@ -5567,15 +5644,18 @@ fn generate_storefront_awnings(
                 continue;
             }
             let facing = facing_for_normal(out_nx, out_nz);
+            let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+            let start_axis_x = segment_start_axis_x(&element.nodes, node_idx, seg_axis_x);
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
-            for (bx, _, bz) in &points {
+            for (pt_idx, (bx, _, bz)) in points.iter().enumerate() {
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
                     || !facade.is_street(bx, bz)
-                    || config.window_col(bx, bz) >= 4
+                    || config.window_col(wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz))
+                        >= 4
                 {
                     continue;
                 }
@@ -5965,6 +6045,7 @@ fn place_religious_buttress(
     bx: i32,
     bz: i32,
     mod6: i32,
+    wu: i32,
     out_nx: i32,
     out_nz: i32,
     facing: &str,
@@ -5975,8 +6056,9 @@ fn place_religious_buttress(
     let lz = bz + out_nz;
     let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    // Buttress at every other window group center (mod6==0)
-    let window_group = ((bx + bz) / 6).rem_euclid(2);
+    // Every other window bay. Shares window_col's lattice, so the phase term and
+    // div_euclid are both needed to land on the same bays.
+    let window_group = config.window_bay(wu).rem_euclid(2);
     if mod6 == 0 && window_group == 0 {
         let buttress_cutoff = config.start_y_offset + (config.building_height * 3 / 5);
 
@@ -7724,19 +7806,19 @@ fn generate_inset_tiers(
         placed = true;
 
         for &(x, z) in &tier_cells {
-            let is_wall = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                .iter()
-                .any(|&(dx, dz)| dist.get(x + dx, z + dz) < tier.inset);
-            if is_wall {
+            // An open X neighbour means the wall runs along Z, so its ordinate is z.
+            // Corners have both open; either pick keeps one run's rhythm and breaks the other.
+            let open_x = dist.get(x + 1, z) < tier.inset || dist.get(x - 1, z) < tier.inset;
+            let open_z = dist.get(x, z + 1) < tier.inset || dist.get(x, z - 1) < tier.inset;
+            if open_x || open_z {
+                let col = ColumnFacade {
+                    wall_u: if open_x { z } else { x },
+                    ..ColumnFacade::default()
+                };
                 // Same wall and window logic as the facade, so bands continue upward.
                 for h in 0..tier.height {
-                    let block = determine_wall_block_at_position(
-                        x,
-                        current_base + h,
-                        z,
-                        config,
-                        ColumnFacade::default(),
-                    );
+                    let block =
+                        determine_wall_block_at_position(x, current_base + h, z, config, col);
                     editor.set_block_absolute(
                         block,
                         x,
@@ -9118,8 +9200,11 @@ fn generate_gabled_roof(
         );
     }
 
-    // Half-pitch when the capped flat ridge would be >= 4 blocks wide.
-    let use_half_pitch = profile != GableProfile::Gambrel && max_perp_half - wall_cap >= 4;
+    // Half-pitch when the capped flat ridge would be >= 4 blocks wide. Skipped under
+    // an explicit cap, which it climbs too slowly to reach.
+    let use_half_pitch = config.peak_cap.is_none()
+        && profile != GableProfile::Gambrel
+        && max_perp_half - wall_cap >= 4;
 
     for &(x, z) in floor_area {
         let pd = &pos_data[&(x, z)];
@@ -9704,8 +9789,9 @@ fn generate_hipped_roof_inner(
         );
     }
 
-    // Half-pitch when the capped flat peak would be >= 4 blocks wide.
-    let use_half_pitch = max_full_span - wall_cap >= 4;
+    // As in the gabled path. max_full_span is the long half-span while a hip slopes
+    // across dist_to_edge, so this gate is doubly unfit for a stated rise.
+    let use_half_pitch = config.peak_cap.is_none() && max_full_span - wall_cap >= 4;
 
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
 
@@ -9943,6 +10029,73 @@ fn parse_roof_direction(value: &str) -> Option<StairFacing> {
     })
 }
 
+/// Roof rise in blocks, from roof:height if mapped, else from the roof:angle pitch.
+/// Only roof:height is rescaled; the angle applies to a span already in blocks.
+fn roof_peak_cap(
+    tags: &HashMap<String, String>,
+    roof_type: RoofType,
+    config: &RoofConfig,
+    roof_orientation: Option<&str>,
+    preferred_ridge_along_x: Option<bool>,
+    scale_factor: f64,
+) -> Option<i32> {
+    if let Some(m) = tags
+        .get("roof:height")
+        .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+        .filter(|m| *m > 0.0)
+    {
+        return Some(multiply_scale(m.round() as i32, scale_factor).max(1));
+    }
+
+    // These shapes never read peak_cap as a pitch.
+    if matches!(
+        roof_type,
+        RoofType::Flat | RoofType::Dome | RoofType::Cone | RoofType::Onion
+    ) {
+        return None;
+    }
+
+    let deg = tags
+        .get("roof:angle")
+        .and_then(|v| v.trim_end_matches('\u{b0}').trim().parse::<f64>().ok())
+        .filter(|d| *d > 0.0 && *d < 90.0)?;
+
+    // width()/length() are bbox extents, one less than the span in cells.
+    let w = config.width() + 1;
+    let l = config.length() + 1;
+
+    let run = match roof_type {
+        // A skillion climbs its whole run, picking the axis as the generator does.
+        RoofType::Skillion => {
+            (match tags
+                .get("roof:direction")
+                .map(|s| s.as_str())
+                .and_then(parse_roof_direction)
+            {
+                Some(StairFacing::West) | Some(StairFacing::East) => w,
+                Some(StairFacing::North) | Some(StairFacing::South) => l,
+                None => w.min(l),
+            }) as f64
+        }
+        // These slope over the shorter half-span in every direction.
+        RoofType::Hipped | RoofType::Mansard | RoofType::Pyramidal => w.min(l) as f64 / 2.0,
+        // Slopes perpendicular to the ridge, so this must match generate_gabled_roof.
+        _ => {
+            let width_is_longer = config.width() >= config.length();
+            let ridge_along_x = match roof_orientation {
+                Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
+                Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
+                _ => preferred_ridge_along_x.unwrap_or(width_is_longer),
+            };
+            (if ridge_along_x { l } else { w }) as f64 / 2.0
+        }
+    };
+
+    let rise = (deg.to_radians().tan() * run).round().max(1.0) as i32;
+    // An inferred rise still stays under the walls, as the mansard path bounds it.
+    Some(rise.min(config.building_height.max(3)))
+}
+
 /// Skillion (mono-pitch) roof descending toward `roof:direction`, or across the shorter axis.
 fn generate_skillion_roof(
     editor: &mut WorldEditor,
@@ -10019,7 +10172,7 @@ fn generate_skillion_roof(
     );
 }
 
-/// Pyramidal roof: tapers to a single apex via Chebyshev distance from centre.
+/// Pyramidal roof: tapers to a single apex via per-axis Chebyshev distance.
 fn generate_pyramidal_roof(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
@@ -10032,14 +10185,15 @@ fn generate_pyramidal_roof(
         .peak_cap
         .unwrap_or_else(|| ((config.building_height as f64) * 0.6).round().max(1.0) as i32);
     let peak_boost = uncapped_boost.min(wall_cap);
-    let max_distance = (config.width() / 2).max(config.length() / 2).max(1) as f64;
+    // Per-axis halves, as dome and cone use, so elongated footprints reach the eave.
+    let half_w = (config.width() / 2).max(1) as f64;
+    let half_l = (config.length() / 2).max(1) as f64;
 
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
     for &(x, z) in floor_area {
         let dx = (x - config.center_x).abs() as f64;
         let dz = (z - config.center_z).abs() as f64;
-        let distance_to_apex = dx.max(dz);
-        let height_factor = (1.0 - distance_to_apex / max_distance).max(0.0);
+        let height_factor = (1.0 - (dx / half_w).max(dz / half_l)).max(0.0);
         let roof_height = config.base_height + (height_factor * peak_boost as f64) as i32;
         roof_heights.insert((x, z), roof_height);
     }
@@ -10360,15 +10514,18 @@ fn generate_roof(
     }
 
     config.add_dormers = add_dormers;
-    // A mapped roof:height overrides the heuristic rise caps.
-    config.peak_cap = element
-        .tags
-        .get("roof:height")
-        .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
-        .filter(|m| *m > 0.0)
-        .map(|m| multiply_scale(m.round() as i32, scale_factor).max(1));
 
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
+    // A mapped roof:height, else a roof:angle pitch, overrides the heuristic caps.
+    let peak_cap = roof_peak_cap(
+        &element.tags,
+        roof_type,
+        &config,
+        roof_orientation,
+        preferred_ridge_along_x,
+        scale_factor,
+    );
+    config.peak_cap = peak_cap;
     let axis_snap = matches!(
         roof_type,
         RoofType::Gabled | RoofType::Gambrel | RoofType::HalfHipped
@@ -11223,14 +11380,34 @@ mod style_tests {
     fn attic_band_is_solid_with_small_lights() {
         use crate::element_processing::building_facade::ColumnFacade;
         let config = test_config(14, true, false);
-        let col = ColumnFacade::default();
         // Middle of the attic band: window only at the single light position.
-        let light = determine_wall_block_at_position_pristine(1, 12, 0, &config, col);
+        let light = determine_wall_block_at_position_pristine(
+            12,
+            &config,
+            ColumnFacade {
+                wall_u: 1,
+                ..Default::default()
+            },
+        );
         assert_eq!(light, GLASS, "attic light at window_col 1, floor_row 2");
-        let wall = determine_wall_block_at_position_pristine(0, 12, 0, &config, col);
+        let wall = determine_wall_block_at_position_pristine(
+            12,
+            &config,
+            ColumnFacade {
+                wall_u: 0,
+                ..Default::default()
+            },
+        );
         assert_eq!(wall, BRICK, "attic band is otherwise solid");
         // Body floors keep full 3-wide windows.
-        let body = determine_wall_block_at_position_pristine(0, 7, 0, &config, col);
+        let body = determine_wall_block_at_position_pristine(
+            7,
+            &config,
+            ColumnFacade {
+                wall_u: 0,
+                ..Default::default()
+            },
+        );
         assert_eq!(body, GLASS);
     }
 
@@ -11238,16 +11415,258 @@ mod style_tests {
     fn top_treatment_narrows_windows_and_adds_band() {
         use crate::element_processing::building_facade::ColumnFacade;
         let config = test_config(14, false, true);
-        let col = ColumnFacade::default();
         // Band below the treated top floor (h = height - cycle = 10, row 0).
-        let band = determine_wall_block_at_position_pristine(0, 10, 0, &config, col);
+        let band = determine_wall_block_at_position_pristine(
+            10,
+            &config,
+            ColumnFacade {
+                wall_u: 0,
+                ..Default::default()
+            },
+        );
         assert_eq!(band, SMOOTH_STONE);
         // Top floor loses its third window column…
-        let narrowed = determine_wall_block_at_position_pristine(2, 12, 0, &config, col);
+        let narrowed = determine_wall_block_at_position_pristine(
+            12,
+            &config,
+            ColumnFacade {
+                wall_u: 2,
+                ..Default::default()
+            },
+        );
         assert_eq!(narrowed, BRICK);
         // …but keeps the first two.
-        let kept = determine_wall_block_at_position_pristine(1, 12, 0, &config, col);
+        let kept = determine_wall_block_at_position_pristine(
+            12,
+            &config,
+            ColumnFacade {
+                wall_u: 1,
+                ..Default::default()
+            },
+        );
         assert_eq!(kept, GLASS);
+    }
+
+    // A 3-column glass strip must stay 3 columns wide at any angle. bx + bz was
+    // constant along a 135-degree wall, turning the facade into one band.
+    #[test]
+    fn window_rhythm_period_is_six_at_any_wall_angle() {
+        use crate::bresenham::bresenham_line;
+        let config = test_config(14, false, false);
+        // 0, 90, 45 and 135 degrees, plus shallow angles both ways.
+        for &(x2, z2) in &[
+            (40, 0),
+            (0, 40),
+            (40, 40),
+            (-40, 40),
+            (40, 13),
+            (13, 40),
+            (40, -13),
+        ] {
+            let axis_x = segment_axis_x(0, 0, x2, z2);
+            let mut prev_u: Option<i32> = None;
+            let (mut glass_run, mut max_glass_run) = (0, 0);
+            for (bx, _, bz) in bresenham_line(0, 0, 0, x2, 0, z2) {
+                let u = if axis_x { bx } else { bz };
+                if let Some(p) = prev_u {
+                    assert_eq!(
+                        (u - p).abs(),
+                        1,
+                        "ordinate must step by one per column at {:?}",
+                        (x2, z2)
+                    );
+                }
+                prev_u = Some(u);
+                if config.window_col(u) < 3 {
+                    glass_run += 1;
+                    max_glass_run = max_glass_run.max(glass_run);
+                } else {
+                    glass_run = 0;
+                }
+            }
+            assert_eq!(
+                max_glass_run,
+                3,
+                "window strip must stay 3 columns wide at {:?}",
+                (x2, z2)
+            );
+        }
+    }
+
+    fn peak_cap_config(w: i32, l: i32) -> RoofConfig {
+        RoofConfig {
+            min_x: 0,
+            max_x: w - 1,
+            min_z: 0,
+            max_z: l - 1,
+            center_x: (w - 1) / 2,
+            center_z: (l - 1) / 2,
+            base_height: 10,
+            building_height: 40,
+            abs_terrain_offset: 0,
+            roof_block: BRICK,
+            add_dormers: false,
+            element_id_for_decor: 1,
+            peak_cap: None,
+        }
+    }
+
+    fn cap(
+        pairs: &[(&str, &str)],
+        rt: RoofType,
+        w: i32,
+        l: i32,
+        orient: Option<&str>,
+    ) -> Option<i32> {
+        let tags: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        roof_peak_cap(&tags, rt, &peak_cap_config(w, l), orient, None, 1.0)
+    }
+
+    // roof:angle is a stated pitch, previously read by nothing at all.
+    #[test]
+    fn roof_angle_drives_the_ridge_rise() {
+        // 45 degrees on a 20x18 gable: the ridge runs along 20, so the slope crosses 9.
+        assert_eq!(
+            cap(&[("roof:angle", "45")], RoofType::Gabled, 20, 18, None),
+            Some(9)
+        );
+        // Shallower pitch, same span.
+        assert_eq!(
+            cap(&[("roof:angle", "30")], RoofType::Gabled, 20, 18, None),
+            Some(5)
+        );
+        // A mapped roof:height still wins outright.
+        assert_eq!(
+            cap(
+                &[("roof:angle", "45"), ("roof:height", "3")],
+                RoofType::Gabled,
+                20,
+                18,
+                None
+            ),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn roof_angle_uses_the_span_the_roof_actually_crosses() {
+        // 20 wide x 8 long, 45 degrees. Default ridge runs along the LONG axis,
+        // so the slope crosses the 8 axis: rise 4.
+        assert_eq!(
+            cap(&[("roof:angle", "45")], RoofType::Gabled, 20, 8, None),
+            Some(4)
+        );
+        // `roof:orientation=across` flips the ridge onto the short axis, so the
+        // slope now crosses the 20 axis: rise 10.
+        assert_eq!(
+            cap(
+                &[("roof:angle", "45")],
+                RoofType::Gabled,
+                20,
+                8,
+                Some("across")
+            ),
+            Some(10)
+        );
+        // A skillion climbs its whole run, not a half-span, and picks the axis
+        // from roof:direction. East -> the 20 axis.
+        assert_eq!(
+            cap(
+                &[("roof:angle", "45"), ("roof:direction", "90")],
+                RoofType::Skillion,
+                20,
+                8,
+                None
+            ),
+            Some(20)
+        );
+        // Untagged direction falls back to the shorter axis, like the generator.
+        assert_eq!(
+            cap(&[("roof:angle", "45")], RoofType::Skillion, 20, 8, None),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn implausible_or_irrelevant_roof_angles_are_ignored() {
+        for bad in ["0", "90", "-10", "flat", ""] {
+            assert_eq!(
+                cap(&[("roof:angle", bad)], RoofType::Gabled, 20, 18, None),
+                None,
+                "roof:angle={bad:?} must not produce a rise"
+            );
+        }
+        // Shapes that never read peak_cap as a pitch stay on their own paths.
+        for rt in [
+            RoofType::Flat,
+            RoofType::Dome,
+            RoofType::Cone,
+            RoofType::Onion,
+        ] {
+            assert_eq!(cap(&[("roof:angle", "45")], rt, 20, 18, None), None);
+        }
+        // A steep pitch on a wide footprint is still bounded by the walls.
+        assert_eq!(
+            cap(&[("roof:angle", "80")], RoofType::Gabled, 200, 200, None),
+            Some(40),
+            "rise is clamped to building_height"
+        );
+    }
+
+    // Each ring vertex is walked twice and the axis flips at most corners, so every
+    // pass must agree on its ordinate or decorations land in front of solid wall.
+    #[test]
+    fn shared_ring_vertices_resolve_to_one_ordinate() {
+        let rings: [&[(i32, i32)]; 6] = [
+            // Axis-aligned rectangle: the axis flips at all four corners.
+            &[(0, 0), (20, 0), (20, 10), (0, 10), (0, 0)],
+            // Shallow/steep mix: the axis flips mid-polyline, not just at
+            // right angles.
+            &[(0, 0), (25, 7), (30, 30), (5, 26), (0, 0)],
+            // Reflex corner.
+            &[(0, 0), (18, 0), (18, 9), (9, 9), (9, 18), (0, 18), (0, 0)],
+            // 45-degree ties on every edge.
+            &[(0, 0), (16, 16), (32, 0), (16, -16), (0, 0)],
+            // Duplicate vertex: low --scale collapses these and rotation re-rounds nodes.
+            &[(0, 0), (0, 10), (0, 10), (10, 10), (0, 0)],
+            // Duplicate on the seam vertex, where the walk-back has to wrap.
+            &[(0, 0), (0, 0), (14, 0), (14, 8), (0, 0)],
+        ];
+
+        for ring in rings {
+            let nodes: Vec<ProcessedNode> = ring
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: i as u64,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect();
+
+            let mut seen: HashMap<(i32, i32), i32> = HashMap::new();
+            for i in 1..nodes.len() {
+                let (x1, z1) = (nodes[i - 1].x, nodes[i - 1].z);
+                let (x2, z2) = (nodes[i].x, nodes[i].z);
+                let seg_axis_x = segment_axis_x(x1, z1, x2, z2);
+                let start_axis_x = segment_start_axis_x(&nodes, i, seg_axis_x);
+                for (idx, (bx, _, bz)) in bresenham_line(x1, 0, z1, x2, 0, z2).iter().enumerate() {
+                    let u = wall_ordinate(idx, start_axis_x, seg_axis_x, *bx, *bz);
+                    if let Some(prev) = seen.insert((*bx, *bz), u) {
+                        assert_eq!(
+                            prev,
+                            u,
+                            "column {:?} got two ordinates on ring {ring:?}",
+                            (*bx, *bz)
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
