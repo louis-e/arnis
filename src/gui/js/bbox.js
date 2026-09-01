@@ -780,7 +780,7 @@ $(document).ready(function () {
             if (generation !== basemapGeneration || basemapSettled) return;
             basemapSettled = true;
             clearBasemapWatchdog();
-            arnisLog('error', 'Custom map source "' + url + '" is not loading (' + reason +
+            arnisLog('error', 'Custom map source host "' + host + '" is not loading (' + reason +
                 '). Check the URL template, or clear the setting to go back to the map themes.');
         }
 
