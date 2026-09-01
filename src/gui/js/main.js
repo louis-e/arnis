@@ -118,8 +118,7 @@ async function applyLocalization(localization) {
     "span[data-localize='world_scale']": "world_scale",
     "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
-    // DEPRECATED: Ground level localization removed
-    // "label[data-localize='ground_level']": "ground_level",
+    "span[data-localize='ground_level']": "ground_level",
     "span[data-localize='language']": "language",
     "span[data-localize='generation_mode']": "generation_mode",
     "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
@@ -175,8 +174,7 @@ async function applyLocalization(localization) {
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
-    // DEPRECATED: Ground level placeholder removed
-    // "input[id='ground-level']": "placeholder_ground"
+    "input[id='ground-level']": "placeholder_ground"
   };
 
   for (const selector in localizationElements) {
@@ -1764,12 +1762,10 @@ async function startGeneration() {
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
-    // DEPRECATED: Ground level input removed from UI
-    var ground_level = -62;
+    var ground_level = parseInt(document.getElementById("ground-level").value, 10);
 
     // Validate ground_level
-    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
+    ground_level = isNaN(ground_level) ? -62 : ground_level;
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;

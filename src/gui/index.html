@@ -297,6 +297,17 @@
           <span data-localize="world_scale_objects_skipped">Below 0.30 buildings and roads are too small to render, so only terrain and land cover are generated.</span>
         </div>
 
+        <!-- Ground Level -->
+        <div class="settings-row">
+          <label for="ground-level">
+            <span data-localize="ground_level">Ground Level</span>
+            <span class="tooltip-icon" data-tooltip="Y level the generated terrain is anchored to. Match your world's actual floor if it isn't vanilla's -64 (e.g. a mod, or Extend build height's -2032).">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="number" id="ground-level" name="ground-level" min="-2032" max="2031" value="-62" placeholder="Ground Level">
+          </div>
+        </div>
+
         <!-- Rotation Angle -->
         <div class="settings-row">
           <label for="rotation-angle-input">
