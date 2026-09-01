@@ -121,10 +121,6 @@ async function applyLocalization(localization) {
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "span[data-localize='language']": "language",
-    "span[data-localize='celestial_body']": "celestial_body",
-    "button[data-localize='body_earth']": "body_earth",
-    "button[data-localize='body_moon']": "body_moon",
-    "button[data-localize='body_mars']": "body_mars",
     "span[data-localize='generation_mode']": "generation_mode",
     "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
     "option[data-localize='mode_geo_only']": "mode_geo_only",
@@ -450,7 +446,8 @@ function getMapFrame() {
   return document.querySelector('.map-container');
 }
 
-// Also called on iframe load: a revert can change the body before the map listens.
+// The map owns the toggle, but an iframe reload restarts it on Earth, so the
+// parent's value has to be pushed back.
 function pushBodyToMap() {
   const mapIframe = getMapFrame();
   if (mapIframe && mapIframe.contentWindow) {
@@ -484,6 +481,13 @@ function setCelestialBody(body) {
     markRow(group);
   });
 
+  const notice = document.getElementById('off-earth-notice');
+  if (notice) {
+    notice.style.display = off ? '' : 'none';
+    document.getElementById('off-earth-notice-body').textContent =
+      selectedCelestialBody === 'moon' ? 'Moon' : 'Mars';
+  }
+
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
   const timeSlider = document.getElementById('world-time-slider');
   if (timeSlider) {
@@ -505,6 +509,11 @@ function registerMessageEvent() {
     if (bboxText && !event.data.type) {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
+    }
+
+    // World toggled on the map toolbar
+    if (event.data && event.data.type === 'bodyChanged') {
+      setCelestialBody(event.data.body);
     }
 
     // Handle angle measurement from the map polyline tool
@@ -942,19 +951,7 @@ function initSettings() {
     });
   });
 
-  // Celestial body segmented control
-  const bodyGroup = document.getElementById("body-group");
-  bodyGroup.querySelectorAll(".segment").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      bodyGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      setCelestialBody(btn.dataset.body);
-      // Swap the map basemap and drop any selection made on the other body.
-      pushBodyToMap();
-    });
-  });
-
-  // A revert or global reset can flip the body while the map is still loading.
+  // A reloaded map comes back on Earth; restore whatever was picked.
   const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
 
@@ -1093,7 +1090,6 @@ function initSettings() {
     if (raw && !isValidTileTemplate(raw)) {
       window.arnisLog('warn', 'Ignoring custom map source: expected an http(s) URL containing {z}, {x} and {y}.');
       localStorage.removeItem('customTileUrl');
-    }
     } else if (raw) {
       localStorage.setItem('customTileUrl', raw);
     } else {
