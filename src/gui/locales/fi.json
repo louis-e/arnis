@@ -34,6 +34,7 @@
   "placeholder_ground": "Maataso",
   "language": "Kieli",
   "map_theme": "Karttateema",
+  "custom_map_source": "Mukautettu karttalähde",
   "terrain": "Maasto",
   "celestial_body": "Maailma",
   "body_earth": "Maa",

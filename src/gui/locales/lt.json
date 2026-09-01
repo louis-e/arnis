@@ -34,6 +34,7 @@
   "placeholder_ground": "Žemės lygis",
   "language": "Kalba",
   "map_theme": "Žemėlapio tema",
+  "custom_map_source": "Pasirinktinis žemėlapio šaltinis",
   "terrain": "Reljefas",
   "celestial_body": "Pasaulis",
   "body_earth": "Žemė",

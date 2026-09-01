@@ -34,6 +34,7 @@
   "placeholder_ground": "Földszint",
   "language": "Nyelv",
   "map_theme": "Térkép téma",
+  "custom_map_source": "Egyéni térképforrás",
   "terrain": "Terep",
   "celestial_body": "Világ",
   "body_earth": "Föld",

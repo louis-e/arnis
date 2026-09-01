@@ -34,6 +34,7 @@
   "placeholder_ground": "Niveau du sol",
   "language": "Langue",
   "map_theme": "Thème de carte",
+  "custom_map_source": "Source de carte personnalisée",
   "terrain": "Terrain",
   "celestial_body": "Monde",
   "body_earth": "Terre",

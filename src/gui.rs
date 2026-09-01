@@ -165,7 +165,8 @@ pub fn run_gui() {
             gui_get_3d_model_attributions,
             gui_get_terrain_preview,
             gui_get_preview_landcover,
-            gui_get_preview_buildings
+            gui_get_preview_buildings,
+            gui_log
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -290,6 +291,30 @@ fn gui_set_save_path(path: String) -> Result<String, String> {
         return Err("Path is not a directory.".to_string());
     }
     Ok(path)
+}
+
+/// Sink for frontend diagnostics (tile/network failures, uncaught errors).
+///
+/// The webview console is unreachable in a release build, so anything the UI
+/// learns about the user's network never reached the log file users are asked
+/// to attach to bug reports. Routing it through `log` puts it in the same
+/// LogDir target as the backend's own output.
+#[tauri::command]
+fn gui_log(level: String, message: String) {
+    // The frontend is not a trusted formatter: cap the length so a runaway
+    // handler cannot fill the log file, and keep it on one line so the file
+    // stays greppable.
+    const MAX_LEN: usize = 2000;
+    let mut message: String = message.replace(['\n', '\r'], " ");
+    if message.chars().count() > MAX_LEN {
+        message = message.chars().take(MAX_LEN).collect::<String>() + "...[truncated]";
+    }
+
+    match level.as_str() {
+        "error" => log::error!(target: "webview", "{message}"),
+        "warn" => log::warn!(target: "webview", "{message}"),
+        _ => log::info!(target: "webview", "{message}"),
+    }
 }
 
 /// Opens a native folder-picker dialog and returns the chosen path.
