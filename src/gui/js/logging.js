@@ -104,11 +104,25 @@
         if (withinBudget()) deliver(level, text);
     };
 
+    // Identity check rather than an origin string: it is scheme-independent
+    // (the app is served from tauri://, where origins are awkward) and strictly
+    // stronger, since only a frame this window actually embeds can match.
+    function isOwnChildFrame(source) {
+        if (!source) return false;
+        for (var i = 0; i < window.frames.length; i++) {
+            if (window.frames[i] === source) return true;
+        }
+        return false;
+    }
+
     // The map iframe posts here; the top frame is the only one that can invoke.
     if (isTopFrame) {
         window.addEventListener('message', function (event) {
             var data = event.data;
             if (!data || data.type !== 'arnisLog') return;
+            // Anything can postMessage to this window. Only relay our own
+            // frames, so nothing else can write into the application log.
+            if (!isOwnChildFrame(event.source)) return;
             var text;
             try {
                 text = String(data.message);

@@ -597,6 +597,19 @@ $(document).ready(function () {
     // can sit pending for a minute or more before it ever fires 'error'.
     var BASEMAP_STALL_MS = 12000;
 
+    // The URL behind the 'custom' theme. It deliberately opts out of the
+    // fallback chain: someone who picked Custom has already established that
+    // the built-in hosts do not work for them, so quietly walking back through
+    // those five would just be a slow route to the same blank map. Failures are
+    // reported instead of papered over, which also means a typo in the template
+    // is visible rather than hidden behind a provider that happens to load.
+    var customTileUrl = (localStorage.getItem('customTileUrl') || '').trim();
+
+    function isValidTileTemplate(url) {
+        return /^https?:\/\//i.test(url) &&
+            url.indexOf('{z}') !== -1 && url.indexOf('{x}') !== -1 && url.indexOf('{y}') !== -1;
+    }
+
     // What is actually on screen, which is not necessarily what the user picked.
     var activeThemeKey = null;
     // Providers already ruled out in this recovery run, so it cannot cycle.
@@ -659,7 +672,7 @@ $(document).ready(function () {
 
     // Records the Earth preference; off Earth the body's own basemap wins.
     function changeTileTheme(themeKey) {
-        if (!tileThemes[themeKey]) return;
+        if (themeKey !== 'custom' && !tileThemes[themeKey]) return;
         selectedEarthTheme = themeKey;
         localStorage.setItem('selectedTileTheme', themeKey);
         if (currentBody === 'earth') applyBasemap();
@@ -742,6 +755,72 @@ $(document).ready(function () {
         }, BASEMAP_STALL_MS);
     }
 
+    // Mounts the user's own tile source. No chain: see customTileUrl above.
+    function showCustomBasemap(url) {
+        detachBasemap();
+        activeThemeKey = 'custom';
+        basemapSettled = false;
+        var generation = ++basemapGeneration;
+        var mountedAt = Date.now();
+
+        var host = url;
+        try {
+            host = new URL(url.replace(/\{[sxyz]\}/g, '0')).hostname;
+        } catch (e) { /* keep the raw template for the attribution */ }
+
+        currentTileLayer = L.tileLayer(url, {
+            attribution: 'Tiles: ' + host,
+            maxZoom: 19,
+            // Only meaningful when the template uses {s}; harmless otherwise.
+            subdomains: 'abc'
+        });
+
+        var errorCount = 0;
+        function reportCustomFailure(reason) {
+            if (generation !== basemapGeneration || basemapSettled) return;
+            basemapSettled = true;
+            clearBasemapWatchdog();
+            arnisLog('error', 'Custom map source "' + url + '" is not loading (' + reason +
+                '). Check the URL template, or clear the setting to go back to the map themes.');
+        }
+
+        currentTileLayer.on('tileload', function () { markBasemapHealthy(generation); });
+        currentTileLayer.on('tileerror', function () {
+            if (generation !== basemapGeneration) return;
+            errorCount++;
+            if (errorCount >= BASEMAP_ERROR_THRESHOLD &&
+                Date.now() - mountedAt >= BASEMAP_MIN_OBSERVE_MS) {
+                reportCustomFailure(errorCount + ' tile requests failed, none succeeded');
+            }
+        });
+        currentTileLayer.addTo(map);
+
+        basemapWatchdog = setTimeout(function () {
+            basemapWatchdog = null;
+            reportCustomFailure('no tile painted within ' + (BASEMAP_STALL_MS / 1000) + 's');
+        }, BASEMAP_STALL_MS);
+    }
+
+    // Driven by the settings field in the parent. An empty or unusable value
+    // hands the map back to the theme chain.
+    function setCustomTileUrl(url) {
+        var next = (url || '').trim();
+        if (next && !isValidTileTemplate(next)) {
+            arnisLog('warn', 'Ignoring custom map source "' + next +
+                '": expected an http(s) URL containing {z}, {x} and {y}.');
+            next = '';
+        }
+        if (next === customTileUrl) return;
+        customTileUrl = next;
+        if (next) {
+            localStorage.setItem('customTileUrl', next);
+        } else {
+            localStorage.removeItem('customTileUrl');
+        }
+        // Only redraws when the URL is the thing actually on screen.
+        if (currentBody === 'earth' && selectedEarthTheme === 'custom') applyBasemap();
+    }
+
     // Function to apply the active basemap, restarting the failover chain
     function applyBasemap() {
         basemapAttempted = [];
@@ -752,20 +831,39 @@ $(document).ready(function () {
             detachBasemap();
             activeThemeKey = null;
             basemapSettled = true;
-            basemapGeneration++;
-            var body = bodyBasemaps[currentBody];
+            // Same staleness rule as the Earth path: a removed layer can still
+            // deliver queued tile events. Both the token and the body name are
+            // captured, so a late Moon error cannot be reported against Mars.
+            var bodyGeneration = ++basemapGeneration;
+            var bodyName = currentBody;
+            var body = bodyBasemaps[bodyName];
             currentTileLayer = L.tileLayer(body.url, body.options);
             var bodyErrors = 0;
             var bodyPainted = false;
-            currentTileLayer.on('tileload', function () { bodyPainted = true; });
+            currentTileLayer.on('tileload', function () {
+                if (bodyGeneration !== basemapGeneration) return;
+                bodyPainted = true;
+            });
             currentTileLayer.on('tileerror', function () {
+                if (bodyGeneration !== basemapGeneration) return;
                 bodyErrors++;
                 if (!bodyPainted && bodyErrors === BASEMAP_ERROR_THRESHOLD) {
-                    arnisLog('warn', 'Basemap for ' + currentBody + ' is not loading (' +
+                    arnisLog('warn', 'Basemap for ' + bodyName + ' is not loading (' +
                         bodyErrors + ' failed tile requests, none succeeded).');
                 }
             });
             currentTileLayer.addTo(map);
+            return;
+        }
+
+        if (selectedEarthTheme === 'custom') {
+            if (isValidTileTemplate(customTileUrl)) {
+                showCustomBasemap(customTileUrl);
+            } else if (!currentTileLayer) {
+                // Custom picked but nothing usable entered yet. Show a real map
+                // rather than a blank one, without overwriting their choice.
+                showEarthTheme(BASEMAP_FALLBACK_CHAIN[0]);
+            }
             return;
         }
 
@@ -1198,6 +1296,11 @@ $(document).ready(function () {
     window.addEventListener('message', function(event) {
         if (event.data && event.data.type === 'changeTileTheme') {
             changeTileTheme(event.data.theme);
+        }
+
+        // User-supplied tile template from the settings panel
+        if (event.data && event.data.type === 'setCustomTileUrl') {
+            setCustomTileUrl(event.data.url);
         }
 
         // Coordinates typed into the parent's bbox field

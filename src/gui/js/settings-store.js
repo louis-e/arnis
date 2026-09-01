@@ -49,6 +49,7 @@ const SETTINGS = [
   // Map & Input. #bbox-coords is the area selection, not a preference, so it
   // is intentionally absent.
   { id: 'tile-theme-select', kind: 'select', store: EXTERNAL },
+  { id: 'custom-tile-url', kind: 'text', store: EXTERNAL },
 
   // Application
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },

@@ -365,7 +365,19 @@
               <option value="stadia-bright">Smooth Bright</option>
               <option value="stadia-dark">Smooth Dark</option>
               <option value="openfreemap-liberty">Modern</option>
+              <option value="custom">Custom</option>
             </select>
+          </div>
+        </div>
+
+        <!-- Custom Map Source, shown only for the Custom theme -->
+        <div class="settings-row" id="custom-tile-row">
+          <label for="custom-tile-url">
+            <span data-localize="custom_map_source">Custom Map Source</span>
+            <span class="tooltip-icon" data-tooltip="Tile URL template containing {z}, {x} and {y}. Must be WGS-84; GCJ-02 sources (most Chinese ones) appear shifted.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="text" id="custom-tile-url" name="custom-tile-url" placeholder="https://example.com/{z}/{x}/{y}.png">
           </div>
         </div>
 
