@@ -38,9 +38,15 @@ pub struct Args {
     #[arg(long, default_value = "requests")]
     pub downloader: String,
 
-    /// World scale to use, in blocks per meter (1.0 = real size)
+    /// World scale to use, in blocks per meter (1.0 = real size).
+    /// Ignored for --body moon/mars, which use their own fixed scale.
     #[arg(long, default_value_t = 1.0, allow_hyphen_values = true, value_parser = parse_scale)]
     pub scale: f64,
+
+    /// Celestial body to generate. moon and mars use NASA PDS elevation at a fixed
+    /// low scale and have no OSM data, so every object option is ignored.
+    #[arg(long, value_enum, default_value_t = crate::celestial::CelestialBody::Earth)]
+    pub body: crate::celestial::CelestialBody,
 
     /// Projection mode for coordinate mapping
     /// local: each generation starts at Minecraft (0,0) (default)
@@ -150,7 +156,7 @@ pub struct Args {
     pub gamemode: GameMode,
 
     /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
-    #[arg(long, default_value_t = 6000, value_parser = clap::value_parser!(i64).range(0..24000))]
+    #[arg(long, default_value_t = DEFAULT_WORLD_TIME, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
 
     /// Readable image signs, Java only. `basic` covers public signage: street names,
@@ -297,8 +303,40 @@ impl GameMode {
 /// Validates CLI arguments after parsing.
 /// For Java Edition: `--path` is required. If the directory doesn't exist, it will be created.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
+/// Non-Earth bodies drive their own scale and force terrain-only. Shared by the
+/// CLI and the GUI so the two cannot disagree about what Moon/Mars means.
+pub fn apply_body_defaults(args: &mut Args) {
+    if args.body.is_earth() {
+        return;
+    }
+    args.scale = args.body.world_scale();
+    args.mode = GenerationMode::TerrainOnly;
+    args.overture = false;
+    args.canopy_height = false;
+    args.use_3d = false;
+    args.interior = false;
+    args.legacy_trees = false;
+    args.aws_only_elevation = false;
+    // Relief already fits vanilla height, so the pack would add only empty sky.
+    args.disable_height_limit = false;
+    // Airless bodies look right at night. Only a default: comparing against the
+    // flag's own default lets an explicit --world-time win.
+    if args.world_time == DEFAULT_WORLD_TIME {
+        args.world_time = MIDNIGHT_TICKS;
+    }
+}
+
+/// Clap's `--world-time` default, so `apply_body_defaults` can tell left-alone
+/// from explicitly-set.
+pub const DEFAULT_WORLD_TIME: i64 = 6_000;
+/// Minecraft tick for midnight (tick 0 is 06:00).
+pub const MIDNIGHT_TICKS: i64 = 18_000;
+
 pub fn validate_args(args: &Args) -> Result<(), String> {
-    validate_scale(args.scale)?;
+    // Moon/Mars scale is ours, and sits below MIN_SCALE by design.
+    if args.body.is_earth() {
+        validate_scale(args.scale)?;
+    }
 
     if args.bedrock && args.luanti {
         return Err("Cannot use --bedrock and --luanti together.".to_string());

@@ -134,11 +134,13 @@ pub fn fetch_elevation_data(
     // Fallback chain: selected provider, then Mapterhorn, then AWS.
     let provider = select_provider(bbox, source_mode);
     let mut chain: Vec<Box<dyn ElevationProvider>> = vec![provider];
-    if chain[0].name() != "mapterhorn" && chain[0].name() != "aws" {
-        chain.push(Box::new(providers::mapterhorn::Mapterhorn));
-    }
-    if chain[0].name() != "aws" {
-        chain.push(Box::new(providers::aws_terrain::AwsTerrain));
+    if source_mode.allows_earth_fallback() {
+        if chain[0].name() != "mapterhorn" && chain[0].name() != "aws" {
+            chain.push(Box::new(providers::mapterhorn::Mapterhorn));
+        }
+        if chain[0].name() != "aws" {
+            chain.push(Box::new(providers::aws_terrain::AwsTerrain));
+        }
     }
 
     emit_gui_progress_update(10.0, "Downloading data...");
@@ -150,10 +152,15 @@ pub fn fetch_elevation_data(
 
     // Shared post-processing pipeline
     let mut height_grid = raw.heights_meters;
-    filter_elevation_outliers(&mut height_grid);
-    bench.mark("elev_filter_outliers");
-    repair_terrain_anomalies(&mut height_grid);
-    bench.mark("elev_repair_anomalies");
+    // Both passes target Earth DSM defects and actively damage altimetry: a lunar
+    // mare is flat to within metres, so its IQR is near zero and a real central
+    // peak reads as corruption. PDS gaps are already NaN, so fill is all we need.
+    if source_mode.allows_earth_fallback() {
+        filter_elevation_outliers(&mut height_grid);
+        bench.mark("elev_filter_outliers");
+        repair_terrain_anomalies(&mut height_grid);
+        bench.mark("elev_repair_anomalies");
+    }
     emit_gui_progress_update(14.0, "Processing elevation...");
     // Safety net: fill any remaining NaN from tile gaps or partial provider coverage
     fill_nan_values(&mut height_grid);

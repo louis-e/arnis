@@ -326,7 +326,11 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 }
 
 /// Adds localized area name to the world name in level.dat
-fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
+fn add_localized_world_name(
+    world_path: PathBuf,
+    bbox: &LLBBox,
+    body: crate::celestial::CelestialBody,
+) -> PathBuf {
     // Only proceed if the path exists
     if !world_path.exists() {
         return world_path;
@@ -371,10 +375,14 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
     let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
 
-    // Try to fetch the area name
-    let area_name = match retrieve_data::fetch_area_name(center_lat, center_lon) {
-        Ok(Some(name)) => name,
-        _ => return world_path, // Keep original name if no area name found
+    // Nominatim would reverse-geocode lunar coordinates into a terrestrial place.
+    let area_name = if !body.is_earth() {
+        body.display_name().to_string()
+    } else {
+        match retrieve_data::fetch_area_name(center_lat, center_lon) {
+            Ok(Some(name)) => name,
+            _ => return world_path, // Keep original name if no area name found
+        }
     };
 
     // Create new name with localized area name, ensuring total length doesn't exceed 30 characters
@@ -988,6 +996,7 @@ fn gui_start_generation(
     world_time: i64,
     map_item: bool,
     signage: String,
+    celestial_body_name: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -1008,6 +1017,15 @@ fn gui_start_generation(
         emit_gui_error(&e);
         return Err(e);
     }
+
+    // Substituted here, not just in Args: the spawn transform and world bounds
+    // below must see the same scale.
+    let celestial_body = crate::celestial::CelestialBody::from_str_lossy(&celestial_body_name);
+    let world_scale = if celestial_body.is_earth() {
+        world_scale
+    } else {
+        celestial_body.world_scale()
+    };
 
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);
@@ -1178,7 +1196,7 @@ fn gui_start_generation(
                 WorldFormat::JavaAnvil => {
                     // Java: use the selected world path, add localized name if new
                     let updated_path = if is_new_world {
-                        add_localized_world_name(world_path.clone(), &bbox)
+                        add_localized_world_name(world_path.clone(), &bbox, celestial_body)
                     } else {
                         world_path.clone()
                     };
@@ -1248,7 +1266,7 @@ fn gui_start_generation(
 
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
-            let args: Args = Args {
+            let mut args: Args = Args {
                 bbox: Some(bbox),
                 file: None,
                 save_json_file: None,
@@ -1294,7 +1312,11 @@ fn gui_start_generation(
                 map_preview: world_format != WorldFormat::LuantiWorld
                     && rotation_angle.abs() <= f64::EPSILON,
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
+                body: celestial_body,
             };
+            // Same helper the CLI uses, so the two cannot diverge.
+            crate::args::apply_body_defaults(&mut args);
+            let args = args;
 
             // Same as run_cli: fix the dimension span before the editor is touched.
             crate::world_editor::set_world_bounds(

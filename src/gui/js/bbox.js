@@ -512,24 +512,76 @@ $(document).ready(function () {
         }
     };
 
+    // Real orbital photography, served as Web Mercator XYZ, so the map CRS stays
+    // EPSG:3857 and a body switch is just a layer swap. Row order differs between
+    // the two and was verified: Mars is TMS, the CARTO-hosted Moon map is XYZ.
+    var bodyBasemaps = {
+        moon: {
+            url: 'https://cartocdn-gusc.global.ssl.fastly.net/opmbuilder/api/v1/map/named/opm-moon-basemap-v0-1/all/{z}/{x}/{y}.png',
+            options: {
+                attribution: 'Imagery: NASA LRO LROC WAC | Basemap &copy; <a href="https://www.openplanetary.org/" target="_blank">OpenPlanetary</a> | Elevation: NASA PDS LOLA',
+                minZoom: 1,
+                maxZoom: 12,
+                maxNativeZoom: 10
+            },
+            // Copernicus crater: sharp rim, terraced walls, central peaks.
+            home: [9.62, -20.08],
+            homeZoom: 5
+        },
+        mars: {
+            url: 'https://s3-eu-west-1.amazonaws.com/whereonmars.cartodb.net/viking_mdim21_global/{z}/{x}/{y}.png',
+            options: {
+                attribution: 'Imagery: NASA Viking MDIM 2.1 | Basemap &copy; <a href="https://www.openplanetary.org/" target="_blank">OpenPlanetary</a> | Elevation: NASA PDS MOLA',
+                tms: true,
+                minZoom: 1,
+                maxZoom: 12,
+                maxNativeZoom: 7
+            },
+            // Valles Marineris: 7 km of relief and unmistakable from orbit.
+            home: [-13.9, -59.2],
+            homeZoom: 4
+        }
+    };
+
     // Global variable to store current tile layer
     var currentTileLayer = null;
+    var currentBody = 'earth';
+    // Read by updateTerrainPreviewButton, which lives outside this scope.
+    window._currentBody = currentBody;
 
-    // Function to change tile theme with automatic HTTP fallback
+    // Records the Earth preference; off Earth the body's own basemap wins.
     function changeTileTheme(themeKey) {
+        if (!tileThemes[themeKey]) return;
+        selectedEarthTheme = themeKey;
+        localStorage.setItem('selectedTileTheme', themeKey);
+        if (currentBody === 'earth') applyBasemap();
+    }
+
+    // Function to apply the active basemap with automatic HTTP fallback
+    function applyBasemap() {
         // Remove current tile layer if it exists
         if (currentTileLayer) {
             map.removeLayer(currentTileLayer);
+            currentTileLayer = null;
+        }
+
+        if (currentBody !== 'earth') {
+            var body = bodyBasemaps[currentBody];
+            currentTileLayer = L.tileLayer(body.url, body.options);
+            currentTileLayer.addTo(map);
+            return;
         }
 
         // Get the theme configuration
+        var themeKey = selectedEarthTheme;
         var theme = tileThemes[themeKey];
         if (theme) {
             if (theme.type === 'vector') {
                 // Fall back to OSM raster if MapLibre plugin failed to load
                 if (typeof L.maplibreGL !== 'function') {
                     console.warn('MapLibre GL plugin unavailable, falling back to OSM raster');
-                    changeTileTheme('osm');
+                    selectedEarthTheme = 'osm';
+                    applyBasemap();
                     return;
                 }
                 currentTileLayer = L.maplibreGL({
@@ -567,15 +619,43 @@ $(document).ready(function () {
 
                 currentTileLayer.addTo(map);
             }
-
-            // Save preference to localStorage
-            localStorage.setItem('selectedTileTheme', themeKey);
         }
     }
 
     // Load saved theme or default to OSM
     var savedTheme = localStorage.getItem('selectedTileTheme') || 'osm';
-    changeTileTheme(savedTheme);
+    var selectedEarthTheme = savedTheme;
+
+    // Driven by the settings selector in the parent. Earth is restored on every
+    // start, so a Moon world stays a deliberate choice.
+    function changeBody(body) {
+        if (body === currentBody) return;
+        currentBody = bodyBasemaps[body] ? body : 'earth';
+        window._currentBody = currentBody;
+
+        // A bbox from another body is meaningless. The existing delete path also
+        // resets bounds to the 0,0,0,0 sentinel the parent watches for.
+        if (drawnItems && drawnItems.getLayers().length) {
+            var removed = L.layerGroup();
+            drawnItems.eachLayer(function (l) { removed.addLayer(l); });
+            map.fire('draw:deleted', { layers: removed });
+        }
+
+        applyBasemap();
+
+        if (currentBody === 'earth') {
+            map.setView([50.114768, 8.687322], 4);
+        } else {
+            var b = bodyBasemaps[currentBody];
+            map.setView(b.home, b.homeZoom);
+        }
+
+        // Nominatim only knows Earth place names.
+        var search = document.getElementById('search-container');
+        if (search) search.style.display = currentBody === 'earth' ? '' : 'none';
+    }
+
+    applyBasemap();
 
     // World overlay state
     var worldOverlay = null;
@@ -935,6 +1015,11 @@ $(document).ready(function () {
     window.addEventListener('message', function(event) {
         if (event.data && event.data.type === 'changeTileTheme') {
             changeTileTheme(event.data.theme);
+        }
+
+        // Earth / Moon / Mars picked in the settings modal
+        if (event.data && event.data.type === 'changeBody') {
+            changeBody(event.data.body);
         }
 
         // Handle world preview data ready (after generation completes)
@@ -1662,7 +1747,8 @@ function updateTerrainPreviewButton() {
     if (!btn) return;
     var parts = (document.getElementById('boxbounds').textContent || '').trim().split(/[,\s]+/).map(Number);
     var ok = false;
-    if (parts.length === 4 && parts.every(isFinite)) {
+    // The preview reads Earth terrain tiles, which say nothing about Moon/Mars.
+    if (window._currentBody === 'earth' && parts.length === 4 && parts.every(isFinite)) {
         var midLat = ((parts[0] + parts[2]) / 2) * Math.PI / 180;
         var area = Math.abs(parts[2] - parts[0]) * 111320 *
             Math.abs(parts[3] - parts[1]) * 111320 * Math.cos(midLat);
@@ -1671,7 +1757,9 @@ function updateTerrainPreviewButton() {
     btn.classList.toggle('disabled', !ok);
     btn.title = ok
         ? 'Render 3D terrain preview'
-        : 'Select an area (up to 500 km²) to enable the 3D terrain preview';
+        : (window._currentBody !== 'earth'
+            ? 'The 3D terrain preview is only available for Earth'
+            : 'Select an area (up to 500 km²) to enable the 3D terrain preview');
 }
 
 // Expose marker coordinates to the parent window

@@ -460,6 +460,7 @@ impl Block {
             363 => "white_wall_banner",
             364..=365 => "spruce_door",
             366 => "oak_door",
+            367 => "end_stone",
             _ => return None,
         })
         // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
@@ -898,6 +899,10 @@ pub const DEEPSLATE_BRICKS: Block = Block::new(20);
 pub const DIORITE: Block = Block::new(21);
 pub const DIRT: Block = Block::new(22);
 pub const END_STONE_BRICKS: Block = Block::new(23);
+/// The Moon's only ground block. Above `BYTE_ID_LIMIT` because the low range is
+/// full, and affordable there: only surface-straddling sections go wide, measured
+/// at 35 124 against 456 396 uniform on a 2126 km2 world. Earth never places it.
+pub const END_STONE: Block = Block::new(367);
 pub const FARMLAND: Block = Block::new(24);
 pub const GLASS: Block = Block::new(25);
 pub const GLOWSTONE: Block = Block::new(26);
@@ -1777,6 +1782,10 @@ mod material_tests {
             (&INDUSTRIAL_WINDOW_OPTIONS[..], "INDUSTRIAL_WINDOW_OPTIONS"),
             (&RELIGIOUS_WINDOW_OPTIONS[..], "RELIGIOUS_WINDOW_OPTIONS"),
             (&FLOOR_BLOCK_OPTIONS[..], "FLOOR_BLOCK_OPTIONS"),
+            (
+                crate::celestial::PLANETARY_SURFACE_BLOCKS,
+                "PLANETARY_SURFACE_BLOCKS",
+            ),
         ] {
             for &block in table {
                 check(block, source);

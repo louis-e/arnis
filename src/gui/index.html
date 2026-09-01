@@ -323,6 +323,20 @@
         <!-- Section: Map & Input -->
         <div class="settings-section-header" data-localize="settings_section_map">Map & Input</div>
 
+        <!-- Celestial Body -->
+        <div class="settings-row">
+          <label for="body-group">
+            <span data-localize="celestial_body">World</span>
+            <span class="tooltip-icon" data-tooltip="Generate real NASA terrain for the Moon or Mars instead of Earth. Terrain only, at a fixed coarse scale (1 block = 200 m / 500 m).">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="body-group">
+              <button type="button" class="segment active" data-default data-body="earth" data-localize="body_earth">Earth</button>
+              <button type="button" class="segment" data-body="moon" data-localize="body_moon">Moon</button>
+              <button type="button" class="segment" data-body="mars" data-localize="body_mars">Mars</button>
+            </div>
+          </div>
+        </div>
         <!-- Bounding Box Input -->
         <div class="settings-row">
           <label for="bbox-coords">

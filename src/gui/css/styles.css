@@ -1302,3 +1302,13 @@ input[type="range"] {
     opacity: 1;
   }
 }
+
+/* Options that do not apply to the selected celestial body */
+.settings-row-unavailable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.segmented-disabled {
+  pointer-events: none;
+}
