@@ -79,7 +79,7 @@ Arnis has been recognized in various academic and press publications after gaini
 
 [XDA Developers: Hometown Minecraft Map: Arnis](https://www.xda-developers.com/hometown-minecraft-map-arnis/)
 
-Free to use press assets, including screenshots and logos, can be found [here](https://drive.google.com/file/d/1T1IsZSyT8oa6qAO_40hVF5KR8eEVCJjo/view?usp=sharing).
+Free to use press assets, including screenshots and logos, can be found [here](https://arnismc.com/presskit/).
 
 ## :copyright: License Information
 Copyright (c) 2022-2026 Louis Erbkamm (louis-e)
