@@ -21,6 +21,9 @@ export const licenseText = `
 <br><br>
 
 <b>OpenFreeMap:</b><br> Vector tiles © <a href="https://openfreemap.org" style="color: inherit;" target="_blank">OpenFreeMap</a>, "Liberty" style © <a href="https://www.openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a>, map data © OpenStreetMap contributors
+<br><br>
+
+<b>OpenPlanetary (Moon and Mars basemaps):</b><br> Basemaps © <a href="https://www.openplanetary.org/" style="color: inherit;" target="_blank">OpenPlanetary</a>. Moon: a blend of the Lunar LOLA hillshade and albedo products, LOLA/USGS. Mars: the Viking MDIM 2.1 colorized global mosaic, NASA/Viking/USGS.
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
 <b>Overture Maps Buildings:</b><br>
@@ -37,6 +40,10 @@ Elevation data derived from the <a href="https://registry.opendata.aws/terrain-t
 
 <b>USGS 3D Elevation Program (3DEP):</b><br>
 Elevation data provided by the <a href="https://www.usgs.gov/3d-elevation-program" style="color: inherit;" target="_blank">U.S. Geological Survey, 3D Elevation Program</a>. Public Domain.
+<br><br>
+
+<b>NASA PDS Moon and Mars Elevation:</b><br>
+Terrain for the Moon and Mars is read from the NASA <a href="https://pds-geosciences.wustl.edu/" style="color: inherit;" target="_blank">Planetary Data System, Geosciences Node</a>: the <a href="https://pds-geosciences.wustl.edu/missions/lro/lola.htm" style="color: inherit;" target="_blank">LRO LOLA</a> gridded topography for the Moon (LOLA/USGS) and the <a href="https://pds-geosciences.wustl.edu/missions/mgs/megdr.html" style="color: inherit;" target="_blank">MGS MOLA MEGDR</a> for Mars. As works of the U.S. Government these data are not subject to copyright; the PDS asks that they be credited.
 <br><br>
 
 <b>ESA WorldCover 2021:</b><br>
