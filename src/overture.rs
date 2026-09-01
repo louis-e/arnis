@@ -319,12 +319,12 @@ pub(crate) struct OvertureBuilding {
     subtype: Option<String>,
     /// Overture class (e.g., "house", "apartments")
     class: Option<String>,
-    /// Roof shape (e.g., "gabled", "flat")
-    roof_shape: Option<String>,
-    /// Roof material (e.g., "metal", "glass", "roof_tiles")
-    roof_material: Option<String>,
-    /// Roof orientation relative to longest axis ("along" or "across")
-    roof_orientation: Option<String>,
+    /// Roof shape, interned and already mapped to its OSM spelling.
+    roof_shape: Option<&'static str>,
+    /// Roof material (e.g., "metal", "glass", "roof_tiles"), interned.
+    roof_material: Option<&'static str>,
+    /// Roof orientation relative to longest axis ("along" or "across").
+    roof_orientation: Option<&'static str>,
     /// Facade color (hex or name)
     facade_color: Option<String>,
     /// Roof color (hex or name)
@@ -1229,9 +1229,9 @@ fn parse_overture_row(
     let mut num_floors: Option<i32> = None;
     let mut subtype: Option<String> = None;
     let mut class: Option<String> = None;
-    let mut roof_shape: Option<String> = None;
-    let mut roof_material: Option<String> = None;
-    let mut roof_orientation: Option<String> = None;
+    let mut roof_shape: Option<&'static str> = None;
+    let mut roof_material: Option<&'static str> = None;
+    let mut roof_orientation: Option<&'static str> = None;
     let mut facade_color: Option<String> = None;
     let mut roof_color: Option<String> = None;
     let mut roof_height: Option<f64> = None;
@@ -1293,17 +1293,54 @@ fn parse_overture_row(
             }
             "roof_shape" => {
                 if let parquet::record::Field::Str(s) = field {
-                    roof_shape = Some(s.clone());
+                    // Closed enum, mapped to its OSM spelling here so the row carries
+                    // no heap string. A value outside the enum is dropped.
+                    roof_shape = match s.as_str() {
+                        "gabled" | "gable" => Some("gabled"),
+                        "hipped" | "hip" => Some("hipped"),
+                        "flat" => Some("flat"),
+                        "pyramidal" => Some("pyramidal"),
+                        "dome" | "onion" => Some("dome"),
+                        "skillion" | "shed" => Some("skillion"),
+                        "gambrel" => Some("gambrel"),
+                        "mansard" => Some("mansard"),
+                        "round" => Some("round"),
+                        "half_hipped" => Some("half_hipped"),
+                        "saltbox" => Some("saltbox"),
+                        "sawtooth" => Some("sawtooth"),
+                        "spherical" => Some("spherical"),
+                        _ => None,
+                    };
                 }
             }
             "roof_material" => {
                 if let parquet::record::Field::Str(s) = field {
-                    roof_material = Some(s.clone());
+                    roof_material = match s.as_str() {
+                        "concrete" => Some("concrete"),
+                        "copper" => Some("copper"),
+                        "eternit" => Some("eternit"),
+                        "glass" => Some("glass"),
+                        "grass" => Some("grass"),
+                        "gravel" => Some("gravel"),
+                        "metal" => Some("metal"),
+                        "plastic" => Some("plastic"),
+                        "roof_tiles" => Some("roof_tiles"),
+                        "slate" => Some("slate"),
+                        "solar_panels" => Some("solar_panels"),
+                        "thatch" => Some("thatch"),
+                        "tar_paper" => Some("tar_paper"),
+                        "wood" => Some("wood"),
+                        _ => None,
+                    };
                 }
             }
             "roof_orientation" => {
                 if let parquet::record::Field::Str(s) = field {
-                    roof_orientation = Some(s.clone());
+                    roof_orientation = match s.as_str() {
+                        "along" => Some("along"),
+                        "across" => Some("across"),
+                        _ => None,
+                    };
                 }
             }
             "facade_color" => {
@@ -1670,32 +1707,19 @@ fn building_to_processed_way(
         }
     }
 
-    // Roof shape
-    if let Some(ref roof) = building.roof_shape {
-        let osm_roof = match roof.as_str() {
-            "gabled" | "gable" => "gabled",
-            "hipped" | "hip" => "hipped",
-            "flat" => "flat",
-            "pyramidal" => "pyramidal",
-            "dome" | "onion" => "dome",
-            "skillion" | "shed" => "skillion",
-            "gambrel" => "gambrel",
-            "mansard" => "mansard",
-            "round" => "round",
-            other => other,
-        };
-        tags.insert("roof:shape".to_string(), osm_roof.to_string());
+    // Roof shape, already mapped to its OSM spelling at parse time.
+    if let Some(roof) = building.roof_shape {
+        tags.insert("roof:shape".to_string(), roof.to_string());
     }
 
     // Roof material (pipeline checks for "glass" to use glass blocks)
-    if let Some(ref mat) = building.roof_material {
-        // Overture uses underscores (e.g., "roof_tiles"), OSM uses underscores too
-        tags.insert("roof:material".to_string(), mat.clone());
+    if let Some(mat) = building.roof_material {
+        tags.insert("roof:material".to_string(), mat.to_string());
     }
 
     // Roof orientation ("along" or "across" relative to longest side)
-    if let Some(ref orient) = building.roof_orientation {
-        tags.insert("roof:orientation".to_string(), orient.clone());
+    if let Some(orient) = building.roof_orientation {
+        tags.insert("roof:orientation".to_string(), orient.to_string());
     }
 
     // Facade color
