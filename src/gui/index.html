@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="./css/preview3d.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
+  <!-- Not deferred: the map iframe starts posting log messages as soon as it
+       parses, so the bridge has to be listening before that element exists. -->
+  <script src="./js/logging.js"></script>
   <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>

@@ -412,13 +412,24 @@ const EARTH_ONLY_SETTINGS = [
   'legacy-trees-toggle',
   'scale-value-slider',
   'aws-only-elevation-toggle',
-  'disable-height-limit-toggle'
+  'disable-height-limit-toggle',
+  // Off Earth the body's own imagery is the only basemap, so the Earth
+  // theme picker has nothing to act on.
+  'tile-theme-select'
 ];
 const EARTH_ONLY_SEGMENTED = ['max-tree-size-group', 'signage-group'];
 
+// The map iframe is addressed by class, never by its src attribute. Manual
+// bbox entry used to rewrite src to "maps.html#lat,lng,lat,lng", after which
+// every iframe[src="maps.html"] lookup silently matched nothing and the map
+// theme and celestial body messages were dropped for the rest of the session.
+function getMapFrame() {
+  return document.querySelector('.map-container');
+}
+
 // Also called on iframe load: a revert can change the body before the map listens.
 function pushBodyToMap() {
-  const mapIframe = document.querySelector('iframe[src="maps.html"]');
+  const mapIframe = getMapFrame();
   if (mapIframe && mapIframe.contentWindow) {
     mapIframe.contentWindow.postMessage(
       { type: 'changeBody', body: selectedCelestialBody },
@@ -921,7 +932,7 @@ function initSettings() {
   });
 
   // A revert or global reset can flip the body while the map is still loading.
-  const bodyMapFrame = document.querySelector('iframe[src="maps.html"]');
+  const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
 
   // Max tree size segmented control
@@ -1034,7 +1045,7 @@ function initSettings() {
     localStorage.setItem('selectedTileTheme', selectedTheme);
 
     // Send message to map iframe to change tile theme
-    const mapIframe = document.querySelector('iframe[src="maps.html"]');
+    const mapIframe = getMapFrame();
     if (mapIframe && mapIframe.contentWindow) {
       mapIframe.contentWindow.postMessage({
         type: 'changeTileTheme',
@@ -1587,10 +1598,19 @@ function handleBboxInput() {
         const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
         window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
-        // Show custom bbox on the map
-        let map_container = document.querySelector('.map-container');
-        map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
-        map_container.contentWindow.location.reload();
+        // Show the typed bbox on the map. Handed over by message rather than
+        // by reloading the frame: setting src and then calling reload() on the
+        // same frame raced - reload() runs against the pre-hash URL, so the
+        // selection could be dropped and the map came back empty. A reload also
+        // throws away every tile already fetched, which is the last thing a slow
+        // or filtered connection can afford.
+        const mapFrame = getMapFrame();
+        if (mapFrame && mapFrame.contentWindow) {
+          mapFrame.contentWindow.postMessage({
+            type: 'setBbox',
+            bounds: [lat1, lng1, lat2, lng2]
+          }, '*');
+        }
 
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
@@ -1715,7 +1735,13 @@ function refreshBboxSelectionInfo() {
 
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
-  let [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
+  // Two producers, two separators: the map posts formatBounds output, which is
+  // space separated, while manual coordinate entry synthesizes a comma
+  // separated string. Splitting on " " alone turned the manual one into a
+  // single NaN, which then got written back over the user's half-typed
+  // coordinates as "NaN,NaN,undefined,NaN" - the next keystroke failed the
+  // format check and the selection was gone.
+  let [lng1, lat1, lng2, lat2] = bboxText.trim().split(/[,\s]+/).map(Number);
 
   // Normalize longitudes
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
@@ -1746,8 +1772,23 @@ function displayBboxInfoText(bboxText) {
     return;
   }
 
-  // Update the custom bbox input with the map selection (comma-separated format)
-  bboxCoordsInput.value = `${lng1},${lat1},${lng2},${lat2}`;
+  // Update the custom bbox input with the map selection (comma-separated
+  // format) - but never type over the user. This also runs as the echo of a
+  // bbox they are entering into this very field, and rewriting it mid-edit
+  // moves the caret so the next keystroke lands in the wrong place.
+  //
+  // The echo is caught by value, not by focus: focus can legitimately be
+  // elsewhere (the map takes it on interaction, and activeElement is
+  // unreliable while the window itself is unfocused) even though the field
+  // still holds what the user typed. The focus check then covers the other
+  // direction - a genuinely different, map-driven selection arriving while
+  // the caret is in the field.
+  const current = bboxCoordsInput.value.trim().split(/[,\s]+/).map(Number);
+  const echoesField = current.length === 4 && current[0] === lng1 &&
+    current[1] === lat1 && current[2] === lng2 && current[3] === lat2;
+  if (!echoesField && document.activeElement !== bboxCoordsInput) {
+    bboxCoordsInput.value = `${lng1},${lat1},${lng2},${lat2}`;
+  }
 
   // Calculate the size of the selected bbox
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
