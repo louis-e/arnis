@@ -1091,9 +1091,9 @@ function initSettings() {
     // one that is not a usable template is left in the box so the user can see
     // and correct it, but is not handed to the map.
     if (raw && !isValidTileTemplate(raw)) {
-      window.arnisLog('warn', 'Ignoring custom map source "' + raw +
-        '": expected an http(s) URL containing {z}, {x} and {y}.');
+      window.arnisLog('warn', 'Ignoring custom map source: expected an http(s) URL containing {z}, {x} and {y}.');
       localStorage.removeItem('customTileUrl');
+    }
     } else if (raw) {
       localStorage.setItem('customTileUrl', raw);
     } else {
