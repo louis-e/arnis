@@ -485,7 +485,7 @@ fn process_element(
 /// Whether to stream regions to disk (lower peak RAM) for `num_regions` regions. Auto-enabled
 /// when the estimated resident world would crowd available RAM; trades some time for RAM, output
 /// unchanged (3D models + subways preserved). `ARNIS_STREAM_TO_DISK=1/0` overrides; constants tunable.
-fn should_stream_to_disk(num_regions: usize) -> bool {
+fn should_stream_to_disk(num_regions: usize, available_mb: u64) -> bool {
     match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
         Some("1") => return true,
         Some("0") => return false,
@@ -496,11 +496,15 @@ fn should_stream_to_disk(num_regions: usize) -> bool {
     const PER_REGION_MB: u64 = 26;
     let est_peak_mb = BASE_MB + PER_REGION_MB * num_regions as u64;
 
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    let available_mb = sys.available_memory() / (1024 * 1024);
     // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
+}
+
+/// Free RAM in MB.
+fn available_memory_mb() -> u64 {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    sys.available_memory() / (1024 * 1024)
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -600,17 +604,20 @@ pub fn generate_world_with_options(
     }
 
     let ground = Arc::new(ground);
+    let mut bench = crate::bench::Bench::new(args.benchmark);
+    crate::world_editor::reset_section_counters(args.benchmark);
     // Materialize the lazy water-blend mask now, before world memory peaks.
     ground.warm_water_blend();
     // Same for the region profile: a lazy first touch inside the parallel
     // passes would block every other thread on the grid walk.
     ground.region_profile();
+    bench.mark("ground_warm");
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     // Uses the ground's real base, not args: the montane check measures blocks above it, and
     // the base sinks when the relief needs the extended floor.
     let tree_pack =
         crate::trees::tree_pack::load(args, llbbox, args.scale, ground.base_level()).map(Arc::new);
-    let mut bench = crate::bench::Bench::new(args.benchmark);
+    bench.reset();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
@@ -778,8 +785,11 @@ pub fn generate_world_with_options(
         // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
         // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
         // are kept via region deferral.
-        eviction_active =
-            matches!(world_format, WorldFormat::JavaAnvil) && should_stream_to_disk(tiles.len());
+        // Read at the decision point: the precompute above allocates heavily, and an
+        // optimistic figure would skip streaming in exactly the runs that need it.
+        let available_mb = available_memory_mb();
+        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
+            && should_stream_to_disk(tiles.len(), available_mb);
 
         // Regions any 3D placement may write to: kept resident (not evicted in-loop)
         // so the post-merge placement pass lands in RAM, then flushed at finalize.
@@ -795,7 +805,17 @@ pub fn generate_world_with_options(
         };
 
         if eviction_active {
-            flush_worker = Some(FlushWorker::spawn(editor.region_write_ctx(), 3));
+            let (flush_threads, flush_queue) =
+                crate::world_editor::flush_pool_params(tile_batch_size, available_mb);
+            if args.benchmark {
+                eprintln!("[BENCHMARK] flush_threads={flush_threads} flush_queue={flush_queue}");
+            }
+            flush_worker = Some(FlushWorker::spawn(
+                editor.region_write_ctx(),
+                flush_queue,
+                flush_threads,
+                args.benchmark,
+            ));
         }
 
         let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
@@ -1311,6 +1331,7 @@ pub fn generate_world_with_options(
     if eviction_active {
         // Flush deferred (rail-tunnel-touched) regions now the global carve has run on them.
         // The spawn region stays resident so the map-item still lands on real ground.
+        let drain_start = args.benchmark.then(std::time::Instant::now);
         let mut leftover: Vec<(i32, i32)> = real_regions
             .difference(&evicted_regions)
             .copied()
@@ -1332,9 +1353,16 @@ pub fn generate_world_with_options(
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
         }
+        if let Some(t) = drain_start {
+            bench.report("leftover_drain", t.elapsed());
+        }
         // Wait for all background writes to land (and surface any I/O error) before save.
+        let join_start = args.benchmark.then(std::time::Instant::now);
         if let Some(w) = flush_worker.take() {
             w.finish()?;
+        }
+        if let Some(t) = join_start {
+            bench.report("flush_join", t.elapsed());
         }
     }
 
@@ -1365,6 +1393,11 @@ pub fn generate_world_with_options(
         return Err(e.to_string());
     }
     bench.mark("save");
+
+    if args.benchmark {
+        let (built, slow) = crate::world_editor::section_counters();
+        eprintln!("[BENCHMARK] sections_built={built} sections_slow_path={slow}");
+    }
 
     // Map item, signage tiles and world settings are often longer than the region
     // write, so they get their own band instead of a frozen bar at the end of save.

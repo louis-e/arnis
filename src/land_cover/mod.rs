@@ -134,23 +134,12 @@ fn compute_water_blend_smooth(
     if width == 0 || height == 0 {
         return Vec::new();
     }
-    let binary: Vec<Vec<f64>> = grid
-        .iter()
-        .take(height)
-        .map(|row| {
-            row.iter()
-                .take(width)
-                .map(|&c| if c == LC_WATER { 1.0 } else { 0.0 })
-                .collect()
-        })
-        .collect();
     // Gaussian blur runs in f64 for numerical stability, then we drop down to
     // f32 for storage — values land in [0, 1] and are only ever compared to a
-    // 0.5 threshold, so precision beyond f32 is wasted.
-    crate::elevation::postprocess::gaussian_blur_grid(&binary, sigma)
-        .into_iter()
-        .map(|row| row.into_iter().map(|v| v as f32).collect())
-        .collect()
+    // 0.5 threshold, so precision beyond f32 is wasted. The mask is read on the
+    // fly rather than materialized: on a city-sized grid the f64 copies were the
+    // process memory peak.
+    crate::elevation::postprocess::gaussian_blur_mask_to_f32(grid, LC_WATER, width, height, sigma)
 }
 
 /// Metadata parsed from a COG (Cloud-Optimized GeoTIFF) IFD.

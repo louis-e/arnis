@@ -58,15 +58,19 @@ fn read_gzip_nbt(path: &Path) -> Result<Value, String> {
     fastnbt::from_bytes(&decompressed).map_err(|e| format!("parse {path:?}: {e}"))
 }
 
-fn write_gzip_nbt(path: &Path, value: &Value) -> Result<(), String> {
+fn gzip_nbt_bytes(path: &Path, value: &Value) -> Result<Vec<u8>, String> {
     let serialized = fastnbt::to_bytes(value).map_err(|e| format!("serialize {path:?}: {e}"))?;
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
         .write_all(&serialized)
         .map_err(|e| format!("compress {path:?}: {e}"))?;
-    let compressed = encoder
+    encoder
         .finish()
-        .map_err(|e| format!("finish {path:?}: {e}"))?;
+        .map_err(|e| format!("finish {path:?}: {e}"))
+}
+
+fn write_gzip_nbt(path: &Path, value: &Value) -> Result<(), String> {
+    let compressed = gzip_nbt_bytes(path, value)?;
     std::fs::write(path, compressed).map_err(|e| format!("write {path:?}: {e}"))
 }
 
@@ -259,8 +263,12 @@ fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
 
 // Write the map .dat under both the pre- and post-26.1 filenames.
 fn write_map_dat_files(data_dir: &Path, map_id: i32, map_dat: &Value) -> Result<(), String> {
-    write_gzip_nbt(&data_dir.join(format!("map_{map_id}.dat")), map_dat)?;
-    write_gzip_nbt(&data_dir.join(format!("{map_id}.dat")), map_dat)
+    // Both filenames get identical bytes, so encode once.
+    let prefixed = data_dir.join(format!("map_{map_id}.dat"));
+    let compressed = gzip_nbt_bytes(&prefixed, map_dat)?;
+    std::fs::write(&prefixed, &compressed).map_err(|e| format!("write {prefixed:?}: {e}"))?;
+    let bare = data_dir.join(format!("{map_id}.dat"));
+    std::fs::write(&bare, &compressed).map_err(|e| format!("write {bare:?}: {e}"))
 }
 
 // Quantize a bundled PNG to a locked 128x128 map; alpha below 128 stays transparent.
