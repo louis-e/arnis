@@ -188,6 +188,14 @@ pub fn generate_ground_region(
     iter_max_z: i32,
     show_progress: bool,
 ) {
+    // `Some` only off Earth, where the body's palette replaces land cover and
+    // every Earth-only surface pass is off.
+    let planetary_body = (!args.body.is_earth()).then_some(args.body);
+    let planetary_lat = args
+        .bbox
+        .as_ref()
+        .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
+        .unwrap_or(0.0);
     let has_land_cover = ground.has_land_cover();
     let has_canopy = ground.has_canopy();
     let tree_spacing = editor.tree_slot_spacing();
@@ -483,7 +491,18 @@ pub fn generate_ground_region(
                             let rock_floor = rock_desert_floor_cover(dryland, ground, coord, cover);
 
                             // Determine surface and sub-surface blocks based on available data
-                            let (surface_block, under_block) = if has_land_cover {
+                            let (surface_block, under_block) = if let Some(body) = planetary_body {
+                                // No land cover off Earth, so this replaces the
+                                // whole ESA cascade below.
+                                crate::celestial::surface_palette(
+                                    body,
+                                    slope,
+                                    planetary_lat,
+                                    ground_y,
+                                    x,
+                                    z,
+                                )
+                            } else if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
 
                                 // Steep terrain overrides land cover classification.
@@ -701,7 +720,9 @@ pub fn generate_ground_region(
                             // Uses water_blend gradient for ESA water (scales with
                             // grid resolution) plus neighbor check for OSM water.
                             // Skip on steep terrain — canyon walls should stay rock.
-                            let (surface_block, under_block) = if surface_block != WATER
+                            // Nothing to blend into off Earth: no water, no beaches.
+                            let (surface_block, under_block) = if planetary_body.is_none()
+                                && surface_block != WATER
                                 && slope <= 3
                             {
                                 // Sand only at the immediate 1-cell ring around LC_WATER

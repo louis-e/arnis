@@ -8,6 +8,7 @@ mod block_definitions;
 mod block_palette;
 mod bresenham;
 mod canopy;
+mod celestial;
 mod climate;
 mod clipping;
 mod colors;
@@ -131,7 +132,9 @@ fn run_cli() {
     version_check::check_for_updates_async();
 
     // Parse input arguments
-    let args: Args = Args::parse();
+    let mut args: Args = Args::parse();
+    args::apply_body_defaults(&mut args);
+    let args = args;
 
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
@@ -224,8 +227,11 @@ fn run_cli() {
     // requests load the public OpenStreetMap / elevation servers. Non-blocking.
     {
         const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
-        let area_km2 = effective_bbox.area_km2();
-        if area_km2 > MAX_RECOMMENDED_AREA_KM2 {
+        // area_km2 assumes Earth's radius, so a Moon bbox reads 13x too large.
+        let r = args.body.scale_ratio();
+        let area_km2 = effective_bbox.area_km2() * r * r;
+        // Earth only: the coarse fixed scale makes a large area the normal case.
+        if args.body.is_earth() && area_km2 > MAX_RECOMMENDED_AREA_KM2 {
             eprintln!(
                 "{} Large area selected (~{:.0} km²). Generation may take a long time and \
                  use many GB of memory, and places heavy load on public OpenStreetMap and \

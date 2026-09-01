@@ -1,5 +1,6 @@
 use crate::args::Args;
 use crate::canopy::{self, CanopyData};
+use crate::celestial::CelestialBody;
 use crate::coordinate_system::{
     cartesian::{XZBBox, XZPoint},
     geographic::LLBBox,
@@ -59,6 +60,8 @@ pub struct Ground {
     /// Blocks per real metre, i.e. `--scale`. Rotation resamples every grid,
     /// so no stored dimension survives it as a measurement, but a block does.
     horizontal_scale: f64,
+    /// Earth unless this is a Moon/Mars world, which take their own surface palette.
+    body: CelestialBody,
 }
 
 /// Slope tiers at 1:1 vertical exaggeration.
@@ -156,6 +159,7 @@ impl Ground {
             profile: once_cell::sync::OnceCell::new(),
             slope_tiers: SLOPE_TIERS_1_1,
             horizontal_scale: 1.0,
+            body: CelestialBody::Earth,
         }
     }
 
@@ -191,6 +195,7 @@ impl Ground {
             profile: once_cell::sync::OnceCell::new(),
             slope_tiers: SLOPE_TIERS_1_1,
             horizontal_scale: scale,
+            body: CelestialBody::Earth,
         }
     }
 
@@ -214,6 +219,7 @@ impl Ground {
             profile: once_cell::sync::OnceCell::new(),
             slope_tiers: SLOPE_TIERS_1_1,
             horizontal_scale: 1.0,
+            body: CelestialBody::Earth,
         }
     }
 
@@ -260,6 +266,7 @@ impl Ground {
             profile: once_cell::sync::OnceCell::new(),
             slope_tiers: SLOPE_TIERS_1_1,
             horizontal_scale: 1.0,
+            body: CelestialBody::Earth,
         }
     }
 
@@ -274,8 +281,12 @@ impl Ground {
         aws_only_elevation: bool,
         benchmark: bool,
         canopy_height: bool,
+        body: CelestialBody,
     ) -> Self {
         let mut bench = crate::bench::Bench::new(benchmark);
+        // Land cover, canopy and the snow line are Earth datasets keyed by
+        // terrestrial lat/lon, so off Earth they return plausible nonsense.
+        let canopy_height = canopy_height && body.is_earth();
         // Fetch land cover FIRST so we can feed it into the elevation
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
@@ -285,7 +296,7 @@ impl Ground {
         std::thread::scope(|scope| {
             let canopy_job = canopy_height
                 .then(|| scope.spawn(|| canopy::fetch_canopy_data(bbox, grid_w, grid_h)));
-            let mut land_cover = {
+            let mut land_cover = if body.is_earth() {
                 let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
                 if lc.is_some() {
                     println!("Land cover data loaded successfully");
@@ -293,6 +304,8 @@ impl Ground {
                     eprintln!("Warning: Land cover data unavailable, using default ground blocks");
                 }
                 lc
+            } else {
+                None
             };
             bench.mark("elev_landcover_fetch");
 
@@ -310,7 +323,9 @@ impl Ground {
             // water would otherwise be cut straight through the bedrock layer.
             let sink_floor = min_ground_level.max(carve_floor).min(water_floor);
 
-            let source_mode = if aws_only_elevation {
+            let source_mode = if !body.is_earth() {
+                crate::elevation::SourceMode::Planetary(body)
+            } else if aws_only_elevation {
                 crate::elevation::SourceMode::AwsOnly
             } else {
                 crate::elevation::SourceMode::Auto
@@ -331,7 +346,11 @@ impl Ground {
                     // Must use the base the scaler actually settled on: snow_threshold_for
                     // inverts that exact affine, so a mismatched base misplaces every snow cap.
                     let base = elevation_data.ground_level;
-                    let snow_threshold_y = snow_threshold_for(&elevation_data, lat, base);
+                    let snow_threshold_y = if body.is_earth() {
+                        snow_threshold_for(&elevation_data, lat, base)
+                    } else {
+                        i32::MAX
+                    };
                     let slope_tiers = slope_tiers_for(elevation_data.blocks_per_meter, scale);
                     let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
                     Self {
@@ -348,6 +367,7 @@ impl Ground {
                         profile: once_cell::sync::OnceCell::new(),
                         slope_tiers,
                         horizontal_scale: scale,
+                        body,
                     }
                 }
                 Err(e) => {
@@ -379,6 +399,7 @@ impl Ground {
                         profile: once_cell::sync::OnceCell::new(),
                         slope_tiers: SLOPE_TIERS_1_1,
                         horizontal_scale: scale,
+                        body,
                     }
                 }
             }
@@ -568,6 +589,12 @@ impl Ground {
             y_min,
             y_max,
         }
+    }
+
+    /// Body this world is on; Earth keeps every existing behaviour.
+    #[inline(always)]
+    pub fn body(&self) -> CelestialBody {
+        self.body
     }
 
     /// Returns whether land cover data is available
@@ -1236,11 +1263,14 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
             args.aws_only_elevation,
             args.benchmark,
             args.canopy_height,
+            args.body,
         );
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
         crate::world_editor::set_base_chunk_y(ground.base_level());
         crate::world_editor::set_terrain_floor_y(ground.base_level());
+        // A grass plane around a lunar crater would be the most visible thing in it.
+        crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
         if args.debug {
             ground.save_debug_image("elevation_debug");
             ground.save_land_cover_debug_image("landcover_debug");
@@ -1253,7 +1283,17 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         Ground::new_flat_with_land_cover(&bbox, args.scale, args.ground_level, args.canopy_height);
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
+    crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
     ground
+}
+
+/// Surface block for the out-of-bbox filler plane that borders the world.
+fn filler_block_for(body: CelestialBody) -> crate::block_definitions::Block {
+    match body {
+        CelestialBody::Earth => crate::block_definitions::GRASS_BLOCK,
+        CelestialBody::Moon => crate::block_definitions::END_STONE,
+        CelestialBody::Mars => crate::block_definitions::RED_TERRACOTTA,
+    }
 }
 
 /// Per-format build-height cap when the user opts into extended build height:
@@ -1345,6 +1385,7 @@ mod tests {
             profile: once_cell::sync::OnceCell::new(),
             slope_tiers: SLOPE_TIERS_1_1,
             horizontal_scale: 1.0,
+            body: CelestialBody::Earth,
         }
     }
 

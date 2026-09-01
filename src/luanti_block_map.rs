@@ -432,7 +432,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         246 => "mcl_flowers:tulip_red",
         247 => "mcl_flowers:dandelion",
         248 => "mcl_flowers:blue_orchid",
-        367 => "mcl_copper:stone_with_copper",
+        368 => "mcl_copper:stone_with_copper",
         249 => "mcl_core:stone_with_diamond",
         250 => "mcl_core:stone_with_redstone",
         251 => "mcl_core:stone_with_lapis",
@@ -544,6 +544,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         363 => "mcl_banners:hanging_banner", // WHITE_WALL_BANNER
         364 | 365 => return conv_door(props, block.id(), "spruce"),
         366 => return conv_door(props, block.id(), "oak"),
+        367 => "mcl_end:end_stone", // END_STONE
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

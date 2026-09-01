@@ -5,6 +5,7 @@ use crate::ground::{Ground, RotationMask};
 use crate::land_cover::LC_WATER;
 use crate::osm_parser::ProcessedElement;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Rotates the entire map (elements, bounding box, elevation) by a given angle
@@ -40,6 +41,47 @@ pub fn rotator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operator>
     result
         .map(|o| o as Box<dyn Operator>)
         .map_err(|e| format!("Rotator config format error:\n{e}"))
+}
+
+/// Tag keys holding an absolute compass bearing, which must turn with the map.
+/// Excludes `direction`, already offset by models_3d, and `roof:orientation`.
+const BEARING_TAGS: [&str; 1] = ["roof:direction"];
+
+/// Parses a 16-point abbreviation, cardinal name or degrees into degrees from north.
+fn compass_bearing_degrees(value: &str) -> Option<f64> {
+    let deg = match value.trim().to_ascii_lowercase().as_str() {
+        "n" | "north" => 0.0,
+        "nne" => 22.5,
+        "ne" => 45.0,
+        "ene" => 67.5,
+        "e" | "east" => 90.0,
+        "ese" => 112.5,
+        "se" => 135.0,
+        "sse" => 157.5,
+        "s" | "south" => 180.0,
+        "ssw" => 202.5,
+        "sw" => 225.0,
+        "wsw" => 247.5,
+        "w" | "west" => 270.0,
+        "wnw" => 292.5,
+        "nw" => 315.0,
+        "nnw" => 337.5,
+        other => other.parse::<f64>().ok()?,
+    };
+    deg.is_finite().then_some(deg)
+}
+
+/// Turns bearing tags with the map. Positive is clockwise for both, so the angle adds.
+fn rotate_bearing_tags(tags: &mut HashMap<String, String>, angle_degrees: f64) {
+    for key in BEARING_TAGS {
+        if let Some(value) = tags.get_mut(key) {
+            if let Some(deg) = compass_bearing_degrees(value) {
+                // Whole degrees suffice; the consumer rounds to a cardinal anyway.
+                let turned = (deg + angle_degrees).rem_euclid(360.0).round() as i64 % 360;
+                *value = turned.to_string();
+            }
+        }
+    }
 }
 
 /// Apply rotation to all world data: elements, bounding box, and ground/elevation.
@@ -126,6 +168,7 @@ pub fn rotate_world(
                 let (rx, rz) = rotate_point(node.x as f64, node.z as f64, cx, cz, sin_r, cos_r);
                 node.x = rx.round() as i32;
                 node.z = rz.round() as i32;
+                rotate_bearing_tags(&mut node.tags, angle_degrees);
             }
             ProcessedElement::Way(way) => {
                 for node in way.nodes.iter_mut() {
@@ -133,6 +176,7 @@ pub fn rotate_world(
                     node.x = rx.round() as i32;
                     node.z = rz.round() as i32;
                 }
+                rotate_bearing_tags(&mut way.tags, angle_degrees);
             }
             ProcessedElement::Relation(rel) => {
                 for member in rel.members.iter_mut() {
@@ -143,7 +187,9 @@ pub fn rotate_world(
                         node.x = rx.round() as i32;
                         node.z = rz.round() as i32;
                     }
+                    rotate_bearing_tags(&mut way.tags, angle_degrees);
                 }
+                rotate_bearing_tags(&mut rel.tags, angle_degrees);
             }
         }
     }
@@ -380,6 +426,71 @@ fn rotate_ground_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A skillion sheds toward a compass bearing, so rotation must carry it along.
+    #[test]
+    fn bearing_tags_turn_with_the_map() {
+        use crate::osm_parser::{ProcessedNode, ProcessedWay};
+
+        let way = |dir: &str| {
+            let mut tags = HashMap::new();
+            tags.insert("building".to_string(), "house".to_string());
+            tags.insert("roof:direction".to_string(), dir.to_string());
+            tags.insert("roof:orientation".to_string(), "along".to_string());
+            ProcessedElement::Way(ProcessedWay {
+                id: 1,
+                nodes: vec![ProcessedNode {
+                    id: 1,
+                    tags: HashMap::new(),
+                    x: 10,
+                    z: 10,
+                }],
+                tags,
+            })
+        };
+
+        // (input bearing, rotation, expected bearing)
+        let cases = [
+            ("north", 90.0, "90"),
+            ("0", 90.0, "90"),
+            ("270", 180.0, "90"),
+            ("SE", -45.0, "90"),
+            ("45", -90.0, "315"),
+            ("350", 45.0, "35"),
+        ];
+
+        for (input, angle, expected) in cases {
+            let mut elements = vec![way(input)];
+            let mut xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+            let mut ground = Ground::new_flat(-62);
+            rotate_world(angle, &mut elements, &mut xzbbox, &mut ground).unwrap();
+
+            let ProcessedElement::Way(w) = &elements[0] else {
+                panic!("element kind changed");
+            };
+            assert_eq!(
+                w.tags.get("roof:direction").map(String::as_str),
+                Some(expected),
+                "roof:direction {input:?} rotated by {angle}"
+            );
+            // Footprint-relative values must not be touched.
+            assert_eq!(
+                w.tags.get("roof:orientation").map(String::as_str),
+                Some("along"),
+                "roof:orientation is relative to the footprint, not the compass"
+            );
+        }
+    }
+
+    // An unparseable bearing is left alone so the consumer's fallback still runs.
+    #[test]
+    fn unparseable_bearing_is_left_alone() {
+        assert_eq!(compass_bearing_degrees("up-ish"), None);
+        assert_eq!(compass_bearing_degrees("NaN"), None);
+        assert_eq!(compass_bearing_degrees("inf"), None);
+        assert_eq!(compass_bearing_degrees(" NNE "), Some(22.5));
+        assert_eq!(compass_bearing_degrees("180"), Some(180.0));
+    }
 
     #[test]
     fn test_zero_rotation_is_noop() {

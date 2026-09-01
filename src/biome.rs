@@ -130,17 +130,22 @@ pub fn build_chunk_biome_nbt(
     let mut names: [&'static str; 16] = ["minecraft:plains"; 16];
 
     if let Some(g) = ground {
-        let climate = g.climate();
-        let dryland = g.region_profile().dryland;
-        for zi in 0..4i32 {
-            for xi in 0..4i32 {
-                let world_x = chunk_x * 16 + xi * 4 + 2;
-                let world_z = chunk_z * 16 + zi * 4 + 2;
-                let coord = XZPoint::new(world_x, world_z);
-                let lc = g.cover_class(coord);
-                let wd = g.water_distance(coord);
-                names[(zi * 4 + xi) as usize] =
-                    biome_for_class(lc, climate, center_lat_deg, wd, dryland);
+        if !g.body().is_earth() {
+            // One barren biome for the whole world; no land cover to classify.
+            names = [g.body().biome(); 16];
+        } else {
+            let climate = g.climate();
+            let dryland = g.region_profile().dryland;
+            for zi in 0..4i32 {
+                for xi in 0..4i32 {
+                    let world_x = chunk_x * 16 + xi * 4 + 2;
+                    let world_z = chunk_z * 16 + zi * 4 + 2;
+                    let coord = XZPoint::new(world_x, world_z);
+                    let lc = g.cover_class(coord);
+                    let wd = g.water_distance(coord);
+                    names[(zi * 4 + xi) as usize] =
+                        biome_for_class(lc, climate, center_lat_deg, wd, dryland);
+                }
             }
         }
     }

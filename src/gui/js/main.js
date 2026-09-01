@@ -121,6 +121,10 @@ async function applyLocalization(localization) {
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "span[data-localize='language']": "language",
+    "span[data-localize='celestial_body']": "celestial_body",
+    "button[data-localize='body_earth']": "body_earth",
+    "button[data-localize='body_moon']": "body_moon",
+    "button[data-localize='body_mars']": "body_mars",
     "span[data-localize='generation_mode']": "generation_mode",
     "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
     "option[data-localize='mode_geo_only']": "mode_geo_only",
@@ -393,6 +397,69 @@ window.openVersionInfoModal = openVersionInfoModal;
 window.closeUpdateModal = closeUpdateModal;
 window.openUpdateInBrowser = openUpdateInBrowser;
 window.downloadLatestRelease = downloadLatestRelease;
+
+// Earth on every start, so a Moon or Mars world stays a deliberate pick.
+var selectedCelestialBody = 'earth';
+
+// Earth-only options. Disabled rather than hidden, so it does not look like
+// they were silently ignored.
+const EARTH_ONLY_SETTINGS = [
+  'generation-mode-select',
+  'overture-toggle',
+  'use-3d-toggle',
+  'interior-toggle',
+  'canopy-height-toggle',
+  'legacy-trees-toggle',
+  'scale-value-slider',
+  'aws-only-elevation-toggle',
+  'disable-height-limit-toggle'
+];
+const EARTH_ONLY_SEGMENTED = ['max-tree-size-group', 'signage-group'];
+
+// Also called on iframe load: a revert can change the body before the map listens.
+function pushBodyToMap() {
+  const mapIframe = document.querySelector('iframe[src="maps.html"]');
+  if (mapIframe && mapIframe.contentWindow) {
+    mapIframe.contentWindow.postMessage(
+      { type: 'changeBody', body: selectedCelestialBody },
+      '*'
+    );
+  }
+}
+
+function setCelestialBody(body) {
+  selectedCelestialBody = (body === 'moon' || body === 'mars') ? body : 'earth';
+  const off = selectedCelestialBody !== 'earth';
+
+  const markRow = (el) => {
+    const row = el && el.closest('.settings-row');
+    if (row) row.classList.toggle('settings-row-unavailable', off);
+  };
+
+  EARTH_ONLY_SETTINGS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = off;
+    markRow(el);
+  });
+
+  EARTH_ONLY_SEGMENTED.forEach((id) => {
+    const group = document.getElementById(id);
+    if (!group) return;
+    group.classList.toggle('segmented-disabled', off);
+    markRow(group);
+  });
+
+  // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
+  const timeSlider = document.getElementById('world-time-slider');
+  if (timeSlider) {
+    timeSlider.value = off ? 0 : 720;
+    timeSlider.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Warnings are per body, so the current selection may read differently now.
+  refreshBboxSelectionInfo();
+}
 
 // Function to register the event listener for bbox updates from iframe
 function registerMessageEvent() {
@@ -840,6 +907,22 @@ function initSettings() {
       btn.classList.add("active");
     });
   });
+
+  // Celestial body segmented control
+  const bodyGroup = document.getElementById("body-group");
+  bodyGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      bodyGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      setCelestialBody(btn.dataset.body);
+      // Swap the map basemap and drop any selection made on the other body.
+      pushBodyToMap();
+    });
+  });
+
+  // A revert or global reset can flip the body while the map is still loading.
+  const bodyMapFrame = document.querySelector('iframe[src="maps.html"]');
+  if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
 
   // Max tree size segmented control
   const maxTreeSizeGroup = document.getElementById("max-tree-size-group");
@@ -1552,10 +1635,14 @@ function handleBboxInput() {
  * @param {number} lat2 - Second latitude coordinate
  * @returns {number} Area in square meters
  */
+// Radii used to turn a bbox into true ground area for the selected body.
+const BODY_RADIUS_M = { earth: 6371000, moon: 1737400, mars: 3396000 };
+
 function calculateBBoxSize(lng1, lat1, lng2, lat2) {
   // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
-  const R = 6371000; // Earth radius in meters
+  // Real ground, not an Earth-sized overestimate: a lunar box reads 13x too large.
+  const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
 
   const latDistance = toRad(lat2 - lat1);
   const lngDistance = toRad(lng2 - lng1);
@@ -1581,9 +1668,19 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
-const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
-const threshold3 = 500000000.00; // Extreme warning threshold (500 km²)
+// Selection-size warnings, in true square metres of ground. Measured timings and
+// world sizes, square selections:
+//   Earth 1km2 18s/19MB | 4km2 25s/70MB | 9km2 39s/154MB | 25km2 47s/415MB
+//   Moon  2deg 5s/4MB | 5deg 9s/16MB | 10deg 21s/36MB | 20deg 68s/144MB
+//   Mars  2deg 5s/4MB | 5deg 9s/16MB | 10deg 20s/36MB | 20deg 51s/100MB
+// Earth keeps its long-standing tiers, which guard memory more than the clock.
+// The Moon and Mars tiers land near one, three and nine minutes.
+const AREA_THRESHOLDS = {
+  earth: { extensive: 44e6, large: 85e6, extreme: 500e6 },
+  moon: { extensive: 3e11, large: 1e12, extreme: 3e12 },
+  mars: { extensive: 1.5e12, large: 5e12, extreme: 1.5e13 }
+};
+
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
@@ -1594,15 +1691,26 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  * @param {number} selectedSize - The calculated bbox area in square meters
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
-  if (selectedSize > threshold3) {
+  const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
+  if (selectedSize > t.extreme) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
-  } else if (selectedSize > threshold2) {
+  } else if (selectedSize > t.large) {
     setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
-  } else if (selectedSize > threshold1) {
+  } else if (selectedSize > t.extensive) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
   } else {
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   }
+}
+
+// Re-runs the size status, e.g. after a body switch changes which tiers apply.
+function refreshBboxSelectionInfo() {
+  if (!mapSelectedBBox) return;
+  const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
+  displayBboxSizeStatus(
+    document.getElementById("bbox-selection-info"),
+    calculateBBoxSize(lng1, lat1, lng2, lat2)
+  );
 }
 
 // Function to handle incoming bbox data
@@ -1813,7 +1921,8 @@ async function startGeneration() {
         gamemode: gamemode,
         worldTime: worldTime,
         mapItem: mapItem,
-        signage: signage
+        signage: signage,
+        celestialBodyName: selectedCelestialBody
     });
 
     console.log("Generation process started.");
