@@ -996,58 +996,25 @@ fn tunnel_portal_faces(
 
 // Phase 2: carve the interior, then lay the road last so no carve can eat it.
 pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[HighwayTunnelCell]) {
-    // What the bore may swallow: its placeholder, ground fill, approach paving, cut surfaces.
-    // Anything the ground pass can leave as a natural surface, plus the paving and
-    // placeholders a bore legitimately cuts. A closed list here silently left
-    // uncarved plugs whenever a new surface material was added.
+    // What the bore may swallow: any ground-pass surface, so a new palette
+    // material cannot leave an uncarved plug, plus the paving it cuts.
     fn carve_accepts(b: Block) -> bool {
-        matches!(
-            b,
-            GRASS_BLOCK
-                | DIRT
-                | COARSE_DIRT
-                | PODZOL
-                | MOSS_BLOCK
-                | MUD
-                | FARMLAND
-                | SAND
-                | RED_SAND
-                | GRAVEL
-                | CLAY
-                | STONE
-                | ANDESITE
-                | TUFF
-                | GRANITE
-                | COBBLESTONE
-                | DEEPSLATE
-                | COBBLED_DEEPSLATE
-                | BLACKSTONE
-                | SANDSTONE
-                | SMOOTH_SANDSTONE
-                | TERRACOTTA
-                | ORANGE_TERRACOTTA
-                | RED_TERRACOTTA
-                | BROWN_TERRACOTTA
-                | GRAY_TERRACOTTA
-                | LIGHT_GRAY_TERRACOTTA
-                | WHITE_TERRACOTTA
-                | SNOW_BLOCK
-                | PACKED_ICE
-        ) || matches!(
-            b,
-            STONE_BRICKS
-                | CRACKED_STONE_BRICKS
-                | MOSSY_STONE_BRICKS
-                | WATER
-                | SNOW_LAYER
-                | DIRT_PATH
-                | GRAY_CONCRETE_POWDER
-                | CYAN_TERRACOTTA
-                | GRAY_CONCRETE
-                | BLACK_CONCRETE
-                | LIGHT_GRAY_CONCRETE
-                | WHITE_CONCRETE
-        )
+        crate::surface::is_natural_ground(b)
+            || matches!(
+                b,
+                STONE_BRICKS
+                    | CRACKED_STONE_BRICKS
+                    | MOSSY_STONE_BRICKS
+                    | WATER
+                    | SNOW_LAYER
+                    | DIRT_PATH
+                    | GRAY_CONCRETE_POWDER
+                    | CYAN_TERRACOTTA
+                    | GRAY_CONCRETE
+                    | BLACK_CONCRETE
+                    | LIGHT_GRAY_CONCRETE
+                    | WHITE_CONCRETE
+            )
     }
     // Whitelist for laying the floor over carved air, placeholder, or fill stone.
     // SEA_LANTERN so a crossing bore's light is paved over, not embedded.

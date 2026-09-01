@@ -21,8 +21,8 @@ fn koppen_class(lat: f64, lon: f64) -> u8 {
     KOPPEN[row as usize * KOPPEN_COLS + col as usize]
 }
 
-/// Pick 0..n once per patch of roughly `size` blocks. Warped first, or the
-/// patches come out as axis-aligned squares.
+/// Pick 0..n once per patch of roughly `size` blocks, warped so the patches
+/// are not axis-aligned squares.
 #[inline]
 pub(crate) fn patch_pick(x: i32, z: i32, size: i32, n: u64) -> u64 {
     let w = coord_hash(x >> 2, z >> 2);
@@ -32,8 +32,8 @@ pub(crate) fn patch_pick(x: i32, z: i32, size: i32, n: u64) -> u64 {
     coord_hash((x + ox).div_euclid(size), (z + oz).div_euclid(size)) % n
 }
 
-/// Dryland character of the bbox. Koppen alone cannot separate grass steppe
-/// from rock desert: Moab and the Kazakh steppe are both BSk.
+/// Dryland character of the bbox. Koppen cannot separate grass steppe from
+/// rock desert: Moab and the Kazakh steppe are both BSk.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Dryland {
     /// Not a dryland, or one whose own palette already suits it.
@@ -49,8 +49,8 @@ pub const BARE_FRACTION_DRY: f64 = 0.12;
 /// Moon 12.2 below, Painted Desert 17.0 and Badlands NP 25.3 above.
 pub const RELIEF_GRADIENT_ROCK: f64 = 15.0;
 
-/// Above this a barren dissected bbox is alpine, not badlands. Only altitude
-/// separates Zard Kuh 2713 m and Damavand 4265 m from Zion 1297 m.
+/// Above this a barren dissected bbox is alpine. Only altitude separates
+/// Zard Kuh 2713 m and Damavand 4265 m from Zion 1297 m.
 pub const MAX_ROCK_BASE_M: f64 = 2200.0;
 
 /// Ds*/Dw* canyon country keeps scrub, so bare stays under half. Near-total
@@ -95,15 +95,13 @@ impl Climate {
         Climate::from_class(koppen_class(lat, lon))
     }
 
-    /// Bareness separates the Sahara from the Kazakh steppe; relief separates
-    /// the Taklamakan from Monument Valley. Polar and temperate stay out, which
-    /// is what keeps Iceland's black basalt off this palette.
+    /// Bareness separates the Sahara from the Kazakh steppe, relief separates
+    /// the Taklamakan from Monument Valley. Polar and temperate stay out.
     pub fn dryland(self, bare_fraction: f64, relief_gradient: f64, base_m: f64) -> Dryland {
         if bare_fraction < BARE_FRACTION_DRY {
             return Dryland::None;
         }
-        // Hot desert keeps its own sand palette: probing found no case where
-        // banding beat it, so there is nothing for this classifier to add.
+        // Hot desert keeps its own sand palette, which probing never beat.
         if matches!(self, Climate::HotDesert) {
             return Dryland::None;
         }
@@ -139,9 +137,8 @@ impl Climate {
         if !veg && !bare {
             return None;
         }
-        // Sand against its own sandstones is a small enough colour step to draw
-        // per block. Every other mix here would read as speckle, so it is picked
-        // once per patch.
+        // Sand against its own sandstones is a small enough colour step to
+        // draw per block. Every other mix would read as speckle.
         let h = if matches!(self, Climate::HotDesert) {
             coord_hash(x, z)
         } else {
@@ -164,8 +161,8 @@ impl Climate {
                 0..=4 => (SAND, SANDSTONE),
                 _ => (COARSE_DIRT, DIRT),
             },
-            // A soil ramp instead: sand against coarse dirt is dE 0.37, far past
-            // where an interleaved mosaic is legible, and sand carries no plants.
+            // A soil ramp instead: sand against coarse dirt is dE 0.37, and
+            // sand carries no plants.
             Climate::HotSteppe => match h % 20 {
                 0..=10 => (GRASS_BLOCK, DIRT),
                 11..=16 => (COARSE_DIRT, DIRT),
@@ -208,10 +205,8 @@ impl Climate {
                 4..=5 => (MOSS_BLOCK, DIRT),
                 _ => (GRASS_BLOCK, DIRT),
             },
-            // Savanna dry season: soil shows between the tussocks. Keyed on this
-            // column's own cover class, so wooded and farmed savanna are untouched.
-            // Every block here passes supports_vegetation and supports_trees, so no
-            // grass tuft and no scattered acacia is lost.
+            // Savanna dry season: soil shows between the tussocks. Keyed on the
+            // column's own cover class, and every block passes the scatter gates.
             Climate::TropicalSavanna => match cover {
                 LC_TREE_COVER => match h % 20 {
                     0..=15 => (GRASS_BLOCK, DIRT),
@@ -264,8 +259,7 @@ mod tests {
             (HotDesert, 0.997, 24.0, 704.0, Dryland::None), // Erg Chebbi
             (HotDesert, 0.988, 37.5, 546.0, Dryland::None), // Sossusvlei
             (HotDesert, 0.917, 97.0, 900.0, Dryland::None), // Wadi Rum
-            // Each of these is caught by a different gate, and each would look
-            // badly wrong rendered as red banded rock.
+            // Each is caught by a different gate.
             (DryContinental, 0.706, 140.5, 1128.0, Dryland::None), // St Helens pumice
             (ColdSteppe, 0.428, 60.3, 2432.0, Dryland::None),      // Great Sand Dunes
             (DryContinental, 0.935, 12.2, 1715.0, Dryland::None),  // Craters of the Moon
@@ -307,8 +301,8 @@ mod tests {
 
     #[test]
     fn clustering_preserves_the_mix_proportions() {
-        // patch_pick's range is 60, which every arm's modulus divides, so moving
-        // from a per-block hash to a per-patch one must not shift the ratios.
+        // patch_pick's range is 60, which every arm's modulus divides, so the
+        // move from a per-block hash to a per-patch one keeps the ratios.
         let mut grass = 0;
         let mut n = 0;
         for x in 0..600 {

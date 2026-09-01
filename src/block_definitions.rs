@@ -230,7 +230,7 @@ impl Block {
             127 => "iron_ore",
             128 => "coal_ore",
             129 => "gold_ore",
-            130 => "copper_ore",
+            130 => "red_sand",
             131 => "clay",
             132 => "dirt_path",
             133 => "waxed_exposed_cut_copper_stairs",
@@ -307,7 +307,7 @@ impl Block {
             206 => "warped_stairs",
             207 => "green_concrete",
             208 => "brick_wall",
-            209 => "red_sand",
+            209 => "redstone_block",
             210 => "chain",
             211 => "warped_trapdoor",
             212 => "stripped_warped_stem",
@@ -459,8 +459,8 @@ impl Block {
             362 => "chain",
             363 => "white_wall_banner",
             364..=365 => "spruce_door",
-            367 => "redstone_block",
             366 => "oak_door",
+            367 => "copper_ore",
             _ => return None,
         })
         // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
@@ -944,7 +944,7 @@ pub const RED_FLOWER: Block = Block::new(67);
 
 pub const RED_TERRACOTTA: Block = Block::new(69);
 pub const RED_WOOL: Block = Block::new(259);
-pub const RED_SAND: Block = Block::new(209);
+pub const RED_SAND: Block = Block::new(130);
 pub const SAND: Block = Block::new(71);
 pub const SANDSTONE: Block = Block::new(72);
 pub const SCAFFOLDING: Block = Block::new(73);
@@ -1023,7 +1023,9 @@ pub const COARSE_DIRT: Block = Block::new(126);
 pub const IRON_ORE: Block = Block::new(127);
 pub const COAL_ORE: Block = Block::new(128);
 pub const GOLD_ORE: Block = Block::new(129);
-pub const COPPER_ORE: Block = Block::new(130);
+/// Above the byte limit: only a `landuse=quarry` tagged `resource=copper`
+/// places it, so it is the cheapest low id to give up to a desert surface.
+pub const COPPER_ORE: Block = Block::new(367);
 pub const CLAY: Block = Block::new(131);
 pub const DIRT_PATH: Block = Block::new(132);
 
@@ -1104,7 +1106,7 @@ pub const ORANGE_WOOL: Block = Block::new(360);
 pub const BLUE_WOOL: Block = Block::new(361);
 pub const GREEN_CONCRETE: Block = Block::new(207);
 pub const BRICK_WALL: Block = Block::new(208);
-pub const REDSTONE_BLOCK: Block = Block::new(367);
+pub const REDSTONE_BLOCK: Block = Block::new(209);
 pub const CHAIN_X: Block = Block::new(210);
 pub const CHAIN_Z: Block = Block::new(362);
 pub const SPRUCE_DOOR_LOWER: Block = Block::new(364);

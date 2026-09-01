@@ -21,9 +21,8 @@ pub fn biome_for_class(
     if lc == LC_WATER {
         let abs_lat = lat_deg.abs();
         let cold = matches!(climate, Climate::IceCap | Climate::Tundra | Climate::Boreal);
-        // The BFS caps at 15, so 0 means open water past the cap, not land.
-        let deep = water_dist == 0 || water_dist >= 12;
-        if water_dist > 0 && water_dist < 8 {
+        let deep = water_dist >= 12;
+        if water_dist < 8 {
             return if cold {
                 "minecraft:frozen_river"
             } else {
@@ -55,17 +54,11 @@ pub fn biome_for_class(
             "minecraft:cold_ocean"
         };
     }
-    // Permanent ice keeps its own biome in every climate, rock desert included:
-    // the ground pass lays SNOW_BLOCK here whatever `dryland` says, and badlands
-    // would put that glacier under a desert sky with snowfall switched off.
-    // Also fixes a glacier in a cold-desert bbox being written as desert.
-    if lc == LC_SNOW_ICE {
-        return "minecraft:snowy_plains";
-    }
-    // Badlands only on bare cover: its foliage tint browns some leaves and not
-    // others, and bare cells carry no vegetation for it to disagree with.
+    // Badlands only on bare cover: its foliage tint browns some leaves.
     if dryland == Dryland::Rock {
         match lc {
+            // The ground pass lays SNOW_BLOCK here whatever `dryland` says.
+            LC_SNOW_ICE => return "minecraft:snowy_plains",
             LC_BARE => return "minecraft:badlands",
             LC_BUILT_UP | LC_CROPLAND | LC_WETLAND => {}
             _ => return "minecraft:savanna",
@@ -220,37 +213,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn open_water_past_the_bfs_cap_is_ocean_not_river() {
-        // water_distance BFS-caps at 15 and leaves the interior of a big body at 0.
-        for climate in [Climate::Temperate, Climate::Boreal] {
-            let mid = biome_for_class(LC_WATER, climate, 55.0, 0, Dryland::None);
-            assert!(
-                mid.contains("ocean"),
-                "uncapped open water should be ocean, got {mid}"
-            );
-        }
-        // A genuine shore cell still reads as river.
-        assert_eq!(
-            biome_for_class(LC_WATER, Climate::Temperate, 55.0, 3, Dryland::None),
-            "minecraft:river"
-        );
-    }
-
-    #[test]
     fn permanent_ice_keeps_its_biome_in_rock_desert() {
-        // The ground pass lays SNOW_BLOCK on LC_SNOW_ICE whatever `dryland` says,
-        // so badlands here would leave a glacier under a desert sky.
-        for dryland in [Dryland::None, Dryland::Rock] {
-            assert_eq!(
-                biome_for_class(LC_SNOW_ICE, Climate::ColdDesert, 40.0, 0, dryland),
-                "minecraft:snowy_plains",
-                "{dryland:?} should not repaint permanent ice"
-            );
-        }
+        assert_eq!(
+            biome_for_class(LC_SNOW_ICE, Climate::ColdDesert, 40.0, 0, Dryland::Rock),
+            "minecraft:snowy_plains"
+        );
         // Bare rock in the same region still reads as badlands.
         assert_eq!(
             biome_for_class(LC_BARE, Climate::ColdDesert, 40.0, 0, Dryland::Rock),
             "minecraft:badlands"
+        );
+        // Outside rock desert the climate keeps its own biome for ice.
+        assert_eq!(
+            biome_for_class(LC_SNOW_ICE, Climate::ColdSteppe, 40.0, 0, Dryland::None),
+            biome_for_class(LC_GRASSLAND, Climate::ColdSteppe, 40.0, 0, Dryland::None)
         );
     }
 

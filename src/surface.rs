@@ -1,14 +1,8 @@
-//! What a ground block means, in one place.
-//!
-//! Several passes read the surface block back to decide whether a plant grows,
-//! a tree roots, or a tunnel bore cuts through. Each used to carry its own
-//! literal list, so a new surface material silently changed behaviour
-//! elsewhere. The coverage test below walks every palette and checks them.
+//! What Minecraft holds up (supports_*) and where Arnis scatters (takes_wild_*).
 
 use crate::block_definitions::*;
 
-/// Excludes SAND on purpose: it is the whole hot-desert surface, so admitting
-/// it would scatter grass across the Sahara.
+/// Excludes SAND: it is the hot-desert surface.
 pub const fn supports_vegetation(b: Block) -> bool {
     matches!(
         b,
@@ -16,17 +10,7 @@ pub const fn supports_vegetation(b: Block) -> bool {
     )
 }
 
-/// Wider than vegetation, since street trees stand in paved ground.
-pub const fn supports_trees(b: Block) -> bool {
-    supports_vegetation(b)
-        || matches!(
-            b,
-            SMOOTH_STONE | STONE_BRICKS | CRACKED_STONE_BRICKS | STONE | COBBLESTONE
-        )
-}
-
-/// `dead_bush_may_place_on` covers terracotta and sand but not sandstone,
-/// where the bush would pop off on the first block update.
+/// Vanilla dead_bush_may_place_on: terracotta and sand, but not sandstone.
 pub const fn supports_dead_bush(b: Block) -> bool {
     matches!(
         b,
@@ -40,6 +24,34 @@ pub const fn supports_dead_bush(b: Block) -> bool {
             | SAND
             | RED_SAND
     ) || supports_vegetation(b)
+}
+
+/// Where the land-cover pass may scatter. Narrower than [`supports_vegetation`]:
+/// podzol is a cemetery, moss a wetland ring, both planted by their own pass.
+pub const fn takes_wild_plants(b: Block) -> bool {
+    matches!(b, GRASS_BLOCK | DIRT | COARSE_DIRT | MUD | FARMLAND)
+}
+
+/// Street trees stand in paved ground. Stone and cobblestone stay out, being
+/// the quarry and bare-rock surfaces.
+pub const fn takes_wild_trees(b: Block) -> bool {
+    takes_wild_plants(b) || matches!(b, SMOOTH_STONE | STONE_BRICKS | CRACKED_STONE_BRICKS)
+}
+
+/// The wild-plant soils plus the rock-desert floor, but not the hot-desert SAND.
+pub const fn takes_wild_dead_bush(b: Block) -> bool {
+    takes_wild_plants(b)
+        || matches!(
+            b,
+            TERRACOTTA
+                | ORANGE_TERRACOTTA
+                | RED_TERRACOTTA
+                | BROWN_TERRACOTTA
+                | GRAY_TERRACOTTA
+                | LIGHT_GRAY_TERRACOTTA
+                | WHITE_TERRACOTTA
+                | RED_SAND
+        )
 }
 
 /// Need soil under them, or they drop on the first chunk update.
@@ -56,8 +68,7 @@ pub const SOIL_PLANTS: &[Block] = &[
     WHITE_FLOWER,
 ];
 
-/// Crops need farmland specifically, not any soil: they pop off plain dirt or
-/// grass the same way they pop off stone.
+/// Farmland only. A crop pops off plain dirt just as it does off stone.
 pub const fn supports_crops(b: Block) -> bool {
     matches!(b, FARMLAND)
 }
@@ -65,9 +76,18 @@ pub const fn supports_crops(b: Block) -> bool {
 /// Placed on farmland at ground+1, before the ground pass can replace it.
 pub const CROPS: &[Block] = &[WHEAT, CARROTS, POTATOES];
 
-/// Everything the stranded-plant sweep may clear at ground+1: the soil plants,
-/// plus the dead bush, which stands on a wider set of blocks and so needs its own
-/// footing test rather than a place in [`SOIL_PLANTS`].
+/// Sand and soil, but not farmland and not the rock-desert floor.
+pub const fn supports_sugar_cane(b: Block) -> bool {
+    matches!(
+        b,
+        GRASS_BLOCK | DIRT | COARSE_DIRT | PODZOL | MOSS_BLOCK | MUD | SAND | RED_SAND
+    )
+}
+
+/// Cane stacks on itself, so a stranded stalk comes out whole.
+pub const SUGAR_CANE_MAX_HEIGHT: i32 = 3;
+
+/// Everything the sweep may clear at ground+1, each with its own footing test.
 pub const CLEARABLE_PLANTS: &[Block] = &[
     GRASS,
     FERN,
@@ -83,17 +103,17 @@ pub const CLEARABLE_PLANTS: &[Block] = &[
     WHEAT,
     CARROTS,
     POTATOES,
+    SUGAR_CANE,
 ];
 
-/// Upper halves of the two-block plants above. Clearing a stranded plant by its
-/// lower half alone leaves one of these floating a block off the ground.
+/// Upper halves, or clearing a lower half leaves one of these floating.
 pub const SOIL_PLANT_TOPS: &[Block] = &[TALL_GRASS_TOP, LARGE_FERN_UPPER];
 
-/// Every block the ground pass may leave as a column's surface. Only the
-/// coverage test reads this; it is the contract each palette has to satisfy.
-#[cfg(test)]
+/// Every block the ground pass may leave as a surface. No smooth stone or
+/// stone bricks, which are building materials a tunnel bore must not eat.
 pub const fn is_natural_ground(b: Block) -> bool {
-    supports_trees(b)
+    supports_vegetation(b)
+        || matches!(b, STONE | COBBLESTONE)
         || matches!(
             b,
             TERRACOTTA
@@ -156,8 +176,7 @@ mod tests {
         LC_MOSS,
     ];
 
-    /// A spread of coordinates wide enough to hit every branch of the patch and
-    /// per-block hashes.
+    /// Wide enough to hit every branch of the patch and per-block hashes.
     fn spread() -> impl Iterator<Item = (i32, i32)> {
         (-3..13).flat_map(|i| (-3..13).map(move |j| (i * 37, j * 53)))
     }
@@ -216,13 +235,11 @@ mod tests {
     #[test]
     fn vegetated_desert_floor_keeps_ground_its_plants_can_use() {
         use crate::strata::FloorCover;
-        // Where the data says something grows, the surface has to pass the plant
-        // and tree gates, or classifying a bbox as rock desert silently deletes
-        // the vegetation its own land cover promised.
+        // Or classifying a bbox as rock desert deletes what the data promised.
         let total = spread().count();
         let rootable = spread()
             .filter(|&(x, z)| {
-                supports_trees(crate::strata::desert_floor(x, z, FloorCover::Wooded).0)
+                takes_wild_trees(crate::strata::desert_floor(x, z, FloorCover::Wooded).0)
             })
             .count();
         assert!(
@@ -231,7 +248,7 @@ mod tests {
         );
         let growable = spread()
             .filter(|&(x, z)| {
-                supports_vegetation(crate::strata::desert_floor(x, z, FloorCover::Sparse).0)
+                takes_wild_plants(crate::strata::desert_floor(x, z, FloorCover::Sparse).0)
             })
             .count();
         assert!(
@@ -262,9 +279,7 @@ mod tests {
 
     #[test]
     fn every_two_block_plant_has_its_top_listed() {
-        // Clearing a stranded plant reads SOIL_PLANTS at ground+1 and
-        // SOIL_PLANT_TOPS at ground+2. A two-block plant whose upper half is
-        // missing from the second list gets decapitated and left floating.
+        // A two-block plant missing from SOIL_PLANT_TOPS is left decapitated.
         for top in SOIL_PLANT_TOPS {
             assert!(
                 SOIL_PLANTS.contains(top),
@@ -292,9 +307,7 @@ mod tests {
 
     #[test]
     fn the_sweep_can_clear_everything_it_can_strand() {
-        // The sweep decides a plant is stranded with one predicate and removes it
-        // with a whitelist. Anything the first recognises that the second omits
-        // gets detected and then left standing.
+        // Anything the predicate finds but the whitelist omits is left standing.
         for p in SOIL_PLANTS {
             assert!(
                 CLEARABLE_PLANTS.contains(p),
@@ -317,6 +330,104 @@ mod tests {
                 "crops must require farmland, not any soil"
             );
         }
+        assert!(
+            CLEARABLE_PLANTS.contains(&SUGAR_CANE),
+            "sugar cane is checked against supports_sugar_cane but never cleared"
+        );
+    }
+
+    // Sand holds cane, the banded rock floor does not.
+    #[test]
+    fn sugar_cane_footing_matches_the_blocks_it_can_stand_on() {
+        for b in [
+            GRASS_BLOCK,
+            DIRT,
+            COARSE_DIRT,
+            PODZOL,
+            MOSS_BLOCK,
+            MUD,
+            SAND,
+            RED_SAND,
+        ] {
+            assert!(supports_sugar_cane(b), "{} holds cane in game", b.name());
+        }
+        for b in [
+            FARMLAND,
+            TERRACOTTA,
+            ORANGE_TERRACOTTA,
+            SANDSTONE,
+            SMOOTH_SANDSTONE,
+            STONE,
+            GRAVEL,
+        ] {
+            assert!(!supports_sugar_cane(b), "{} drops cane in game", b.name());
+        }
+    }
+
+    // Anything the scatter plants must be something the sweep will not clear.
+    #[test]
+    fn every_surface_the_scatter_plants_on_also_holds_the_plant() {
+        let held = |b: Block, what: &str| {
+            if takes_wild_plants(b) {
+                assert!(
+                    supports_vegetation(b),
+                    "{what} scatters plants on {}, which the sweep then clears",
+                    b.name()
+                );
+            }
+            if takes_wild_dead_bush(b) {
+                assert!(
+                    supports_dead_bush(b),
+                    "{what} scatters a dead bush on {}, which the sweep then clears",
+                    b.name()
+                );
+            }
+        };
+        for c in CLIMATES {
+            for cover in COVERS {
+                for (x, z) in spread() {
+                    if let Some((surf, under)) = c.surface_palette(cover, x, z) {
+                        held(surf, "Climate::surface_palette");
+                        held(under, "Climate::surface_palette under");
+                    }
+                }
+            }
+        }
+        use crate::strata::FloorCover;
+        for cover in [FloorCover::Bare, FloorCover::Sparse, FloorCover::Wooded] {
+            for (x, z) in spread() {
+                let (surf, under) = crate::strata::desert_floor(x, z, cover);
+                held(surf, "desert_floor");
+                held(under, "desert_floor under");
+            }
+        }
+    }
+
+    // A surface an OSM pass wrote on purpose is not open countryside.
+    #[test]
+    fn authored_osm_surfaces_keep_their_own_planting() {
+        assert!(
+            !takes_wild_plants(PODZOL) && !takes_wild_trees(PODZOL),
+            "landuse=cemetery writes podzol"
+        );
+        assert!(
+            !takes_wild_plants(MOSS_BLOCK),
+            "wetland puddle rings are moss"
+        );
+        assert!(
+            !takes_wild_trees(STONE),
+            "landuse=quarry, landuse=industrial and natural=bare_rock write stone"
+        );
+        assert!(
+            !takes_wild_trees(COBBLESTONE),
+            "natural=blockfield and natural=mountain_range write cobblestone"
+        );
+        assert!(
+            !takes_wild_dead_bush(SAND),
+            "sand is the hot-desert surface, not a bare patch to weed"
+        );
+        // Minecraft still holds a plant on those, which the sweep relies on.
+        assert!(supports_vegetation(PODZOL) && supports_vegetation(MOSS_BLOCK));
     }
 
     #[test]

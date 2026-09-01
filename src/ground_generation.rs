@@ -19,8 +19,9 @@ use crate::block_definitions::{
     COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
     DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
     HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD, OAK_LEAVES, OAK_PLANKS, PODZOL, POTATOES,
-    RED_FLOWER, SAND, SANDSTONE, SNOW_BLOCK, SNOW_LAYER, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
-    TALL_GRASS_TOP, TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    RED_FLOWER, SAND, SANDSTONE, SNOW_BLOCK, SNOW_LAYER, STONE, STONE_BRICKS, SUGAR_CANE,
+    TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER,
+    YELLOW_FLOWER,
 };
 use crate::climate::Dryland;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -477,9 +478,7 @@ pub fn generate_ground_region(
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
-                            // Read once per column. The surface cascade, the OSM-soil
-                            // replacement and the vegetation pass all need the cover class,
-                            // and the rock-desert level costs a canopy lookup on top of it.
+                            // Read once per column: three passes below need it.
                             let cover = ground.cover_class(coord);
                             let rock_floor = rock_desert_floor_cover(dryland, ground, coord, cover);
 
@@ -550,16 +549,10 @@ pub fn generate_ground_region(
                                 } else if cover == land_cover::LC_SNOW_ICE
                                     && ground.has_cover_neighbour(coord, land_cover::LC_SNOW_ICE)
                                 {
-                                    // Permanent ice, one authority for every climate.
-                                    // A lone class-70 cell is winter imagery, not a
-                                    // glacier, so it still blends with its neighbours
-                                    // through the land-cover default below.
+                                    // A lone cell is winter imagery, not a glacier.
                                     (SNOW_BLOCK, SNOW_BLOCK)
                                 } else if let Some(fc) = rock_floor {
-                                    // Rock desert floor, at the vegetation level this
-                                    // column's own data implies. Built-up, cropland and
-                                    // wetland return None and keep their own surfaces:
-                                    // those are where people changed the ground.
+                                    // At the vegetation level the column's data implies.
                                     crate::strata::desert_floor(x, z, fc)
                                 } else if let Some(p) = climate.surface_palette(cover, x, z) {
                                     p
@@ -783,16 +776,10 @@ pub fn generate_ground_region(
                             } else if rock_floor == Some(crate::strata::FloorCover::Bare)
                                 || surface_block == SNOW_BLOCK
                             {
-                                // OSM paints natural=scrub, grassland and its catch-all as
-                                // GRASS_BLOCK regardless of climate, and it runs before this
-                                // pass, so an if-absent write loses to it. In rock desert
-                                // that turns whole valleys green -- Monument Valley came out
-                                // 81 % grass. Replace only the soils OSM could have laid
-                                // down, so roads, buildings and water are untouched.
-                                //
-                                // Only on measured-bare columns: where the land cover or the
-                                // canopy map says something grows here, OSM agrees with them
-                                // and its surface is kept.
+                                // OSM paints scrub and grassland as GRASS_BLOCK whatever
+                                // the climate and runs first, so an if-absent write loses
+                                // to it and Monument Valley came out 81 % grass. Only the
+                                // soils OSM could have laid, and only on bare columns.
                                 editor.set_block_absolute(
                                     surface_block,
                                     x,
@@ -870,15 +857,12 @@ pub fn generate_ground_region(
                                 if y_max > min_y() {
                                     let y_min = (ground_y - depth).max(min_y() + 1);
                                     if dryland == Dryland::Rock {
-                                        // Fill one run per band. A cliff face is
-                                        // its neighbours' under-fill, so this is
-                                        // what makes strata visible, and it costs
-                                        // the same writes as a single fill.
+                                        // One run per band. A cliff face is its
+                                        // neighbours' under-fill.
                                         let col = strata.column(x, z);
                                         let mut y = y_min;
                                         while y <= y_max {
-                                            // max(y) so integer truncation in the
-                                            // band boundary can never stall the loop.
+                                            // max(y) so truncation cannot stall it.
                                             let top = strata
                                                 .band_top(&col, y)
                                                 .saturating_sub(1)
@@ -943,15 +927,17 @@ pub fn generate_ground_region(
                             // Place vegetation from ESA land cover classification
                             // Only if nothing was already placed above ground by OSM processing
                             // and the ground block is a natural surface (not a road, building slab, etc.)
-                            // One read, then the shared predicates, so a new surface
-                            // material can never silently lose its plants or trees.
+                            // Where Arnis may scatter, which is narrower than what
+                            // Minecraft holds up: podzol means cemetery, stone quarry.
                             let ground_block = editor.get_block_absolute(x, ground_y, z);
                             let ground_is_natural =
-                                ground_block.is_some_and(crate::surface::supports_vegetation);
+                                ground_block.is_some_and(crate::surface::takes_wild_plants);
                             let ground_allows_trees =
-                                ground_block.is_some_and(crate::surface::supports_trees);
-                            let ground_takes_dead_bush =
-                                ground_block.is_some_and(crate::surface::supports_dead_bush);
+                                ground_block.is_some_and(crate::surface::takes_wild_trees);
+                            // Rock desert only: outside it TERRACOTTA is a clay pitch
+                            // or a tartan track, not desert floor.
+                            let ground_takes_dead_bush = dryland == Dryland::Rock
+                                && ground_block.is_some_and(crate::surface::takes_wild_dead_bush);
                             // Where the canopy map reaches, it decides which columns get
                             // trees on any class, and land cover keeps the surface and the
                             // undergrowth. Its roll uses its own hash, so turning the option
@@ -1293,8 +1279,7 @@ pub fn generate_ground_region(
                         }
                     }
 
-                    // A plant left on rock or sand drops on the first block update.
-                    // Runs after every surface branch, including the steep override.
+                    // Runs after every surface branch, the steep override included.
                     clear_stranded_plant(editor, x, ground_y, z);
 
                     // Post-processing: remove stray vegetation from road surfaces.
@@ -1452,11 +1437,8 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
     a * (1.0 - fz) + b * fz
 }
 
-/// Clear plants left on ground that cannot hold them.
-///
-/// The per-column pass cannot catch everything: tiles run in parallel and each
-/// writes into its neighbour's 64-block halo, so a plant can merge in after that
-/// neighbour already cleaned its own columns. This sweeps the merged world.
+/// Clear plants left on ground that cannot hold them. Tiles write into each
+/// other's halo, so a plant can merge in after that column was cleaned.
 pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzbbox: &XZBBox) {
     let cleared = sweep_stranded_plants(
         editor,
@@ -1471,11 +1453,8 @@ pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzb
     }
 }
 
-/// Sweep one region's columns, for the streaming path.
-///
-/// A region is swept once every tile that can write into it has merged and while
-/// it is still resident. After the flush its writes are dropped, so this is the
-/// only moment the halo race can be repaired there at all.
+/// Sweep one region, for the streaming path. Called once every tile has merged
+/// and while the region is resident, since a flush drops later writes.
 pub fn clear_stranded_plants_in_region(
     editor: &mut WorldEditor,
     ground: &Ground,
@@ -1505,14 +1484,9 @@ fn sweep_stranded_plants(
     min_z: i32,
     max_z: i32,
 ) -> u64 {
-    // Scanning is the expensive half: it costs one terrain-height interpolation
-    // per column over the whole bbox, and almost none of them turn out to need a
-    // write. So the scan runs read-only across threads and the handful of writes
-    // are applied serially afterwards, which keeps the pass off the critical path
-    // without changing what it does.
-    // Swept in bands of columns so the hit list stays bounded by the band and not
-    // by the bbox: a country-scale area runs to hundreds of millions of columns,
-    // and collecting every hit in one vector would size it by the whole world.
+    // Scanning is the expensive half and almost never finds a write, so it runs
+    // read-only across threads and the hits are applied serially after. Banded,
+    // or the hit list would be sized by the bbox rather than the band.
     const BAND: i32 = 1024;
     if min_x > max_x || min_z > max_z {
         return 0;
@@ -1551,19 +1525,19 @@ fn sweep_stranded_plants(
 
 /// Whether a plant stands here on ground that cannot hold it.
 fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> bool {
-    // Plant first: almost every column has air there, so most exit after one
-    // lookup instead of two.
+    // Plant first: most columns have air there and exit after one lookup.
     let Some(plant) = editor.get_block_absolute(x, ground_y + 1, z) else {
         return false;
     };
     let footing: fn(crate::block_definitions::Block) -> bool = if plant == DEAD_BUSH {
-        // A dead bush stands on terracotta and sand as well, which is most of a
-        // rock-desert floor, so testing it against soil would uproot it wrongly.
+        // Terracotta and sand as well, which is most of a rock-desert floor.
         crate::surface::supports_dead_bush
     } else if crate::surface::CROPS.contains(&plant) {
-        // Farmland only. The ground pass can replace the farmland a crop was
-        // planted on, and a crop on plain soil drops just like one on stone.
+        // Farmland only, and the ground pass can replace it after planting.
         crate::surface::supports_crops
+    } else if plant == SUGAR_CANE {
+        // Sand counts, farmland and the banded rock floor do not.
+        crate::surface::supports_sugar_cane
     } else if crate::surface::SOIL_PLANTS.contains(&plant) {
         crate::surface::supports_vegetation
     } else {
@@ -1574,11 +1548,8 @@ fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> boo
         .is_some_and(footing)
 }
 
-/// Clear the plant above this column, upper half included.
-///
-/// Two-block plants have to go whole: the upper half sits a block higher, and
-/// taking only the lower half leaves it floating, which is what the road cleanup
-/// further up has always handled by hand.
+/// Clear the plant above this column, upper half included, or a two-block
+/// plant is left with its top floating.
 fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
     editor.set_block_absolute(
         AIR,
@@ -1596,6 +1567,10 @@ fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
         Some(crate::surface::SOIL_PLANT_TOPS),
         None,
     );
+    // Cane stands on cane, so the whole stalk goes.
+    for dy in 2..=crate::surface::SUGAR_CANE_MAX_HEIGHT {
+        editor.set_block_absolute(AIR, x, ground_y + dy, z, Some(&[SUGAR_CANE]), None);
+    }
 }
 
 /// The rock-desert floor level for a column, or `None` where the rock-desert
