@@ -377,10 +377,6 @@ body,
   background-repeat: no-repeat !important;
 }
 
-.leaflet-draw-toolbar a.leaflet-draw-edit-body.off-earth {
-  background-color: #fdf3d8;
-}
-
 .leaflet-draw-toolbar a.leaflet-draw-edit-body.body-earth {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='%23555555' stroke-width='1.5'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Cellipse cx='12' cy='12' rx='3.4' ry='8'/%3E%3Cpath d='M4 12h16'/%3E%3C/g%3E%3C/svg%3E") !important;
 }
