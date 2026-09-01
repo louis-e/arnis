@@ -370,6 +370,8 @@ pub fn generate_ground_region(
                     // with GRASS_BLOCK for no good reason — it's only a 27° hiking
                     // slope, not a cliff.
                     let steep_override = terrain_enabled && slope > t27;
+                    // Set in the non-water path below; water columns grow nothing.
+                    let mut occupied_above = false;
                     let mut did_underfill = false;
 
                     // Determine surface and under-block material for this column.
@@ -768,14 +770,12 @@ pub fn generate_ground_region(
                                 (surface_block, under_block)
                             };
 
-                            // Whether this pass, rather than an OSM pass, put the surface
-                            // here. An if-absent write only lands on an empty column, and
-                            // both overwrite branches below always land.
-                            let ours_surface = steep_override
-                                || (dryland == Dryland::Rock
-                                    && (rock_floor == Some(crate::strata::FloorCover::Bare)
-                                        || surface_block == SNOW_BLOCK))
-                                || !editor.block_exists_absolute(x, ground_y, z);
+                            // Whether this pass, rather than an OSM pass, laid the surface.
+                            // Only podzol and moss are ambiguous, every other block decides
+                            // on its own, so the lookup is skipped on the columns that
+                            // cannot need it.
+                            let ours_surface = matches!(surface_block, PODZOL | MOSS_BLOCK)
+                                && !editor.block_exists_absolute(x, ground_y, z);
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
                                 // Use blacklist to avoid replacing water/bedrock and
@@ -970,9 +970,12 @@ pub fn generate_ground_region(
                             let ground_allows_trees =
                                 ours || ground_block.is_some_and(crate::surface::takes_wild_trees);
                             // A canopy measurement is a tree observed at this spot, so it
-                            // outranks the slope tiers and plants on any natural ground.
-                            let ground_is_terrain =
-                                ground_block.is_some_and(crate::surface::is_natural_ground);
+                            // outranks the slope tiers. Rock counts only where this pass put
+                            // it there: OSM gravel is a railway and OSM stone is a quarry.
+                            let ground_is_terrain = ground_block.is_some_and(|b| {
+                                crate::surface::takes_wild_trees(b)
+                                    || (steep_override && crate::surface::is_natural_ground(b))
+                            });
                             // Rock desert only: outside it TERRACOTTA is a clay pitch
                             // or a tartan track, not desert floor.
                             let ground_takes_dead_bush = dryland == Dryland::Rock
@@ -994,12 +997,15 @@ pub fn generate_ground_region(
                             } else {
                                 (false, false)
                             };
+                            // Read once. Three passes below asked the same question, and
+                            // it is one section lookup per column over the whole bbox.
+                            occupied_above = editor.block_exists_absolute(x, ground_y + 1, z);
                             // Placed before the vegetation pass, whose own guard then sees
                             // the trunk and leaves the column alone.
                             if canopy_tree
                                 && ground_is_terrain
                                 && !tunnel_footprint.contains(x, z)
-                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                                && !occupied_above
                             {
                                 tree::Tree::create_from_canopy(
                                     editor,
@@ -1007,8 +1013,9 @@ pub fn generate_ground_region(
                                     Some(building_footprints),
                                     Some(bridge_surface),
                                 );
+                                occupied_above = true;
                             }
-                            if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
+                            if has_land_cover && !occupied_above {
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
@@ -1319,8 +1326,11 @@ pub fn generate_ground_region(
                         }
                     }
 
-                    // Runs after every surface branch, the steep override included.
-                    clear_stranded_plant(editor, x, ground_y, z);
+                    // Only where something already stood: the scatter above plants only
+                    // what the sweep accepts, so a column it filled cannot be stranded.
+                    if occupied_above {
+                        clear_stranded_plant(editor, x, ground_y, z);
+                    }
 
                     // Post-processing: remove stray vegetation from road surfaces.
                     // Despite guards in natural/landuse processing, overlapping elements
