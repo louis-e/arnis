@@ -1689,7 +1689,7 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
             &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE]
         }
         "plastic" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, WHITE_CONCRETE, GLASS],
-        // All three map to one dark stair, so pitched panel roofs stay uniform.
+        // These blocks share one stair variant, so pitched panel roofs stay uniform.
         "solarpanels" | "photovoltaic" => &[BLACK_CONCRETE, BLACKSTONE, POLISHED_BLACKSTONE],
         _ => return None,
     };

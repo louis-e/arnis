@@ -7807,7 +7807,7 @@ fn generate_inset_tiers(
 
         for &(x, z) in &tier_cells {
             // An open X neighbour means the wall runs along Z, so its ordinate is z.
-            // Convex corners have both open and tie-break to X, as elsewhere here.
+            // Corners have both open; either pick keeps one run's rhythm and breaks the other.
             let open_x = dist.get(x + 1, z) < tier.inset || dist.get(x - 1, z) < tier.inset;
             let open_z = dist.get(x, z + 1) < tier.inset || dist.get(x, z - 1) < tier.inset;
             if open_x || open_z {
