@@ -27,9 +27,12 @@ fn corner_min_seg_len(scale: f64) -> i32 {
     ((6.0 * scale) as i32).max(6)
 }
 
-/// Per-column facade context; the default reproduces legacy behavior.
+/// Per-column wall context.
 #[derive(Copy, Clone)]
 pub struct ColumnFacade {
+    /// Along-wall ordinate, so the window rhythm holds at any wall angle.
+    /// Segment walks must set this; the default only suits tests.
+    pub wall_u: i32,
     pub party: bool,
     pub street: bool,
 }
@@ -37,6 +40,7 @@ pub struct ColumnFacade {
 impl Default for ColumnFacade {
     fn default() -> Self {
         Self {
+            wall_u: 0,
             party: false,
             street: true,
         }

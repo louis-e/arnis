@@ -329,6 +329,10 @@ pub(crate) struct OvertureBuilding {
     facade_color: Option<String>,
     /// Roof color (hex or name)
     roof_color: Option<String>,
+    /// Roof rise in metres, i.e. the part of `height` the roof occupies.
+    roof_height: Option<f64>,
+    /// Facade material, interned from Overture's closed enum.
+    facade_material: Option<&'static str>,
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────
@@ -1230,6 +1234,8 @@ fn parse_overture_row(
     let mut roof_orientation: Option<String> = None;
     let mut facade_color: Option<String> = None;
     let mut roof_color: Option<String> = None;
+    let mut roof_height: Option<f64> = None;
+    let mut facade_material: Option<&'static str> = None;
     let mut bbox_xmin: Option<f64> = None;
     let mut bbox_ymin: Option<f64> = None;
     let mut bbox_xmax: Option<f64> = None;
@@ -1310,6 +1316,32 @@ fn parse_overture_row(
                     roof_color = Some(s.clone());
                 }
             }
+            "roof_height" => {
+                if let parquet::record::Field::Double(v) = field {
+                    roof_height = Some(*v);
+                } else if let parquet::record::Field::Float(v) = field {
+                    roof_height = Some(*v as f64);
+                }
+            }
+            "facade_material" => {
+                if let parquet::record::Field::Str(s) = field {
+                    // Interned, so the row allocates nothing and unknown values drop.
+                    facade_material = match s.as_str() {
+                        "brick" => Some("brick"),
+                        "cement_block" => Some("cement_block"),
+                        "clay" => Some("clay"),
+                        "concrete" => Some("concrete"),
+                        "glass" => Some("glass"),
+                        "metal" => Some("metal"),
+                        "plaster" => Some("plaster"),
+                        "plastic" => Some("plastic"),
+                        "stone" => Some("stone"),
+                        "timber_framing" => Some("timber_framing"),
+                        "wood" => Some("wood"),
+                        _ => None,
+                    };
+                }
+            }
             "bbox" => {
                 // bbox is a struct with sub-fields
                 if let parquet::record::Field::Group(group) = field {
@@ -1378,6 +1410,8 @@ fn parse_overture_row(
         roof_orientation,
         facade_color,
         roof_color,
+        roof_height,
+        facade_material,
     })
 }
 
@@ -1672,6 +1706,19 @@ fn building_to_processed_way(
     // Roof color
     if let Some(ref color) = building.roof_color {
         tags.insert("roof:colour".to_string(), color.clone());
+    }
+
+    // Overture's vocabulary matches OSM's, so the value passes through verbatim.
+    if let Some(mat) = building.facade_material {
+        tags.insert("building:material".to_string(), mat.to_string());
+    }
+
+    // A rise near the building height would collapse the walls, so guard relatively.
+    if let Some(rh) = building.roof_height {
+        let plausible = (0.5..100.0).contains(&rh) && building.height.is_none_or(|h| rh < h * 0.75);
+        if plausible {
+            tags.insert("roof:height".to_string(), format!("{rh:.1}"));
+        }
     }
 
     // Source tracking

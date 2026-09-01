@@ -1584,8 +1584,11 @@ pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
             QUARTZ_BLOCK,
             SMOOTH_SANDSTONE,
         ],
-        "wood" | "timber" | "timberframe" | "halftimber" | "halftimbered" | "loghouse" | "logs"
-        | "bamboo" => &[OAK_PLANKS, SPRUCE_PLANKS, DARK_OAK_PLANKS, OAK_LOG],
+        // timber_framing normalizes to "timberframing", which this arm was missing.
+        "wood" | "timber" | "timberframe" | "timberframing" | "timberplanks" | "halftimber"
+        | "halftimbered" | "loghouse" | "logs" | "bamboo" => {
+            &[OAK_PLANKS, SPRUCE_PLANKS, DARK_OAK_PLANKS, OAK_LOG]
+        }
         "reed" => &[HAY_BALE],
         "metal" | "steel" | "iron" | "aluminium" | "aluminum" | "corrugatedsteel"
         | "corrugatediron" | "corrugatedmetal" | "tin" | "sheetmetal" | "metalsheet"
@@ -1638,28 +1641,47 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         .collect();
 
     let options: &[Block] = match normalized.as_str() {
-        "glass" | "glazing" | "acrylicglass" => {
+        "glass" | "glazing" | "acrylicglass" | "mirror" => {
             &[GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS]
         }
-        "tile" | "tiles" | "rooftiles" | "ceramic" | "ceramictiles" | "claytile" | "claytiles"
-        | "terracotta" => &[BRICK, NETHER_BRICK, RED_NETHER_BRICKS, MUD_BRICKS],
-        "slate" | "slates" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],
-        "metal" | "steel" | "aluminium" | "aluminum" | "corrugatedsteel" | "corrugatediron"
-        | "corrugatedmetal" | "tin" | "zinc" | "lead" | "sheetmetal" | "metalsheet" => {
-            &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, IRON_BLOCK]
+        "tile" | "tiles" | "rooftile" | "rooftiles" | "ceramic" | "ceramictiles" | "claytile"
+        | "claytiles" | "cementtile" | "terracotta" => {
+            &[BRICK, NETHER_BRICK, RED_NETHER_BRICKS, MUD_BRICKS]
         }
+        "slate" | "slates" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],
+        "metal"
+        | "steel"
+        | "aluminium"
+        | "aluminum"
+        | "corrugatedsteel"
+        | "corrugatediron"
+        | "corrugatedmetal"
+        | "corrugatedironsheets"
+        | "corrugated"
+        | "cgi"
+        | "tin"
+        | "zinc"
+        | "zink"
+        | "lead"
+        | "sheetmetal"
+        | "metalsheet"
+        | "metalplates" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, IRON_BLOCK],
         "copper" => &[
             WAXED_OXIDIZED_COPPER,
             WAXED_EXPOSED_COPPER,
             WAXED_COPPER_BLOCK,
         ],
-        "concrete" | "reinforcedconcrete" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, SMOOTH_STONE],
+        "concrete" | "reinforcedconcrete" | "rcc" | "concerte" | "cement" | "concreteslab" => {
+            &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, SMOOTH_STONE]
+        }
         "wood" | "timber" | "shingle" | "shingles" | "woodshingle" | "woodshingles" => {
             &[OAK_PLANKS, SPRUCE_PLANKS, DARK_OAK_PLANKS]
         }
         "thatch" | "straw" | "reed" | "reeds" | "palmleaves" => &[HAY_BALE],
         "asphalt" | "bitumen" | "tar" | "tarpaper" | "rolledasphalt" | "rolledroofing"
-        | "asphaltshingle" => &[BLACKSTONE, POLISHED_BLACKSTONE, POLISHED_BLACKSTONE_BRICKS],
+        | "asphaltshingle" | "asphaltshingles" | "roofingfelt" => {
+            &[BLACKSTONE, POLISHED_BLACKSTONE, POLISHED_BLACKSTONE_BRICKS]
+        }
         "stone" => &[STONE_BRICKS, SMOOTH_STONE, ANDESITE],
         "gravel" => &[GRAVEL],
         "grass" | "green" | "vegetation" | "greenroof" | "sod" => &[GRASS_BLOCK, MOSS_BLOCK],
@@ -1667,6 +1689,8 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
             &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE]
         }
         "plastic" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, WHITE_CONCRETE, GLASS],
+        // All three map to one dark stair, so pitched panel roofs stay uniform.
+        "solarpanels" | "photovoltaic" => &[BLACK_CONCRETE, BLACKSTONE, POLISHED_BLACKSTONE],
         _ => return None,
     };
 
@@ -1700,6 +1724,9 @@ mod material_tests {
             "masonry",
             "pebbledash",
             "mirror",
+            "timber_framing",
+            "timber framing",
+            "timber_planks",
         ] {
             assert!(
                 get_wall_block_for_material(m, &mut rng()).is_some(),
@@ -1716,6 +1743,17 @@ mod material_tests {
             "asphalt_shingle",
             "plastic",
             "acrylic_glass",
+            "solar_panels",
+            "photovoltaic",
+            "rcc",
+            "cement",
+            "zink",
+            "cgi",
+            "corrugated",
+            "roof_tile",
+            "asphalt_shingles",
+            "roofing_felt",
+            "mirror",
         ] {
             assert!(
                 get_roof_block_for_material(m, &mut rng()).is_some(),
@@ -1865,6 +1903,8 @@ mod material_tests {
         "wood",
         "timber",
         "timberframe",
+        "timberframing",
+        "timberplanks",
         "halftimber",
         "halftimbered",
         "loghouse",
@@ -1934,13 +1974,16 @@ mod material_tests {
         "glass",
         "glazing",
         "acrylicglass",
+        "mirror",
         "tile",
         "tiles",
+        "rooftile",
         "rooftiles",
         "ceramic",
         "ceramictiles",
         "claytile",
         "claytiles",
+        "cementtile",
         "terracotta",
         "slate",
         "slates",
@@ -1951,14 +1994,23 @@ mod material_tests {
         "corrugatedsteel",
         "corrugatediron",
         "corrugatedmetal",
+        "corrugatedironsheets",
+        "corrugated",
+        "cgi",
         "tin",
         "zinc",
+        "zink",
         "lead",
         "sheetmetal",
         "metalsheet",
+        "metalplates",
         "copper",
         "concrete",
         "reinforcedconcrete",
+        "rcc",
+        "concerte",
+        "cement",
+        "concreteslab",
         "wood",
         "timber",
         "shingle",
@@ -1977,6 +2029,8 @@ mod material_tests {
         "rolledasphalt",
         "rolledroofing",
         "asphaltshingle",
+        "asphaltshingles",
+        "roofingfelt",
         "stone",
         "gravel",
         "grass",
@@ -1989,5 +2043,7 @@ mod material_tests {
         "fibrecement",
         "fibercement",
         "plastic",
+        "solarpanels",
+        "photovoltaic",
     ];
 }
