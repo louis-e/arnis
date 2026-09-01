@@ -532,7 +532,7 @@ $(document).ready(function () {
             },
             // Copernicus crater: sharp rim, terraced walls, central peaks.
             home: [9.62, -20.08],
-            homeZoom: 5
+            homeZoom: 2
         },
         mars: {
             url: 'https://s3-eu-west-1.amazonaws.com/whereonmars.cartodb.net/viking_mdim21_global/{z}/{x}/{y}.png',
@@ -545,7 +545,7 @@ $(document).ready(function () {
             },
             // Valles Marineris: 7 km of relief and unmistakable from orbit.
             home: [-13.9, -59.2],
-            homeZoom: 4
+            homeZoom: 1
         }
     };
 
@@ -890,7 +890,6 @@ $(document).ready(function () {
         BODY_CYCLE.forEach(function (b) {
             _bodyToggleBtn.classList.toggle('body-' + b, b === currentBody);
         });
-        _bodyToggleBtn.classList.toggle('off-earth', currentBody !== 'earth');
         _bodyToggleBtn.title = 'World: ' + BODY_LABELS[currentBody] +
             '\nClick to switch to ' + next.charAt(0).toUpperCase() + next.slice(1);
     }
