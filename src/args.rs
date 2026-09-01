@@ -323,18 +323,10 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.aws_only_elevation = false;
     // Relief already fits vanilla height, so the pack would add only empty sky.
     args.disable_height_limit = false;
-    // Airless bodies look right at night. Only a default: comparing against the
-    // flag's own default lets an explicit --world-time win.
-    if args.world_time == DEFAULT_WORLD_TIME {
-        args.world_time = MIDNIGHT_TICKS;
-    }
 }
 
-/// Clap's `--world-time` default, so `apply_body_defaults` can tell left-alone
-/// from explicitly-set.
+/// Clap's `--world-time` default.
 pub const DEFAULT_WORLD_TIME: i64 = 6_000;
-/// Minecraft tick for midnight (tick 0 is 06:00).
-pub const MIDNIGHT_TICKS: i64 = 18_000;
 
 pub fn validate_args(args: &Args) -> Result<(), String> {
     // Moon/Mars scale is ours, and sits below MIN_SCALE by design.

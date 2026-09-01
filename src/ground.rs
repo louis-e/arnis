@@ -784,9 +784,18 @@ impl Ground {
             return (1, 1);
         };
         let (world_w, world_h) = self.world_dims();
+        // cover_class maps world -> grid by nearest neighbour over (grid - 1)
+        // steps, so the gap between sampled cells is the ceiling, not the floor.
+        let span = |world: usize, grid: usize| {
+            if grid <= 1 {
+                world.max(1)
+            } else {
+                world.saturating_sub(1).div_ceil(grid - 1).max(1)
+            }
+        };
         (
-            (world_w / lc.width.max(1)).max(1) as i32,
-            (world_h / lc.height.max(1)).max(1) as i32,
+            span(world_w, lc.width) as i32,
+            span(world_h, lc.height) as i32,
         )
     }
 
@@ -1499,6 +1508,19 @@ mod tests {
         assert!(
             !g.has_cover_neighbour(snow, LC_SNOW_ICE),
             "a lone snow cell must not find itself across the coarse z axis"
+        );
+
+        // 8 blocks over 3 cells: floor division gives a step of 2, and world 2
+        // and 4 both round to cell 1, so the probe never leaves the cell.
+        let mut g = ground_with(vec![vec![0.0; 8]; 8]);
+        let mut grid = vec![vec![LC_GRASSLAND; 3]; 3];
+        grid[1][1] = LC_SNOW_ICE;
+        g.land_cover = Some(lc_of(grid, 3, 3));
+        let snow = XZPoint::new(4, 4);
+        assert_eq!(g.cover_class(snow), LC_SNOW_ICE, "probe hits the snow cell");
+        assert!(
+            !g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "floor division would leave both probes inside the same cell"
         );
     }
 

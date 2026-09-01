@@ -1046,12 +1046,11 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
                         .min(editor.terrain_level(cx, cz).unwrap_or(cell.carve_top))
                 };
                 for y in (cell.road_y + 1)..=top {
+                    // None means the cell is already air, so there is nothing to cut.
                     if editor
                         .get_block_absolute(cx, y, cz)
-                        .is_none_or(carve_accepts)
+                        .is_some_and(carve_accepts)
                     {
-                        // Blacklisting AIR takes the overwrite path and skips
-                        // rewriting what is already carved.
                         editor.set_block_absolute(AIR, cx, y, cz, None, Some(&[AIR]));
                     }
                 }

@@ -60,7 +60,7 @@ pub fn biome_for_class(
             // The ground pass lays SNOW_BLOCK here whatever `dryland` says.
             LC_SNOW_ICE => return "minecraft:snowy_plains",
             LC_BARE => return "minecraft:badlands",
-            LC_BUILT_UP | LC_CROPLAND | LC_WETLAND => {}
+            LC_BUILT_UP | LC_CROPLAND | LC_WETLAND | LC_MANGROVES => {}
             _ => return "minecraft:savanna",
         }
     }

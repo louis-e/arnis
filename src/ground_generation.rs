@@ -768,6 +768,14 @@ pub fn generate_ground_region(
                                 (surface_block, under_block)
                             };
 
+                            // Whether this pass, rather than an OSM pass, put the surface
+                            // here. An if-absent write only lands on an empty column, and
+                            // both overwrite branches below always land.
+                            let ours_surface = steep_override
+                                || (dryland == Dryland::Rock
+                                    && (rock_floor == Some(crate::strata::FloorCover::Bare)
+                                        || surface_block == SNOW_BLOCK))
+                                || !editor.block_exists_absolute(x, ground_y, z);
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
                                 // Use blacklist to avoid replacing water/bedrock and
@@ -955,13 +963,16 @@ pub fn generate_ground_region(
                             // them and a cemetery or a puddle ring when an OSM pass did, so
                             // the gates ask who owns the column, not just which block it is.
                             let ground_block = editor.get_block_absolute(x, ground_y, z);
-                            let ours = ground_block.is_some_and(|b| {
-                                b == surface_block && crate::surface::supports_vegetation(b)
-                            });
+                            let ours = ours_surface
+                                && ground_block.is_some_and(crate::surface::supports_vegetation);
                             let ground_is_natural =
                                 ours || ground_block.is_some_and(crate::surface::takes_wild_plants);
                             let ground_allows_trees =
                                 ours || ground_block.is_some_and(crate::surface::takes_wild_trees);
+                            // A canopy measurement is a tree observed at this spot, so it
+                            // outranks the slope tiers and plants on any natural ground.
+                            let ground_is_terrain =
+                                ground_block.is_some_and(crate::surface::is_natural_ground);
                             // Rock desert only: outside it TERRACOTTA is a clay pitch
                             // or a tartan track, not desert floor.
                             let ground_takes_dead_bush = dryland == Dryland::Rock
@@ -986,8 +997,7 @@ pub fn generate_ground_region(
                             // Placed before the vegetation pass, whose own guard then sees
                             // the trunk and leaves the column alone.
                             if canopy_tree
-                                && slope <= t27
-                                && ground_allows_trees
+                                && ground_is_terrain
                                 && !tunnel_footprint.contains(x, z)
                                 && !editor.block_exists_absolute(x, ground_y + 1, z)
                             {
@@ -1002,9 +1012,11 @@ pub fn generate_ground_region(
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
+                                    // A 10 m class, not a per-tree measurement, so it
+                                    // still stops at a sheer face.
                                     land_cover::LC_TREE_COVER
-                                        if slope <= t27
-                                            && ground_allows_trees
+                                        if slope <= t45
+                                            && (ground_allows_trees || ground_is_terrain)
                                             && !tunnel_footprint.contains(x, z) =>
                                     {
                                         // Micro trees cover ~5 blocks instead of ~80, so the
