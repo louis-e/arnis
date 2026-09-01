@@ -816,6 +816,28 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "dark_oak_door" => BedrockBlock::simple("dark_oak_door"),
         "oak_trapdoor" => BedrockBlock::simple("trapdoor"),
 
+        // These two still carry legacy states on Bedrock. The other new blocks keep their name.
+        "purpur_block" => BedrockBlock::with_states(
+            "purpur_block",
+            vec![
+                (
+                    "chisel_type",
+                    BedrockBlockStateValue::String("default".to_string()),
+                ),
+                (
+                    "pillar_axis",
+                    BedrockBlockStateValue::String("y".to_string()),
+                ),
+            ],
+        ),
+        "dark_prismarine" => BedrockBlock::with_states(
+            "prismarine",
+            vec![(
+                "prismarine_block_type",
+                BedrockBlockStateValue::String("dark".to_string()),
+            )],
+        ),
+
         // Vegetation with different Bedrock names
         "fern" => BedrockBlock::with_states(
             "tallgrass",
@@ -931,8 +953,8 @@ pub fn to_bedrock_block_with_properties(
         return convert_log(java_name, props_map);
     }
 
-    // Handle doors with half property (upper/lower → upper_block_bit)
-    if java_name.ends_with("_door") && java_name != "iron_door" {
+    // Handle doors with half property (upper/lower -> upper_block_bit), iron ones included.
+    if java_name.ends_with("_door") {
         return convert_door(java_name, props_map);
     }
 
@@ -2203,6 +2225,38 @@ mod tests {
     }
 
     /// Standing signs must keep their Java rotation.
+    /// The jetbridge cab doors are iron and have to keep their half, facing and hinge.
+    #[test]
+    fn test_iron_door_keeps_its_states() {
+        use crate::block_definitions::IRON_DOOR;
+        use std::collections::HashMap as StdHashMap;
+
+        let mut props = StdHashMap::new();
+        props.insert(
+            "half".to_string(),
+            fastnbt::Value::String("upper".to_string()),
+        );
+        props.insert(
+            "facing".to_string(),
+            fastnbt::Value::String("west".to_string()),
+        );
+        props.insert(
+            "hinge".to_string(),
+            fastnbt::Value::String("left".to_string()),
+        );
+        let bedrock =
+            to_bedrock_block_with_properties(IRON_DOOR, Some(&fastnbt::Value::Compound(props)));
+        assert_eq!(bedrock.name, "minecraft:iron_door");
+        assert!(matches!(
+            bedrock.states.get("upper_block_bit"),
+            Some(BedrockBlockStateValue::Bool(true))
+        ));
+        assert!(matches!(
+            bedrock.states.get("direction"),
+            Some(BedrockBlockStateValue::Int(2))
+        ));
+    }
+
     #[test]
     fn test_standing_sign_keeps_rotation() {
         use crate::block_definitions::SIGN;
