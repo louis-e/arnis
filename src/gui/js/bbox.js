@@ -874,7 +874,28 @@ $(document).ready(function () {
     var savedTheme = localStorage.getItem('selectedTileTheme') || 'osm';
     var selectedEarthTheme = savedTheme;
 
-    // Driven by the settings selector in the parent. Earth is restored on every
+    var BODY_CYCLE = ['earth', 'moon', 'mars'];
+    var BODY_LABELS = {
+        earth: 'Earth',
+        moon: 'Moon (NASA terrain only, 1 block = 200 m)',
+        mars: 'Mars (NASA terrain only, 1 block = 500 m)'
+    };
+    var _bodyToggleBtn = null;
+
+    // Icon and tooltip carry the whole state: which world is selected and which
+    // one the next click brings.
+    function syncBodyToggleButton() {
+        if (!_bodyToggleBtn) return;
+        var next = BODY_CYCLE[(BODY_CYCLE.indexOf(currentBody) + 1) % BODY_CYCLE.length];
+        BODY_CYCLE.forEach(function (b) {
+            _bodyToggleBtn.classList.toggle('body-' + b, b === currentBody);
+        });
+        _bodyToggleBtn.classList.toggle('off-earth', currentBody !== 'earth');
+        _bodyToggleBtn.title = 'World: ' + BODY_LABELS[currentBody] +
+            '\nClick to switch to ' + next.charAt(0).toUpperCase() + next.slice(1);
+    }
+
+    // Driven by the world toggle in the map toolbar. Earth is restored on every
     // start, so a Moon world stays a deliberate choice.
     function changeBody(body) {
         if (body === currentBody) return;
@@ -901,6 +922,10 @@ $(document).ready(function () {
         // Nominatim only knows Earth place names.
         var search = document.getElementById('search-container');
         if (search) search.style.display = currentBody === 'earth' ? '' : 'none';
+
+        syncBodyToggleButton();
+        // Earth-only, so its tooltip and enabled state change with the body.
+        updateTerrainPreviewButton();
     }
 
     applyBasemap();
@@ -1680,6 +1705,32 @@ $(document).ready(function () {
         editToolbar.appendChild(btn);
         window._terrainPreviewBtn = btn;
         updateTerrainPreviewButton();
+    })();
+
+    // World toggle: its own toolbar group below the edit tools, cycling
+    // Earth -> Moon -> Mars. The map is the only place the body is picked.
+    (function addBodyToggleButton() {
+        var drawContainer = document.querySelector('.leaflet-draw');
+        if (!drawContainer) return;
+
+        var section = L.DomUtil.create('div', 'leaflet-draw-section', drawContainer);
+        var bar = L.DomUtil.create('div', 'leaflet-draw-toolbar leaflet-bar', section);
+        var btn = L.DomUtil.create('a', 'leaflet-draw-edit-body', bar);
+        btn.href = '#';
+        btn.id = 'body-toggle-btn';
+
+        L.DomEvent
+            .on(btn, 'mousedown dblclick', L.DomEvent.stopPropagation)
+            .on(btn, 'click', L.DomEvent.stop)
+            .on(btn, 'click', function () {
+                var i = BODY_CYCLE.indexOf(currentBody);
+                changeBody(BODY_CYCLE[(i + 1) % BODY_CYCLE.length]);
+                // The parent gates Earth-only settings off this.
+                window.parent.postMessage({ type: 'bodyChanged', body: currentBody }, '*');
+            });
+
+        _bodyToggleBtn = btn;
+        syncBodyToggleButton();
     })();
     /*
     **

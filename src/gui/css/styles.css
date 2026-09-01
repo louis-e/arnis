@@ -749,6 +749,15 @@ input[type="range"] {
   margin-top: 0;
 }
 
+.settings-notice {
+  border-left: 3px solid #fecc44;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  font-size: 0.8em;
+  color: #d8d8d8;
+  text-align: left;
+}
+
 .settings-row {
   display: flex;
   justify-content: space-between;
