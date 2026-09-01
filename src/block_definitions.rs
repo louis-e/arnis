@@ -88,7 +88,7 @@ impl Block {
     }
 
     #[inline(always)]
-    pub fn id(&self) -> u16 {
+    pub const fn id(&self) -> u16 {
         self.id
     }
 

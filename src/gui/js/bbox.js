@@ -519,7 +519,7 @@ $(document).ready(function () {
         moon: {
             url: 'https://cartocdn-gusc.global.ssl.fastly.net/opmbuilder/api/v1/map/named/opm-moon-basemap-v0-1/all/{z}/{x}/{y}.png',
             options: {
-                attribution: 'Imagery: NASA LRO LROC WAC | Basemap &copy; <a href="https://www.openplanetary.org/" target="_blank">OpenPlanetary</a> | Elevation: NASA PDS LOLA',
+                attribution: 'Basemap &copy; <a href="https://www.openplanetary.org/" target="_blank">OpenPlanetary</a> | LOLA/USGS | Elevation: NASA PDS LOLA',
                 minZoom: 1,
                 maxZoom: 12,
                 maxNativeZoom: 10
@@ -531,7 +531,7 @@ $(document).ready(function () {
         mars: {
             url: 'https://s3-eu-west-1.amazonaws.com/whereonmars.cartodb.net/viking_mdim21_global/{z}/{x}/{y}.png',
             options: {
-                attribution: 'Imagery: NASA Viking MDIM 2.1 | Basemap &copy; <a href="https://www.openplanetary.org/" target="_blank">OpenPlanetary</a> | Elevation: NASA PDS MOLA',
+                attribution: 'Basemap &copy; <a href="https://www.openplanetary.org/" target="_blank">OpenPlanetary</a> | NASA/Viking/USGS | Elevation: NASA PDS MOLA',
                 tms: true,
                 minZoom: 1,
                 maxZoom: 12,
@@ -580,8 +580,8 @@ $(document).ready(function () {
                 // Fall back to OSM raster if MapLibre plugin failed to load
                 if (typeof L.maplibreGL !== 'function') {
                     console.warn('MapLibre GL plugin unavailable, falling back to OSM raster');
-                    selectedEarthTheme = 'osm';
-                    applyBasemap();
+                    // Via changeTileTheme so the fallback is persisted, not retried next launch.
+                    changeTileTheme('osm');
                     return;
                 }
                 currentTileLayer = L.maplibreGL({

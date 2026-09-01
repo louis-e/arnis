@@ -1011,21 +1011,25 @@ fn gui_start_generation(
 
     progress::reset_progress_floor();
 
-    // The GUI builds Args directly and never runs validate_args, so guard the scale here
-    // rather than letting it panic deep in the coordinate transform after the fetch.
-    if let Err(e) = crate::args::validate_scale(world_scale) {
-        emit_gui_error(&e);
-        return Err(e);
-    }
-
-    // Substituted here, not just in Args: the spawn transform and world bounds
-    // below must see the same scale.
+    // Resolved before validation: off Earth the slider value is ignored, so
+    // validating it could reject a run over a scale that never gets used.
+    // Substituted here, not just in Args, because the spawn transform and world
+    // bounds below must see the same scale.
     let celestial_body = crate::celestial::CelestialBody::from_str_lossy(&celestial_body_name);
     let world_scale = if celestial_body.is_earth() {
         world_scale
     } else {
         celestial_body.world_scale()
     };
+
+    // The GUI builds Args directly and never runs validate_args, so guard the scale here
+    // rather than letting it panic deep in the coordinate transform after the fetch.
+    if celestial_body.is_earth() {
+        if let Err(e) = crate::args::validate_scale(world_scale) {
+            emit_gui_error(&e);
+            return Err(e);
+        }
+    }
 
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);

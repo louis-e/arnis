@@ -120,7 +120,7 @@ pub fn base_chunk_y() -> i32 {
     BASE_CHUNK_Y.load(MemOrdering::Relaxed)
 }
 
-static BASE_CHUNK_BLOCK: AtomicU16 = AtomicU16::new(0);
+static BASE_CHUNK_BLOCK: AtomicU16 = AtomicU16::new(crate::block_definitions::GRASS_BLOCK.id());
 
 /// Surface block for those filler chunks; grass would ring a lunar world in green.
 pub fn set_base_chunk_block(block: crate::block_definitions::Block) {
@@ -129,12 +129,7 @@ pub fn set_base_chunk_block(block: crate::block_definitions::Block) {
 
 #[inline]
 pub fn base_chunk_block() -> crate::block_definitions::Block {
-    let id = BASE_CHUNK_BLOCK.load(MemOrdering::Relaxed);
-    if id == 0 {
-        crate::block_definitions::GRASS_BLOCK
-    } else {
-        crate::block_definitions::Block::from_raw_id(id)
-    }
+    crate::block_definitions::Block::from_raw_id(BASE_CHUNK_BLOCK.load(MemOrdering::Relaxed))
 }
 /// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
 /// Vanilla limit is 319, but data packs can extend this up to 2031.
