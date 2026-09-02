@@ -1107,7 +1107,12 @@
         },
         {
             "key": "aeroway",
-            "description": "Used to generate airport infrastructure including runways, taxiways and helipads (with occasional parked helicopters)."
+            "description": "Used to generate airport infrastructure including runways, taxiways and helipads (with occasional parked helicopters), plus aeroplanes along runways and taxiways."
+        },
+        {
+            "key": "aeroway",
+            "value": "jet_bridge",
+            "description": "Generates a jet bridge model running from the terminal building out to the aircraft stand."
         },
         {
             "key": "area:aeroway",

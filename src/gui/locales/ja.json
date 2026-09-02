@@ -34,6 +34,7 @@
   "placeholder_ground": "地面レベル",
   "language": "言語",
   "map_theme": "地図テーマ",
+  "custom_map_source": "カスタム地図ソース",
   "terrain": "地形",
   "celestial_body": "ワールド",
   "body_earth": "地球",

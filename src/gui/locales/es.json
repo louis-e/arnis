@@ -34,6 +34,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Idioma",
   "map_theme": "Tema del Mapa",
+  "custom_map_source": "Fuente de mapa personalizada",
   "terrain": "Terreno",
   "celestial_body": "Mundo",
   "body_earth": "Tierra",

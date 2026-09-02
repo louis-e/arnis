@@ -103,6 +103,8 @@ fn conv_door(props: Option<&Value>, id: u16, species: &str) -> LuantiNode {
         ("spruce", true) => "mcl_doors:door_spruce_t_1",
         ("birch", false) => "mcl_doors:door_birch_b_1",
         ("birch", true) => "mcl_doors:door_birch_t_1",
+        ("iron", false) => "mcl_doors:iron_door_b_1",
+        ("iron", true) => "mcl_doors:iron_door_t_1",
         (_, false) => "mcl_doors:door_oak_b_1",
         (_, true) => "mcl_doors:door_oak_t_1",
     };
@@ -432,7 +434,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         246 => "mcl_flowers:tulip_red",
         247 => "mcl_flowers:dandelion",
         248 => "mcl_flowers:blue_orchid",
-        368 => "mcl_copper:stone_with_copper",
+        385 => "mcl_copper:stone_with_copper",
         249 => "mcl_core:stone_with_diamond",
         250 => "mcl_core:stone_with_redstone",
         251 => "mcl_core:stone_with_lapis",
@@ -545,6 +547,31 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         364 | 365 => return conv_door(props, block.id(), "spruce"),
         366 => return conv_door(props, block.id(), "oak"),
         367 => "mcl_end:end_stone", // END_STONE
+        // Aeroplane livery + jetbridge blocks.
+        368 => "mcl_end:purpur_block",
+        369 => "mcl_stairs:slab_purpur_block",
+        370 => return conv_stair(props, "mcl_stairs:stair_purpur_block"),
+        // register_wood(name) gives mcl_trees:wood_<name> and mcl_stairs:{slab,stair}_<name>.
+        371 => "mcl_trees:wood_crimson",
+        372 => "mcl_stairs:slab_crimson",
+        373 => return conv_stair(props, "mcl_stairs:stair_crimson"),
+        374 => "mcl_trees:wood_cherry_blossom",
+        375 => "mcl_stairs:slab_cherry_blossom",
+        376 => return conv_stair(props, "mcl_stairs:stair_cherry_blossom"),
+        377 => "mcl_ocean:prismarine_dark",
+        378 => "mcl_stairs:slab_prismarine_dark",
+        379 => return conv_stair(props, "mcl_stairs:stair_prismarine_dark"),
+        380 => "mcl_stairs:slab_copper_exposed_cut",
+        381 => {
+            return conv_trapdoor(
+                props,
+                "mcl_doors:trapdoor_pale_oak",
+                "mcl_doors:trapdoor_pale_oak_open",
+            )
+        }
+        382 => "mcl_core:coalblock",
+        383 => "mcl_stairs:slab_blackstone",
+        384 => return conv_door(props, block.id(), "iron"),
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

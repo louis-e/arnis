@@ -20,8 +20,6 @@ const NONE = 'none'; // never stored, revert only
 // kind picks how the value is read, compared and written.
 const SETTINGS = [
   // Generation
-  // Not persisted: a Moon or Mars world should be a fresh choice each launch.
-  { id: 'body-group', kind: 'segmented', store: NONE, valueAttr: 'data-body' },
   { id: 'generation-mode-select', kind: 'select', store: OWN },
   { id: 'overture-toggle', kind: 'checkbox', store: OWN },
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
@@ -49,6 +47,7 @@ const SETTINGS = [
   // Map & Input. #bbox-coords is the area selection, not a preference, so it
   // is intentionally absent.
   { id: 'tile-theme-select', kind: 'select', store: EXTERNAL },
+  { id: 'custom-tile-url', kind: 'text', store: EXTERNAL },
 
   // Application
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },

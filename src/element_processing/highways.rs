@@ -2458,6 +2458,8 @@ const AEROWAY_DEFAULT_HALF_M: f64 = 12.0;
 /// Clamp (metres) for `width=*`-derived half-widths — guards against absurd tags.
 const AEROWAY_MIN_HALF_M: f64 = 6.0;
 const AEROWAY_MAX_HALF_M: f64 = 40.0;
+/// Half-width (metres) of a stand lead-in line, which is a marking rather than a taxiway.
+const PARKING_POSITION_HALF_M: f64 = 2.5;
 
 /// True where a runway centerline dash is painted, given distance `s` (blocks) from the way start.
 fn runway_centerline_dash_on(s: f32, scale: f64) -> bool {
@@ -2487,6 +2489,8 @@ pub fn generate_aeroway(
     let aeroway = way.tags.get("aeroway").map(String::as_str);
     let is_runway = aeroway == Some("runway");
     let is_taxiway = aeroway == Some("taxiway");
+    // A parking position is the painted lead-in to one stand, not a 24 m slab of pavement.
+    let is_stand_line = aeroway == Some("parking_position");
 
     if aeroway == Some("helipad") {
         generate_helipad_way(editor, way, args, building_footprints);
@@ -2500,9 +2504,13 @@ pub fn generate_aeroway(
     };
 
     // Half-width from the OSM `width=*` tag (metres, clamped to sane sizes); default when absent.
-    let half_m = parse_width_tag_m(&way.tags)
-        .map(|w| (w * 0.5).clamp(AEROWAY_MIN_HALF_M, AEROWAY_MAX_HALF_M))
-        .unwrap_or(AEROWAY_DEFAULT_HALF_M);
+    let half_m = if is_stand_line {
+        PARKING_POSITION_HALF_M
+    } else {
+        parse_width_tag_m(&way.tags)
+            .map(|w| (w * 0.5).clamp(AEROWAY_MIN_HALF_M, AEROWAY_MAX_HALF_M))
+            .unwrap_or(AEROWAY_DEFAULT_HALF_M)
+    };
     let half_width: i32 = (half_m * args.scale).round().max(1.0) as i32;
 
     // Build the centerline once: bresenham per segment, consecutive duplicates dropped, with a
@@ -2563,7 +2571,7 @@ pub fn generate_aeroway(
                 let ez = (cp.z as f32 + sign * pz * off).round() as i32;
                 editor.set_block(WHITE_CONCRETE, ex, 0, ez, over_base, None);
             }
-        } else if is_taxiway {
+        } else if is_taxiway || is_stand_line {
             editor.set_block(YELLOW_CONCRETE, cp.x, 0, cp.z, over_base, None);
         }
     }
@@ -2834,6 +2842,11 @@ fn collect_highway_surface_coords(
 
         // Exclude indoor ways (same guard as generate_highways_internal)
         if way.tags.get("indoor").is_some_and(|v| v == "yes") {
+            continue;
+        }
+
+        // Jet bridges render as a schematic, so the apron under them is not road.
+        if way.tags.get("aeroway").is_some_and(|v| v == "jet_bridge") {
             continue;
         }
 

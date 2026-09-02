@@ -34,6 +34,7 @@
   "placeholder_ground": "Ground Level",
   "language": "언어",
   "map_theme": "지도 테마",
+  "custom_map_source": "사용자 지정 지도 소스",
   "terrain": "지형",
   "celestial_body": "세계",
   "body_earth": "지구",

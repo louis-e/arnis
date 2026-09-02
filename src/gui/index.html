@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="./css/preview3d.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
+  <!-- Not deferred: the map iframe starts posting log messages as soon as it
+       parses, so the bridge has to be listening before that element exists. -->
+  <script src="./js/logging.js"></script>
   <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
@@ -90,6 +93,11 @@
         </div>
 
         <div class="settings-scrollable">
+        <!-- Why half the settings are greyed out; the world is picked on the map -->
+        <div id="off-earth-notice" class="settings-notice" style="display: none;">
+          <span id="off-earth-notice-body">Moon</span> is selected in the map toolbar. Terrain only, at a fixed coarse scale, so the Earth-only settings below are disabled.
+        </div>
+
         <!-- Section: Generation -->
         <div class="settings-section-header" data-localize="settings_section_generation">Generation</div>
 
@@ -123,7 +131,7 @@
         <div class="settings-row">
           <label for="use-3d-toggle">
             <span data-localize="three_dmr">3D Models &amp; Props</span>
-            <span class="tooltip-icon" data-tooltip="Adds detailed 3D content: community-contributed models (from the OpenStreetMap 3D Model Repository and Wikimedia Commons) for famous landmarks such as the Eiffel Tower, plus bundled schematic props like cars, boats, cranes and wind turbines. Turn off to disable all of them.">?</span>
+            <span class="tooltip-icon" data-tooltip="Adds detailed 3D content: community-contributed models (from the OpenStreetMap 3D Model Repository and Wikimedia Commons) for famous landmarks such as the Eiffel Tower, plus bundled schematic props like cars, boats, cranes, aeroplanes and wind turbines. Turn off to disable all of them.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="use-3d-toggle" name="use-3d-toggle" checked>
@@ -323,20 +331,6 @@
         <!-- Section: Map & Input -->
         <div class="settings-section-header" data-localize="settings_section_map">Map & Input</div>
 
-        <!-- Celestial Body -->
-        <div class="settings-row">
-          <label for="body-group">
-            <span data-localize="celestial_body">World</span>
-            <span class="tooltip-icon" data-tooltip="Generate real NASA terrain for the Moon or Mars instead of Earth. Terrain only, at a fixed coarse scale (1 block = 200 m / 500 m).">?</span>
-          </label>
-          <div class="settings-control">
-            <div class="segmented-control" id="body-group">
-              <button type="button" class="segment active" data-default data-body="earth" data-localize="body_earth">Earth</button>
-              <button type="button" class="segment" data-body="moon" data-localize="body_moon">Moon</button>
-              <button type="button" class="segment" data-body="mars" data-localize="body_mars">Mars</button>
-            </div>
-          </div>
-        </div>
         <!-- Bounding Box Input -->
         <div class="settings-row">
           <label for="bbox-coords">
@@ -362,7 +356,19 @@
               <option value="stadia-bright">Smooth Bright</option>
               <option value="stadia-dark">Smooth Dark</option>
               <option value="openfreemap-liberty">Modern</option>
+              <option value="custom">Custom</option>
             </select>
+          </div>
+        </div>
+
+        <!-- Custom Map Source, shown only for the Custom theme -->
+        <div class="settings-row" id="custom-tile-row">
+          <label for="custom-tile-url">
+            <span data-localize="custom_map_source">Custom Map Source</span>
+            <span class="tooltip-icon" data-tooltip="Tile URL template containing {z}, {x} and {y}. Must be WGS-84; GCJ-02 sources (most Chinese ones) appear shifted.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="text" id="custom-tile-url" name="custom-tile-url" placeholder="https://example.com/{z}/{x}/{y}.png">
           </div>
         </div>
 

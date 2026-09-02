@@ -121,10 +121,6 @@ async function applyLocalization(localization) {
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "span[data-localize='language']": "language",
-    "span[data-localize='celestial_body']": "celestial_body",
-    "button[data-localize='body_earth']": "body_earth",
-    "button[data-localize='body_moon']": "body_moon",
-    "button[data-localize='body_mars']": "body_mars",
     "span[data-localize='generation_mode']": "generation_mode",
     "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
     "option[data-localize='mode_geo_only']": "mode_geo_only",
@@ -140,6 +136,7 @@ async function applyLocalization(localization) {
     "span[data-localize='bake_lighting']": "bake_lighting",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
+    "span[data-localize='custom_map_source']": "custom_map_source",
     "span[data-localize='java_save_path']": "java_save_path",
     "span[data-localize='bedrock_save_path']": "bedrock_save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
@@ -412,13 +409,47 @@ const EARTH_ONLY_SETTINGS = [
   'legacy-trees-toggle',
   'scale-value-slider',
   'aws-only-elevation-toggle',
-  'disable-height-limit-toggle'
+  'disable-height-limit-toggle',
+  // Off Earth the body's own imagery is the only basemap, so neither the
+  // Earth theme picker nor a custom Earth tile source has anything to act on.
+  'tile-theme-select',
+  'custom-tile-url'
 ];
 const EARTH_ONLY_SEGMENTED = ['max-tree-size-group', 'signage-group'];
 
-// Also called on iframe load: a revert can change the body before the map listens.
+// A tile URL template Leaflet can actually fill in. Deliberately permissive
+// about the host - the entire point is to reach something we do not know about -
+// but the placeholders have to be there or every tile 404s.
+function isValidTileTemplate(url) {
+  if (!/^https?:\/\//i.test(url)) return false;
+  return url.includes('{z}') && url.includes('{x}') && url.includes('{y}');
+}
+
+function getCustomTileUrl() {
+  return (localStorage.getItem('customTileUrl') || '').trim();
+}
+
+// The URL field is only meaningful for the Custom theme, so it is hidden
+// rather than disabled for every other one.
+function refreshCustomSourceRow() {
+  const select = document.getElementById('tile-theme-select');
+  const row = document.getElementById('custom-tile-row');
+  if (!select || !row) return;
+  row.style.display = select.value === 'custom' ? '' : 'none';
+}
+
+// The map iframe is addressed by class, never by its src attribute. Manual
+// bbox entry used to rewrite src to "maps.html#lat,lng,lat,lng", after which
+// every iframe[src="maps.html"] lookup silently matched nothing and the map
+// theme and celestial body messages were dropped for the rest of the session.
+function getMapFrame() {
+  return document.querySelector('.map-container');
+}
+
+// The map owns the toggle, but an iframe reload restarts it on Earth, so the
+// parent's value has to be pushed back.
 function pushBodyToMap() {
-  const mapIframe = document.querySelector('iframe[src="maps.html"]');
+  const mapIframe = getMapFrame();
   if (mapIframe && mapIframe.contentWindow) {
     mapIframe.contentWindow.postMessage(
       { type: 'changeBody', body: selectedCelestialBody },
@@ -450,6 +481,13 @@ function setCelestialBody(body) {
     markRow(group);
   });
 
+  const notice = document.getElementById('off-earth-notice');
+  if (notice) {
+    notice.style.display = off ? '' : 'none';
+    document.getElementById('off-earth-notice-body').textContent =
+      selectedCelestialBody === 'moon' ? 'Moon' : 'Mars';
+  }
+
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
   const timeSlider = document.getElementById('world-time-slider');
   if (timeSlider) {
@@ -471,6 +509,11 @@ function registerMessageEvent() {
     if (bboxText && !event.data.type) {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
+    }
+
+    // World toggled on the map toolbar
+    if (event.data && event.data.type === 'bodyChanged') {
+      setCelestialBody(event.data.body);
     }
 
     // Handle angle measurement from the map polyline tool
@@ -908,20 +951,8 @@ function initSettings() {
     });
   });
 
-  // Celestial body segmented control
-  const bodyGroup = document.getElementById("body-group");
-  bodyGroup.querySelectorAll(".segment").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      bodyGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      setCelestialBody(btn.dataset.body);
-      // Swap the map basemap and drop any selection made on the other body.
-      pushBodyToMap();
-    });
-  });
-
-  // A revert or global reset can flip the body while the map is still loading.
-  const bodyMapFrame = document.querySelector('iframe[src="maps.html"]');
+  // A reloaded map comes back on Earth; restore whatever was picked.
+  const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
 
   // Max tree size segmented control
@@ -1032,9 +1063,10 @@ function initSettings() {
 
     // Store the selected theme in localStorage for persistence
     localStorage.setItem('selectedTileTheme', selectedTheme);
+    refreshCustomSourceRow();
 
     // Send message to map iframe to change tile theme
-    const mapIframe = document.querySelector('iframe[src="maps.html"]');
+    const mapIframe = getMapFrame();
     if (mapIframe && mapIframe.contentWindow) {
       mapIframe.contentWindow.postMessage({
         type: 'changeTileTheme',
@@ -1042,6 +1074,41 @@ function initSettings() {
       }, '*');
     }
   });
+
+  // Custom map source, the field behind the Custom theme. It exists because a
+  // network that blocks every built-in provider turns the fallback chain into a
+  // slower route to the same blank map (see issues #1222, #1298, #1299).
+  const customTileInput = document.getElementById("custom-tile-url");
+  customTileInput.value = getCustomTileUrl();
+
+  function applyCustomTileUrl() {
+    const raw = customTileInput.value.trim();
+
+    // An empty field is the normal way to go back to the themes. A non-empty
+    // one that is not a usable template is left in the box so the user can see
+    // and correct it, but is not handed to the map.
+    if (raw && !isValidTileTemplate(raw)) {
+      window.arnisLog('warn', 'Ignoring custom map source: expected an http(s) URL containing {z}, {x} and {y}.');
+      localStorage.removeItem('customTileUrl');
+    } else if (raw) {
+      localStorage.setItem('customTileUrl', raw);
+    } else {
+      localStorage.removeItem('customTileUrl');
+    }
+
+    const mapIframe = getMapFrame();
+    if (mapIframe && mapIframe.contentWindow) {
+      mapIframe.contentWindow.postMessage({
+        type: 'setCustomTileUrl',
+        url: getCustomTileUrl()
+      }, '*');
+    }
+  }
+
+  // On change, not on input: a half-typed URL is not a source, and remounting
+  // the basemap per keystroke would hammer whatever host they are aiming at.
+  customTileInput.addEventListener("change", applyCustomTileUrl);
+  refreshCustomSourceRow();
 
   // Telemetry consent toggle
   const telemetryToggle = document.getElementById("telemetry-toggle");
@@ -1557,8 +1624,8 @@ function handleBboxInput() {
         setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
       } else {
         // Restore map selection info display but don't update input field
-        const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
-        const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+        const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
+        const selectedSize = calculateBBoxSize(lat1, lng1, lat2, lng2);
         displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
       }
       return;
@@ -1587,10 +1654,19 @@ function handleBboxInput() {
         const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
         window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
-        // Show custom bbox on the map
-        let map_container = document.querySelector('.map-container');
-        map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
-        map_container.contentWindow.location.reload();
+        // Show the typed bbox on the map. Handed over by message rather than
+        // by reloading the frame: setting src and then calling reload() on the
+        // same frame raced - reload() runs against the pre-hash URL, so the
+        // selection could be dropped and the map came back empty. A reload also
+        // throws away every tile already fetched, which is the last thing a slow
+        // or filtered connection can afford.
+        const mapFrame = getMapFrame();
+        if (mapFrame && mapFrame.contentWindow) {
+          mapFrame.contentWindow.postMessage({
+            type: 'setBbox',
+            bounds: [lat1, lng1, lat2, lng2]
+          }, '*');
+        }
 
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
@@ -1629,16 +1705,16 @@ function handleBboxInput() {
 /**
  * Calculates the approximate area of a bounding box in square meters
  * Uses the Haversine formula for geodesic calculations
- * @param {number} lng1 - First longitude coordinate
- * @param {number} lat1 - First latitude coordinate
- * @param {number} lng2 - Second longitude coordinate
- * @param {number} lat2 - Second latitude coordinate
+ * @param {number} lat1 - South latitude
+ * @param {number} lng1 - West longitude
+ * @param {number} lat2 - North latitude
+ * @param {number} lng2 - East longitude
  * @returns {number} Area in square meters
  */
 // Radii used to turn a bbox into true ground area for the selected body.
 const BODY_RADIUS_M = { earth: 6371000, moon: 1737400, mars: 3396000 };
 
-function calculateBBoxSize(lng1, lat1, lng2, lat2) {
+function calculateBBoxSize(lat1, lng1, lat2, lng2) {
   // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
   // Real ground, not an Earth-sized overestimate: a lunar box reads 13x too large.
@@ -1706,21 +1782,30 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
 // Re-runs the size status, e.g. after a body switch changes which tiers apply.
 function refreshBboxSelectionInfo() {
   if (!mapSelectedBBox) return;
-  const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
+  const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
   displayBboxSizeStatus(
     document.getElementById("bbox-selection-info"),
-    calculateBBoxSize(lng1, lat1, lng2, lat2)
+    calculateBBoxSize(lat1, lng1, lat2, lng2)
   );
 }
 
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
-  let [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
+  // Two producers, two separators: the map posts formatBounds output, which is
+  // space separated, while manual coordinate entry synthesizes a comma
+  // separated string. Splitting on " " alone turned the manual one into a
+  // single NaN, which then got written back over the user's half-typed
+  // coordinates as "NaN,NaN,undefined,NaN" - the next keystroke failed the
+  // format check and the selection was gone.
+  // lat,lng,lat,lng throughout - what formatBounds emits, what the manual
+  // input accepts, and what LLBBox::from_str parses on the Rust side. Do not
+  // "fix" this to lng-first; the backend has a comment saying the same.
+  let [lat1, lng1, lat2, lng2] = bboxText.trim().split(/[,\s]+/).map(Number);
 
   // Normalize longitudes
-  lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
-  lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
-  mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+  lng1 = parseFloat(normalizeLongitude(lng1).toFixed(6));
+  lng2 = parseFloat(normalizeLongitude(lng2).toFixed(6));
+  mapSelectedBBox = `${lat1} ${lng1} ${lat2} ${lng2}`;
 
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
@@ -1735,7 +1820,7 @@ function displayBboxInfoText(bboxText) {
   const bboxCoordsInput = document.getElementById("bbox-coords");
 
   // Reset the info text if the bbox is 0,0,0,0
-  if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
+  if (lat1 === 0 && lng1 === 0 && lat2 === 0 && lng2 === 0) {
     setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
@@ -1746,11 +1831,26 @@ function displayBboxInfoText(bboxText) {
     return;
   }
 
-  // Update the custom bbox input with the map selection (comma-separated format)
-  bboxCoordsInput.value = `${lng1},${lat1},${lng2},${lat2}`;
+  // Update the custom bbox input with the map selection (comma-separated
+  // format) - but never type over the user. This also runs as the echo of a
+  // bbox they are entering into this very field, and rewriting it mid-edit
+  // moves the caret so the next keystroke lands in the wrong place.
+  //
+  // The echo is caught by value, not by focus: focus can legitimately be
+  // elsewhere (the map takes it on interaction, and activeElement is
+  // unreliable while the window itself is unfocused) even though the field
+  // still holds what the user typed. The focus check then covers the other
+  // direction - a genuinely different, map-driven selection arriving while
+  // the caret is in the field.
+  const current = bboxCoordsInput.value.trim().split(/[,\s]+/).map(Number);
+  const echoesField = current.length === 4 && current[0] === lat1 &&
+    current[1] === lng1 && current[2] === lat2 && current[3] === lng2;
+  if (!echoesField && document.activeElement !== bboxCoordsInput) {
+    bboxCoordsInput.value = `${lat1},${lng1},${lat2},${lng2}`;
+  }
 
   // Calculate the size of the selected bbox
-  const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+  const selectedSize = calculateBBoxSize(lat1, lng1, lat2, lng2);
 
   displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
 

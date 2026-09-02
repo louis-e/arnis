@@ -87,6 +87,10 @@ var citySearch = {
                 if (self.activeRequest !== request) return;
                 self.activeRequest = null;
                 if (textStatus !== 'abort') {
+                    // status 0 means the request never reached the host: DNS,
+                    // TLS or a network-level block, not a geocoder error.
+                    arnisLog('warn', 'Geocoding request to ' + url + ' failed (' +
+                        textStatus + ', HTTP status ' + (jqXHR && jqXHR.status) + ').');
                     self.showError('Search failed. Please try again.');
                 }
             }

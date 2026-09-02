@@ -1,5 +1,11 @@
 var map, rsidebar, lsidebar, drawControl, drawnItems = null;
 
+// logging.js defines this. The guard keeps a problem in the diagnostics path
+// from turning into a broken map, which is the very failure mode it reports on.
+if (typeof window.arnisLog !== 'function') {
+    window.arnisLog = function (level, message) { console.log('[' + level + '] ' + message); };
+}
+
 // Where we keep the big list of proj defs from the server
 var proj4defs = null;
 // Where we keep the proj objects we are using in this session
@@ -526,7 +532,7 @@ $(document).ready(function () {
             },
             // Copernicus crater: sharp rim, terraced walls, central peaks.
             home: [9.62, -20.08],
-            homeZoom: 5
+            homeZoom: 2
         },
         mars: {
             url: 'https://s3-eu-west-1.amazonaws.com/whereonmars.cartodb.net/viking_mdim21_global/{z}/{x}/{y}.png',
@@ -539,7 +545,7 @@ $(document).ready(function () {
             },
             // Valles Marineris: 7 km of relief and unmistakable from orbit.
             home: [-13.9, -59.2],
-            homeZoom: 4
+            homeZoom: 1
         }
     };
 
@@ -549,84 +555,346 @@ $(document).ready(function () {
     // Read by updateTerrainPreviewButton, which lives outside this scope.
     window._currentBody = currentBody;
 
+    /*
+    **
+    **  basemap failover
+    **
+    **  a basemap host the user's network cannot reach used to leave
+    **  the map permanently blank: the only recovery was retrying the
+    **  SAME host over plain HTTP, which cannot work for
+    **  tile.openstreetmap.org (it 301s straight back to HTTPS) and is
+    **  mixed-content blocked on macOS anyway. reported from mainland
+    **  China and from networks where the OSM tile CDN refuses the
+    **  client - see issues #1222, #1298, #1299.
+    **
+    **  so: walk a chain of independent operators until one paints.
+    **  deliberately conservative - a single successful tile pins the
+    **  provider for the session, so coverage gaps and zoom-limit 404s
+    **  never cause a switch. only a provider that paints NOTHING is
+    **  replaced.
+    **
+    */
+    var BASEMAP_FALLBACK_CHAIN = [
+        'osm',
+        'esri-imagery',
+        'opentopomap',
+        'stadia-bright',
+        'openfreemap-liberty'
+    ];
+
+    // Enough failures to rule out a couple of unlucky tiles, low enough to
+    // recover well inside the watchdog when the host fails fast (DNS, TLS, 4xx).
+    var BASEMAP_ERROR_THRESHOLD = 6;
+
+    // Errors come back faster than images do, so a working provider can report
+    // a handful of 404s before its first tile paints. Give every provider this
+    // long to prove itself before the error count is allowed to condemn it; if
+    // the errors stop arriving in the meantime, the stall watchdog still does.
+    var BASEMAP_MIN_OBSERVE_MS = 3000;
+
+    // Backstop for the failure the error counter cannot see: sockets that hang
+    // rather than fail. That is the usual shape of a blocked host, and an <img>
+    // can sit pending for a minute or more before it ever fires 'error'.
+    var BASEMAP_STALL_MS = 12000;
+
+    // The URL behind the 'custom' theme. It deliberately opts out of the
+    // fallback chain: someone who picked Custom has already established that
+    // the built-in hosts do not work for them, so quietly walking back through
+    // those five would just be a slow route to the same blank map. Failures are
+    // reported instead of papered over, which also means a typo in the template
+    // is visible rather than hidden behind a provider that happens to load.
+    var customTileUrl = (localStorage.getItem('customTileUrl') || '').trim();
+
+    function isValidTileTemplate(url) {
+        return /^https?:\/\//i.test(url) &&
+            url.indexOf('{z}') !== -1 && url.indexOf('{x}') !== -1 && url.indexOf('{y}') !== -1;
+    }
+
+    // What is actually on screen, which is not necessarily what the user picked.
+    var activeThemeKey = null;
+    // Providers already ruled out in this recovery run, so it cannot cycle.
+    var basemapAttempted = [];
+    var basemapWatchdog = null;
+    var basemapSettled = false;
+    // A layer that has been removed can still deliver a queued tileload or
+    // tileerror. Every health callback carries the generation it was armed in,
+    // so a late event from the previous provider cannot settle or condemn the
+    // one that replaced it.
+    var basemapGeneration = 0;
+
+    function clearBasemapWatchdog() {
+        if (basemapWatchdog !== null) {
+            clearTimeout(basemapWatchdog);
+            basemapWatchdog = null;
+        }
+    }
+
+    function basemapCurrent(generation) {
+        return generation === basemapGeneration && !basemapSettled;
+    }
+
+    // First painted tile: this provider works, stop watching it.
+    function markBasemapHealthy(generation) {
+        if (!basemapCurrent(generation)) return;
+        basemapSettled = true;
+        clearBasemapWatchdog();
+    }
+
+    // Move to the next untried provider. Leaves selectedEarthTheme (the user's
+    // preference) untouched, so their choice returns once the network does.
+    function failBasemap(generation, reason) {
+        if (!basemapCurrent(generation)) return;
+        basemapSettled = true;
+        clearBasemapWatchdog();
+
+        var failed = activeThemeKey;
+        var next = null;
+        for (var i = 0; i < BASEMAP_FALLBACK_CHAIN.length; i++) {
+            var candidate = BASEMAP_FALLBACK_CHAIN[i];
+            if (tileThemes[candidate] && basemapAttempted.indexOf(candidate) === -1) {
+                next = candidate;
+                break;
+            }
+        }
+
+        if (!next) {
+            arnisLog('error', 'Basemap "' + failed + '" failed (' + reason +
+                ') and every fallback provider has been tried. The map will stay blank; ' +
+                'this network appears to block the tile hosts.');
+            return;
+        }
+
+        arnisLog('warn', 'Basemap "' + failed + '" failed (' + reason +
+            '), falling back to "' + next + '". User preference stays "' +
+            selectedEarthTheme + '".');
+        showEarthTheme(next);
+    }
+
     // Records the Earth preference; off Earth the body's own basemap wins.
     function changeTileTheme(themeKey) {
-        if (!tileThemes[themeKey]) return;
+        if (themeKey !== 'custom' && !tileThemes[themeKey]) return;
         selectedEarthTheme = themeKey;
         localStorage.setItem('selectedTileTheme', themeKey);
         if (currentBody === 'earth') applyBasemap();
     }
 
-    // Function to apply the active basemap with automatic HTTP fallback
-    function applyBasemap() {
-        // Remove current tile layer if it exists
+    function detachBasemap() {
+        clearBasemapWatchdog();
         if (currentTileLayer) {
             map.removeLayer(currentTileLayer);
             currentTileLayer = null;
         }
+    }
+
+    // Mounts one Earth theme and arms its health checks. Only failBasemap and
+    // applyBasemap call this; everything else goes through applyBasemap so the
+    // recovery run is reset.
+    function showEarthTheme(themeKey) {
+        var theme = tileThemes[themeKey];
+        if (!theme) return;
+
+        detachBasemap();
+        activeThemeKey = themeKey;
+        basemapSettled = false;
+        var generation = ++basemapGeneration;
+        var mountedAt = Date.now();
+        var lastFailureDetail = null;
+        if (basemapAttempted.indexOf(themeKey) === -1) basemapAttempted.push(themeKey);
+
+        if (theme.type === 'vector') {
+            // Fall back to OSM raster if MapLibre plugin failed to load
+            if (typeof L.maplibreGL !== 'function') {
+                arnisLog('warn', 'MapLibre GL plugin unavailable, falling back to OSM raster');
+                // Via changeTileTheme so the fallback is persisted, not retried next launch.
+                changeTileTheme('osm');
+                return;
+            }
+            currentTileLayer = L.maplibreGL({
+                style: theme.style,
+                attributionControl: { customAttribution: theme.attribution },
+                pixelRatio: window.devicePixelRatio || 1
+            });
+            currentTileLayer.addTo(map);
+
+            // The style document is a plain fetch: if the host is unreachable
+            // the GL map reports an error and never reaches 'load'.
+            var glMap = typeof currentTileLayer.getMaplibreMap === 'function'
+                ? currentTileLayer.getMaplibreMap()
+                : null;
+            if (glMap) {
+                glMap.on('load', function () { markBasemapHealthy(generation); });
+                // Deliberately not a failure signal on its own: maplibre reports
+                // a missing sprite or one bad tile the same way it reports an
+                // unreachable style host. Remember the last one so the watchdog
+                // can name a cause, and let the watchdog make the call.
+                glMap.on('error', function (e) {
+                    lastFailureDetail = (e && e.error && e.error.message) || 'style or tile request failed';
+                });
+            }
+        } else {
+            currentTileLayer = L.tileLayer(theme.url, theme.options);
+
+            var errorCount = 0;
+            currentTileLayer.on('tileload', function () { markBasemapHealthy(generation); });
+            currentTileLayer.on('tileerror', function () {
+                errorCount++;
+                lastFailureDetail = errorCount + ' tile requests failed, none succeeded';
+                if (errorCount >= BASEMAP_ERROR_THRESHOLD &&
+                    Date.now() - mountedAt >= BASEMAP_MIN_OBSERVE_MS) {
+                    failBasemap(generation, lastFailureDetail);
+                }
+            });
+
+            currentTileLayer.addTo(map);
+        }
+
+        basemapWatchdog = setTimeout(function () {
+            basemapWatchdog = null;
+            failBasemap(generation, lastFailureDetail ||
+                ('no tile painted within ' + (BASEMAP_STALL_MS / 1000) + 's'));
+        }, BASEMAP_STALL_MS);
+    }
+
+    // Mounts the user's own tile source. No chain: see customTileUrl above.
+    function showCustomBasemap(url) {
+        detachBasemap();
+        activeThemeKey = 'custom';
+        basemapSettled = false;
+        var generation = ++basemapGeneration;
+        var mountedAt = Date.now();
+
+        var host = url;
+        try {
+            host = new URL(url.replace(/\{[sxyz]\}/g, '0')).hostname;
+        } catch (e) { /* keep the raw template for the attribution */ }
+
+        currentTileLayer = L.tileLayer(url, {
+            attribution: 'Tiles: ' + host,
+            maxZoom: 19,
+            // Only meaningful when the template uses {s}; harmless otherwise.
+            subdomains: 'abc'
+        });
+
+        var errorCount = 0;
+        function reportCustomFailure(reason) {
+            if (generation !== basemapGeneration || basemapSettled) return;
+            basemapSettled = true;
+            clearBasemapWatchdog();
+            arnisLog('error', 'Custom map source host "' + host + '" is not loading (' + reason +
+                '). Check the URL template, or clear the setting to go back to the map themes.');
+        }
+
+        currentTileLayer.on('tileload', function () { markBasemapHealthy(generation); });
+        currentTileLayer.on('tileerror', function () {
+            if (generation !== basemapGeneration) return;
+            errorCount++;
+            if (errorCount >= BASEMAP_ERROR_THRESHOLD &&
+                Date.now() - mountedAt >= BASEMAP_MIN_OBSERVE_MS) {
+                reportCustomFailure(errorCount + ' tile requests failed, none succeeded');
+            }
+        });
+        currentTileLayer.addTo(map);
+
+        basemapWatchdog = setTimeout(function () {
+            basemapWatchdog = null;
+            reportCustomFailure('no tile painted within ' + (BASEMAP_STALL_MS / 1000) + 's');
+        }, BASEMAP_STALL_MS);
+    }
+
+    // Driven by the settings field in the parent. An empty or unusable value
+    // hands the map back to the theme chain.
+    function setCustomTileUrl(url) {
+        var next = (url || '').trim();
+        if (next && !isValidTileTemplate(next)) {
+            arnisLog('warn', 'Ignoring custom map source "' + next +
+                '": expected an http(s) URL containing {z}, {x} and {y}.');
+            next = '';
+        }
+        if (next === customTileUrl) return;
+        customTileUrl = next;
+        if (next) {
+            localStorage.setItem('customTileUrl', next);
+        } else {
+            localStorage.removeItem('customTileUrl');
+        }
+        // Only redraws when the URL is the thing actually on screen.
+        if (currentBody === 'earth' && selectedEarthTheme === 'custom') applyBasemap();
+    }
+
+    // Function to apply the active basemap, restarting the failover chain
+    function applyBasemap() {
+        basemapAttempted = [];
 
         if (currentBody !== 'earth') {
-            var body = bodyBasemaps[currentBody];
+            // One source per body, so there is nothing to fall back to and the
+            // watchdog would only fire pointlessly. Still worth a log line.
+            detachBasemap();
+            activeThemeKey = null;
+            basemapSettled = true;
+            // Same staleness rule as the Earth path: a removed layer can still
+            // deliver queued tile events. Both the token and the body name are
+            // captured, so a late Moon error cannot be reported against Mars.
+            var bodyGeneration = ++basemapGeneration;
+            var bodyName = currentBody;
+            var body = bodyBasemaps[bodyName];
             currentTileLayer = L.tileLayer(body.url, body.options);
+            var bodyErrors = 0;
+            var bodyPainted = false;
+            currentTileLayer.on('tileload', function () {
+                if (bodyGeneration !== basemapGeneration) return;
+                bodyPainted = true;
+            });
+            currentTileLayer.on('tileerror', function () {
+                if (bodyGeneration !== basemapGeneration) return;
+                bodyErrors++;
+                if (!bodyPainted && bodyErrors === BASEMAP_ERROR_THRESHOLD) {
+                    arnisLog('warn', 'Basemap for ' + bodyName + ' is not loading (' +
+                        bodyErrors + ' failed tile requests, none succeeded).');
+                }
+            });
             currentTileLayer.addTo(map);
             return;
         }
 
-        // Get the theme configuration
-        var themeKey = selectedEarthTheme;
-        var theme = tileThemes[themeKey];
-        if (theme) {
-            if (theme.type === 'vector') {
-                // Fall back to OSM raster if MapLibre plugin failed to load
-                if (typeof L.maplibreGL !== 'function') {
-                    console.warn('MapLibre GL plugin unavailable, falling back to OSM raster');
-                    // Via changeTileTheme so the fallback is persisted, not retried next launch.
-                    changeTileTheme('osm');
-                    return;
-                }
-                currentTileLayer = L.maplibreGL({
-                    style: theme.style,
-                    attributionControl: { customAttribution: theme.attribution },
-                    pixelRatio: window.devicePixelRatio || 1
-                });
-                currentTileLayer.addTo(map);
-            } else {
-                currentTileLayer = L.tileLayer(theme.url, theme.options);
-
-                // Add automatic HTTP fallback for HTTPS failures
-                var failureCount = 0;
-                currentTileLayer.on('tileerror', function(error) {
-                    failureCount++;
-
-                    // After a few failures, try HTTP fallback
-                    if (failureCount >= 6 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
-                        console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
-                        this._httpFallbackAttempted = true;
-
-                        // Create HTTP version of the URL
-                        var httpUrl = theme.url.replace('https://', 'http://');
-
-                        // Remove the failed HTTPS layer
-                        map.removeLayer(this);
-
-                        // Create new layer with HTTP URL
-                        var httpLayer = L.tileLayer(httpUrl, theme.options);
-                        httpLayer._httpFallbackAttempted = true;
-                        httpLayer.addTo(map);
-                        currentTileLayer = httpLayer;
-                    }
-                });
-
-                currentTileLayer.addTo(map);
+        if (selectedEarthTheme === 'custom') {
+            if (isValidTileTemplate(customTileUrl)) {
+                showCustomBasemap(customTileUrl);
+            } else if (!currentTileLayer) {
+                // Custom picked but nothing usable entered yet. Show a real map
+                // rather than a blank one, without overwriting their choice.
+                showEarthTheme(BASEMAP_FALLBACK_CHAIN[0]);
             }
+            return;
         }
+
+        showEarthTheme(selectedEarthTheme);
     }
 
     // Load saved theme or default to OSM
     var savedTheme = localStorage.getItem('selectedTileTheme') || 'osm';
     var selectedEarthTheme = savedTheme;
 
-    // Driven by the settings selector in the parent. Earth is restored on every
+    var BODY_CYCLE = ['earth', 'moon', 'mars'];
+    var BODY_LABELS = {
+        earth: 'Earth',
+        moon: 'Moon (NASA terrain only, 1 block = 200 m)',
+        mars: 'Mars (NASA terrain only, 1 block = 500 m)'
+    };
+    var _bodyToggleBtn = null;
+
+    // Icon and tooltip carry the whole state: which world is selected and which
+    // one the next click brings.
+    function syncBodyToggleButton() {
+        if (!_bodyToggleBtn) return;
+        var next = BODY_CYCLE[(BODY_CYCLE.indexOf(currentBody) + 1) % BODY_CYCLE.length];
+        BODY_CYCLE.forEach(function (b) {
+            _bodyToggleBtn.classList.toggle('body-' + b, b === currentBody);
+        });
+        _bodyToggleBtn.title = 'World: ' + BODY_LABELS[currentBody] +
+            '\nClick to switch to ' + next.charAt(0).toUpperCase() + next.slice(1);
+    }
+
+    // Driven by the world toggle in the map toolbar. Earth is restored on every
     // start, so a Moon world stays a deliberate choice.
     function changeBody(body) {
         if (body === currentBody) return;
@@ -653,6 +921,10 @@ $(document).ready(function () {
         // Nominatim only knows Earth place names.
         var search = document.getElementById('search-container');
         if (search) search.style.display = currentBody === 'earth' ? '' : 'none';
+
+        syncBodyToggleButton();
+        // Earth-only, so its tooltip and enabled state change with the body.
+        updateTerrainPreviewButton();
     }
 
     applyBasemap();
@@ -1011,10 +1283,54 @@ $(document).ready(function () {
     map.on('zoomstart', hideContextMenu);
     // ========== End Context Menu ==========
 
+    // Coordinates typed into the parent's bbox field, as [south, west, north,
+    // east]. Applied through the same draw:created path the hash restore uses,
+    // so bounds, handles, the location hash and the parent notification all
+    // stay in exactly one place.
+    function applyBboxFromParent(b) {
+        var valid = Object.prototype.toString.call(b) === '[object Array]' &&
+            b.length === 4 &&
+            b.every(function (n) { return typeof n === 'number' && isFinite(n); });
+        if (!valid) {
+            arnisLog('warn', 'Ignoring malformed bbox from the parent window');
+            return;
+        }
+
+        // A spawn point picked for the previous area is meaningless here, and
+        // the frame reload this replaces used to drop it too.
+        if (drawnItems) {
+            drawnItems.eachLayer(function (layer) {
+                if (layer instanceof L.Marker) drawnItems.removeLayer(layer);
+            });
+        }
+
+        var lyr = new L.Rectangle(new L.LatLngBounds([b[0], b[1]], [b[2], b[3]]), {
+            color: '#3778d4',
+            opacity: 1.0,
+            weight: 3,
+            fill: '#3778d4',
+            lineCap: 'round',
+            lineJoin: 'round'
+        });
+        // Restored rectangles fire as "polygon"; the handler keys off instanceof.
+        map.fire('draw:created', { layer: lyr, layerType: 'polygon' });
+    }
+
     // Listen for messages from parent window
     window.addEventListener('message', function(event) {
+        if (event.source !== window.parent) return;
         if (event.data && event.data.type === 'changeTileTheme') {
             changeTileTheme(event.data.theme);
+        }
+
+        // User-supplied tile template from the settings panel
+        if (event.data && event.data.type === 'setCustomTileUrl') {
+            setCustomTileUrl(event.data.url);
+        }
+
+        // Coordinates typed into the parent's bbox field
+        if (event.data && event.data.type === 'setBbox') {
+            applyBboxFromParent(event.data.bounds);
         }
 
         // Earth / Moon / Mars picked in the settings modal
@@ -1389,6 +1705,32 @@ $(document).ready(function () {
         window._terrainPreviewBtn = btn;
         updateTerrainPreviewButton();
     })();
+
+    // World toggle: its own toolbar group below the edit tools, cycling
+    // Earth -> Moon -> Mars. The map is the only place the body is picked.
+    (function addBodyToggleButton() {
+        var drawContainer = document.querySelector('.leaflet-draw');
+        if (!drawContainer) return;
+
+        var section = L.DomUtil.create('div', 'leaflet-draw-section', drawContainer);
+        var bar = L.DomUtil.create('div', 'leaflet-draw-toolbar leaflet-bar', section);
+        var btn = L.DomUtil.create('a', 'leaflet-draw-edit-body', bar);
+        btn.href = '#';
+        btn.id = 'body-toggle-btn';
+
+        L.DomEvent
+            .on(btn, 'mousedown dblclick', L.DomEvent.stopPropagation)
+            .on(btn, 'click', L.DomEvent.stop)
+            .on(btn, 'click', function () {
+                var i = BODY_CYCLE.indexOf(currentBody);
+                changeBody(BODY_CYCLE[(i + 1) % BODY_CYCLE.length]);
+                // The parent gates Earth-only settings off this.
+                window.parent.postMessage({ type: 'bodyChanged', body: currentBody }, '*');
+            });
+
+        _bodyToggleBtn = btn;
+        syncBodyToggleButton();
+    })();
     /*
     **
     **  create bounds layer
@@ -1668,12 +2010,20 @@ $(document).ready(function () {
     // Note: leaflet.draw's edit and delete modes are both disabled (always-on
     // handles replace edit, the one-click trash replaces delete mode), so no
     // draw:editstart/deletestart handlers are needed anymore.
-    function display() {
+    function renderBounds() {
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
+    }
+    function display() {
+        renderBounds();
         notifyBboxUpdate();
     }
-    display();
+    // Render only. Notifying here posts the null-island 0,0,0,0 sentinel on
+    // every load, which the parent reads as "selection cleared" and uses to
+    // wipe the selection it had just set - the manual bbox entry announced
+    // success and then immediately reverted to "select an area". The hash
+    // restore below notifies once there is something real to report.
+    renderBounds();
 
     map.on('move', function (e) {
         crosshair.setLatLng(map.getCenter());

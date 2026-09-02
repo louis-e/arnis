@@ -34,6 +34,7 @@
   "placeholder_ground": "Bodenhöhe",
   "language": "Sprache",
   "map_theme": "Kartenstil",
+  "custom_map_source": "Eigene Kartenquelle",
   "terrain": "Terrain",
   "celestial_body": "Welt",
   "body_earth": "Erde",

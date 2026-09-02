@@ -34,6 +34,7 @@
   "placeholder_ground": "地面高度",
   "language": "语言",
   "map_theme": "地图主题",
+  "custom_map_source": "自定义地图源",
   "terrain": "地形",
   "celestial_body": "世界",
   "body_earth": "地球",
