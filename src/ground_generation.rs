@@ -882,22 +882,28 @@ pub fn generate_ground_region(
                             // Place vegetation from ESA land cover classification
                             // Only if nothing was already placed above ground by OSM processing
                             // and the ground block is a natural surface (not a road, building slab, etc.)
-                            let ground_is_natural = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z,
-                                Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
-                                None,
-                            );
-                            // Trees can also grow through stone surfaces (urban tree cover)
-                            let ground_allows_trees = ground_is_natural
-                                || editor.check_for_block_absolute(
+                            // A road or pitch owns its column whatever block it ended up
+                            // with, and surface=dirt or surface=grass make the block check
+                            // below say "natural" on both.
+                            let sealed = editor.surface_is_sealed(x, z);
+                            let ground_is_natural = !sealed
+                                && editor.check_for_block_absolute(
                                     x,
                                     ground_y,
                                     z,
-                                    Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
+                                    Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
                                     None,
                                 );
+                            // Trees can also grow through stone surfaces (urban tree cover)
+                            let ground_allows_trees = ground_is_natural
+                                || (!sealed
+                                    && editor.check_for_block_absolute(
+                                        x,
+                                        ground_y,
+                                        z,
+                                        Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
+                                        None,
+                                    ));
                             // Where the canopy map reaches, it decides which columns get
                             // trees on any class, and land cover keeps the surface and the
                             // undergrowth. Its roll uses its own hash, so turning the option
@@ -930,7 +936,10 @@ pub fn generate_ground_region(
                                     Some(bridge_surface),
                                 );
                             }
-                            if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
+                            if has_land_cover
+                                && !sealed
+                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                            {
                                 let cover = ground.cover_class(coord);
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
