@@ -419,6 +419,12 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
+    /// Drops the sealed-surface mask once every vegetation pass is done, so the
+    /// bitmap is not carried into the save phase.
+    pub fn release_sealed_surface(&mut self) {
+        self.sealed_surface = None;
+    }
+
     /// True if a man-made surface owns this column, so scattered vegetation
     /// would land on a road, a pitch or a parking lot.
     #[inline]

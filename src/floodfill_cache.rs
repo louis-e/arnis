@@ -180,6 +180,13 @@ impl CoordinateBitmap {
         false
     }
 
+    /// Checks if a coordinate is inside the bitmap and not set yet.
+    #[inline]
+    fn is_unset_in_bounds(&self, x: i32, z: i32) -> bool {
+        self.coord_to_index(x, z)
+            .is_some_and(|i| (self.bits[i / 8] >> (i % 8)) & 1 == 0)
+    }
+
     /// Returns true if no coordinates are marked.
     #[must_use]
     #[allow(dead_code)]
@@ -556,31 +563,37 @@ impl FloodFillCache {
     /// Builds the sealed-surface mask: the road mask plus every cached footprint
     /// of a leisure, amenity or highway area that paves its ground.
     ///
-    /// Returns `None` when no such area exists, so the caller can share the road
-    /// mask instead of paying for a second full-world bitmap. Runs off the
-    /// pre-computed cache, so no extra flood fill is done here.
+    /// Returns `None` when no such area contributes a column the roads do not
+    /// already own, so the caller can share the road mask instead of paying for a
+    /// second full-world bitmap. Runs off the pre-computed cache, so no extra
+    /// flood fill is done here.
     pub fn collect_sealed_surfaces(
         &self,
         elements: &[ProcessedElement],
         roads: &RoadMaskBitmap,
     ) -> Option<SealedSurfaceBitmap> {
-        let sealed_ways: Vec<&ProcessedWay> = elements
+        let sealed_fills: Vec<&FloodFillResult> = elements
             .iter()
             .filter_map(|e| match e {
-                ProcessedElement::Way(w) if is_sealed_surface_way(w) => Some(w),
+                ProcessedElement::Way(w) if is_sealed_surface_way(w) => self.way_cache.get(&w.id),
                 _ => None,
             })
             .collect();
-        if sealed_ways.is_empty() {
+
+        // A tagged area whose fill came back empty (degenerate ring, fill timeout) or that
+        // sits entirely on columns the roads already own would clone a full second bitmap
+        // for nothing, so bail out before allocating. Short-circuits on the first new cell.
+        if !sealed_fills
+            .iter()
+            .any(|f| f.iter().any(|&(x, z)| roads.is_unset_in_bounds(x, z)))
+        {
             return None;
         }
 
         let mut mask = roads.clone();
-        for way in sealed_ways {
-            if let Some(cached) = self.way_cache.get(&way.id) {
-                for &(x, z) in cached.iter() {
-                    mask.set(x, z);
-                }
+        for fill in sealed_fills {
+            for &(x, z) in fill.iter() {
+                mask.set(x, z);
             }
         }
 
@@ -795,6 +808,29 @@ mod tests {
         assert!(
             cache.collect_sealed_surfaces(&elements, &roads).is_none(),
             "a second full-world bitmap must not be allocated for nothing"
+        );
+    }
+
+    #[test]
+    fn a_pitch_the_roads_already_own_shares_the_road_mask() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let elements = vec![ProcessedElement::Way(tagged_way(
+            11,
+            &[(10, 10), (30, 10), (30, 25), (10, 25), (10, 10)],
+            &[("leisure", "pitch")],
+        ))];
+
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        for x in 5..=35 {
+            for z in 5..=30 {
+                roads.set(x, z);
+            }
+        }
+
+        assert!(
+            cache.collect_sealed_surfaces(&elements, &roads).is_none(),
+            "the pitch adds no column, so the road mask is already the answer"
         );
     }
 }

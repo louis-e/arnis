@@ -1295,6 +1295,11 @@ pub fn generate_world_with_options(
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
+    // The editor holds its own handle on the sealed-surface mask, and that mask is the
+    // road mask itself when nothing else was sealed, so releasing it here is what
+    // actually frees the bitmap.
+    editor.release_sealed_surface();
+    drop(sealed_surface);
     drop(road_mask);
     drop(tunnel_footprint);
     drop(rail_mask);
