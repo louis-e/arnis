@@ -1003,6 +1003,7 @@ pub fn generate_ground_region(
                             // Placed before the vegetation pass, whose own guard then sees
                             // the trunk and leaves the column alone.
                             if canopy_tree
+                                && slope <= t45
                                 && ground_is_terrain
                                 && !tunnel_footprint.contains(x, z)
                                 && !occupied_above
@@ -1017,16 +1018,20 @@ pub fn generate_ground_region(
                                 // forbidden ground, so ask rather than assume.
                                 occupied_above = editor.block_exists_absolute(x, ground_y + 1, z);
                             }
+                            // Rock desert reaches the banded floor and the steeper tiers,
+                            // since that is the woodland its own data promised. Every other
+                            // climate keeps the 27 degree ceiling and the soil requirement.
+                            let lc_tree_ok = if dryland == Dryland::Rock {
+                                slope <= t45 && (ground_allows_trees || ground_is_terrain)
+                            } else {
+                                slope <= t27 && ground_allows_trees
+                            };
                             if has_land_cover && !occupied_above {
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
-                                    // A 10 m class, not a per-tree measurement, so it
-                                    // still stops at a sheer face.
                                     land_cover::LC_TREE_COVER
-                                        if slope <= t45
-                                            && (ground_allows_trees || ground_is_terrain)
-                                            && !tunnel_footprint.contains(x, z) =>
+                                        if lc_tree_ok && !tunnel_footprint.contains(x, z) =>
                                     {
                                         // Micro trees cover ~5 blocks instead of ~80, so the
                                         // normal rate would read as bare ground from altitude.
@@ -1603,25 +1608,18 @@ fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> boo
 /// Clear the plant above this column, upper half included, or a two-block
 /// plant is left with its top floating.
 fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
-    editor.set_block_absolute(
-        AIR,
-        x,
-        ground_y + 1,
-        z,
-        Some(crate::surface::CLEARABLE_PLANTS),
-        None,
-    );
-    editor.set_block_absolute(
-        AIR,
-        x,
-        ground_y + 2,
-        z,
-        Some(crate::surface::SOIL_PLANT_TOPS),
-        None,
-    );
+    // A whitelisted write inserts when the cell is empty, so an unguarded clear
+    // materialises an all-air cell and with it the section holding it.
+    let mut clear = |y: i32, list: &'static [crate::block_definitions::Block]| {
+        if editor.block_exists_absolute(x, y, z) {
+            editor.set_block_absolute(AIR, x, y, z, Some(list), None);
+        }
+    };
+    clear(ground_y + 1, crate::surface::CLEARABLE_PLANTS);
+    clear(ground_y + 2, crate::surface::SOIL_PLANT_TOPS);
     // Cane stands on cane, so the whole stalk goes.
     for dy in 2..=crate::surface::SUGAR_CANE_MAX_HEIGHT {
-        editor.set_block_absolute(AIR, x, ground_y + dy, z, Some(&[SUGAR_CANE]), None);
+        clear(ground_y + dy, &[SUGAR_CANE]);
     }
 }
 

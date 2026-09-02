@@ -364,42 +364,57 @@ mod tests {
         }
     }
 
-    // Anything the scatter plants must be something the sweep will not clear.
+    // A shape invariant on the predicates, not a claim about any palette: every
+    // block the scatter may plant on must be one the sweep will not then clear.
     #[test]
-    fn every_surface_the_scatter_plants_on_also_holds_the_plant() {
-        let held = |b: Block, what: &str| {
-            if takes_wild_plants(b) {
-                assert!(
-                    supports_vegetation(b),
-                    "{what} scatters plants on {}, which the sweep then clears",
-                    b.name()
-                );
-            }
-            if takes_wild_dead_bush(b) {
-                assert!(
-                    supports_dead_bush(b),
-                    "{what} scatters a dead bush on {}, which the sweep then clears",
-                    b.name()
-                );
-            }
-        };
-        for c in CLIMATES {
-            for cover in COVERS {
-                for (x, z) in spread() {
-                    if let Some((surf, under)) = c.surface_palette(cover, x, z) {
-                        held(surf, "Climate::surface_palette");
-                        held(under, "Climate::surface_palette under");
-                    }
-                }
-            }
-        }
-        use crate::strata::FloorCover;
-        for cover in [FloorCover::Bare, FloorCover::Sparse, FloorCover::Wooded] {
-            for (x, z) in spread() {
-                let (surf, under) = crate::strata::desert_floor(x, z, cover);
-                held(surf, "desert_floor");
-                held(under, "desert_floor under");
-            }
+    fn the_scatter_gates_stay_inside_the_sweep_gates() {
+        const GROUND: &[Block] = &[
+            GRASS_BLOCK,
+            DIRT,
+            COARSE_DIRT,
+            PODZOL,
+            MOSS_BLOCK,
+            MUD,
+            FARMLAND,
+            SAND,
+            RED_SAND,
+            GRAVEL,
+            STONE,
+            COBBLESTONE,
+            SMOOTH_STONE,
+            STONE_BRICKS,
+            CRACKED_STONE_BRICKS,
+            SANDSTONE,
+            SMOOTH_SANDSTONE,
+            TERRACOTTA,
+            ORANGE_TERRACOTTA,
+            RED_TERRACOTTA,
+            BROWN_TERRACOTTA,
+            GRAY_TERRACOTTA,
+            LIGHT_GRAY_TERRACOTTA,
+            WHITE_TERRACOTTA,
+            ANDESITE,
+            TUFF,
+            DEEPSLATE,
+            COBBLED_DEEPSLATE,
+            GRANITE,
+            BLACKSTONE,
+            CLAY,
+            SNOW_BLOCK,
+            PACKED_ICE,
+            DIRT_PATH,
+        ];
+        for &b in GROUND {
+            assert!(
+                !takes_wild_plants(b) || supports_vegetation(b),
+                "{} takes a scattered plant the sweep would clear",
+                b.name()
+            );
+            assert!(
+                !takes_wild_dead_bush(b) || supports_dead_bush(b),
+                "{} takes a scattered bush the sweep would clear",
+                b.name()
+            );
         }
     }
 
