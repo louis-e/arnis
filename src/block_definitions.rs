@@ -230,7 +230,7 @@ impl Block {
             127 => "iron_ore",
             128 => "coal_ore",
             129 => "gold_ore",
-            130 => "copper_ore",
+            130 => "red_sand",
             131 => "clay",
             132 => "dirt_path",
             133 => "waxed_exposed_cut_copper_stairs",
@@ -479,6 +479,7 @@ impl Block {
             382 => "coal_block",
             383 => "blackstone_slab",
             384 => "iron_door",
+            385 => "copper_ore",
             _ => return None,
         })
         // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
@@ -966,6 +967,7 @@ pub const RED_FLOWER: Block = Block::new(67);
 
 pub const RED_TERRACOTTA: Block = Block::new(69);
 pub const RED_WOOL: Block = Block::new(259);
+pub const RED_SAND: Block = Block::new(130);
 pub const SAND: Block = Block::new(71);
 pub const SANDSTONE: Block = Block::new(72);
 pub const SCAFFOLDING: Block = Block::new(73);
@@ -1044,7 +1046,9 @@ pub const COARSE_DIRT: Block = Block::new(126);
 pub const IRON_ORE: Block = Block::new(127);
 pub const COAL_ORE: Block = Block::new(128);
 pub const GOLD_ORE: Block = Block::new(129);
-pub const COPPER_ORE: Block = Block::new(130);
+/// Above the byte limit: only a `landuse=quarry` tagged `resource=copper`
+/// places it, so it is the cheapest low id to give up to a desert surface.
+pub const COPPER_ORE: Block = Block::new(385);
 pub const CLAY: Block = Block::new(131);
 pub const DIRT_PATH: Block = Block::new(132);
 

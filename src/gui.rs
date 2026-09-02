@@ -1333,6 +1333,7 @@ fn gui_start_generation(
                 disable_height_limit,
                 aws_only_elevation,
                 benchmark: false,
+                probe: false,
                 bake_lighting: bake_lighting_enabled,
                 gamemode: crate::args::GameMode::from_str_lossy(&gamemode),
                 world_time: world_time.clamp(0, 23999),

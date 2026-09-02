@@ -611,6 +611,9 @@ pub fn generate_world_with_options(
     crate::world_editor::reset_section_counters(args.benchmark);
     // Materialize the lazy water-blend mask now, before world memory peaks.
     ground.warm_water_blend();
+    // Same for the region profile: a lazy first touch inside the parallel
+    // passes would block every other thread on the grid walk.
+    ground.region_profile();
     bench.mark("ground_warm");
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     // Uses the ground's real base, not args: the montane check measures blocks above it, and
@@ -740,6 +743,8 @@ pub fn generate_world_with_options(
     let mut hash_acc: u64 = 0;
     let mut real_regions: HashSet<(i32, i32)> = HashSet::new();
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
+    // Plants the streaming path cleared region by region.
+    let mut evicted_cleared: u64 = 0;
     // Background writer for eviction; None unless eviction is active.
     let mut flush_worker: Option<FlushWorker> = None;
     // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
@@ -1069,19 +1074,27 @@ pub fn generate_world_with_options(
                             let d = (rt.0 + dx, rt.1 + dz);
                             if let Some(c) = remaining.get_mut(&d) {
                                 *c -= 1;
-                                if *c == 0
-                                    && !evicted_regions.contains(&d)
-                                    && !model_regions.contains(&d)
-                                    && Some(d) != spawn_region
-                                {
-                                    if hash_check {
-                                        hash_acc = hash_acc
-                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                if *c == 0 && !evicted_regions.contains(&d) {
+                                    // The one moment the halo race can be
+                                    // repaired here. Deferred and spawn regions
+                                    // are swept too, being flushed but not remerged.
+                                    evicted_cleared +=
+                                        ground_generation::clear_stranded_plants_in_region(
+                                            &mut editor,
+                                            ground.as_ref(),
+                                            &xzbbox,
+                                            d,
+                                        );
+                                    if !model_regions.contains(&d) && Some(d) != spawn_region {
+                                        if hash_check {
+                                            hash_acc = hash_acc
+                                                .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                        }
+                                        if let Some(w) = flush_worker.as_ref() {
+                                            editor.flush_region_via(w, d.0, d.1)?;
+                                        }
+                                        evicted_regions.insert(d);
                                     }
-                                    if let Some(w) = flush_worker.as_ref() {
-                                        editor.flush_region_via(w, d.0, d.1)?;
-                                    }
-                                    evicted_regions.insert(d);
                                 }
                             }
                         }
@@ -1299,6 +1312,15 @@ pub fn generate_world_with_options(
     }
     if !eviction_active && !tunnel_cells.is_empty() {
         highways::carve_highway_tunnel_interior(&mut editor, &tunnel_cells);
+    }
+
+    // After the tile merge, since a neighbour's halo writes land after that
+    // tile's own cleanup ran. Under eviction the regions are already flushed,
+    // so the merge loop sweeps each region as it completes instead.
+    if !eviction_active {
+        ground_generation::clear_stranded_soil_plants(&mut editor, ground.as_ref(), &xzbbox);
+    } else if evicted_cleared > 0 {
+        println!("Cleared {evicted_cleared} plants left on ground that cannot hold them");
     }
 
     // Run after ground generation so anchor Y reflects the final terrain.

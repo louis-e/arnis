@@ -118,7 +118,30 @@ static SHADED_PALETTE: Lazy<Vec<PaletteEntry>> = Lazy::new(|| {
 
 /// Returns the opaque map color id (base * 4 + shade) perceptually closest to the given RGB.
 /// Exact palette colors short-circuit; everything else is matched in Oklab.
+/// Memo over the scan below. Map tiles average the preview, so the same pixel
+/// colour recurs across millions of samples and a miss costs 244 Oklab
+/// distances. Direct-mapped, so a collision just recomputes.
 pub fn nearest_map_color(r: u8, g: u8, b: u8) -> u8 {
+    const BITS: u32 = 13;
+    thread_local! {
+        static MEMO: std::cell::RefCell<Vec<(u32, u8)>> =
+            std::cell::RefCell::new(vec![(u32::MAX, 0); 1 << BITS]);
+    }
+    let key = (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+    let slot = (key.wrapping_mul(0x9E37_79B1) >> (32 - BITS)) as usize;
+    if let Some(hit) = MEMO.with(|m| {
+        let t = m.borrow();
+        let (k, v) = t[slot];
+        (k == key).then_some(v)
+    }) {
+        return hit;
+    }
+    let id = nearest_map_color_uncached(r, g, b);
+    MEMO.with(|m| m.borrow_mut()[slot] = (key, id));
+    id
+}
+
+fn nearest_map_color_uncached(r: u8, g: u8, b: u8) -> u8 {
     let lab = rgb_to_oklab(r, g, b);
     let mut best_id = 4u8;
     let mut best_dist = f32::MAX;

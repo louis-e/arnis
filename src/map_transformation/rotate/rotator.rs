@@ -214,6 +214,8 @@ pub fn rotate_world(
         cz,
         neg_sin: -sin_r,
         cos: cos_r,
+        world_min_x: xzbbox.min_x(),
+        world_min_z: xzbbox.min_z(),
         orig_min_x,
         orig_max_x,
         orig_min_z,

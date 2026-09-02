@@ -18,10 +18,12 @@ use crate::block_definitions::{
     AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COARSE_DIRT,
     COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
     DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
-    HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
-    SANDSTONE, SMOOTH_STONE, SNOW_LAYER, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
-    TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD, OAK_LEAVES, OAK_PLANKS, PODZOL, POTATOES,
+    RED_FLOWER, SAND, SANDSTONE, SNOW_BLOCK, SNOW_LAYER, STONE, STONE_BRICKS, SUGAR_CANE,
+    TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER,
+    YELLOW_FLOWER,
 };
+use crate::climate::Dryland;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree;
@@ -34,6 +36,7 @@ use crate::world_editor::{min_y, terrain_floor_y};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
+use rayon::prelude::*;
 
 /// Per-chunk cache of ground Y values.
 ///
@@ -199,6 +202,11 @@ pub fn generate_ground_region(
     let schematic_trees = editor.tree_pack().is_some();
     let terrain_enabled = ground.elevation_enabled;
     let climate = ground.climate();
+    let profile = ground.region_profile();
+    let dryland = profile.dryland;
+    let strata = crate::strata::Strata::new(profile.y_min, profile.y_max);
+    // 27 / 37 / 45 degrees, corrected for this bbox's vertical exaggeration.
+    let [t27, t37, t45] = ground.slope_tiers();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -355,13 +363,15 @@ pub fn generate_ground_region(
                     // (e.g., a quarry's stone, a park's grass) with slope-appropriate
                     // rock material. Steep cliffs should always look like rock.
                     //
-                    // Threshold must match the first "rock" tier below (`slope > 4`).
-                    // At `slope == 4`, the material cascade falls through to land-
+                    // Threshold must match the first "rock" tier below (`slope > t27`).
+                    // At `slope == t27`, the material cascade falls through to land-
                     // cover selection (grass / farmland / etc.), so force-replacing
                     // at that slope would wipe e.g. a `landuse=quarry` STONE surface
                     // with GRASS_BLOCK for no good reason — it's only a 27° hiking
                     // slope, not a cliff.
-                    let steep_override = terrain_enabled && slope > 4;
+                    let steep_override = terrain_enabled && slope > t27;
+                    // Set in the non-water path below; water columns grow nothing.
+                    let mut occupied_above = false;
                     let mut did_underfill = false;
 
                     // Determine surface and under-block material for this column.
@@ -478,6 +488,10 @@ pub fn generate_ground_region(
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
+                            // Read once per column: three passes below need it.
+                            let cover = ground.cover_class(coord);
+                            let rock_floor = rock_desert_floor_cover(dryland, ground, coord, cover);
+
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if let Some(body) = planetary_body {
                                 // No land cover off Earth, so this replaces the
@@ -492,24 +506,31 @@ pub fn generate_ground_region(
                                 )
                             } else if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
-                                let cover = ground.cover_class(coord);
 
                                 // Steep terrain overrides land cover classification.
                                 //
                                 // slope is max-min of 4 cardinal neighbours sampled
-                                // STEP=4 away, so `slope = 8 · tan(incline)`. Thresholds:
+                                // STEP=4 away, so `slope = 8 · vex · tan(incline)`;
+                                // Ground::slope_tiers divides the exaggeration back
+                                // out so these are real angles. Thresholds:
                                 //
-                                //   slope > 8  → ≥ 45° : sheer cliff face
-                                //   slope > 6  → ≥ 37° : very steep rocky face
-                                //   slope > 4  → ≥ 27° : steep slope with scree
-                                //   slope ≤ 4  → < 27° : falls through to land cover
+                                //   slope > t45 → ≥ 45° : sheer cliff face
+                                //   slope > t37 → ≥ 37° : very steep rocky face
+                                //   slope > t27 → ≥ 27° : steep slope with scree
+                                //   slope ≤ t27 → < 27° : falls through to land cover
                                 //                        (alpine meadow, forest, etc.)
                                 //
                                 // We don't force rock materials onto 21–27° slopes
                                 // any more — that's a normal hiking incline where
                                 // grass and trees belong.
-                                if slope > 4 {
-                                    if slope > 8 {
+                                if dryland == Dryland::Rock && slope > t27 {
+                                    // Exposed rock in canyon country: the band
+                                    // table, so faces line up across the bbox.
+                                    let col = strata.column(x, z);
+                                    let b = strata.block(&col, ground_y);
+                                    (b, b)
+                                } else if slope > t27 {
+                                    if slope > t45 {
                                         // Sheer cliff: each column is 100% one material
                                         // so the downward under-fill matches the surface,
                                         // producing vertical stripes of cobbled/deepslate.
@@ -519,7 +540,7 @@ pub fn generate_ground_region(
                                         } else {
                                             (DEEPSLATE, DEEPSLATE)
                                         }
-                                    } else if slope > 6 {
+                                    } else if slope > t37 {
                                         // Very steep rock face: stone-dominant with
                                         // weathered cobblestone chunks and occasional
                                         // andesite banding. Deepslate stays below-surface
@@ -546,6 +567,17 @@ pub fn generate_ground_region(
                                             _ => (GRAVEL, STONE),          // 17% scree
                                         }
                                     }
+                                } else if dryland == Dryland::Rock
+                                    && cover == land_cover::LC_SNOW_ICE
+                                    && ground.has_cover_neighbour(coord, land_cover::LC_SNOW_ICE)
+                                {
+                                    // Only to keep the rock floor off a glacier. Every other
+                                    // climate keeps its own snow surface. A lone cell is
+                                    // winter imagery, not a glacier.
+                                    (SNOW_BLOCK, SNOW_BLOCK)
+                                } else if let Some(fc) = rock_floor {
+                                    // At the vegetation level the column's data implies.
+                                    crate::strata::desert_floor(x, z, fc)
                                 } else if let Some(p) = climate.surface_palette(cover, x, z) {
                                     p
                                 } else {
@@ -651,16 +683,16 @@ pub fn generate_ground_region(
                             } else if terrain_enabled {
                                 // No land cover data: same slope-based cascade
                                 // as the has_land_cover path, falling through
-                                // to plain grass for the ≤4 slopes (no ESA
-                                // class to pick instead).
-                                if slope > 8 {
+                                // to plain grass below t27 (no ESA class to
+                                // pick instead).
+                                if slope > t45 {
                                     let h = land_cover::coord_hash(x, z);
                                     if h.is_multiple_of(2) {
                                         (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
                                     } else {
                                         (DEEPSLATE, DEEPSLATE)
                                     }
-                                } else if slope > 6 {
+                                } else if slope > t37 {
                                     let h = land_cover::coord_hash(x, z) % 20;
                                     if h < 12 {
                                         (STONE, DEEPSLATE)
@@ -669,7 +701,7 @@ pub fn generate_ground_region(
                                     } else {
                                         (ANDESITE, DEEPSLATE)
                                     }
-                                } else if slope > 4 {
+                                } else if slope > t27 {
                                     let h = land_cover::coord_hash(x, z) % 12;
                                     match h {
                                         0..=3 => (ANDESITE, STONE),
@@ -738,6 +770,12 @@ pub fn generate_ground_region(
                                 (surface_block, under_block)
                             };
 
+                            // Whether this pass, rather than an OSM pass, laid the surface.
+                            // Only podzol and moss are ambiguous, every other block decides
+                            // on its own, so the lookup is skipped on the columns that
+                            // cannot need it.
+                            let ours_surface = matches!(surface_block, PODZOL | MOSS_BLOCK)
+                                && !editor.block_exists_absolute(x, ground_y, z);
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
                                 // Use blacklist to avoid replacing water/bedrock and
@@ -766,6 +804,22 @@ pub fn generate_ground_region(
                                         OAK_PLANKS,
                                         BLACK_CONCRETE,
                                     ]),
+                                );
+                            } else if dryland == Dryland::Rock
+                                && (rock_floor == Some(crate::strata::FloorCover::Bare)
+                                    || surface_block == SNOW_BLOCK)
+                            {
+                                // OSM paints scrub and grassland as GRASS_BLOCK whatever
+                                // the climate and runs first, so an if-absent write loses
+                                // to it and Monument Valley came out 81 % grass. Only the
+                                // soils OSM could have laid, and only on bare columns.
+                                editor.set_block_absolute(
+                                    surface_block,
+                                    x,
+                                    ground_y,
+                                    z,
+                                    Some(&[GRASS_BLOCK, PODZOL, MOSS_BLOCK]),
+                                    None,
                                 );
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
@@ -834,14 +888,37 @@ pub fn generate_ground_region(
                                 let y_max = ground_y - 1;
                                 if y_max > min_y() {
                                     let y_min = (ground_y - depth).max(min_y() + 1);
-                                    editor.fill_column_absolute(
-                                        under_block,
-                                        x,
-                                        z,
-                                        y_min,
-                                        y_max,
-                                        true,
-                                    );
+                                    if dryland == Dryland::Rock {
+                                        // One run per band. A cliff face is its
+                                        // neighbours' under-fill.
+                                        let col = strata.column(x, z);
+                                        let mut y = y_min;
+                                        while y <= y_max {
+                                            // max(y) so truncation cannot stall it.
+                                            let top = strata
+                                                .band_top(&col, y)
+                                                .saturating_sub(1)
+                                                .clamp(y, y_max);
+                                            editor.fill_column_absolute(
+                                                strata.block(&col, y),
+                                                x,
+                                                z,
+                                                y,
+                                                top,
+                                                true,
+                                            );
+                                            y = top + 1;
+                                        }
+                                    } else {
+                                        editor.fill_column_absolute(
+                                            under_block,
+                                            x,
+                                            z,
+                                            y_min,
+                                            y_max,
+                                            true,
+                                        );
+                                    }
                                 }
                                 did_underfill = true;
                             } else {
@@ -882,22 +959,27 @@ pub fn generate_ground_region(
                             // Place vegetation from ESA land cover classification
                             // Only if nothing was already placed above ground by OSM processing
                             // and the ground block is a natural surface (not a road, building slab, etc.)
-                            let ground_is_natural = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z,
-                                Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
-                                None,
-                            );
-                            // Trees can also grow through stone surfaces (urban tree cover)
-                            let ground_allows_trees = ground_is_natural
-                                || editor.check_for_block_absolute(
-                                    x,
-                                    ground_y,
-                                    z,
-                                    Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
-                                    None,
-                                );
+                            // Podzol and moss are boreal forest floor when this pass laid
+                            // them and a cemetery or a puddle ring when an OSM pass did, so
+                            // the gates ask who owns the column, not just which block it is.
+                            let ground_block = editor.get_block_absolute(x, ground_y, z);
+                            let ours = ours_surface
+                                && ground_block.is_some_and(crate::surface::supports_vegetation);
+                            let ground_is_natural =
+                                ours || ground_block.is_some_and(crate::surface::takes_wild_plants);
+                            let ground_allows_trees =
+                                ours || ground_block.is_some_and(crate::surface::takes_wild_trees);
+                            // A canopy measurement is a tree observed at this spot, so it
+                            // outranks the slope tiers. Rock counts only where this pass put
+                            // it there: OSM gravel is a railway and OSM stone is a quarry.
+                            let ground_is_terrain = ground_block.is_some_and(|b| {
+                                crate::surface::takes_wild_trees(b)
+                                    || (steep_override && crate::surface::is_natural_ground(b))
+                            });
+                            // Rock desert only: outside it TERRACOTTA is a clay pitch
+                            // or a tartan track, not desert floor.
+                            let ground_takes_dead_bush = dryland == Dryland::Rock
+                                && ground_block.is_some_and(crate::surface::takes_wild_dead_bush);
                             // Where the canopy map reaches, it decides which columns get
                             // trees on any class, and land cover keeps the surface and the
                             // undergrowth. Its roll uses its own hash, so turning the option
@@ -915,13 +997,16 @@ pub fn generate_ground_region(
                             } else {
                                 (false, false)
                             };
+                            // Read once. Three passes below asked the same question, and
+                            // it is one section lookup per column over the whole bbox.
+                            occupied_above = editor.block_exists_absolute(x, ground_y + 1, z);
                             // Placed before the vegetation pass, whose own guard then sees
                             // the trunk and leaves the column alone.
                             if canopy_tree
-                                && slope <= 4
-                                && ground_allows_trees
+                                && slope <= t45
+                                && ground_is_terrain
                                 && !tunnel_footprint.contains(x, z)
-                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                                && !occupied_above
                             {
                                 tree::Tree::create_from_canopy(
                                     editor,
@@ -929,16 +1014,24 @@ pub fn generate_ground_region(
                                     Some(building_footprints),
                                     Some(bridge_surface),
                                 );
+                                // The build declines on a footprint, a bridge or
+                                // forbidden ground, so ask rather than assume.
+                                occupied_above = editor.block_exists_absolute(x, ground_y + 1, z);
                             }
-                            if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
-                                let cover = ground.cover_class(coord);
+                            // Rock desert reaches the banded floor and the steeper tiers,
+                            // since that is the woodland its own data promised. Every other
+                            // climate keeps the 27 degree ceiling and the soil requirement.
+                            let lc_tree_ok = if dryland == Dryland::Rock {
+                                slope <= t45 && (ground_allows_trees || ground_is_terrain)
+                            } else {
+                                slope <= t27 && ground_allows_trees
+                            };
+                            if has_land_cover && !occupied_above {
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
                                     land_cover::LC_TREE_COVER
-                                        if slope <= 4
-                                            && ground_allows_trees
-                                            && !tunnel_footprint.contains(x, z) =>
+                                        if lc_tree_ok && !tunnel_footprint.contains(x, z) =>
                                     {
                                         // Micro trees cover ~5 blocks instead of ~80, so the
                                         // normal rate would read as bare ground from altitude.
@@ -1143,7 +1236,9 @@ pub fn generate_ground_region(
                                             );
                                         }
                                     }
-                                    land_cover::LC_BARE if ground_is_natural => {
+                                    land_cover::LC_BARE
+                                        if ground_is_natural || ground_takes_dead_bush =>
+                                    {
                                         // Coarse-dirt patches (from the bare-terrain soil
                                         // blobs above) get a light scatter of weeds: a bit
                                         // of grass with rare fallen-leaf clumps and dead
@@ -1236,6 +1331,12 @@ pub fn generate_ground_region(
                                 editor.fill_column_absolute(STONE, x, z, y_min, y_max, true);
                             }
                         }
+                    }
+
+                    // Only where something already stood: the scatter above plants only
+                    // what the sweep accepts, so a column it filled cannot be stranded.
+                    if occupied_above {
+                        clear_stranded_plant(editor, x, ground_y, z);
                     }
 
                     // Post-processing: remove stray vegetation from road surfaces.
@@ -1391,4 +1492,181 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
     let a = v00 * (1.0 - fx) + v10 * fx;
     let b = v01 * (1.0 - fx) + v11 * fx;
     a * (1.0 - fz) + b * fz
+}
+
+/// Clear plants left on ground that cannot hold them. Tiles write into each
+/// other's halo, so a plant can merge in after that column was cleaned.
+pub fn clear_stranded_soil_plants(editor: &mut WorldEditor, ground: &Ground, xzbbox: &XZBBox) {
+    let cleared = sweep_stranded_plants(
+        editor,
+        ground,
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
+    );
+    if cleared > 0 {
+        println!("Cleared {cleared} plants left on ground that cannot hold them");
+    }
+}
+
+/// Sweep one region, for the streaming path. Called once every tile has merged
+/// and while the region is resident, since a flush drops later writes.
+pub fn clear_stranded_plants_in_region(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    region: (i32, i32),
+) -> u64 {
+    /// Blocks per region side, matching the `>> 9` the editor evicts on.
+    const REGION_BLOCKS: i32 = 512;
+    let x0 = region.0.saturating_mul(REGION_BLOCKS);
+    let z0 = region.1.saturating_mul(REGION_BLOCKS);
+    sweep_stranded_plants(
+        editor,
+        ground,
+        x0.max(xzbbox.min_x()),
+        x0.saturating_add(REGION_BLOCKS - 1).min(xzbbox.max_x()),
+        z0.max(xzbbox.min_z()),
+        z0.saturating_add(REGION_BLOCKS - 1).min(xzbbox.max_z()),
+    )
+}
+
+/// Clear every stranded plant in a rectangle of columns; returns how many.
+fn sweep_stranded_plants(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+) -> u64 {
+    // Scanning is the expensive half and almost never finds a write, so it runs
+    // read-only across threads and the hits are applied serially after. Banded,
+    // or the hit list would be sized by the bbox rather than the band.
+    const BAND: i32 = 1024;
+    if min_x > max_x || min_z > max_z {
+        return 0;
+    }
+    let mut cleared = 0u64;
+    let mut x0 = min_x;
+    loop {
+        let x1 = x0.saturating_add(BAND - 1).min(max_x);
+        // Shared reborrow: the scan only reads, and the writes come after it ends.
+        let reader: &WorldEditor = editor;
+        let stranded: Vec<(i32, i32, i32)> = (x0..=x1)
+            .into_par_iter()
+            .flat_map_iter(|x| {
+                (min_z..=max_z).filter_map(move |z| {
+                    if !ground.is_in_rotated_bounds(x, z) {
+                        return None;
+                    }
+                    let ground_y = reader.get_ground_level(x, z);
+                    plant_is_stranded(reader, x, ground_y, z).then_some((x, ground_y, z))
+                })
+            })
+            .collect();
+
+        for &(x, ground_y, z) in &stranded {
+            clear_plant_above(editor, x, ground_y, z);
+        }
+        cleared += stranded.len() as u64;
+
+        if x1 >= max_x {
+            break;
+        }
+        x0 = x1 + 1;
+    }
+    cleared
+}
+
+/// Whether a plant stands here on ground that cannot hold it.
+fn plant_is_stranded(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> bool {
+    // Plant first: most columns have air there and exit after one lookup.
+    let Some(plant) = editor.get_block_absolute(x, ground_y + 1, z) else {
+        return false;
+    };
+    let footing: fn(crate::block_definitions::Block) -> bool = if plant == DEAD_BUSH {
+        // Terracotta and sand as well, which is most of a rock-desert floor.
+        crate::surface::supports_dead_bush
+    } else if crate::surface::CROPS.contains(&plant) {
+        // Farmland only, and the ground pass can replace it after planting.
+        crate::surface::supports_crops
+    } else if plant == SUGAR_CANE {
+        // Sand counts, farmland and the banded rock floor do not.
+        crate::surface::supports_sugar_cane
+    } else if crate::surface::SOIL_PLANTS.contains(&plant) {
+        crate::surface::supports_vegetation
+    } else {
+        return false;
+    };
+    !editor
+        .get_block_absolute(x, ground_y, z)
+        .is_some_and(footing)
+}
+
+/// Clear the plant above this column, upper half included, or a two-block
+/// plant is left with its top floating.
+fn clear_plant_above(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
+    // A whitelisted write inserts when the cell is empty, so an unguarded clear
+    // materialises an all-air cell and with it the section holding it.
+    let mut clear = |y: i32, list: &'static [crate::block_definitions::Block]| {
+        if editor.block_exists_absolute(x, y, z) {
+            editor.set_block_absolute(AIR, x, y, z, Some(list), None);
+        }
+    };
+    clear(ground_y + 1, crate::surface::CLEARABLE_PLANTS);
+    clear(ground_y + 2, crate::surface::SOIL_PLANT_TOPS);
+    // Cane stands on cane, so the whole stalk goes.
+    for dy in 2..=crate::surface::SUGAR_CANE_MAX_HEIGHT {
+        clear(ground_y + dy, &[SUGAR_CANE]);
+    }
+}
+
+/// The rock-desert floor level for a column, or `None` where the rock-desert
+/// palette does not apply at all.
+///
+/// The bbox is classified as a whole, but vegetation is measured per cell, so a
+/// wooded or grassy pocket inside a rock desert keeps ground its plants can root
+/// in. Built-up, cropland and wetland are where people changed the ground and
+/// keep their own surfaces.
+fn rock_desert_floor_cover(
+    dryland: Dryland,
+    ground: &Ground,
+    coord: XZPoint,
+    cover: u8,
+) -> Option<crate::strata::FloorCover> {
+    use crate::strata::FloorCover;
+    if dryland != Dryland::Rock {
+        return None;
+    }
+    match cover {
+        // Mangroves are a wetland class as well: they carry their own mud surface
+        // and vegetation path, which the rock-desert floor would overwrite.
+        land_cover::LC_BUILT_UP
+        | land_cover::LC_CROPLAND
+        | land_cover::LC_WETLAND
+        | land_cover::LC_MANGROVES => None,
+        land_cover::LC_TREE_COVER => Some(FloorCover::Wooded),
+        // A canopy measurement outranks the cover class: it is the finer signal,
+        // and a tree the canopy map found needs rootable ground whatever ESA
+        // called the cell.
+        _ if ground
+            .canopy_height_m(coord)
+            .is_some_and(|h| h >= crate::canopy::CANOPY_MIN_M) =>
+        {
+            Some(FloorCover::Wooded)
+        }
+        land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND | land_cover::LC_MOSS => {
+            Some(FloorCover::Sparse)
+        }
+        _ => Some(FloorCover::Bare),
+    }
+}
+
+/// Clear one plant standing on ground that cannot hold it.
+fn clear_stranded_plant(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
+    if plant_is_stranded(editor, x, ground_y, z) {
+        clear_plant_above(editor, x, ground_y, z);
+    }
 }

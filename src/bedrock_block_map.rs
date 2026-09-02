@@ -686,6 +686,14 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "crimson_planks" => BedrockBlock::simple("crimson_planks"),
         "warped_planks" => BedrockBlock::simple("warped_planks"),
 
+        // Sand variants: Bedrock carries the colour as a state, not a name.
+        "red_sand" => BedrockBlock::with_states(
+            "sand",
+            vec![(
+                "sand_type",
+                BedrockBlockStateValue::String("red".to_string()),
+            )],
+        ),
         // Stone variants
         "stone" => BedrockBlock::simple("stone"),
         "granite" => BedrockBlock::with_states(
@@ -1769,7 +1777,7 @@ fn convert_rail(props: Option<&std::collections::HashMap<String, fastnbt::Value>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_definitions::{AIR, GRASS_BLOCK, STONE};
+    use crate::block_definitions::{AIR, GRASS_BLOCK, RED_SAND, STONE};
 
     #[test]
     fn test_simple_blocks() {
@@ -2272,6 +2280,17 @@ mod tests {
     /// Java encodes a full block as `type=double` on the slab; Bedrock has a
     /// separate id per material. The bundled schematics (cars, boats, bridge
     /// segments, playgrounds, crane, starship) all contain double slabs.
+    #[test]
+    fn red_sand_becomes_sand_with_its_state() {
+        let b = to_bedrock_block_with_properties(RED_SAND, None);
+        assert_eq!(b.name, "minecraft:sand");
+        assert_eq!(
+            b.states.get("sand_type"),
+            Some(&BedrockBlockStateValue::String("red".to_string())),
+            "Bedrock has no red_sand block name"
+        );
+    }
+
     #[test]
     fn test_double_slabs_become_double_slab_ids() {
         use std::collections::HashMap as StdHashMap;

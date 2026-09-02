@@ -290,7 +290,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         127 => "mcl_core:stone_with_iron",
         128 => "mcl_core:stone_with_coal",
         129 => "mcl_core:stone_with_gold",
-        130 => "mcl_copper:stone_with_copper",
+        130 => "mcl_core:redsand",
         131 => "mcl_core:clay",
         132 => "mcl_core:grass_path",
         133 => return conv_stair(props, "mcl_stairs:stair_copper_exposed_cut"), // WAXED_EXPOSED_CUT_COPPER_STAIRS
@@ -434,6 +434,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         246 => "mcl_flowers:tulip_red",
         247 => "mcl_flowers:dandelion",
         248 => "mcl_flowers:blue_orchid",
+        385 => "mcl_copper:stone_with_copper",
         249 => "mcl_core:stone_with_diamond",
         250 => "mcl_core:stone_with_redstone",
         251 => "mcl_core:stone_with_lapis",

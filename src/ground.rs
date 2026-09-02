@@ -24,6 +24,9 @@ pub struct RotationMask {
     /// sin/cos of the *negative* angle (inverse rotation)
     pub neg_sin: f64,
     pub cos: f64,
+    /// World origin of the enlarged post-rotation bbox.
+    pub world_min_x: i32,
+    pub world_min_z: i32,
     /// Original axis-aligned bounding box before rotation
     pub orig_min_x: i32,
     pub orig_max_x: i32,
@@ -50,8 +53,57 @@ pub struct Ground {
     snow_threshold_y: i32,
     /// Climate at the bbox center, driving arid/polar surface palettes and biomes.
     climate: crate::climate::Climate,
+    /// Dryland character and relief, derived once from the grids on first use.
+    profile: once_cell::sync::OnceCell<RegionProfile>,
+    /// 27, 37 and 45 degrees here, with the vertical exaggeration divided out.
+    slope_tiers: [i32; 3],
+    /// Blocks per real metre, i.e. `--scale`. Rotation resamples every grid,
+    /// so no stored dimension survives it as a measurement, but a block does.
+    horizontal_scale: f64,
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
+}
+
+/// Slope tiers at 1:1 vertical exaggeration.
+pub const SLOPE_TIERS_1_1: [i32; 3] = [4, 6, 8];
+
+/// `slope` is max-min of four samples 4 blocks out, so it is 8 * vex * tan(angle).
+fn slope_tiers_for(blocks_per_meter: f64, scale: f64) -> [i32; 3] {
+    if !(blocks_per_meter.is_finite() && scale.is_finite())
+        || blocks_per_meter <= 0.0
+        || scale <= 0.0
+    {
+        return SLOPE_TIERS_1_1;
+    }
+    let vex = (blocks_per_meter / scale).clamp(0.0, 1.0);
+    let t = |tan: f64| (8.0 * vex * tan).round() as i32;
+    // Floors of 1, and tiers may collide rather than being forced apart. The
+    // test is a strict `slope > t`, so a floor of 2 demands slope 3, which a
+    // compressed 45 deg face never reaches. Below vex ~0.2 the integer metric
+    // cannot separate a cliff from a hillside at all.
+    let t27 = t(0.5095).max(1);
+    let t37 = t(0.7536).max(t27);
+    let t45 = t(1.0).max(t37);
+    [t27, t37, t45]
+}
+
+/// Whole-bbox character, sampled once from grids Arnis already holds.
+#[derive(Clone, Copy, Debug)]
+pub struct RegionProfile {
+    pub dryland: crate::climate::Dryland,
+    /// Share of non-water land cover classified bare, which is what separates
+    /// rock desert from grass steppe inside one Koppen class.
+    pub bare_fraction: f32,
+    /// Minecraft Y of the lowest and highest sampled terrain.
+    pub y_min: i32,
+    pub y_max: i32,
+    /// The same relief in real metres, since Minecraft Y may be compressed.
+    pub relief_m: f32,
+    /// Metres above sea level at the foot of the bbox.
+    pub base_elevation_m: f32,
+    /// Relief per kilometre of bbox diagonal. Absolute relief grows with the
+    /// bbox, so only the gradient separates a canyon from a dune field.
+    pub relief_gradient: f32,
 }
 
 /// Climatic snow line in metres by absolute latitude, piecewise-linear through
@@ -104,6 +156,9 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
+            horizontal_scale: 1.0,
             body: CelestialBody::Earth,
         }
     }
@@ -137,6 +192,9 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::classify(bbox),
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
+            horizontal_scale: scale,
             body: CelestialBody::Earth,
         }
     }
@@ -158,6 +216,9 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
+            horizontal_scale: 1.0,
             body: CelestialBody::Earth,
         }
     }
@@ -202,6 +263,9 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
+            horizontal_scale: 1.0,
             body: CelestialBody::Earth,
         }
     }
@@ -287,6 +351,7 @@ impl Ground {
                     } else {
                         i32::MAX
                     };
+                    let slope_tiers = slope_tiers_for(elevation_data.blocks_per_meter, scale);
                     let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
                     Self {
                         elevation_enabled: true,
@@ -299,6 +364,9 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y,
                         climate: crate::climate::Climate::classify(bbox),
+                        profile: once_cell::sync::OnceCell::new(),
+                        slope_tiers,
+                        horizontal_scale: scale,
                         body,
                     }
                 }
@@ -328,6 +396,9 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
                         climate: crate::climate::Climate::classify(bbox),
+                        profile: once_cell::sync::OnceCell::new(),
+                        slope_tiers: SLOPE_TIERS_1_1,
+                        horizontal_scale: scale,
                         body,
                     }
                 }
@@ -346,6 +417,178 @@ impl Ground {
     #[inline(always)]
     pub fn climate(&self) -> crate::climate::Climate {
         self.climate
+    }
+
+    /// Slope values meaning 27 / 37 / 45 degrees for this bbox.
+    #[inline(always)]
+    pub fn slope_tiers(&self) -> [i32; 3] {
+        self.slope_tiers
+    }
+
+    /// Whole-bbox character, computed on first use and cached.
+    pub fn region_profile(&self) -> RegionProfile {
+        *self.profile.get_or_init(|| self.compute_region_profile())
+    }
+
+    /// The ground a profile describes: the pre-rotation selection, else the world.
+    fn selection_dims_blocks(&self) -> (f64, f64) {
+        match self.rotation_mask {
+            Some(ref m) => (
+                (m.orig_max_x - m.orig_min_x + 1) as f64,
+                (m.orig_max_z - m.orig_min_z + 1) as f64,
+            ),
+            None => {
+                let (w, h) = self.world_dims();
+                (w as f64, h as f64)
+            }
+        }
+    }
+
+    fn compute_region_profile(&self) -> RegionProfile {
+        // Strided: the fractions settle long before every cell is read.
+        const STRIDE: usize = 8;
+        // Rotation pads every grid with clamped edge samples, and counting
+        // those would let a rotation change the classification on its own.
+        let (world_w, world_h) = self.world_dims();
+        let rotated = self.rotation_mask.is_some();
+        let in_selection = |gx: usize, gw: usize, gz: usize, gh: usize| {
+            if !rotated {
+                return true;
+            }
+            let scale = |g: usize, grid: usize, world: usize| {
+                ((g as f64 / (grid - 1).max(1) as f64) * (world - 1) as f64).round() as i32
+            };
+            self.local_in_rotated_bounds(scale(gx, gw, world_w), scale(gz, gh, world_h))
+        };
+        let mut bare = 0u64;
+        let mut land = 0u64;
+        if let Some(ref lc) = self.land_cover {
+            for z in (0..lc.height).step_by(STRIDE) {
+                let row = &lc.grid[z];
+                for x in (0..lc.width).step_by(STRIDE) {
+                    if !in_selection(x, lc.width, z, lc.height) {
+                        continue;
+                    }
+                    match row[x] {
+                        land_cover::LC_WATER => {}
+                        // Snow is not bare rock, and counting it let a snowfield
+                        // clear the bareness gate on its own.
+                        land_cover::LC_BARE => {
+                            bare += 1;
+                            land += 1;
+                        }
+                        _ => land += 1,
+                    }
+                }
+            }
+        }
+        let bare_fraction = if land == 0 {
+            0.0
+        } else {
+            bare as f64 / land as f64
+        };
+
+        // Percentiles, not extremes: one DEM spike would squeeze the column.
+        const BINS: usize = 512;
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        if let Some(ref ed) = self.elevation_data {
+            for z in (0..ed.height).step_by(STRIDE) {
+                let row = &ed.heights[z];
+                for x in (0..ed.width).step_by(STRIDE) {
+                    if !in_selection(x, ed.width, z, ed.height) {
+                        continue;
+                    }
+                    let v = row[x];
+                    if v.is_finite() {
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+            }
+        }
+        let (y_min, y_max) = if !lo.is_finite() || !hi.is_finite() {
+            (self.ground_level, self.ground_level)
+        } else if hi - lo < 1.0 {
+            (lo as i32, hi as i32)
+        } else {
+            let ed = self.elevation_data.as_ref().expect("range implies a grid");
+            let scale = BINS as f32 / (hi - lo);
+            let mut hist = [0u32; BINS];
+            let mut n = 0u64;
+            for z in (0..ed.height).step_by(STRIDE) {
+                let row = &ed.heights[z];
+                for x in (0..ed.width).step_by(STRIDE) {
+                    if !in_selection(x, ed.width, z, ed.height) {
+                        continue;
+                    }
+                    let v = row[x];
+                    if !v.is_finite() {
+                        continue;
+                    }
+                    let b = (((v - lo) * scale) as usize).min(BINS - 1);
+                    hist[b] += 1;
+                    n += 1;
+                }
+            }
+            let bin_y = |target: u64| {
+                let mut acc = 0u64;
+                for (i, &c) in hist.iter().enumerate() {
+                    acc += c as u64;
+                    if acc >= target {
+                        return (lo + i as f32 / scale) as i32;
+                    }
+                }
+                hi as i32
+            };
+            let a = bin_y(n / 50);
+            let b = bin_y(n - n / 50);
+            if a < b {
+                (a, b)
+            } else {
+                (lo as i32, hi as i32)
+            }
+        };
+
+        let bpm = self
+            .elevation_data
+            .as_ref()
+            .map(|ed| ed.blocks_per_meter)
+            .filter(|b| *b > 0.0)
+            .unwrap_or(1.0);
+        let relief_m = ((y_max - y_min) as f64 / bpm) as f32;
+        // Across the selection, converted with the one factor rotation cannot
+        // invalidate: it swaps in enlarged dims but keeps cells_per_meter.
+        let (span_w, span_h) = self.selection_dims_blocks();
+        let span_m = if self.horizontal_scale > 0.0 {
+            (span_w * span_w + span_h * span_h).sqrt() / self.horizontal_scale
+        } else {
+            0.0
+        };
+        let relief_gradient = if span_m > 1.0 {
+            (relief_m as f64 / (span_m / 1000.0)) as f32
+        } else {
+            0.0
+        };
+
+        let base_elevation_m = self
+            .elevation_data
+            .as_ref()
+            .map(|ed| ed.min_height_m as f32)
+            .unwrap_or(0.0);
+
+        RegionProfile {
+            dryland: self.climate.dryland(
+                bare_fraction,
+                relief_gradient as f64,
+                base_elevation_m as f64,
+            ),
+            base_elevation_m,
+            bare_fraction: bare_fraction as f32,
+            relief_m,
+            relief_gradient,
+            y_min,
+            y_max,
+        }
     }
 
     /// Body this world is on; Earth keeps every existing behaviour.
@@ -512,19 +755,54 @@ impl Ground {
         }
     }
 
+    /// True when a land-cover cell one cell away carries `class`.
+    ///
+    /// Probes in grid space. Stepping in blocks cannot do this: the world to
+    /// grid map rounds, so a coordinate on a half-cell boundary can land back
+    /// on the cell it started from and answer for itself.
+    pub fn has_cover_neighbour(&self, coord: XZPoint, class: u8) -> bool {
+        let Some(ref lc) = self.land_cover else {
+            return false;
+        };
+        let Some((gx, gz)) = self.cover_cell_index(coord) else {
+            return false;
+        };
+        let (world_w, world_h) = self.world_dims();
+        [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+            .iter()
+            .any(|(dx, dz)| {
+                let (nx, nz) = (gx as i32 + dx, gz as i32 + dz);
+                if nx < 0 || nz < 0 || nx as usize >= lc.width || nz as usize >= lc.height {
+                    return false;
+                }
+                let (nx, nz) = (nx as usize, nz as usize);
+                // Rotation padding holds clamped copies of the selection edge,
+                // which would be this same measurement read twice.
+                let wx = (nx as f64 / (lc.width - 1).max(1) as f64 * (world_w - 1) as f64).round();
+                let wz = (nz as f64 / (lc.height - 1).max(1) as f64 * (world_h - 1) as f64).round();
+                self.local_in_rotated_bounds(wx as i32, wz as i32) && lc.grid[nz][nx] == class
+            })
+    }
+
+    /// Grid cell a world coordinate samples, or `None` without land cover.
+    #[inline]
+    fn cover_cell_index(&self, coord: XZPoint) -> Option<(usize, usize)> {
+        let lc = self.land_cover.as_ref()?;
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
+        let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
+        Some((x, z))
+    }
+
     /// Returns the ESA WorldCover land cover class at the given coordinates.
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
     pub fn cover_class(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-            lc.grid[z][x]
-        } else {
-            0
+        match (self.land_cover.as_ref(), self.cover_cell_index(coord)) {
+            (Some(lc), Some((x, z))) => lc.grid[z][x],
+            _ => 0,
         }
     }
 
@@ -813,6 +1091,15 @@ impl Ground {
         self.rotation_mask = Some(mask);
     }
 
+    /// [`Self::is_in_rotated_bounds`] for a ground-local coordinate.
+    #[inline]
+    pub fn local_in_rotated_bounds(&self, lx: i32, lz: i32) -> bool {
+        match self.rotation_mask {
+            None => true,
+            Some(ref m) => self.is_in_rotated_bounds(lx + m.world_min_x, lz + m.world_min_z),
+        }
+    }
+
     /// Returns `true` if the coordinate is inside the rotated original bbox.
     /// When no rotation was applied, always returns `true`.
     #[inline(always)]
@@ -1061,6 +1348,17 @@ mod tests {
     use crate::coordinate_system::cartesian::XZPoint;
     use crate::elevation_data::ElevationData;
 
+    fn lc_of(grid: Vec<Vec<u8>>, width: usize, height: usize) -> LandCoverData {
+        LandCoverData {
+            water_distance: vec![vec![0; width]; height],
+            grid,
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width,
+            height,
+            cells_per_meter: 1.0,
+        }
+    }
+
     fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
         let h = heights.len();
         let w = heights[0].len();
@@ -1084,7 +1382,200 @@ mod tests {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            profile: once_cell::sync::OnceCell::new(),
+            slope_tiers: SLOPE_TIERS_1_1,
+            horizontal_scale: 1.0,
             body: CelestialBody::Earth,
+        }
+    }
+
+    #[test]
+    fn rotation_padding_stays_out_of_the_region_profile() {
+        use crate::land_cover::{LandCoverData, LC_BARE, LC_TREE_COVER};
+
+        // Half bare, half wooded. A mask over the bare half stands in for a
+        // rotation's padding, so counting it holds the fraction at 0.5.
+        let n = 64usize;
+        let grid: Vec<Vec<u8>> = (0..n)
+            .map(|_| {
+                (0..n)
+                    .map(|x| if x < n / 2 { LC_BARE } else { LC_TREE_COVER })
+                    .collect()
+            })
+            .collect();
+        let make = |mask: Option<RotationMask>| {
+            let mut g = ground_with(vec![vec![0.0; n]; n]);
+            g.land_cover = Some(LandCoverData {
+                grid: grid.clone(),
+                water_distance: vec![vec![0; n]; n],
+                water_blend_cache: once_cell::sync::OnceCell::new(),
+                width: n,
+                height: n,
+                cells_per_meter: 1.0,
+            });
+            g.rotation_mask = mask;
+            g
+        };
+
+        let unmasked = make(None).region_profile().bare_fraction;
+        assert!(
+            (unmasked - 0.5).abs() < 0.05,
+            "half-bare world should read ~0.5, got {unmasked}"
+        );
+
+        // Identity rotation, bounds covering only the bare half.
+        let masked = make(Some(RotationMask {
+            cx: 0.0,
+            cz: 0.0,
+            neg_sin: 0.0,
+            cos: 1.0,
+            world_min_x: 0,
+            world_min_z: 0,
+            orig_min_x: 0,
+            orig_max_x: (n / 2 - 1) as i32,
+            orig_min_z: 0,
+            orig_max_z: (n - 1) as i32,
+        }))
+        .region_profile()
+        .bare_fraction;
+        assert!(
+            masked > 0.95,
+            "only the bare half is inside the selection, so it should read ~1.0, got {masked}"
+        );
+    }
+
+    // Measuring the span across the padding shrinks the gradient on rotation alone.
+    #[test]
+    fn rotation_padding_does_not_stretch_the_relief_span() {
+        // The same ramp, once alone and once padded out to double width.
+        let ramp = |w: usize| -> Vec<Vec<f32>> {
+            (0..64)
+                .map(|_| (0..w).map(|x| x.min(63) as f32).collect())
+                .collect()
+        };
+
+        let plain = ground_with(ramp(64)).region_profile();
+
+        let mut padded = ground_with(ramp(128));
+        padded.rotation_mask = Some(RotationMask {
+            cx: 0.0,
+            cz: 0.0,
+            neg_sin: 0.0,
+            cos: 1.0,
+            world_min_x: 0,
+            world_min_z: 0,
+            orig_min_x: 0,
+            orig_max_x: 63,
+            orig_min_z: 0,
+            orig_max_z: 63,
+        });
+        let padded = padded.region_profile();
+
+        assert_eq!(
+            padded.relief_m, plain.relief_m,
+            "the selection holds the same relief either way"
+        );
+        assert!(
+            (padded.relief_gradient - plain.relief_gradient).abs() / plain.relief_gradient < 0.01,
+            "padding must not widen the span: {} vs {}",
+            padded.relief_gradient,
+            plain.relief_gradient
+        );
+    }
+
+    // A cover grid coarser in z than in x: one shared step would stay inside the
+    // same cell there and let a lone snow cell answer for itself.
+    #[test]
+    fn cover_neighbour_steps_a_whole_cell_on_each_axis() {
+        use crate::land_cover::{LC_GRASSLAND, LC_SNOW_ICE};
+
+        let mut g = ground_with(vec![vec![0.0; 8]; 8]);
+        let mut grid = vec![vec![LC_GRASSLAND; 8]; 4];
+        grid[1][2] = LC_SNOW_ICE;
+        g.land_cover = Some(lc_of(grid, 8, 4));
+
+        let snow = XZPoint::new(2, 2);
+        assert_eq!(g.cover_class(snow), LC_SNOW_ICE, "probe hits the snow cell");
+        assert!(
+            !g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "a lone snow cell must not find itself across the coarse z axis"
+        );
+
+        // 8 blocks over 3 cells, where any block-space step rounds back.
+        let mut g = ground_with(vec![vec![0.0; 8]; 8]);
+        let mut grid = vec![vec![LC_GRASSLAND; 3]; 3];
+        grid[1][1] = LC_SNOW_ICE;
+        g.land_cover = Some(lc_of(grid, 3, 3));
+        let snow = XZPoint::new(4, 4);
+        assert_eq!(g.cover_class(snow), LC_SNOW_ICE, "probe hits the snow cell");
+        assert!(
+            !g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "floor division would leave both probes inside the same cell"
+        );
+    }
+
+    // Rotation padding holds clamped copies of the selection edge, so a neighbour
+    // read out there is the same measurement twice.
+    #[test]
+    fn cover_neighbour_rejects_rotation_padding() {
+        use crate::land_cover::{LC_GRASSLAND, LC_SNOW_ICE};
+
+        // Two snow cells side by side in x, so the probe genuinely reaches one.
+        let mut g = ground_with(vec![vec![0.0; 8]; 8]);
+        let mut grid = vec![vec![LC_GRASSLAND; 8]; 8];
+        grid[2][2] = LC_SNOW_ICE;
+        grid[2][3] = LC_SNOW_ICE;
+        g.land_cover = Some(lc_of(grid, 8, 8));
+
+        let snow = XZPoint::new(2, 2);
+        assert!(
+            g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "unmasked, the probe must reach the neighbouring snow cell"
+        );
+
+        // Selection stops at x = 2, so that neighbour is padding.
+        g.rotation_mask = Some(RotationMask {
+            cx: 0.0,
+            cz: 0.0,
+            neg_sin: 0.0,
+            cos: 1.0,
+            world_min_x: 0,
+            world_min_z: 0,
+            orig_min_x: 0,
+            orig_max_x: 2,
+            orig_min_z: 0,
+            orig_max_z: 7,
+        });
+        assert!(
+            !g.has_cover_neighbour(snow, LC_SNOW_ICE),
+            "padding outside the selection must not count as a neighbour"
+        );
+    }
+
+    // No world size and grid size may let a lone cell answer for itself.
+    #[test]
+    fn a_lone_cover_cell_never_finds_itself() {
+        use crate::land_cover::{LC_GRASSLAND, LC_SNOW_ICE};
+
+        for world in [8usize, 23, 27, 45, 64] {
+            for grid in [1usize, 2, 3, 11, 12, 14, 32] {
+                let mut g = ground_with(vec![vec![0.0; world]; world]);
+                let (cx, cz) = (grid / 2, grid / 2);
+                let mut grid_v = vec![vec![LC_GRASSLAND; grid]; grid];
+                grid_v[cz][cx] = LC_SNOW_ICE;
+                g.land_cover = Some(lc_of(grid_v, grid, grid));
+                for x in 0..world as i32 {
+                    for z in 0..world as i32 {
+                        let c = XZPoint::new(x, z);
+                        if g.cover_class(c) == LC_SNOW_ICE {
+                            assert!(
+                                !g.has_cover_neighbour(c, LC_SNOW_ICE),
+                                "world {world} grid {grid} at ({x},{z}) found itself"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1165,6 +1656,43 @@ mod tests {
                 .collect(),
         );
         assert_eq!(cliff.water_level(XZPoint::new(7, 8)), 30);
+    }
+
+    #[test]
+    fn slope_tiers_are_unchanged_at_one_to_one() {
+        // Every bbox whose relief fits the vertical budget must be bit-identical.
+        assert_eq!(slope_tiers_for(1.0, 1.0), SLOPE_TIERS_1_1);
+        assert_eq!(slope_tiers_for(2.0, 2.0), SLOPE_TIERS_1_1);
+        assert_eq!(slope_tiers_for(0.0, 1.0), SLOPE_TIERS_1_1);
+        assert_eq!(slope_tiers_for(f64::NAN, 1.0), SLOPE_TIERS_1_1);
+    }
+
+    #[test]
+    fn slope_tiers_shrink_when_relief_is_compressed() {
+        // A 1340 m canyon squeezed into ~360 blocks: a real 45 deg wall scores
+        // about 2, so the 1:1 tiers would never call it rock.
+        let t = slope_tiers_for(0.27, 1.0);
+        assert!(t[2] < SLOPE_TIERS_1_1[2], "cliff tier should drop: {t:?}");
+        assert!(
+            t[0] >= 1 && t[0] <= t[1] && t[1] <= t[2],
+            "tiers must stay ordered: {t:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_cliff_still_reads_as_rock_when_relief_is_compressed() {
+        // The point of the correction is that a real angle keeps its meaning, so
+        // test the angle, not the tier ordering. `slope` is the integer drop over
+        // the 8-block sample span, so a 45 deg face measures 8 * vex, and it has
+        // to clear t27 or the whole cascade treats a cliff as a hillside.
+        for vex in [1.0, 0.75, 0.535, 0.4, 0.3, 0.27] {
+            let tiers = slope_tiers_for(vex, 1.0);
+            let measured = (8.0 * vex) as i32;
+            assert!(
+                measured > tiers[0],
+                "vex {vex}: a 45 deg face measures {measured} and misses t27 in {tiers:?}"
+            );
+        }
     }
 
     #[test]
