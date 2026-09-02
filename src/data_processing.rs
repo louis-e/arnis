@@ -659,7 +659,20 @@ pub fn generate_world_with_options(
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    let road_mask = highways::collect_road_surface_coords(&elements, &editor, &xzbbox, args.scale);
+    let road_mask = Arc::new(highways::collect_road_surface_coords(
+        &elements, &editor, &xzbbox, args.scale,
+    ));
+
+    // Roads plus every paved area footprint, resolved before anything is placed so
+    // vegetation passes can tell a man-made surface from natural ground. With no
+    // paved area in the bbox the road mask already is the answer, so it is shared
+    // instead of copied: one bitmap is a bit per world column and that adds up on
+    // a several-hundred-square-kilometre run.
+    let sealed_surface = match flood_fill_cache.collect_sealed_surfaces(&elements, &road_mask) {
+        Some(mask) => Arc::new(mask),
+        None => Arc::clone(&road_mask),
+    };
+    editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
@@ -899,6 +912,7 @@ pub fn generate_world_with_options(
                     if let Some(ref tp) = tree_pack {
                         tile_editor.set_tree_pack(Arc::clone(tp));
                     }
+                    tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
                     if let Some(ctx) = &signage_ctx {
                         tile_editor.set_signage(Arc::clone(ctx));
                     }
@@ -1281,6 +1295,11 @@ pub fn generate_world_with_options(
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
+    // The editor holds its own handle on the sealed-surface mask, and that mask is the
+    // road mask itself when nothing else was sealed, so releasing it here is what
+    // actually frees the bitmap.
+    editor.release_sealed_surface();
+    drop(sealed_surface);
     drop(road_mask);
     drop(tunnel_footprint);
     drop(rail_mask);

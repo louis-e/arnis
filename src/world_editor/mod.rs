@@ -184,6 +184,9 @@ pub struct WorldEditor<'a> {
     ground: Option<Arc<Ground>>,
     /// Loaded region tree pack (None = procedural); shared via Arc across main + tile editors.
     tree_pack: Option<Arc<crate::trees::region::RegionLibrary>>,
+    /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
+    /// parking); vegetation stays off them. Shared via Arc with the tile editors.
+    sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -255,6 +258,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             tree_pack: None,
+            sealed_surface: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -300,6 +304,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             tree_pack: None,
+            sealed_surface: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -345,6 +350,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             tree_pack: None,
+            sealed_surface: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -406,6 +412,26 @@ impl<'a> WorldEditor<'a> {
     /// The loaded region tree pack, if any (a cheap Arc clone so the editor borrow is freed).
     pub fn tree_pack(&self) -> Option<Arc<crate::trees::region::RegionLibrary>> {
         self.tree_pack.clone()
+    }
+
+    /// Sets the sealed-surface mask (shared across the main and tile editors).
+    pub fn set_sealed_surface(&mut self, mask: Arc<crate::floodfill_cache::SealedSurfaceBitmap>) {
+        self.sealed_surface = Some(mask);
+    }
+
+    /// Drops the sealed-surface mask once every vegetation pass is done, so the
+    /// bitmap is not carried into the save phase.
+    pub fn release_sealed_surface(&mut self) {
+        self.sealed_surface = None;
+    }
+
+    /// True if a man-made surface owns this column, so scattered vegetation
+    /// would land on a road, a pitch or a parking lot.
+    #[inline]
+    pub fn surface_is_sealed(&self, x: i32, z: i32) -> bool {
+        self.sealed_surface
+            .as_ref()
+            .is_some_and(|m| m.contains(x, z))
     }
 
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).

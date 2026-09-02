@@ -558,6 +558,13 @@ impl Tree {
             return;
         }
 
+        // Roads, pitches and other paved areas own their columns. The block check
+        // below cannot see this: a surface=dirt track is dirt like any field, and a
+        // pitch drawn after the park around it has not been painted yet.
+        if !allow_on_paved && editor.surface_is_sealed(x, z) {
+            return;
+        }
+
         // water always blocked; paved blocked unless allow_on_paved
         let forbidden_ground: &[Block] = if allow_on_paved {
             &[WATER]
@@ -637,6 +644,7 @@ impl Tree {
                     || building_footprints.is_some_and(|f| f.contains(sx, sz))
                     || editor.check_for_block(sx, 0, sz, Some(road_water))
                     || bridge_surface.is_some_and(|b| b.contains(sx, sz))
+                    || (!allow_on_paved && editor.surface_is_sealed(sx, sz))
                 {
                     return;
                 }
@@ -1571,6 +1579,58 @@ mod tests {
         assert!(
             !has_trunk(&editor),
             "trees must never stand on water, even when paving is allowed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod sealed_surface_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::floodfill_cache::SealedSurfaceBitmap;
+    use std::sync::Arc;
+
+    fn column_is_empty(editor: &WorldEditor, x: i32, z: i32) -> bool {
+        !(0..40).any(|y| editor.block_exists_absolute(x, y, z))
+    }
+
+    fn editor_with_sealed_column(xzbbox: &XZBBox) -> WorldEditor<'_> {
+        let llbbox = LLBBox::new(46.0, 7.7, 46.01, 7.71).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
+        let mut mask = SealedSurfaceBitmap::new(xzbbox);
+        mask.set(16, 16);
+        editor.set_sealed_surface(Arc::new(mask));
+        editor
+    }
+
+    #[test]
+    fn scattered_trees_stay_off_a_sealed_column() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let mut editor = editor_with_sealed_column(&xzbbox);
+
+        Tree::create(&mut editor, (16, 0, 16), None, None);
+        assert!(
+            column_is_empty(&editor, 16, 16),
+            "a court or road column must stay clear"
+        );
+
+        Tree::create(&mut editor, (20, 0, 20), None, None);
+        assert!(
+            !column_is_empty(&editor, 20, 20),
+            "open ground next to it still gets its tree"
+        );
+    }
+
+    #[test]
+    fn a_mapped_tree_node_still_stands_on_a_sealed_column() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let mut editor = editor_with_sealed_column(&xzbbox);
+
+        Tree::create_of_type(&mut editor, (16, 0, 16), TreeType::Oak, None, None, true);
+        assert!(
+            !column_is_empty(&editor, 16, 16),
+            "natural=tree is mapped on purpose and keeps its paving exception"
         );
     }
 }
