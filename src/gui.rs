@@ -101,7 +101,7 @@ impl Drop for NewWorldCleanup {
     }
 }
 
-pub fn run_gui() {
+pub fn run_gui() -> Result<(), String> {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
 
@@ -171,12 +171,12 @@ pub fn run_gui() {
         .setup(|app| {
             let app_handle = app.handle();
             let main_window = tauri::Manager::get_webview_window(app_handle, "main")
-                .expect("Failed to get main window");
+                .ok_or_else(|| std::io::Error::other("Failed to get main window"))?;
             progress::set_main_window(main_window);
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("Error while starting the application UI (Tauri)");
+        .map_err(|e| format!("Error while starting the application UI (Tauri): {e}"))
 }
 
 /// Detects the default Minecraft Java Edition saves directory for the current OS.
