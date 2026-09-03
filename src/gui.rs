@@ -101,7 +101,7 @@ impl Drop for NewWorldCleanup {
     }
 }
 
-pub fn run_gui() {
+pub fn run_gui() -> Result<(), String> {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
 
@@ -176,7 +176,7 @@ pub fn run_gui() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("Error while starting the application UI (Tauri)");
+        .map_err(|e| format!("Error while starting the application UI (Tauri): {e}"))
 }
 
 /// Detects the default Minecraft Java Edition saves directory for the current OS.

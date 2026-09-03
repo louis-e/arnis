@@ -58,6 +58,8 @@ use args::Args;
 use clap::Parser;
 use colored::*;
 use std::path::PathBuf;
+#[cfg(all(feature = "gui", target_os = "linux"))]
+use std::process::Command;
 use std::{env, fs, io::Write};
 
 // mimalloc scales far better than the system allocator under the concurrent
@@ -82,6 +84,41 @@ mod progress {
 }
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+const EGL_ZINK_RETRY_MARKER: &str = "ARNIS_EGL_ZINK_RETRY";
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+fn has_user_rendering_override() -> bool {
+    [
+        "MESA_LOADER_DRIVER_OVERRIDE",
+        "LIBGL_ALWAYS_SOFTWARE",
+        "GALLIUM_DRIVER",
+    ]
+    .iter()
+    .any(|name| env::var_os(name).is_some())
+}
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+fn is_egl_startup_failure(error_message: &str) -> bool {
+    let lowered = error_message.to_ascii_lowercase();
+    lowered.contains("egl_not_initialized")
+        || lowered.contains("surfaceless egl")
+        || (lowered.contains("libegl") && lowered.contains("failed"))
+}
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+fn retry_gui_with_zink() -> Result<(), String> {
+    let executable = env::current_exe()
+        .map_err(|e| format!("Failed to locate current executable for EGL fallback retry: {e}"))?;
+    let status = Command::new(executable)
+        .env(EGL_ZINK_RETRY_MARKER, "1")
+        .env("MESA_LOADER_DRIVER_OVERRIDE", "zink")
+        .status()
+        .map_err(|e| format!("Failed to relaunch with zink EGL workaround: {e}"))?;
+
+    std::process::exit(status.code().unwrap_or(1));
+}
 
 /// Reattach to the console this process was launched from, so terminal output
 /// works in both CLI and GUI runs.
@@ -609,7 +646,27 @@ fn main() {
     {
         let gui_mode = std::env::args().len() == 1; // Just "arnis" with no args
         if gui_mode {
-            gui::run_gui();
+            #[cfg(target_os = "linux")]
+            let user_rendering_override = has_user_rendering_override();
+
+            if let Err(e) = gui::run_gui() {
+                #[cfg(target_os = "linux")]
+                {
+                    let already_retried = env::var_os(EGL_ZINK_RETRY_MARKER).is_some();
+                    if !already_retried && !user_rendering_override && is_egl_startup_failure(&e) {
+                        eprintln!(
+                            "{} Linux EGL initialization failed; retrying once with zink.",
+                            "Warning:".yellow().bold()
+                        );
+                        if let Err(retry_error) = retry_gui_with_zink() {
+                            eprintln!("{} {}", "Error:".red().bold(), retry_error);
+                        }
+                    }
+                }
+
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            }
         }
     }
 
