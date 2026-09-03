@@ -171,7 +171,7 @@ pub fn run_gui() -> Result<(), String> {
         .setup(|app| {
             let app_handle = app.handle();
             let main_window = tauri::Manager::get_webview_window(app_handle, "main")
-                .expect("Failed to get main window");
+                .ok_or_else(|| std::io::Error::other("Failed to get main window"))?;
             progress::set_main_window(main_window);
             Ok(())
         })
