@@ -2,8 +2,8 @@
 
 use crate::block_definitions::{
     Block, AIR, BLUE_FLOWER, CLAY, COARSE_DIRT, DEAD_BUSH, DIRT, FERN, GRASS, GRAVEL, KELP,
-    KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MAGMA_BLOCK, OAK_LEAVES, RED_FLOWER, SAND,
-    SANDSTONE, SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, OAK_LEAVES, RED_FLOWER, SAND, SANDSTONE,
+    SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
     TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -416,8 +416,6 @@ pub fn carve_water_column(
                 } else {
                     GRAVEL
                 }
-            } else if d >= 5 && vn(401, 503, 8) > 0.96 {
-                MAGMA_BLOCK
             } else if d >= 5 && vn(727, 911, 8) > 0.96 {
                 SOUL_SAND
             } else if vn(73, 109, 64) > 0.74 {
