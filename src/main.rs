@@ -114,6 +114,8 @@ fn retry_gui_with_zink() -> Result<(), String> {
     let status = Command::new(executable)
         .env(EGL_ZINK_RETRY_MARKER, "1")
         .env("MESA_LOADER_DRIVER_OVERRIDE", "zink")
+        .env("LIBGL_ALWAYS_SOFTWARE", "0")
+        .env("GALLIUM_DRIVER", "zink")
         .status()
         .map_err(|e| format!("Failed to relaunch with zink EGL workaround: {e}"))?;
 
@@ -667,6 +669,8 @@ fn main() {
                 eprintln!("{} {}", "Error:".red().bold(), e);
                 std::process::exit(1);
             }
+
+            return;
         }
     }
 
