@@ -59,6 +59,7 @@
   "disable_height_limit": "扩展建造高度",
   "aws_only_elevation": "旧版地形",
   "bake_lighting": "烘焙光照",
+  "voxy_lod": "预生成 Voxy LOD",
   "bedrock_auto_generated": "Bedrock 世界自动生成",
   "java_save_path": "Java 存档路径",
   "bedrock_save_path": "Bedrock 存档路径",

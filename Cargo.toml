@@ -27,6 +27,7 @@ bytes = "1"
 byteorder = "1.5"
 clap = { version = "4.6.0", features = ["derive", "env"] }
 colored = "3.0.0"
+crc = "3"
 dda-voxelize = { git = "https://github.com/MIERUNE/dda-voxelize-rs", rev = "1e0844a873262f13b19a709e188a3df22a6fbf97" }
 dirs = "6.0.0"
 fastanvil = "0.32.0"
@@ -53,6 +54,7 @@ semver = "1.0.27"
 parquet = { version = "59", default-features = false, features = ["snap", "zstd"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 tauri = { version = "2", optional = true }
 tauri-plugin-log = { version = "2.6.0", optional = true }

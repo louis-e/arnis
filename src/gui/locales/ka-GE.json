@@ -66,6 +66,7 @@
   "disable_height_limit": "აშენების სიმაღლის ლიმიტის გაზრდა",
   "aws_only_elevation": "ძველი რელიეფის სისტემა",
   "bake_lighting": "განათების დამუშავება",
+  "voxy_lod": "Voxy LOD-ის წინასწარი გენერირება",
   "bedrock_auto_generated": "Bedrock-ის სამყარო ავტომატურად იქმნება",
   "java_save_path": "Java-ს შენახვის გზა",
   "bedrock_save_path": "Bedrock-ის შენახვის გზა",

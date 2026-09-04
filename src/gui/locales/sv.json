@@ -59,6 +59,7 @@
   "disable_height_limit": "Utöka byggnadshöjd",
   "aws_only_elevation": "Äldre terräng",
   "bake_lighting": "Förberäkna ljussättning",
+  "voxy_lod": "Förgenerera Voxy LOD",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "java_save_path": "Sökväg för Java",
   "bedrock_save_path": "Sökväg för Bedrock",
