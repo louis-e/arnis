@@ -1799,23 +1799,13 @@ mod material_tests {
         assert!(get_roof_block_for_material("notamaterial", &mut rng()).is_none());
     }
 
-    /// Common generator palettes must keep using the compact paletted section
-    /// representation regardless of the blocks' raw ids.
+    /// The distinct block kinds that common generator paths can emit into one
+    /// section must still fit the section-local paletted representation.
     #[test]
-    fn generator_palettes_do_not_force_direct_storage() {
-        fn check(block: Block, source: &str) {
-            let mut storage = crate::world_editor::BlockStorage::Uniform(AIR);
-            storage.set(0, STONE);
-            storage.set(1, block);
-            assert!(
-                !matches!(storage, crate::world_editor::BlockStorage::Direct(_)),
-                "{source} forced direct storage for {} (id {})",
-                block.name(),
-                block.id()
-            );
-        }
+    fn common_generator_block_set_fits_paletted_storage() {
+        let mut blocks = std::collections::BTreeSet::new();
 
-        for (table, source) in [
+        for table in [
             (&WINDOW_VARIATIONS[..], "WINDOW_VARIATIONS"),
             (
                 &RESIDENTIAL_WINDOW_OPTIONS[..],
@@ -1837,13 +1827,13 @@ mod material_tests {
                 "PLANETARY_SURFACE_BLOCKS",
             ),
         ] {
-            for &block in table {
-                check(block, source);
+            for &block in table.0 {
+                blocks.insert(block);
             }
         }
 
         for block in crate::block_palette::all_building_palette_blocks() {
-            check(block, "block_palette");
+            blocks.insert(block);
         }
 
         // Every named block can flow through the material -> stair/slab/wall
@@ -1853,41 +1843,39 @@ mod material_tests {
             if material.try_name().is_none() {
                 continue;
             }
-            check(
-                get_stair_block_for_material(material),
-                "get_stair_block_for_material",
-            );
-            check(
-                get_slab_block_for_material(material),
-                "get_slab_block_for_material",
-            );
-            check(
-                get_wall_piece_for_material(material),
-                "get_wall_piece_for_material",
-            );
+            blocks.insert(get_stair_block_for_material(material));
+            blocks.insert(get_slab_block_for_material(material));
+            blocks.insert(get_wall_piece_for_material(material));
         }
 
         // The random pickers draw from inline option arrays, so sample each one
         // often enough to reach every entry.
         for seed in 0..64 {
             let mut r = ChaCha8Rng::seed_from_u64(seed);
-            check(
-                get_fallback_building_block(&mut r),
-                "get_fallback_building_block",
-            );
-            check(get_castle_wall_block(&mut r), "get_castle_wall_block");
-            check(get_floor_block_with_rng(&mut r), "get_floor_block_with_rng");
+            blocks.insert(get_fallback_building_block(&mut r));
+            blocks.insert(get_castle_wall_block(&mut r));
+            blocks.insert(get_floor_block_with_rng(&mut r));
             for material in WALL_MATERIALS {
                 if let Some(block) = get_wall_block_for_material(material, &mut r) {
-                    check(block, "get_wall_block_for_material");
+                    blocks.insert(block);
                 }
             }
             for material in ROOF_MATERIALS {
                 if let Some(block) = get_roof_block_for_material(material, &mut r) {
-                    check(block, "get_roof_block_for_material");
+                    blocks.insert(block);
                 }
             }
         }
+
+        let mut storage = crate::world_editor::BlockStorage::Uniform(AIR);
+        for (i, &block) in blocks.iter().enumerate() {
+            storage.set(i, block);
+        }
+        assert!(
+            !matches!(storage, crate::world_editor::BlockStorage::Direct(_)),
+            "common generator block set grew to {} unique blocks and no longer fits the section palette",
+            blocks.len()
+        );
     }
 
     /// Every `building:material` / `roof:material` value the mappers recognise.

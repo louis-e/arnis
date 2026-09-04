@@ -16,11 +16,12 @@ use std::sync::Mutex;
 const MAX_OUTPUT_SIDE: u32 = 4096;
 const COLOR_LUT_LIMIT: u16 = 512;
 
+/// Shared name->color table for the LUT builder and the out-of-range fallback.
+static BLOCK_COLORS: Lazy<FnvHashMap<&'static str, Rgb<u8>>> = Lazy::new(get_block_colors);
 /// Per-block-id color; None = transparent (top-block search looks below).
 static COLOR_LUT: Lazy<Vec<Option<Rgb<u8>>>> = Lazy::new(build_color_lut);
 
 fn build_color_lut() -> Vec<Option<Rgb<u8>>> {
-    let colors = get_block_colors();
     (0..COLOR_LUT_LIMIT)
         .map(|id| {
             let block = Block::from_raw_id(id);
@@ -29,7 +30,7 @@ fn build_color_lut() -> Vec<Option<Rgb<u8>>> {
                 return None;
             }
             Some(
-                colors
+                BLOCK_COLORS
                     .get(name)
                     .copied()
                     .unwrap_or_else(|| get_fallback_color(name)),
@@ -44,13 +45,12 @@ fn lut_color(block: Block) -> Option<Rgb<u8>> {
         return *color;
     }
 
-    let colors = get_block_colors();
     let name = block.try_name()?;
     if is_transparent_block(name) {
         return None;
     }
     Some(
-        colors
+        BLOCK_COLORS
             .get(name)
             .copied()
             .unwrap_or_else(|| get_fallback_color(name)),
