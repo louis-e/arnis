@@ -142,9 +142,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 const SECTION_BLOCKS: usize = 4096;
+const DENSE_ID_LIMIT: u16 = u8::MAX as u16 + 1;
+const DENSE_BLOCK_IDS: usize = DENSE_ID_LIMIT as usize;
 const MAX_SECTION_PALETTE: usize = 256;
 const RECENT_PALETTE_LOOKUPS: usize = 4;
-const REVERSE_LOOKUP_THRESHOLD: usize = 8;
+const REVERSE_LOOKUP_THRESHOLD: usize = 32;
 const REVERSE_LOOKUP_ENTRY_BYTES: u64 = 8;
 
 /// Chunk structure for Java Edition NBT format
@@ -290,6 +292,43 @@ impl PalettedBlockStorage {
         bytes
     }
 
+    fn from_dense(ids: &[u8; SECTION_BLOCKS]) -> Self {
+        let mut palette = Vec::new();
+        let mut slot_by_id = [u16::MAX; DENSE_BLOCK_IDS];
+        let mut indices = [0u8; SECTION_BLOCKS];
+
+        for (i, &id) in ids.iter().enumerate() {
+            let entry = &mut slot_by_id[id as usize];
+            if *entry == u16::MAX {
+                *entry = palette.len() as u16;
+                palette.push(Block::from_raw_id(u16::from(id)));
+            }
+            indices[i] = *entry as u8;
+        }
+
+        let reverse = if palette.len() >= REVERSE_LOOKUP_THRESHOLD {
+            let mut reverse = FnvHashMap::default();
+            reverse.reserve(palette.len());
+            for (slot, &block) in palette.iter().enumerate() {
+                reverse.insert(block, slot as u8);
+            }
+            Some(reverse)
+        } else {
+            None
+        };
+        let mut storage = Self {
+            indices,
+            palette,
+            reverse,
+            recent: [RecentPaletteSlot::EMPTY; RECENT_PALETTE_LOOKUPS],
+            recent_len: 0,
+        };
+        if let Some(&block) = storage.palette.first() {
+            storage.touch_recent(block, 0);
+        }
+        storage
+    }
+
     fn try_from_direct(blocks: &[Block; SECTION_BLOCKS]) -> Option<Self> {
         let mut palette = Vec::new();
         let mut reverse = FnvHashMap::default();
@@ -323,6 +362,19 @@ impl PalettedBlockStorage {
             storage.touch_recent(block, 0);
         }
         Some(storage)
+    }
+
+    fn try_to_dense(&self) -> Option<Box<[u8; SECTION_BLOCKS]>> {
+        let mut dense_palette = [0u8; MAX_SECTION_PALETTE];
+        for (slot, &block) in self.palette.iter().enumerate() {
+            dense_palette[slot] = u8::try_from(block.id()).ok()?;
+        }
+
+        let mut dense = Box::new([0u8; SECTION_BLOCKS]);
+        for (i, &slot) in self.indices.iter().enumerate() {
+            dense[i] = dense_palette[slot as usize];
+        }
+        Some(dense)
     }
 
     fn find_slot(&mut self, block: Block) -> Option<u8> {
@@ -494,6 +546,8 @@ impl PalettedBlockStorage {
 pub(crate) enum BlockStorage {
     /// Every position is the same block (commonly AIR).
     Uniform(Block),
+    /// Mixed blocks whose live ids all fit in one byte.
+    Dense(Box<[u8; SECTION_BLOCKS]>),
     /// Mixed blocks with a per-section palette and one-byte indices.
     Paletted(Box<PalettedBlockStorage>),
     /// Rare overflow path when a section needs more than 256 distinct live blocks.
@@ -506,6 +560,7 @@ impl BlockStorage {
     pub fn get(&self, index: usize) -> Block {
         match self {
             BlockStorage::Uniform(b) => *b,
+            BlockStorage::Dense(v) => Block::from_raw_id(u16::from(v[index])),
             BlockStorage::Paletted(storage) => storage.get(index),
             BlockStorage::Direct(v) => v[index],
         }
@@ -521,10 +576,30 @@ impl BlockStorage {
                 // No-op – writing the same value.
             }
             BlockStorage::Uniform(base) => {
-                let mut storage = PalettedBlockStorage::from_uniform(*base);
-                let promoted = storage.set(index, block);
-                debug_assert!(promoted.is_none(), "fresh paletted section cannot overflow");
-                *self = BlockStorage::Paletted(Box::new(storage));
+                if let (Ok(base), Ok(block_id)) =
+                    (u8::try_from(base.id()), u8::try_from(block.id()))
+                {
+                    let mut dense = Box::new([base; SECTION_BLOCKS]);
+                    dense[index] = block_id;
+                    *self = BlockStorage::Dense(dense);
+                } else {
+                    let mut storage = PalettedBlockStorage::from_uniform(*base);
+                    let promoted = storage.set(index, block);
+                    debug_assert!(promoted.is_none(), "fresh paletted section cannot overflow");
+                    *self = BlockStorage::Paletted(Box::new(storage));
+                }
+            }
+            BlockStorage::Dense(v) => {
+                if let Ok(block_id) = u8::try_from(block.id()) {
+                    v[index] = block_id;
+                } else {
+                    let mut storage = PalettedBlockStorage::from_dense(v);
+                    if let Some(direct) = storage.set(index, block) {
+                        *self = BlockStorage::Direct(direct);
+                    } else {
+                        *self = BlockStorage::Paletted(Box::new(storage));
+                    }
+                }
             }
             BlockStorage::Paletted(storage) => {
                 if let Some(direct) = storage.set(index, block) {
@@ -542,6 +617,7 @@ impl BlockStorage {
     pub fn iter(&self) -> BlockStorageIter<'_> {
         match self {
             BlockStorage::Uniform(b) => BlockStorageIter::Uniform(*b, 0),
+            BlockStorage::Dense(v) => BlockStorageIter::Dense(v.iter()),
             BlockStorage::Paletted(storage) => BlockStorageIter::Paletted {
                 palette: &storage.palette,
                 indices: storage.indices.iter(),
@@ -554,10 +630,19 @@ impl BlockStorage {
     /// is the same block. Frees the heap allocation.
     pub fn try_compact(&mut self) {
         match self {
+            BlockStorage::Dense(v) => {
+                if let Some(&first) = v.first() {
+                    if v.iter().all(|&b| b == first) {
+                        *self = BlockStorage::Uniform(Block::from_raw_id(u16::from(first)));
+                    }
+                }
+            }
             BlockStorage::Paletted(storage) => {
                 storage.repack_live_palette();
                 if storage.palette.len() == 1 {
                     *self = BlockStorage::Uniform(storage.palette[0]);
+                } else if let Some(dense) = storage.try_to_dense() {
+                    *self = BlockStorage::Dense(dense);
                 }
             }
             BlockStorage::Direct(v) => {
@@ -567,7 +652,9 @@ impl BlockStorage {
                         return;
                     }
                 }
-                if let Some(paletted) = PalettedBlockStorage::try_from_direct(v) {
+                if let Some(dense) = dense_storage_from_blocks(v) {
+                    *self = BlockStorage::Dense(dense);
+                } else if let Some(paletted) = PalettedBlockStorage::try_from_direct(v) {
                     if paletted.palette.len() == 1 {
                         *self = BlockStorage::Uniform(paletted.palette[0]);
                     } else {
@@ -583,6 +670,7 @@ impl BlockStorage {
     pub fn resident_bytes(&self) -> u64 {
         match self {
             BlockStorage::Uniform(_) => 0,
+            BlockStorage::Dense(_) => SECTION_BLOCKS as u64,
             BlockStorage::Paletted(storage) => storage.resident_bytes(),
             BlockStorage::Direct(_) => std::mem::size_of::<[Block; SECTION_BLOCKS]>() as u64,
         }
@@ -592,6 +680,7 @@ impl BlockStorage {
 /// Iterator returned by [`BlockStorage::iter`].
 pub(crate) enum BlockStorageIter<'a> {
     Uniform(Block, usize),
+    Dense(std::slice::Iter<'a, u8>),
     Paletted {
         palette: &'a [Block],
         indices: std::slice::Iter<'a, u8>,
@@ -613,6 +702,7 @@ impl<'a> Iterator for BlockStorageIter<'a> {
                     None
                 }
             }
+            BlockStorageIter::Dense(it) => it.next().map(|&id| Block::from_raw_id(u16::from(id))),
             BlockStorageIter::Paletted { palette, indices } => {
                 indices.next().map(|slot| palette[*slot as usize])
             }
@@ -624,6 +714,7 @@ impl<'a> Iterator for BlockStorageIter<'a> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let rem = match self {
             BlockStorageIter::Uniform(_, c) => SECTION_BLOCKS - *c,
+            BlockStorageIter::Dense(it) => it.len(),
             BlockStorageIter::Paletted { indices, .. } => indices.len(),
             BlockStorageIter::Direct(it) => it.len(),
         };
@@ -640,6 +731,16 @@ fn bits_for_palette_len(palette_len: usize) -> usize {
         bits += 1;
     }
     bits
+}
+
+fn dense_storage_from_blocks(
+    blocks: &[Block; SECTION_BLOCKS],
+) -> Option<Box<[u8; SECTION_BLOCKS]>> {
+    let mut dense = Box::new([0u8; SECTION_BLOCKS]);
+    for (i, &block) in blocks.iter().enumerate() {
+        dense[i] = u8::try_from(block.id()).ok()?;
+    }
+    Some(dense)
 }
 
 fn pack_palette_indices(indices: &[u16; SECTION_BLOCKS], bits_per_block: usize) -> LongArray {
@@ -769,6 +870,40 @@ impl SectionToModify {
         if self.properties.is_empty() {
             match &self.storage {
                 BlockStorage::Uniform(_) => {}
+                BlockStorage::Dense(ids) => {
+                    let mut id_to_palette = [u16::MAX; DENSE_BLOCK_IDS];
+                    let mut palette_blocks: Vec<Block> = Vec::new();
+                    let mut indices = [0u16; SECTION_BLOCKS];
+
+                    for (i, &id) in ids.iter().enumerate() {
+                        let entry = &mut id_to_palette[id as usize];
+                        if *entry == u16::MAX {
+                            *entry = palette_blocks.len() as u16;
+                            palette_blocks.push(Block::from_raw_id(u16::from(id)));
+                        }
+                        indices[i] = *entry;
+                    }
+
+                    if palette_blocks.len() == 1 {
+                        return make_section(
+                            y,
+                            vec![make_palette_item(palette_blocks[0], None)],
+                            None,
+                        );
+                    }
+
+                    let bits_per_block = bits_for_palette_len(palette_blocks.len());
+                    let palette = palette_blocks
+                        .into_iter()
+                        .map(|block| make_palette_item(block, None))
+                        .collect();
+
+                    return make_section(
+                        y,
+                        palette,
+                        Some(pack_palette_indices(&indices, bits_per_block)),
+                    );
+                }
                 BlockStorage::Paletted(storage) => {
                     let mut slot_to_palette = [u16::MAX; MAX_SECTION_PALETTE];
                     let mut palette_blocks: Vec<Block> = Vec::with_capacity(storage.palette.len());
@@ -882,6 +1017,33 @@ impl SectionToModify {
         let mut indices = [0u16; SECTION_BLOCKS];
 
         match &self.storage {
+            BlockStorage::Dense(ids) => {
+                let mut plain_palette = [u16::MAX; DENSE_BLOCK_IDS];
+                let mut props_palette: FnvHashMap<(u8, u16), u16> = FnvHashMap::default();
+
+                for (i, &id) in ids.iter().enumerate() {
+                    let props_id = cell_props[i];
+                    let block = Block::from_raw_id(u16::from(id));
+                    let palette_index = if props_id == 0 {
+                        if plain_palette[id as usize] == u16::MAX {
+                            plain_palette[id as usize] = unique_blocks.len() as u16;
+                            unique_blocks.push((block, None));
+                        }
+                        plain_palette[id as usize]
+                    } else {
+                        match props_palette.entry((id, props_id)) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let idx = unique_blocks.len() as u16;
+                                e.insert(idx);
+                                unique_blocks.push((block, self.properties.get(&i).cloned()));
+                                idx
+                            }
+                        }
+                    };
+                    indices[i] = palette_index;
+                }
+            }
             BlockStorage::Paletted(storage) => {
                 let mut plain_palette = [u16::MAX; MAX_SECTION_PALETTE];
                 let mut props_palette: FnvHashMap<(u8, u16), u16> = FnvHashMap::default();
@@ -1880,12 +2042,21 @@ fn distinct_test_blocks(n: usize) -> Vec<Block> {
 }
 
 #[cfg(test)]
-fn distinct_non_air_test_blocks(n: usize) -> Vec<Block> {
-    distinct_test_blocks(n + 1)
-        .into_iter()
-        .filter(|&block| block != AIR)
-        .take(n)
-        .collect()
+fn distinct_dense_non_air_test_blocks(n: usize) -> Vec<Block> {
+    let mut blocks = Vec::with_capacity(n);
+    for id in 0..DENSE_ID_LIMIT {
+        let block = Block::from_raw_id(id);
+        if block != AIR && block.try_name().is_some() {
+            blocks.push(block);
+            if blocks.len() == n {
+                return blocks;
+            }
+        }
+    }
+    panic!(
+        "needed {n} dense distinct named blocks, found {}",
+        blocks.len()
+    );
 }
 
 #[cfg(test)]
@@ -2141,7 +2312,7 @@ mod tests {
     fn high_id_blocks_stay_paletted() {
         let mut s = BlockStorage::Uniform(AIR);
         s.set(0, STONE);
-        assert!(matches!(s, BlockStorage::Paletted(_)));
+        assert!(matches!(s, BlockStorage::Dense(_)));
         s.set(1, END_STONE);
         assert!(matches!(s, BlockStorage::Paletted(_)));
         assert_eq!(s.get(0), STONE);
@@ -2179,23 +2350,35 @@ mod tests {
             );
         }
         storage.try_compact();
-        assert!(matches!(storage, BlockStorage::Paletted(_)));
+        assert!(matches!(storage, BlockStorage::Dense(_)));
         assert_eq!(storage.get(0), STONE);
         assert_eq!(storage.get(1), COBBLESTONE);
     }
 
     #[test]
     fn full_palette_can_swap_one_singleton_for_another() {
-        let blocks = distinct_non_air_test_blocks(MAX_SECTION_PALETTE);
+        let blocks = distinct_dense_non_air_test_blocks(MAX_SECTION_PALETTE - 2);
         let mut storage = BlockStorage::Uniform(AIR);
-        for (i, &block) in blocks.iter().take(MAX_SECTION_PALETTE - 1).enumerate() {
+        for (i, &block) in blocks.iter().enumerate() {
             storage.set(i, block);
         }
+        storage.set(blocks.len(), LEVER);
         assert!(matches!(storage, BlockStorage::Paletted(_)));
 
-        storage.set(0, blocks[MAX_SECTION_PALETTE - 1]);
+        storage.set(0, LADDER);
         assert!(matches!(storage, BlockStorage::Paletted(_)));
-        assert_eq!(storage.get(0), blocks[MAX_SECTION_PALETTE - 1]);
+        assert_eq!(storage.get(0), LADDER);
+    }
+
+    #[test]
+    fn low_id_blocks_stay_dense() {
+        let mut storage = BlockStorage::Uniform(AIR);
+        storage.set(0, STONE);
+        assert!(matches!(storage, BlockStorage::Dense(_)));
+        storage.set(1, COBBLESTONE);
+        assert!(matches!(storage, BlockStorage::Dense(_)));
+        assert_eq!(storage.get(0), STONE);
+        assert_eq!(storage.get(1), COBBLESTONE);
     }
 
     #[test]
@@ -2250,8 +2433,8 @@ mod tests {
         // Section -2 should be left alone as a mixed section with COBBLESTONE at y=-20.
         let section = chunk.sections.get(&-2).unwrap();
         assert!(
-            matches!(&section.storage, BlockStorage::Paletted(_)),
-            "section -2 should still be paletted (had COBBLESTONE)"
+            matches!(&section.storage, BlockStorage::Dense(_)),
+            "section -2 should still be dense (had COBBLESTONE)"
         );
         // The pre-existing block must still be there
         let local_y = (-20i32 & 15) as u8;
