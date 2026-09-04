@@ -59,6 +59,7 @@
   "disable_height_limit": "Paplašināt būvniecības augstumu",
   "aws_only_elevation": "Mantotais reljefs",
   "bake_lighting": "Iepriekš aprēķināt apgaismojumu",
+  "voxy_lod": "Iepriekš ģenerēt Voxy LOD",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "java_save_path": "Java saglabāšanas ceļš",
   "bedrock_save_path": "Bedrock saglabāšanas ceļš",

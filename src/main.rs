@@ -50,6 +50,7 @@ mod test_utilities;
 mod tile;
 mod trees;
 mod version_check;
+mod voxy;
 mod water_depth;
 mod world_editor;
 mod world_utils;

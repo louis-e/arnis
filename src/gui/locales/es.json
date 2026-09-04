@@ -59,6 +59,7 @@
   "disable_height_limit": "Ampliar altura de construcción",
   "aws_only_elevation": "Terreno clásico",
   "bake_lighting": "Precalcular iluminación",
+  "voxy_lod": "Pregenerar LOD de Voxy",
   "bedrock_auto_generated": "El mundo Bedrock se genera automáticamente",
   "java_save_path": "Ruta de guardado de Java",
   "bedrock_save_path": "Ruta de guardado de Bedrock",

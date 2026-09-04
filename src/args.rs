@@ -143,6 +143,12 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub bake_lighting: bool,
 
+    /// Pre-generate the Voxy mod's LOD cache so the world renders to the horizon
+    /// on first join, instead of needing `/voxy import current`. Java only;
+    /// implies --bake-lighting, since unlit LOD terrain renders black.
+    #[arg(long, default_value_t = false)]
+    pub voxy_lod: bool,
+
     /// Render a top-down PNG map preview of the generated world (Java and Bedrock)
     #[arg(long, default_value_t = false)]
     pub map_preview: bool,
@@ -529,6 +535,7 @@ mod tests {
         assert!(!args.bedrock);
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
+        assert!(!args.voxy_lod);
         assert!(!args.map_preview);
         assert_eq!(args.signage, SignageLevel::Basic);
         let cmd = [

@@ -550,7 +550,11 @@ pub fn generate_world_with_options(
             args.disable_height_limit,
         )
     };
-    editor.set_bake_lighting(args.bake_lighting);
+    // Voxy renders from stored per-voxel light, so an unlit LOD cache would be a
+    // black horizon. The toggle implies baked lighting rather than silently
+    // producing that.
+    let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
+    editor.set_bake_lighting(args.bake_lighting || wants_voxy);
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
@@ -604,6 +608,17 @@ pub fn generate_world_with_options(
     });
     if let Some(p) = &preview {
         editor.set_preview(Arc::clone(p));
+    }
+
+    // Voxy LOD cache, fed alongside the region files as they are written.
+    if wants_voxy {
+        match crate::voxy::VoxyWriter::create(&output_path) {
+            Ok(Some(writer)) => editor.set_voxy(Arc::new(writer)),
+            Ok(None) => eprintln!(
+                "Skipping the Voxy LOD cache: could not read the world seed from level.dat."
+            ),
+            Err(e) => eprintln!("Skipping the Voxy LOD cache: {e}"),
+        }
     }
 
     let ground = Arc::new(ground);
