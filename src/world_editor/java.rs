@@ -351,6 +351,11 @@ fn morton_16(index: usize) -> (i32, i32) {
 /// A section that turns out to be all air anyway is still listed - the keys say
 /// a chunk section exists there, not that it holds a block - which costs one
 /// buffer that the flush then discards.
+///
+/// Note this marks LOD *sections*, not chunk sections: the air one section
+/// above the tallest roof is never marked here, yet it still gets ingested,
+/// because the level-1..4 sections it falls into are live from the content
+/// below it. That is what `region_content_span`'s `+ 1` relies on.
 fn live_lod_sections(
     region: &super::common::RegionToModify,
     region_x: i32,
@@ -392,8 +397,11 @@ fn region_content_span(region: &super::common::RegionToModify) -> (i32, i32) {
             max_y = max_y.max(section_y as i32);
         }
     }
-    // One section past the top, so the lit air directly above the highest roof
-    // is still ingested and can light it.
+    // One section past the top. Every solid voxel sits at or below `max_y`, so
+    // this is exactly enough for each of them to have its lit neighbour above
+    // ingested - at level 4 that neighbour is a whole chunk section away.
+    // Dropping the +1 leaves dark air over the tallest roofs in the coarse
+    // levels; going further only fills sections that nothing samples.
     (min_y, max_y + 1)
 }
 

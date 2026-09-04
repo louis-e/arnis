@@ -68,8 +68,25 @@ fn with_light(voxel: u64, light: u8) -> u64 {
     (voxel & !(0xFFu64 << 56)) | ((light as u64) << 56)
 }
 
+/// Voxy's `WorldSection.getChildIndex`: which bit of a parent's
+/// `nonEmptyChildren` mask stands for the child at these section coordinates.
+///
+/// Careful - voxy numbers the eight children of a cell **two different ways**,
+/// and they are not interchangeable:
+///
+/// - `WorldSection.getChildIndex`, here, packs `x | (y << 2) | (z << 1)`.
+/// - [`mip`] ranks candidate voxels by `(x << 2) | (y << 1) | z`.
+///
+/// Both are pinned by tests against masks and voxels the mod wrote itself.
+#[inline]
+fn child_octant(x: i32, y: i32, z: i32) -> u32 {
+    ((x & 1) | ((y & 1) << 2) | ((z & 1) << 1)) as u32
+}
+
 /// Voxy's `Mipper.mip`: the surviving voxel is the non-air child with the
 /// highest `(opacity << 4) | corner`, where `corner` is `(x << 2) | (y << 1) | z`.
+/// That is not the ordering [`child_octant`] uses; see its docs.
+///
 /// When all eight are air the light is averaged instead, so an empty cell still
 /// lights whatever sits next to it.
 fn mip(children: &[u64; 8], opacity: &[u8]) -> u64 {
@@ -704,9 +721,7 @@ impl<'a> RegionLod<'a> {
             if children != 0 {
                 if lvl < MAX_LOD {
                     if let Some(parent) = self.levels[lvl + 1].get_mut(&(section.y >> 1)) {
-                        let octant =
-                            (section.x & 1) | ((section.y & 1) << 2) | ((section.z & 1) << 1);
-                        parent.children |= 1 << octant;
+                        parent.children |= 1 << child_octant(section.x, section.y, section.z);
                     }
                 }
                 let key = section_key(lvl as i32, section.x, section.y, section.z);
@@ -752,6 +767,41 @@ mod tests {
         assert_eq!(compose(0x0F, 0, 3), 0x0F00_0000_0000_0000);
         assert_eq!(block_of(compose(15, 1234, 7)), 1234);
         assert_eq!(light_of(compose(0xF3, 1, 0)), 0xF3);
+    }
+
+    /// Straight from voxy's `WorldSection.getChildIndex`. The mip ranking below
+    /// uses a different permutation, which is exactly why this is pinned.
+    #[test]
+    fn child_octant_matches_voxy() {
+        for (x, y, z, expected) in [
+            (0, 0, 0, 0),
+            (1, 0, 0, 1),
+            (0, 0, 1, 2),
+            (1, 0, 1, 3),
+            (0, 1, 0, 4),
+            (1, 1, 0, 5),
+            (0, 1, 1, 6),
+            (1, 1, 1, 7),
+        ] {
+            assert_eq!(child_octant(x, y, z), expected, "child ({x},{y},{z})");
+        }
+        // Section coordinates are signed, and only the low bit selects the octant.
+        assert_eq!(child_octant(-1, -2, -3), child_octant(1, 0, 1));
+        assert_eq!(child_octant(-4, -4, -4), child_octant(0, 0, 0));
+    }
+
+    /// The mip corner code is the other permutation: `(x << 2) | (y << 1) | z`.
+    #[test]
+    fn mip_corner_order_is_not_the_child_octant_order() {
+        let opacity = vec![0, 15];
+        let air = compose(0, 0, 0);
+        let stone = compose(0, 1, 0);
+
+        // Corner 4 is (x=1, y=0, z=0) for the mip, but octant 4 is (0, 1, 0).
+        let mut children = [air; 8];
+        children[4] = stone;
+        assert_eq!(mip(&children, &opacity), stone);
+        assert_eq!(child_octant(1, 0, 0), 1, "the two orderings really differ");
     }
 
     #[test]

@@ -66,6 +66,11 @@ impl<W: Write> LogWriter<W> {
                 self.block_offset = 0;
             }
 
+            // `avail` can be 0 when a record starts with exactly a header's
+            // worth of room left. RocksDB's own writer emits a zero-length
+            // FIRST fragment here rather than skipping the block, and its
+            // reader treats that as the start of a fragmented record, so match
+            // it exactly. See `records_can_start_with_only_a_header_left`.
             let avail = BLOCK_SIZE - self.block_offset - HEADER_SIZE;
             let take = payload.len().min(avail);
             let last = take == payload.len();
@@ -265,6 +270,79 @@ mod tests {
         assert_eq!(out[BLOCK_SIZE + 6], K_LAST);
         let last_len = u16::from_le_bytes([out[BLOCK_SIZE + 4], out[BLOCK_SIZE + 5]]) as usize;
         assert_eq!(first_len + last_len, payload.len());
+    }
+
+    /// The awkward alignment: a record that begins with exactly `HEADER_SIZE`
+    /// bytes left in the block. RocksDB's `log_writer.cc` takes
+    /// `fragment_length = min(left, avail)` with no special case, so it emits an
+    /// empty FIRST and continues in the next block; anything else would produce
+    /// a log its reader frames differently from one RocksDB wrote itself.
+    #[test]
+    fn records_can_start_with_only_a_header_left() {
+        let mut out = Vec::new();
+        {
+            let mut w = LogWriter::new(&mut out);
+            // Leaves the block with room for a header and nothing else.
+            w.add_record(&vec![1u8; BLOCK_SIZE - 2 * HEADER_SIZE])
+                .unwrap();
+            w.add_record(b"tail").unwrap();
+        }
+        assert_eq!(out.len(), BLOCK_SIZE + HEADER_SIZE + 4);
+
+        let head = BLOCK_SIZE - HEADER_SIZE;
+        assert_eq!(out[head + 6], K_FIRST);
+        assert_eq!(u16::from_le_bytes([out[head + 4], out[head + 5]]), 0);
+        assert_eq!(out[BLOCK_SIZE + 6], K_LAST);
+        assert_eq!(
+            u16::from_le_bytes([out[BLOCK_SIZE + 4], out[BLOCK_SIZE + 5]]),
+            4
+        );
+        assert_eq!(&out[BLOCK_SIZE + HEADER_SIZE..], b"tail");
+
+        // The empty fragment carries a real checksum, and the record reassembles.
+        let records = read_back(&out);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[1], b"tail");
+    }
+
+    /// Reassembles logical records, the way RocksDB's `log_reader.cc` does.
+    fn read_back(log: &[u8]) -> Vec<Vec<u8>> {
+        let mut records = Vec::new();
+        let mut pending: Vec<u8> = Vec::new();
+        let mut off = 0usize;
+        while off + HEADER_SIZE <= log.len() {
+            let block_end = ((off / BLOCK_SIZE) + 1) * BLOCK_SIZE;
+            if block_end - off < HEADER_SIZE {
+                off = block_end;
+                continue;
+            }
+            let stored = u32::from_le_bytes(log[off..off + 4].try_into().unwrap());
+            let len = u16::from_le_bytes(log[off + 4..off + 6].try_into().unwrap()) as usize;
+            let kind = log[off + 6];
+            if kind == 0 && len == 0 {
+                off = block_end;
+                continue;
+            }
+            let mut digest = CRC32C.digest();
+            digest.update(&log[off + 6..off + 7]);
+            digest.update(&log[off + HEADER_SIZE..off + HEADER_SIZE + len]);
+            assert_eq!(stored, mask_crc(digest.finalize()), "bad crc at {off}");
+
+            let fragment = &log[off + HEADER_SIZE..off + HEADER_SIZE + len];
+            match kind {
+                K_FULL => records.push(fragment.to_vec()),
+                K_FIRST => pending = fragment.to_vec(),
+                K_MIDDLE => pending.extend_from_slice(fragment),
+                K_LAST => {
+                    pending.extend_from_slice(fragment);
+                    records.push(std::mem::take(&mut pending));
+                }
+                other => panic!("unexpected record type {other}"),
+            }
+            off += HEADER_SIZE + len;
+        }
+        assert!(pending.is_empty(), "log ends mid-record");
+        records
     }
 
     /// Every record's stored checksum is the masked CRC32C of type byte + fragment.
