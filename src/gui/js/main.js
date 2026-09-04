@@ -47,6 +47,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  initVoxyLightingCoupling();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
@@ -1175,6 +1176,30 @@ function initSettings() {
 let selectedWorldFormat = 'java'; // Default to Java
 
 const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
+
+// Voxy renders distant terrain from the per-voxel light stored in its LOD
+// cache, so pre-generating one without baked lighting would give a black
+// horizon. Keep the two toggles consistent in the UI rather than quietly
+// overriding the user's choice at generation time.
+function initVoxyLightingCoupling() {
+  const voxy = document.getElementById('voxy-lod-toggle');
+  const bake = document.getElementById('bake-lighting-toggle');
+  if (!voxy || !bake) return;
+
+  // Dispatch so the settings store persists the knock-on change too.
+  const set = (el, value) => {
+    if (el.checked === value) return;
+    el.checked = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  voxy.addEventListener('change', () => {
+    if (voxy.checked) set(bake, true);
+  });
+  bake.addEventListener('change', () => {
+    if (!bake.checked) set(voxy, false);
+  });
+}
 
 function initWorldFormatToggle() {
   initLuantiExperimentalToggle();
