@@ -59,6 +59,7 @@
   "disable_height_limit": "Építési magasság kiterjesztése",
   "aws_only_elevation": "Régi domborzat",
   "bake_lighting": "Megvilágítás előszámítása",
+  "voxy_lod": "Voxy LOD előre generálása",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "java_save_path": "Java mentési útvonal",
   "bedrock_save_path": "Bedrock mentési útvonal",

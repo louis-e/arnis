@@ -59,6 +59,7 @@
   "disable_height_limit": "Bauhöhe erweitern",
   "aws_only_elevation": "Klassisches Terrain",
   "bake_lighting": "Licht vorberechnen",
+  "voxy_lod": "Voxy-LOD vorberechnen",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
   "java_save_path": "Java-Speicherpfad",
   "bedrock_save_path": "Bedrock-Speicherpfad",

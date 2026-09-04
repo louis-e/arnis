@@ -59,6 +59,7 @@
   "disable_height_limit": "건축 높이 확장",
   "aws_only_elevation": "기존 지형",
   "bake_lighting": "조명 베이크",
+  "voxy_lod": "Voxy LOD 미리 생성",
   "bedrock_auto_generated": "Bedrock 월드는 자동 생성됩니다",
   "java_save_path": "Java 저장 경로",
   "bedrock_save_path": "Bedrock 저장 경로",

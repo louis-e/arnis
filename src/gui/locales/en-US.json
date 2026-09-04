@@ -66,6 +66,7 @@
   "disable_height_limit": "Extend build height",
   "aws_only_elevation": "Legacy terrain",
   "bake_lighting": "Bake lighting",
+  "voxy_lod": "Pre-generate Voxy LOD",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "java_save_path": "Java Save Path",
   "bedrock_save_path": "Bedrock Save Path",

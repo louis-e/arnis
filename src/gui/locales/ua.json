@@ -59,6 +59,7 @@
   "disable_height_limit": "Розширити висоту будівництва",
   "aws_only_elevation": "Застарілий рельєф",
   "bake_lighting": "Попередній розрахунок освітлення",
+  "voxy_lod": "Попередня генерація Voxy LOD",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
   "java_save_path": "Шлях збереження Java",
   "bedrock_save_path": "Шлях збереження Bedrock",

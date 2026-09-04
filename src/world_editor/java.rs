@@ -55,34 +55,6 @@ fn get_base_chunk_sections() -> Arc<Vec<Section>> {
 use crate::telemetry::{send_log, LogLevel};
 
 impl<'a> WorldEditor<'a> {
-    /// Helper function to create a base chunk with grass blocks at Y -62
-    /// Uses cached sections for efficiency - only serialization happens per chunk
-    pub(super) fn create_base_chunk(
-        abs_chunk_x: i32,
-        abs_chunk_z: i32,
-        bake_lighting: bool,
-        biome_value: &Value,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        // Use cached sections (computed once on first call)
-        let sections = get_base_chunk_sections();
-
-        // Prepare chunk data with cloned sections
-        let chunk_data = Chunk {
-            sections: sections.to_vec(),
-            x_pos: abs_chunk_x,
-            z_pos: abs_chunk_z,
-            is_light_on: 0,
-            other: FnvHashMap::default(),
-        };
-
-        let chunk_nbt = create_chunk_nbt(&chunk_data, bake_lighting, biome_value);
-
-        let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-
-        Ok(ser_buffer)
-    }
-
     /// Saves the world in Java Edition Anvil format.
     ///
     /// Uses parallel processing with rayon for fast region saving.
@@ -205,6 +177,7 @@ impl<'a> WorldEditor<'a> {
             self.ground.as_deref(),
             self.bake_lighting,
             self.preview.as_deref(),
+            self.voxy.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -235,7 +208,13 @@ fn create_region_file(
 
 /// Serialize one region's chunks to its `.mca`. Shared by the synchronous save
 /// path and the background flush worker (hence free-standing, not `&self`).
-/// Every in-bbox region passes here exactly once, so the map preview is fed here.
+/// Every in-bbox region passes here exactly once, so the map preview and the
+/// voxy LOD cache are both fed here.
+///
+/// Chunks are visited in Morton (quadtree) order. The `.mca` does not care -
+/// it allocates sectors as chunks land - but the voxy builder does: it finishes
+/// a level-`n` LOD column every `4^n` chunk columns, which is what keeps its
+/// working set at a handful of megabytes instead of a whole region's worth.
 #[allow(clippy::too_many_arguments)]
 fn write_region_to_disk(
     world_dir: &std::path::Path,
@@ -243,6 +222,7 @@ fn write_region_to_disk(
     ground: Option<&crate::ground::Ground>,
     bake_lighting: bool,
     preview: Option<&crate::map_renderer::PreviewAccumulator>,
+    voxy: Option<&crate::voxy::VoxyWriter>,
     region_x: i32,
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
@@ -257,55 +237,125 @@ fn write_region_to_disk(
     // vs forest vs jungle) at chunk-build time. Cheap to recompute.
     let center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
 
-    // First pass: write all chunks that have content
-    for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
-        if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-            let abs_chunk_x = chunk_x + (region_x * 32);
-            let abs_chunk_z = chunk_z + (region_z * 32);
-            let chunk = Chunk {
-                sections: chunk_to_modify.sections().collect(),
-                x_pos: abs_chunk_x,
-                z_pos: abs_chunk_z,
-                is_light_on: 0,
-                other: strip_orphan_block_entities(chunk_to_modify),
-            };
+    // Filler chunks all share one set of sections, so they share their light too.
+    let base_sections = get_base_chunk_sections();
+    let (base_min_y, base_max_y) = chunk_section_span(&base_sections);
+    let base_lighting =
+        bake_lighting.then(|| compute_lighting(&base_sections, base_min_y, base_max_y));
 
-            let biome_value =
-                crate::biome::build_chunk_biome_nbt(abs_chunk_x, abs_chunk_z, ground, center_lat);
-            let chunk_nbt = create_chunk_nbt(&chunk, bake_lighting, &biome_value);
-            ser_buffer.clear();
-            fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-            region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+    let mut lod = voxy.map(|writer| {
+        let (min_y, max_y) = region_content_span(region_to_modify);
+        writer.region_lod(min_y, max_y)
+    });
+
+    for column in 0..256usize {
+        let (sx, sz) = morton_16(column);
+        for dz in 0..2 {
+            for dx in 0..2 {
+                let chunk_x = sx * 2 + dx;
+                let chunk_z = sz * 2 + dz;
+                let existing = region_to_modify.get_chunk(chunk_x, chunk_z);
+
+                // A chunk that is present but holds nothing is left unwritten,
+                // as it was before this loop was reordered.
+                if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
+                    continue;
+                }
+
+                let abs_chunk_x = chunk_x + (region_x * 32);
+                let abs_chunk_z = chunk_z + (region_z * 32);
+                let biome_names =
+                    crate::biome::chunk_biome_names(abs_chunk_x, abs_chunk_z, ground, center_lat);
+                let biome_value = crate::biome::biome_nbt_from_names(&biome_names);
+
+                let (sections, other, lighting, span) = match existing {
+                    Some(chunk_to_modify) => {
+                        let sections: Vec<Section> = chunk_to_modify.sections().collect();
+                        let span = chunk_section_span(&sections);
+                        let lighting =
+                            bake_lighting.then(|| compute_lighting(&sections, span.0, span.1));
+                        (
+                            sections,
+                            strip_orphan_block_entities(chunk_to_modify),
+                            lighting,
+                            span,
+                        )
+                    }
+                    None => (
+                        base_sections.to_vec(),
+                        FnvHashMap::default(),
+                        base_lighting.clone(),
+                        (base_min_y, base_max_y),
+                    ),
+                };
+
+                if let Some(lod) = lod.as_mut() {
+                    lod.ingest_chunk(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        &sections,
+                        (span.0 as i32, span.1 as i32),
+                        lighting.as_deref(),
+                        &biome_names,
+                    );
+                }
+
+                let chunk = Chunk {
+                    sections,
+                    x_pos: abs_chunk_x,
+                    z_pos: abs_chunk_z,
+                    is_light_on: 0,
+                    other,
+                };
+                let chunk_nbt = create_chunk_nbt_with_lighting(&chunk, lighting, &biome_value);
+                ser_buffer.clear();
+                fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
+                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+            }
+        }
+
+        if let Some(lod) = lod.as_mut() {
+            lod.end_column(column);
         }
     }
 
-    // Second pass: ensure all chunks exist (fill with base layer if not).
-    // Skip entirely when region already has all 1024 chunks (common after ground gen).
-    if region_to_modify.chunks.len() < 1024 {
-        for chunk_x in 0..32 {
-            for chunk_z in 0..32 {
-                if !region_to_modify.chunks.contains_key(&(chunk_x, chunk_z)) {
-                    let abs_chunk_x = chunk_x + (region_x * 32);
-                    let abs_chunk_z = chunk_z + (region_z * 32);
-                    let biome_value = crate::biome::build_chunk_biome_nbt(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        ground,
-                        center_lat,
-                    );
-                    let ser_buffer = WorldEditor::create_base_chunk(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        bake_lighting,
-                        &biome_value,
-                    )?;
-                    region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
-                }
-            }
-        }
+    if let Some(mut lod) = lod {
+        lod.finish();
     }
 
     Ok(())
+}
+
+/// Morton (Z-order) index into a 16x16 grid of 2x2-chunk columns.
+fn morton_16(index: usize) -> (i32, i32) {
+    let mut x = 0i32;
+    let mut z = 0i32;
+    for bit in 0..4 {
+        x |= (((index >> (2 * bit)) & 1) as i32) << bit;
+        z |= (((index >> (2 * bit + 1)) & 1) as i32) << bit;
+    }
+    (x, z)
+}
+
+/// The span of chunk sections the voxy builder has to walk for one region.
+///
+/// The upper bound is the highest section holding a block anywhere in the
+/// region: above it every column is air, so any LOD section up there would be
+/// dropped as empty. Sections that are present but all-air only widen the span,
+/// which costs a little work and never loses data.
+fn region_content_span(region: &super::common::RegionToModify) -> (i32, i32) {
+    let base_section_y = crate::world_editor::base_chunk_y() >> 4;
+    let mut min_y = base_section_y.min(-4);
+    let mut max_y = base_section_y;
+    for chunk in region.chunks.values() {
+        for &section_y in chunk.sections.keys() {
+            min_y = min_y.min(section_y as i32);
+            max_y = max_y.max(section_y as i32);
+        }
+    }
+    // One section past the top, so the lit air directly above the highest roof
+    // is still ingested and can light it.
+    (min_y, max_y + 1)
 }
 
 /// Owned, `Send` context for writing regions off the main thread (background flush).
@@ -316,6 +366,7 @@ pub(crate) struct RegionWriteCtx {
     ground: Option<std::sync::Arc<crate::ground::Ground>>,
     bake_lighting: bool,
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
+    voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
 }
 
 impl RegionWriteCtx {
@@ -325,6 +376,7 @@ impl RegionWriteCtx {
         ground: Option<std::sync::Arc<crate::ground::Ground>>,
         bake_lighting: bool,
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
+        voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
     ) -> Self {
         Self {
             world_dir,
@@ -332,6 +384,7 @@ impl RegionWriteCtx {
             ground,
             bake_lighting,
             preview,
+            voxy,
         }
     }
 
@@ -347,6 +400,7 @@ impl RegionWriteCtx {
             self.ground.as_deref(),
             self.bake_lighting,
             self.preview.as_deref(),
+            self.voxy.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -507,7 +561,7 @@ fn is_light_transparent(name: &str) -> bool {
 }
 
 // Light a block removes: 0 passes, 1 attenuates (water/leaves/ice), 15 blocks.
-fn light_opacity(name: &str) -> u8 {
+pub(crate) fn light_opacity(name: &str) -> u8 {
     let n = name.strip_prefix("minecraft:").unwrap_or(name);
     if n.ends_with("leaves")
         || matches!(
@@ -769,9 +823,45 @@ fn get_structures_value() -> &'static Value {
 /// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
 /// Section range is determined dynamically: at minimum the vanilla range
 /// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
+/// Emitted section range: the vanilla span, expanded to cover content. Deliberately NOT
+/// the whole dimension — under the tall datapack that would be 254 sections per chunk
+/// instead of ~24. Minecraft slots each section by its own `Y` and fills the gaps with air,
+/// so a sparse list is fine.
+pub(crate) fn chunk_section_span(sections: &[Section]) -> (i8, i8) {
+    let mut min_section_y: i8 = -4; // vanilla min (Y=-64)
+    let mut max_section_y: i8 = 19; // vanilla max (Y=319)
+    for section in sections {
+        if section.y < min_section_y {
+            min_section_y = section.y;
+        }
+        if section.y > max_section_y {
+            max_section_y = section.y;
+        }
+    }
+    (min_section_y, max_section_y)
+}
+
+/// Builds a chunk and its lighting in one call. The region writer computes the
+/// two separately so it can share the light with the LOD cache; this stays for
+/// callers that only want the NBT.
+#[cfg(test)]
 fn create_chunk_nbt(
     chunk: &Chunk,
     bake_lighting: bool,
+    biome_value: &Value,
+) -> HashMap<String, Value> {
+    let (min_section_y, max_section_y) = chunk_section_span(&chunk.sections);
+    let lighting =
+        bake_lighting.then(|| compute_lighting(&chunk.sections, min_section_y, max_section_y));
+    create_chunk_nbt_with_lighting(chunk, lighting, biome_value)
+}
+
+/// Builds one chunk's NBT from light arrays the caller already has. The voxy
+/// LOD writer needs the very same light the chunk is written with, so the
+/// region loop computes it once and hands it to both.
+fn create_chunk_nbt_with_lighting(
+    chunk: &Chunk,
+    lighting: Option<Vec<(Vec<i8>, Vec<i8>)>>,
     biome_value: &Value,
 ) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
@@ -782,20 +872,7 @@ fn create_chunk_nbt(
         .map(|(i, s)| (s.y, i))
         .collect();
 
-    // Emitted section range: the vanilla span, expanded to cover content. Deliberately NOT
-    // the whole dimension — under the tall datapack that would be 254 sections per chunk
-    // instead of ~24. Minecraft slots each section by its own `Y` and fills the gaps with air,
-    // so a sparse list is fine.
-    let mut min_section_y: i8 = -4; // vanilla min (Y=-64)
-    let mut max_section_y: i8 = 19; // vanilla max (Y=319)
-    for &y in section_map.keys() {
-        if y < min_section_y {
-            min_section_y = y;
-        }
-        if y > max_section_y {
-            max_section_y = y;
-        }
-    }
+    let (min_section_y, max_section_y) = chunk_section_span(&chunk.sections);
 
     // `yPos` and the heightmaps are dimension-relative and must NOT come from the emitted
     // range: Minecraft sizes the heightmap bit width from the dimension's height and offsets
@@ -806,12 +883,9 @@ fn create_chunk_nbt(
     let (world_min_section, world_max_section) = crate::world_editor::world_section_range();
     let world_height = ((world_max_section as i32 + 1) - world_min_section as i32) * 16;
 
-    // Bake lighting only when requested; otherwise leave it for the engine to relight on load.
-    let mut lighting = if bake_lighting {
-        compute_lighting(&chunk.sections, min_section_y, max_section_y)
-    } else {
-        Vec::new()
-    };
+    // Lighting is baked only when requested; otherwise the engine relights on load.
+    let bake_lighting = lighting.is_some();
+    let mut lighting = lighting.unwrap_or_default();
 
     // Build all sections in the determined range
     let sections: Vec<Value> = (min_section_y..=max_section_y)
@@ -1208,7 +1282,7 @@ mod tests {
     }
 
     fn plains_biome() -> Value {
-        crate::biome::build_chunk_biome_nbt(0, 0, None, 0.0)
+        crate::biome::biome_nbt_from_names(&crate::biome::chunk_biome_names(0, 0, None, 0.0))
     }
 
     #[test]

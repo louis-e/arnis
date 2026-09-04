@@ -103,14 +103,18 @@ fn biome_temperate(lc: u8, lat_deg: f64, water_dist: u8) -> &'static str {
 
 pub type ChunkBiomeNbt = Value;
 
-/// Build the `biomes` compound for one chunk, sampling LC at a 4x4 grid
-/// (4-block resolution) and packing into the Anvil 1.18+ palette+data layout.
-pub fn build_chunk_biome_nbt(
+/// Biome per 4x4 horizontal cell of one chunk, in `zi * 4 + xi` order.
+///
+/// Minecraft stores biomes per 4x4x4 cell, but Arnis classifies by land cover,
+/// which is flat: every cell in a column gets the same biome. The voxy LOD
+/// writer wants the names rather than the packed NBT, so both callers share
+/// this.
+pub fn chunk_biome_names(
     chunk_x: i32,
     chunk_z: i32,
     ground: Option<&Ground>,
     center_lat_deg: f64,
-) -> ChunkBiomeNbt {
+) -> [&'static str; 16] {
     let mut names: [&'static str; 16] = ["minecraft:plains"; 16];
 
     if let Some(g) = ground {
@@ -133,6 +137,11 @@ pub fn build_chunk_biome_nbt(
         }
     }
 
+    names
+}
+
+/// Packs an already-classified 4x4 biome grid into the Anvil container.
+pub fn biome_nbt_from_names(names: &[&'static str; 16]) -> ChunkBiomeNbt {
     let mut palette: Vec<&'static str> = Vec::with_capacity(4);
     let mut indices: [u8; 16] = [0; 16];
     for (i, &name) in names.iter().enumerate() {
@@ -243,7 +252,7 @@ mod tests {
 
     #[test]
     fn no_ground_yields_plains_palette() {
-        let nbt = build_chunk_biome_nbt(0, 0, None, 0.0);
+        let nbt = biome_nbt_from_names(&chunk_biome_names(0, 0, None, 0.0));
         match nbt {
             Value::Compound(map) => {
                 assert!(map.contains_key("palette"));

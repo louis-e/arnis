@@ -9,7 +9,7 @@
 //! - `java` - Java Edition Anvil format saving
 //! - `bedrock` - Bedrock Edition .mcworld format saving
 
-mod common;
+pub(crate) mod common;
 pub(crate) mod java;
 mod luanti;
 
@@ -224,6 +224,8 @@ pub struct WorldEditor<'a> {
     luanti_game: LuantiGame,
     /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
     bake_lighting: bool,
+    /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
+    voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
     /// Driven by the same toggle as external 3D models (`args.use_3d`).
     place_schematics: bool,
@@ -275,6 +277,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            voxy: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -321,6 +324,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            voxy: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -367,6 +371,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            voxy: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -847,6 +852,12 @@ impl<'a> WorldEditor<'a> {
         self.preview = Some(preview);
     }
 
+    /// Attach a voxy LOD writer, fed alongside the region files and finalized
+    /// once every region has been written.
+    pub fn set_voxy(&mut self, voxy: Arc<crate::voxy::VoxyWriter>) {
+        self.voxy = Some(voxy);
+    }
+
     /// Owned, `Send` context for writing regions off the merge thread.
     pub(crate) fn region_write_ctx(&self) -> java::RegionWriteCtx {
         java::RegionWriteCtx::new(
@@ -855,6 +866,7 @@ impl<'a> WorldEditor<'a> {
             self.ground.clone(),
             self.bake_lighting,
             self.preview.clone(),
+            self.voxy.clone(),
         )
     }
 
@@ -2048,6 +2060,7 @@ impl<'a> WorldEditor<'a> {
                     }
                     return Err(e);
                 }
+                self.finish_voxy();
             }
             WorldFormat::BedrockMcWorld => self.save_bedrock()?,
             WorldFormat::LuantiWorld => {
@@ -2076,6 +2089,28 @@ impl<'a> WorldEditor<'a> {
         }
 
         Ok(())
+    }
+
+    /// Seal the voxy LOD database. A failure here costs the user nothing but
+    /// distant terrain, so it is reported and swallowed rather than failing a
+    /// world that is already written.
+    fn finish_voxy(&mut self) {
+        let Some(voxy) = self.voxy.take() else {
+            return;
+        };
+        match voxy.finish() {
+            Ok((sections, bytes)) => println!(
+                "  Voxy LOD: {} sections, {:.1} MB",
+                sections,
+                bytes as f64 / (1024.0 * 1024.0)
+            ),
+            Err(e) => {
+                let msg = format!("Failed to write the Voxy LOD cache: {e}");
+                eprintln!("{msg}");
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &msg);
+            }
+        }
     }
 
     fn save_bedrock(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2456,6 +2491,7 @@ mod eviction_guard_tests {
             LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
             None,
             false,
+            None,
             None,
         )
     }
