@@ -603,7 +603,14 @@ mod sealed_surface_tests {
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
 
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4", "--mode", "geo-only"]);
-        let way = rect_way(2, 5, 5, 54, 54, &[("landuse", "quarry"), ("resource", "coal")]);
+        let way = rect_way(
+            2,
+            5,
+            5,
+            54,
+            54,
+            &[("landuse", "quarry"), ("resource", "coal")],
+        );
         let cache = FloodFillCache::new();
         let footprints = BuildingFootprintBitmap::new_empty();
         let roads = RoadMaskBitmap::new_empty();
