@@ -79,9 +79,12 @@ jobs:
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
-          # Use generation-only time for verdict when available
+          # Use generation-only time for the verdict and reported delta when available,
+          # so the two stay consistent instead of mixing wall-clock and generation-only time.
           if [ -n "$gen_time" ]; then
             eval_diff=$((gen_time - baseline_time))
+            diff=$eval_diff
+            abs_diff=${diff#-}
           else
             eval_diff=$diff
           fi
