@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "java_save_path": "Java saglabāšanas ceļš",
   "bedrock_save_path": "Bedrock saglabāšanas ceļš",
+  "luanti_save_path": "Luanti saglabāšanas ceļš",
   "rotation_angle": "Rotācijas Leņķis",
   "settings_section_generation": "Ģenerēšana",
   "settings_section_world": "Pasaule",

@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "java_save_path": "Java mentési útvonal",
   "bedrock_save_path": "Bedrock mentési útvonal",
+  "luanti_save_path": "Luanti mentési útvonal",
   "rotation_angle": "Forgatási Szög",
   "settings_section_generation": "Generálás",
   "settings_section_world": "Világ",

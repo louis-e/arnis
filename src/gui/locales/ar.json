@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "java_save_path": "مسار حفظ Java",
   "bedrock_save_path": "مسار حفظ Bedrock",
+  "luanti_save_path": "مسار حفظ Luanti",
   "rotation_angle": "زاوية الدوران",
   "settings_section_generation": "التوليد",
   "settings_section_world": "العالم",

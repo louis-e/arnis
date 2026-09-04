@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "java_save_path": "Sökväg för Java",
   "bedrock_save_path": "Sökväg för Bedrock",
+  "luanti_save_path": "Sökväg för Luanti",
   "rotation_angle": "Rotationsvinkel",
   "settings_section_generation": "Generering",
   "settings_section_world": "Värld",

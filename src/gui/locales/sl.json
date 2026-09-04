@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
   "java_save_path": "Pot shranjevanja Java",
   "bedrock_save_path": "Pot shranjevanja Bedrock",
+  "luanti_save_path": "Pot shranjevanja Luanti",
   "rotation_angle": "Kot zasuka",
   "settings_section_generation": "Generiranje",
   "settings_section_world": "Svet",

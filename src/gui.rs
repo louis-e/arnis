@@ -153,6 +153,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_create_world,
             gui_get_default_save_path,
             gui_get_default_bedrock_save_path,
+            gui_get_default_luanti_save_path,
             gui_set_save_path,
             gui_pick_save_directory,
             gui_start_generation,
@@ -251,6 +252,29 @@ fn resolve_bedrock_output_dir(configured: &str) -> PathBuf {
         );
     }
     crate::world_utils::get_bedrock_output_directory()
+}
+
+/// Returns the default directory for Luanti/Minetest worlds.
+#[tauri::command]
+fn gui_get_default_luanti_save_path() -> String {
+    crate::world_utils::get_luanti_worlds_directory()
+        .display()
+        .to_string()
+}
+
+/// Returns the configured Luanti worlds directory, or the default if it is unusable.
+fn resolve_luanti_output_dir(configured: &str) -> PathBuf {
+    let trimmed = configured.trim();
+    if !trimmed.is_empty() {
+        let configured_dir = PathBuf::from(trimmed);
+        if configured_dir.is_dir() {
+            return configured_dir;
+        }
+        eprintln!(
+            "Warning: Luanti save path '{trimmed}' is not a directory, using the default instead."
+        );
+    }
+    crate::world_utils::get_luanti_worlds_directory()
 }
 
 #[derive(serde::Serialize)]
@@ -998,6 +1022,7 @@ fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
     bedrock_save_path: String,
+    luanti_save_path: String,
     world_scale: f64,
     ground_level: i32,
     terrain_enabled: bool,
@@ -1150,13 +1175,17 @@ fn gui_start_generation(
                 WorldFormat::BedrockMcWorld => resolve_bedrock_output_dir(&bedrock_save_path),
                 _ => PathBuf::new(),
             };
+            let luanti_output_dir = match world_format {
+                WorldFormat::LuantiWorld => resolve_luanti_output_dir(&luanti_save_path),
+                _ => PathBuf::new(),
+            };
 
             // Check available disk space before starting generation (minimum 3GB required)
             const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
             let check_path = match world_format {
                 WorldFormat::JavaAnvil => world_path.clone(),
                 WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
-                WorldFormat::LuantiWorld => crate::world_utils::get_luanti_worlds_directory(),
+                WorldFormat::LuantiWorld => luanti_output_dir.clone(),
             };
             // Probe the nearest existing ancestor: a missing or space-containing
             // path otherwise confuses the Windows volume lookup, which then reports
@@ -1239,7 +1268,7 @@ fn gui_start_generation(
                     (output_path, Some(lvl_name))
                 }
                 WorldFormat::LuantiWorld => {
-                    let worlds_dir = crate::world_utils::get_luanti_worlds_directory();
+                    let worlds_dir = luanti_output_dir.clone();
                     let _ = std::fs::create_dir_all(&worlds_dir);
                     let mut counter = 1;
                     let world_name = loop {

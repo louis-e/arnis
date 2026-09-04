@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Le monde Bedrock est généré automatiquement",
   "java_save_path": "Chemin de sauvegarde Java",
   "bedrock_save_path": "Chemin de sauvegarde Bedrock",
+  "luanti_save_path": "Chemin de sauvegarde Luanti",
   "rotation_angle": "Angle de Rotation",
   "settings_section_generation": "Génération",
   "settings_section_world": "Monde",

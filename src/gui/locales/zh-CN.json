@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock 世界自动生成",
   "java_save_path": "Java 存档路径",
   "bedrock_save_path": "Bedrock 存档路径",
+  "luanti_save_path": "Luanti 存档路径",
   "rotation_angle": "旋转角度",
   "settings_section_generation": "生成",
   "settings_section_world": "世界",
