@@ -25,7 +25,6 @@ pub use common::{
 };
 pub(crate) use common::{
     reset_section_counters, section_counters, BlockStorage, RegionToModify, SectionToModify,
-    MAX_BLOCK_ID,
 };
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
@@ -2018,8 +2017,8 @@ impl<'a> WorldEditor<'a> {
             }
         );
 
-        // Compact sections before saving: collapses uniform Full(Vec) sections
-        // (e.g. all-STONE from --fillground) back to Uniform, freeing ~4 KiB each.
+        // Compact sections before saving: collapses uniform mixed sections back to
+        // Uniform and repacks any overflowed direct sections that fit a palette again.
         self.world.compact_sections();
 
         // Non-Java formats have no per-region write hook, so feed the preview here.
@@ -2235,11 +2234,7 @@ fn region_storage_bytes(region: &common::RegionToModify) -> u64 {
     let mut bytes = 0u64;
     for chunk in region.chunks.values() {
         for section in chunk.sections.values() {
-            bytes += match &section.storage {
-                BlockStorage::Uniform(_) => 0,
-                BlockStorage::Full(_) => 4096,
-                BlockStorage::FullWide(_) => 8192,
-            };
+            bytes += section.storage.resident_bytes();
         }
     }
     bytes

@@ -203,8 +203,8 @@ fn mars_palette(slope: i32, lat_deg: f64, ground_y: i32, h: u64, x: i32, z: i32)
 /// Beyond this latitude Mars keeps a permanent cap.
 const MARS_POLAR_CAP_LAT: f64 = 74.0;
 
-/// Checked against `BYTE_ID_LIMIT` by `palette_split_is_sane`. END_STONE is
-/// exempt on purpose, see its definition.
+/// Common planetary ground blocks, kept in sync with `surface_palette` so the
+/// storage regression test covers every branch that can become bulk terrain.
 #[cfg(test)]
 pub const PLANETARY_SURFACE_BLOCKS: &[Block] = &[
     BROWN_TERRACOTTA,
