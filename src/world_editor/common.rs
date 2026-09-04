@@ -576,10 +576,10 @@ impl BlockStorage {
                 // No-op – writing the same value.
             }
             BlockStorage::Uniform(base) => {
-                if let (Ok(base), Ok(block_id)) =
+                if let (Ok(base_id), Ok(block_id)) =
                     (u8::try_from(base.id()), u8::try_from(block.id()))
                 {
-                    let mut dense = Box::new([base; SECTION_BLOCKS]);
+                    let mut dense = Box::new([base_id; SECTION_BLOCKS]);
                     dense[index] = block_id;
                     *self = BlockStorage::Dense(dense);
                 } else {
