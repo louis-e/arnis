@@ -44,37 +44,43 @@ fn voxy_opacity(name: &str) -> u8 {
     crate::world_editor::java::light_opacity(name)
 }
 
-/// A stable, cheap identity for a palette entry. Two entries that produce the
-/// same key must be the same blockstate: voxy warns loudly (and renders
-/// unpredictably) if two ids deserialize to one `BlockState`.
-pub(crate) fn state_key(item: &PaletteItem) -> String {
+/// A stable, cheap identity for a palette entry, written into `out`. Two
+/// entries that produce the same key must be the same blockstate: voxy warns
+/// loudly (and renders unpredictably) if two ids deserialize to one
+/// `BlockState`.
+///
+/// Every section's palette goes through here, so the caller supplies the
+/// buffer rather than taking an allocation per entry.
+pub(crate) fn state_key_into(item: &PaletteItem, out: &mut String) {
+    out.clear();
+    out.push_str(&item.name);
+
     let Some(Value::Compound(props)) = item.properties.as_ref() else {
-        return item.name.clone();
+        return;
     };
     if props.is_empty() {
-        return item.name.clone();
+        return;
     }
-    let mut pairs: Vec<(&str, String)> = props
-        .iter()
-        .map(|(k, v)| {
-            let text = match v {
-                Value::String(s) => s.clone(),
-                other => format!("{other:?}"),
-            };
-            (k.as_str(), text)
-        })
-        .collect();
-    pairs.sort_unstable();
 
-    let mut key = String::with_capacity(item.name.len() + pairs.len() * 12);
-    key.push_str(&item.name);
+    let mut pairs: Vec<(&str, &Value)> = props.iter().map(|(k, v)| (k.as_str(), v)).collect();
+    pairs.sort_unstable_by_key(|(k, _)| *k);
     for (k, v) in pairs {
-        key.push('\u{1}');
-        key.push_str(k);
-        key.push('=');
-        key.push_str(&v);
+        out.push('\u{1}');
+        out.push_str(k);
+        out.push('=');
+        match v {
+            Value::String(s) => out.push_str(s),
+            other => out.push_str(&format!("{other:?}")),
+        }
     }
-    key
+}
+
+/// [`state_key_into`] into a fresh `String`.
+#[cfg(test)]
+pub(crate) fn state_key(item: &PaletteItem) -> String {
+    let mut out = String::new();
+    state_key_into(item, &mut out);
+    out
 }
 
 fn gzip(bytes: &[u8]) -> Vec<u8> {

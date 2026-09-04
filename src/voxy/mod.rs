@@ -22,7 +22,7 @@ mod lod;
 mod mapper;
 mod rocks;
 
-pub(crate) use lod::RegionLod;
+pub(crate) use lod::{mark_live, LiveSections, RegionLod};
 
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -35,6 +35,10 @@ use mapper::Mapper;
 
 /// Matches the `compressionLevel` in the config we write, and voxy's default.
 const ZSTD_LEVEL: i32 = 1;
+
+/// Upper bound on a serialized section, matching voxy's own scratch buffer.
+#[cfg(test)]
+const MAX_DECOMPRESSED: usize = 16 + 32768 * 2 + 32768 * 8;
 
 /// File numbers for the database we lay down. RocksDB only requires that
 /// `NEXT_FILE_NUMBER` exceeds every number already on disk.
@@ -215,8 +219,13 @@ impl VoxyWriter {
     }
 
     /// A builder for one region's slice of the LOD pyramid.
-    pub(crate) fn region_lod(&self, min_section_y: i32, max_section_y: i32) -> RegionLod<'_> {
-        RegionLod::new(self, min_section_y, max_section_y)
+    pub(crate) fn region_lod(
+        &self,
+        min_section_y: i32,
+        max_section_y: i32,
+        live: LiveSections,
+    ) -> RegionLod<'_> {
+        RegionLod::new(self, min_section_y, max_section_y, live)
     }
 
     /// Registers a blockstate, returning its voxy id and light dampening.
@@ -234,22 +243,20 @@ impl VoxyWriter {
             .biome_id(name)
     }
 
-    /// Compresses and stores one serialized section. Compression happens before
-    /// the lock so the region threads do not serialize on it.
-    pub(crate) fn put_section(&self, key: i64, serialized: &[u8]) {
-        let compressed = match zstd::bulk::compress(serialized, ZSTD_LEVEL) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                let mut wal = self.wal.lock().unwrap_or_else(|p| p.into_inner());
-                if wal.error.is_none() {
-                    wal.error = Some(e);
-                }
-                return;
-            }
-        };
+    /// Stores one already-compressed section. The region builders compress
+    /// outside this lock, so the only work held here is the log append.
+    pub(crate) fn put_section(&self, key: i64, compressed: &[u8]) {
         let mut wal = self.wal.lock().unwrap_or_else(|p| p.into_inner());
-        wal.put(rocks::CF_WORLD_SECTIONS, &key.to_be_bytes(), &compressed);
+        wal.put(rocks::CF_WORLD_SECTIONS, &key.to_be_bytes(), compressed);
         wal.sections += 1;
+    }
+
+    /// Latch a failure from a region thread; surfaced by [`Self::finish`].
+    pub(crate) fn record_error(&self, error: std::io::Error) {
+        let mut wal = self.wal.lock().unwrap_or_else(|p| p.into_inner());
+        if wal.error.is_none() {
+            wal.error = Some(error);
+        }
     }
 
     /// Flushes the id registries into the log, then lays down the manifest that
@@ -330,7 +337,9 @@ mod tests {
 
         let writer = VoxyWriter::create(dir.path()).unwrap().unwrap();
         let key = lod::section_key(0, 1, 0, 2);
-        writer.put_section(key, &lod::serialize_section(key, &vec![7u64; 32768], 0xFF));
+        let serialized = lod::serialize_section(key, &vec![7u64; 32768], 0xFF);
+        let compressed = zstd::bulk::compress(&serialized, ZSTD_LEVEL).unwrap();
+        writer.put_section(key, &compressed);
         let (sections, _) = writer.finish().unwrap();
         assert_eq!(sections, 1);
 
@@ -356,6 +365,30 @@ mod tests {
         assert_eq!(payload[13], 1);
         assert_eq!(payload[14], 8);
         assert_eq!(&payload[15..23], &key.to_be_bytes());
+
+        // ... and its value is the zstd frame voxy will decompress.
+        let mut at = 23;
+        let mut value_len = 0usize;
+        let mut shift = 0;
+        loop {
+            let byte = payload[at];
+            at += 1;
+            value_len |= ((byte & 0x7F) as usize) << shift;
+            shift += 7;
+            if byte & 0x80 == 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            &payload[at..at + 4],
+            &[0x28, 0xb5, 0x2f, 0xfd],
+            "zstd magic"
+        );
+        let frame = &payload[at..at + value_len];
+        assert_eq!(
+            zstd::bulk::decompress(frame, MAX_DECOMPRESSED).unwrap(),
+            serialized
+        );
     }
 
     /// Regenerating into the same folder replaces the cache instead of mixing

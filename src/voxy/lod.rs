@@ -18,9 +18,9 @@
 //! of a whole region's worth (~250 MB).
 
 use fastnbt::LongArray;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 
-use super::mapper::{is_air_name, state_key};
+use super::mapper::{is_air_name, state_key_into};
 use super::VoxyWriter;
 use crate::world_editor::common::Section;
 
@@ -102,46 +102,87 @@ fn mip(children: &[u64; 8], opacity: &[u8]) -> u64 {
     with_light(children[7], (block_light | sky_light) as u8)
 }
 
-/// Serializes one section the way `SaveLoadSystem3.serialize` does: the key, a
-/// metadata word, 32768 little-endian LUT indices, then the LUT itself.
-pub(crate) fn serialize_section(key: i64, data: &[u64], non_empty_children: u8) -> Vec<u8> {
-    debug_assert_eq!(data.len(), SECTION_VOLUME);
+/// The largest a serialized section can get: every voxel distinct.
+const MAX_SERIALIZED: usize = 16 + SECTION_VOLUME * 2 + SECTION_VOLUME * 8;
 
-    let mut lut: Vec<u64> = Vec::with_capacity(64);
-    let mut seen: FnvHashMap<u64, u16> = FnvHashMap::default();
-    let mut indices: Vec<u16> = Vec::with_capacity(SECTION_VOLUME);
+/// Reusable working set for section serialization. A region writes thousands of
+/// sections, so the LUT map and the output buffer are kept rather than rebuilt.
+#[derive(Default)]
+struct SectionScratch {
+    seen: FnvHashMap<u64, u16>,
+    lut: Vec<u64>,
+}
 
-    // Runs of one value are the norm, so remember the last hit and skip the map.
-    let mut prev = u64::MAX;
-    let mut prev_index = 0u16;
-    let mut first = true;
-    for &voxel in data {
-        if !first && voxel == prev {
-            indices.push(prev_index);
-            continue;
+impl SectionScratch {
+    /// Serializes one section into `out` the way `SaveLoadSystem3.serialize`
+    /// does: the key, a metadata word, 32768 little-endian LUT indices, then
+    /// the LUT itself.
+    ///
+    /// The index bytes and the LUT are built in a single pass; the metadata
+    /// word is patched afterwards, once the LUT length is known.
+    fn serialize(&mut self, key: i64, data: &[u64], non_empty_children: u8, out: &mut Vec<u8>) {
+        debug_assert_eq!(data.len(), SECTION_VOLUME);
+        self.seen.clear();
+        self.lut.clear();
+        out.clear();
+        out.reserve(MAX_SERIALIZED);
+
+        out.extend_from_slice(&key.to_le_bytes());
+        out.extend_from_slice(&0i64.to_le_bytes()); // metadata, patched below
+
+        // Runs of one value are the norm, so remember the last hit and skip the map.
+        let mut prev = u64::MAX;
+        let mut prev_index = 0u16;
+        let mut first = true;
+        for &voxel in data {
+            let index = if !first && voxel == prev {
+                prev_index
+            } else {
+                let next = self.lut.len() as u16;
+                let lut = &mut self.lut;
+                let index = *self.seen.entry(voxel).or_insert_with(|| {
+                    lut.push(voxel);
+                    next
+                });
+                prev = voxel;
+                prev_index = index;
+                first = false;
+                index
+            };
+            out.extend_from_slice(&index.to_le_bytes());
         }
-        let next = lut.len() as u16;
-        let index = *seen.entry(voxel).or_insert_with(|| {
-            lut.push(voxel);
-            next
-        });
-        indices.push(index);
-        prev = voxel;
-        prev_index = index;
-        first = false;
-    }
 
-    let metadata = (lut.len() as i64) | ((non_empty_children as i64) << 16);
-    let mut out = Vec::with_capacity(16 + SECTION_VOLUME * 2 + lut.len() * 8);
-    out.extend_from_slice(&key.to_le_bytes());
-    out.extend_from_slice(&metadata.to_le_bytes());
-    for index in &indices {
-        out.extend_from_slice(&index.to_le_bytes());
+        for voxel in &self.lut {
+            out.extend_from_slice(&voxel.to_le_bytes());
+        }
+
+        let metadata = (self.lut.len() as i64) | ((non_empty_children as i64) << 16);
+        out[8..16].copy_from_slice(&metadata.to_le_bytes());
     }
-    for voxel in &lut {
-        out.extend_from_slice(&voxel.to_le_bytes());
-    }
+}
+
+/// Serializes one section into a fresh buffer. The region builder uses
+/// [`SectionScratch`] directly; this is for callers that write a single section.
+#[cfg(test)]
+pub(crate) fn serialize_section(key: i64, data: &[u64], non_empty_children: u8) -> Vec<u8> {
+    let mut out = Vec::new();
+    SectionScratch::default().serialize(key, data, non_empty_children, &mut out);
     out
+}
+
+/// Per level, the coordinates of every section that some chunk can put a block
+/// into. Built from the chunk section keys alone, before any voxel is touched.
+pub(crate) type LiveSections = [FnvHashSet<(i32, i32, i32)>; MAX_LOD + 1];
+
+/// Marks every LOD section that one populated chunk section feeds into.
+pub(crate) fn mark_live(live: &mut LiveSections, chunk_x: i32, section_y: i32, chunk_z: i32) {
+    for (lvl, level) in live.iter_mut().enumerate() {
+        level.insert((
+            chunk_x >> (lvl + 1),
+            section_y >> (lvl + 1),
+            chunk_z >> (lvl + 1),
+        ));
+    }
 }
 
 /// A section under construction. `x`/`y`/`z` are section coordinates at this level.
@@ -165,6 +206,9 @@ pub(crate) struct RegionLod<'a> {
     writer: &'a VoxyWriter,
     /// One map per level, keyed by section Y within the level's current column.
     levels: Vec<FnvHashMap<i32, LodSection>>,
+    /// Sections that can hold a block, per level. Everything else is air and
+    /// would be dropped at flush, so it is never allocated in the first place.
+    live: LiveSections,
     /// Recycled 32768-voxel buffers; allocating these fresh dominates otherwise.
     pool: Vec<Vec<u64>>,
     block_cache: FnvHashMap<String, u32>,
@@ -173,6 +217,13 @@ pub(crate) struct RegionLod<'a> {
     pyramid: Vec<u64>,
     palette_ids: Vec<u32>,
     biome_ids: [u32; 16],
+    /// Reused so identifying a palette entry does not allocate per section.
+    state_key: String,
+    scratch: SectionScratch,
+    serialized: Vec<u8>,
+    /// One compression context for the whole region; building a fresh one per
+    /// section allocates and initializes zstd's workspace thousands of times.
+    compressor: zstd::bulk::Compressor<'static>,
     min_section_y: i32,
     max_section_y: i32,
     pub(crate) sections_written: u64,
@@ -182,10 +233,16 @@ impl<'a> RegionLod<'a> {
     /// `max_section_y` is the highest chunk section anywhere in the region that
     /// holds a block. Everything above it is air across the whole region, so
     /// every section up there would be dropped as empty anyway.
-    pub(crate) fn new(writer: &'a VoxyWriter, min_section_y: i32, max_section_y: i32) -> Self {
+    pub(crate) fn new(
+        writer: &'a VoxyWriter,
+        min_section_y: i32,
+        max_section_y: i32,
+        live: LiveSections,
+    ) -> Self {
         Self {
             writer,
             levels: (0..=MAX_LOD).map(|_| FnvHashMap::default()).collect(),
+            live,
             pool: Vec::new(),
             block_cache: FnvHashMap::default(),
             biome_cache: FnvHashMap::default(),
@@ -193,6 +250,11 @@ impl<'a> RegionLod<'a> {
             pyramid: vec![0; PYRAMID_LEN],
             palette_ids: Vec::new(),
             biome_ids: [0; 16],
+            state_key: String::new(),
+            scratch: SectionScratch::default(),
+            serialized: Vec::with_capacity(MAX_SERIALIZED),
+            compressor: zstd::bulk::Compressor::new(super::ZSTD_LEVEL)
+                .expect("zstd level 1 is always valid"),
             min_section_y,
             max_section_y,
             sections_written: 0,
@@ -220,7 +282,6 @@ impl<'a> RegionLod<'a> {
             self.biome_ids[slot] = self.biome_for(name);
         }
 
-        let by_y: FnvHashMap<i32, &Section> = sections.iter().map(|s| (s.y as i32, s)).collect();
         let (span_min, span_max) = span;
         let from = span_min.max(self.min_section_y);
         let to = span_max.min(self.max_section_y);
@@ -231,13 +292,20 @@ impl<'a> RegionLod<'a> {
                     .ok()
                     .and_then(|i| l.get(i))
             });
-            self.ingest_section(
-                chunk_x,
-                section_y,
-                chunk_z,
-                by_y.get(&section_y).copied(),
-                light,
-            );
+            // Nothing this chunk section touches can end up on disk: skip it
+            // before decoding a palette or composing a single voxel. Above the
+            // roofline this is almost every section in the chunk.
+            if !(0..=MAX_LOD)
+                .rev()
+                .any(|lvl| self.is_live(lvl, chunk_x, section_y, chunk_z))
+            {
+                continue;
+            }
+
+            // A chunk holds at most a couple of dozen sections, so a scan beats
+            // building a map per chunk.
+            let section = sections.iter().find(|s| s.y as i32 == section_y);
+            self.ingest_section(chunk_x, section_y, chunk_z, section, light);
         }
     }
 
@@ -292,16 +360,16 @@ impl<'a> RegionLod<'a> {
                     let id = if is_air_name(&item.name) {
                         0
                     } else {
-                        let key = state_key(item);
-                        match self.block_cache.get(&key) {
+                        state_key_into(item, &mut self.state_key);
+                        match self.block_cache.get(self.state_key.as_str()) {
                             Some(&id) => id,
                             None => {
-                                let (id, opacity) = self.writer.intern_block(&key, item);
+                                let (id, opacity) = self.writer.intern_block(&self.state_key, item);
                                 if self.opacity.len() <= id as usize {
                                     self.opacity.resize(id as usize + 1, 15);
                                 }
                                 self.opacity[id as usize] = opacity;
-                                self.block_cache.insert(key, id);
+                                self.block_cache.insert(self.state_key.clone(), id);
                                 id
                             }
                         }
@@ -312,26 +380,103 @@ impl<'a> RegionLod<'a> {
             }
         }
 
+        // Uniform light is the common case by far: air above the terrain is
+        // fully sky-lit, everything enclosed is dark. Detecting it once here
+        // replaces 4096 nibble reads plus the whole mip pass below.
+        let uniform_light = match light {
+            None => Some(0u8),
+            Some((sky, block)) => {
+                let flat = |a: &[i8]| {
+                    let first = a.first().copied().unwrap_or(0) as u8;
+                    (first & 0x0F == first >> 4 && a.iter().all(|&n| n as u8 == first))
+                        .then_some(first & 0x0F)
+                };
+                match (flat(sky), flat(block)) {
+                    (Some(s), Some(b)) => Some(s | (b << 4)),
+                    _ => None,
+                }
+            }
+        };
+
         // Unlit air contributes nothing: every voxel would be zero, which is
         // what the destination buffers already hold. Skipping is what keeps
         // hollow interiors and the void below the terrain nearly free.
-        if all_air
-            && light.is_none_or(|(sky, block)| {
-                sky.iter().all(|&n| n == 0) && block.iter().all(|&n| n == 0)
-            })
-        {
+        if all_air && uniform_light == Some(0) {
             return;
+        }
+
+        let data = section.and_then(|s| s.block_states.data.as_ref());
+
+        // A single-valued palette container plus uniform light means every
+        // voxel in the cube is the same word, and so is every mip of it: the
+        // mip of eight identical blocks is that block, and of eight identical
+        // air voxels is air with the same light. Fill the destinations
+        // directly and skip building the pyramid at all.
+        if let (None, Some(light)) = (data, uniform_light) {
+            let block = self.palette_ids[0];
+            let uniform_biome = self.biome_ids.iter().all(|&b| b == self.biome_ids[0]);
+            if block == 0 || uniform_biome {
+                let voxel = compose(light, block, self.biome_ids[0]);
+                for lvl in 0..=MAX_LOD {
+                    self.insert_uniform(lvl, chunk_x, section_y, chunk_z, voxel);
+                }
+                return;
+            }
         }
 
         let sky = light.map(|(s, _)| s.as_slice());
         let block_light = light.map(|(_, b)| b.as_slice());
 
-        let data = section.and_then(|s| s.block_states.data.as_ref());
         self.fill_level0(data, sky, block_light);
         self.build_mips();
 
         for lvl in 0..=MAX_LOD {
             self.insert_level(lvl, chunk_x, section_y, chunk_z);
+        }
+    }
+
+    /// Sub-cube bounds of one chunk section inside its level-`lvl` world section.
+    fn placement(lvl: usize, chunk_x: i32, section_y: i32, chunk_z: i32) -> (usize, usize, usize) {
+        let side_bits = 4 - lvl;
+        let side = 1usize << side_bits;
+        let coord_mask = (1i32 << (lvl + 1)) - 1;
+        (
+            ((chunk_x & coord_mask) as usize) * side,
+            ((section_y & coord_mask) as usize) * side,
+            ((chunk_z & coord_mask) as usize) * side,
+        )
+    }
+
+    /// Writes a constant voxel over one chunk section's sub-cube. Rows are
+    /// contiguous in x, so this runs at memset speed.
+    fn insert_uniform(
+        &mut self,
+        lvl: usize,
+        chunk_x: i32,
+        section_y: i32,
+        chunk_z: i32,
+        voxel: u64,
+    ) {
+        let side = 1usize << (4 - lvl);
+        let (base_x, base_y, base_z) = Self::placement(lvl, chunk_x, section_y, chunk_z);
+        let Some(section) = Self::section_mut(
+            &mut self.levels[lvl],
+            &mut self.pool,
+            &self.live[lvl],
+            chunk_x >> (lvl + 1),
+            section_y >> (lvl + 1),
+            chunk_z >> (lvl + 1),
+        ) else {
+            return;
+        };
+        for y in 0..side {
+            for z in 0..side {
+                let start = ((base_y + y) << 10) | ((base_z + z) << 5) | base_x;
+                section.data[start..start + side].fill(voxel);
+            }
+        }
+        if lvl == 0 && block_of(voxel) != 0 {
+            section.non_air += (side * side * side) as u32;
         }
     }
 
@@ -351,39 +496,64 @@ impl<'a> RegionLod<'a> {
         let per_long = 64 / bits;
         let mask = (1u64 << bits) - 1;
 
-        let nibble = |arr: Option<&[i8]>, i: usize| -> u8 {
-            let Some(arr) = arr else { return 0 };
-            let Some(&byte) = arr.get(i >> 1) else {
-                return 0;
-            };
-            let byte = byte as u8;
-            if i & 1 == 1 {
-                byte >> 4
-            } else {
-                byte & 0x0F
+        // Fixed 2048-byte nibble planes, so the inner loop indexes without an
+        // Option check or a bounds check per voxel.
+        const NIBBLES: usize = 2048;
+        const DARK: [i8; NIBBLES] = [0; NIBBLES];
+        let plane = |arr: Option<&'_ [i8]>| -> [i8; NIBBLES] {
+            match arr {
+                Some(a) if a.len() >= NIBBLES => a[..NIBBLES].try_into().unwrap(),
+                _ => DARK,
             }
         };
+        let sky = plane(sky);
+        let block_light = plane(block_light);
 
-        for i in 0..4096usize {
-            let block = match data {
-                None => self.palette_ids[0],
-                Some(longs) => {
-                    let long_index = i / per_long;
-                    let shift = (i % per_long) * bits;
-                    match longs.get(long_index) {
-                        Some(&word) => {
-                            let slot = ((word as u64 >> shift) & mask) as usize;
-                            self.palette_ids.get(slot).copied().unwrap_or(0)
-                        }
-                        None => 0,
+        let biomes = self.biome_ids;
+        let pyramid = &mut self.pyramid[..4096];
+        let palette = &self.palette_ids;
+        let uniform_block = palette[0];
+
+        // Walk the packed container with a running slot cursor: the divisions a
+        // per-index decode would need are the most expensive part of this loop.
+        let mut long_index = 0usize;
+        let mut slot = 0usize;
+        let mut i = 0usize;
+        for _y in 0..16usize {
+            for z in 0..16usize {
+                let biome_row = &biomes[(z >> 2) * 4..(z >> 2) * 4 + 4];
+                // Two voxels share one light byte, so read it once per pair.
+                for x2 in 0..8usize {
+                    let s = sky[i >> 1] as u8;
+                    let b = block_light[i >> 1] as u8;
+                    let lights = [(s & 0x0F) | ((b & 0x0F) << 4), (s >> 4) | (b & 0xF0)];
+
+                    for (half, &light) in lights.iter().enumerate() {
+                        let block = match data {
+                            None => uniform_block,
+                            Some(longs) => {
+                                let id = match longs.get(long_index) {
+                                    Some(&word) => {
+                                        let entry =
+                                            ((word as u64 >> (slot * bits)) & mask) as usize;
+                                        palette.get(entry).copied().unwrap_or(0)
+                                    }
+                                    None => 0,
+                                };
+                                slot += 1;
+                                if slot == per_long {
+                                    slot = 0;
+                                    long_index += 1;
+                                }
+                                id
+                            }
+                        };
+                        let biome = biome_row[(x2 * 2 + half) >> 2];
+                        pyramid[i + half] = compose(light, block, biome);
                     }
+                    i += 2;
                 }
-            };
-            let light = nibble(sky, i) | (nibble(block_light, i) << 4);
-            let x = i & 0xF;
-            let z = (i >> 4) & 0xF;
-            let biome = self.biome_ids[(z >> 2) * 4 + (x >> 2)];
-            self.pyramid[i] = compose(light, block, biome);
+            }
         }
     }
 
@@ -396,19 +566,30 @@ impl<'a> RegionLod<'a> {
             let src_shift = (dst_side * 2).trailing_zeros() as usize;
             let dst_shift = dst_side.trailing_zeros() as usize;
 
+            // Neighbours are one step apart on each axis, so the eight children
+            // are fixed offsets from the corner rather than eight index builds.
+            let y_stride = 1usize << (2 * src_shift);
+            let z_stride = 1usize << src_shift;
+
             for y in 0..dst_side {
                 for z in 0..dst_side {
                     for x in 0..dst_side {
-                        let mut children = [0u64; 8];
-                        for (corner, slot) in children.iter_mut().enumerate() {
-                            let dx = (corner >> 2) & 1;
-                            let dy = (corner >> 1) & 1;
-                            let dz = corner & 1;
-                            let index = ((y * 2 + dy) << (2 * src_shift))
-                                | ((z * 2 + dz) << src_shift)
-                                | (x * 2 + dx);
-                            *slot = self.pyramid[src_base + index];
-                        }
+                        // Ordered by voxy's corner code, (x << 2) | (y << 1) | z.
+                        let c = src_base
+                            + ((y * 2) << (2 * src_shift))
+                            + ((z * 2) << src_shift)
+                            + (x * 2);
+                        let p = &self.pyramid;
+                        let children = [
+                            p[c],
+                            p[c + z_stride],
+                            p[c + y_stride],
+                            p[c + y_stride + z_stride],
+                            p[c + 1],
+                            p[c + 1 + z_stride],
+                            p[c + 1 + y_stride],
+                            p[c + 1 + y_stride + z_stride],
+                        ];
                         let index = (y << (2 * dst_shift)) | (z << dst_shift) | x;
                         self.pyramid[dst_base + index] = mip(&children, &self.opacity);
                     }
@@ -421,19 +602,18 @@ impl<'a> RegionLod<'a> {
     fn insert_level(&mut self, lvl: usize, chunk_x: i32, section_y: i32, chunk_z: i32) {
         let side_bits = 4 - lvl;
         let side = 1usize << side_bits;
-        let coord_mask = (1i32 << (lvl + 1)) - 1;
+        let (base_x, base_y, base_z) = Self::placement(lvl, chunk_x, section_y, chunk_z);
 
-        let base_x = ((chunk_x & coord_mask) as usize) * side;
-        let base_y = ((section_y & coord_mask) as usize) * side;
-        let base_z = ((chunk_z & coord_mask) as usize) * side;
-
-        let section = Self::section_mut(
+        let Some(section) = Self::section_mut(
             &mut self.levels[lvl],
             &mut self.pool,
+            &self.live[lvl],
             chunk_x >> (lvl + 1),
             section_y >> (lvl + 1),
             chunk_z >> (lvl + 1),
-        );
+        ) else {
+            return;
+        };
 
         // Each chunk section owns a disjoint sub-cube of its world section, so
         // every destination voxel is written exactly once and the running count
@@ -459,30 +639,51 @@ impl<'a> RegionLod<'a> {
         section.non_air += non_air;
     }
 
+    /// The section at these coordinates, created on first write. Returns `None`
+    /// for a section no chunk can put a block in: allocating and zeroing a
+    /// quarter-megabyte buffer only to drop it at flush is the single most
+    /// expensive thing this builder could do.
     fn section_mut<'s>(
         level: &'s mut FnvHashMap<i32, LodSection>,
         pool: &mut Vec<Vec<u64>>,
+        live: &FnvHashSet<(i32, i32, i32)>,
         x: i32,
         y: i32,
         z: i32,
-    ) -> &'s mut LodSection {
-        level.entry(y).or_insert_with(|| {
-            let data = match pool.pop() {
-                Some(mut buf) => {
-                    buf.fill(0);
-                    buf
+    ) -> Option<&'s mut LodSection> {
+        use std::collections::hash_map::Entry;
+        match level.entry(y) {
+            Entry::Occupied(slot) => Some(slot.into_mut()),
+            Entry::Vacant(slot) => {
+                if !live.contains(&(x, y, z)) {
+                    return None;
                 }
-                None => vec![0u64; SECTION_VOLUME],
-            };
-            LodSection {
-                x,
-                y,
-                z,
-                data,
-                non_air: 0,
-                children: 0,
+                let data = match pool.pop() {
+                    Some(mut buf) => {
+                        buf.fill(0);
+                        buf
+                    }
+                    None => vec![0u64; SECTION_VOLUME],
+                };
+                Some(slot.insert(LodSection {
+                    x,
+                    y,
+                    z,
+                    data,
+                    non_air: 0,
+                    children: 0,
+                }))
             }
-        })
+        }
+    }
+
+    /// Whether any level-`lvl` section covering this chunk section can hold a block.
+    fn is_live(&self, lvl: usize, chunk_x: i32, section_y: i32, chunk_z: i32) -> bool {
+        self.live[lvl].contains(&(
+            chunk_x >> (lvl + 1),
+            section_y >> (lvl + 1),
+            chunk_z >> (lvl + 1),
+        ))
     }
 
     /// Serializes and emits every section of one finished column, marking each
@@ -509,9 +710,15 @@ impl<'a> RegionLod<'a> {
                     }
                 }
                 let key = section_key(lvl as i32, section.x, section.y, section.z);
-                let blob = serialize_section(key, &section.data, children);
-                self.writer.put_section(key, &blob);
-                self.sections_written += 1;
+                self.scratch
+                    .serialize(key, &section.data, children, &mut self.serialized);
+                match self.compressor.compress(&self.serialized) {
+                    Ok(blob) => {
+                        self.writer.put_section(key, &blob);
+                        self.sections_written += 1;
+                    }
+                    Err(e) => self.writer.record_error(e),
+                }
             }
 
             self.pool.push(section.data);

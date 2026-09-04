@@ -245,7 +245,11 @@ fn write_region_to_disk(
 
     let mut lod = voxy.map(|writer| {
         let (min_y, max_y) = region_content_span(region_to_modify);
-        writer.region_lod(min_y, max_y)
+        writer.region_lod(
+            min_y,
+            max_y,
+            live_lod_sections(region_to_modify, region_x, region_z),
+        )
     });
 
     for column in 0..256usize {
@@ -335,6 +339,41 @@ fn morton_16(index: usize) -> (i32, i32) {
         z |= (((index >> (2 * bit + 1)) & 1) as i32) << bit;
     }
     (x, z)
+}
+
+/// Which LOD sections of this region can hold a block.
+///
+/// Derived from chunk section keys alone, so it costs nothing next to the voxel
+/// work it saves: above the roofline every column is air, and without this the
+/// builder would allocate and zero a 256 KB buffer for each of those sections
+/// only to drop it again at flush.
+///
+/// A section that turns out to be all air anyway is still listed - the keys say
+/// a chunk section exists there, not that it holds a block - which costs one
+/// buffer that the flush then discards.
+fn live_lod_sections(
+    region: &super::common::RegionToModify,
+    region_x: i32,
+    region_z: i32,
+) -> crate::voxy::LiveSections {
+    let base_section_y = crate::world_editor::base_chunk_y() >> 4;
+    let mut live: crate::voxy::LiveSections = Default::default();
+    for local_x in 0..32 {
+        for local_z in 0..32 {
+            let chunk_x = region_x * 32 + local_x;
+            let chunk_z = region_z * 32 + local_z;
+            match region.get_chunk(local_x, local_z) {
+                Some(chunk) => {
+                    for &section_y in chunk.sections.keys() {
+                        crate::voxy::mark_live(&mut live, chunk_x, section_y as i32, chunk_z);
+                    }
+                }
+                // Filler chunks are a flat plane at the terrain base.
+                None => crate::voxy::mark_live(&mut live, chunk_x, base_section_y, chunk_z),
+            }
+        }
+    }
+    live
 }
 
 /// The span of chunk sections the voxy builder has to walk for one region.
