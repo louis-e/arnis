@@ -2017,7 +2017,7 @@ fn compute_detail_tier(
 ) -> DetailTier {
     let mut score: i32 = 0;
     score += (footprint as i32 / 40).min(25);
-    score += (building_height * 2).min(25);
+    score += building_height.saturating_mul(2).min(25);
     score += match category {
         BuildingCategory::Historic | BuildingCategory::Religious => 20,
         BuildingCategory::Commercial | BuildingCategory::Hotel | BuildingCategory::Office => 10,
@@ -11940,6 +11940,19 @@ mod style_tests {
         assert_eq!(
             compute_detail_tier(&notable, BuildingCategory::Historic, 600, 20, true),
             DetailTier::Landmark
+        );
+    }
+
+    #[test]
+    fn detail_tier_height_score_does_not_overflow() {
+        let way = ProcessedWay {
+            id: 1,
+            nodes: Vec::new(),
+            tags: std::collections::HashMap::new(),
+        };
+        assert_eq!(
+            compute_detail_tier(&way, BuildingCategory::House, 100, i32::MAX, false),
+            DetailTier::Standard
         );
     }
 
