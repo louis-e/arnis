@@ -69,6 +69,7 @@
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "java_save_path": "Java Save Path",
   "bedrock_save_path": "Bedrock Save Path",
+  "luanti_save_path": "Luanti Save Path",
   "rotation_angle": "Rotation Angle",
   "settings_section_generation": "Generation",
   "settings_section_world": "World",

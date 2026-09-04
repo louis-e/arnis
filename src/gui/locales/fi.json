@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock-maailma luodaan automaattisesti",
   "java_save_path": "Javan tallennuspolku",
   "bedrock_save_path": "Bedrockin tallennuspolku",
+  "luanti_save_path": "Luanti-tallennuspolku",
   "rotation_angle": "Kiertokulma",
   "settings_section_generation": "Generointi",
   "settings_section_world": "Maailma",

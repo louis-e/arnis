@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Świat Bedrock jest generowany automatycznie",
   "java_save_path": "Ścieżka zapisu Java",
   "bedrock_save_path": "Ścieżka zapisu Bedrock",
+  "luanti_save_path": "Ścieżka zapisu Luanti",
   "rotation_angle": "Kąt Obrotu",
   "settings_section_generation": "Generowanie",
   "settings_section_world": "Świat",

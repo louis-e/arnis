@@ -139,6 +139,7 @@ async function applyLocalization(localization) {
     "span[data-localize='custom_map_source']": "custom_map_source",
     "span[data-localize='java_save_path']": "java_save_path",
     "span[data-localize='bedrock_save_path']": "bedrock_save_path",
+    "span[data-localize='luanti_save_path']": "luanti_save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
     "span[data-localize='canopy_height']": "canopy_height",
     "span[data-localize='max_tree_size']": "max_tree_size",
@@ -866,6 +867,7 @@ function resolveDefaultSavePath() {
 
   resolve('gui_get_default_save_path', 'savePath');
   resolve('gui_get_default_bedrock_save_path', 'bedrockSavePath');
+  resolve('gui_get_default_luanti_save_path', 'luantiSavePath');
 }
 
 function initSettings() {
@@ -1499,6 +1501,7 @@ function initTooltips() {
 /// Save path management, one path per world format
 let savePath = "";
 let bedrockSavePath = "";
+let luantiSavePath = "";
 
 const SAVE_PATHS = {
   java: {
@@ -1516,6 +1519,14 @@ const SAVE_PATHS = {
     browseId: 'bedrock-save-path-browse',
     get: () => bedrockSavePath,
     set: (value) => { bedrockSavePath = value; },
+  },
+  luanti: {
+    storageKey: 'arnis-luanti-save-path',
+    defaultCommand: 'gui_get_default_luanti_save_path',
+    inputId: 'luanti-save-path-input',
+    browseId: 'luanti-save-path-browse',
+    get: () => luantiSavePath,
+    set: (value) => { luantiSavePath = value; },
   },
 };
 
@@ -1999,6 +2010,7 @@ async function startGeneration() {
         bboxText: selectedBBox,
         selectedWorld: worldPath,
         bedrockSavePath: bedrockSavePath,
+        luantiSavePath: luantiSavePath,
         worldScale: scale,
         groundLevel: ground_level,
         terrainEnabled: terrain,

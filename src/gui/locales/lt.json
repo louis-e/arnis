@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "java_save_path": "Java išsaugojimo kelias",
   "bedrock_save_path": "Bedrock išsaugojimo kelias",
+  "luanti_save_path": "Luanti išsaugojimo kelias",
   "rotation_angle": "Pasukimo Kampas",
   "settings_section_generation": "Generavimas",
   "settings_section_world": "Pasaulis",

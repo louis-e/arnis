@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock ワールドは自動生成されます",
   "java_save_path": "Java の保存先",
   "bedrock_save_path": "Bedrock の保存先",
+  "luanti_save_path": "Luanti の保存先",
   "rotation_angle": "回転角度",
   "settings_section_generation": "生成",
   "settings_section_world": "ワールド",

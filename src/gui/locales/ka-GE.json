@@ -69,6 +69,7 @@
   "bedrock_auto_generated": "Bedrock-ის სამყარო ავტომატურად იქმნება",
   "java_save_path": "Java-ს შენახვის გზა",
   "bedrock_save_path": "Bedrock-ის შენახვის გზა",
+  "luanti_save_path": "Luanti-ის შენახვის გზა",
   "rotation_angle": "ბრუნვის კუთხე",
   "settings_section_generation": "გენერაცია",
   "settings_section_world": "სამყარო",

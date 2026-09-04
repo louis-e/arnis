@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
   "java_save_path": "Путь сохранения Java",
   "bedrock_save_path": "Путь сохранения Bedrock",
+  "luanti_save_path": "Путь сохранения Luanti",
   "rotation_angle": "Угол Поворота",
   "settings_section_generation": "Генерация",
   "settings_section_world": "Мир",

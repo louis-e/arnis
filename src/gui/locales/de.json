@@ -62,6 +62,7 @@
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
   "java_save_path": "Java-Speicherpfad",
   "bedrock_save_path": "Bedrock-Speicherpfad",
+  "luanti_save_path": "Luanti-Speicherpfad",
   "rotation_angle": "Rotationswinkel",
   "settings_section_generation": "Generierung",
   "settings_section_world": "Welt",
