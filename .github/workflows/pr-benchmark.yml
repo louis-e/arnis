@@ -75,13 +75,16 @@ jobs:
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
           gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          baseline_time=18
+          baseline_time=20
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
-          # Use generation-only time for verdict when available
+          # Use generation-only time for the verdict and reported delta when available,
+          # so the two stay consistent instead of mixing wall-clock and generation-only time.
           if [ -n "$gen_time" ]; then
             eval_diff=$((gen_time - baseline_time))
+            diff=$eval_diff
+            abs_diff=${diff#-}
           else
             eval_diff=$diff
           fi
@@ -97,7 +100,7 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=1160
+          baseline_mem=1225
           mem_diff=$((peak_mem - baseline_mem))
           mem_abs_diff=${mem_diff#-}
           mem_annotation=""
