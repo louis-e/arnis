@@ -136,13 +136,16 @@ pub fn base_chunk_block() -> crate::block_definitions::Block {
 /// The world editor supports the full range; the elevation system controls
 /// the actual heights used based on the disable_height_limit setting.
 const MAX_Y: i32 = 2031;
-/// Sizes the per-section palette lookup array. Block ids are u16 but stay well
-/// below this; raise it if block_definitions ever allocates an id this high.
-pub(crate) const MAX_BLOCK_ID: usize = 512;
 use fastnbt::{LongArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+const SECTION_BLOCKS: usize = 4096;
+const MAX_SECTION_PALETTE: usize = 256;
+const RECENT_PALETTE_LOOKUPS: usize = 4;
+const REVERSE_LOOKUP_THRESHOLD: usize = 8;
+const REVERSE_LOOKUP_ENTRY_BYTES: u64 = 8;
 
 /// Chunk structure for Java Edition NBT format
 #[derive(Serialize, Deserialize)]
@@ -209,36 +212,292 @@ pub(crate) fn section_counters() -> (u64, u64) {
     )
 }
 
+#[derive(Copy, Clone)]
+struct RecentPaletteSlot {
+    block: Block,
+    slot: u8,
+}
+
+impl RecentPaletteSlot {
+    const EMPTY: Self = Self {
+        block: AIR,
+        slot: 0,
+    };
+}
+
+#[derive(Clone)]
+pub(crate) struct PalettedBlockStorage {
+    indices: [u8; SECTION_BLOCKS],
+    palette: Vec<Block>,
+    reverse: Option<FnvHashMap<Block, u8>>,
+    recent: [RecentPaletteSlot; RECENT_PALETTE_LOOKUPS],
+    recent_len: u8,
+}
+
+impl PalettedBlockStorage {
+    fn from_uniform(block: Block) -> Self {
+        let mut recent = [RecentPaletteSlot::EMPTY; RECENT_PALETTE_LOOKUPS];
+        recent[0] = RecentPaletteSlot { block, slot: 0 };
+        Self {
+            indices: [0; SECTION_BLOCKS],
+            palette: vec![block],
+            reverse: None,
+            recent,
+            recent_len: 1,
+        }
+    }
+
+    #[inline(always)]
+    fn get(&self, index: usize) -> Block {
+        self.palette[self.indices[index] as usize]
+    }
+
+    #[inline]
+    fn set(&mut self, index: usize, block: Block) -> Option<Box<[Block; SECTION_BLOCKS]>> {
+        let current_slot = self.indices[index];
+        if self.palette[current_slot as usize] == block {
+            return None;
+        }
+
+        if let Some(slot) = self.find_slot(block) {
+            self.indices[index] = slot;
+            return None;
+        }
+
+        if self.palette.len() == MAX_SECTION_PALETTE {
+            self.repack_live_palette_ignoring(index);
+            if let Some(slot) = self.find_slot(block) {
+                self.indices[index] = slot;
+                return None;
+            }
+            if self.palette.len() == MAX_SECTION_PALETTE {
+                return Some(self.promote_to_direct(index, block));
+            }
+        }
+
+        let slot = self.insert(block);
+        self.indices[index] = slot;
+        None
+    }
+
+    #[inline]
+    fn resident_bytes(&self) -> u64 {
+        let mut bytes = std::mem::size_of::<Self>() as u64;
+        bytes += (self.palette.capacity() * std::mem::size_of::<Block>()) as u64;
+        if let Some(reverse) = &self.reverse {
+            bytes += reverse.capacity() as u64 * REVERSE_LOOKUP_ENTRY_BYTES;
+        }
+        bytes
+    }
+
+    fn try_from_direct(blocks: &[Block; SECTION_BLOCKS]) -> Option<Self> {
+        let mut palette = Vec::new();
+        let mut reverse = FnvHashMap::default();
+        let mut indices = [0u8; SECTION_BLOCKS];
+
+        for (i, &block) in blocks.iter().enumerate() {
+            let slot = match reverse.get(&block).copied() {
+                Some(slot) => slot,
+                None => {
+                    if palette.len() == MAX_SECTION_PALETTE {
+                        return None;
+                    }
+                    let slot = palette.len() as u8;
+                    palette.push(block);
+                    reverse.insert(block, slot);
+                    slot
+                }
+            };
+            indices[i] = slot;
+        }
+
+        let reverse = (palette.len() >= REVERSE_LOOKUP_THRESHOLD).then_some(reverse);
+        let mut storage = Self {
+            indices,
+            palette,
+            reverse,
+            recent: [RecentPaletteSlot::EMPTY; RECENT_PALETTE_LOOKUPS],
+            recent_len: 0,
+        };
+        if let Some(&block) = storage.palette.first() {
+            storage.touch_recent(block, 0);
+        }
+        Some(storage)
+    }
+
+    fn find_slot(&mut self, block: Block) -> Option<u8> {
+        if let Some(slot) = self.recent[..self.recent_len as usize]
+            .iter()
+            .find_map(|entry| {
+                (entry.block == block
+                    && self.palette.get(entry.slot as usize).copied() == Some(block))
+                .then_some(entry.slot)
+            })
+        {
+            self.touch_recent(block, slot);
+            return Some(slot);
+        }
+
+        if self.palette.len() >= REVERSE_LOOKUP_THRESHOLD {
+            if self.reverse.is_none() {
+                self.rebuild_reverse_lookup();
+            }
+            if let Some(slot) = self
+                .reverse
+                .as_ref()
+                .and_then(|reverse| reverse.get(&block).copied())
+            {
+                self.touch_recent(block, slot);
+                return Some(slot);
+            }
+            return None;
+        }
+
+        let slot = self
+            .palette
+            .iter()
+            .position(|&candidate| candidate == block)? as u8;
+        self.touch_recent(block, slot);
+        Some(slot)
+    }
+
+    fn insert(&mut self, block: Block) -> u8 {
+        debug_assert!(self.palette.len() < MAX_SECTION_PALETTE);
+        let slot = self.palette.len() as u8;
+        self.palette.push(block);
+        if let Some(reverse) = &mut self.reverse {
+            reverse.insert(block, slot);
+        } else if self.palette.len() >= REVERSE_LOOKUP_THRESHOLD {
+            self.rebuild_reverse_lookup();
+        }
+        self.touch_recent(block, slot);
+        slot
+    }
+
+    fn touch_recent(&mut self, block: Block, slot: u8) {
+        let len = self.recent_len as usize;
+        if let Some(pos) = self.recent[..len]
+            .iter()
+            .position(|entry| entry.block == block && entry.slot == slot)
+        {
+            let entry = self.recent[pos];
+            for i in (0..pos).rev() {
+                self.recent[i + 1] = self.recent[i];
+            }
+            self.recent[0] = entry;
+            return;
+        }
+
+        let capped = len.min(RECENT_PALETTE_LOOKUPS - 1);
+        for i in (0..capped).rev() {
+            self.recent[i + 1] = self.recent[i];
+        }
+        self.recent[0] = RecentPaletteSlot { block, slot };
+        if len < RECENT_PALETTE_LOOKUPS {
+            self.recent_len += 1;
+        }
+    }
+
+    fn clear_recent(&mut self) {
+        self.recent = [RecentPaletteSlot::EMPTY; RECENT_PALETTE_LOOKUPS];
+        self.recent_len = 0;
+    }
+
+    fn rebuild_reverse_lookup(&mut self) {
+        let mut reverse = FnvHashMap::default();
+        reverse.reserve(self.palette.len());
+        for (slot, &block) in self.palette.iter().enumerate() {
+            reverse.insert(block, slot as u8);
+        }
+        self.reverse = Some(reverse);
+    }
+
+    fn repack_live_palette(&mut self) {
+        self.repack_live_palette_inner(None);
+    }
+
+    fn repack_live_palette_ignoring(&mut self, index: usize) {
+        self.repack_live_palette_inner(Some(index));
+    }
+
+    fn repack_live_palette_inner(&mut self, skipped_index: Option<usize>) {
+        let mut used = [false; MAX_SECTION_PALETTE];
+        for (i, &slot) in self.indices.iter().enumerate() {
+            if skipped_index == Some(i) {
+                continue;
+            }
+            used[slot as usize] = true;
+        }
+
+        let live = used[..self.palette.len()]
+            .iter()
+            .filter(|&&is_used| is_used)
+            .count();
+        if live == self.palette.len() {
+            if self.palette.len() < REVERSE_LOOKUP_THRESHOLD {
+                self.reverse = None;
+            }
+            return;
+        }
+
+        let old_palette = self.palette.clone();
+        let mut remap = [u8::MAX; MAX_SECTION_PALETTE];
+        let mut new_palette = Vec::with_capacity(live);
+        for (old_slot, &block) in old_palette.iter().enumerate() {
+            if used[old_slot] {
+                let new_slot = new_palette.len() as u8;
+                remap[old_slot] = new_slot;
+                new_palette.push(block);
+            }
+        }
+        for (i, slot) in self.indices.iter_mut().enumerate() {
+            if skipped_index == Some(i) {
+                *slot = 0;
+            } else {
+                *slot = remap[*slot as usize];
+            }
+        }
+
+        self.palette = new_palette;
+        if self.palette.len() >= REVERSE_LOOKUP_THRESHOLD {
+            self.rebuild_reverse_lookup();
+        } else {
+            self.reverse = None;
+        }
+        self.clear_recent();
+        if let Some(&block) = self.palette.first() {
+            self.touch_recent(block, 0);
+        }
+    }
+
+    fn promote_to_direct(&self, index: usize, block: Block) -> Box<[Block; SECTION_BLOCKS]> {
+        let mut direct = Box::new([AIR; SECTION_BLOCKS]);
+        for (i, &slot) in self.indices.iter().enumerate() {
+            direct[i] = self.palette[slot as usize];
+        }
+        direct[index] = block;
+        direct
+    }
+}
+
 /// Block storage strategy for a 16×16×16 section.
 ///
-/// **Memory optimisation**: instead of always allocating a 4 096-byte array,
-/// we distinguish two cases:
+/// `Uniform` keeps untouched or bulk-filled sections allocation-free.
 ///
-/// * `Uniform(block)` – every position holds the same block (1 byte).
-///   This covers freshly-created (all-AIR) sections, and sections that were
-///   entirely filled with one type (e.g. STONE underground with `--fillground`).
+/// `Paletted` stores one byte per cell plus a section-local block list, so the
+/// memory cost depends on how many distinct blocks are live in this section,
+/// not on their raw u16 ids.
 ///
-/// * `Full(Vec<u8>)` – the general case for sections whose block ids all
-///   fit in a byte (the overwhelming majority), one byte per cell.
-///
-/// * `FullWide(Vec<Block>)` – only for sections holding a block id of
-///   [`BYTE_ID_LIMIT`] or more; two bytes per cell. Kept separate so the
-///   common case isn't paying for the wider id space.
-///
-/// The palette is laid out so only the decorative tail lands in the wide
-/// range, which keeps this variant rare (around 0.5% of allocating sections
-/// across the sample areas). See the id-space notes in `block_definitions`.
-///
-/// Both are heap-allocated via `Vec`, so the inline size inside the parent
-/// `FnvHashMap` entry is only 24 bytes.
+/// `Direct` is the rare fallback for sections that truly need more than 256
+/// distinct live blocks at once.
 #[derive(Clone)]
 pub(crate) enum BlockStorage {
     /// Every position is the same block (commonly AIR).
     Uniform(Block),
-    /// Mixed blocks, every id below [`BYTE_ID_LIMIT`] – always exactly 4 096 entries.
-    Full(Vec<u8>),
-    /// Mixed blocks with at least one id at or above [`BYTE_ID_LIMIT`] – always 4 096 entries.
-    FullWide(Vec<Block>),
+    /// Mixed blocks with a per-section palette and one-byte indices.
+    Paletted(Box<PalettedBlockStorage>),
+    /// Rare overflow path when a section needs more than 256 distinct live blocks.
+    Direct(Box<[Block; SECTION_BLOCKS]>),
 }
 
 impl BlockStorage {
@@ -247,14 +506,14 @@ impl BlockStorage {
     pub fn get(&self, index: usize) -> Block {
         match self {
             BlockStorage::Uniform(b) => *b,
-            BlockStorage::Full(v) => Block::from_raw_id(u16::from(v[index])),
-            BlockStorage::FullWide(v) => v[index],
+            BlockStorage::Paletted(storage) => storage.get(index),
+            BlockStorage::Direct(v) => v[index],
         }
     }
 
-    /// Write block at flat `index`. Promotes `Uniform` → `Full`/`FullWide`
-    /// on the first differing write, and `Full` → `FullWide` the first time
-    /// a wide id is written.
+    /// Write block at flat `index`. Promotes `Uniform` to paletted storage on
+    /// the first differing write, and only falls back to direct storage when a
+    /// section genuinely exceeds 256 live block kinds.
     #[inline]
     pub fn set(&mut self, index: usize, block: Block) {
         match self {
@@ -262,30 +521,17 @@ impl BlockStorage {
                 // No-op – writing the same value.
             }
             BlockStorage::Uniform(base) => {
-                let base = *base;
-                if base.id() < BYTE_ID_LIMIT && block.id() < BYTE_ID_LIMIT {
-                    let mut v = vec![base.id() as u8; 4096];
-                    v[index] = block.id() as u8;
-                    *self = BlockStorage::Full(v);
-                } else {
-                    let mut v = vec![base; 4096];
-                    v[index] = block;
-                    *self = BlockStorage::FullWide(v);
+                let mut storage = PalettedBlockStorage::from_uniform(*base);
+                let promoted = storage.set(index, block);
+                debug_assert!(promoted.is_none(), "fresh paletted section cannot overflow");
+                *self = BlockStorage::Paletted(Box::new(storage));
+            }
+            BlockStorage::Paletted(storage) => {
+                if let Some(direct) = storage.set(index, block) {
+                    *self = BlockStorage::Direct(direct);
                 }
             }
-            BlockStorage::Full(v) => {
-                if block.id() < BYTE_ID_LIMIT {
-                    v[index] = block.id() as u8;
-                } else {
-                    let mut wide: Vec<Block> = v
-                        .iter()
-                        .map(|&id| Block::from_raw_id(u16::from(id)))
-                        .collect();
-                    wide[index] = block;
-                    *self = BlockStorage::FullWide(wide);
-                }
-            }
-            BlockStorage::FullWide(v) => {
+            BlockStorage::Direct(v) => {
                 v[index] = block;
             }
         }
@@ -296,8 +542,11 @@ impl BlockStorage {
     pub fn iter(&self) -> BlockStorageIter<'_> {
         match self {
             BlockStorage::Uniform(b) => BlockStorageIter::Uniform(*b, 0),
-            BlockStorage::Full(v) => BlockStorageIter::Full(v.iter()),
-            BlockStorage::FullWide(v) => BlockStorageIter::FullWide(v.iter()),
+            BlockStorage::Paletted(storage) => BlockStorageIter::Paletted {
+                palette: &storage.palette,
+                indices: storage.indices.iter(),
+            },
+            BlockStorage::Direct(v) => BlockStorageIter::Direct(v.iter()),
         }
     }
 
@@ -305,21 +554,37 @@ impl BlockStorage {
     /// is the same block. Frees the heap allocation.
     pub fn try_compact(&mut self) {
         match self {
-            BlockStorage::Full(v) => {
-                if let Some(&first) = v.first() {
-                    if v.iter().all(|&b| b == first) {
-                        *self = BlockStorage::Uniform(Block::from_raw_id(u16::from(first)));
-                    }
+            BlockStorage::Paletted(storage) => {
+                storage.repack_live_palette();
+                if storage.palette.len() == 1 {
+                    *self = BlockStorage::Uniform(storage.palette[0]);
                 }
             }
-            BlockStorage::FullWide(v) => {
+            BlockStorage::Direct(v) => {
                 if let Some(&first) = v.first() {
                     if v.iter().all(|&b| b == first) {
                         *self = BlockStorage::Uniform(first);
+                        return;
+                    }
+                }
+                if let Some(paletted) = PalettedBlockStorage::try_from_direct(v) {
+                    if paletted.palette.len() == 1 {
+                        *self = BlockStorage::Uniform(paletted.palette[0]);
+                    } else {
+                        *self = BlockStorage::Paletted(Box::new(paletted));
                     }
                 }
             }
             BlockStorage::Uniform(_) => {}
+        }
+    }
+
+    #[inline]
+    pub fn resident_bytes(&self) -> u64 {
+        match self {
+            BlockStorage::Uniform(_) => 0,
+            BlockStorage::Paletted(storage) => storage.resident_bytes(),
+            BlockStorage::Direct(_) => std::mem::size_of::<[Block; SECTION_BLOCKS]>() as u64,
         }
     }
 }
@@ -327,8 +592,11 @@ impl BlockStorage {
 /// Iterator returned by [`BlockStorage::iter`].
 pub(crate) enum BlockStorageIter<'a> {
     Uniform(Block, usize),
-    Full(std::slice::Iter<'a, u8>),
-    FullWide(std::slice::Iter<'a, Block>),
+    Paletted {
+        palette: &'a [Block],
+        indices: std::slice::Iter<'a, u8>,
+    },
+    Direct(std::slice::Iter<'a, Block>),
 }
 
 impl<'a> Iterator for BlockStorageIter<'a> {
@@ -338,30 +606,85 @@ impl<'a> Iterator for BlockStorageIter<'a> {
     fn next(&mut self) -> Option<Block> {
         match self {
             BlockStorageIter::Uniform(b, count) => {
-                if *count < 4096 {
+                if *count < SECTION_BLOCKS {
                     *count += 1;
                     Some(*b)
                 } else {
                     None
                 }
             }
-            BlockStorageIter::Full(it) => it.next().map(|&id| Block::from_raw_id(u16::from(id))),
-            BlockStorageIter::FullWide(it) => it.next().copied(),
+            BlockStorageIter::Paletted { palette, indices } => {
+                indices.next().map(|slot| palette[*slot as usize])
+            }
+            BlockStorageIter::Direct(it) => it.next().copied(),
         }
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let rem = match self {
-            BlockStorageIter::Uniform(_, c) => 4096 - *c,
-            BlockStorageIter::Full(it) => it.len(),
-            BlockStorageIter::FullWide(it) => it.len(),
+            BlockStorageIter::Uniform(_, c) => SECTION_BLOCKS - *c,
+            BlockStorageIter::Paletted { indices, .. } => indices.len(),
+            BlockStorageIter::Direct(it) => it.len(),
         };
         (rem, Some(rem))
     }
 }
 
 impl ExactSizeIterator for BlockStorageIter<'_> {}
+
+#[inline]
+fn bits_for_palette_len(palette_len: usize) -> usize {
+    let mut bits = 4;
+    while (1usize << bits) < palette_len.max(1) {
+        bits += 1;
+    }
+    bits
+}
+
+fn pack_palette_indices(indices: &[u16; SECTION_BLOCKS], bits_per_block: usize) -> LongArray {
+    let mut data = Vec::new();
+    let mut cur: i64 = 0;
+    let mut cur_idx = 0usize;
+
+    for &palette_index in indices {
+        if cur_idx + bits_per_block > 64 {
+            data.push(cur);
+            cur = 0;
+            cur_idx = 0;
+        }
+
+        cur |= i64::from(palette_index) << cur_idx;
+        cur_idx += bits_per_block;
+    }
+
+    if cur_idx > 0 {
+        data.push(cur);
+    }
+
+    LongArray::new(data)
+}
+
+fn make_palette_item(block: Block, stored_props: Option<&Arc<Value>>) -> PaletteItem {
+    PaletteItem {
+        name: format!("{}:{}", block.namespace(), block.name()),
+        properties: stored_props
+            .map(|p| (**p).clone())
+            .or_else(|| block.properties()),
+    }
+}
+
+fn make_section(y: i8, palette: Vec<PaletteItem>, data: Option<LongArray>) -> Section {
+    Section {
+        block_states: Blockstates {
+            palette,
+            data,
+            other: FnvHashMap::default(),
+        },
+        y,
+        other: FnvHashMap::default(),
+    }
+}
 
 /// A section being modified (16x16x16 blocks)
 pub(crate) struct SectionToModify {
@@ -438,84 +761,87 @@ impl SectionToModify {
         // fall through to the general path so every index is checked.
         if self.properties.is_empty() {
             if let BlockStorage::Uniform(block) = &self.storage {
-                let palette_item = PaletteItem {
-                    name: format!("{}:{}", block.namespace(), block.name()),
-                    properties: block.properties(),
-                };
-                return Section {
-                    block_states: Blockstates {
-                        palette: vec![palette_item],
-                        data: None,
-                        other: FnvHashMap::default(),
-                    },
-                    y,
-                    other: FnvHashMap::default(),
-                };
+                return make_section(y, vec![make_palette_item(*block, None)], None);
             }
         }
 
-        // Medium path: Full storage with no per-index properties.
-        // Use Block id directly as palette key; no string formatting needed.
-        if self.properties.is_empty() && !matches!(self.storage, BlockStorage::Uniform(_)) {
-            // Build palette from unique blocks; array indexed by block id.
-            let mut block_to_palette = [u16::MAX; MAX_BLOCK_ID];
-            let mut palette_blocks: Vec<Block> = Vec::new();
+        // Medium path: mixed blocks with no per-index properties.
+        if self.properties.is_empty() {
+            match &self.storage {
+                BlockStorage::Uniform(_) => {}
+                BlockStorage::Paletted(storage) => {
+                    let mut slot_to_palette = [u16::MAX; MAX_SECTION_PALETTE];
+                    let mut palette_blocks: Vec<Block> = Vec::with_capacity(storage.palette.len());
+                    let mut indices = [0u16; SECTION_BLOCKS];
 
-            for block in self.storage.iter() {
-                let id = block.id() as usize;
-                debug_assert!(
-                    id < MAX_BLOCK_ID,
-                    "block id {id} exceeds palette array size"
-                );
-                if block_to_palette[id] == u16::MAX {
-                    block_to_palette[id] = palette_blocks.len() as u16;
-                    palette_blocks.push(block);
+                    for (i, &slot) in storage.indices.iter().enumerate() {
+                        let entry = &mut slot_to_palette[slot as usize];
+                        if *entry == u16::MAX {
+                            *entry = palette_blocks.len() as u16;
+                            palette_blocks.push(storage.palette[slot as usize]);
+                        }
+                        indices[i] = *entry;
+                    }
+
+                    if palette_blocks.len() == 1 {
+                        return make_section(
+                            y,
+                            vec![make_palette_item(palette_blocks[0], None)],
+                            None,
+                        );
+                    }
+
+                    let bits_per_block = bits_for_palette_len(palette_blocks.len());
+                    let palette = palette_blocks
+                        .into_iter()
+                        .map(|block| make_palette_item(block, None))
+                        .collect();
+
+                    return make_section(
+                        y,
+                        palette,
+                        Some(pack_palette_indices(&indices, bits_per_block)),
+                    );
+                }
+                BlockStorage::Direct(blocks) => {
+                    let mut block_to_palette: FnvHashMap<Block, u16> = FnvHashMap::default();
+                    let mut palette_blocks: Vec<Block> = Vec::new();
+                    let mut indices = [0u16; SECTION_BLOCKS];
+
+                    for (i, &block) in blocks.iter().enumerate() {
+                        let palette_index = match block_to_palette.entry(block) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let idx = palette_blocks.len() as u16;
+                                e.insert(idx);
+                                palette_blocks.push(block);
+                                idx
+                            }
+                        };
+                        indices[i] = palette_index;
+                    }
+
+                    if palette_blocks.len() == 1 {
+                        return make_section(
+                            y,
+                            vec![make_palette_item(palette_blocks[0], None)],
+                            None,
+                        );
+                    }
+
+                    let bits_per_block = bits_for_palette_len(palette_blocks.len());
+                    let palette = palette_blocks
+                        .into_iter()
+                        .map(|block| make_palette_item(block, None))
+                        .collect();
+
+                    return make_section(
+                        y,
+                        palette,
+                        Some(pack_palette_indices(&indices, bits_per_block)),
+                    );
                 }
             }
-
-            let mut bits_per_block = 4;
-            while (1 << bits_per_block) < palette_blocks.len() {
-                bits_per_block += 1;
-            }
-
-            let mut data = vec![];
-            let mut cur: i64 = 0;
-            let mut cur_idx = 0;
-
-            for block in self.storage.iter() {
-                let p = block_to_palette[block.id() as usize] as i64;
-
-                if cur_idx + bits_per_block > 64 {
-                    data.push(cur);
-                    cur = 0;
-                    cur_idx = 0;
-                }
-
-                cur |= p << cur_idx;
-                cur_idx += bits_per_block;
-            }
-
-            if cur_idx > 0 {
-                data.push(cur);
-            }
-
-            let palette = palette_blocks
-                .iter()
-                .map(|block| PaletteItem {
-                    name: format!("{}:{}", block.namespace(), block.name()),
-                    properties: block.properties(),
-                })
-                .collect();
-
-            return Section {
-                block_states: Blockstates {
-                    palette,
-                    data: Some(LongArray::new(data)),
-                    other: FnvHashMap::default(),
-                },
-                y,
-                other: FnvHashMap::default(),
-            };
         }
 
         if count {
@@ -525,14 +851,14 @@ impl SectionToModify {
         // Slow path: mixed blocks with per-index properties. Few cells carry any, so
         // resolve them up front into small ids (0 = none). That keys the per-cell lookup
         // on (Block, u16) and renders each compound's Debug string once, not 4096 times.
-        let mut cell_props = [0u16; 4096];
+        let mut cell_props = [0u16; SECTION_BLOCKS];
         if !self.properties.is_empty() {
             // Borrowed for the whole call, so no Arc can be freed and its address reused.
             let mut props_by_ptr: FnvHashMap<usize, u16> = FnvHashMap::default();
             let mut props_by_repr: FnvHashMap<String, u16> = FnvHashMap::default();
             let mut next_id: u16 = 1;
             for (&i, p) in &self.properties {
-                if i >= 4096 {
+                if i >= SECTION_BLOCKS {
                     continue;
                 }
                 let id = match props_by_ptr.entry(Arc::as_ptr(p) as usize) {
@@ -553,79 +879,89 @@ impl SectionToModify {
         }
 
         let mut unique_blocks: Vec<(Block, Option<Arc<Value>>)> = Vec::new();
-        let mut plain_palette = [u16::MAX; MAX_BLOCK_ID];
-        let mut props_palette: FnvHashMap<(Block, u16), u16> = FnvHashMap::default();
-        let mut indices = [0u16; 4096];
+        let mut indices = [0u16; SECTION_BLOCKS];
 
-        for (i, block) in self.storage.iter().enumerate() {
-            let props_id = cell_props[i];
-            let id = block.id() as usize;
-            // An id past the array falls through to the map rather than panicking.
-            let palette_index = if props_id == 0 && id < MAX_BLOCK_ID {
-                if plain_palette[id] == u16::MAX {
-                    plain_palette[id] = unique_blocks.len() as u16;
-                    unique_blocks.push((block, None));
+        match &self.storage {
+            BlockStorage::Paletted(storage) => {
+                let mut plain_palette = [u16::MAX; MAX_SECTION_PALETTE];
+                let mut props_palette: FnvHashMap<(u8, u16), u16> = FnvHashMap::default();
+
+                for (i, &slot) in storage.indices.iter().enumerate() {
+                    let props_id = cell_props[i];
+                    let block = storage.palette[slot as usize];
+                    let palette_index = if props_id == 0 {
+                        if plain_palette[slot as usize] == u16::MAX {
+                            plain_palette[slot as usize] = unique_blocks.len() as u16;
+                            unique_blocks.push((block, None));
+                        }
+                        plain_palette[slot as usize]
+                    } else {
+                        match props_palette.entry((slot, props_id)) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let idx = unique_blocks.len() as u16;
+                                e.insert(idx);
+                                unique_blocks.push((block, self.properties.get(&i).cloned()));
+                                idx
+                            }
+                        }
+                    };
+                    indices[i] = palette_index;
                 }
-                plain_palette[id]
-            } else {
-                match props_palette.entry((block, props_id)) {
-                    std::collections::hash_map::Entry::Occupied(e) => *e.get(),
-                    std::collections::hash_map::Entry::Vacant(e) => {
-                        let idx = unique_blocks.len() as u16;
-                        e.insert(idx);
-                        unique_blocks.push((block, self.properties.get(&i).cloned()));
-                        idx
-                    }
-                }
-            };
-            indices[i] = palette_index;
-        }
-
-        let mut bits_per_block = 4; // minimum allowed
-        while (1 << bits_per_block) < unique_blocks.len() {
-            bits_per_block += 1;
-        }
-
-        // Pack indices into long array
-        let mut data = vec![];
-        let mut cur: i64 = 0;
-        let mut cur_idx = 0;
-
-        for &p in &indices {
-            if cur_idx + bits_per_block > 64 {
-                data.push(cur);
-                cur = 0;
-                cur_idx = 0;
             }
+            storage => {
+                let mut plain_palette: FnvHashMap<Block, u16> = FnvHashMap::default();
+                let mut props_palette: FnvHashMap<(Block, u16), u16> = FnvHashMap::default();
 
-            cur |= (p as i64) << cur_idx;
-            cur_idx += bits_per_block;
+                for i in 0..SECTION_BLOCKS {
+                    let block = storage.get(i);
+                    let props_id = cell_props[i];
+                    let palette_index = if props_id == 0 {
+                        match plain_palette.entry(block) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let idx = unique_blocks.len() as u16;
+                                e.insert(idx);
+                                unique_blocks.push((block, None));
+                                idx
+                            }
+                        }
+                    } else {
+                        match props_palette.entry((block, props_id)) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let idx = unique_blocks.len() as u16;
+                                e.insert(idx);
+                                unique_blocks.push((block, self.properties.get(&i).cloned()));
+                                idx
+                            }
+                        }
+                    };
+                    indices[i] = palette_index;
+                }
+            }
         }
 
-        if cur_idx > 0 {
-            data.push(cur);
+        if unique_blocks.len() == 1 {
+            let (block, stored_props) = &unique_blocks[0];
+            return make_section(
+                y,
+                vec![make_palette_item(*block, stored_props.as_ref())],
+                None,
+            );
         }
 
+        let bits_per_block = bits_for_palette_len(unique_blocks.len());
         let palette = unique_blocks
             .iter()
-            .map(|(block, stored_props)| PaletteItem {
-                name: format!("{}:{}", block.namespace(), block.name()),
-                properties: stored_props
-                    .as_ref()
-                    .map(|p| (**p).clone())
-                    .or_else(|| block.properties()),
-            })
+            .map(|(block, stored_props)| make_palette_item(*block, stored_props.as_ref()))
             .collect();
 
-        Section {
-            block_states: Blockstates {
-                palette,
-                data: Some(LongArray::new(data)),
-                other: FnvHashMap::default(),
-            },
+        make_section(
             y,
-            other: FnvHashMap::default(),
-        }
+            palette,
+            Some(pack_palette_indices(&indices, bits_per_block)),
+        )
     }
 }
 
@@ -739,7 +1075,7 @@ impl WorldToModify {
             for sk in sec_keys {
                 sk.hash(&mut h);
                 // Hash logical block ids, not the raw storage, so a section
-                // is hashed identically whether it ended up Full or FullWide.
+                // is hashed identically whether it ended up paletted or direct.
                 let storage = &chunk.sections[sk].storage;
                 match storage {
                     BlockStorage::Uniform(b) => b.hash(&mut h),
@@ -1282,7 +1618,7 @@ impl WorldToModify {
             BlockStorage::Uniform(block) if *block == AIR => {}
             BlockStorage::Uniform(block) => {
                 let block = *block;
-                for idx in 0..4096usize {
+                for idx in 0..SECTION_BLOCKS {
                     if self_section.storage.get(idx) == AIR {
                         self_section.storage.set(idx, block);
                         if let Some(props) = other_section.properties.get(&idx) {
@@ -1349,7 +1685,7 @@ impl WorldToModify {
             BlockStorage::Uniform(block) => {
                 // Auth tile is uniformly one non-AIR block; overwrite everything.
                 let block = *block;
-                for idx in 0..4096usize {
+                for idx in 0..SECTION_BLOCKS {
                     self_section.storage.set(idx, block);
                     if let Some(props) = other_section.properties.get(&idx) {
                         self_section.properties.insert(idx, props.clone());
@@ -1391,7 +1727,7 @@ impl WorldToModify {
             BlockStorage::Uniform(block) if *block == AIR => {}
             BlockStorage::Uniform(block) => {
                 let block = *block;
-                for idx in 0..4096usize {
+                for idx in 0..SECTION_BLOCKS {
                     let local_z = ((idx % 256) / 16) as i32;
                     let local_x = (idx % 16) as i32;
                     let world_x = chunk_world_x + local_x;
@@ -1441,7 +1777,7 @@ impl WorldToModify {
     }
 
     /// Scan every section and collapse any that are entirely one block type
-    /// from `Full(Vec)` back to `Uniform(Block)`, freeing the 4 KiB allocation.
+    /// back to `Uniform(Block)`, freeing the mixed-section allocation.
     pub fn compact_sections(&mut self) {
         for region in self.regions.values_mut() {
             for chunk in region.chunks.values_mut() {
@@ -1465,7 +1801,7 @@ mod merge_reference {
             BlockStorage::Uniform(block) if *block == AIR => {}
             BlockStorage::Uniform(block) => {
                 let block = *block;
-                for idx in 0..4096usize {
+                for idx in 0..SECTION_BLOCKS {
                     if self_section.storage.get(idx) == AIR {
                         self_section.storage.set(idx, block);
                         if let Some(props) = other_section.properties.get(&idx) {
@@ -1502,7 +1838,7 @@ mod merge_reference {
             BlockStorage::Uniform(block) if *block == AIR => {}
             BlockStorage::Uniform(block) => {
                 let block = *block;
-                for idx in 0..4096usize {
+                for idx in 0..SECTION_BLOCKS {
                     self_section.storage.set(idx, block);
                     if let Some(props) = other_section.properties.get(&idx) {
                         self_section.properties.insert(idx, props.clone());
@@ -1529,6 +1865,30 @@ mod merge_reference {
 }
 
 #[cfg(test)]
+fn distinct_test_blocks(n: usize) -> Vec<Block> {
+    let mut blocks = Vec::with_capacity(n);
+    for id in 0..=u16::MAX {
+        let block = Block::from_raw_id(id);
+        if block.try_name().is_some() {
+            blocks.push(block);
+            if blocks.len() == n {
+                return blocks;
+            }
+        }
+    }
+    panic!("needed {n} distinct named blocks, found {}", blocks.len());
+}
+
+#[cfg(test)]
+fn distinct_non_air_test_blocks(n: usize) -> Vec<Block> {
+    distinct_test_blocks(n + 1)
+        .into_iter()
+        .filter(|&block| block != AIR)
+        .take(n)
+        .collect()
+}
+
+#[cfg(test)]
 mod to_section_tests {
     use super::*;
 
@@ -1538,7 +1898,7 @@ mod to_section_tests {
     fn reference_palette(section: &SectionToModify) -> ReferencePalette {
         let mut unique_blocks: Vec<(Block, Option<Arc<Value>>)> = Vec::new();
         let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
-        let mut indices = Vec::with_capacity(4096);
+        let mut indices = Vec::with_capacity(SECTION_BLOCKS);
         for (i, block) in section.storage.iter().enumerate() {
             let properties = section.properties.get(&i);
             let props_key = properties.map(|p| format!("{p:?}"));
@@ -1565,29 +1925,66 @@ mod to_section_tests {
             (rng >> 33) as usize
         };
         for _ in 0..400 {
-            s.storage.set(next() % 4096, STONE);
+            s.storage.set(next() % SECTION_BLOCKS, STONE);
         }
         for _ in 0..60 {
-            s.storage.set(next() % 4096, SMOOTH_STONE);
+            s.storage.set(next() % SECTION_BLOCKS, SMOOTH_STONE);
         }
         // One Arc reused across cells, plus separate Arcs with identical contents.
         let shared = Arc::new(Value::String("half=top".to_string()));
         for _ in 0..12 {
-            s.properties.insert(next() % 4096, Arc::clone(&shared));
+            s.properties
+                .insert(next() % SECTION_BLOCKS, Arc::clone(&shared));
         }
         for _ in 0..12 {
             s.properties.insert(
-                next() % 4096,
+                next() % SECTION_BLOCKS,
                 Arc::new(Value::String("half=top".to_string())),
             );
         }
         for k in 0..8 {
             s.properties.insert(
-                next() % 4096,
+                next() % SECTION_BLOCKS,
                 Arc::new(Value::String(format!("facing={k}"))),
             );
         }
         s
+    }
+
+    #[test]
+    fn no_props_path_keeps_first_seen_palette_order() {
+        let mut s = SectionToModify::default();
+        s.storage.set(5, STONE);
+        s.storage.set(0, COBBLESTONE);
+        s.storage.set(2, END_STONE);
+
+        let (want_blocks, want_indices) = reference_palette(&s);
+        let got = s.to_section(0);
+
+        assert_eq!(got.block_states.palette.len(), want_blocks.len());
+        for (i, (block, stored)) in want_blocks.iter().enumerate() {
+            let item = &got.block_states.palette[i];
+            assert_eq!(item.name, format!("{}:{}", block.namespace(), block.name()));
+            let want_props = stored
+                .as_ref()
+                .map(|p| (**p).clone())
+                .or_else(|| block.properties());
+            assert_eq!(item.properties, want_props);
+        }
+
+        let mut bits = 4;
+        while (1 << bits) < want_blocks.len() {
+            bits += 1;
+        }
+        let data = got.block_states.data.as_ref().expect("packed data");
+        let longs: &[i64] = data;
+        let per_long = 64 / bits;
+        for (i, want) in want_indices.iter().enumerate() {
+            let long = longs[i / per_long];
+            let shift = (i % per_long) * bits;
+            let got_idx = ((long >> shift) & ((1i64 << bits) - 1)) as usize;
+            assert_eq!(got_idx, *want, "cell {i}");
+        }
     }
 
     #[test]
@@ -1640,6 +2037,10 @@ mod to_section_tests {
 #[cfg(test)]
 mod merge_fast_path_tests {
     use super::*;
+    use once_cell::sync::Lazy;
+
+    static DIRECT_SECTION_BLOCKS: Lazy<Vec<Block>> =
+        Lazy::new(|| distinct_test_blocks(MAX_SECTION_PALETTE + 1));
 
     struct Lcg(u64);
 
@@ -1661,22 +2062,25 @@ mod merge_fast_path_tests {
             0 => {}
             1 => s.storage = BlockStorage::Uniform(STONE),
             2 => {
-                // Wide id forces FullWide.
-                s.storage
-                    .set(rng.below(4096) as usize, Block::from_raw_id(BYTE_ID_LIMIT));
-                for _ in 0..64 {
-                    s.storage.set(rng.below(4096) as usize, STONE);
+                for (i, &block) in DIRECT_SECTION_BLOCKS.iter().enumerate() {
+                    s.storage.set(i, block);
                 }
+                for _ in 0..64 {
+                    s.storage
+                        .set(rng.below(SECTION_BLOCKS as u64) as usize, STONE);
+                }
+                assert!(matches!(&s.storage, BlockStorage::Direct(_)));
             }
             _ => {
                 for _ in 0..(1 + rng.below(600)) {
-                    s.storage.set(rng.below(4096) as usize, STONE);
+                    s.storage
+                        .set(rng.below(SECTION_BLOCKS as u64) as usize, STONE);
                 }
             }
         }
         if with_props {
             for _ in 0..(1 + rng.below(6)) {
-                let idx = rng.below(4096) as usize;
+                let idx = rng.below(SECTION_BLOCKS as u64) as usize;
                 s.properties
                     .insert(idx, Arc::new(Value::String(format!("p{}", idx % 3))));
             }
@@ -1692,7 +2096,7 @@ mod merge_fast_path_tests {
     }
 
     fn same(a: &SectionToModify, b: &SectionToModify) -> bool {
-        if (0..4096).any(|i| a.storage.get(i) != b.storage.get(i)) {
+        if (0..SECTION_BLOCKS).any(|i| a.storage.get(i) != b.storage.get(i)) {
             return false;
         }
         if a.properties.len() != b.properties.len() {
@@ -1734,33 +2138,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wide_id_storage_round_trips() {
-        // Taken off the limit rather than named, so the test keeps testing the
-        // promotion path no matter which blocks currently sit in the wide range.
-        let wide = Block::from_raw_id(BYTE_ID_LIMIT);
-        let wider = Block::from_raw_id(BYTE_ID_LIMIT + 1);
-        assert!(STONE.id() < BYTE_ID_LIMIT);
-
-        // Writing a wide id upgrades Full(u8) -> FullWide and round-trips exactly.
+    fn high_id_blocks_stay_paletted() {
         let mut s = BlockStorage::Uniform(AIR);
         s.set(0, STONE);
-        assert!(matches!(s, BlockStorage::Full(_)));
-        s.set(1, wide);
-        assert!(matches!(s, BlockStorage::FullWide(_)));
+        assert!(matches!(s, BlockStorage::Paletted(_)));
+        s.set(1, END_STONE);
+        assert!(matches!(s, BlockStorage::Paletted(_)));
         assert_eq!(s.get(0), STONE);
-        assert_eq!(s.get(1), wide);
-        assert_eq!(s.iter().nth(1), Some(wide));
+        assert_eq!(s.get(1), END_STONE);
+        assert_eq!(s.iter().nth(1), Some(END_STONE));
 
-        // A wide block straight from Uniform, then a uniform fill, compacts back.
         let mut w = BlockStorage::Uniform(AIR);
-        w.set(0, wider);
-        assert!(matches!(w, BlockStorage::FullWide(_)));
-        for i in 0..4096 {
-            w.set(i, wider);
+        w.set(0, LEVER);
+        assert!(matches!(w, BlockStorage::Paletted(_)));
+        for i in 0..SECTION_BLOCKS {
+            w.set(i, LEVER);
         }
         w.try_compact();
         assert!(matches!(w, BlockStorage::Uniform(_)));
-        assert_eq!(w.get(7), wider);
+        assert_eq!(w.get(7), LEVER);
+    }
+
+    #[test]
+    fn palette_overflow_promotes_to_direct_and_compacts_back() {
+        let blocks = distinct_test_blocks(MAX_SECTION_PALETTE + 1);
+        let mut storage = BlockStorage::Uniform(AIR);
+        for (i, &block) in blocks.iter().enumerate() {
+            storage.set(i, block);
+        }
+        assert!(matches!(storage, BlockStorage::Direct(_)));
+
+        for i in 0..SECTION_BLOCKS {
+            storage.set(
+                i,
+                if i.is_multiple_of(2) {
+                    STONE
+                } else {
+                    COBBLESTONE
+                },
+            );
+        }
+        storage.try_compact();
+        assert!(matches!(storage, BlockStorage::Paletted(_)));
+        assert_eq!(storage.get(0), STONE);
+        assert_eq!(storage.get(1), COBBLESTONE);
+    }
+
+    #[test]
+    fn full_palette_can_swap_one_singleton_for_another() {
+        let blocks = distinct_non_air_test_blocks(MAX_SECTION_PALETTE);
+        let mut storage = BlockStorage::Uniform(AIR);
+        for (i, &block) in blocks.iter().take(MAX_SECTION_PALETTE - 1).enumerate() {
+            storage.set(i, block);
+        }
+        assert!(matches!(storage, BlockStorage::Paletted(_)));
+
+        storage.set(0, blocks[MAX_SECTION_PALETTE - 1]);
+        assert!(matches!(storage, BlockStorage::Paletted(_)));
+        assert_eq!(storage.get(0), blocks[MAX_SECTION_PALETTE - 1]);
     }
 
     #[test]
@@ -1812,11 +2247,11 @@ mod tests {
                 "section {y} should be Uniform(STONE)"
             );
         }
-        // Section -2 should be left alone (Full(Vec) with COBBLESTONE at y=-20)
+        // Section -2 should be left alone as a mixed section with COBBLESTONE at y=-20.
         let section = chunk.sections.get(&-2).unwrap();
         assert!(
-            matches!(&section.storage, BlockStorage::Full(_)),
-            "section -2 should still be Full(Vec) (had COBBLESTONE)"
+            matches!(&section.storage, BlockStorage::Paletted(_)),
+            "section -2 should still be paletted (had COBBLESTONE)"
         );
         // The pre-existing block must still be there
         let local_y = (-20i32 & 15) as u8;

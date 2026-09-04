@@ -481,8 +481,8 @@ impl Block {
             384 => "iron_door",
             _ => return None,
         })
-        // Note: ids are u16, but the split at BYTE_ID_LIMIT is load-bearing --
-        // see the comment above the constant list before picking an id.
+        // Block ids are u16 handles; keep the name and property tables in sync
+        // when assigning a new one.
     }
 
     pub fn properties(&self) -> Option<Value> {
@@ -867,33 +867,11 @@ pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
     stair
 }
 
-/// Ids below this are stored one byte per cell; a single id at or above it
-/// widens the whole 16x16x16 section to two bytes per cell.
-///
-/// See [`crate::world_editor::BlockStorage`], which keeps the narrow `Full`
-/// representation only while every id in the section stays under this limit.
-pub const BYTE_ID_LIMIT: u16 = 256;
-
 // Lazy static blocks
 //
-// The id space is split at BYTE_ID_LIMIT, and the split is deliberate:
-//
-//   0..255   blocks the world generator places in bulk -- terrain, land cover,
-//            climate, ores, roads, building shells and their fittings.
-//   256..    the long decorative tail: blocks that only arrive through a
-//            bundled .schem prop, a one-off landmark, or a rare interior
-//            detail, plus entries kept solely so a block name resolves.
-//
-// A section pays for the wide representation as soon as it holds one id from
-// the upper range, so a single common block sitting up there costs 4 KB in
-// every section it touches. Measured over seven sample areas, keeping the
-// split honest holds the wide-section rate near 0.5%; letting it drift took it
-// to 8.7% (up to 26% in dense cities), roughly 90 MB of avoidable peak RAM.
-//
-// When adding a block: give it a low id only if the generator can emit it
-// across many chunks. Props, landmark materials and one-off decorations belong
-// above the limit. `palette_split_is_sane` in the tests below guards the parts
-// of this that can be checked mechanically.
+// Section storage is palette-based, so the numeric id no longer changes a
+// section's RAM cost. When adding a block, assign any free u16 id and keep
+// the name/properties tables in sync.
 pub const AIR: Block = Block::new(1);
 pub const ANDESITE: Block = Block::new(2);
 pub const BIRCH_LEAVES: Block = Block::new(3);
@@ -917,9 +895,7 @@ pub const DEEPSLATE_BRICKS: Block = Block::new(20);
 pub const DIORITE: Block = Block::new(21);
 pub const DIRT: Block = Block::new(22);
 pub const END_STONE_BRICKS: Block = Block::new(23);
-/// The Moon's only ground block. Above `BYTE_ID_LIMIT` because the low range is
-/// full, and affordable there: only surface-straddling sections go wide, measured
-/// at 35 124 against 456 396 uniform on a 2126 km2 world. Earth never places it.
+/// The Moon's only ground block. Earth never places it.
 pub const END_STONE: Block = Block::new(367);
 pub const FARMLAND: Block = Block::new(24);
 pub const GLASS: Block = Block::new(25);
@@ -1286,10 +1262,10 @@ pub const STRIPPED_WARPED_STEM: Block = Block::new(212);
 pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(213);
 pub const ORANGE_CONCRETE: Block = Block::new(145);
 pub const REDSTONE_LAMP: Block = Block::new(218);
-// Reuses the retired open-trapdoor slot; sub-256 ids keep sections one byte per cell.
+// Reuses the retired open-trapdoor slot.
 pub const SUGAR_CANE: Block = Block::new(237);
 
-// Aeroplane livery and jetbridge blocks. Above BYTE_ID_LIMIT, they only arrive through props.
+// Aeroplane livery and jetbridge blocks.
 pub const PURPUR_BLOCK: Block = Block::new(368);
 pub const PURPUR_SLAB: Block = Block::new(369);
 pub const PURPUR_STAIRS: Block = Block::new(370);
@@ -1823,20 +1799,19 @@ mod material_tests {
         assert!(get_roof_block_for_material("notamaterial", &mut rng()).is_none());
     }
 
-    /// Blocks the generator can lay down across whole buildings and streets must
-    /// stay under [`BYTE_ID_LIMIT`]; one stray high id widens every section that
-    /// holds it from 4 KB to 8 KB. This covers the tables that can be enumerated
-    /// mechanically -- the material palettes, the window and floor pickers, and
-    /// the material -> stair/slab/wall derivations over the whole id space.
+    /// Common generator palettes must keep using the compact paletted section
+    /// representation regardless of the blocks' raw ids.
     #[test]
-    fn palette_split_is_sane() {
+    fn generator_palettes_do_not_force_direct_storage() {
         fn check(block: Block, source: &str) {
+            let mut storage = crate::world_editor::BlockStorage::Uniform(AIR);
+            storage.set(0, STONE);
+            storage.set(1, block);
             assert!(
-                block.id() < BYTE_ID_LIMIT,
-                "{source} can place {} (id {}), at or above BYTE_ID_LIMIT; \
-                 that widens every section it lands in",
+                !matches!(storage, crate::world_editor::BlockStorage::Direct(_)),
+                "{source} forced direct storage for {} (id {})",
                 block.name(),
-                block.id(),
+                block.id()
             );
         }
 
@@ -1871,11 +1846,9 @@ mod material_tests {
             check(block, "block_palette");
         }
 
-        // Every wall material derives its own stairs, slabs and wall pieces, so
-        // walk the whole low range rather than a sample of it. Materials that
-        // already sit in the wide range need no check: they widen the section
-        // themselves, so where their trim lands makes no difference.
-        for id in 0..BYTE_ID_LIMIT {
+        // Every named block can flow through the material -> stair/slab/wall
+        // derivations, so walk the whole assigned id space rather than a sample.
+        for id in 0..=u16::MAX {
             let material = Block::from_raw_id(id);
             if material.try_name().is_none() {
                 continue;
@@ -1918,7 +1891,7 @@ mod material_tests {
     }
 
     /// Every `building:material` / `roof:material` value the mappers recognise.
-    /// Keep in sync when adding an arm, so `palette_split_is_sane` keeps covering it.
+    /// Keep in sync when adding an arm, so the generator palette coverage stays complete.
     const WALL_MATERIALS: &[&str] = &[
         "brick",
         "bricks",
