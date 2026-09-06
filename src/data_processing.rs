@@ -14,7 +14,7 @@ use crate::osm_parser::{
 };
 use crate::progress::{
     emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
-    emit_show_in_folder,
+    emit_show_in_folder, MESSAGE_ONLY,
 };
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -37,6 +37,11 @@ pub struct GenerationOptions {
     pub spawn_point: Option<(i32, i32)>,
     pub luanti_game: Option<crate::luanti_block_map::LuantiGame>,
     pub ground_level: i32,
+    /// The Mapillary facade pipeline, started by the caller as soon as it knew
+    /// the bbox so that its downloads overlap the OSM, Overture and elevation
+    /// fetches. Idle unless the feature is on. Joined below, before the
+    /// buildings go up.
+    pub facades: crate::mapillary::FacadeJob,
 }
 
 /// Shoelace area of a way's projected ring, in blocks squared.
@@ -559,6 +564,67 @@ pub fn generate_world_with_options(
     editor.set_start_with_map(args.map_item);
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
+
+    // Facade textures: loaded and projected onto the buildings before any tile
+    // thread starts, so the wall builder only reads. A folder given on the
+    // command line is loaded as it always was, which is how the Python review
+    // loop works; otherwise the pipeline that was started as soon as the bbox
+    // was known is collected here, at the first point that cannot go on without
+    // it, and its export in the cache is what gets loaded.
+    let mapillary_start = args.benchmark.then(std::time::Instant::now);
+    let pipeline_export = options.facades.join();
+    if let Some(t) = mapillary_start {
+        eprintln!("[BENCHMARK] mapillary_join_ms={}", t.elapsed().as_millis());
+    }
+    // Both panel modes are Java entities carried by a resource pack. The blocks
+    // are ordinary blocks and work on every format, so the feature stays on and
+    // says what it dropped rather than dropping it in silence. The CLI refuses
+    // the combination outright in `validate_args`; this catches the GUI, which
+    // builds `Args` directly.
+    if world_format != WorldFormat::JavaAnvil
+        && (args.mapillary_facade_mode.places_paintings()
+            || args.mapillary_facade_mode.places_displays())
+        && args.mapillary_facades_wanted()
+    {
+        let msg = format!(
+            "Facade photo panels need a Java world; building the {} facade blocks only.",
+            if world_format == WorldFormat::LuantiWorld {
+                "Luanti"
+            } else {
+                "Bedrock"
+            }
+        );
+        eprintln!("{} {msg}", "Warning:".yellow().bold());
+        emit_gui_progress_update(MESSAGE_ONLY, &msg);
+    }
+    // A folder is the review loop's override, but an explicit "off" still means
+    // off: the GUI toggle sends Some(false), and a `--mapillary-facades-dir`
+    // given beside it used to build facades anyway. Some(None) from the CLI
+    // keeps working. The GUI has no folder of its own any more, so on that side
+    // this is always the pipeline's own export.
+    let folder = if args.mapillary_facades == Some(false) {
+        None
+    } else {
+        args.mapillary_facades_dir
+            .as_deref()
+            .or(pipeline_export.as_deref())
+    };
+    match folder {
+        Some(dir) => crate::mapillary::facades::install(dir, &elements, args, &xzbbox),
+        None => crate::mapillary::facades::clear(),
+    }
+    // Panel candidates collect in a process-wide registry while the buildings
+    // are built, are hung before the world is saved and become packs after it;
+    // a run without them must not inherit the previous world's. The two panel
+    // modes are alternatives, so at most one registry is ever enabled.
+    crate::mapillary::paintings::reset(
+        crate::mapillary::facades::paintings_enabled(),
+        args.mapillary_paintings_px,
+    );
+    crate::mapillary::displays::reset(
+        crate::mapillary::facades::displays_enabled(),
+        args.mapillary_paintings_px,
+    );
 
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
     // threads only read the registry. Java only; other formats keep banner fallbacks.
@@ -1116,6 +1182,14 @@ pub fn generate_world_with_options(
                                         hash_acc = hash_acc
                                             .wrapping_add(editor.region_content_hash(d.0, d.1));
                                     }
+                                    // Facade panels check the region's final blocks
+                                    // and must be in before it leaves memory.
+                                    crate::mapillary::paintings::flush_region(
+                                        &mut editor,
+                                        d.0,
+                                        d.1,
+                                    );
+                                    crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
                                     if let Some(w) = flush_worker.as_ref() {
                                         editor.flush_region_via(w, d.0, d.1)?;
                                     }
@@ -1371,6 +1445,8 @@ pub fn generate_world_with_options(
             if hash_check {
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
+            crate::mapillary::paintings::flush_region(&mut editor, rx, rz);
+            crate::mapillary::displays::flush_region(&mut editor, rx, rz);
             if let Some(w) = flush_worker.as_ref() {
                 editor.flush_region_via(w, rx, rz)?;
             }
@@ -1417,6 +1493,19 @@ pub fn generate_world_with_options(
         }
     }
 
+    // Facade panels: every candidate recorded while the walls went up is
+    // checked against the finished blocks and hung now, before the save. Under
+    // eviction most were settled as their regions were flushed; this hangs the
+    // rest and reports the outcome.
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(report) = crate::mapillary::paintings::finalize(&mut editor) {
+            println!("{report}");
+        }
+        if let Some(report) = crate::mapillary::displays::finalize(&mut editor) {
+            println!("{report}");
+        }
+    }
+
     // Save world
     if let Err(e) = editor.save() {
         return Err(e.to_string());
@@ -1455,6 +1544,22 @@ pub fn generate_world_with_options(
             eprintln!("[BENCHMARK] signage_maps_ms={}", t.elapsed().as_millis());
         }
         println!("{}", ctx.summary(args.debug));
+    }
+
+    // Facade panels: the paintings need their variants as a data pack and
+    // their textures as the world's resource pack; the display panels are a
+    // resource pack alone. The world folder and its level.dat exist by now.
+    if world_format == WorldFormat::JavaAnvil {
+        match crate::mapillary::paintings::write_packs(&output_path) {
+            Ok(Some(report)) => println!("{report}"),
+            Ok(None) => {}
+            Err(e) => eprintln!("Warning: Failed to write facade paintings: {e}"),
+        }
+        match crate::mapillary::displays::write_packs(&output_path) {
+            Ok(Some(report)) => println!("{report}"),
+            Ok(None) => {}
+            Err(e) => eprintln!("Warning: Failed to write facade panels: {e}"),
+        }
     }
 
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.

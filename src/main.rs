@@ -31,6 +31,7 @@ mod map_item_palette;
 mod map_preview;
 mod map_renderer;
 mod map_transformation;
+mod mapillary;
 mod models_3d;
 mod net;
 mod ore_generation;
@@ -290,7 +291,11 @@ fn run_cli() {
     };
 
     // Build the generation output path and level name
-    let (generation_path, level_name) = if args.bedrock {
+    let (generation_path, level_name) = if args.mapillary_probe {
+        // The probe reports coverage and exits, so it must not allocate (and
+        // leave behind) an empty world directory on the way there.
+        (PathBuf::new(), None)
+    } else if args.bedrock {
         // Bedrock: generate .mcworld file in user-specified path or Desktop
         let output_dir = args
             .path
@@ -367,6 +372,17 @@ fn run_cli() {
         println!(
             "{} Terrain-only mode: skipping OpenStreetMap and Overture objects",
             "[1/7]".bold()
+        );
+    }
+
+    // The Mapillary facade pipeline needs only the bbox too, and its downloads
+    // are the longest thing in a run that uses it, so it starts here and is
+    // collected inside `generate_world_with_options`, just before the buildings.
+    let facade_job = mapillary::FacadeJob::start(&args, effective_bbox);
+    if facade_job.is_running() {
+        println!(
+            "{} Fetching Mapillary street-level imagery...",
+            "  [+]".bold()
         );
     }
 
@@ -591,6 +607,34 @@ fn run_cli() {
         None
     };
 
+    // Probe mode stops here: it exists to answer "is this area covered?" before
+    // anyone waits on a full generation.
+    if args.mapillary_probe {
+        let Some(token) = args.mapillary_token.as_deref().filter(|t| !t.is_empty()) else {
+            eprintln!(
+                "{} --mapillary-probe needs a token; pass --mapillary-token or set MAPILLARY_TOKEN.",
+                "Error:".red().bold()
+            );
+            std::process::exit(1);
+        };
+        let debug_dir = args.mapillary_debug_dir.clone();
+        match mapillary::sample_area(
+            &parsed_elements,
+            &args,
+            effective_bbox,
+            token,
+            debug_dir.is_some(),
+        )
+        .and_then(|report| mapillary::report(&report, debug_dir.as_deref()))
+        {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("{} Mapillary probe failed: {e}", "Error:".red().bold());
+                std::process::exit(1);
+            }
+        }
+    }
+
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
@@ -598,6 +642,7 @@ fn run_cli() {
         spawn_point,
         luanti_game,
         ground_level: args.ground_level,
+        facades: facade_job,
     };
 
     // Generate world
