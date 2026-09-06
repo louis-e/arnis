@@ -67,6 +67,7 @@
   "rotation_angle": "Angle de Rotation",
   "settings_section_generation": "Génération",
   "settings_section_world": "Monde",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Carte et saisie",
   "settings_section_application": "Application",
   "clear_tile_cache": "Vider le cache de tuiles",
@@ -89,8 +90,17 @@
   "signage_none": "Aucune",
   "signage_basic": "Basique",
   "signage_full": "Complète",
+  "mapillary_token": "Jeton Mapillary",
+  "mapillary_facades": "Façades des bâtiments",
   "reset_to_default": "Réinitialiser à la valeur par défaut",
   "reset_all_settings": "Réinitialiser tous les paramètres",
   "reset_all_settings_button": "Réinitialiser",
-  "reset_all_settings_confirm": "Confirmer ?"
+  "reset_all_settings_confirm": "Confirmer ?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Tableaux",
+  "facade_mode_paintings_v2": "Tableaux v2",
+  "facade_mode_java_only": "Les panneaux photo sont des entités Java ; sur Bedrock et Luanti, seules les façades en blocs sont construites."
 }

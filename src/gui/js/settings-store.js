@@ -34,6 +34,9 @@ const SETTINGS = [
   { id: 'world-time-slider', kind: 'number', store: OWN },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
+  // The token and the mode beside it keep their own keys, set up in
+  // initSettings(); only the on/off switch belongs to this blob.
+  { id: 'facades-toggle', kind: 'checkbox', store: OWN },
   { id: 'disable-height-limit-toggle', kind: 'checkbox', store: OWN },
   { id: 'aws-only-elevation-toggle', kind: 'checkbox', store: OWN },
   { id: 'bake-lighting-toggle', kind: 'checkbox', store: OWN },

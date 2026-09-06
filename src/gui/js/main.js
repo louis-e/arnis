@@ -55,6 +55,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
+  initPrecomputeFacadesButton();
   initTooltips();
   handleBboxInput();
   const localization = await getLocalization();
@@ -158,13 +159,23 @@ async function applyLocalization(localization) {
     "span[data-localize='world_time']": "world_time",
     "span[data-localize='map_item']": "map_item",
     "span[data-localize='signage']": "signage",
+    "span[data-localize='mapillary_token']": "mapillary_token",
+    "span[data-localize='mapillary_facades']": "mapillary_facades",
+    "span[data-localize='facade_precompute']": "facade_precompute",
+    "span[data-localize='facade_mode']": "facade_mode",
+    "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
+    "button[data-localize='facade_mode_paintings']": "facade_mode_paintings",
+    "button[data-localize='facade_mode_paintings_v2']": "facade_mode_paintings_v2",
+    "div[data-localize='facade_mode_java_only']": "facade_mode_java_only",
     "button[data-localize='signage_none']": "signage_none",
     "button[data-localize='signage_basic']": "signage_basic",
     "button[data-localize='signage_full']": "signage_full",
     "div[data-localize='settings_section_generation']": "settings_section_generation",
     "div[data-localize='settings_section_world']": "settings_section_world",
+    "div[data-localize='settings_section_mapillary']": "settings_section_mapillary",
     "div[data-localize='settings_section_map']": "settings_section_map",
     "div[data-localize='settings_section_application']": "settings_section_application",
+    "button[data-localize='facade_precompute_button']": "facade_precompute_button",
     "span[data-localize='clear_tile_cache']": "clear_tile_cache",
     "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
     // Row label only; settings-store.js owns the button text.
@@ -200,6 +211,10 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+
+  // The line above has just written the idle label over a button that may be
+  // saying Cancel, so put the running state back.
+  refreshPrecomputeButton();
 }
 
 // Function to initialize the footer with the current year and version
@@ -431,6 +446,57 @@ function isValidTileTemplate(url) {
 
 function getCustomTileUrl() {
   return (localStorage.getItem('customTileUrl') || '').trim();
+}
+
+function getMapillaryToken() {
+  return (localStorage.getItem('mapillaryToken') || '').trim();
+}
+
+function getFacadeMode() {
+  // Only the modes that exist; a value left behind by an older build falls
+  // back to blocks, the same way the backend reads it.
+  const stored = localStorage.getItem('facadeMode');
+  return ['paintings', 'paintings-v2'].includes(stored) ? stored : 'blocks';
+}
+
+// Both panel modes hang Java entities carried by a resource pack, so no other
+// world format can show them. The stored choice is left alone so that going
+// back to Java restores it; only what the backend is asked for changes.
+function getEffectiveFacadeMode() {
+  const mode = getFacadeMode();
+  if (mode !== 'blocks' && selectedWorldFormat !== 'java') return 'blocks';
+  return mode;
+}
+
+function getFacadesEnabled() {
+  const toggle = document.getElementById('facades-toggle');
+  return toggle ? toggle.checked : false;
+}
+
+// The facade rows react to the world format (panels are Java only), the on/off
+// switch and the token. A row that cannot do anything is greyed out rather than
+// left looking live, and the Precompute button reads the same facts.
+function refreshFacadeRows() {
+  const group = document.getElementById('facade-mode-group');
+  const notice = document.getElementById('facade-java-only-notice');
+  if (!group) return;
+
+  const java = selectedWorldFormat === 'java';
+  const effective = getEffectiveFacadeMode();
+  group.querySelectorAll('.segment').forEach((btn) => {
+    const panels = btn.dataset.facadeMode !== 'blocks';
+    btn.disabled = panels && !java;
+    btn.classList.toggle('active', btn.dataset.facadeMode === effective);
+  });
+  if (notice) notice.style.display = java ? 'none' : '';
+
+  // Nothing can be applied without both the switch and a token, so the mode
+  // row is greyed until they are both there.
+  const active = getFacadesEnabled() && getMapillaryToken();
+  const row = group.closest('.settings-row');
+  if (row) row.classList.toggle('settings-row-unavailable', !active);
+
+  refreshPrecomputeButton();
 }
 
 // The URL field is only meaningful for the Custom theme, so it is hidden
@@ -783,14 +849,21 @@ function setupProgressListener() {
         window.arnisPreview3D?.setGenerationRunning(false);
         setWorldNameLabel("");
         resetEta();
+        refreshPrecomputeButton();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
         window.arnisPreview3D?.setGenerationRunning(false);
         resetEta();
+        // A generation just built facades into the same cache, so the preview
+        // and the Precompute button both have something new to say.
+        window.arnisPreview3D?.refreshFacades();
+        refreshPrecomputeButton();
       } else {
         progressInfo.style.color = "#ececec";
       }
+      // The facade pipeline reports its stages here whichever job is driving it.
+      notePrecomputeStage(message);
     }
   });
 
@@ -887,6 +960,10 @@ function initSettings() {
     settingsModal.style.display = "flex";
     settingsModal.style.justifyContent = "center";
     settingsModal.style.alignItems = "center";
+    // The caches grow with every generation, so the number the panel shows
+    // has to be read when the panel opens; measuring it once at startup left
+    // it stale for the whole session.
+    refreshCacheSize();
   }
 
   // Close settings modal
@@ -1089,6 +1166,40 @@ function initSettings() {
   const customTileInput = document.getElementById("custom-tile-url");
   customTileInput.value = getCustomTileUrl();
 
+  // Mapillary token. Kept in localStorage like the save paths so it survives a
+  // restart; it is a per-user API credential, so it is never written to a log
+  // or sent anywhere except the backend that fetches with it.
+  const mapillaryTokenInput = document.getElementById("mapillary-token");
+  mapillaryTokenInput.value = getMapillaryToken();
+  mapillaryTokenInput.addEventListener("change", () => {
+    const raw = mapillaryTokenInput.value.trim();
+    if (raw) {
+      localStorage.setItem('mapillaryToken', raw);
+    } else {
+      localStorage.removeItem('mapillaryToken');
+    }
+    refreshFacadeRows();
+  });
+
+  // The switch that turns the download on. Persisted by settings-store.js with
+  // the rest of the World section, so only the greying is handled here.
+  const facadesToggle = document.getElementById("facades-toggle");
+  if (facadesToggle) facadesToggle.addEventListener("change", refreshFacadeRows);
+
+  // An older build kept a facade export folder here. The field is gone, the
+  // preview reads the cache and generation fetches into it, so the leftover
+  // key means nothing and is dropped rather than left to look meaningful.
+  localStorage.removeItem('facadeDir');
+
+  const facadeModeGroup = document.getElementById("facade-mode-group");
+  facadeModeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      localStorage.setItem('facadeMode', btn.dataset.facadeMode);
+      refreshFacadeRows();
+    });
+  });
+  refreshFacadeRows();
+
   function applyCustomTileUrl() {
     const raw = customTileInput.value.trim();
 
@@ -1166,6 +1277,35 @@ function initSettings() {
       }
     } catch (e) {
       console.warn("Failed to load 3D model attributions:", e);
+    }
+
+    // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
+    // built from street photographs has to name the photographers. One line per
+    // image, in the shape Mapillary's own guidance asks for.
+    try {
+      const shots = await invoke("gui_get_mapillary_attributions");
+      if (Array.isArray(shots) && shots.length > 0) {
+        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+        const link = (url, text) =>
+          `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+        // A record that carries the image id but not the uploader name has no
+        // profile to link to, so the name is shown as plain text instead.
+        const items = shots.map((s) => {
+          const by = s.profile_url ? link(s.profile_url, s.username) : esc(s.username);
+          return `<li>${link(s.image_url, s.title)} by ${by}, licensed under CC-BY-SA</li>`;
+        }).join("");
+        const unnamed = shots.filter((s) => !s.profile_url).length;
+        const note = unnamed > 0
+          ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
+          : "";
+        const block =
+          `<p><b>Building facades (Mapillary):</b></p>` +
+          `<p style="font-size: 0.9em;">Facade textures and colours were measured from these street-level photographs, licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>. Share-alike applies to anything you publish that carries them.${note}</p>` +
+          `<ul style="padding-left: 20px; font-size: 0.9em;">${items}</ul>`;
+        licenseContent.insertAdjacentHTML("beforeend", block);
+      }
+    } catch (e) {
+      console.warn("Failed to load Mapillary attributions:", e);
     }
   }
 
@@ -1335,6 +1475,11 @@ function updateFormatToggleUI(format) {
     if (luantiBtn) luantiBtn.classList.add('format-active');
     worldPath = "";
   }
+
+  // The facade panels are Java entities, so the mode control changes with the
+  // format. Called from here so a format picked before the settings modal is
+  // ever opened still leaves it consistent.
+  refreshFacadeRows();
 }
 
 // Expose to window for onclick handlers
@@ -1393,11 +1538,30 @@ function initTelemetryConsent() {
 // rows, no extra status label. The button stays disabled while the
 // call is in flight so repeated clicks can't fire multiple concurrent
 // wipes (Rust is idempotent, but the UI would look confused).
+// How much disk the caches hold, shown next to the Clear button so the user
+// can see whether clearing is worth doing. Refreshed when the settings panel
+// opens and again after a wipe, never on a timer: walking the trees is cheap
+// but not free.
+async function refreshCacheSize() {
+  const label = document.getElementById('cache-size');
+  if (!label) {
+    return;
+  }
+  try {
+    label.textContent = await invoke('gui_get_cache_size');
+  } catch (error) {
+    console.warn('Cache size unavailable:', error);
+    label.textContent = '';
+  }
+}
+window.refreshCacheSize = refreshCacheSize;
+
 function initClearCacheButton() {
   const button = document.getElementById('clear-cache-button');
   if (!button) {
     return;
   }
+  refreshCacheSize();
 
   // How long the success/error flash stays applied before reverting to
   // the default outline. Long enough to register as confirmation, short
@@ -1428,6 +1592,7 @@ function initClearCacheButton() {
     try {
       await invoke('gui_clear_tile_caches');
       flash('is-success');
+      refreshCacheSize();
     } catch (error) {
       // The Rust side returns Err(String) for partial failures (files
       // still locked). The user sees the red flash; the full text goes
@@ -1436,6 +1601,141 @@ function initClearCacheButton() {
       flash('is-error');
     } finally {
       button.disabled = false;
+    }
+  });
+}
+
+/* Precompute: fills the Mapillary facade cache for the selected area, so the
+   generation that follows does no image work and the 3D preview can show the
+   walls. The backend refuses a second precompute and one started beside a
+   generation; the button state here is that same rule said early, so pressing
+   it is never the way to find out it cannot run. */
+
+let precomputeRunning = false;
+let precomputeStartedAt = 0;
+let precomputeTicker = null;
+// The pipeline reports its stages on the shared progress channel. Nothing else
+// is emitting while a precompute holds the process, so those lines are mirrored
+// into the settings row instead of being left in a status bar the user is not
+// looking at, under a progress bar that is not moving.
+let precomputeStage = "";
+
+function setPrecomputeStatus(text, kind, detail) {
+  const el = document.getElementById('facade-precompute-status');
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.display = text ? "" : "none";
+  el.classList.toggle('is-success', kind === 'success');
+  el.classList.toggle('is-error', kind === 'error');
+  if (detail) {
+    el.title = detail;
+  } else {
+    el.removeAttribute('title');
+  }
+}
+
+// Why the button cannot be pressed, or "" when it can. The wording is what the
+// button's tooltip says, so a disabled button always explains itself.
+function precomputeBlockedReason() {
+  if (!getMapillaryToken()) return "Add a Mapillary token above first.";
+  if (!selectedBBox || selectedBBox === "0.000000 0.000000 0.000000 0.000000") {
+    return "Select an area on the map first.";
+  }
+  if (!generationButtonEnabled) return "A generation is running.";
+  return "";
+}
+
+function refreshPrecomputeButton() {
+  const button = document.getElementById('precompute-facades-button');
+  if (!button) return;
+
+  if (precomputeRunning) {
+    // Never disabled while running: this is the only way to stop it.
+    button.disabled = false;
+    button.textContent = "Cancel";
+    button.title = "Stops at the end of the stage it is in. Walls already built stay cached.";
+    return;
+  }
+
+  const localized = window.localization || {};
+  button.textContent = localized['facade_precompute_button'] || "Precompute";
+  const blocked = precomputeBlockedReason();
+  button.disabled = !!blocked;
+  button.title = blocked;
+}
+
+// mm:ss since the run started, for a job whose stages are minutes long.
+function precomputeElapsed() {
+  const seconds = Math.max(0, Math.round((Date.now() - precomputeStartedAt) / 1000));
+  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, '0');
+}
+
+function showPrecomputeProgress() {
+  if (!precomputeRunning) return;
+  setPrecomputeStatus((precomputeStage || "Working...") + " (" + precomputeElapsed() + ")");
+}
+
+// Called by the progress listener for every line the facade pipeline emits, so
+// the row says which stage is running rather than only that something is.
+function notePrecomputeStage(message) {
+  if (!precomputeRunning || !message.startsWith("Mapillary facades:")) return;
+  precomputeStage = message.slice("Mapillary facades:".length).trim();
+  showPrecomputeProgress();
+}
+
+function initPrecomputeFacadesButton() {
+  const button = document.getElementById('precompute-facades-button');
+  if (!button) return;
+  refreshPrecomputeButton();
+
+  button.addEventListener('click', async () => {
+    if (precomputeRunning) {
+      // The pipeline checks between stages, so this is a request, not a stop.
+      precomputeStage = "Cancelling after this stage";
+      showPrecomputeProgress();
+      try {
+        await invoke('gui_cancel_precompute');
+      } catch (error) {
+        console.warn('Cancel precompute failed:', error);
+      }
+      return;
+    }
+
+    const blocked = precomputeBlockedReason();
+    if (blocked) {
+      setPrecomputeStatus(blocked, 'error');
+      return;
+    }
+
+    precomputeRunning = true;
+    precomputeStartedAt = Date.now();
+    precomputeStage = "Starting";
+    refreshPrecomputeButton();
+    showPrecomputeProgress();
+    // One second, so a run that spends twenty minutes in one stage still shows
+    // something moving and cannot be mistaken for a hang.
+    precomputeTicker = setInterval(showPrecomputeProgress, 1000);
+
+    try {
+      const outcome = await invoke('gui_precompute_facades', {
+        bboxText: selectedBBox,
+        mapillaryToken: getMapillaryToken(),
+      });
+      // Green only when there are facades here now. A cancelled run and an
+      // area with nothing to find both come back plain: neither is a failure
+      // and neither left a wall behind.
+      setPrecomputeStatus(outcome.summary, outcome.built ? 'success' : '', outcome.detail);
+      if (outcome.built) window.arnisPreview3D?.refreshFacades();
+      refreshCacheSize();
+    } catch (error) {
+      // Every refusal from the backend is a sentence meant to be read.
+      setPrecomputeStatus(String(error), 'error');
+      refreshCacheSize();
+    } finally {
+      clearInterval(precomputeTicker);
+      precomputeTicker = null;
+      precomputeRunning = false;
+      refreshPrecomputeButton();
     }
   });
 }
@@ -1779,6 +2079,9 @@ function handleBboxInput() {
       }
       setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
+    // The Precompute button next to this field turns on the selection, and the
+    // field is inside the same panel, so it has to follow every keystroke.
+    refreshPrecomputeButton();
   });
 }
 
@@ -1908,6 +2211,7 @@ function displayBboxInfoText(bboxText) {
       selectedBBox = "";
     }
     window.arnisPreview3D?.onBboxCleared();
+    refreshPrecomputeButton();
     return;
   }
 
@@ -1936,6 +2240,7 @@ function displayBboxInfoText(bboxText) {
 
   // Hide any rendered mini 3D preview if the selection actually changed
   window.arnisPreview3D?.onBboxChanged(selectedBBox);
+  refreshPrecomputeButton();
 }
 
 let worldPath = "";
@@ -1989,10 +2294,23 @@ async function startGeneration() {
   if (generationButtonEnabled === false) {
     return;
   }
+  // The backend refuses this too, but only after gui_create_world has already
+  // made an empty world for a run that is not going to happen. Said here, the
+  // world is never created and the user is told where the machine has gone.
+  if (precomputeRunning) {
+    const info = document.getElementById('progress-info');
+    if (info) {
+      info.textContent = "Waiting for the Mapillary precompute. Cancel it in Settings, or let it finish.";
+      info.style.color = "#fecc44";
+    }
+    return;
+  }
   // Claim the guard before the first await. gui_create_world and gui_start_generation are
   // both awaited round-trips, so leaving the claim until after them lets a second click
   // through and starts a parallel run against the same process-global world floor.
   generationButtonEnabled = false;
+  // The two jobs exclude each other in the backend, so grey the other one out.
+  refreshPrecomputeButton();
   let started = false;
 
   try {
@@ -2107,6 +2425,9 @@ async function startGeneration() {
         worldTime: worldTime,
         mapItem: mapItem,
         signage: signage,
+        mapillaryToken: getMapillaryToken(),
+        facadesEnabled: getFacadesEnabled(),
+        facadeMode: getEffectiveFacadeMode(),
         celestialBodyName: selectedCelestialBody
     });
 
@@ -2124,6 +2445,7 @@ async function startGeneration() {
       generationButtonEnabled = true;
       window.arnisPreview3D?.setGenerationRunning(false);
     }
+    refreshPrecomputeButton();
   }
 }
 

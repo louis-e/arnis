@@ -67,6 +67,7 @@
   "rotation_angle": "Ángulo de Rotación",
   "settings_section_generation": "Generación",
   "settings_section_world": "Mundo",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Mapa y entrada",
   "settings_section_application": "Aplicación",
   "clear_tile_cache": "Borrar caché de tiles",
@@ -89,8 +90,17 @@
   "signage_none": "Ninguna",
   "signage_basic": "Básica",
   "signage_full": "Completa",
+  "mapillary_token": "Token de Mapillary",
+  "mapillary_facades": "Fachadas de edificios",
   "reset_to_default": "Restablecer al valor predeterminado",
   "reset_all_settings": "Restablecer todos los ajustes",
   "reset_all_settings_button": "Restablecer",
-  "reset_all_settings_confirm": "¿Confirmar?"
+  "reset_all_settings_confirm": "¿Confirmar?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Pinturas",
+  "facade_mode_paintings_v2": "Pinturas v2",
+  "facade_mode_java_only": "Los paneles fotográficos son entidades de Java, así que en Bedrock y Luanti solo se construyen las fachadas de bloques."
 }

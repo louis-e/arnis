@@ -67,6 +67,7 @@
   "rotation_angle": "زاوية الدوران",
   "settings_section_generation": "التوليد",
   "settings_section_world": "العالم",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "الخريطة والإدخال",
   "settings_section_application": "التطبيق",
   "clear_tile_cache": "مسح ذاكرة البلاطات",
@@ -89,8 +90,17 @@
   "signage_none": "بدون",
   "signage_basic": "أساسي",
   "signage_full": "كامل",
+  "mapillary_token": "رمز Mapillary",
+  "mapillary_facades": "واجهات المباني",
   "reset_to_default": "إعادة التعيين إلى الوضع الافتراضي",
   "reset_all_settings": "إعادة تعيين جميع الإعدادات",
   "reset_all_settings_button": "إعادة تعيين",
-  "reset_all_settings_confirm": "تأكيد؟"
+  "reset_all_settings_confirm": "تأكيد؟",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "لوحات",
+  "facade_mode_paintings_v2": "لوحات v2",
+  "facade_mode_java_only": "لوحات الصور كيانات خاصة بـ Java، لذا لا تُبنى سوى واجهات الكتل في Bedrock وLuanti."
 }

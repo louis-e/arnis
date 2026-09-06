@@ -67,6 +67,7 @@
   "rotation_angle": "回転角度",
   "settings_section_generation": "生成",
   "settings_section_world": "ワールド",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "マップと入力",
   "settings_section_application": "アプリケーション",
   "clear_tile_cache": "タイルキャッシュをクリア",
@@ -89,8 +90,17 @@
   "signage_none": "なし",
   "signage_basic": "基本",
   "signage_full": "フル",
+  "mapillary_token": "Mapillary トークン",
+  "mapillary_facades": "建物のファサード",
   "reset_to_default": "デフォルトに戻す",
   "reset_all_settings": "すべての設定をリセット",
   "reset_all_settings_button": "リセット",
-  "reset_all_settings_confirm": "確定?"
+  "reset_all_settings_confirm": "確定?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "絵画",
+  "facade_mode_paintings_v2": "絵画 v2",
+  "facade_mode_java_only": "写真パネルは Java 版のエンティティのため、Bedrock と Luanti ではブロックのファサードのみを生成します。"
 }

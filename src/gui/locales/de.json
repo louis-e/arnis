@@ -67,6 +67,7 @@
   "rotation_angle": "Rotationswinkel",
   "settings_section_generation": "Generierung",
   "settings_section_world": "Welt",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Karte & Eingabe",
   "settings_section_application": "Anwendung",
   "clear_tile_cache": "Tile-Cache leeren",
@@ -89,8 +90,17 @@
   "signage_none": "Keine",
   "signage_basic": "Standard",
   "signage_full": "Voll",
+  "mapillary_token": "Mapillary-Token",
+  "mapillary_facades": "Gebäudefassaden",
   "reset_to_default": "Auf Standard zurücksetzen",
   "reset_all_settings": "Alle Einstellungen zurücksetzen",
   "reset_all_settings_button": "Zurücksetzen",
-  "reset_all_settings_confirm": "Bestätigen?"
+  "reset_all_settings_confirm": "Bestätigen?",
+  "facade_precompute": "Bereich vorberechnen",
+  "facade_precompute_button": "Vorberechnen",
+  "facade_mode": "Fassadenmodus",
+  "facade_mode_blocks": "Blöcke",
+  "facade_mode_paintings": "Gemälde",
+  "facade_mode_paintings_v2": "Gemälde v2",
+  "facade_mode_java_only": "Fotopaneele sind Java-Entities, daher werden auf Bedrock und Luanti nur die Blockfassaden gebaut."
 }

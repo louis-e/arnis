@@ -67,6 +67,7 @@
   "rotation_angle": "Кут Обертання",
   "settings_section_generation": "Генерація",
   "settings_section_world": "Світ",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Карта та введення",
   "settings_section_application": "Застосунок",
   "clear_tile_cache": "Очистити кеш плиток",
@@ -89,8 +90,17 @@
   "signage_none": "Немає",
   "signage_basic": "Базові",
   "signage_full": "Усі",
+  "mapillary_token": "Токен Mapillary",
+  "mapillary_facades": "Фасади будівель",
   "reset_to_default": "Скинути до типового значення",
   "reset_all_settings": "Скинути всі налаштування",
   "reset_all_settings_button": "Скинути",
-  "reset_all_settings_confirm": "Підтвердити?"
+  "reset_all_settings_confirm": "Підтвердити?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Картини",
+  "facade_mode_paintings_v2": "Картини v2",
+  "facade_mode_java_only": "Фотопанелі є сутностями Java, тому в Bedrock і Luanti будуються лише блокові фасади."
 }

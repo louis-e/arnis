@@ -758,6 +758,16 @@ input[type="range"] {
   text-align: left;
 }
 
+/* A notice that reports an outcome rather than warning about one. Same green
+   and warm red the cache button flashes, so the panel speaks one language. */
+.settings-notice.is-success {
+  border-left-color: #4caf50;
+}
+
+.settings-notice.is-error {
+  border-left-color: #cf6679;
+}
+
 .settings-row {
   display: flex;
   justify-content: space-between;
@@ -878,6 +888,7 @@ input[type="range"] {
 }
 
 .settings-control input[type="text"],
+.settings-control input[type="password"],
 .settings-control input[type="number"] {
   width: 100%;
   max-width: 180px;
@@ -938,6 +949,16 @@ input[type="range"] {
   font-weight: 600;
 }
 
+/* One segment the selected world format cannot show, next to ones it can. */
+.segmented-control .segment:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.segmented-control .segment:disabled:hover {
+  background: none;
+}
+
 /* Five segments do not fit beside a label at the normal size. */
 .segmented-control.is-compact .segment {
   padding: 5px 7px;
@@ -989,11 +1010,21 @@ input[type="range"] {
   fill: #fecc44;
 }
 
+/* How much disk the caches hold, sitting just left of the Clear button. Muted
+   so it reads as information about the button rather than a second control. */
+.cache-size {
+  /* the panel's secondary text colour; #9aa4b2 was too dim to read here */
+  color: #d6d6d6;
+  font-size: 0.8em;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
 /* Clear-cache button: compact golden-outline button that sits in the
    settings row's standard right-aligned `.settings-control` slot, no
    extra wrapper element. Success/error feedback is expressed by a
    brief class-driven background flash rather than a separate status
-   label — keeps the row visually consistent with the checkbox and
+   label; keeps the row visually consistent with the checkbox and
    slider rows next to it. */
 .clear-cache-button,
 .settings-reset-button {

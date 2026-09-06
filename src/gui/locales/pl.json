@@ -67,6 +67,7 @@
   "rotation_angle": "Kąt Obrotu",
   "settings_section_generation": "Generowanie",
   "settings_section_world": "Świat",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Mapa i dane",
   "settings_section_application": "Aplikacja",
   "clear_tile_cache": "Wyczyść pamięć kafelków",
@@ -89,8 +90,17 @@
   "signage_none": "Brak",
   "signage_basic": "Podstawowe",
   "signage_full": "Pełne",
+  "mapillary_token": "Token Mapillary",
+  "mapillary_facades": "Fasady budynków",
   "reset_to_default": "Przywróć wartość domyślną",
   "reset_all_settings": "Zresetuj wszystkie ustawienia",
   "reset_all_settings_button": "Zresetuj",
-  "reset_all_settings_confirm": "Potwierdzić?"
+  "reset_all_settings_confirm": "Potwierdzić?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Obrazy",
+  "facade_mode_paintings_v2": "Obrazy v2",
+  "facade_mode_java_only": "Panele ze zdjęciami to encje Javy, więc na Bedrock i Luanti powstają tylko fasady z bloków."
 }

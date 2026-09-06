@@ -67,6 +67,7 @@
   "rotation_angle": "Kiertokulma",
   "settings_section_generation": "Generointi",
   "settings_section_world": "Maailma",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Kartta ja syöte",
   "settings_section_application": "Sovellus",
   "clear_tile_cache": "Tyhjennä laattojen välimuisti",
@@ -89,8 +90,17 @@
   "signage_none": "Ei mitään",
   "signage_basic": "Perus",
   "signage_full": "Täysi",
+  "mapillary_token": "Mapillary-tunnus",
+  "mapillary_facades": "Rakennusten julkisivut",
   "reset_to_default": "Palauta oletusarvo",
   "reset_all_settings": "Palauta kaikki asetukset",
   "reset_all_settings_button": "Palauta",
-  "reset_all_settings_confirm": "Vahvista?"
+  "reset_all_settings_confirm": "Vahvista?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Maalaukset",
+  "facade_mode_paintings_v2": "Maalaukset v2",
+  "facade_mode_java_only": "Valokuvapaneelit ovat Javan entiteettejä, joten Bedrockissa ja Luantissa rakennetaan vain lohkojulkisivut."
 }

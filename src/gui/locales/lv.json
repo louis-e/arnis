@@ -67,6 +67,7 @@
   "rotation_angle": "Rotācijas Leņķis",
   "settings_section_generation": "Ģenerēšana",
   "settings_section_world": "Pasaule",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Karte un ievade",
   "settings_section_application": "Lietotne",
   "clear_tile_cache": "Notīrīt flīžu kešatmiņu",
@@ -89,8 +90,17 @@
   "signage_none": "Nav",
   "signage_basic": "Pamata",
   "signage_full": "Pilnas",
+  "mapillary_token": "Mapillary marķieris",
+  "mapillary_facades": "Ēku fasādes",
   "reset_to_default": "Atiestatīt uz noklusējumu",
   "reset_all_settings": "Atiestatīt visus iestatījumus",
   "reset_all_settings_button": "Atiestatīt",
-  "reset_all_settings_confirm": "Apstiprināt?"
+  "reset_all_settings_confirm": "Apstiprināt?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Gleznas",
+  "facade_mode_paintings_v2": "Gleznas v2",
+  "facade_mode_java_only": "Fotopaneļi ir Java entītājas, tāpēc Bedrock un Luanti tiek veidotas tikai bloku fasādes."
 }

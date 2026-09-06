@@ -67,6 +67,7 @@
   "rotation_angle": "Pasukimo Kampas",
   "settings_section_generation": "Generavimas",
   "settings_section_world": "Pasaulis",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Žemėlapis ir įvestis",
   "settings_section_application": "Programa",
   "clear_tile_cache": "Išvalyti plytelių talpyklą",
@@ -89,8 +90,17 @@
   "signage_none": "Nėra",
   "signage_basic": "Pagrindiniai",
   "signage_full": "Visi",
+  "mapillary_token": "Mapillary prieigos raktas",
+  "mapillary_facades": "Pastatų fasadai",
   "reset_to_default": "Atkurti numatytąją reikšmę",
   "reset_all_settings": "Atkurti visus nustatymus",
   "reset_all_settings_button": "Atkurti",
-  "reset_all_settings_confirm": "Patvirtinti?"
+  "reset_all_settings_confirm": "Patvirtinti?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Paveikslai",
+  "facade_mode_paintings_v2": "Paveikslai v2",
+  "facade_mode_java_only": "Nuotraukų plokštės yra Java objektai, todėl Bedrock ir Luanti kuriami tik blokų fasadai."
 }

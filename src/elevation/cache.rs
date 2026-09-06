@@ -50,16 +50,57 @@ impl CacheClearStats {
     }
 }
 
+/// Bytes held by every regular file under `dir`, symlinks counted but not
+/// followed, so the number cannot run off into a directory the cache merely
+/// points at. A missing directory is zero rather than an error: the settings
+/// panel asks for this before anything has ever been cached.
+pub fn dir_size_bytes(dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            total = total.saturating_add(dir_size_bytes(&entry.path()));
+        } else if let Ok(meta) = entry.metadata() {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    total
+}
+
+/// The same size as a short human string, so the settings panel can say
+/// "812 MB" rather than a byte count.
+pub fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.0} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.0} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Recursively remove everything inside `dir`, leaving `dir` itself in
 /// place (so subsequent cache writes don't need to recreate the root
 /// handle). Missing directory is a no-op.
 ///
 /// Safety considerations implemented here:
+///
 /// - Symlinks are removed but not followed. We never recurse into an
 ///   arbitrary filesystem the user may have pointed at with a stray
 ///   symlink inside the cache.
 /// - Unreadable entries contribute to the error count instead of
-///   propagating — the GUI surfaces the error count as a warning.
+///   propagating, and the GUI surfaces the error count as a warning.
 /// - No panics: every fs call is matched; transient errors (e.g. a
 ///   file busy-locked by another reader) just increment `errors`.
 pub fn clear_cache_dir(dir: &std::path::Path) -> CacheClearStats {

@@ -67,6 +67,7 @@
   "rotation_angle": "Rotationsvinkel",
   "settings_section_generation": "Generering",
   "settings_section_world": "Värld",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Karta och inmatning",
   "settings_section_application": "Applikation",
   "clear_tile_cache": "Rensa plattcache",
@@ -89,8 +90,17 @@
   "signage_none": "Inga",
   "signage_basic": "Grundläggande",
   "signage_full": "Fullständig",
+  "mapillary_token": "Mapillary-token",
+  "mapillary_facades": "Byggnadsfasader",
   "reset_to_default": "Återställ till standard",
   "reset_all_settings": "Återställ alla inställningar",
   "reset_all_settings_button": "Återställ",
-  "reset_all_settings_confirm": "Bekräfta?"
+  "reset_all_settings_confirm": "Bekräfta?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Målningar",
+  "facade_mode_paintings_v2": "Målningar v2",
+  "facade_mode_java_only": "Fotopaneler är Java-entiteter, så på Bedrock och Luanti byggs bara blockfasaderna."
 }

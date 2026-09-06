@@ -67,6 +67,7 @@
   "rotation_angle": "회전 각도",
   "settings_section_generation": "생성",
   "settings_section_world": "월드",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "지도 및 입력",
   "settings_section_application": "애플리케이션",
   "clear_tile_cache": "타일 캐시 지우기",
@@ -89,8 +90,17 @@
   "signage_none": "없음",
   "signage_basic": "기본",
   "signage_full": "전체",
+  "mapillary_token": "Mapillary 토큰",
+  "mapillary_facades": "건물 외벽",
   "reset_to_default": "기본값으로 되돌리기",
   "reset_all_settings": "모든 설정 초기화",
   "reset_all_settings_button": "초기화",
-  "reset_all_settings_confirm": "확인?"
+  "reset_all_settings_confirm": "확인?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "그림",
+  "facade_mode_paintings_v2": "그림 v2",
+  "facade_mode_java_only": "사진 패널은 Java 엔티티이므로 Bedrock과 Luanti에서는 블록 외벽만 생성됩니다."
 }

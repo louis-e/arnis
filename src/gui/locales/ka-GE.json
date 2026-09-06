@@ -74,6 +74,7 @@
   "rotation_angle": "ბრუნვის კუთხე",
   "settings_section_generation": "გენერაცია",
   "settings_section_world": "სამყარო",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "რუკა და შეყვანა",
   "settings_section_application": "აპლიკაცია",
   "clear_tile_cache": "ფილების ქეშის გასუფთავება",
@@ -89,8 +90,17 @@
   "signage_none": "არცერთი",
   "signage_basic": "ძირითადი",
   "signage_full": "სრული",
+  "mapillary_token": "Mapillary ტოკენი",
+  "mapillary_facades": "შენობების ფასადები",
   "reset_to_default": "ნაგულისხმევ პარამეტრებზე დაბრუნება",
   "reset_all_settings": "ყველა პარამეტრის გადაყენება",
   "reset_all_settings_button": "გადაყენება",
-  "reset_all_settings_confirm": "დაადასტურეთ?"
+  "reset_all_settings_confirm": "დაადასტურეთ?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "ნახატები",
+  "facade_mode_paintings_v2": "ნახატები v2",
+  "facade_mode_java_only": "ფოტოპანელები Java-ს ერთეულებია, ამიტომ ბლოკის ფასადები მხოლოდ Bedrock-სა და Luanti-ზე აიგება."
 }

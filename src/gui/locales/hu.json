@@ -67,6 +67,7 @@
   "rotation_angle": "Forgatási Szög",
   "settings_section_generation": "Generálás",
   "settings_section_world": "Világ",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Térkép és bevitel",
   "settings_section_application": "Alkalmazás",
   "clear_tile_cache": "Csempe-gyorsítótár törlése",
@@ -89,8 +90,17 @@
   "signage_none": "Nincs",
   "signage_basic": "Alap",
   "signage_full": "Teljes",
+  "mapillary_token": "Mapillary token",
+  "mapillary_facades": "Épülethomlokzatok",
   "reset_to_default": "Visszaállítás alapértelmezettre",
   "reset_all_settings": "Összes beállítás visszaállítása",
   "reset_all_settings_button": "Visszaállítás",
-  "reset_all_settings_confirm": "Megerősíti?"
+  "reset_all_settings_confirm": "Megerősíti?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Festmények",
+  "facade_mode_paintings_v2": "Festmények v2",
+  "facade_mode_java_only": "A fotópanelek Java-entitások, ezért Bedrockon és Luantin csak a blokkhomlokzatok épülnek meg."
 }

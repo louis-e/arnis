@@ -67,6 +67,7 @@
   "rotation_angle": "Kot zasuka",
   "settings_section_generation": "Generiranje",
   "settings_section_world": "Svet",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Zemljevid in vnos",
   "settings_section_application": "Aplikacija",
   "clear_tile_cache": "Počisti predpomnilnik ploščic",
@@ -89,8 +90,17 @@
   "signage_none": "Brez",
   "signage_basic": "Osnovne",
   "signage_full": "Vse",
+  "mapillary_token": "Žeton Mapillary",
+  "mapillary_facades": "Fasade stavb",
   "reset_to_default": "Ponastavi na privzeto",
   "reset_all_settings": "Ponastavi vse nastavitve",
   "reset_all_settings_button": "Ponastavi",
-  "reset_all_settings_confirm": "Potrdi?"
+  "reset_all_settings_confirm": "Potrdi?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Slike",
+  "facade_mode_paintings_v2": "Slike v2",
+  "facade_mode_java_only": "Fotografske plošče so entitete različice Java, zato se v Bedrock in Luanti zgradijo samo fasade iz blokov."
 }

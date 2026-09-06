@@ -74,6 +74,7 @@
   "rotation_angle": "Rotation Angle",
   "settings_section_generation": "Generation",
   "settings_section_world": "World",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Map & Input",
   "settings_section_application": "Application",
   "clear_tile_cache": "Clear Tile Cache",
@@ -89,8 +90,17 @@
   "signage_none": "None",
   "signage_basic": "Basic",
   "signage_full": "Full",
+  "mapillary_token": "Mapillary Token",
+  "mapillary_facades": "Enable Mapillary",
   "reset_to_default": "Reset to default",
   "reset_all_settings": "Reset all settings",
   "reset_all_settings_button": "Reset",
-  "reset_all_settings_confirm": "Confirm?"
+  "reset_all_settings_confirm": "Confirm?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Paintings",
+  "facade_mode_paintings_v2": "Paintings v2",
+  "facade_mode_java_only": "Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti."
 }

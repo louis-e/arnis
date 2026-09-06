@@ -339,6 +339,64 @@
           </div>
         </div>
 
+        <!-- Section: Mapillary -->
+        <div class="settings-section-header" data-localize="settings_section_mapillary">Mapillary (experimental)</div>
+
+        <!-- Building facades from street-level photographs, the feature switch -->
+        <div class="settings-row">
+          <label for="facades-toggle">
+            <span data-localize="mapillary_facades">Enable Mapillary</span>
+            <span class="tooltip-icon" data-tooltip="Builds real building facades from street-level photos: wall colours per floor, plus the windows and doors from world scale 2 up. Needs the token below.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="facades-toggle" name="facades-toggle">
+          </div>
+        </div>
+
+        <!-- Mapillary API token, the credential the facade download needs -->
+        <div class="settings-row">
+          <label for="mapillary-token">
+            <span data-localize="mapillary_token">Mapillary Token</span>
+            <span class="tooltip-icon" data-tooltip="Free from mapillary.com/developer. Kept on this machine and sent to nobody but Mapillary. Without it there is nothing to download.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="password" id="mapillary-token" name="mapillary-token" placeholder="MLY|...">
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_mode">Facade Mode</span>
+            <span class="tooltip-icon" data-tooltip="Blocks builds colour-matched walls on every world format. Paintings (Java 1.21+) and Paintings v2 (Java 1.21.4+) hang the photograph itself.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-mode-group">
+              <button type="button" class="segment active" data-default data-facade-mode="blocks" data-localize="facade_mode_blocks">Blocks</button>
+              <button type="button" class="segment" data-facade-mode="paintings" data-localize="facade_mode_paintings">Paintings</button>
+              <button type="button" class="segment" data-facade-mode="paintings-v2" data-localize="facade_mode_paintings_v2">Paintings v2</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Why the panel modes are greyed out on a non-Java world -->
+        <div id="facade-java-only-notice" class="settings-notice" style="display: none;" data-localize="facade_mode_java_only">
+          Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.
+        </div>
+
+        <!-- Fills the facade cache for the selected area ahead of generating -->
+        <div class="settings-row">
+          <label for="precompute-facades-button">
+            <span data-localize="facade_precompute">Precompute Area</span>
+            <span class="tooltip-icon" data-tooltip="Fetches the imagery for the selected area and builds its facades into the cache, so generating there is instant and the 3D preview shows them. Up to 0.1 km²; a city block takes about half an hour.">?</span>
+          </label>
+          <div class="settings-control">
+            <button type="button" id="precompute-facades-button" class="clear-cache-button" data-localize="facade_precompute_button">Precompute</button>
+          </div>
+        </div>
+
+        <!-- What the precompute is doing, what it did, or why it cannot run -->
+        <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
+
         <!-- Section: Map & Input -->
         <div class="settings-section-header" data-localize="settings_section_map">Map & Input</div>
 
@@ -473,9 +531,10 @@
         <div class="settings-row">
           <label for="clear-cache-button">
             <span data-localize="clear_tile_cache">Clear Tile Cache</span>
-            <span class="tooltip-icon" data-tooltip="Delete every cached elevation and land-cover tile. Frees disk space; next generation re-downloads from source.">?</span>
+            <span class="tooltip-icon" data-tooltip="Delete every cached tile and facade texture. Frees the disk space shown; the next generation downloads them again.">?</span>
           </label>
           <div class="settings-control">
+            <span id="cache-size" class="cache-size"></span>
             <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
           </div>
         </div>

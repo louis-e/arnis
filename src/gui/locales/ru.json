@@ -67,6 +67,7 @@
   "rotation_angle": "Угол Поворота",
   "settings_section_generation": "Генерация",
   "settings_section_world": "Мир",
+  "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Карта и ввод",
   "settings_section_application": "Приложение",
   "clear_tile_cache": "Очистить кэш тайлов",
@@ -89,8 +90,17 @@
   "signage_none": "Нет",
   "signage_basic": "Базовые",
   "signage_full": "Все",
+  "mapillary_token": "Токен Mapillary",
+  "mapillary_facades": "Фасады зданий",
   "reset_to_default": "Сбросить до значения по умолчанию",
   "reset_all_settings": "Сбросить все настройки",
   "reset_all_settings_button": "Сбросить",
-  "reset_all_settings_confirm": "Подтвердить?"
+  "reset_all_settings_confirm": "Подтвердить?",
+  "facade_precompute": "Precompute Area",
+  "facade_precompute_button": "Precompute",
+  "facade_mode": "Facade Mode",
+  "facade_mode_blocks": "Blocks",
+  "facade_mode_paintings": "Картины",
+  "facade_mode_paintings_v2": "Картины v2",
+  "facade_mode_java_only": "Фотопанели являются сущностями Java, поэтому в Bedrock и Luanti строятся только блочные фасады."
 }
