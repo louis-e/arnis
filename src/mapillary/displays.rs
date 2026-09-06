@@ -1,0 +1,1965 @@
+//! Facade textures as item display entities (Java 1.21.4+, "Paintings v2").
+//!
+//! `paintings.rs` hangs the photograph as painting entities. A painting is
+//! nailed to a block face, so a wall that runs diagonally through the block
+//! grid becomes a staircase of axis-aligned panels, and two panels meeting at
+//! a step fight over the air cell between them: one of the two faces has to
+//! stay bare. An item display has neither problem. It is a free entity, not a
+//! hanging one, so it can sit anywhere at any angle, nothing has to be solid
+//! behind it, nothing may block the air in front of it, and it never drops.
+//!
+//! So this mode puts **one flat quad on the wall's true line**, whatever angle
+//! that line runs at, instead of one panel per axis run. A wall is cut only
+//! when it is longer or taller than `MAX_PANEL` blocks, and then only because
+//! one texture per panel is stitched into the game's block atlas.
+//!
+//! A panel carries the photograph at its own metre scale and nothing else. On
+//! a slope the shell's floor sits at the building's highest corner and the
+//! wall is filled down to the terrain below that, so the downhill end of a
+//! panel stops short of the street and the fill there stays bare. That gap was
+//! once covered by repeating the crop's bottom row down to the ground, which
+//! read as a vertical smear: the photograph ends at the ground the camera saw,
+//! and there is nothing honest to put below it. `paintings.rs` and the block
+//! facades anchor the texture at the same first wall block and never reach
+//! below it either.
+//!
+//! Three steps, the same shape as `paintings.rs`:
+//! * `collect` runs when a building's wall ring has been built and records one
+//!   candidate per textured wall: its cells, its texture columns and how tall
+//!   it was built. A building is processed by every tile it overlaps, so the
+//!   first tile to reach a wall claims it.
+//! * `finalize` runs once every block is final, before the world is saved
+//!   (under stream-to-disk eviction `flush_region` does the same for each
+//!   region right before it leaves memory, since an entity written into a
+//!   flushed region is lost). It works out each candidate's quad, writes one
+//!   `minecraft:item_display` per piece and crops that piece out of the 8 px/m
+//!   wall texture.
+//! * `write_packs` runs once the world is saved. Unlike the paintings there is
+//!   no data pack: an item's model is chosen by the `minecraft:item_model`
+//!   component, which is pure resource pack, so everything goes into
+//!   `<world>/resources.zip` (and the same file under `resourcepacks/`, where
+//!   26.1 looks).
+//!
+//! Per panel the pack carries three files: the item model definition
+//! (`assets/arnis/items/<name>.json`), the model itself
+//! (`assets/arnis/models/item/<name>.json`) and the texture
+//! (`assets/arnis/textures/block/<name>.png`). The texture goes under
+//! `textures/block/` because vanilla's `blocks.json` atlas has a `directory`
+//! source over `block/` that spans every namespace, so the panels are stitched
+//! into the block atlas without this pack shipping an atlas file of its own.
+//!
+//! 1.21.11 split item textures out into an `items` atlas of their own, which
+//! does not change this: a model's textures are looked up in the items atlas
+//! first and then in the blocks one, and vanilla's own block items work the
+//! same way (`items/dirt.json` draws `block/dirt`). What the atlas a model
+//! landed in does decide is the render pass, see `ITEM`.
+
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::io::{Cursor, Write};
+use std::path::Path;
+use std::sync::Mutex;
+
+use fastnbt::Value;
+use fnv::{FnvHashMap, FnvHashSet};
+use image::RgbImage;
+
+use super::facades::{self, FacadeStore};
+use super::paintings::{
+    crop_texture, cut, pack_mcmeta_described, ATLAS_BUDGET_PX, MIN_PX_PER_BLOCK,
+};
+use crate::progress::{emit_gui_progress_update, MESSAGE_ONLY};
+use crate::world_editor::WorldEditor;
+
+/// Longest panel edge in blocks. An item display has no size cap of its own,
+/// but one texture per panel is stitched into the block atlas, so a very long
+/// wall is still cut into pieces of a size the atlas can hold.
+pub const MAX_PANEL: i32 = 32;
+
+/// How far the quad sits in front of the wall's outermost block corner, in
+/// blocks. Enough that it never z-fights, small enough that it still reads as
+/// the wall's own surface.
+pub const PUSH_OUT: f64 = 0.06;
+
+/// `view_range` 1.0 is 64 blocks times the client's entity distance scaling.
+/// A facade has to stay up as long as the building itself is drawn.
+const VIEW_RANGE: f32 = 4.0;
+
+/// Namespace of the models and their textures.
+const NAMESPACE: &str = "arnis";
+
+/// The item the display carries. Its own model is never consulted: the
+/// `minecraft:item_model` component replaces the lookup outright. An id that
+/// does not resolve falls back to the game's missing-item model, never to the
+/// carrier's own, so a pack that failed to load shows magenta panels rather
+/// than no panels at all.
+///
+/// It is a **block** item, and that is why it is stone rather than something
+/// inert like paper. The client picks the render pass of an item model from
+/// the carrier item, not from the model: once `BlockModelWrapper` sees that
+/// every quad of the model comes from the block atlas it asks its block render
+/// type getter, which answers with the opaque `entity_cutout` pass for a block
+/// item whose block is not a translucent one, and with the alpha-blended,
+/// depth-sorted `item_entity_translucent_cull` pass for every other item. A
+/// photograph is opaque, so the cutout pass is the right one: no per-quad
+/// sorting against the world's other translucent geometry.
+///
+/// The translucent pass is not an invisible one, so the carrier item decides
+/// how a panel is blended and never whether it is drawn. It renders into
+/// `ITEM_ENTITY_TARGET`, and that target falls back to the main render target
+/// whenever the level renderer holds no item entity target of its own, which
+/// is every graphics setting except Fabulous; Fabulous does hold one and its
+/// transparency chain composites it. Every dropped item goes through it.
+const ITEM: &str = "minecraft:stone";
+
+/// Resource pack format of 1.21.4, the first version where an item's model is
+/// chosen by the `minecraft:item_model` component and resolved through
+/// `assets/<ns>/items/`. The mcmeta declares support open-ended upwards, so
+/// every later version loads the pack as well.
+const RESOURCEPACK_FORMAT: u32 = 46;
+
+/// The wall's outward unit normal in Arnis' frame (x east, z south): the
+/// perpendicular of the node A to node B direction `dir` that points the way
+/// the axis-snapped normal `(snx, snz)` does. This is the same choice
+/// `paintings::outward_faces` makes, only kept at its true angle instead of
+/// being split into axis faces. None for a wall with no direction at all.
+pub fn outward_normal(dir: (i32, i32), snx: i32, snz: i32) -> Option<(f64, f64)> {
+    let (dx, dz) = (f64::from(dir.0), f64::from(dir.1));
+    let len = (dx * dx + dz * dz).sqrt();
+    // Dot product of the perpendicular (dz, -dx) with the snapped normal.
+    let side = dz * f64::from(snx) - dx * f64::from(snz);
+    let (nx, nz) = if len > 1e-9 && side > 0.0 {
+        (dz / len, -dx / len)
+    } else if len > 1e-9 && side < 0.0 {
+        (-dz / len, dx / len)
+    } else {
+        // No direction, or a snapped normal along it: the snap is all there is.
+        let l = ((snx * snx + snz * snz) as f64).sqrt();
+        if l < 1e-9 {
+            return None;
+        }
+        (f64::from(snx) / l, f64::from(snz) / l)
+    };
+    Some((nx, nz))
+}
+
+/// The viewer's right, standing outside the wall and looking at it: the
+/// model's own +x axis once the quad has been turned onto `n`.
+pub fn right_of(n: (f64, f64)) -> (f64, f64) {
+    (n.1, -n.0)
+}
+
+/// Minecraft yaw in degrees of a quad whose front points along the unit normal
+/// `n`. Yaw 0 faces south (+z) and +90 west (-x), so the facing vector is
+/// (-sin yaw, cos yaw) and the yaw is its inverse.
+///
+/// Nothing writes a yaw: the turn lives in `left_rotation` alone, and the
+/// entity's own `Rotation` stays at zero so the two cannot compound. This is
+/// here to pin the convention the quaternion encodes.
+#[cfg(test)]
+pub fn yaw_deg(n: (f64, f64)) -> f64 {
+    (-n.0).atan2(n.1).to_degrees()
+}
+
+/// The `left_rotation` quaternion [x, y, z, w] that turns the model's own +z
+/// axis onto the unit normal `n`.
+///
+/// Minecraft's frame is right-handed (east cross up is south), so a turn of
+/// theta about +y takes (0, 0, 1) to (sin theta, cos theta); asking for
+/// (nx, nz) gives theta = atan2(nx, nz), which is minus the yaw.
+///
+/// Which of the model's two wide faces ends up looking at the street is not
+/// the +z one: the item display renderer turns the model half a circle about
+/// +y before it draws it, so that the item sits the way it does in an item
+/// frame, and that turn happens inside this rotation. The face on the street
+/// is therefore the model's `north` face, and `model_json` textures both wide
+/// faces so it does not matter. See the note there for why the crop still
+/// reads the right way round.
+pub fn left_rotation(n: (f64, f64)) -> [f32; 4] {
+    let half = n.0.atan2(n.1) / 2.0;
+    [0.0, half.sin() as f32, 0.0, half.cos() as f32]
+}
+
+/// The world direction the model's +z face points once `q` (a turn about +y)
+/// has been applied: the quaternion rotation of (0, 0, 1). The inverse of
+/// `left_rotation`, so a test can read a quaternion back as a direction.
+#[cfg(test)]
+pub fn facing_of(q: [f32; 4]) -> (f64, f64) {
+    let (y, w) = (f64::from(q[1]), f64::from(q[3]));
+    (2.0 * y * w, w * w - y * y)
+}
+
+/// True when the wall texture has to be mirrored: its columns run from node A
+/// to node B, and the panel's left edge must be the outside viewer's left.
+pub fn flip_crop(dir: (i32, i32), n: (f64, f64)) -> bool {
+    let (rx, rz) = right_of(n);
+    f64::from(dir.0) * rx + f64::from(dir.1) * rz < 0.0
+}
+
+/// How far one wall cell carries the wall along its own line, in blocks. The
+/// wall builder walks a Bresenham line, which advances one block along the
+/// wall's major axis per cell, so a cell is one block of a straight wall and
+/// about 1.41 of a wall at 45 degrees.
+pub fn cell_step(dir: (i32, i32)) -> f64 {
+    let major = dir.0.abs().max(dir.1.abs());
+    if major == 0 {
+        return 1.0;
+    }
+    let (dx, dz) = (f64::from(dir.0), f64::from(dir.1));
+    (dx * dx + dz * dz).sqrt() / f64::from(major)
+}
+
+/// Where one panel hangs: the centre of its quad in world coordinates, its
+/// size in blocks and the turn that puts its front onto the wall's normal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Quad {
+    pub cx: f64,
+    pub cy: f64,
+    pub cz: f64,
+    /// Width along the wall and height upwards, both in blocks.
+    pub w: f64,
+    pub h: f64,
+    /// `transformation.left_rotation`, as [x, y, z, w].
+    pub rot: [f32; 4],
+}
+
+/// The flat quad covering `cells` (wall cells of one wall, in any order)
+/// between absolute world y `base_y` and `base_y + h`.
+///
+/// Along the wall the quad reaches half a cell step past the outer cell
+/// centres. Reaching the end cells' outermost corners would want half of
+/// `|rx| + |rz|` instead, which is the same number for a straight wall and for
+/// one at 45 degrees and up to 0.07 blocks more for one in between, so an
+/// oblique wall can leave a texel of its two end corners uncovered. Half a
+/// step is used anyway because a step is what one cell of a uniform run
+/// carries, so the pieces a wall is cut into at `MAX_PANEL` meet edge to edge
+/// instead of overlapping and z-fighting along their seam.
+///
+/// Across the wall the quad is pushed clear of the outermost block corner of
+/// every cell: a cell centre's own corner sticks out `0.5 * (|nx| + |nz|)`
+/// along the normal, which is half a block for a straight wall and 0.71 for
+/// one at 45 degrees, and a staircase would otherwise poke through its own
+/// photograph.
+pub fn quad_for(cells: &[(i32, i32)], n: (f64, f64), step: f64, base_y: i32, h: i32) -> Quad {
+    let (rx, rz) = right_of(n);
+    let (mut s_lo, mut s_hi) = (f64::MAX, f64::MIN);
+    let mut t_max = f64::MIN;
+    for &(bx, bz) in cells {
+        let (px, pz) = (f64::from(bx) + 0.5, f64::from(bz) + 0.5);
+        let s = px * rx + pz * rz;
+        s_lo = s_lo.min(s);
+        s_hi = s_hi.max(s);
+        t_max = t_max.max(px * n.0 + pz * n.1);
+    }
+    let s_c = (s_lo + s_hi) / 2.0;
+    let plane = t_max + 0.5 * (n.0.abs() + n.1.abs()) + PUSH_OUT;
+    Quad {
+        // (right, n) is an orthonormal basis of the ground plane, so a point
+        // is just its two coordinates read back out along them.
+        cx: s_c * rx + plane * n.0,
+        cy: f64::from(base_y) + f64::from(h) / 2.0,
+        cz: s_c * rz + plane * n.1,
+        w: (s_hi - s_lo) + step,
+        h: f64::from(h),
+        rot: left_rotation(n),
+    }
+}
+
+/// One panel's texture, resampled when the pack is written.
+pub struct Panel {
+    pub name: String,
+    /// Panel size in blocks; not whole numbers on a wall that runs at an angle.
+    pub w: f64,
+    pub h: f64,
+    pub tex: RgbImage,
+}
+
+/// The cells of one wall while a building is being collected, each with its
+/// texture column, plus the sum of their axis-snapped outward normals, which
+/// picks the side of the wall the building is not on.
+#[derive(Default)]
+struct WallCells {
+    cells: Vec<(i32, i32, u16)>,
+    snapped: (i32, i32),
+}
+
+/// One textured wall waiting for the finished world.
+struct Candidate {
+    way_id: u64,
+    wall: u32,
+    /// Sum of the axis-snapped normals of the wall's cells, which picks the
+    /// side of the wall the building is not on.
+    snapped: (i32, i32),
+    /// Absolute y of wall row 0.
+    base_y: i32,
+    /// Wall rows in blocks, capped by the height the building was built to.
+    total_h: i32,
+    /// Wall cells, each with its texture column.
+    cells: Vec<(i32, i32, u16)>,
+}
+
+/// What became of the candidates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlacementStats {
+    /// Walls collected while the buildings went up.
+    pub candidates: usize,
+    /// Display entities written.
+    pub displays: usize,
+    /// Candidates that produced at least one display.
+    pub placed: usize,
+    /// Candidates that produced none.
+    pub dropped: usize,
+}
+
+/// Panels of the world being generated, filled from the tile threads.
+struct Registry {
+    enabled: bool,
+    px: u32,
+    panels: Vec<Panel>,
+    /// Walls already collected. A building is processed by every tile it
+    /// overlaps, and unlike a painting a display claims no air cell, so the
+    /// duplicates have to be turned away by name.
+    claimed: FnvHashSet<u32>,
+    /// Candidates in collection order; `None` once settled.
+    candidates: Vec<Option<Candidate>>,
+    /// Candidate indices by the 512-block regions their cells touch, so a
+    /// region can be settled before stream-to-disk eviction drops it.
+    by_region: FnvHashMap<(i32, i32), Vec<usize>>,
+    stats: PlacementStats,
+}
+
+/// Replaced on every generation, like the facade store: the GUI generates
+/// several worlds in one process.
+static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
+    enabled: false,
+    px: 16,
+    panels: Vec::new(),
+    claimed: FnvHashSet::with_hasher(fnv::FnvBuildHasher::new()),
+    candidates: Vec::new(),
+    by_region: FnvHashMap::with_hasher(fnv::FnvBuildHasher::new()),
+    stats: PlacementStats {
+        candidates: 0,
+        displays: 0,
+        placed: 0,
+        dropped: 0,
+    },
+});
+
+/// Starts a generation: forgets the previous world's panels. `px` is the
+/// requested texture resolution in pixels per block.
+pub fn reset(enabled: bool, px: u32) {
+    let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    *r = Registry {
+        enabled,
+        px,
+        panels: Vec::new(),
+        claimed: FnvHashSet::default(),
+        candidates: Vec::new(),
+        by_region: FnvHashMap::default(),
+        stats: PlacementStats::default(),
+    };
+}
+
+/// The outcome so far, for tests.
+#[cfg(test)]
+fn stats() -> PlacementStats {
+    REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).stats
+}
+
+fn warn(msg: &str) {
+    eprintln!("Warning: {msg}");
+    // -1 leaves the progress bar alone and only shows the text.
+    emit_gui_progress_update(MESSAGE_ONLY, msg);
+}
+
+/// Records one candidate per textured wall of the building built under
+/// `element_id`. Runs after the wall ring is built; nothing is written until
+/// `finalize`, so every quad is placed against the finished world from the
+/// main editor rather than from whichever tile happened to build the wall.
+/// Returns the number of candidates recorded.
+pub fn collect(
+    editor: &mut WorldEditor,
+    element_id: u64,
+    start_y_offset: i32,
+    abs_terrain_offset: i32,
+    building_height: i32,
+) -> usize {
+    let Some(s) = facades::store() else {
+        return 0;
+    };
+    if !s.displays || !editor.map_decals_enabled() {
+        return 0;
+    }
+    let Some(columns) = s.way_cells.get(&element_id) else {
+        return 0;
+    };
+
+    // Cells per wall. A cell two pieces of one wall both landed on belongs to
+    // the last one, the same rule `block_at` follows, and the ring walk can
+    // hand the same cell over twice.
+    let mut by_wall: BTreeMap<u32, WallCells> = BTreeMap::new();
+    let mut seen = FnvHashSet::default();
+    for &(bx, bz) in columns {
+        if !seen.insert((bx, bz)) {
+            continue;
+        }
+        let Some(cell) = s.cells.get(&(bx, bz)) else {
+            continue;
+        };
+        let wall = &s.walls[cell.wall as usize];
+        if wall.way_id != element_id || wall.tex.is_none() {
+            continue;
+        }
+        let entry = by_wall.entry(cell.wall).or_default();
+        entry.cells.push((bx, bz, cell.col));
+        entry.snapped.0 += i32::from(cell.nx);
+        entry.snapped.1 += i32::from(cell.nz);
+    }
+    if by_wall.is_empty() {
+        return 0;
+    }
+
+    let scale = s.scale;
+    let mut registry = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    if !registry.enabled {
+        return 0;
+    }
+    // Absolute y of the first wall block, the row `block_at` calls row 0.
+    let base_y = start_y_offset + 1 + abs_terrain_offset;
+    let mut collected = 0;
+
+    for (wi, wall_cells) in by_wall {
+        if !registry.claimed.insert(wi) {
+            continue;
+        }
+        let WallCells { cells, snapped } = wall_cells;
+        let wall = &s.walls[wi as usize];
+        // The textured rows, in blocks, capped by the wall that was built.
+        let total_h = ((f64::from(wall.rows) * scale).round() as i32).min(building_height);
+        if total_h <= 0 {
+            continue;
+        }
+        // The quad hangs just outside the wall, so the cell in front of each
+        // wall cell counts towards the regions this candidate has to beat.
+        let (ox, oz) = (snapped.0.signum(), snapped.1.signum());
+        let mut regions: Vec<(i32, i32)> = Vec::with_capacity(2);
+        for &(bx, bz, _) in &cells {
+            for key in [(bx >> 9, bz >> 9), ((bx + ox) >> 9, (bz + oz) >> 9)] {
+                if !regions.contains(&key) {
+                    regions.push(key);
+                }
+            }
+        }
+        let index = registry.candidates.len();
+        for key in regions {
+            registry.by_region.entry(key).or_default().push(index);
+        }
+        registry.candidates.push(Some(Candidate {
+            way_id: element_id,
+            wall: wi,
+            snapped,
+            base_y,
+            total_h,
+            cells,
+        }));
+        registry.stats.candidates += 1;
+        collected += 1;
+    }
+    collected
+}
+
+/// Name of one panel, unique because a wall is claimed once and each of its
+/// pieces is named by where it starts. Resource paths take lowercase letters,
+/// digits and underscores, and every part here is a non-negative number.
+fn panel_name(way_id: u64, wall: u32, along: i32, row: i32) -> String {
+    format!("f{way_id}_{wall}_{along}_{row}")
+}
+
+/// UUID seed contribution of a panel. Two panels meeting at a corner can put
+/// their centres in one block, and the block is all the entity UUID is
+/// otherwise built from, so they would collide and the game would keep one.
+fn name_seed(name: &str) -> i64 {
+    let mut hash: i64 = 0x0102_0304_0506_0708;
+    for byte in name.bytes() {
+        hash ^= i64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// The display's own NBT, on top of what `add_item_display` writes.
+fn display_nbt(name: &str, quad: &Quad) -> HashMap<String, Value> {
+    let floats = |v: &[f32]| Value::List(v.iter().map(|f| Value::Float(*f)).collect());
+
+    let mut components = HashMap::new();
+    components.insert(
+        "minecraft:item_model".to_string(),
+        Value::String(format!("{NAMESPACE}:{name}")),
+    );
+    let mut item = HashMap::new();
+    item.insert("id".to_string(), Value::String(ITEM.to_string()));
+    item.insert("count".to_string(), Value::Int(1));
+    item.insert("components".to_string(), Value::Compound(components));
+
+    // The model is a one-block quad centred on the entity, so the scale is the
+    // panel's size in blocks outright. Display entities do not clamp it.
+    let mut transformation = HashMap::new();
+    transformation.insert("left_rotation".to_string(), floats(&quad.rot));
+    transformation.insert("right_rotation".to_string(), floats(&[0.0, 0.0, 0.0, 1.0]));
+    transformation.insert("translation".to_string(), floats(&[0.0, 0.0, 0.0]));
+    transformation.insert(
+        "scale".to_string(),
+        floats(&[quad.w as f32, quad.h as f32, 1.0]),
+    );
+
+    let mut extra = HashMap::new();
+    extra.insert("item".to_string(), Value::Compound(item));
+    // `fixed` is the item frame transform: the model is drawn flat-on rather
+    // than tilted the way a held or dropped item is.
+    extra.insert(
+        "item_display".to_string(),
+        Value::String("fixed".to_string()),
+    );
+    extra.insert(
+        "transformation".to_string(),
+        Value::Compound(transformation),
+    );
+    // No billboarding: the quad keeps the angle the rotation gave it. `fixed`
+    // still applies the entity's own yaw and pitch, which is why `Rotation`
+    // stays at zero.
+    extra.insert("billboard".to_string(), Value::String("fixed".to_string()));
+    extra.insert("view_range".to_string(), Value::Float(VIEW_RANGE));
+    // `width` and `height` are the culling box, which grows from the entity
+    // position. Zero on either turns culling off outright, which is what a
+    // panel scaled far beyond its own position needs: a box would blink the
+    // quad out as soon as its centre point left the screen. Zero is also the
+    // default and what the game writes back for its own displays, but it is
+    // written out so a later reader does not have to look the default up.
+    extra.insert("width".to_string(), Value::Float(0.0));
+    extra.insert("height".to_string(), Value::Float(0.0));
+    extra
+}
+
+/// Places one collected wall: works out its quad, cuts it into pieces the
+/// atlas can hold and writes one display entity per piece, each cropped out of
+/// the 8 px/m wall texture.
+fn place_candidate(editor: &mut WorldEditor, s: &FacadeStore, cand: Candidate, r: &mut Registry) {
+    let wall = &s.walls[cand.wall as usize];
+    let dir = s.wall_dir[cand.wall as usize];
+    let (Some(tex), Some(n)) = (
+        wall.tex.as_ref(),
+        outward_normal(dir, cand.snapped.0, cand.snapped.1),
+    ) else {
+        r.stats.dropped += 1;
+        return;
+    };
+
+    // A wall buried in the hillside shows nothing; the blocks are enough there.
+    let top = cand.base_y + cand.total_h;
+    if !cand
+        .cells
+        .iter()
+        .any(|&(bx, bz, _)| top > editor.get_absolute_y(bx, 0, bz) + 1)
+    {
+        r.stats.dropped += 1;
+        return;
+    }
+
+    // The outside viewer's left first, so a piece's crop and its world
+    // position run the same way.
+    let (rx, rz) = right_of(n);
+    let mut cells = cand.cells;
+    cells.sort_by(|a, b| {
+        let along = |c: &(i32, i32, u16)| f64::from(c.0) * rx + f64::from(c.1) * rz;
+        along(a).total_cmp(&along(b))
+    });
+
+    let step = cell_step(dir);
+    let flip = flip_crop(dir, n);
+    let fallback = s.building_colour(cand.way_id);
+    let scale = s.scale;
+    // Pieces of at most MAX_PANEL blocks of wall, which is fewer cells the
+    // more the wall leans off its major axis.
+    let max_cells = ((f64::from(MAX_PANEL) / step).floor() as i32).max(1);
+
+    let mut hung = 0usize;
+    for (p0, p1) in cut(cells.len() as i32, max_cells) {
+        let slice = &cells[p0 as usize..p1 as usize];
+        // The piece covers whole texture columns. Two pieces can share or skip
+        // one metre at their seam, where the Bresenham walk doubled a column
+        // or stepped over one; that is a sub-metre seam every 32 blocks.
+        let (cmin, cmax) = slice
+            .iter()
+            .fold((u16::MAX, 0u16), |(a, b), c| (a.min(c.2), b.max(c.2)));
+        let footprint: Vec<(i32, i32)> = slice.iter().map(|c| (c.0, c.1)).collect();
+        for (b0, b1) in cut(cand.total_h, MAX_PANEL) {
+            let h = b1 - b0;
+            // Metres down from the top of the texture.
+            let va = f64::from(wall.rows) - f64::from(b1) / scale;
+            let vb = f64::from(wall.rows) - f64::from(b0) / scale;
+            let Some(crop) = crop_texture(
+                tex,
+                f64::from(cmin),
+                f64::from(cmax) + 1.0,
+                va,
+                vb,
+                flip,
+                fallback,
+            ) else {
+                continue;
+            };
+            // The panel covers the wall the photograph covers and no more, so
+            // the bottom piece stops at the shell's first wall block. On a
+            // slope the fill below it stays bare: the photograph has no pixels
+            // for ground the camera never saw, and the block wall down there
+            // is the building's own colour-matched material, which reads as a
+            // plinth where invented pixels read as a smear.
+            let quad = quad_for(&footprint, n, step, cand.base_y + b0, h);
+            let name = panel_name(cand.way_id, cand.wall, p0, b0);
+            let nbt = display_nbt(&name, &quad);
+            if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
+                continue;
+            }
+            r.panels.push(Panel {
+                name,
+                w: quad.w,
+                h: quad.h,
+                tex: crop,
+            });
+            hung += 1;
+        }
+    }
+    r.stats.displays += hung;
+    if hung == 0 {
+        r.stats.dropped += 1;
+    } else {
+        r.stats.placed += 1;
+    }
+}
+
+/// Settles the candidates at `indices` that are still pending.
+fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usize>) {
+    let Some(s) = facades::store() else {
+        return;
+    };
+    let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    if !r.enabled {
+        return;
+    }
+    for i in indices {
+        let Some(cand) = r.candidates.get_mut(i).and_then(Option::take) else {
+            continue;
+        };
+        place_candidate(editor, &s, cand, &mut r);
+    }
+}
+
+/// Settles the pending candidates whose cells touch region `(rx, rz)`. Under
+/// stream-to-disk eviction an entity written after a region was flushed is
+/// lost, so this runs right before the flush.
+pub fn flush_region(editor: &mut WorldEditor, rx: i32, rz: i32) {
+    let indices: Vec<usize> = {
+        let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        if !r.enabled {
+            return;
+        }
+        r.by_region.get(&(rx, rz)).cloned().unwrap_or_default()
+    };
+    if !indices.is_empty() {
+        place_pending(editor, indices);
+    }
+}
+
+/// Settles every candidate still pending against the finished world, right
+/// before it is saved, and reports the outcome to the GUI. `None` when the run
+/// collected nothing.
+pub fn finalize(editor: &mut WorldEditor) -> Option<PlacementReport> {
+    let count = {
+        let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        if !r.enabled || r.stats.candidates == 0 {
+            return None;
+        }
+        r.candidates.len()
+    };
+    place_pending(editor, 0..count);
+    let report = PlacementReport {
+        stats: REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).stats,
+    };
+    emit_gui_progress_update(MESSAGE_ONLY, &report.summary());
+    Some(report)
+}
+
+/// Summary of what `finalize` wrote.
+pub struct PlacementReport {
+    pub stats: PlacementStats,
+}
+
+impl PlacementReport {
+    fn summary(&self) -> String {
+        let s = self.stats;
+        format!(
+            "Facade panels: {} display entities on {} of {} walls ({} without a usable crop)",
+            s.displays, s.placed, s.candidates, s.dropped
+        )
+    }
+}
+
+impl fmt::Display for PlacementReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "  {}", self.summary())
+    }
+}
+
+/// The item model definition an item stack's `minecraft:item_model` component
+/// resolves to (`assets/<ns>/items/<name>.json`, 1.21.4+).
+pub fn item_definition_json(name: &str) -> String {
+    serde_json::json!({
+        "model": {
+            "type": "minecraft:model",
+            "model": format!("{NAMESPACE}:item/{name}")
+        }
+    })
+    .to_string()
+}
+
+/// The model itself: one flat element in the middle of the block, textured on
+/// both of its wide faces.
+///
+/// No parent. `minecraft:block/block` would look like the natural one, but its
+/// `fixed` display transform scales to half a block and would silently halve
+/// every panel; without a parent every transform is the identity, which is
+/// what a quad placed by its entity wants.
+///
+/// The element spans the whole 16 by 16 of the model in x and y and is 0.2
+/// thick around z = 8, so its centre is the model's centre and the display
+/// entity's position is the middle of the photograph. Its wide faces are
+/// `north` (-z) and `south` (+z); `uv` [0, 0, 16, 16] is the identity mapping
+/// on both, which reads upright and unmirrored to a viewer of either, the same
+/// way one texture on `block/cube_all` reads on every side of a block.
+///
+/// Both faces have to be textured. The renderer turns the model half a circle
+/// about +y before drawing it (`left_rotation` documents why), so it is
+/// `north` that faces the street, and identity `uv` on a `north` face runs its
+/// u to the right of a viewer standing outside it, exactly as identity `uv` on
+/// a `south` face does for a viewer of that one. The half turn and the swapped
+/// face cancel, which is why the crop the outside viewer sees is the one
+/// `right_of` laid out and not its mirror.
+pub fn model_json(name: &str) -> String {
+    let texture = format!("{NAMESPACE}:block/{name}");
+    serde_json::json!({
+        "textures": { "0": texture, "particle": texture },
+        "elements": [{
+            "from": [0.0, 0.0, 7.9],
+            "to": [16.0, 16.0, 8.1],
+            "faces": {
+                "north": { "uv": [0, 0, 16, 16], "texture": "#0" },
+                "south": { "uv": [0, 0, 16, 16], "texture": "#0" }
+            }
+        }],
+        "display": {
+            "fixed": {
+                "rotation": [0, 0, 0],
+                "translation": [0, 0, 0],
+                "scale": [1, 1, 1]
+            }
+        }
+    })
+    .to_string()
+}
+
+/// Texture side in pixels for `blocks` blocks at `px` pixels per block,
+/// rounded to a whole multiple of 16 and at least 16.
+///
+/// The model maps the whole texture onto the whole quad, so this only chooses
+/// the resolution and can never stretch the photograph. The multiple of 16 is
+/// what the block atlas wants: it is mipmapped four levels deep, and one
+/// texture that cannot be halved four times costs every block in the world
+/// its mipmaps.
+fn tex_side(blocks: f64, px: u32) -> u32 {
+    let raw = blocks * f64::from(px) / 16.0;
+    (raw.round() as u32).max(1) * 16
+}
+
+/// Summary of what `write_packs` produced.
+pub struct PackReport {
+    pub panels: usize,
+    pub px: u32,
+    pub requested_px: u32,
+}
+
+impl fmt::Display for PackReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "  Facade panels: {} item display panels at {} px per block in resources.zip",
+            self.panels, self.px
+        )?;
+        if self.px < self.requested_px {
+            write!(
+                f,
+                " (lowered from {} px to fit the atlas)",
+                self.requested_px
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Writes the placed panels as the world's resource pack. No data pack: the
+/// item model definitions are resource pack files. `Ok(None)` when the run
+/// placed nothing.
+pub fn write_packs(world_path: &Path) -> Result<Option<PackReport>, String> {
+    let (panels, px) = {
+        let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        if !r.enabled || r.panels.is_empty() {
+            return Ok(None);
+        }
+        (std::mem::take(&mut r.panels), r.px)
+    };
+    emit_gui_progress_update(98.0, "Writing facade panels...");
+    write_packs_for(world_path, &panels, px).map(Some)
+}
+
+/// Total panel texture area at `px` pixels per block.
+fn atlas_area(panels: &[Panel], px: u32) -> u64 {
+    panels
+        .iter()
+        .map(|p| u64::from(tex_side(p.w, px)) * u64::from(tex_side(p.h, px)))
+        .sum()
+}
+
+/// Halves the resolution until the atlas budget holds, down to 4 px per block.
+fn fit_px(panels: &[Panel], requested_px: u32) -> u32 {
+    let mut px = requested_px.max(MIN_PX_PER_BLOCK);
+    while px > MIN_PX_PER_BLOCK && atlas_area(panels, px) > ATLAS_BUDGET_PX {
+        px /= 2;
+    }
+    px
+}
+
+/// The resource pack as zip bytes: pack.mcmeta plus a model definition, a
+/// model and a texture per panel.
+fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut put = |path: String, bytes: &[u8]| -> Result<(), String> {
+        zip.start_file(path, options).map_err(|e| e.to_string())?;
+        zip.write_all(bytes).map_err(|e| e.to_string())
+    };
+    put(
+        "pack.mcmeta".to_string(),
+        pack_mcmeta_described(RESOURCEPACK_FORMAT, "Arnis facade panels").as_bytes(),
+    )?;
+    for p in panels {
+        put(
+            format!("assets/{NAMESPACE}/items/{}.json", p.name),
+            item_definition_json(&p.name).as_bytes(),
+        )?;
+        put(
+            format!("assets/{NAMESPACE}/models/item/{}.json", p.name),
+            model_json(&p.name).as_bytes(),
+        )?;
+        let img = image::imageops::resize(
+            &p.tex,
+            tex_side(p.w, px),
+            tex_side(p.h, px),
+            image::imageops::FilterType::Triangle,
+        );
+        let mut png = Vec::new();
+        img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|e| format!("encode {}: {e}", p.name))?;
+        put(
+            format!("assets/{NAMESPACE}/textures/block/{}.png", p.name),
+            &png,
+        )?;
+    }
+    let cursor = zip.finish().map_err(|e| e.to_string())?;
+    Ok(cursor.into_inner())
+}
+
+/// Writes the resource pack for `panels` into `world_path`, at `requested_px`
+/// pixels per block or the highest resolution below it that fits the atlas.
+fn write_packs_for(
+    world_path: &Path,
+    panels: &[Panel],
+    requested_px: u32,
+) -> Result<PackReport, String> {
+    let px = fit_px(panels, requested_px);
+    if px < requested_px {
+        warn(&format!(
+            "Facade panels: {} panels would not fit the game's block atlas at {requested_px} px per block; using {px} px.",
+            panels.len()
+        ));
+    }
+    if atlas_area(panels, px) > ATLAS_BUDGET_PX {
+        warn(&format!(
+            "Facade panels: {} panels exceed the block atlas even at {px} px per block; the game may fail to stitch them.",
+            panels.len()
+        ));
+    }
+    let mut panels: Vec<&Panel> = panels.iter().collect();
+    panels.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // The same zip at both places the game has looked for a world's pack.
+    let bytes = resource_zip(&panels, px)?;
+    let rp_dir = world_path.join("resourcepacks");
+    std::fs::create_dir_all(&rp_dir).map_err(|e| format!("create {}: {e}", rp_dir.display()))?;
+    for path in [
+        world_path.join("resources.zip"),
+        rp_dir.join("resources.zip"),
+    ] {
+        std::fs::write(&path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+
+    Ok(PackReport {
+        panels: panels.len(),
+        px,
+        requested_px,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::mapillary::facades::{CellRef, FacadeWall, TEST_GLOBALS as GLOBALS};
+    use image::{Rgb, RgbaImage};
+    use std::path::PathBuf;
+
+    /// Unit normals of the four cardinal walls plus one at 45 degrees.
+    const ROOT_HALF: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    fn quat_close(got: [f32; 4], want: [f64; 4]) -> bool {
+        got.iter()
+            .zip(want)
+            .all(|(g, w)| (f64::from(*g) - w).abs() < 1e-6)
+    }
+
+    #[test]
+    fn a_wall_turns_its_quad_onto_its_own_normal() {
+        // dir is node A to node B, (snx, snz) the axis-snapped outward normal
+        // the projection recorded; the true normal is the perpendicular of dir
+        // on that side. Yaw 0 is south, +90 west.
+        // (node A to node B, snapped normal, true normal, yaw in degrees)
+        type Case = ((i32, i32), (i32, i32), (f64, f64), f64);
+        let cases: [Case; 5] = [
+            // A wall running east with the building to the north: faces south.
+            ((19, 0), (0, 1), (0.0, 1.0), 0.0),
+            // Running south with the building to the east: faces west.
+            ((0, 19), (-1, 0), (-1.0, 0.0), 90.0),
+            // Running west with the building to the south: faces north.
+            ((-19, 0), (0, -1), (0.0, -1.0), 180.0),
+            // Running north with the building to the west: faces east.
+            ((0, -19), (1, 0), (1.0, 0.0), -90.0),
+            // 45 degrees to the south-east with the building south-west: the
+            // snap picked east, the true normal is north-east.
+            ((7, 7), (1, 0), (ROOT_HALF, -ROOT_HALF), -135.0),
+        ];
+        for (dir, snap, want_n, want_yaw) in cases {
+            let n = outward_normal(dir, snap.0, snap.1).unwrap();
+            assert!(
+                close(n.0, want_n.0) && close(n.1, want_n.1),
+                "dir {dir:?}: normal {n:?} wanted {want_n:?}"
+            );
+            assert!(
+                close(yaw_deg(n), want_yaw),
+                "dir {dir:?}: yaw {}",
+                yaw_deg(n)
+            );
+            // The quaternion has to turn the model's own +z face onto it.
+            let facing = facing_of(left_rotation(n));
+            assert!(
+                close(facing.0, want_n.0) && close(facing.1, want_n.1),
+                "dir {dir:?}: facing {facing:?} wanted {want_n:?}"
+            );
+        }
+
+        // The quaternions themselves, as [x, y, z, w] with y = sin(theta / 2)
+        // for a turn of theta = -yaw about +y.
+        assert!(quat_close(left_rotation((0.0, 1.0)), [0.0, 0.0, 0.0, 1.0]));
+        assert!(quat_close(
+            left_rotation((-1.0, 0.0)),
+            [0.0, -ROOT_HALF, 0.0, ROOT_HALF]
+        ));
+        assert!(quat_close(left_rotation((0.0, -1.0)), [0.0, 1.0, 0.0, 0.0]));
+        assert!(quat_close(
+            left_rotation((1.0, 0.0)),
+            [0.0, ROOT_HALF, 0.0, ROOT_HALF]
+        ));
+        // 135 degrees about +y: sin(67.5) and cos(67.5).
+        assert!(quat_close(
+            left_rotation((ROOT_HALF, -ROOT_HALF)),
+            [0.0, 0.923_879_532_5, 0.0, 0.382_683_432_4]
+        ));
+
+        // The viewer's right matches the paintings' axis rule.
+        assert_eq!(right_of((0.0, 1.0)), (1.0, 0.0), "facing south, right east");
+        assert_eq!(
+            right_of((-1.0, 0.0)),
+            (0.0, 1.0),
+            "facing west, right south"
+        );
+        assert_eq!(
+            right_of((0.0, -1.0)),
+            (-1.0, 0.0),
+            "facing north, right west"
+        );
+        assert_eq!(
+            right_of((1.0, 0.0)),
+            (0.0, -1.0),
+            "facing east, right north"
+        );
+
+        // A wall with no direction at all falls back on the snap.
+        assert_eq!(outward_normal((0, 0), 0, 1), Some((0.0, 1.0)));
+        assert_eq!(outward_normal((0, 0), 0, 0), None);
+    }
+
+    #[test]
+    fn one_quad_spans_the_whole_wall_and_clears_its_blocks() {
+        // A 20 block wall along x at z = 50, twelve rows high, facing south.
+        let cells: Vec<(i32, i32)> = (0..20).map(|i| (100 + i, 50)).collect();
+        let n = (0.0, 1.0);
+        let quad = quad_for(&cells, n, 1.0, 64, 12);
+        assert!(close(quad.w, 20.0) && close(quad.h, 12.0));
+        assert!(close(quad.cx, 110.0), "centred along the wall");
+        // The blocks fill z 50 to 51; the quad sits PUSH_OUT in front of that.
+        assert!(close(quad.cz, 51.0 + PUSH_OUT));
+        assert!(close(quad.cy, 70.0), "bottom at 64, twelve blocks up");
+        assert!(quat_close(quad.rot, [0.0, 0.0, 0.0, 1.0]));
+
+        // The same wall seen from the north: the quad flips to the other side.
+        let quad = quad_for(&cells, (0.0, -1.0), 1.0, 64, 12);
+        assert!(close(quad.cx, 110.0) && close(quad.cz, 50.0 - PUSH_OUT));
+        assert!(close(quad.w, 20.0));
+
+        // A staircase at 45 degrees: one quad on the true line, not eight
+        // panels. Its plane clears the outer corner of every step, which
+        // sticks out further than half a block.
+        let steps: Vec<(i32, i32)> = (0..8).map(|i| (100 + i, 50 + i)).collect();
+        let n = (ROOT_HALF, -ROOT_HALF);
+        let step = cell_step((7, 7));
+        let quad = quad_for(&steps, n, step, 64, 6);
+        assert!(close(quad.w, 98.0f64.sqrt() + step), "w = {}", quad.w);
+        // Centre of the cells, pushed out along the normal by the corner
+        // reach (one over root two) plus PUSH_OUT.
+        let out = ROOT_HALF + PUSH_OUT;
+        assert!(close(quad.cx, 104.0 + out * ROOT_HALF), "cx = {}", quad.cx);
+        assert!(close(quad.cz, 54.0 - out * ROOT_HALF), "cz = {}", quad.cz);
+    }
+
+    #[test]
+    fn a_cell_carries_more_wall_the_further_the_wall_leans() {
+        assert!(close(cell_step((19, 0)), 1.0));
+        assert!(close(cell_step((0, -19)), 1.0));
+        assert!(close(cell_step((7, 7)), std::f64::consts::SQRT_2));
+        assert!(close(cell_step((20, 3)), 409.0f64.sqrt() / 20.0));
+        assert!(close(cell_step((0, 0)), 1.0));
+    }
+
+    #[test]
+    fn crop_is_mirrored_when_node_a_is_on_the_viewers_right() {
+        // The same cases `paintings::flip_crop` covers, keyed on the true
+        // normal instead of a facing byte.
+        assert!(
+            !flip_crop((10, 0), (0.0, 1.0)),
+            "facing south, right is east"
+        );
+        assert!(
+            flip_crop((10, 0), (0.0, -1.0)),
+            "facing north, right is west"
+        );
+        assert!(
+            flip_crop((0, 10), (1.0, 0.0)),
+            "facing east, right is north"
+        );
+        assert!(
+            !flip_crop((0, 10), (-1.0, 0.0)),
+            "facing west, right is south"
+        );
+        // At 45 degrees the outward normal decides it just the same.
+        assert!(flip_crop((7, 7), (ROOT_HALF, -ROOT_HALF)));
+        assert!(!flip_crop((7, 7), (-ROOT_HALF, ROOT_HALF)));
+    }
+
+    #[test]
+    fn the_model_and_its_definition_have_the_1_21_4_shape() {
+        let v: serde_json::Value = serde_json::from_str(&item_definition_json("f1_0_0_0")).unwrap();
+        assert_eq!(v["model"]["type"], "minecraft:model");
+        assert_eq!(v["model"]["model"], "arnis:item/f1_0_0_0");
+
+        let v: serde_json::Value = serde_json::from_str(&model_json("f1_0_0_0")).unwrap();
+        // block/block would halve the quad through its own `fixed` transform.
+        assert!(v.get("parent").is_none(), "the model must have no parent");
+        assert_eq!(v["textures"]["0"], "arnis:block/f1_0_0_0");
+        assert_eq!(v["textures"]["particle"], "arnis:block/f1_0_0_0");
+        assert_eq!(v["display"]["fixed"]["scale"], serde_json::json!([1, 1, 1]));
+        assert_eq!(
+            v["display"]["fixed"]["rotation"],
+            serde_json::json!([0, 0, 0])
+        );
+        let element = &v["elements"][0];
+        assert_eq!(element["from"], serde_json::json!([0.0, 0.0, 7.9]));
+        assert_eq!(element["to"], serde_json::json!([16.0, 16.0, 8.1]));
+        // Both wide faces carry the identity mapping, so the photograph reads
+        // upright and unmirrored whichever side the viewer stands on.
+        for face in ["north", "south"] {
+            assert_eq!(
+                element["faces"][face]["uv"],
+                serde_json::json!([0, 0, 16, 16]),
+                "{face}"
+            );
+            assert_eq!(element["faces"][face]["texture"], "#0", "{face}");
+        }
+        assert!(element["faces"].get("east").is_none());
+    }
+
+    #[test]
+    fn texture_sides_stay_mipmappable_and_the_budget_halves() {
+        // A whole multiple of 16 in every case, never zero.
+        assert_eq!(tex_side(20.0, 16), 320);
+        assert_eq!(tex_side(12.0, 16), 192);
+        assert_eq!(tex_side(11.314, 16), 176, "181 px rounds to 176");
+        assert_eq!(tex_side(0.5, 4), 16, "never below one texel row");
+        assert_eq!(tex_side(1.0, 4), 16);
+
+        let panel = |i: usize| Panel {
+            name: format!("p{i}"),
+            w: 32.0,
+            h: 32.0,
+            tex: RgbImage::new(1, 1),
+        };
+        // 250 full panels: 65.5 M px at 16, 16.4 M at 8.
+        let many: Vec<Panel> = (0..250).map(panel).collect();
+        assert_eq!(fit_px(&many, 16), 8);
+        assert_eq!(fit_px(&many, 32), 8);
+        assert_eq!(fit_px(&many[..2], 16), 16);
+        assert_eq!(fit_px(&many[..2], 32), 32);
+        // Never below 4, even when that still does not fit.
+        let huge: Vec<Panel> = (0..20_000).map(panel).collect();
+        assert_eq!(fit_px(&huge, 16), 4);
+    }
+
+    #[test]
+    fn the_resource_pack_carries_three_files_per_panel_and_no_data_pack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(tmp.path());
+        let panels = vec![Panel {
+            name: "f1_0_0_0".to_string(),
+            w: 3.0,
+            h: 2.0,
+            tex: RgbImage::from_pixel(24, 16, Rgb([10, 20, 30])),
+        }];
+        let report = write_packs_for(&world, &panels, 16).unwrap();
+        assert_eq!((report.panels, report.px), (1, 16));
+        // Display panels are resource pack only: no variants, no level.dat.
+        assert!(!world.join("datapacks").exists());
+
+        for rel in ["resources.zip", "resourcepacks/resources.zip"] {
+            let file = std::fs::File::open(world.join(rel)).unwrap();
+            let mut archive = zip::ZipArchive::new(file).unwrap();
+            let read = |archive: &mut zip::ZipArchive<std::fs::File>, name: &str| {
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut archive.by_name(name).unwrap(), &mut text)
+                    .unwrap();
+                text
+            };
+            let mcmeta: serde_json::Value =
+                serde_json::from_str(&read(&mut archive, "pack.mcmeta")).unwrap();
+            assert_eq!(mcmeta["pack"]["pack_format"], 46, "{rel}");
+            assert_eq!(mcmeta["pack"]["min_format"], 46, "{rel}");
+            assert_eq!(mcmeta["pack"]["description"], "Arnis facade panels");
+
+            let def: serde_json::Value =
+                serde_json::from_str(&read(&mut archive, "assets/arnis/items/f1_0_0_0.json"))
+                    .unwrap();
+            assert_eq!(def["model"]["model"], "arnis:item/f1_0_0_0");
+            let model: serde_json::Value = serde_json::from_str(&read(
+                &mut archive,
+                "assets/arnis/models/item/f1_0_0_0.json",
+            ))
+            .unwrap();
+            assert_eq!(model["textures"]["0"], "arnis:block/f1_0_0_0");
+
+            let mut png = Vec::new();
+            std::io::Read::read_to_end(
+                &mut archive
+                    .by_name("assets/arnis/textures/block/f1_0_0_0.png")
+                    .unwrap(),
+                &mut png,
+            )
+            .unwrap();
+            let img = image::load_from_memory(&png).unwrap();
+            assert_eq!((img.width(), img.height()), (48, 32), "{rel}");
+        }
+    }
+
+    /// A `cols` m wide, `rows` m high wall texture at the lab's 8 px per
+    /// metre: red on the node A half, blue on the node B half.
+    fn two_tone_tex(cols: u32, rows: u32) -> RgbaImage {
+        let width = cols * 8;
+        RgbaImage::from_fn(width, rows * 8, |x, _| {
+            if x < width / 2 {
+                image::Rgba([255, 0, 0, 255])
+            } else {
+                image::Rgba([0, 0, 255, 255])
+            }
+        })
+    }
+
+    /// A straight wall of `cols` cells along x at `z`, textured from node A
+    /// (west) to node B (east), with its outward normal `(0, nz)`.
+    fn wall_along_x(
+        cells: &mut FnvHashMap<(i32, i32), CellRef>,
+        wall: u32,
+        x0: i32,
+        z: i32,
+        cols: i32,
+        nz: i8,
+    ) {
+        for i in 0..cols {
+            cells.insert(
+                (x0 + i, z),
+                CellRef {
+                    wall,
+                    col: i as u16,
+                    nx: 0,
+                    nz,
+                },
+            );
+        }
+    }
+
+    fn doubles(entity: &HashMap<String, Value>, key: &str) -> Vec<f64> {
+        match entity.get(key) {
+            Some(Value::List(v)) => v
+                .iter()
+                .map(|x| match x {
+                    Value::Double(d) => *d,
+                    other => panic!("{key}: {other:?} is not a double"),
+                })
+                .collect(),
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+
+    fn floats(compound: &HashMap<String, Value>, key: &str) -> Vec<f64> {
+        match compound.get(key) {
+            Some(Value::List(v)) => v
+                .iter()
+                .map(|x| match x {
+                    Value::Float(f) => f64::from(*f),
+                    other => panic!("{key}: {other:?} is not a float"),
+                })
+                .collect(),
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+
+    fn transformation(entity: &HashMap<String, Value>) -> &HashMap<String, Value> {
+        match entity.get("transformation") {
+            Some(Value::Compound(c)) => c,
+            other => panic!("transformation: {other:?}"),
+        }
+    }
+
+    /// The `minecraft:item_model` id the display's item carries.
+    fn item_model(entity: &HashMap<String, Value>) -> String {
+        let Some(Value::Compound(item)) = entity.get("item") else {
+            panic!("no item");
+        };
+        assert_eq!(item.get("id"), Some(&Value::String(ITEM.to_string())));
+        assert_eq!(item.get("count"), Some(&Value::Int(1)));
+        let Some(Value::Compound(components)) = item.get("components") else {
+            panic!("no components");
+        };
+        match components.get("minecraft:item_model") {
+            Some(Value::String(s)) => s.clone(),
+            other => panic!("item_model: {other:?}"),
+        }
+    }
+
+    /// Panel sizes in the registry, by name.
+    fn panel_sizes() -> Vec<(String, f64, f64)> {
+        let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        let mut v: Vec<_> = r
+            .panels
+            .iter()
+            .map(|p| (p.name.clone(), p.w, p.h))
+            .collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
+    }
+
+    /// Corner pixels of a registered panel's crop: top-left and bottom-right.
+    fn panel_corners(name: &str) -> ((u32, u32), [u8; 3], [u8; 3]) {
+        let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        let tex = &r.panels.iter().find(|p| p.name == name).unwrap().tex;
+        let (w, h) = (tex.width(), tex.height());
+        ((w, h), tex.get_pixel(0, 0).0, tex.get_pixel(w - 1, h - 1).0)
+    }
+
+    #[test]
+    fn a_wall_standing_on_fill_starts_at_its_first_wall_block() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5353;
+        // The same 20 by 12 wall, but the building's floor sits two blocks
+        // above the terrain, which is what a slope does on the downhill side.
+        let walls = vec![FacadeWall::for_test(
+            WAY,
+            1,
+            2,
+            20,
+            12,
+            two_tone_tex(20, 12),
+        )];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        wall_along_x(&mut cells, 0, 100, 50, 20, 1);
+        facades::install_displays_for_test(walls, cells, vec![(19, 0)], 1.0);
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 2, 0, 12), 1);
+        finalize(&mut editor).unwrap();
+
+        let entities = editor.item_displays();
+        assert_eq!(entities.len(), 1);
+        let e = &entities[0];
+        // The first wall block is at y = 3 and the ground two blocks below it.
+        // The panel is the photograph's own twelve blocks and starts at the
+        // wall block: the two blocks of fill below stay bare rather than
+        // carrying pixels the photograph does not have.
+        let t = transformation(e);
+        assert_eq!(floats(t, "scale"), vec![20.0, 12.0, 1.0]);
+        let pos = doubles(e, "Pos");
+        assert!(close(pos[1], 9.0), "centre of a 12 block panel based at 3");
+        assert_eq!(panel_sizes(), vec![("f5353_0_0_0".to_string(), 20.0, 12.0)]);
+
+        // Nothing was added to the crop: 8 px per metre over 20 by 12 metres.
+        let ((w, h), top_left, bottom_right) = panel_corners("f5353_0_0_0");
+        assert_eq!((w, h), (160, 96), "the photograph and nothing else");
+        assert_eq!(top_left, [255, 0, 0]);
+        assert_eq!(bottom_right, [0, 0, 255]);
+    }
+
+    #[test]
+    fn a_straight_wall_hangs_one_display_covering_all_of_it() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5252;
+        // One 20 block wall at z = 50 facing south, twelve rows high,
+        // textured from node A (west) to node B (east).
+        let walls = vec![FacadeWall::for_test(
+            WAY,
+            1,
+            2,
+            20,
+            12,
+            two_tone_tex(20, 12),
+        )];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        wall_along_x(&mut cells, 0, 100, 50, 20, 1);
+        facades::install_displays_for_test(walls, cells, vec![(19, 0)], 1.0);
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+        // No wall blocks are placed on purpose: a display needs nothing solid
+        // behind it and nothing clear in front, only ground below the top.
+
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 12), 1);
+        // A second tile reaching the same building claims nothing.
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 12), 0);
+        assert!(editor.item_displays().is_empty(), "nothing hangs yet");
+
+        let report = finalize(&mut editor).unwrap();
+        assert_eq!(
+            report.stats,
+            PlacementStats {
+                candidates: 1,
+                displays: 1,
+                placed: 1,
+                dropped: 0,
+            }
+        );
+        let entities = editor.item_displays();
+        assert_eq!(entities.len(), 1, "one entity for the whole wall");
+        let e = &entities[0];
+        assert_eq!(item_model(e), "arnis:f5252_0_0_0");
+        assert_eq!(
+            e.get("item_display"),
+            Some(&Value::String("fixed".to_string()))
+        );
+        assert_eq!(
+            e.get("billboard"),
+            Some(&Value::String("fixed".to_string()))
+        );
+        assert_eq!(e.get("view_range"), Some(&Value::Float(VIEW_RANGE)));
+        // Zero, which turns culling off; a box around the entity point would
+        // cut a panel this much bigger than itself.
+        assert_eq!(e.get("width"), Some(&Value::Float(0.0)));
+        assert_eq!(e.get("height"), Some(&Value::Float(0.0)));
+
+        // Centred on the wall, half a block plus PUSH_OUT south of it, and
+        // half its height above the first wall block at y = 1.
+        let pos = doubles(e, "Pos");
+        assert!(close(pos[0], 110.0) && close(pos[1], 7.0) && close(pos[2], 51.0 + PUSH_OUT));
+        let t = transformation(e);
+        assert_eq!(floats(t, "scale"), vec![20.0, 12.0, 1.0]);
+        assert_eq!(floats(t, "translation"), vec![0.0, 0.0, 0.0]);
+        assert_eq!(floats(t, "left_rotation"), vec![0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(floats(t, "right_rotation"), vec![0.0, 0.0, 0.0, 1.0]);
+
+        assert_eq!(panel_sizes(), vec![("f5252_0_0_0".to_string(), 20.0, 12.0)]);
+        // Seen from the south, node A (red) is on the viewer's left.
+        assert_eq!(
+            panel_corners("f5252_0_0_0"),
+            ((160, 96), [255, 0, 0], [0, 0, 255])
+        );
+
+        // Settling again finds nothing pending.
+        assert!(finalize(&mut editor).is_some());
+        assert_eq!(editor.item_displays().len(), 1);
+        assert_eq!(stats().displays, 1);
+    }
+
+    #[test]
+    fn a_diagonal_wall_gets_one_flat_quad_instead_of_a_staircase() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5353;
+        // The wall of `paintings::a_diagonal_wall_gets_panels_on_both_faces`:
+        // 45 degrees from node A at (100, 50) to node B at (107, 57), eight
+        // Bresenham cells, one texture column each. That mode hangs nine
+        // paintings there, one per open axis face; this one hangs a single
+        // quad along the true line.
+        let walls = vec![FacadeWall::for_test(WAY, 11, 12, 8, 6, two_tone_tex(8, 6))];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        for i in 0..8 {
+            cells.insert(
+                (100 + i, 50 + i),
+                CellRef {
+                    wall: 0,
+                    col: i as u16,
+                    nx: 1,
+                    nz: 0,
+                },
+            );
+        }
+        facades::install_displays_for_test(walls, cells, vec![(7, 7)], 1.0);
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 1);
+        let report = finalize(&mut editor).unwrap();
+        assert_eq!(report.stats.displays, 1, "one quad, not nine panels");
+
+        let entities = editor.item_displays();
+        assert_eq!(entities.len(), 1);
+        let e = &entities[0];
+        let pos = doubles(e, "Pos");
+        let out = ROOT_HALF + PUSH_OUT;
+        assert!(close(pos[0], 104.0 + out * ROOT_HALF), "x = {}", pos[0]);
+        assert!(close(pos[1], 4.0));
+        assert!(close(pos[2], 54.0 - out * ROOT_HALF), "z = {}", pos[2]);
+        let t = transformation(e);
+        // The quad spans the eight cell centres plus half a step at each end.
+        let width = 98.0f64.sqrt() + std::f64::consts::SQRT_2;
+        assert!(
+            close(floats(t, "scale")[0], width),
+            "{:?}",
+            floats(t, "scale")
+        );
+        assert_eq!(floats(t, "scale")[1], 6.0);
+        // 135 degrees about +y, so the quad's front points north-east.
+        let rot = floats(t, "left_rotation");
+        assert!(
+            close(rot[1], 0.923_879_5) && close(rot[3], 0.382_683_4),
+            "{rot:?}"
+        );
+
+        // The crop is mirrored: from the north-east, node A (red) is on the
+        // viewer's right.
+        assert_eq!(
+            panel_corners("f5353_0_0_0"),
+            ((64, 48), [0, 0, 255], [255, 0, 0])
+        );
+    }
+
+    #[test]
+    fn a_long_wall_is_cut_and_a_buried_one_is_dropped() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5454;
+        // 70 blocks along x at z = 50 facing south, 40 rows high: three
+        // pieces along the wall and two up it.
+        let walls = vec![FacadeWall::for_test(
+            WAY,
+            1,
+            2,
+            70,
+            40,
+            two_tone_tex(70, 40),
+        )];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        wall_along_x(&mut cells, 0, 100, 50, 70, 1);
+        facades::install_displays_for_test(walls, cells, vec![(69, 0)], 1.0);
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(300.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 40), 1);
+        let report = finalize(&mut editor).unwrap();
+        assert_eq!(report.stats.displays, 6, "3 along by 2 up");
+        let mut names: Vec<(String, f64, f64)> = panel_sizes();
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            names,
+            vec![
+                ("f5454_0_0_0".to_string(), 32.0, 32.0),
+                ("f5454_0_0_32".to_string(), 32.0, 8.0),
+                ("f5454_0_32_0".to_string(), 32.0, 32.0),
+                ("f5454_0_32_32".to_string(), 32.0, 8.0),
+                ("f5454_0_64_0".to_string(), 6.0, 32.0),
+                ("f5454_0_64_32".to_string(), 6.0, 8.0),
+            ]
+        );
+
+        // A wall whose whole height sits under the terrain shows nothing.
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, -60, 0, 40), 1);
+        let report = finalize(&mut editor).unwrap();
+        assert_eq!(
+            report.stats,
+            PlacementStats {
+                candidates: 1,
+                displays: 0,
+                placed: 0,
+                dropped: 1,
+            }
+        );
+        assert_eq!(editor.item_displays().len(), 6, "no new entity");
+    }
+
+    #[test]
+    fn flush_region_settles_only_the_candidates_touching_that_region() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5555;
+        // One south-facing wall straddling the region border at x = 512, and
+        // one well inside region (0, 0).
+        let walls = vec![
+            FacadeWall::for_test(WAY, 31, 32, 10, 6, two_tone_tex(10, 6)),
+            FacadeWall::for_test(WAY, 33, 34, 4, 6, two_tone_tex(4, 6)),
+        ];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        wall_along_x(&mut cells, 0, 507, 50, 10, 1);
+        wall_along_x(&mut cells, 1, 100, 50, 4, 1);
+        facades::install_displays_for_test(walls, cells, vec![(9, 0), (3, 0)], 1.0);
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(600.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 2);
+        // Region (1, 0) holds the east end of the long wall and nothing else.
+        flush_region(&mut editor, 1, 0);
+        assert_eq!(editor.item_displays().len(), 1);
+        // Flushing it again, or a region with no candidates, changes nothing.
+        flush_region(&mut editor, 1, 0);
+        flush_region(&mut editor, 5, 5);
+        assert_eq!(editor.item_displays().len(), 1);
+        // The rest waits for the end.
+        let report = finalize(&mut editor).unwrap();
+        assert_eq!(report.stats.displays, 2);
+        assert_eq!(editor.item_displays().len(), 2);
+    }
+
+    #[test]
+    fn a_wall_merged_over_five_ring_edges_hangs_as_one_run_of_quads() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        // r147094's south wall as one exported wall of 65 columns over its
+        // five OSM edges (see `facades::test_fixtures`), textured with one
+        // colour per metre column so a crop tells which columns it holds.
+        // `paintings.rs` hangs five paintings here, capped at 16 blocks each;
+        // this hangs three, capped at 32.
+        use crate::element_processing::buildings::relation_ring_id;
+        use crate::osm_parser::ProcessedElement;
+        let relation = facades::test_fixtures::r147094_relation();
+        let ring_id = relation_ring_id(147094, 0);
+        let column_colour = |m: u32| {
+            let m = m as u8;
+            [3 * m, 255 - 3 * m, 100]
+        };
+        let tex = RgbaImage::from_fn(65 * 8, 48, |x, _| {
+            let [r, g, b] = column_colour(x / 8);
+            image::Rgba([r, g, b, 255])
+        });
+        let edges = [
+            (21486944, 2545319959, 0.0, 6.0),
+            (2545319959, 2545319965, 6.0, 30.0),
+            (2545319965, 1121737122, 30.0, 39.0),
+            (1121737122, 2545319977, 39.0, 53.0),
+            (2545319977, 410874364, 53.0, 65.0),
+        ];
+        let walls = vec![FacadeWall::for_test_relation_edges(
+            147094,
+            &edges,
+            0.0,
+            65,
+            6,
+            Some(tex),
+        )];
+        let elements = vec![ProcessedElement::Relation(relation)];
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        facades::install_display_elements_for_test(walls, &elements, &xzbbox, 1.0);
+
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, ring_id, 0, 0, 6), 1);
+        let report = finalize(&mut editor).unwrap();
+        assert_eq!(report.stats.displays, 3);
+
+        // Each piece holds exactly the metre columns of its blocks, left to
+        // right along the ring from node 21486944, and hangs centred on them
+        // half a block plus PUSH_OUT south of the wall.
+        let mut placed: Vec<(f64, f64, f64)> = editor
+            .item_displays()
+            .iter()
+            .map(|e| {
+                let pos = doubles(e, "Pos");
+                (pos[0], pos[2], floats(transformation(e), "scale")[0])
+            })
+            .collect();
+        placed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for ((x, z, w), (want_x, want_w)) in
+            placed.iter().zip([(36.0, 32.0), (68.0, 32.0), (84.5, 1.0)])
+        {
+            assert!(close(*x, want_x) && close(*w, want_w), "{x} {w}");
+            assert!(close(*z, 61.0 + PUSH_OUT));
+        }
+        for (name, first_col, w) in [
+            ("f{id}_0_0_0", 0u32, 32u32),
+            ("f{id}_0_32_0", 32, 32),
+            ("f{id}_0_64_0", 64, 1),
+        ] {
+            let name = name.replace("{id}", &ring_id.to_string());
+            let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+            let crop = &r.panels.iter().find(|p| p.name == name).unwrap().tex;
+            assert_eq!((crop.width(), crop.height()), (w * 8, 48), "{name}");
+            for k in 0..w {
+                assert_eq!(
+                    crop.get_pixel(k * 8 + 4, 24).0,
+                    column_colour(first_col + k),
+                    "{name}, block {k}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_two_panel_modes_never_run_together() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        use crate::args::FacadeMode;
+        assert!(!FacadeMode::Blocks.places_paintings() && !FacadeMode::Blocks.places_displays());
+        assert!(
+            FacadeMode::Paintings.places_paintings() && !FacadeMode::Paintings.places_displays()
+        );
+        assert!(
+            FacadeMode::PaintingsV2.places_displays()
+                && !FacadeMode::PaintingsV2.places_paintings()
+        );
+
+        const WAY: u64 = 5656;
+        let make = || {
+            let walls = vec![FacadeWall::for_test(WAY, 1, 2, 4, 6, two_tone_tex(4, 6))];
+            let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+            wall_along_x(&mut cells, 0, 100, 50, 4, 1);
+            (walls, cells)
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+        for i in 0..4 {
+            for y in 1..=6 {
+                editor.set_block_absolute(
+                    crate::block_definitions::SMOOTH_STONE,
+                    100 + i,
+                    y,
+                    50,
+                    None,
+                    None,
+                );
+            }
+        }
+
+        // Paintings v2 selected: the painting registry stays empty.
+        let (walls, cells) = make();
+        facades::install_displays_for_test(walls, cells, vec![(3, 0)], 1.0);
+        assert!(facades::displays_enabled() && !facades::paintings_enabled());
+        assert!(facades::panels_enabled());
+        reset(true, 16);
+        crate::mapillary::paintings::reset(false, 16);
+        assert_eq!(
+            crate::mapillary::paintings::collect(&mut editor, WAY, 0, 0, 6),
+            0
+        );
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 1);
+
+        // Paintings selected: the display registry stays empty.
+        let (walls, cells) = make();
+        facades::install_for_test(walls, cells, vec![(3, 0)], 1.0);
+        assert!(facades::paintings_enabled() && !facades::displays_enabled());
+        assert!(facades::panels_enabled());
+        reset(false, 16);
+        crate::mapillary::paintings::reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 0);
+        assert_eq!(
+            crate::mapillary::paintings::collect(&mut editor, WAY, 0, 0, 6),
+            1
+        );
+        crate::mapillary::paintings::reset(false, 16);
+    }
+
+    /// Every tag of one finished display, key by key and type by type, against
+    /// what a 1.21.4+ client reads. The shape is easy to break by accident and
+    /// the game says nothing when it is wrong: an item stack it cannot decode
+    /// becomes an empty one and the entity then draws nothing at all.
+    #[test]
+    fn one_display_carries_exactly_the_tags_the_client_reads() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5757;
+        let walls = vec![FacadeWall::for_test(WAY, 1, 2, 8, 5, two_tone_tex(8, 5))];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        wall_along_x(&mut cells, 0, 100, 50, 8, 1);
+        facades::install_displays_for_test(walls, cells, vec![(7, 0)], 1.0);
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        editor.set_map_decals(true);
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 5), 1);
+        finalize(&mut editor).unwrap();
+        let entities = editor.item_displays();
+        assert_eq!(entities.len(), 1);
+        let e = &entities[0];
+
+        // Nothing beyond this set, so a stray tag cannot creep in unnoticed.
+        let mut keys: Vec<&str> = e.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "Air",
+                "FallDistance",
+                "Fire",
+                "Motion",
+                "OnGround",
+                "PortalCooldown",
+                "Pos",
+                "Rotation",
+                "UUID",
+                "billboard",
+                "height",
+                "id",
+                "item",
+                "item_display",
+                "transformation",
+                "view_range",
+                "width",
+            ]
+        );
+
+        // `item_display` is the entity's own transform name, not the model's.
+        assert_eq!(
+            e.get("id"),
+            Some(&Value::String("minecraft:item_display".to_string())),
+            "the entity id, and the only one whose `item` tag takes a stack"
+        );
+        assert_eq!(
+            e.get("item_display"),
+            Some(&Value::String("fixed".to_string()))
+        );
+        assert_eq!(
+            e.get("billboard"),
+            Some(&Value::String("fixed".to_string()))
+        );
+        assert_eq!(e.get("view_range"), Some(&Value::Float(4.0)));
+        assert_eq!(e.get("width"), Some(&Value::Float(0.0)));
+        assert_eq!(e.get("height"), Some(&Value::Float(0.0)));
+        // A `fixed` billboard still turns the model by the entity's own yaw
+        // and pitch, so those must stay at zero or they compound with the
+        // quaternion below.
+        assert_eq!(floats(e, "Rotation"), vec![0.0, 0.0]);
+        // Three doubles, the exact point the quad is centred on.
+        assert_eq!(doubles(e, "Pos").len(), 3);
+
+        // The 1.20.5+ item stack: lowercase `count`, components by full id,
+        // `minecraft:item_model` a bare namespaced string. A block item, so
+        // the client draws the panel in the opaque entity pass.
+        let Some(Value::Compound(item)) = e.get("item") else {
+            panic!("no item compound");
+        };
+        let mut item_keys: Vec<&str> = item.keys().map(String::as_str).collect();
+        item_keys.sort_unstable();
+        assert_eq!(item_keys, ["components", "count", "id"]);
+        assert_eq!(item.get("id"), Some(&Value::String(ITEM.to_string())));
+        assert!(
+            ITEM == "minecraft:stone",
+            "the carrier must stay a block item, see ITEM"
+        );
+        assert_eq!(item.get("count"), Some(&Value::Int(1)));
+        let Some(Value::Compound(components)) = item.get("components") else {
+            panic!("no components compound");
+        };
+        assert_eq!(
+            components.keys().collect::<Vec<_>>(),
+            vec!["minecraft:item_model"]
+        );
+        assert_eq!(
+            components.get("minecraft:item_model"),
+            Some(&Value::String("arnis:f5757_0_0_0".to_string())),
+            "the id the pack's assets/arnis/items/<name>.json answers to"
+        );
+
+        // The transformation: four fields, floats throughout, quaternions as
+        // [x, y, z, w]. The scale is the panel's size in blocks because the
+        // model is one block wide and the game applies it before the rotation.
+        let t = transformation(e);
+        let mut t_keys: Vec<&str> = t.keys().map(String::as_str).collect();
+        t_keys.sort_unstable();
+        assert_eq!(
+            t_keys,
+            ["left_rotation", "right_rotation", "scale", "translation"]
+        );
+        assert_eq!(floats(t, "scale"), vec![8.0, 5.0, 1.0]);
+        assert_eq!(floats(t, "translation"), vec![0.0, 0.0, 0.0]);
+        assert_eq!(floats(t, "right_rotation"), vec![0.0, 0.0, 0.0, 1.0]);
+        let left = floats(t, "left_rotation");
+        assert_eq!(left.len(), 4);
+        let norm: f64 = left.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-6,
+            "left_rotation must be a unit quaternion, got {left:?}"
+        );
+
+        assert_eq!(panel_sizes(), vec![("f5757_0_0_0".to_string(), 8.0, 5.0)]);
+    }
+
+    /// The pack's exact layout: which files a panel produces, where they sit
+    /// and what each one has to say for the chain from the entity's
+    /// `minecraft:item_model` id down to a stitched sprite to close.
+    #[test]
+    fn the_pack_lays_a_panel_out_the_way_the_client_resolves_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(tmp.path());
+        let panels = vec![Panel {
+            name: "f7_1_0_0".to_string(),
+            w: 4.0,
+            h: 3.0,
+            tex: RgbImage::from_pixel(32, 24, Rgb([7, 8, 9])),
+        }];
+        write_packs_for(&world, &panels, 16).unwrap();
+
+        let file = std::fs::File::open(world.join("resources.zip")).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "assets/arnis/items/f7_1_0_0.json".to_string(),
+                "assets/arnis/models/item/f7_1_0_0.json".to_string(),
+                "assets/arnis/textures/block/f7_1_0_0.png".to_string(),
+                "pack.mcmeta".to_string(),
+            ],
+            "one item definition, one model and one texture per panel, nothing else"
+        );
+
+        let read = |archive: &mut zip::ZipArchive<std::fs::File>, name: &str| {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut archive.by_name(name).unwrap(), &mut text).unwrap();
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()
+        };
+
+        // The pack has to declare a floor of 46, the first format that
+        // resolves an item's model through `assets/<ns>/items/`, and no
+        // ceiling that would shut a later game out. 1.21.11 reads 75.
+        let mcmeta = read(&mut archive, "pack.mcmeta");
+        assert_eq!(mcmeta["pack"]["min_format"], 46);
+        assert_eq!(mcmeta["pack"]["pack_format"], 46);
+        assert_eq!(mcmeta["pack"]["max_format"], serde_json::json!([999, 0]));
+
+        // items/<name>.json is what the entity's component names; it points at
+        // models/item/<name>.json, which points at textures/block/<name>.png.
+        let def = read(&mut archive, "assets/arnis/items/f7_1_0_0.json");
+        assert_eq!(
+            def,
+            serde_json::json!({
+                "model": { "type": "minecraft:model", "model": "arnis:item/f7_1_0_0" }
+            })
+        );
+        let model = read(&mut archive, "assets/arnis/models/item/f7_1_0_0.json");
+        assert_eq!(
+            model,
+            serde_json::json!({
+                "textures": {
+                    "0": "arnis:block/f7_1_0_0",
+                    "particle": "arnis:block/f7_1_0_0"
+                },
+                "elements": [{
+                    "from": [0.0, 0.0, 7.9],
+                    "to": [16.0, 16.0, 8.1],
+                    "faces": {
+                        "north": { "uv": [0, 0, 16, 16], "texture": "#0" },
+                        "south": { "uv": [0, 0, 16, 16], "texture": "#0" }
+                    }
+                }],
+                "display": {
+                    "fixed": {
+                        "rotation": [0, 0, 0],
+                        "translation": [0, 0, 0],
+                        "scale": [1, 1, 1]
+                    }
+                }
+            }),
+            "every texture of an item model has to come from one atlas, and \
+             textures/block puts them all in the block one"
+        );
+
+        // A whole multiple of 16 on both sides or the block atlas loses a
+        // mipmap level for every block in the world.
+        let mut png = Vec::new();
+        std::io::Read::read_to_end(
+            &mut archive
+                .by_name("assets/arnis/textures/block/f7_1_0_0.png")
+                .unwrap(),
+            &mut png,
+        )
+        .unwrap();
+        let img = image::load_from_memory(&png).unwrap();
+        assert_eq!((img.width(), img.height()), (64, 48));
+        assert_eq!((img.width() % 16, img.height() % 16), (0, 0));
+
+        // Resource pack only, and the same bytes at both places a world pack
+        // has ever been read from.
+        assert!(!world.join("datapacks").exists());
+        assert_eq!(
+            std::fs::read(world.join("resources.zip")).unwrap(),
+            std::fs::read(world.join("resourcepacks/resources.zip")).unwrap()
+        );
+    }
+}
