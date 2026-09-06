@@ -458,9 +458,19 @@ impl RegionWriteCtx {
 /// Helper function to get entity coordinates
 /// Extracts a block entity or entity position for coordinate dedup. Hanging entities
 /// (item frames, paintings) add their `Facing`, so several decals can share one cell.
+///
+/// An entity's UUID beats `Facing` where there is one. Every UUID this writer
+/// produces comes from `build_deterministic_uuid`, so the two copies a tile
+/// halo makes of one entity carry the same one and still collapse, while two
+/// entities that merely round into the same cell (two facade panels meeting at
+/// a building corner put their centres in one block) no longer take each
+/// other's place. Block entities have no UUID and keep the old key.
 #[inline]
 fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, i32)> {
-    let facing = entity.get("Facing").and_then(value_to_i32).unwrap_or(-1);
+    let facing = match entity.get("UUID") {
+        Some(Value::IntArray(uuid)) if uuid.len() == 4 => uuid[0] ^ uuid[3],
+        _ => entity.get("Facing").and_then(value_to_i32).unwrap_or(-1),
+    };
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
             if let (Some(x), Some(y), Some(z)) = (
@@ -1750,5 +1760,55 @@ mod dimension_bounds_tests {
         assert_eq!(section_ys(&nbt), expected);
 
         set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn entity_dedup_keeps_two_entities_that_share_a_cell() {
+        use super::{dedup_compound_list, get_entity_coords};
+        use fastnbt::IntArray;
+
+        // Two facade panels meeting at a building corner: different sub-block
+        // positions inside one cell, no face byte, different UUIDs.
+        let display = |x: f64, z: f64, uuid: [i32; 4]| {
+            let mut e: HashMap<String, Value> = HashMap::new();
+            e.insert(
+                "id".to_string(),
+                Value::String("minecraft:item_display".to_string()),
+            );
+            e.insert(
+                "Pos".to_string(),
+                Value::List(vec![
+                    Value::Double(x),
+                    Value::Double(-52.0),
+                    Value::Double(z),
+                ]),
+            );
+            e.insert(
+                "UUID".to_string(),
+                Value::IntArray(IntArray::new(uuid.into())),
+            );
+            Value::Compound(e)
+        };
+        let a = display(33.1, 12.2, [1, 2, 3, 4]);
+        let b = display(33.8, 12.9, [5, 6, 7, 8]);
+        assert_eq!(
+            dedup_compound_list(&[a.clone(), b.clone()]).len(),
+            2,
+            "two panels rounding into one cell must both survive"
+        );
+
+        // The same panel seen twice by two tiles: identical UUID, one survives.
+        assert_eq!(dedup_compound_list(&[a.clone(), a.clone()]).len(), 1);
+
+        // Hanging entities still separate by cell, and a block entity, which
+        // carries no UUID, still keys on its own x/y/z.
+        let Value::Compound(am) = &a else { panic!() };
+        let Value::Compound(bm) = &b else { panic!() };
+        assert_ne!(get_entity_coords(am), get_entity_coords(bm));
+        let mut be: HashMap<String, Value> = HashMap::new();
+        be.insert("x".to_string(), Value::Int(7));
+        be.insert("y".to_string(), Value::Int(8));
+        be.insert("z".to_string(), Value::Int(9));
+        assert_eq!(get_entity_coords(&be), Some((7, 8, 9, -1)));
     }
 }
