@@ -465,11 +465,26 @@ impl RegionWriteCtx {
 /// entities that merely round into the same cell (two facade panels meeting at
 /// a building corner put their centres in one block) no longer take each
 /// other's place. Block entities have no UUID and keep the old key.
+///
+/// The whole UUID goes in the key, not a fold of it: `uuid[0] ^ uuid[3]` would
+/// put 128 bits into 32, and at a few thousand panels in one world the birthday
+/// odds of two colliding are percents, not nothing. A collision here is silent
+/// entity loss, which is the defect this key exists to fix.
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+enum EntityIdentity {
+    Uuid([i32; 4]),
+    /// Block entities carry no UUID; `Facing` separates the ones that share a
+    /// cell, and -1 stands for an entity that has neither.
+    Facing(i32),
+}
+
 #[inline]
-fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, i32)> {
+fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, EntityIdentity)> {
     let facing = match entity.get("UUID") {
-        Some(Value::IntArray(uuid)) if uuid.len() == 4 => uuid[0] ^ uuid[3],
-        _ => entity.get("Facing").and_then(value_to_i32).unwrap_or(-1),
+        Some(Value::IntArray(uuid)) if uuid.len() == 4 => {
+            EntityIdentity::Uuid([uuid[0], uuid[1], uuid[2], uuid[3]])
+        }
+        _ => EntityIdentity::Facing(entity.get("Facing").and_then(value_to_i32).unwrap_or(-1)),
     };
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
@@ -1131,7 +1146,7 @@ fn block_entity_owned_by_block(chunk: &ChunkToModify, be: &Value) -> bool {
 
 /// Deduplicates a compound list by entity coordinate, keeping the last occurrence.
 fn dedup_compound_list(values: &[Value]) -> Vec<Value> {
-    let mut coord_index: HashMap<(i32, i32, i32, i32), usize> = HashMap::new();
+    let mut coord_index: HashMap<(i32, i32, i32, EntityIdentity), usize> = HashMap::new();
     let mut deduped: Vec<Value> = Vec::with_capacity(values.len());
 
     for value in values {
@@ -1764,7 +1779,7 @@ mod dimension_bounds_tests {
 
     #[test]
     fn entity_dedup_keeps_two_entities_that_share_a_cell() {
-        use super::{dedup_compound_list, get_entity_coords};
+        use super::{dedup_compound_list, get_entity_coords, EntityIdentity};
         use fastnbt::IntArray;
 
         // Two facade panels meeting at a building corner: different sub-block
@@ -1809,6 +1824,9 @@ mod dimension_bounds_tests {
         be.insert("x".to_string(), Value::Int(7));
         be.insert("y".to_string(), Value::Int(8));
         be.insert("z".to_string(), Value::Int(9));
-        assert_eq!(get_entity_coords(&be), Some((7, 8, 9, -1)));
+        assert_eq!(
+            get_entity_coords(&be),
+            Some((7, 8, 9, EntityIdentity::Facing(-1)))
+        );
     }
 }

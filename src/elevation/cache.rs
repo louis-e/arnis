@@ -52,7 +52,8 @@ impl CacheClearStats {
 
 /// Bytes held by every regular file under `dir`, symlinks counted but not
 /// followed, so the number cannot run off into a directory the cache merely
-/// points at. A missing directory is zero rather than an error: the settings
+/// points at. `symlink_metadata` states that in the call rather than leaning on
+/// `DirEntry::metadata`'s own no-traverse contract, which a reader has to know. A missing directory is zero rather than an error: the settings
 /// panel asks for this before anything has ever been cached.
 pub fn dir_size_bytes(dir: &std::path::Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -65,7 +66,7 @@ pub fn dir_size_bytes(dir: &std::path::Path) -> u64 {
         };
         if kind.is_dir() {
             total = total.saturating_add(dir_size_bytes(&entry.path()));
-        } else if let Ok(meta) = entry.metadata() {
+        } else if let Ok(meta) = std::fs::symlink_metadata(entry.path()) {
             total = total.saturating_add(meta.len());
         }
     }
@@ -458,5 +459,39 @@ mod tests {
         assert_eq!(stats.files_deleted, 0);
         // Target must be untouched.
         assert!(real.join("important.txt").exists());
+    }
+
+    /// A symlink must contribute its own size, never the target's, or the
+    /// settings panel would report bytes that live outside the cache. Skipped
+    /// where the platform will not let a test create a symlink at all.
+    #[test]
+    fn a_symlink_is_counted_but_not_followed() {
+        let base = std::env::temp_dir().join(format!("arnis-symsize-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let outside = base.join("outside");
+        let counted = base.join("counted");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(&counted).unwrap();
+
+        let target = outside.join("big.bin");
+        std::fs::write(&target, vec![0u8; 100_000]).unwrap();
+        std::fs::write(counted.join("small.bin"), vec![0u8; 1_000]).unwrap();
+
+        let link = counted.join("link.bin");
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, &link).is_ok();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, &link).is_ok();
+        if !made {
+            let _ = std::fs::remove_dir_all(&base);
+            return; // no privilege to create one here
+        }
+
+        let total = dir_size_bytes(&counted);
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(
+            total < 100_000,
+            "the link's 100 kB target was counted: {total} bytes"
+        );
     }
 }

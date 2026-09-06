@@ -254,8 +254,12 @@ pub struct Fetched {
 enum HttpError {
     /// 403 or 404 on a signed URL: it expired and must be re-queried once.
     Forbidden,
-    /// The Graph 500 that asks for a smaller cell.
-    TooLarge,
+    /// The Graph 500 that asks for a smaller cell. `explicit` is true only when
+    /// the body actually said so; a bare Graph 500 is assumed to mean size,
+    /// which is right while a cell is still big enough for that to be possible.
+    TooLarge {
+        explicit: bool,
+    },
     Failed(String),
 }
 
@@ -263,7 +267,7 @@ impl HttpError {
     fn message(&self) -> String {
         match self {
             HttpError::Forbidden => "signed URL expired".to_string(),
-            HttpError::TooLarge => "response too large".to_string(),
+            HttpError::TooLarge { .. } => "response too large".to_string(),
             HttpError::Failed(e) => e.clone(),
         }
     }
@@ -371,7 +375,9 @@ impl Http {
                         )));
                     }
                     if reply.status.as_u16() == 500 && (graph || api::wants_smaller_area(&text)) {
-                        return Err(HttpError::TooLarge);
+                        return Err(HttpError::TooLarge {
+                            explicit: api::wants_smaller_area(&text),
+                        });
                     }
                     if matches!(reply.status.as_u16(), 403 | 404) {
                         return Err(HttpError::Forbidden);
@@ -465,6 +471,25 @@ struct CellResult {
     refused: usize,
 }
 
+/// How many times a leaf cell's non-explicit refusal is asked again.
+const LEAF_RETRIES: u32 = 2;
+
+/// The longest a leaf retry waits. The request backoff is five seconds, tuned
+/// for a rate limit, and a leaf pays it once per cell: on an area with dozens
+/// of refused leaves that would be the slowest part of the search. A server
+/// error either clears in under a second or is not going to.
+const LEAF_RETRY_BACKOFF_MAX: Duration = Duration::from_millis(750);
+
+/// The `data` array of a search response.
+fn parse_records(body: &[u8]) -> Result<Vec<Value>, String> {
+    let parsed: Value = serde_json::from_slice(body)
+        .map_err(|e| format!("Mapillary response was not the expected JSON: {e}"))?;
+    Ok(match parsed.get("data") {
+        Some(Value::Array(a)) => a.clone(),
+        _ => Vec::new(),
+    })
+}
+
 /// One search cell, quartered and retried while the API asks for less.
 fn search_cell(
     http: &Http,
@@ -481,26 +506,39 @@ fn search_cell(
     ];
 
     match http.get(&cfg.endpoints.images, &query, true) {
-        Ok(body) => {
-            let parsed: Value = serde_json::from_slice(&body)
-                .map_err(|e| format!("Mapillary response was not the expected JSON: {e}"))?;
-            let records = match parsed.get("data") {
-                Some(Value::Array(a)) => a.clone(),
-                _ => Vec::new(),
-            };
-            Ok(CellResult {
-                records,
-                refused: 0,
-            })
-        }
-        Err(HttpError::TooLarge) => {
+        Ok(body) => Ok(CellResult {
+            records: parse_records(&body)?,
+            refused: 0,
+        }),
+        Err(HttpError::TooLarge { explicit }) => {
             if depth >= cfg.limits.subdivision_depth {
-                // A cell of a few tens of metres that is still refused cannot
-                // be split into an answer. Count it and go on: the rest of the
-                // area is worth more than this cell. Counted rather than
-                // printed, because a search that is being refused for a reason
-                // other than size is refused in every leaf, and a thousand
-                // identical lines say no more than one.
+                // A cell this deep is metres across, so "too much data" is no
+                // longer a credible answer: only an explicit "reduce the amount
+                // of data" is taken at face value here. Anything else is the
+                // Graph API having a bad moment, and it is worth asking again,
+                // because a cell written off as refused costs the whole area
+                // its cached verdicts and the next run repeats the search.
+                if !explicit {
+                    for attempt in 1..=LEAF_RETRIES {
+                        std::thread::sleep(
+                            cfg.limits.backoff.min(LEAF_RETRY_BACKOFF_MAX) * attempt,
+                        );
+                        match http.get(&cfg.endpoints.images, &query, true) {
+                            Ok(body) => {
+                                return Ok(CellResult {
+                                    records: parse_records(&body)?,
+                                    refused: 0,
+                                })
+                            }
+                            // It does mean size after all, so stop asking.
+                            Err(HttpError::TooLarge { explicit: true }) => break,
+                            Err(_) => continue,
+                        }
+                    }
+                }
+                // Counted rather than printed, because a search refused for a
+                // reason other than size is refused in every leaf, and a
+                // thousand identical lines say no more than one.
                 return Ok(CellResult {
                     records: Vec::new(),
                     refused: 1,
@@ -1298,9 +1336,13 @@ fn vec3(v: Option<&Value>) -> Option<[f64; 3]> {
 /// occludes one inside it, and the line of sight test needs it as geometry.
 pub fn fetch_osm(cfg: &FetchConfig) -> Result<Value, String> {
     let b = pad_bbox(cfg.bbox, cfg.osm_margin_m);
+    // The bbox goes in the global header rather than on each statement: the
+    // Arnis proxy, which is first in the mirror list, refuses a query without
+    // one ("Query must include a global [bbox:south,west,north,east] header")
+    // and every generation was falling through to the public mirrors.
     let query = format!(
-        "[out:json][timeout:60];\n(\n  way[\"building\"]({0},{1},{2},{3});\n  \
-         relation[\"building\"]({0},{1},{2},{3});\n);\nout body; >; out skel qt;",
+        "[out:json][timeout:60][bbox:{0},{1},{2},{3}];\n(\n  way[\"building\"];\n  \
+         relation[\"building\"];\n);\nout body; >; out skel qt;",
         b.min_lat, b.min_lon, b.max_lat, b.max_lon
     );
 
@@ -2393,6 +2435,66 @@ mod tests {
         println!(
             "cache holds {}",
             cache::format_size(cfg.layout().size_bytes())
+        );
+    }
+
+    /// A Graph 500 with nothing in it about size, at the smallest cell the
+    /// search will make, is the server having a bad moment. Writing it off as
+    /// a hole costs the whole area its cached verdicts, so it is asked again.
+    #[test]
+    fn a_leaf_refused_without_being_asked_for_less_is_tried_again() {
+        let _serial = serialized();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = calls.clone();
+        // Every request 500s with a body that says nothing about size, until
+        // the fifth, by which point the cell has been split to the limit.
+        let server = Server::new(move |_target, _base, _n| {
+            let n = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n < 4 {
+                Act::text(500, "{\"error\":{\"message\":\"Internal Server Error\"}}")
+            } else {
+                Act::text(200, &one_image("1071917607838019"))
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = config(&server, tmp.path());
+
+        let fetched = fetch_metadata(&cfg).unwrap();
+        assert_eq!(
+            fetched.cells_refused, 0,
+            "a transient 500 at the leaf was recorded as a hole in coverage"
+        );
+        assert!(!fetched.metas.is_empty(), "the retry's answer was dropped");
+    }
+
+    /// The opposite: a body that does ask for less means what it says, so the
+    /// leaf is not asked the same question twice. Same shape as the test above
+    /// it, since an area where every cell is refused is a failure, not a hole.
+    #[test]
+    fn a_leaf_that_asks_for_less_is_not_asked_again() {
+        let _serial = serialized();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = calls.clone();
+        let server = Server::new(move |target: &str, _base: &str, _n| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if target.contains("bbox=11%2C") {
+                Act::text(200, &one_image("1071917607838019"))
+            } else {
+                Act::text(500, TOO_LARGE)
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = config(&server, tmp.path());
+        cfg.bbox = BBox::new(48.10, 11.00, 48.105, 11.012);
+
+        let fetched = fetch_metadata(&cfg).unwrap();
+        assert_eq!(fetched.cells_refused, 16);
+        // One request per cell in the tree and not one more. Retrying each of
+        // the sixteen leaves twice would add thirty-two.
+        let n = calls.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            n <= 22,
+            "an explicit refusal was retried: {n} requests for a 22 cell tree"
         );
     }
 }

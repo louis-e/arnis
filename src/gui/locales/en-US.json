@@ -77,7 +77,7 @@
   "settings_section_mapillary": "Mapillary (experimental)",
   "settings_section_map": "Map & Input",
   "settings_section_application": "Application",
-  "clear_tile_cache": "Clear Tile Cache",
+  "clear_tile_cache": "Clear Cache",
   "clear_tile_cache_button": "Clear",
   "anonymous_crash_reports": "Anonymous Crash Reports",
   "gamemode": "Game Mode",

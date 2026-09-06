@@ -75,6 +75,9 @@ mod gui;
 // If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
 #[cfg(not(feature = "gui"))]
 mod progress {
+    /// Mirrors the real module's constant so callers outside the GUI feature
+    /// still compile; nothing here reads it, the emits below do nothing.
+    pub const MESSAGE_ONLY: f64 = -1.0;
     pub fn emit_gui_error(_message: &str) {}
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
     pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
