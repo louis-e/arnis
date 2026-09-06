@@ -277,15 +277,17 @@ pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
     fs::write(dp_root.join("pack.mcmeta"), PACK_MCMETA)
         .map_err(|e| format!("Failed to write pack.mcmeta: {e}"))?;
 
-    register_tall_datapack_in_level_dat(world_path)?;
+    enable_datapack_in_level_dat(world_path, TALL_DATAPACK_NAME)?;
 
     Ok(())
 }
 
-/// Appends the pack entry if missing. Expected to run on a fresh level.dat
-/// template whose Enabled list starts with `["vanilla"]`, so the appended
-/// entry naturally lands after vanilla and our dimension_type override wins.
-fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> {
+/// Appends `file/<pack_dir_name>` to `Data.DataPacks.Enabled` if missing, so the
+/// folder pack in `<world>/datapacks/<pack_dir_name>` loads when the world opens.
+/// Expected to run on a fresh level.dat template whose Enabled list starts with
+/// `["vanilla"]`, so the appended entry naturally lands after vanilla and the
+/// pack's overrides win.
+pub fn enable_datapack_in_level_dat(world_path: &Path, pack_dir_name: &str) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
         return Err(format!("level.dat not found at {level_path:?}"));
@@ -301,7 +303,7 @@ fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> 
     let mut root: Value = fastnbt::from_bytes(&decompressed)
         .map_err(|e| format!("Failed to parse level.dat NBT: {e}"))?;
 
-    let entry = format!("file/{TALL_DATAPACK_NAME}");
+    let entry = format!("file/{pack_dir_name}");
 
     {
         let data = match root {

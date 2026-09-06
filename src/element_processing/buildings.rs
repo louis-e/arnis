@@ -20,6 +20,7 @@ use fastnbt::Value;
 use fnv::FnvHashSet;
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Lifecycle / damage state derived from OSM tags.
@@ -945,7 +946,9 @@ impl BuildingStyle {
     ) -> Self {
         // === Block Palette ===
 
-        // Priority: OSM tag > preset > category palette.
+        // Priority: OSM tag > preset > category palette. A photographed colour
+        // enters later, in `resolve`, because it belongs to the building rather
+        // than to its category and the facade store is what knows it.
         let wall_block = determine_wall_block_from_tags(element, category, rng)
             .or(preset.wall_block)
             .unwrap_or_else(|| determine_wall_block(element, category, era, climate, rng));
@@ -1231,7 +1234,7 @@ impl BuildingStyle {
             is_flat && has_multiple_floors && suitable
         });
 
-        Self {
+        let style = Self {
             wall_block,
             floor_block,
             window_block,
@@ -1250,7 +1253,34 @@ impl BuildingStyle {
             has_single_door,
             wall_depth_style,
             has_parapet,
+        };
+
+        // A building with facade textures takes the lab's whole-building
+        // colour as its wall block, at every scale, and keeps everything else
+        // it resolved. The flattening a texture needs, so that it is not
+        // fighting procedural windows and pilasters, is applied per column
+        // instead (`BuildingConfig::is_photo_column`), because a building
+        // gets a facade as soon as one of its walls was photographed: on the
+        // Munich test box 105 of the 310 ring segments of the 42 buildings
+        // with a facade carry a photograph, so flattening the whole shell
+        // turned the other 205 into blank single colour walls where a normal
+        // Arnis building has windows and doors.
+        if crate::mapillary::facades::has_building(element.id) {
+            let base = crate::mapillary::facades::building_colour(element.id)
+                .map(|rgb| crate::block_palette::wall_block_for_color(rgb, rng))
+                .unwrap_or(style.wall_block);
+            return style.with_wall_block(base);
         }
+        style
+    }
+
+    /// The same style with only its wall block swapped: windows, doors,
+    /// accents, wall depth and roof stay as resolved, so a building with
+    /// facade data still reads as the procedural one, in the lab's colour,
+    /// wherever no photograph covers it.
+    fn with_wall_block(mut self, wall_block: Block) -> Self {
+        self.wall_block = wall_block;
+        self
     }
 }
 
@@ -1312,6 +1342,12 @@ struct BuildingConfig {
     has_storefront: bool,
     /// Per-building window dressing style, derived from hand-built reference frames.
     window_frame: Option<WindowFrameStyle>,
+    /// The wall columns a facade photograph covers, built as a plain shell
+    /// for the texture to override (see `photo_shell_columns`). Empty on a
+    /// building with no facade, and below two blocks per metre without photo
+    /// panels, where the export supplies colours only and the building keeps
+    /// every procedural feature.
+    facade_shell: Arc<FnvHashSet<(i32, i32)>>,
 }
 
 /// Window frame styles distilled from the reference schematics, one per building.
@@ -1492,6 +1528,20 @@ fn pick_window_frame(
 }
 
 impl BuildingConfig {
+    /// Whether the wall column at `(bx, bz)` is one a facade photograph
+    /// covers, and so is built as a plain shell in `wall_block` for the
+    /// texture to override.
+    ///
+    /// Only the photographed walls are flattened, because only they have a
+    /// photograph: a procedural window, accent line, pilaster or quoin here
+    /// would show through the texture wherever it has no data, and a
+    /// protrusion in front of it would hide part of it, but on the walls the
+    /// export never covered, the same features are the whole building.
+    #[inline]
+    fn is_photo_column(&self, bx: i32, bz: i32) -> bool {
+        self.facade_shell.contains(&(bx, bz))
+    }
+
     /// Grammar anchor: +2 at ground level; elevated parts already carry the
     /// bonus in their min_level offset, keeping stacked bands in phase.
     #[inline]
@@ -3446,11 +3496,12 @@ fn build_wall_ring(
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
     facade: &FacadePlan,
-) -> (Vec<(i32, i32)>, i32) {
+) -> (Vec<(i32, i32)>, i32, Vec<WallSegmentKind>) {
     let mut previous_node: Option<(i32, i32)> = None;
     // Count of generated wall coordinates; the caller only needs to know the ring is non-empty.
     let mut corner_count: i32 = 0;
     let mut current_building: Vec<(i32, i32)> = Vec::new();
+    let mut segments: Vec<WallSegmentKind> = Vec::new();
 
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
@@ -3470,6 +3521,7 @@ fn build_wall_ring(
                 z,
             );
 
+            let mut kind = WallSegmentKind::default();
             for (pt_idx, (bx, _, bz)) in bresenham_points.into_iter().enumerate() {
                 // Passages only apply to ground-level buildings; elevated
                 // building:part elements (min_level > 0) receive an empty bitmap
@@ -3522,8 +3574,13 @@ fn build_wall_ring(
                     party: facade.is_party(bx, bz),
                     street: !facade.has_any_street || facade.is_street(bx, bz),
                 };
+                // Resolved once per column rather than per block: it is a
+                // lookup in the facade store, and the whole column shares it.
+                let photo = config.is_photo_column(bx, bz);
+                kind.photographed |= photo;
                 for h in wall_start..=column_top {
-                    let block = determine_wall_block_at_position(bx, h, bz, config, col);
+                    let block = determine_wall_block_at_position(bx, h, bz, config, col, photo);
+                    kind.windowed |= !photo && (block == config.window_block || block == GLASS);
                     editor.set_block_absolute(
                         block,
                         bx,
@@ -3548,7 +3605,10 @@ fn build_wall_ring(
 
                 // Add roof line only for flat roofs, sloped roofs will cover this area
                 if !has_sloped_roof {
-                    let roof_line_block = if config.use_accent_roof_line {
+                    // An accent line over a photographed wall belongs to a
+                    // building the photograph does not show, so the shell
+                    // keeps its own colour up here too.
+                    let roof_line_block = if config.use_accent_roof_line && !photo {
                         config.accent_block
                     } else {
                         config.wall_block
@@ -3569,12 +3629,195 @@ fn build_wall_ring(
                 current_building.push((bx, bz));
                 corner_count += 1;
             }
+            segments.push(kind);
         }
 
         previous_node = Some((x, z));
     }
 
-    (current_building, corner_count)
+    // Painting panels are recorded once the wall exists: they need the wall
+    // behind them in place and the air in front of it known. They are hung at
+    // the end of the run, once every later block is in.
+    if crate::mapillary::facades::paintings_enabled() {
+        crate::mapillary::paintings::collect(
+            editor,
+            config.element_id,
+            config.start_y_offset,
+            config.abs_terrain_offset,
+            config.building_height,
+        );
+    }
+    // Paintings v2 records the wall itself rather than its open faces; the
+    // quads are placed at the end of the run like the paintings.
+    if crate::mapillary::facades::displays_enabled() {
+        crate::mapillary::displays::collect(
+            editor,
+            config.element_id,
+            config.start_y_offset,
+            config.abs_terrain_offset,
+            config.building_height,
+        );
+    }
+
+    (current_building, corner_count, segments)
+}
+
+/// The wall columns of `element`'s ring that a facade photograph covers, and
+/// so are built as a plain shell for the texture to override. Empty unless
+/// the export gives this building a block grid or a photo panel: below two
+/// blocks per metre without panels it supplies floor band colours only, and
+/// those already apply per column through `band_block_at`.
+///
+/// A column carrying a facade cell, plus its two neighbours along the same
+/// ring segment. The dilation is one block of rounding, not a coverage claim:
+/// the export numbers its columns in metres along its own extent, so the
+/// block that straddles the end of a texture falls just past the last column
+/// and drops out. Without it a photographed wall could end in a single
+/// procedural window standing alone against the corner. Taking the columns as
+/// a set also settles the corner block two ring segments share: it is decided
+/// the same way whichever segment is being drawn, so a photographed wall
+/// meeting a normal one cannot leave a gap or a doubled block there.
+fn photo_shell_columns(element: &ProcessedWay) -> Arc<FnvHashSet<(i32, i32)>> {
+    let mut shell = FnvHashSet::default();
+    if !crate::mapillary::facades::has_building(element.id)
+        || (crate::mapillary::facades::colour_only()
+            && !crate::mapillary::facades::panels_enabled())
+    {
+        return Arc::new(shell);
+    }
+    let mut previous: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        if let Some((px, pz)) = previous {
+            let points = bresenham_line(px, 0, pz, node.x, 0, node.z);
+            for (i, &(bx, _, bz)) in points.iter().enumerate() {
+                if !crate::mapillary::facades::photo_column(bx, bz, element.id) {
+                    continue;
+                }
+                for near in &points[i.saturating_sub(1)..(i + 2).min(points.len())] {
+                    shell.insert((near.0, near.2));
+                }
+            }
+        }
+        previous = Some((node.x, node.z));
+    }
+    Arc::new(shell)
+}
+
+/// What one ring segment of a facade building turned out to be, for the
+/// `ARNIS_FACADE_WALL_STATS` line: whether a photograph covers any of it, and
+/// whether the procedural pass put a window on it. A segment can be neither
+/// (a blank wall, a party wall, a windowless style) and, where a photographed
+/// wall ends part way along a ring segment, both.
+#[derive(Clone, Copy, Default)]
+struct WallSegmentKind {
+    photographed: bool,
+    windowed: bool,
+}
+
+/// Prints how one facade building's ring split between the walls a photograph
+/// covers and the walls a normal Arnis building was generated on, and audits
+/// every corner where the two meet, so both can be counted over a whole area
+/// without reading the world back. Off unless `ARNIS_FACADE_WALL_STATS` is
+/// set, since it is one line per building.
+///
+/// Segments are what the export calls a wall, but a corner block belongs to
+/// two of them, so `cols`, `shell_cols` and `window_cols` count the ring's
+/// world columns instead, each exactly once, which is the honest denominator.
+///
+/// `seams` counts the ring vertices a photographed segment shares with one
+/// that is not, which are the corners the texture stops short of: a corner it
+/// reaches is shell, and a shell corner belongs to both its segments, so both
+/// count as photographed and it is not a seam at all. `seam_gaps` counts the
+/// seam columns the wall left a hole in and has to read zero. `seam_orphan`
+/// counts the ones that touch a shell column without being one, which is the
+/// first block past the shell's single block of rounding allowance rather
+/// than a defect, so a few are expected on an area of any size.
+fn report_wall_segments(
+    editor: &WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    passages: &CoordinateBitmap,
+    segments: &[WallSegmentKind],
+) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("ARNIS_FACADE_WALL_STATS").is_some()) {
+        return;
+    }
+    if !crate::mapillary::facades::has_building(config.element_id) || segments.len() < 2 {
+        return;
+    }
+    let photo_segs = segments.iter().filter(|s| s.photographed).count();
+    let window_segs = segments.iter().filter(|s| s.windowed).count();
+
+    // Does any block of this wall column read as a window? On a shell column
+    // that is the photograph's own window cell, everywhere else the
+    // procedural one.
+    let has_window = |x: i32, z: i32| {
+        ((config.start_y_offset + 1)..=(config.start_y_offset + config.building_height)).any(|h| {
+            editor
+                .get_block_absolute(x, h + config.abs_terrain_offset, z)
+                .is_some_and(|b| b.id() == config.window_block.id() || b.id() == GLASS.id())
+        })
+    };
+
+    let mut ring: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+    let mut previous: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        if let Some((px, pz)) = previous {
+            for (bx, _, bz) in bresenham_line(px, 0, pz, node.x, 0, node.z) {
+                ring.insert((bx, bz));
+            }
+        }
+        previous = Some((node.x, node.z));
+    }
+    let shell_cols = ring
+        .iter()
+        .filter(|c| config.facade_shell.contains(c))
+        .count();
+    let window_cols = ring
+        .iter()
+        .filter(|c| !config.facade_shell.contains(*c) && has_window(c.0, c.1))
+        .count();
+
+    let (mut seams, mut seam_gaps, mut seam_orphan) = (0, 0, 0);
+    // Closed rings only, so that the last segment really does meet the first.
+    let ends = |n: Option<&ProcessedNode>| n.map(|n| (n.x, n.z));
+    let closed = ends(element.nodes.first()) == ends(element.nodes.last());
+    for (i, kind) in segments.iter().enumerate() {
+        let next = (i + 1) % segments.len();
+        if (next == 0 && !closed) || kind.photographed == segments[next].photographed {
+            continue;
+        }
+        // Segment i runs nodes[i] to nodes[i + 1], so the two share nodes[i + 1],
+        // which for the closing pair is the repeated first node.
+        let node = &element.nodes[i + 1];
+        if passages.contains(node.x, node.z) {
+            continue;
+        }
+        seams += 1;
+        if !config.facade_shell.contains(&(node.x, node.z))
+            && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|(dx, dz)| config.facade_shell.contains(&(node.x + dx, node.z + dz)))
+        {
+            seam_orphan += 1;
+        }
+        let gap = ((config.start_y_offset + 1)..=(config.start_y_offset + config.building_height))
+            .any(|h| {
+                editor
+                    .get_block_absolute(node.x, h + config.abs_terrain_offset, node.z)
+                    .is_none()
+            });
+        seam_gaps += i32::from(gap);
+    }
+    println!(
+        "facade-walls id={} segments={} photo_segs={photo_segs} window_segs={window_segs} \
+         cols={} shell_cols={shell_cols} window_cols={window_cols} \
+         seams={seams} seam_gaps={seam_gaps} seam_orphan={seam_orphan}",
+        config.element_id,
+        segments.len(),
+        ring.len(),
+    );
 }
 
 /// Generates special doors for garages (double door) and sheds (single door)
@@ -3625,9 +3868,13 @@ fn generate_special_doors(
                     (mid_x, mid_z, mid_x, mid_z + 1)
                 };
 
-                // Skip placing doors inside a building passage
+                // Skip placing doors inside a building passage, and on a
+                // photographed wall, which carries the door the photograph
+                // shows and not a procedural one.
                 if building_passages.contains(door1_x, door1_z)
                     || building_passages.contains(door2_x, door2_z)
+                    || config.is_photo_column(door1_x, door1_z)
+                    || config.is_photo_column(door2_x, door2_z)
                 {
                     continue;
                 }
@@ -3677,8 +3924,11 @@ fn generate_special_doors(
             let door_idx = rng.random_range(0..wall_outline.len());
             let (door_x, door_z) = wall_outline[door_idx];
 
-            // Skip placing a door inside a building passage
-            if !building_passages.contains(door_x, door_z) {
+            // Skip placing a door inside a building passage or on a
+            // photographed wall, which carries its own door.
+            if !building_passages.contains(door_x, door_z)
+                && !config.is_photo_column(door_x, door_z)
+            {
                 // Place single oak door (empty blacklist to overwrite wall blocks)
                 editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, Some(&[]));
                 editor.set_block_absolute(
@@ -3702,16 +3952,57 @@ fn determine_wall_block_at_position(
     bz: i32,
     config: &BuildingConfig,
     col: ColumnFacade,
+    photo: bool,
 ) -> Block {
-    let chosen = determine_wall_block_at_position_pristine(h, config, col);
+    // A photographed column is a plain shell: the facade cell over it decides
+    // what shows, and a procedural window or accent line underneath would
+    // come through wherever the texture has no data. `photo` is
+    // `config.is_photo_column(bx, bz)`, hoisted out of the height loop.
+    let chosen = if photo {
+        config.wall_block
+    } else {
+        determine_wall_block_at_position_pristine(h, config, col)
+    };
     let chosen = apply_block_variety(chosen, bx, h, bz, config);
     apply_condition_variation(chosen, bx, h, bz, config)
 }
 
 /// Substitutes the wall block with a same-family alternative for variety.
 fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &BuildingConfig) -> Block {
+    // From two blocks per metre up a facade texture cell wins over every
+    // procedural choice for this position.
+    if let Some(block) = crate::mapillary::facades::block_at(
+        bx,
+        h,
+        bz,
+        config.start_y_offset,
+        config.element_id,
+        config.window_block,
+    ) {
+        return block;
+    }
+    // Only the plain wall material is varied or recoloured below. Windows,
+    // accent lines, plinth courses and storefront glass come back from
+    // `determine_wall_block_at_position_pristine` as other blocks and are
+    // kept as they are; pilasters and the other wall depth features never
+    // pass through here.
     if chosen != config.wall_block {
         return chosen;
+    }
+    // Below two blocks per metre the lab supplies colours only: a plain wall
+    // block takes the colour of the lab's floor band at this height, flat,
+    // and keeps its procedural block above the textured rows. Scaffolding on
+    // a construction site is not a wall colour.
+    if config.condition != BuildingCondition::Construction {
+        if let Some(block) = crate::mapillary::facades::band_block_at(
+            bx,
+            h,
+            bz,
+            config.start_y_offset,
+            config.element_id,
+        ) {
+            return block;
+        }
     }
     let pool = substitute_pool_only(chosen);
     if pool.is_empty() {
@@ -4548,6 +4839,7 @@ fn generate_residential_window_decorations(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
+                    || config.is_photo_column(bx, bz)
                 {
                     continue;
                 }
@@ -4932,7 +5224,10 @@ fn generate_corner_quoins(
 
     for &(cx, cz) in &corners {
         // Party-wall vertices sit against the neighbor and get no framing.
-        if facade.is_party(cx, cz) {
+        // A corner block a photograph reaches belongs to the photograph: the
+        // quoin would overwrite the one column two ring segments share, which
+        // is exactly where a photographed wall meets a normal one.
+        if facade.is_party(cx, cz) || config.is_photo_column(cx, cz) {
             continue;
         }
         // When only the street corner qualified (roll failed), frame it alone.
@@ -5055,6 +5350,7 @@ fn generate_wall_depth_features(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
+                    || config.is_photo_column(bx, bz)
                 {
                     continue;
                 }
@@ -5262,6 +5558,7 @@ fn generate_window_frames(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
+                    || config.is_photo_column(bx, bz)
                 {
                     continue;
                 }
@@ -5504,6 +5801,7 @@ fn generate_facade_cornices(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
+                    || config.is_photo_column(bx, bz)
                 {
                     continue;
                 }
@@ -5579,6 +5877,7 @@ fn generate_archetype_window_headers(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
+                    || config.is_photo_column(bx, bz)
                 {
                     continue;
                 }
@@ -5653,6 +5952,7 @@ fn generate_storefront_awnings(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
+                    || config.is_photo_column(bx, bz)
                     || !facade.is_street(bx, bz)
                     || config.window_col(wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz))
                         >= 4
@@ -5723,7 +6023,11 @@ fn generate_corner_downpipes(
         // Diagonal outward offset so the pipe hugs the corner edge.
         let dx = (px - cx).signum();
         let dz = (pz - cz).signum();
-        if (dx == 0 && dz == 0) || building_passages.contains(px, pz) {
+        // A pipe off a photographed corner stands in front of the photograph.
+        if (dx == 0 && dz == 0)
+            || building_passages.contains(px, pz)
+            || config.is_photo_column(px, pz)
+        {
             continue;
         }
         let (ox, oz) = (px + dx, pz + dz);
@@ -7040,6 +7344,7 @@ pub fn generate_buildings(
             ))
         .then(|| pick_window_frame(category, era, detail, wall_block, group_seed))
         .flatten(),
+        facade_shell: photo_shell_columns(element),
     };
 
     // Passages only apply to ground-level buildings. Elevated building:part
@@ -7096,7 +7401,7 @@ pub fn generate_buildings(
         }
     }
 
-    let (wall_outline, corner_count) = build_wall_ring(
+    let (wall_outline, corner_count, wall_segments) = build_wall_ring(
         editor,
         &element.nodes,
         &config,
@@ -7317,6 +7622,10 @@ pub fn generate_buildings(
             );
         }
     }
+
+    // After every wall and decoration pass, so the seam audit sees the world
+    // the player would.
+    report_wall_segments(editor, element, &config, effective_passages, &wall_segments);
 
     facade_anchor(element, &facade, &config, &entrance_plans)
 }
@@ -7816,9 +8125,16 @@ fn generate_inset_tiers(
                     ..ColumnFacade::default()
                 };
                 // Same wall and window logic as the facade, so bands continue upward.
+                let photo = config.is_photo_column(x, z);
                 for h in 0..tier.height {
-                    let block =
-                        determine_wall_block_at_position(x, current_base + h, z, config, col);
+                    let block = determine_wall_block_at_position(
+                        x,
+                        current_base + h,
+                        z,
+                        config,
+                        col,
+                        photo,
+                    );
                     editor.set_block_absolute(
                         block,
                         x,
@@ -10626,6 +10942,128 @@ fn generate_roof(
     }
 }
 
+/// Synthetic way id a relation's `ring_idx`-th outer ring is built under.
+/// Bit 63 keeps it out of the real way id range, so it cannot collide in the
+/// flood fill cache or the deterministic RNG seeded by element id; the hole
+/// rings use the same scheme with bit 15 of the ring slot set.
+pub(crate) fn relation_ring_id(relation_id: u64, ring_idx: usize) -> u64 {
+    (1u64 << 63) | (relation_id << 16) | (ring_idx as u64 & 0xFFFF)
+}
+
+/// Merges member way segments into rings, clips them to the world and keeps
+/// the closed ones.
+///
+/// Multipolygon relations commonly split the outline across many short way
+/// segments that share endpoints. Without merging, each segment would be
+/// processed individually, producing degenerate polygons and empty flood
+/// fills (only wall outlines, no filled floors, ceilings or roofs). Member
+/// ways were kept unclipped during parsing to allow that assembly, so the
+/// merged rings may extend beyond the requested area and are clipped here;
+/// clipping prevents oversized flood fills and unnecessary block placement.
+/// Rings whose ends are within one block are closed, the rest are dropped.
+fn assemble_relation_rings(
+    mut rings: Vec<Vec<ProcessedNode>>,
+    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+) -> Vec<Vec<ProcessedNode>> {
+    super::merge_way_segments(&mut rings);
+
+    let mut rings: Vec<Vec<ProcessedNode>> = rings
+        .into_iter()
+        .map(|ring| clip_way_to_bbox(&ring, xzbbox))
+        .filter(|ring| ring.len() >= 4)
+        .collect();
+
+    // Close rings that are nearly closed (endpoints within 1 block)
+    for ring in &mut rings {
+        if ring.len() >= 3 {
+            let first = &ring[0];
+            let last = ring.last().unwrap();
+            if first.id != last.id {
+                let dx = (first.x - last.x).abs();
+                let dz = (first.z - last.z).abs();
+                if dx <= 1 && dz <= 1 {
+                    let close_node = ring[0].clone();
+                    ring.push(close_node);
+                }
+            }
+        }
+    }
+
+    // Discard rings that are still open or too small
+    rings.retain(|ring| {
+        if ring.len() < 4 {
+            return false;
+        }
+        let first = &ring[0];
+        let last = ring.last().unwrap();
+        first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
+    });
+    rings
+}
+
+/// The closed outer rings a building relation is generated from, each with
+/// the synthetic way id `generate_buildings` runs under for it, in generation
+/// order. Empty when the relation builds nothing of its own: it is
+/// underground, it is a type=building relation whose parts render standalone,
+/// or its outer members are closed building:part rings that render on their
+/// own. The facade textures use this to key a relation's walls the way the
+/// wall builder will ask for them.
+pub(crate) fn relation_outer_rings(
+    relation: &ProcessedRelation,
+    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+) -> Vec<(u64, Vec<ProcessedNode>)> {
+    if is_underground_building(&relation.tags) {
+        return Vec::new();
+    }
+
+    // Check if this is a type=building relation with part members.
+    // Only type=building relations use Part roles; type=multipolygon relations
+    // should always render their Outer members normally.
+    let is_building_type = relation.tags.get("type").map(|t| t.as_str()) == Some("building");
+    let has_parts = is_building_type
+        && relation
+            .members
+            .iter()
+            .any(|m| m.role == ProcessedMemberRole::Part);
+    if has_parts {
+        // Parts are rendered as standalone ways from the elements list. The
+        // outline way is suppressed in data_processing to avoid overlaying the parts.
+        return Vec::new();
+    }
+
+    // Closed building:part outer rings render standalone with their own
+    // height tags; rendering the relation too would stack a box on top
+    let mut outer_iter = relation
+        .members
+        .iter()
+        .filter(|m| m.role == ProcessedMemberRole::Outer)
+        .peekable();
+    if outer_iter.peek().is_some()
+        && outer_iter.all(|m| {
+            m.way
+                .tags
+                .get("building:part")
+                .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+                && m.way.nodes.len() >= 4
+                && m.way.nodes.first().map(|n| n.id) == m.way.nodes.last().map(|n| n.id)
+        })
+    {
+        return Vec::new();
+    }
+
+    let outer_rings: Vec<Vec<ProcessedNode>> = relation
+        .members
+        .iter()
+        .filter(|m| m.role == ProcessedMemberRole::Outer && !SKIP_WAY_IDS.contains(&m.way.id))
+        .map(|m| m.way.nodes.clone())
+        .collect();
+    assemble_relation_rings(outer_rings, xzbbox)
+        .into_iter()
+        .enumerate()
+        .map(|(ring_idx, ring)| (relation_ring_id(relation.id, ring_idx), ring))
+        .collect()
+}
+
 pub fn generate_building_from_relation(
     editor: &mut WorldEditor,
     relation: &ProcessedRelation,
@@ -10656,180 +11094,67 @@ pub fn generate_building_from_relation(
         .and_then(|l: &String| l.trim().parse::<f64>().ok())
         .map(|l| l.round() as i32);
 
-    // Check if this is a type=building relation with part members.
-    // Only type=building relations use Part roles; type=multipolygon relations
-    // should always render their Outer members normally.
-    let is_building_type = relation.tags.get("type").map(|t| t.as_str()) == Some("building");
-    let has_parts = is_building_type
-        && relation
-            .members
-            .iter()
-            .any(|m| m.role == ProcessedMemberRole::Part);
+    // The closed outer rings this relation is built from, with the ids the
+    // buildings are generated under. Nothing when the relation renders no
+    // building of its own (see `relation_outer_rings`).
+    let outer_rings = relation_outer_rings(relation, xzbbox);
+    if outer_rings.is_empty() {
+        return;
+    }
 
-    if !has_parts {
-        // Closed building:part outer rings render standalone with their own
-        // height tags; rendering the relation too would stack a box on top
-        let mut outer_iter = relation
-            .members
-            .iter()
-            .filter(|m| m.role == ProcessedMemberRole::Outer)
-            .peekable();
-        if outer_iter.peek().is_some()
-            && outer_iter.all(|m| {
-                m.way
-                    .tags
-                    .get("building:part")
-                    .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
-                    && m.way.nodes.len() >= 4
-                    && m.way.nodes.first().map(|n| n.id) == m.way.nodes.last().map(|n| n.id)
-            })
-        {
-            return;
-        }
-
-        // Collect outer member node lists and merge open segments into closed rings.
-        // Multipolygon relations commonly split the outline across many short way
-        // segments that share endpoints. Without merging, each segment is processed
-        // individually, producing degenerate polygons and empty flood fills (only
-        // wall outlines, no filled floors/ceilings/roofs).
-        let mut outer_rings: Vec<Vec<ProcessedNode>> = relation
-            .members
-            .iter()
-            .filter(|m| m.role == ProcessedMemberRole::Outer && !SKIP_WAY_IDS.contains(&m.way.id))
-            .map(|m| m.way.nodes.clone())
-            .collect();
-
-        super::merge_way_segments(&mut outer_rings);
-
-        // Clip assembled rings to the world bounding box.  Because member ways
-        // were kept unclipped during parsing (to allow ring assembly), the
-        // merged rings may extend beyond the requested area.  Clipping prevents
-        // oversized flood fills and unnecessary block placement.
-        outer_rings = outer_rings
-            .into_iter()
-            .map(|ring| clip_way_to_bbox(&ring, xzbbox))
-            .filter(|ring| ring.len() >= 4)
-            .collect();
-
-        // Close rings that are nearly closed (endpoints within 1 block)
-        for ring in &mut outer_rings {
-            if ring.len() >= 3 {
-                let first = &ring[0];
-                let last = ring.last().unwrap();
-                if first.id != last.id {
-                    let dx = (first.x - last.x).abs();
-                    let dz = (first.z - last.z).abs();
-                    if dx <= 1 && dz <= 1 {
-                        let close_node = ring[0].clone();
-                        ring.push(close_node);
-                    }
-                }
-            }
-        }
-
-        // Discard rings that are still open or too small
-        outer_rings.retain(|ring| {
-            if ring.len() < 4 {
-                return false;
-            }
-            let first = &ring[0];
-            let last = ring.last().unwrap();
-            first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
-        });
-
-        // Collect and assemble inner rings for courtyards/holes.
-        let mut inner_rings: Vec<Vec<ProcessedNode>> = relation
+    // Collect and assemble inner rings for courtyards/holes.
+    let inner_rings = assemble_relation_rings(
+        relation
             .members
             .iter()
             .filter(|m| m.role == ProcessedMemberRole::Inner)
             .map(|m| m.way.nodes.clone())
-            .collect();
+            .collect(),
+        xzbbox,
+    );
 
-        super::merge_way_segments(&mut inner_rings);
-
-        inner_rings = inner_rings
-            .into_iter()
-            .map(|ring| clip_way_to_bbox(&ring, xzbbox))
-            .filter(|ring| ring.len() >= 4)
-            .collect();
-
-        // Close rings that are nearly closed (endpoints within 1 block)
-        for ring in &mut inner_rings {
-            if ring.len() >= 3 {
-                let first = &ring[0];
-                let last = ring.last().unwrap();
-                if first.id != last.id {
-                    let dx = (first.x - last.x).abs();
-                    let dz = (first.z - last.z).abs();
-                    if dx <= 1 && dz <= 1 {
-                        let close_node = ring[0].clone();
-                        ring.push(close_node);
+    let hole_polygons: Option<Vec<HolePolygon>> = if inner_rings.is_empty() {
+        None
+    } else {
+        Some(
+            inner_rings
+                .into_iter()
+                .enumerate()
+                .map(|(ring_idx, ring)| {
+                    // Use a different index range from outer rings to avoid cache collisions.
+                    let ring_slot = 0x8000 | (ring_idx & 0x7FFF);
+                    HolePolygon {
+                        way: ProcessedWay {
+                            id: relation_ring_id(relation.id, ring_slot),
+                            tags: HashMap::new(),
+                            nodes: ring,
+                        },
+                        add_walls: true,
                     }
-                }
-            }
-        }
+                })
+                .collect(),
+        )
+    };
 
-        // Discard rings that are still open or too small
-        inner_rings.retain(|ring| {
-            if ring.len() < 4 {
-                return false;
-            }
-            let first = &ring[0];
-            let last = ring.last().unwrap();
-            first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
-        });
-
-        let hole_polygons: Option<Vec<HolePolygon>> = if inner_rings.is_empty() {
-            None
-        } else {
-            Some(
-                inner_rings
-                    .into_iter()
-                    .enumerate()
-                    .map(|(ring_idx, ring)| {
-                        // Use a different index range from outer rings to avoid cache collisions.
-                        let ring_slot = 0x8000u64 | (ring_idx as u64 & 0x7FFF);
-                        let synthetic_id = (1u64 << 63) | (relation.id << 16) | ring_slot;
-                        HolePolygon {
-                            way: ProcessedWay {
-                                id: synthetic_id,
-                                tags: HashMap::new(),
-                                nodes: ring,
-                            },
-                            add_walls: true,
-                        }
-                    })
-                    .collect(),
-            )
+    // Build a synthetic ProcessedWay for each assembled ring and render it.
+    // The relation tags are applied so that building type, levels, and roof
+    // shape from the relation are honoured.
+    for (synthetic_id, ring) in outer_rings {
+        let merged_way = ProcessedWay {
+            id: synthetic_id,
+            tags: relation.tags.clone(),
+            nodes: ring,
         };
-
-        // Build a synthetic ProcessedWay for each assembled ring and render it.
-        // The relation tags are applied so that building type, levels, and roof
-        // shape from the relation are honoured.
-        //
-        // Synthetic IDs use bit 63 as a flag combined with the relation ID and a
-        // ring index.  This prevents collisions with real way IDs in the flood
-        // fill cache and the deterministic RNG seeded by element ID.
-        for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
-            let synthetic_id = (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
-            let merged_way = ProcessedWay {
-                id: synthetic_id,
-                tags: relation.tags.clone(),
-                nodes: ring,
-            };
-            generate_buildings(
-                editor,
-                &merged_way,
-                args,
-                relation_levels,
-                hole_polygons.as_deref(),
-                ctx,
-                merged_way.id,
-            );
-        }
+        generate_buildings(
+            editor,
+            &merged_way,
+            args,
+            relation_levels,
+            hole_polygons.as_deref(),
+            ctx,
+            merged_way.id,
+        );
     }
-    // When has_parts: parts are rendered as standalone ways from the elements list.
-    // The outline way is suppressed in data_processing to avoid overlaying the parts.
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
@@ -11361,6 +11686,7 @@ mod style_tests {
             base_course_block: None,
             has_storefront: false,
             window_frame: None,
+            facade_shell: Arc::default(),
         }
     }
 
@@ -12039,13 +12365,38 @@ mod facade_integration_tests {
         ])
     }
 
+    /// `flat_args` at a chosen world scale. The facade export applies as a
+    /// block grid from two blocks per metre up, which is where the shell is.
+    fn scaled_args(scale: &str) -> Args {
+        Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+            "--scale",
+            scale,
+        ])
+    }
+
     fn run_building(
         editor: &mut WorldEditor,
         way: &ProcessedWay,
         road: &CoordinateBitmap,
         footprints: &CoordinateBitmap,
     ) {
-        let args = flat_args();
+        run_building_with(editor, way, road, footprints, &flat_args());
+    }
+
+    fn run_building_with(
+        editor: &mut WorldEditor,
+        way: &ProcessedWay,
+        road: &CoordinateBitmap,
+        footprints: &CoordinateBitmap,
+        args: &Args,
+    ) {
         let cache = FloodFillCache::new();
         let passages = CoordinateBitmap::new_empty();
         let groups: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
@@ -12056,7 +12407,7 @@ mod facade_integration_tests {
             building_footprints: footprints,
             group_members: &groups,
         };
-        generate_buildings(editor, way, &args, None, None, &ctx, way.id);
+        generate_buildings(editor, way, args, None, None, &ctx, way.id);
     }
 
     #[test]
@@ -12179,6 +12530,134 @@ mod facade_integration_tests {
             let roofed =
                 (11..=18).any(|y| (24..=28).any(|z| editor.check_for_block(30, y, z, Some(SLATE))));
             assert!(roofed, "{shape} roof should rise above the walls");
+        }
+    }
+
+    /// Every block the residential window pass can leave on a wall: the
+    /// category's own pool plus the dark-wall substitution.
+    const WINDOW_BLOCKS: &[Block] = &[
+        GLASS,
+        WHITE_STAINED_GLASS,
+        LIGHT_GRAY_STAINED_GLASS,
+        BROWN_STAINED_GLASS,
+        TINTED_GLASS,
+        LIGHT_BLUE_STAINED_GLASS,
+        GRAY_STAINED_GLASS,
+    ];
+
+    /// Whether any block of the wall column at `(x, z)` is a window.
+    fn column_has_window(editor: &WorldEditor, x: i32, z: i32) -> bool {
+        (1..80).any(|y| {
+            editor
+                .get_block_absolute(x, y, z)
+                .is_some_and(|b| WINDOW_BLOCKS.iter().any(|w| w.id() == b.id()))
+        })
+    }
+
+    /// Only the walls a photograph covers are built as a plain shell. The rest
+    /// of the ring stays a normal Arnis building, and the corner column where
+    /// the two meet carries neither a gap nor a window of its own.
+    #[test]
+    fn only_the_photographed_wall_loses_its_windows() {
+        let _guard = crate::mapillary::facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 4711;
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        // The street runs south of the building, so the synthetic entrance
+        // lands on the wall without a photograph and cannot be mistaken for a
+        // hole in the shell.
+        let road = bitmap_with_rect(&xz, 0, 38, 59, 40);
+        let footprints = CoordinateBitmap::new(&xz);
+        let way = rect_way(
+            WAY,
+            20,
+            20,
+            40,
+            32,
+            &[
+                ("building", "apartments"),
+                ("building:levels", "4"),
+                ("roof:shape", "flat"),
+            ],
+        );
+        let args = scaled_args("2");
+
+        // The same building twice: once with one photographed wall, the north
+        // edge from node (20, 20) to node (40, 20), and once with no export at
+        // all, which is what the other three walls have to end up looking like.
+        let elements = vec![crate::osm_parser::ProcessedElement::Way(way.clone())];
+        crate::mapillary::facades::install_wall_blocks_for_test(
+            // 11 metre columns over the edge's 21 blocks at two blocks per
+            // metre, and 20 metres of rows, taller than the building, so every
+            // wall row of it has a cell.
+            &[(WAY, WAY * 100, WAY * 100 + 1, 11, 20)],
+            &elements,
+            &xz,
+            2.0,
+        );
+        // The export numbers its columns in metres, so the block at the far
+        // end of the edge falls exactly on column 11 of 11 and carries no
+        // cell. That is the corner the seam runs through.
+        assert!(crate::mapillary::facades::photo_column(20, 20, WAY));
+        assert!(!crate::mapillary::facades::photo_column(40, 20, WAY));
+        let mut facaded = test_editor(&xz);
+        run_building_with(&mut facaded, &way, &road, &footprints, &args);
+        crate::mapillary::facades::clear();
+        let mut plain = test_editor(&xz);
+        run_building_with(&mut plain, &way, &road, &footprints, &args);
+
+        // Without the export this building glazes both walls, so the north
+        // wall losing its windows is the shell and not the style.
+        assert!(
+            (21..40).any(|x| column_has_window(&plain, x, 20)),
+            "the test building has to glaze its north wall without an export"
+        );
+        assert!(
+            (21..40).any(|x| column_has_window(&plain, x, 32)),
+            "and its south wall"
+        );
+
+        for x in 20..=40 {
+            assert!(
+                !column_has_window(&facaded, x, 20),
+                "column {x} of the photographed wall kept a procedural window"
+            );
+        }
+        assert!(
+            (21..40).any(|x| column_has_window(&facaded, x, 32)),
+            "the wall with no photograph must still be a normal building"
+        );
+
+        // The photograph reaches the wall: its cells are one flat colour, so
+        // the block they resolve to has to be on that wall and nowhere else.
+        let shell =
+            crate::block_palette::facade_block_for_color(crate::mapillary::facades::TEST_WALL_RGB);
+        let carries_shell = |e: &WorldEditor, x: i32, z: i32| {
+            (1..80).any(|y| {
+                e.get_block_absolute(x, y, z)
+                    .is_some_and(|b| b.id() == shell.id())
+            })
+        };
+        assert!(carries_shell(&facaded, 30, 20), "no texture on the wall");
+        assert!(
+            !carries_shell(&facaded, 30, 32),
+            "the texture must not reach the wall it was not taken of"
+        );
+
+        // The seam. The corner the projection drops is still built as shell,
+        // so a photographed wall cannot end in a lone procedural window, and
+        // the column two ring segments both write is solid from the ground to
+        // the roof line whichever of them wrote it last.
+        for &(x, z) in &[(20, 20), (40, 20)] {
+            let top = (1..80)
+                .rev()
+                .find(|&y| facaded.get_block_absolute(x, y, z).is_some())
+                .expect("corner column is empty");
+            assert!(
+                (1..=top).all(|y| facaded.get_block_absolute(x, y, z).is_some()),
+                "gap in the corner column at ({x}, {z})"
+            );
         }
     }
 

@@ -262,6 +262,12 @@ fn get_cache_dir() -> PathBuf {
     }
 }
 
+/// Where the ESA WorldCover tiles are cached, for the settings panel's size
+/// readout.
+pub fn land_cover_cache_dir() -> PathBuf {
+    get_cache_dir()
+}
+
 /// Clear every cached ESA WorldCover tile. Wrapper around the generic
 /// [`crate::elevation::cache::clear_cache_dir`] so the GUI cache-clean
 /// command only has to call one entry point per cache root.

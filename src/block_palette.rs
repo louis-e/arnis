@@ -10,12 +10,16 @@ use crate::colors::{oklab_distance, RGBTuple};
 pub const USE_MODEL: u8 = 1;
 pub const USE_WALL: u8 = 2;
 pub const USE_ROOF: u8 = 4;
+/// Facade textures only: blocks too garish for a procedural wall but right when
+/// the colour was measured from a photograph.
+pub const USE_FACADE: u8 = 8;
 
 // Shorthand for the flag column below.
 const M: u8 = USE_MODEL;
 const MW: u8 = USE_MODEL | USE_WALL;
 const MR: u8 = USE_MODEL | USE_ROOF;
 const MWR: u8 = USE_MODEL | USE_WALL | USE_ROOF;
+const F: u8 = USE_FACADE;
 
 #[rustfmt::skip]
 static PALETTE: &[(RGBTuple, Block, u8)] = &[
@@ -104,6 +108,11 @@ static PALETTE: &[(RGBTuple, Block, u8)] = &[
     ((45,  47,  143), BLUE_CONCRETE, MW),
     ((74,  60,  91),  BLUE_TERRACOTTA, MWR),
     ((53,  57,  157), BLUE_WOOL, M),
+    // Facade-only extras: colours the procedural palettes never pick. Kept few
+    // on purpose, because a photographed wall picks per cell and a chunk
+    // section that runs past MAX_SECTION_PALETTE falls back to direct storage.
+    ((77,  81,  85),  GRAY_CONCRETE_POWDER, F),
+    ((126, 85,  54),  BROWN_CONCRETE_POWDER, F),
     ((36,  137, 199), LIGHT_BLUE_CONCRETE, MWR),
     ((113, 109, 138), LIGHT_BLUE_TERRACOTTA, MWR),
     // Purples / magentas
@@ -166,6 +175,49 @@ pub fn wall_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
     pick_for_usage(color, USE_WALL, rng)
 }
 
+/// Block for a facade texel whose colour was measured from a photograph.
+///
+/// Blocks whose texture reads as something other than a wall however close
+/// their average colour is: metal, hay, snow, soil, moss and copper. The
+/// procedural walls may use some of them; a photographed facade must not.
+const NOT_A_FACADE: &[Block] = &[
+    WAXED_COPPER_BLOCK,
+    WAXED_EXPOSED_COPPER,
+    WAXED_OXIDIZED_COPPER,
+    HAY_BALE,
+    SNOW_BLOCK,
+    IRON_BLOCK,
+    GOLD_BLOCK,
+    NETHERITE_BLOCK,
+    MOSS_BLOCK,
+    MOSSY_COBBLESTONE,
+    DIRT,
+    COARSE_DIRT,
+];
+
+/// Every remaining palette entry is eligible, including the wool and
+/// facade-only extras, and the match is the nearest colour in Oklab with
+/// chroma counted double: two beiges a shade apart must land on the same
+/// stone, not on pink terracotta versus stone bricks (the lab's preview uses
+/// the same weighting, see tools/facade_lab/bands.py). The texture already
+/// carries the variety, and the lab hands over one colour per floor band, so
+/// breaking near-ties at random (as this once did) only put noise back into a
+/// wall that was measured to be flat.
+pub fn facade_block_for_color(color: RGBTuple) -> Block {
+    let (tl, ta, tb) = crate::colors::oklab_components(&color);
+    PALETTE
+        .iter()
+        .filter(|(_, b, _)| !NOT_A_FACADE.contains(b))
+        .map(|(c, b, _)| {
+            let (l, a, bb) = crate::colors::oklab_components(c);
+            let d = (tl - l) * (tl - l) + 4.0 * ((ta - a) * (ta - a) + (tb - bb) * (tb - bb));
+            (d, *b)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b)| b)
+        .unwrap_or(WHITE_CONCRETE)
+}
+
 /// Roof block for a `roof:colour` tag value.
 pub fn roof_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
     pick_for_usage(color, USE_ROOF, rng)
@@ -176,7 +228,7 @@ pub fn roof_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
 pub(crate) fn all_building_palette_blocks() -> Vec<Block> {
     PALETTE
         .iter()
-        .filter(|(_, _, f)| f & (USE_WALL | USE_ROOF) != 0)
+        .filter(|(_, _, f)| f & (USE_WALL | USE_ROOF | USE_FACADE) != 0)
         .map(|(_, b, _)| *b)
         .collect()
 }
