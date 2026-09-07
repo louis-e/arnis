@@ -1150,7 +1150,7 @@ fn write_packs_for(
         world_path.join("resources.zip"),
         rp_dir.join("resources.zip"),
     ] {
-        std::fs::write(&path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+        super::displays::write_world_pack(&path, &bytes)?;
     }
 
     crate::world_utils::enable_datapack_in_level_dat(world_path, DATAPACK_NAME)?;

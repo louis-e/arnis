@@ -878,6 +878,49 @@ fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
     Ok(cursor.into_inner())
 }
 
+/// Whether the pack at `path` is one Arnis wrote.
+///
+/// Both facade modes install the world pack at the two names the game reads,
+/// and `fs::write` would replace whatever is there. A world Arnis generated
+/// holds its own pack and replacing that is the point; a world the user has
+/// dressed themselves holds theirs, and losing it to a regeneration is not
+/// something they can undo. Ours says so in `pack.mcmeta`.
+pub(super) fn is_arnis_pack(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else {
+        return false;
+    };
+    let Ok(mut meta) = zip.by_name("pack.mcmeta") else {
+        return false;
+    };
+    let mut text = String::new();
+    meta.read_to_string(&mut text).is_ok() && text.contains("Arnis")
+}
+
+/// Installs the world pack at `path`, stepping a pack we did not write aside
+/// first rather than overwriting it. The backup is numbered so a second
+/// generation cannot bury the first one's rescue.
+pub(super) fn write_world_pack(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if path.exists() && !is_arnis_pack(path) {
+        let mut backup = path.with_extension("zip.bak");
+        let mut n = 1;
+        while backup.exists() {
+            backup = path.with_extension(format!("zip.bak{n}"));
+            n += 1;
+        }
+        std::fs::rename(path, &backup)
+            .map_err(|e| format!("move {} aside: {e}", path.display()))?;
+        warn(&format!(
+            "Facade panels: this world already had a resource pack Arnis did not write; it is kept at {}.",
+            backup.display()
+        ));
+    }
+    std::fs::write(path, bytes).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
 /// Writes the resource pack for `panels` into `world_path`, at `requested_px`
 /// pixels per block or the highest resolution below it that fits the atlas.
 fn write_packs_for(
@@ -909,7 +952,7 @@ fn write_packs_for(
         world_path.join("resources.zip"),
         rp_dir.join("resources.zip"),
     ] {
-        std::fs::write(&path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+        write_world_pack(&path, &bytes)?;
     }
 
     Ok(PackReport {
@@ -1961,5 +2004,43 @@ mod tests {
             std::fs::read(world.join("resources.zip")).unwrap(),
             std::fs::read(world.join("resourcepacks/resources.zip")).unwrap()
         );
+    }
+
+    /// A world the user has dressed themselves keeps its pack: ours goes in,
+    /// theirs is kept beside it rather than overwritten.
+    #[test]
+    fn a_resource_pack_arnis_did_not_write_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("resources.zip");
+
+        // A pack that is not ours: a real zip whose pack.mcmeta says so.
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = zip::write::FileOptions::default();
+        zip.start_file("pack.mcmeta", opts).unwrap();
+        zip.write_all(br#"{"pack":{"description":"My own textures"}}"#)
+            .unwrap();
+        let theirs = zip.finish().unwrap().into_inner();
+        std::fs::write(&path, &theirs).unwrap();
+        assert!(!is_arnis_pack(&path));
+
+        write_world_pack(&path, b"ours").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"ours");
+        assert_eq!(
+            std::fs::read(dir.path().join("resources.zip.bak")).unwrap(),
+            theirs,
+            "the user's pack was not kept"
+        );
+
+        // A second generation replaces our own pack in place and does not
+        // bury the rescued one.
+        std::fs::write(&path, b"ours-v1").unwrap();
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("pack.mcmeta", opts).unwrap();
+        zip.write_all(br#"{"pack":{"description":"Arnis facade panels"}}"#)
+            .unwrap();
+        std::fs::write(&path, zip.finish().unwrap().into_inner()).unwrap();
+        write_world_pack(&path, b"ours-v2").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"ours-v2");
+        assert!(!dir.path().join("resources.zip.bak1").exists());
     }
 }

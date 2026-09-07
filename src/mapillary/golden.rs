@@ -648,7 +648,9 @@ impl GoldenCluster {
             self.points
         );
         let points: Vec<[f64; 3]> = bytes
-            .chunks_exact(24)
+            .as_chunks::<24>()
+            .0
+            .iter()
             .map(|c| {
                 let f =
                     |k: usize| f64::from_le_bytes(c[k * 8..k * 8 + 8].try_into().expect("8 bytes"));
@@ -1159,7 +1161,9 @@ pub fn align_points(file: &str) -> Vec<[f64; 2]> {
     let bytes =
         std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     bytes
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|c| {
             let f = |k: usize| {
                 f64::from(f32::from_le_bytes(

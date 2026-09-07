@@ -56,6 +56,14 @@ impl CacheClearStats {
 /// `DirEntry::metadata`'s own no-traverse contract, which a reader has to know. A missing directory is zero rather than an error: the settings
 /// panel asks for this before anything has ever been cached.
 pub fn dir_size_bytes(dir: &std::path::Path) -> u64 {
+    // The root gets the same refusal `clear_cache_dir` gives it: `read_dir`
+    // follows a symlinked root, so a cache directory that is itself a link
+    // would have this reporting the size of somewhere else entirely. Entries
+    // below are already safe, `file_type` does not follow.
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_dir() => {}
+        _ => return 0,
+    }
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
