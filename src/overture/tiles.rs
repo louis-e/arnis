@@ -96,21 +96,36 @@ fn tile_count(bbox: &LLBBox) -> u64 {
     u64::from(max_x - min_x + 1) * u64::from(max_y - min_y + 1)
 }
 
-/// Concurrent range requests. Enough to keep the link busy, few enough that a
-/// large area cannot exhaust the process's sockets or look like an attack to
-/// the bucket.
-const FETCH_THREADS: usize = 8;
+/// Ceiling on concurrent range requests: enough to keep the link busy, few
+/// enough that a large area cannot exhaust the process's sockets or look like
+/// an attack to the bucket.
+const FETCH_THREADS_MAX: usize = 8;
+
+/// Threads for the tile fetch pool.
+///
+/// The work is latency-bound, so concurrency past the core count would still
+/// pay - but Arnis allocates through mimalloc, which gives every thread its own
+/// heap and segments, and decoding a tile allocates hard. On a four-core CI
+/// runner a fixed eight threads therefore cost more in resident allocator
+/// arenas than the extra overlap saves on a fetch that is a handful of tiles.
+/// Scaling with the machine keeps the overlap where there are cores to hold it.
+fn fetch_thread_count() -> usize {
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(2)
+        .clamp(2, FETCH_THREADS_MAX)
+}
 
 /// One pool for the process, not one per fetch: the 3D preview re-fetches on
-/// every pan, and spawning eight threads each time would cost more than the
-/// requests do. Kept separate from the global Rayon pool so that blocking on
-/// HTTP cannot starve the generation work sharing it.
+/// every pan, and spawning threads each time would cost more than the requests
+/// do. Kept separate from the global Rayon pool so that blocking on HTTP cannot
+/// starve the generation work sharing it.
 fn fetch_pool() -> Result<&'static rayon::ThreadPool> {
     static POOL: std::sync::OnceLock<std::result::Result<rayon::ThreadPool, String>> =
         std::sync::OnceLock::new();
     POOL.get_or_init(|| {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(FETCH_THREADS)
+            .num_threads(fetch_thread_count())
             .thread_name(|i| format!("overture-tiles-{i}"))
             .build()
             .map_err(|e| format!("could not start the tile fetch pool: {e}"))
