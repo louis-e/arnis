@@ -53,10 +53,10 @@ const TILES_THEME: &str = "buildings";
 
 /// Layer inside the archive.
 ///
-/// The archive also carries a `building_part` layer, which the Parquet path has
-/// no equivalent for. Reading it would add footprints that the other provider
-/// cannot produce, so it is deliberately left alone: swapping the transport must
-/// not change what a world contains.
+/// The archive also carries a `building_part` layer that the Parquet path has
+/// no equivalent for. Reading it would add footprints the other transport
+/// cannot produce, so it is left alone. Changing transport should not change
+/// what a world contains.
 const BUILDING_LAYER: &str = "building";
 
 /// Zoom to read. The archive's maximum, and therefore its full resolution;
@@ -73,10 +73,10 @@ pub(super) const MAX_TILES: usize = 4096;
 /// cheaper transport. Checked before any release is tried, so a continental
 /// request goes straight to Parquet instead of failing once per release.
 ///
-/// Counts arithmetically rather than by building the list: at zoom 14 a
-/// world-sized bounding box is 268 million tiles, and materialising the
-/// coordinates just to reject them would exhaust memory on the very request
-/// this check exists to route away.
+/// Counts arithmetically rather than by building the list. At zoom 14 a
+/// world-sized bounding box is 268 million tiles, so allocating the
+/// coordinates to reject them would run out of memory on exactly the request
+/// this check is meant to route elsewhere.
 pub(super) fn covers_area(bbox: &LLBBox) -> bool {
     tile_count(bbox) <= MAX_TILES as u64
 }
@@ -103,12 +103,11 @@ const FETCH_THREADS_MAX: usize = 8;
 
 /// Threads for the tile fetch pool.
 ///
-/// The work is latency-bound, so concurrency past the core count would still
-/// pay - but Arnis allocates through mimalloc, which gives every thread its own
-/// heap and segments, and decoding a tile allocates hard. On a four-core CI
-/// runner a fixed eight threads therefore cost more in resident allocator
-/// arenas than the extra overlap saves on a fetch that is a handful of tiles.
-/// Scaling with the machine keeps the overlap where there are cores to hold it.
+/// The work is latency-bound, so more threads than cores would still help the
+/// fetch. But Arnis allocates through mimalloc, which gives each thread its own
+/// heap, and tile decoding allocates heavily. On a four-core runner eight fixed
+/// threads cost more in resident allocator arenas than the extra overlap saves.
+/// Scaling with the machine keeps the overlap where there are cores for it.
 fn fetch_thread_count() -> usize {
     std::thread::available_parallelism()
         .map(std::num::NonZeroUsize::get)
@@ -182,10 +181,10 @@ struct TileBuilding {
     /// Twice the footprint's unsigned area, in square degrees.
     ///
     /// Used to pick the intact copy when a building appears in several tiles.
-    /// Vertex count cannot do that job: clipping against a tile boundary *adds*
+    /// Vertex count does not work here: clipping against a tile boundary adds
     /// intersection vertices, and a clipped rectangle keeps the same four
-    /// corners as a whole one. Clipping can only ever remove area, so the
-    /// largest copy is the one that was carried whole.
+    /// corners as a whole one. Clipping only ever removes area, so the largest
+    /// copy is the whole one.
     area2: f64,
 }
 
@@ -246,10 +245,9 @@ fn feature_to_building(
     }
     let gers_id = layer.attr_str(feature, "id")?.to_string();
 
-    // Largest exterior ring by area; holes are dropped, as they are on the
-    // Parquet path. By area rather than by vertex count, because a small,
-    // finely mapped outbuilding routinely carries more vertices than the main
-    // footprint it sits beside.
+    // Largest exterior ring by area; holes are dropped, as on the Parquet path.
+    // By area, not vertex count: a small, finely mapped outbuilding often has
+    // more vertices than the main footprint next to it.
     let ring = feature
         .rings
         .iter()
@@ -420,7 +418,7 @@ pub fn collect_from_tiles(
                     }
                     let layers = mvt::decode_tile(&raw)?;
                     // The decoded layers own their bytes, so the compressed
-                    // tile is dead weight from here on - and eight of these
+                    // tile is dead weight from here on. Up to eight of these
                     // are in flight at once.
                     drop(raw);
                     let mut harvest = TileHarvest::default();
@@ -433,13 +431,12 @@ pub fn collect_from_tiles(
                                 continue;
                             }
                             if candidate.building.is_osm_sourced {
-                                // An OSM-sourced row is a duplicate footprint
-                                // that still carries conflated Microsoft / Esri
-                                // / 3DEP values. Unless the caller wants the
-                                // geometry too, only those values are kept -
-                                // in a European city they are 99% of the rows,
-                                // so carrying their rings would dominate memory
-                                // for data that is then thrown away.
+                                // An OSM-sourced row duplicates a footprint we
+                                // already have, but carries conflated Microsoft
+                                // / Esri / 3DEP values. Keep only those unless
+                                // the caller asked for the geometry: in a
+                                // European city these are 99% of the rows, and
+                                // their rings would be discarded anyway.
                                 if let Some(key) = candidate.building.osm_ref {
                                     harvest.hints.push((
                                         key,
@@ -495,9 +492,9 @@ pub fn collect_from_tiles(
         }
     }
 
-    // Every tile failing is a broken archive, not an empty area. Returning an
-    // empty collection here would look like success, mark the release good, and
-    // rob `auto` of the Parquet fallback it promises.
+    // Every tile failing means a broken archive, not an empty area. Returning
+    // an empty collection would look like success, mark the release good, and
+    // skip the Parquet fallback that `auto` is supposed to provide.
     if attempted > 0 && lost_tiles == attempted {
         return Err(format!(
             "all {lost_tiles} Overture tile(s) holding data could not be read"
@@ -511,10 +508,9 @@ pub fn collect_from_tiles(
         );
     }
 
-    // A HashMap iterates in an order the standard library deliberately
-    // randomises per process, and the budget below truncates. Sorting by the
-    // GERS id makes which buildings survive a property of the data rather than
-    // of this run, so two runs of one bbox produce the same world.
+    // HashMap iteration order is randomised per process and the budget below
+    // truncates, so without a sort the surviving buildings would differ between
+    // two runs of the same bbox. Sort by GERS id to keep the world stable.
     let mut collected: Vec<TileBuilding> = best.into_values().collect();
     collected.sort_unstable_by(|a, b| a.gers_id.cmp(&b.gers_id));
     capped |= collected.len() > max_buildings;

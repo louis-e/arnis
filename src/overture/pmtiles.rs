@@ -133,18 +133,17 @@ impl Header {
 
 /// Undo the archive's declared compression, refusing output past `max_output`.
 ///
-/// The caps elsewhere in this file bound what is *fetched*, which says nothing
-/// about what it expands to: a few hundred kilobytes of gzip can decode to
-/// gigabytes. These bytes come off the network, so the decoders are read
-/// through `take` and the result is rejected the moment it exceeds the limit,
-/// rather than after a decoder has already allocated it.
+/// The other caps in this file bound the compressed size only. A few hundred
+/// kilobytes of gzip can decode to gigabytes, and these bytes come off the
+/// network, so both decoders read through `take` and the result is rejected
+/// once it passes the limit.
 fn decompress(kind: u8, data: Vec<u8>, max_output: u64) -> Result<Vec<u8>> {
     /// Reads at most `max_output` bytes, then reports the overrun rather than
     /// returning a truncated buffer that would parse as valid-but-wrong.
     fn read_bounded(mut reader: impl Read, max_output: u64, what: &str) -> Result<Vec<u8>> {
         let mut out = Vec::new();
-        // One byte past the cap, so hitting it is distinguishable from a
-        // stream that happens to be exactly the maximum size.
+        // One byte past the cap, so a stream sitting right on the limit is
+        // still told apart from one that overruns it.
         reader
             .by_ref()
             .take(max_output.saturating_add(1))
@@ -281,8 +280,8 @@ fn find_entry(entries: &[Entry], tile_id: u64) -> Option<Entry> {
 
 /// PMTiles orders tiles along a Hilbert curve, zoom level by zoom level, so a
 /// tile's id is the count of every tile in lower zooms plus its position on the
-/// curve at its own zoom. Neighbouring tiles then land close together in the
-/// archive, which is what makes a city a handful of contiguous reads.
+/// curve at its own zoom. Neighbouring tiles land close together in the
+/// archive, so a city reads as a handful of nearby ranges.
 pub fn zxy_to_tile_id(z: u8, x: u32, y: u32) -> Result<u64> {
     if z > 31 {
         return Err(format!("zoom {z} is out of range"));

@@ -237,10 +237,9 @@ impl<'a> Reader<'a> {
             }
             WIRE_LEN => {
                 let mut inner = self.message()?;
-                // Deliberately no `reserve` here. The byte length bounds the
-                // element count, but each element is four bytes, so reserving
-                // from it would allocate four times a field size that the tile
-                // itself chooses. Amortised growth costs less than trusting it.
+                // No `reserve` here. The byte length bounds the element
+                // count, but each element is four bytes, so reserving from it
+                // would allocate four times a length the tile chooses.
                 while !inner.done() {
                     out.push(u32::try_from(inner.varint()?).map_err(|_| "u32 out of range")?);
                 }
@@ -451,10 +450,9 @@ fn decode_geometry(geometry: &[u32]) -> Vec<Ring> {
 /// exterior ring.
 ///
 /// `i128`, not `i64`. Coordinates accumulate from cursor deltas and can reach
-/// any `i32`, so one term is up to 2^62 and just three of them overflow an
-/// `i64` accumulator - which this crate builds with `overflow-checks = true`,
-/// so it would panic in release on a malformed tile rather than merely give a
-/// wrong sign. This function is on the no-panic path for network data.
+/// any `i32`, so one term is up to 2^62 and three of them overflow an `i64`
+/// accumulator. This crate builds with `overflow-checks = true`, so that would
+/// panic in a release build on a malformed tile.
 fn shoelace2(points: &[(i32, i32)]) -> i128 {
     let mut sum: i128 = 0;
     for idx in 0..points.len() {
