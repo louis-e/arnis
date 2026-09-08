@@ -20,8 +20,8 @@ pub(crate) use common::WorldToModify;
 pub(crate) use common::FLOOR_TEST_LOCK;
 pub use common::{
     base_chunk_block, base_chunk_y, min_y, set_base_chunk_block, set_base_chunk_y,
-    set_terrain_floor_y, set_world_bounds, terrain_floor_y, world_section_range, DEFAULT_MAX_Y,
-    DEFAULT_MIN_Y,
+    set_terrain_floor_y, set_world_bounds, terrain_floor_y, world_max_y, world_section_range,
+    DEFAULT_MAX_Y, DEFAULT_MIN_Y,
 };
 pub(crate) use common::{
     reset_section_counters, section_counters, BlockStorage, RegionToModify, SectionToModify,
@@ -2224,21 +2224,41 @@ const _: () = {
     }
 };
 
+/// Estimated resident MB of one queued region.
+///
+/// The flat figure is calibrated on a dense full-feature vanilla run (terrain + land cover +
+/// Overture + 3D). `--fillground` is the one mode whose column follows the dimension rather
+/// than the surface, so there it scales with the span the fill actually covers; a vanilla
+/// span reproduces the flat figure exactly.
+pub(crate) fn per_region_estimate_mb(fillground: bool) -> u64 {
+    const BASE_MB: u64 = 26;
+    const VANILLA_SPAN: i32 = DEFAULT_MAX_Y - DEFAULT_MIN_Y;
+    if !fillground {
+        return BASE_MB;
+    }
+    let span = (world_max_y() - terrain_floor_y()).max(VANILLA_SPAN) as u64;
+    BASE_MB * span / VANILLA_SPAN as u64
+}
+
 /// Thread count and queue depth for the flush pool. `threads` is throughput,
 /// `capacity` is RAM. One region is evicted per merged tile, so covering a whole
 /// batch without backpressure would need `capacity + threads >= tile_batch`. That is
 /// the target, not a guarantee: both are clamped and capped by the RAM budget below,
 /// so a wide batch still stalls the producer some. `flush_stall_ms` measures it.
-pub(crate) fn flush_pool_params(tile_batch: usize, available_mb: u64) -> (usize, usize) {
+pub(crate) fn flush_pool_params(
+    tile_batch: usize,
+    available_mb: u64,
+    fillground: bool,
+) -> (usize, usize) {
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
     // `capacity + threads + 1` regions are alive at once, so budget the total rather
-    // than each knob. 26 MB/region matches should_stream_to_disk; measured is ~7.
-    const PER_REGION_MB: u64 = 26;
+    // than each knob. Shared with should_stream_to_disk; measured is ~7 on a vanilla run.
+    let per_region_mb = per_region_estimate_mb(fillground);
     let budget = if available_mb > 0 {
         // A tenth of free RAM, floored so the pool always beats the old single writer.
-        ((available_mb / 10 / PER_REGION_MB) as usize).clamp(5, 15)
+        ((available_mb / 10 / per_region_mb) as usize).clamp(5, 15)
     } else {
         15
     };

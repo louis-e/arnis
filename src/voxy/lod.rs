@@ -236,6 +236,9 @@ pub(crate) struct RegionLod<'a> {
     biome_ids: [u32; 16],
     /// Reused so identifying a palette entry does not allocate per section.
     state_key: String,
+    /// Per-chunk `section_y - from` to index into `sections`, `u32::MAX` for a gap.
+    /// Keeps the per-section lookup O(1) when a tall span meets a filled column.
+    section_at: Vec<u32>,
     scratch: SectionScratch,
     serialized: Vec<u8>,
     /// One compression context for the whole region; building a fresh one per
@@ -268,6 +271,7 @@ impl<'a> RegionLod<'a> {
             palette_ids: Vec::new(),
             biome_ids: [0; 16],
             state_key: String::new(),
+            section_at: Vec::new(),
             scratch: SectionScratch::default(),
             serialized: Vec::with_capacity(MAX_SERIALIZED),
             compressor: zstd::bulk::Compressor::new(super::ZSTD_LEVEL)
@@ -280,12 +284,13 @@ impl<'a> RegionLod<'a> {
 
     /// Feeds one finished chunk.
     ///
-    /// `span` is the range of sections the chunk is written with and `lighting`
-    /// is indexed from its start, exactly as
-    /// [`crate::world_editor::java`] hands them to the NBT builder. Sections in
-    /// the span that `sections` does not carry are air in the chunk file too,
-    /// and are ingested as air: they still hold sky light, which is what lights
-    /// whatever LOD geometry sits underneath them.
+    /// `span` is the outer range [`crate::world_editor::java`] lights the chunk
+    /// over and `lighting` is indexed from its start. Sections in the span that
+    /// `sections` does not carry are air in the chunk file too (the writer
+    /// leaves the empty ones outside the vanilla range out of the NBT entirely,
+    /// and Minecraft fills them back in as air), and are ingested as air here:
+    /// they still hold sky light, which is what lights whatever LOD geometry
+    /// sits underneath them.
     pub(crate) fn ingest_chunk(
         &mut self,
         chunk_x: i32,
@@ -303,6 +308,19 @@ impl<'a> RegionLod<'a> {
         let from = span_min.max(self.min_section_y);
         let to = span_max.min(self.max_section_y);
 
+        // `sections` is keyed by Y and unsorted, and a filled column under the tall
+        // datapack carries one entry per span section, so scanning it per section is
+        // quadratic. Index it once instead.
+        let mut section_at = std::mem::take(&mut self.section_at);
+        section_at.clear();
+        section_at.resize((to - from + 1).max(0) as usize, u32::MAX);
+        for (i, s) in sections.iter().enumerate() {
+            let y = s.y as i32;
+            if (from..=to).contains(&y) {
+                section_at[(y - from) as usize] = i as u32;
+            }
+        }
+
         for section_y in from..=to {
             let light = lighting.and_then(|l| {
                 usize::try_from(section_y - span_min)
@@ -311,19 +329,20 @@ impl<'a> RegionLod<'a> {
             });
             // Nothing this chunk section touches can end up on disk: skip it
             // before decoding a palette or composing a single voxel. Above the
-            // roofline this is almost every section in the chunk.
-            if !(0..=MAX_LOD)
-                .rev()
-                .any(|lvl| self.is_live(lvl, chunk_x, section_y, chunk_z))
-            {
+            // roofline this is almost every section in the chunk. A section live
+            // at any level is live at `MAX_LOD` too (`mark_live` marks every
+            // level from the same chunk section, and equal coordinates at one
+            // shift stay equal at a wider one), so one probe answers all five.
+            if !self.is_live(MAX_LOD, chunk_x, section_y, chunk_z) {
                 continue;
             }
 
-            // A chunk holds at most a couple of dozen sections, so a scan beats
-            // building a map per chunk.
-            let section = sections.iter().find(|s| s.y as i32 == section_y);
+            let slot = section_at[(section_y - from) as usize];
+            let section = (slot != u32::MAX).then(|| &sections[slot as usize]);
             self.ingest_section(chunk_x, section_y, chunk_z, section, light);
         }
+
+        self.section_at = section_at;
     }
 
     /// Called after the four chunks of Morton column `column` have been fed.

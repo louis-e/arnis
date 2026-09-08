@@ -241,7 +241,7 @@ fn write_region_to_disk(
     let base_sections = get_base_chunk_sections();
     let (base_min_y, base_max_y) = chunk_section_span(&base_sections);
     let base_lighting =
-        bake_lighting.then(|| compute_lighting(&base_sections, base_min_y, base_max_y));
+        bake_lighting.then(|| compute_chunk_lighting(&base_sections, (base_min_y, base_max_y)));
 
     let mut lod = voxy.map(|writer| {
         let (min_y, max_y) = region_content_span(region_to_modify);
@@ -277,7 +277,7 @@ fn write_region_to_disk(
                         let sections: Vec<Section> = chunk_to_modify.sections().collect();
                         let span = chunk_section_span(&sections);
                         let lighting =
-                            bake_lighting.then(|| compute_lighting(&sections, span.0, span.1));
+                            bake_lighting.then(|| compute_chunk_lighting(&sections, span));
                         (
                             sections,
                             strip_orphan_block_entities(chunk_to_modify),
@@ -737,18 +737,26 @@ fn pack_light_nibble(arr: &mut [i8], index: usize, value: u8) {
     arr[byte] = new as i8;
 }
 
+/// Sky and block light for a run of sections, as 2048-byte nibble arrays per section.
+type SectionLight = Vec<(Vec<i8>, Vec<i8>)>;
+
 // Sky + block light per section as 2048-byte nibble arrays.
+//
+// `sky_above` is the skylight entering the top of the range: 15 under open sky, or the level
+// leaving the bottom of the range above. Also returns the level leaving this range's bottom,
+// or None when that plane is mixed and a caller stacking ranges cannot carry a single value.
 fn compute_lighting(
     sections: &[Section],
     min_section_y: i8,
     max_section_y: i8,
-) -> Vec<(Vec<i8>, Vec<i8>)> {
+    sky_above: u8,
+) -> (SectionLight, Option<u8>) {
     use std::collections::VecDeque;
 
     let num_sections = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
     let height = num_sections * 16;
     if height == 0 {
-        return Vec::new();
+        return (Vec::new(), Some(sky_above));
     }
     let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
 
@@ -783,11 +791,11 @@ fn compute_lighting(
     // SkyLight: open sky above the highest non-transparent block is 15; flood-fill the band below.
     let top = if any_solid { (htop + 2).min(height) } else { 0 };
     let mut sky = vec![0u8; height * 256];
-    sky[top * 256..].fill(15);
+    sky[top * 256..].fill(sky_above);
     let mut sq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
     for z in 0..16usize {
         for x in 0..16usize {
-            let mut level = 15u8;
+            let mut level = sky_above;
             for y in (0..top).rev() {
                 let g = idx(x, y, z);
                 if opacity[g] >= 15 {
@@ -834,6 +842,61 @@ fn compute_lighting(
         }
         out.push((sl, bl));
     }
+
+    let first = sky[0];
+    let sky_below = sky[..256].iter().all(|&v| v == first).then_some(first);
+    (out, sky_below)
+}
+
+/// Light for the sections a chunk actually writes, indexed by `y - span.0` so callers keep
+/// using span offsets. Computed one contiguous run at a time, top down: the working grids then
+/// cover a run's height instead of the whole span, which under the tall datapack is ~180
+/// sections of mostly air between the bedrock plane and the surface.
+///
+/// The skipped gaps are air, so the skylight leaving a run passes through unchanged and seeds
+/// the run below, and block light cannot cross their 16-plus blocks. A gap plane that is not
+/// uniform cannot be carried that way, so those chunks fall back to one full-span pass.
+fn compute_chunk_lighting(sections: &[Section], span: (i8, i8)) -> SectionLight {
+    let (min_section_y, max_section_y) = span;
+    let len = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
+    let mut out: SectionLight = vec![(Vec::new(), Vec::new()); len];
+
+    let ys = emitted_section_ys(sections, span);
+    let mut runs: Vec<(i8, i8)> = Vec::new();
+    for &y in &ys {
+        match runs.last_mut() {
+            Some(run) if run.1 as i32 + 1 == y as i32 => run.1 = y,
+            _ => runs.push((y, y)),
+        }
+    }
+
+    let mut sky_above = 15u8;
+    let mut gap_top: Option<i8> = None;
+    for &(lo, hi) in runs.iter().rev() {
+        // `compute_lighting` only reads sections inside the range it is given, so the full
+        // slice can be passed without copying the run out of it.
+        let (light, sky_below) = compute_lighting(sections, lo, hi, sky_above);
+        let base = (lo as i32 - min_section_y as i32) as usize;
+        for (k, section_light) in light.into_iter().enumerate() {
+            out[base + k] = section_light;
+        }
+        let Some(sky_below) = sky_below else {
+            return compute_lighting(sections, min_section_y, max_section_y, 15).0;
+        };
+        // A lit gap only happens in a chunk with no terrain over it, so paying for the two
+        // constant arrays there keeps the LOD exact without costing the common case anything.
+        if sky_above > 0 {
+            if let Some(top) = gap_top {
+                let packed = ((sky_above << 4) | sky_above) as i8;
+                for y in hi as i32 + 1..=top as i32 {
+                    let at = (y - min_section_y as i32) as usize;
+                    out[at] = (vec![packed; 2048], vec![0i8; 2048]);
+                }
+            }
+        }
+        sky_above = sky_below;
+        gap_top = Some(lo - 1);
+    }
     out
 }
 
@@ -864,19 +927,26 @@ fn get_structures_value() -> &'static Value {
     })
 }
 
-/// Creates modern chunk NBT data (post-1.18 format, no Level wrapper).
-///
-/// Writes all required fields for server compatibility:
-/// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
-/// Section range is determined dynamically: at minimum the vanilla range
-/// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
-/// Emitted section range: the vanilla span, expanded to cover content. Deliberately NOT
-/// the whole dimension — under the tall datapack that would be 254 sections per chunk
-/// instead of ~24. Minecraft slots each section by its own `Y` and fills the gaps with air,
-/// so a sparse list is fine.
+/// Vanilla build range, in section coordinates (Y=-64 to Y=319).
+const VANILLA_MIN_SECTION_Y: i8 = -4;
+const VANILLA_MAX_SECTION_Y: i8 = 19;
+
+/// Section Ys a chunk writes: the vanilla span, plus any section outside it holding content.
+/// Lighting and the emitted NBT list both come from here so the two cannot drift apart.
+fn emitted_section_ys(sections: &[Section], span: (i8, i8)) -> Vec<i8> {
+    let content: std::collections::HashSet<i8> = sections.iter().map(|s| s.y).collect();
+    (span.0..=span.1)
+        .filter(|y| {
+            (VANILLA_MIN_SECTION_Y..=VANILLA_MAX_SECTION_Y).contains(y) || content.contains(y)
+        })
+        .collect()
+}
+
+/// Outer bounds of a chunk: the vanilla span, widened to reach any section with content.
+/// The sections actually written are a sparse subset of it, see `emitted_section_ys`.
 pub(crate) fn chunk_section_span(sections: &[Section]) -> (i8, i8) {
-    let mut min_section_y: i8 = -4; // vanilla min (Y=-64)
-    let mut max_section_y: i8 = 19; // vanilla max (Y=319)
+    let mut min_section_y: i8 = VANILLA_MIN_SECTION_Y;
+    let mut max_section_y: i8 = VANILLA_MAX_SECTION_Y;
     for section in sections {
         if section.y < min_section_y {
             min_section_y = section.y;
@@ -898,8 +968,8 @@ fn create_chunk_nbt(
     biome_value: &Value,
 ) -> HashMap<String, Value> {
     let (min_section_y, max_section_y) = chunk_section_span(&chunk.sections);
-    let lighting =
-        bake_lighting.then(|| compute_lighting(&chunk.sections, min_section_y, max_section_y));
+    let lighting = bake_lighting
+        .then(|| compute_chunk_lighting(&chunk.sections, (min_section_y, max_section_y)));
     create_chunk_nbt_with_lighting(chunk, lighting, biome_value)
 }
 
@@ -908,7 +978,7 @@ fn create_chunk_nbt(
 /// region loop computes it once and hands it to both.
 fn create_chunk_nbt_with_lighting(
     chunk: &Chunk,
-    lighting: Option<Vec<(Vec<i8>, Vec<i8>)>>,
+    lighting: Option<SectionLight>,
     biome_value: &Value,
 ) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
@@ -934,10 +1004,13 @@ fn create_chunk_nbt_with_lighting(
     let bake_lighting = lighting.is_some();
     let mut lighting = lighting.unwrap_or_default();
 
-    // Build all sections in the determined range
-    let sections: Vec<Value> = (min_section_y..=max_section_y)
-        .enumerate()
-        .map(|(off, y)| {
+    // Sparse section list: the vanilla span plus whatever content sits outside it. Empty gaps
+    // beyond the vanilla span are left out entirely; Minecraft slots each section by its own
+    // `Y` and treats the missing ones as air. Under the tall datapack a chunk otherwise emits
+    // ~180 sections, nearly all of them synthesized air, instead of the usual 24.
+    let sections: Vec<Value> = emitted_section_ys(&chunk.sections, (min_section_y, max_section_y))
+        .into_iter()
+        .map(|y| {
             let mut section_nbt = if let Some(&idx) = section_map.get(&y) {
                 build_section_value(&chunk.sections[idx])
             } else {
@@ -949,6 +1022,8 @@ fn create_chunk_nbt_with_lighting(
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
             if bake_lighting {
+                // `lighting` covers the whole span, so index by Y, not by list position.
+                let off = (y as i32 - min_section_y as i32) as usize;
                 let (sky_light, block_light) = std::mem::take(&mut lighting[off]);
                 section_nbt.insert(
                     "SkyLight".to_string(),
@@ -1450,6 +1525,54 @@ mod dimension_bounds_tests {
         }
     }
 
+    /// A chunk with a bedrock plane far below the surface, the shape a sunk terrain base makes.
+    fn chunk_with_plane_at(depths: &[i32]) -> Chunk {
+        let mut c = ChunkToModify::default();
+        for &y in depths {
+            for x in 0..16 {
+                for z in 0..16 {
+                    c.set_block(x, y, z, STONE);
+                }
+            }
+        }
+        Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        }
+    }
+
+    #[test]
+    fn run_by_run_light_matches_one_pass_over_the_whole_span() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+
+        // Terrain over a deep plane, a lone deep plane (nothing above it blocks the sky), a
+        // partly filled column, and the vanilla shape.
+        for depths in [
+            &[-2000, -62][..],
+            &[-2000][..],
+            &[-2000, -62, 500][..],
+            &[-62][..],
+        ] {
+            let chunk = chunk_with_plane_at(depths);
+            let span = chunk_section_span(&chunk.sections);
+            let runs = compute_chunk_lighting(&chunk.sections, span);
+            let whole = compute_lighting(&chunk.sections, span.0, span.1, 15).0;
+
+            for y in emitted_section_ys(&chunk.sections, span) {
+                let at = (y as i32 - span.0 as i32) as usize;
+                assert_eq!(runs[at], whole[at], "section {y} of {depths:?}");
+            }
+        }
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
     #[test]
     fn heightmaps_follow_the_dimension_not_the_chunk_content() {
         let _g = super::super::common::FLOOR_TEST_LOCK
@@ -1495,6 +1618,137 @@ mod dimension_bounds_tests {
             "expected just the vanilla span, got {}",
             sections.len()
         );
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn deep_content_adds_its_own_section_without_filling_the_gap() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -2000, z, STONE);
+                c.set_block(x, -62, z, STONE);
+            }
+        }
+        let chunk = Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+
+        let nbt = create_chunk_nbt(&chunk, true, &Value::Compound(HashMap::new()));
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        // Vanilla span plus the one deep section, not the 145 the span covers.
+        assert_eq!(sections.len(), 25);
+
+        let ys: Vec<i8> = sections
+            .iter()
+            .map(|s| match s {
+                Value::Compound(m) => match m["Y"] {
+                    Value::Byte(y) => y,
+                    _ => panic!("Y is not a byte"),
+                },
+                _ => panic!("section is not a compound"),
+            })
+            .collect();
+        assert_eq!(ys[0], -125);
+        assert_eq!(&ys[1..], (-4..=19).collect::<Vec<i8>>());
+
+        // Light must follow the section's own Y, not its position in the list: everything
+        // above the -62 plane is open sky, everything under it is buried. Section -4 straddles
+        // the plane, so it is the one mixed section.
+        for (y, s) in ys.iter().zip(sections).filter(|(y, _)| **y != -4) {
+            let Value::Compound(m) = s else { panic!() };
+            let Value::ByteArray(sky) = &m["SkyLight"] else {
+                panic!("no SkyLight")
+            };
+            let expect: i8 = if *y > -4 { -1 } else { 0 };
+            assert!(
+                sky.iter().all(|&v| v == expect),
+                "section {y} has the wrong skylight"
+            );
+        }
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    fn section_ys(nbt: &HashMap<String, Value>) -> Vec<i8> {
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        sections
+            .iter()
+            .map(|s| match s {
+                Value::Compound(m) => match m["Y"] {
+                    Value::Byte(y) => y,
+                    _ => panic!("Y is not a byte"),
+                },
+                _ => panic!("section is not a compound"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn vanilla_chunks_emit_exactly_the_vanilla_section_span() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+
+        let nbt = create_chunk_nbt(&shallow_chunk(), true, &Value::Compound(HashMap::new()));
+        assert_eq!(section_ys(&nbt), (-4..=19).collect::<Vec<i8>>());
+
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        for (y, s) in section_ys(&nbt).iter().zip(sections).skip(1) {
+            let Value::Compound(m) = s else { panic!() };
+            let Value::ByteArray(sky) = &m["SkyLight"] else {
+                panic!("no SkyLight")
+            };
+            assert!(
+                sky.iter().all(|&v| v == -1),
+                "section {y} above the surface should be fully skylit"
+            );
+        }
+    }
+
+    #[test]
+    fn content_above_the_vanilla_ceiling_is_emitted_without_the_gap() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -62, z, STONE);
+                c.set_block(x, 500, z, STONE);
+            }
+        }
+        let chunk = Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+
+        let nbt = create_chunk_nbt(&chunk, true, &Value::Compound(HashMap::new()));
+        let mut expected: Vec<i8> = (-4..=19).collect();
+        expected.push(31);
+        assert_eq!(section_ys(&nbt), expected);
+
         set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
     }
 }

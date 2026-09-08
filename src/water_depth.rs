@@ -24,6 +24,9 @@ const MAX_WATER_DEPTH: i32 = 6;
 /// Cap on water sub-rect cells (bounds memory, keeps u32 indices valid); ~1000 km².
 const MAX_WATER_FIELD_CELLS: usize = 1_000_000_000;
 
+/// Frontier capacity carried between components; a bigger one gives its buffer back.
+const FRONTIER_KEEP: usize = 1 << 16;
+
 #[inline]
 fn nibble_get(buf: &[u8], i: usize) -> u8 {
     let byte = buf[i >> 1];
@@ -53,6 +56,24 @@ fn bit_get(b: &[u64], i: usize) -> bool {
 #[inline]
 fn bit_set(b: &mut [u64], i: usize) {
     b[i >> 6] |= 1u64 << (i & 63);
+}
+
+#[inline]
+fn for_each_neighbor(idx: usize, w: usize, h: usize, mut f: impl FnMut(usize)) {
+    let i = idx % w;
+    let j = idx / w;
+    if i > 0 {
+        f(idx - 1);
+    }
+    if i + 1 < w {
+        f(idx + 1);
+    }
+    if j > 0 {
+        f(idx - w);
+    }
+    if j + 1 < h {
+        f(idx + w);
+    }
 }
 
 /// Baked per-cell carve depth (0..=6), nibble-packed over the water sub-rect.
@@ -169,52 +190,58 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
     }
     chamfer_3_4_dt(&mut dt, sw, sh);
 
-    // Per-component BFS for the max DT, then bake each cell's depth.
+    // Per-component BFS for the max DT, then a second walk bakes each cell's depth.
+    // Levels are held in swapped frontiers, so residency is the perimeter, not the body.
     let mut depth = vec![0u8; total.div_ceil(2)];
     let mut visited = vec![0u64; total.div_ceil(64)];
-    let mut comp: Vec<u32> = Vec::new();
+    let mut baked = vec![0u64; total.div_ceil(64)];
+    let mut cur: Vec<u32> = Vec::new();
+    let mut next: Vec<u32> = Vec::new();
     for start in 0..total {
         if dt[start] == 0 || bit_get(&visited, start) {
             continue;
         }
-        comp.clear();
-        comp.push(start as u32);
-        bit_set(&mut visited, start);
         let mut comp_max = 0u8;
-        let mut head = 0;
-        while head < comp.len() {
-            let idx = comp[head] as usize;
-            head += 1;
-            comp_max = comp_max.max(dt[idx]);
-            let i = idx % sw;
-            let j = idx / sw;
-            let mut visit = |n: usize, comp: &mut Vec<u32>| {
-                if dt[n] != 0 && !bit_get(&visited, n) {
-                    bit_set(&mut visited, n);
-                    comp.push(n as u32);
-                }
-            };
-            if i > 0 {
-                visit(idx - 1, &mut comp);
+        bit_set(&mut visited, start);
+        cur.clear();
+        cur.push(start as u32);
+        while !cur.is_empty() {
+            next.clear();
+            for &c in &cur {
+                let idx = c as usize;
+                comp_max = comp_max.max(dt[idx]);
+                for_each_neighbor(idx, sw, sh, |n| {
+                    if dt[n] != 0 && !bit_get(&visited, n) {
+                        bit_set(&mut visited, n);
+                        next.push(n as u32);
+                    }
+                });
             }
-            if i + 1 < sw {
-                visit(idx + 1, &mut comp);
-            }
-            if j > 0 {
-                visit(idx - sw, &mut comp);
-            }
-            if j + 1 < sh {
-                visit(idx + sw, &mut comp);
-            }
+            std::mem::swap(&mut cur, &mut next);
         }
+
         let cm = u16::from(comp_max);
-        for &c in &comp {
-            let idx = c as usize;
-            let x = smin_x + (idx % sw) as i32;
-            let z = smin_z + (idx / sw) as i32;
-            let d = ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm);
-            nibble_set(&mut depth, idx, d as u8);
+        bit_set(&mut baked, start);
+        cur.push(start as u32);
+        while !cur.is_empty() {
+            next.clear();
+            for &c in &cur {
+                let idx = c as usize;
+                let x = smin_x + (idx % sw) as i32;
+                let z = smin_z + (idx / sw) as i32;
+                let d = ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm);
+                nibble_set(&mut depth, idx, d as u8);
+                for_each_neighbor(idx, sw, sh, |n| {
+                    if dt[n] != 0 && !bit_get(&baked, n) {
+                        bit_set(&mut baked, n);
+                        next.push(n as u32);
+                    }
+                });
+            }
+            std::mem::swap(&mut cur, &mut next);
         }
+        cur.shrink_to(FRONTIER_KEEP);
+        next.shrink_to(FRONTIER_KEEP);
     }
 
     BigWaterField {
@@ -882,6 +909,200 @@ mod tests {
         }
         for (i, v) in [0u8, 6, 3, 1, 5, 2, 4, 0].iter().enumerate() {
             assert_eq!(nibble_get(&buf, i), *v);
+        }
+    }
+}
+
+#[cfg(test)]
+mod water_field_traversal_tests {
+    use super::*;
+    use crate::ground::test_support::ground_with_land_cover_and_elevation;
+    use crate::land_cover::LandCoverData;
+
+    const SIDE: usize = 48;
+
+    fn ground_from(grid: Vec<Vec<u8>>) -> Ground {
+        let (w, h) = (grid[0].len(), grid.len());
+        let lc = LandCoverData {
+            grid,
+            water_distance: vec![vec![0u8; w]; h],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width: w,
+            height: h,
+            cells_per_meter: 1.0,
+        };
+        ground_with_land_cover_and_elevation(lc, w, h)
+    }
+
+    fn water_grid(cells: impl Fn(usize, usize) -> bool) -> Vec<Vec<u8>> {
+        (0..SIDE)
+            .map(|z| {
+                (0..SIDE)
+                    .map(|x| if cells(x, z) { LC_WATER } else { 10 })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Reference traversal: one growing index list per component, walked with a head
+    /// pointer, with the depths baked once the whole component has been collected.
+    fn single_pass_reference(
+        ground: &Ground,
+        xzbbox: &XZBBox,
+    ) -> (Vec<u8>, usize, usize, i32, i32) {
+        let (min_x, max_x) = (xzbbox.min_x(), xzbbox.max_x());
+        let (min_z, max_z) = (xzbbox.min_z(), xzbbox.max_z());
+        let (wmin_x, wmin_z, wmax_x, wmax_z) = match ground.lc_water_block_bounds() {
+            Some((lx, lz, hx, hz)) => (min_x + lx, min_z + lz, min_x + hx, min_z + hz),
+            None => return (Vec::new(), 0, 0, 0, 0),
+        };
+        let smin_x = (wmin_x - 1).max(min_x);
+        let smax_x = (wmax_x + 1).min(max_x);
+        let smin_z = (wmin_z - 1).max(min_z);
+        let smax_z = (wmax_z + 1).min(max_z);
+        let sw = (smax_x - smin_x + 1) as usize;
+        let sh = (smax_z - smin_z + 1) as usize;
+        let total = sw * sh;
+
+        let mut dt = vec![0u8; total];
+        for z in smin_z..=smax_z {
+            let row = (z - smin_z) as usize * sw;
+            for x in smin_x..=smax_x {
+                if ground.cover_class(XZPoint::new(x - min_x, z - min_z)) == LC_WATER {
+                    dt[row + (x - smin_x) as usize] = DT_MAX;
+                }
+            }
+        }
+        chamfer_3_4_dt(&mut dt, sw, sh);
+
+        let mut depth = vec![0u8; total.div_ceil(2)];
+        let mut visited = vec![0u64; total.div_ceil(64)];
+        let mut comp: Vec<u32> = Vec::new();
+        for start in 0..total {
+            if dt[start] == 0 || bit_get(&visited, start) {
+                continue;
+            }
+            comp.clear();
+            comp.push(start as u32);
+            bit_set(&mut visited, start);
+            let mut comp_max = 0u8;
+            let mut head = 0;
+            while head < comp.len() {
+                let idx = comp[head] as usize;
+                head += 1;
+                comp_max = comp_max.max(dt[idx]);
+                let i = idx % sw;
+                let j = idx / sw;
+                let mut visit = |n: usize, comp: &mut Vec<u32>| {
+                    if dt[n] != 0 && !bit_get(&visited, n) {
+                        bit_set(&mut visited, n);
+                        comp.push(n as u32);
+                    }
+                };
+                if i > 0 {
+                    visit(idx - 1, &mut comp);
+                }
+                if i + 1 < sw {
+                    visit(idx + 1, &mut comp);
+                }
+                if j > 0 {
+                    visit(idx - sw, &mut comp);
+                }
+                if j + 1 < sh {
+                    visit(idx + sw, &mut comp);
+                }
+            }
+            let cm = u16::from(comp_max);
+            for &c in &comp {
+                let idx = c as usize;
+                let x = smin_x + (idx % sw) as i32;
+                let z = smin_z + (idx / sw) as i32;
+                let d = ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm);
+                nibble_set(&mut depth, idx, d as u8);
+            }
+        }
+        (depth, sw, sh, smin_x, smin_z)
+    }
+
+    fn assert_matches_reference(label: &str, grid: Vec<Vec<u8>>) -> BigWaterField {
+        let bbox = XZBBox::rect_from_min_max(0, 0, SIDE as i32 - 1, SIDE as i32 - 1).unwrap();
+        let ground = ground_from(grid);
+        let field = compute_big_water_field(&ground, &bbox);
+        let (depth, sw, sh, smin_x, smin_z) = single_pass_reference(&ground, &bbox);
+        assert_eq!((field.width, field.height), (sw, sh), "{label}: sub-rect");
+        assert_eq!(
+            (field.min_x, field.min_z),
+            (smin_x, smin_z),
+            "{label}: origin"
+        );
+        assert_eq!(field.depth, depth, "{label}: baked depths differ");
+        assert!(
+            depth.iter().any(|&b| b != 0),
+            "{label}: no depth was carved, the comparison is vacuous"
+        );
+        field
+    }
+
+    #[test]
+    fn frontier_walk_bakes_the_same_depths_as_the_single_pass_walk() {
+        assert_matches_reference(
+            "one open lake",
+            water_grid(|x, z| (8..40).contains(&x) && (8..40).contains(&z)),
+        );
+
+        assert_matches_reference(
+            "two components of different size",
+            water_grid(|x, z| {
+                ((2..22).contains(&x) && (2..22).contains(&z))
+                    || ((30..44).contains(&x) && (30..44).contains(&z))
+            }),
+        );
+
+        // Diagonal-only contact: 4-connectivity must keep these two components apart,
+        // so each keeps its own comp_max and its own depth tier.
+        assert_matches_reference(
+            "diagonally touching bodies",
+            water_grid(|x, z| {
+                ((2..24).contains(&x) && (2..24).contains(&z))
+                    || ((24..46).contains(&x) && (24..46).contains(&z))
+            }),
+        );
+
+        // A ring around an island, plus a corridor: the re-walk has to reach every cell
+        // through a shape where a level frontier and a head-pointer queue diverge in order.
+        assert_matches_reference(
+            "ring with an island and a corridor",
+            water_grid(|x, z| {
+                let ring = (4..36).contains(&x)
+                    && (4..36).contains(&z)
+                    && !((14..26).contains(&x) && (14..26).contains(&z));
+                let corridor = (36..46).contains(&x) && (18..22).contains(&z);
+                ring || corridor
+            }),
+        );
+    }
+
+    #[test]
+    fn a_second_body_does_not_change_the_first_ones_depths() {
+        let lone = assert_matches_reference(
+            "lone lake",
+            water_grid(|x, z| (2..22).contains(&x) && (2..22).contains(&z)),
+        );
+        let paired = assert_matches_reference(
+            "same lake beside a larger one",
+            water_grid(|x, z| {
+                ((2..22).contains(&x) && (2..22).contains(&z))
+                    || ((26..46).contains(&x) && (26..46).contains(&z))
+            }),
+        );
+        for z in 2..22 {
+            for x in 2..22 {
+                assert_eq!(
+                    lone.depth_at(x, z),
+                    paired.depth_at(x, z),
+                    "cell ({x},{z}) changed when an unrelated component was added"
+                );
+            }
         }
     }
 }

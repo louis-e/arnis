@@ -35,6 +35,8 @@ pub struct RotationMask {
 #[derive(Clone)]
 pub struct Ground {
     pub elevation_enabled: bool,
+    /// The output format's pack raised the build ceiling, so relief stays close to metre scale.
+    extended_ceiling: bool,
     ground_level: i32,
     elevation_data: Option<ElevationData>,
     land_cover: Option<LandCoverData>,
@@ -95,6 +97,7 @@ impl Ground {
     pub fn new_flat(ground_level: i32) -> Self {
         Self {
             elevation_enabled: false,
+            extended_ceiling: false,
             ground_level,
             elevation_data: None,
             land_cover: None,
@@ -128,6 +131,7 @@ impl Ground {
         }
         Self {
             elevation_enabled: false,
+            extended_ceiling: false,
             ground_level,
             elevation_data: None,
             land_cover,
@@ -149,6 +153,7 @@ impl Ground {
     ) -> Self {
         Self {
             elevation_enabled: false,
+            extended_ceiling: false,
             ground_level: 0,
             elevation_data: None,
             land_cover: Some(land_cover),
@@ -184,6 +189,7 @@ impl Ground {
         );
         Self {
             elevation_enabled: true,
+            extended_ceiling: false,
             ground_level: 0,
             elevation_data: Some(crate::elevation::ElevationData {
                 heights,
@@ -193,6 +199,7 @@ impl Ground {
                 world_height,
                 min_height_m: 0.0,
                 blocks_per_meter: 1.0,
+                slope_correction: 1.0,
                 ground_level: 0,
             }),
             land_cover: None,
@@ -290,6 +297,8 @@ impl Ground {
                     let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
                     Self {
                         elevation_enabled: true,
+                        extended_ceiling: disable_height_limit
+                            && extended_max_y > crate::world_editor::DEFAULT_MAX_Y,
                         ground_level: base,
                         elevation_data: Some(elevation_data),
                         land_cover,
@@ -319,6 +328,7 @@ impl Ground {
                     drop(canopy_job.and_then(|h| h.join().ok()));
                     Self {
                         elevation_enabled: false,
+                        extended_ceiling: false,
                         ground_level,
                         elevation_data: None,
                         land_cover: None,
@@ -610,8 +620,9 @@ impl Ground {
     /// Computes terrain slope at the given coordinates.
     ///
     /// Slope is the difference between the maximum and minimum elevation of
-    /// 4 cardinal neighbors sampled at a step distance. Higher values indicate
-    /// steeper terrain.
+    /// 4 cardinal neighbors sampled at a step distance, corrected back out of
+    /// compressed block space into the `8 * tan(incline)` units the thresholds
+    /// downstream are documented in. Higher values indicate steeper terrain.
     ///
     /// Returns 0 if elevation data is not available.
     #[inline(always)]
@@ -630,7 +641,23 @@ impl Ground {
         let min_val = east.min(west).min(north).min(south);
         // Saturate: pathological CLI input (e.g. very negative ground_level)
         // can push max - min past i32::MAX.
-        max_val.saturating_sub(min_val)
+        let raw = max_val.saturating_sub(min_val);
+        let correction = self
+            .elevation_data
+            .as_ref()
+            .map(|d| d.slope_correction)
+            .unwrap_or(1.0);
+        (raw as f64 * correction).round() as i32
+    }
+
+    /// Vertical blocks per real-world metre, 1.0 without elevation (or with zero
+    /// relief), so callers inverting the metre->Y affine can divide unconditionally.
+    #[inline(always)]
+    pub fn blocks_per_meter(&self) -> f64 {
+        match &self.elevation_data {
+            Some(d) if self.elevation_enabled && d.blocks_per_meter > 0.0 => d.blocks_per_meter,
+            _ => 1.0,
+        }
     }
 
     /// Returns the ground level at the given coordinates
@@ -648,9 +675,8 @@ impl Ground {
     /// Returns the appropriate Y level for water placement.
     /// On steep terrain, snaps to the local minimum within a small radius to
     /// correct spatial misalignment between water classification (OSM/ESA) and
-    /// the elevation DEM. The snap is skipped across a real cliff/falls (a drop
-    /// larger than the snap radius), where the cell keeps its own level so the
-    /// waterfront isn't terraced into a step.
+    /// the elevation DEM. The snap is skipped across a real cliff/falls, where the
+    /// cell keeps its own level so the waterfront isn't terraced into a step.
     pub fn water_level(&self, coord: XZPoint) -> i32 {
         let center = self.level(coord);
         if !self.elevation_enabled {
@@ -680,10 +706,18 @@ impl Ground {
                 min_y = min_y.min(neighbor);
             }
         }
-        // A drop larger than the snap radius is a real cliff/falls, not
-        // misalignment; snapping across it terraces the waterfront into a step.
+        // A real cliff/falls is not misalignment; snapping across it terraces the
+        // waterfront into a step. Under a raised ceiling the drop is a metre-space concept,
+        // so scale it by blocks-per-metre; the vanilla ceiling keeps the block-space radius
+        // it was tuned against, where an 8-block quay wall is a wall and not a rounding error.
         // saturating_sub guards against overflow on pathological elevations.
-        if center.saturating_sub(min_y) > SNAP_RADIUS {
+        const CLIFF_DROP_M: f64 = 25.0;
+        let cliff_drop = if self.extended_ceiling {
+            ((CLIFF_DROP_M * self.blocks_per_meter()).round() as i32).max(SNAP_RADIUS)
+        } else {
+            SNAP_RADIUS
+        };
+        if center.saturating_sub(min_y) > cliff_drop {
             return center;
         }
         min_y
@@ -964,6 +998,9 @@ impl Ground {
 }
 
 pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
+    // Cleared before the scaler publishes its own: in the GUI a previous run's terrain top
+    // would misgrade this world's map preview.
+    crate::world_editor::common::set_terrain_top_y(args.ground_level);
     if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
         let ground = Ground::new_enabled(
@@ -1010,10 +1047,14 @@ fn filler_block_for(body: CelestialBody) -> crate::block_definitions::Block {
 }
 
 /// Per-format build-height cap when the user opts into extended build height:
-/// 2031 for the Java datapack, 512 for the Bedrock behavior pack.
+/// 2031 for the Java datapack, 512 for the Bedrock behavior pack, and the vanilla
+/// ceiling for Luanti, which has no pack and whose spawn search only scans the
+/// vanilla range. Must stay gated like `world_top_y_for` / `extended_min_y_for`.
 pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
     if args.bedrock {
         512
+    } else if args.luanti {
+        crate::world_editor::DEFAULT_MAX_Y
     } else {
         2031
     }
@@ -1023,14 +1064,18 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
 /// (dimension_type min_y=-2032, height=4064), so the only thing keeping Arnis at -64 was the
 /// old constant. Java only: the Bedrock behavior pack declares -512, but the LevelDB subchunk
 /// writer is unverified below -64, and Luanti has no such pack at all.
-/// Dimension ceiling actually declared to the engine: the tall datapack's 2031, or vanilla's
-/// 319. Gated identically to `extended_min_y_for` — chunk serialization sizes heightmaps from
-/// the span between the two, so the pair must always describe the same dimension.
+/// Dimension ceiling actually declared to the engine: the tall datapack's 2031, the Bedrock
+/// behavior pack's 512 (511 here, since an editor ceiling has to end a section), or vanilla's
+/// 319. Must never sit below the ceiling the scaler aims at (`extended_max_y_for`), or the
+/// block store drops the terrain the scaler just placed. On Java it also pairs with
+/// `extended_min_y_for`: chunk serialization sizes heightmaps from the span between the two.
 pub(crate) fn world_top_y_for(args: &Args) -> i32 {
-    if args.disable_height_limit && !args.bedrock && !args.luanti {
-        2031
-    } else {
+    if !args.disable_height_limit || args.luanti {
         crate::world_editor::DEFAULT_MAX_Y
+    } else if args.bedrock {
+        511
+    } else {
+        2031
     }
 }
 
@@ -1066,6 +1111,7 @@ mod tests {
         let w = heights[0].len();
         Ground {
             elevation_enabled: true,
+            extended_ceiling: false,
             ground_level: 0,
             elevation_data: Some(ElevationData {
                 heights,
@@ -1075,6 +1121,7 @@ mod tests {
                 world_height: h,
                 min_height_m: 0.0,
                 blocks_per_meter: 1.0,
+                slope_correction: 1.0,
                 ground_level: 0,
             }),
             land_cover: None,
@@ -1187,6 +1234,7 @@ mod tests {
             world_height: 2,
             min_height_m: min_m,
             blocks_per_meter: bpm,
+            slope_correction: 1.0,
             ground_level: 0,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
@@ -1194,5 +1242,157 @@ mod tests {
         // Flat terrain: never below the line, always above it.
         assert_eq!(snow_threshold_for(&ed(100.0, 0.0), 46.0, 64), i32::MAX);
         assert_eq!(snow_threshold_for(&ed(4000.0, 0.0), 46.0, 64), i32::MIN);
+    }
+
+    fn scaled_ground(
+        heights: Vec<Vec<f32>>,
+        blocks_per_meter: f64,
+        slope_correction: f64,
+    ) -> Ground {
+        let mut g = ground_with(heights);
+        let d = g.elevation_data.as_mut().unwrap();
+        d.blocks_per_meter = blocks_per_meter;
+        d.slope_correction = slope_correction;
+        g
+    }
+
+    /// heights[z][x] = x * per_block, so `level` is exact at integer coordinates.
+    fn ramp(per_block: f64) -> Vec<Vec<f32>> {
+        (0..16)
+            .map(|_| (0..16).map(|x| (x as f64 * per_block) as f32).collect())
+            .collect()
+    }
+
+    #[test]
+    fn slope_reports_the_same_incline_whatever_the_vertical_compression() {
+        // 8 blocks of rise across the 8-block sampling span is 45 degrees, which the
+        // downstream thresholds spell 8 * tan(incline) = 8.
+        let uncompressed = scaled_ground(ramp(1.0), 1.0, 1.0);
+        assert_eq!(uncompressed.slope(XZPoint::new(8, 8)), 8);
+
+        // Same hillside with the relief squeezed 4:1 into the vanilla ceiling.
+        let compressed = scaled_ground(ramp(0.25), 0.25, 4.0);
+        assert_eq!(compressed.slope(XZPoint::new(8, 8)), 8);
+    }
+
+    #[test]
+    fn blocks_per_metre_falls_back_to_one_without_a_vertical_affine() {
+        let mut g = scaled_ground(vec![vec![0.0; 4]; 4], 0.25, 4.0);
+        assert_eq!(g.blocks_per_meter(), 0.25);
+
+        g.elevation_data.as_mut().unwrap().blocks_per_meter = 0.0;
+        assert_eq!(
+            g.blocks_per_meter(),
+            1.0,
+            "zero relief leaves no affine to invert"
+        );
+
+        g.elevation_data.as_mut().unwrap().blocks_per_meter = 0.25;
+        g.elevation_enabled = false;
+        assert_eq!(g.blocks_per_meter(), 1.0);
+    }
+
+    #[test]
+    fn the_water_snap_cliff_cutoff_only_scales_under_a_raised_ceiling() {
+        let step = |drop: f64| -> Vec<Vec<f32>> {
+            (0..16)
+                .map(|_| {
+                    (0..16)
+                        .map(|x| if x <= 7 { drop as f32 } else { 0.0 })
+                        .collect()
+                })
+                .collect()
+        };
+        let at = |drop: f64, bpm: f64, correction: f64, extended: bool| {
+            let mut g = scaled_ground(step(drop), bpm, correction);
+            g.extended_ceiling = extended;
+            g.water_level(XZPoint::new(7, 8))
+        };
+
+        // Vanilla ceiling: the cutoff is the 3-block snap radius at any scaling, so a quay
+        // wall a few blocks above the basin still keeps its own level.
+        assert_eq!(at(3.0, 1.0, 1.0, false), 0);
+        assert_eq!(at(4.0, 1.0, 1.0, false), 4);
+        assert_eq!(at(4.0, 0.12, 8.33, false), 4);
+
+        // Raised ceiling, compressed: 25 m is under the snap radius, so the cutoff stays 3.
+        assert_eq!(at(3.0, 0.12, 8.33, true), 0);
+        assert_eq!(at(4.0, 0.12, 8.33, true), 4);
+
+        // Raised ceiling, 1:1 vertical: the cutoff is the 25 m cliff the guard was written for.
+        assert_eq!(at(10.0, 1.0, 1.0, true), 0);
+        assert_eq!(at(26.0, 1.0, 1.0, true), 26);
+    }
+
+    #[test]
+    fn the_extended_ceiling_agrees_with_the_declared_world_top() {
+        use clap::Parser;
+        let args = |extra: &[&str]| {
+            let mut cmd: Vec<&str> = vec![
+                "arnis",
+                "--output-dir",
+                ".",
+                "--bbox",
+                "1,2,3,4",
+                "--disable-height-limit",
+            ];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+
+        let java = args(&[]);
+        assert_eq!(extended_max_y_for(&java), 2031);
+        assert_eq!(world_top_y_for(&java), 2031);
+
+        let bedrock = args(&["--bedrock"]);
+        assert_eq!(extended_max_y_for(&bedrock), 512);
+        // Ends a section, and still covers the 497 the scaler clamps to.
+        assert_eq!(world_top_y_for(&bedrock), 511);
+
+        let luanti = args(&["--luanti"]);
+        assert_eq!(
+            extended_max_y_for(&luanti),
+            crate::world_editor::DEFAULT_MAX_Y
+        );
+        assert_eq!(world_top_y_for(&luanti), crate::world_editor::DEFAULT_MAX_Y);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// Ground carrying an elevation grid *and* land cover; the water-field tests need
+    /// both and neither single-purpose test constructor supplies the pair.
+    pub(crate) fn ground_with_land_cover_and_elevation(
+        land_cover: LandCoverData,
+        world_width: usize,
+        world_height: usize,
+    ) -> Ground {
+        let (gw, gh) = (land_cover.width, land_cover.height);
+        Ground {
+            elevation_enabled: true,
+            extended_ceiling: false,
+            ground_level: 0,
+            elevation_data: Some(ElevationData {
+                heights: vec![vec![0.0f32; gw]; gh],
+                width: gw,
+                height: gh,
+                world_width,
+                world_height,
+                min_height_m: 0.0,
+                blocks_per_meter: 1.0,
+                slope_correction: 1.0,
+                ground_level: 0,
+            }),
+            land_cover: Some(land_cover),
+            canopy: None,
+            world_width,
+            world_height,
+            rotation_mask: None,
+            snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::Temperate,
+            body: CelestialBody::Earth,
+        }
     }
 }

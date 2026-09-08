@@ -8,6 +8,12 @@ const EARTH_RADIUS: f64 = 6_371_000.0;
 ///
 /// Orientation follows Minecraft conventions: increasing X points east,
 /// and **north maps to negative Z**.
+///
+/// Anisotropic: `x` carries a `cos(origin_lat)` factor and so comes out in ground
+/// metres, while `z` stays in raw Mercator units and is stretched by `1/cos(lat)`
+/// (1.48x at 47 deg). `validate_args` rejects `--projection web_mercator` for that
+/// reason. `CoordTransformer::transform_point` repeats this formula for every node,
+/// so the two have to be corrected together.
 pub struct WebMercatorProjection {
     /// Reference latitude in degrees.
     pub(crate) origin_lat: f64,
@@ -137,6 +143,31 @@ mod tests {
             z2 < z1,
             "increasing latitude (north) should decrease z: z1={z1}, z2={z2}"
         );
+    }
+
+    #[test]
+    fn z_is_stretched_by_one_over_cos_lat_while_x_is_ground_metres() {
+        const D: f64 = 0.0045;
+        for lat in [0.0045, 47.3745, 61.0045] {
+            let p = WebMercatorProjection::new(lat, 8.5415, 1.0);
+
+            let (x_east, _) = p.forward(lat, 8.5415 + D);
+            let ground_x = EARTH_RADIUS * D.to_radians() * lat.to_radians().cos();
+            assert!(
+                (x_east / ground_x - 1.0).abs() < 1e-9,
+                "x should be ground metres at lat {lat}: got {x_east}, ground {ground_x}"
+            );
+
+            let (_, z_south) = p.forward(lat - D, 8.5415);
+            let (_, z_north) = p.forward(lat + D, 8.5415);
+            let ground_z = EARTH_RADIUS * (2.0 * D).to_radians();
+            let ratio = (z_south - z_north) / ground_z;
+            let expected = 1.0 / lat.to_radians().cos();
+            assert!(
+                (ratio - expected).abs() < 1e-4,
+                "z stretch at lat {lat}: got {ratio}, expected {expected}"
+            );
+        }
     }
 
     #[test]

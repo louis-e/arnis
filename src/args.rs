@@ -48,14 +48,13 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = crate::celestial::CelestialBody::Earth)]
     pub body: crate::celestial::CelestialBody,
 
-    /// Projection mode for coordinate mapping
-    /// local: each generation starts at Minecraft (0,0) (default)
-    /// web_mercator: global projection for multi-generation worlds
+    /// Projection mode for coordinate mapping.
+    /// local: each generation starts at Minecraft (0,0). The only supported mode.
     #[arg(long, default_value = "local")]
     pub projection: crate::projection::ProjectionKind,
 
     /// Ground level to use in the Minecraft world
-    #[arg(long, default_value_t = -62)]
+    #[arg(long, default_value_t = -62, allow_hyphen_values = true)]
     pub ground_level: i32,
 
     /// What to generate, mirroring the GUI's generation mode dropdown:
@@ -361,6 +360,16 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
     }
 
+    // Never shipped working: X gets a cos(lat) factor and Z does not, so the world comes out
+    // stretched north-south by 1/cos(lat) against both the elevation grid and its own
+    // east-west scale. Still parsed so an old command line gets this instead of a parse error.
+    if args.projection == crate::projection::ProjectionKind::WebMercator {
+        return Err(
+            "--projection web_mercator was experimental and never worked: it stretches the world north-south by 1/cos(latitude) (about 1.5x at 47 degrees), so objects come out elongated and misaligned with the terrain. Use --projection local."
+                .to_string(),
+        );
+    }
+
     // A bounding box is required unless a local --file supplies one to derive it from.
     // Terrain-only mode ignores --file (it never loads OSM objects), so it always needs --bbox.
     if args.bbox.is_none() {
@@ -450,7 +459,25 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("Rotation angle must be between -90 and 90 degrees.".to_string());
     }
 
+    let (floor, ceiling) = ground_level_bounds(args);
+    if args.ground_level < floor || args.ground_level > ceiling {
+        return Err(format!(
+            "--ground-level must be between {floor} and {ceiling} for this world format (got {}).",
+            args.ground_level
+        ));
+    }
+
     Ok(())
+}
+
+/// Legal `--ground-level` range for the chosen output format. The scaler clamps every column
+/// into `[ground_level, ceiling]`, so a base above the ceiling makes that clamp's min exceed
+/// its max and aborts the run after the whole elevation download.
+fn ground_level_bounds(args: &Args) -> (i32, i32) {
+    let floor = crate::ground::extended_min_y_for(args) + 2;
+    let ceiling =
+        crate::ground::world_top_y_for(args) - crate::elevation::postprocess::TERRAIN_HEIGHT_BUFFER;
+    (floor, ceiling)
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -501,6 +528,88 @@ mod tests {
         let mut cmd: Vec<&str> = base.to_vec();
         cmd.extend_from_slice(&["--mode", "objects"]);
         assert!(Args::try_parse_from(cmd.iter()).is_err());
+    }
+
+    #[test]
+    fn web_mercator_projection_is_rejected() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+
+        assert!(validate_args(&parse(&["--projection", "local"])).is_ok());
+        let err = validate_args(&parse(&["--projection", "web_mercator"])).unwrap_err();
+        assert!(err.contains("--projection local"), "unhelpful error: {err}");
+        // Not just the terrain path: geo-only is distorted too.
+        assert!(
+            validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_err()
+        );
+    }
+
+    #[test]
+    fn ground_level_is_bounded_by_the_world_ceiling() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+
+        let gl = |flags: &[&str], level: i32| {
+            let mut args = parse(flags);
+            args.ground_level = level;
+            validate_args(&args)
+        };
+
+        assert!(validate_args(&parse(&[])).is_ok());
+        // Vanilla ceiling is 319 - 15; above it the scaler's clamp has min > max and panics.
+        assert!(gl(&[], 304).is_ok());
+        assert!(gl(&[], 305).is_err());
+        assert!(gl(&[], 400).is_err());
+        // Below the bedrock plane there is nothing to stand on.
+        assert!(gl(&[], -63).is_err());
+
+        // The tall datapack raises the ceiling to 2031; Bedrock's pack stops far below it.
+        let dhl: &[&str] = &["--disable-height-limit"];
+        assert!(gl(dhl, 2016).is_ok());
+        assert!(gl(dhl, 2017).is_err());
+        assert!(gl(dhl, -2030).is_ok());
+        assert!(gl(dhl, -2031).is_err());
+        assert!(gl(&["--bedrock", "--disable-height-limit"], 500).is_err());
+    }
+
+    #[test]
+    fn formats_without_an_extended_dimension_keep_the_vanilla_ground_level_range() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let gl = |flags: &[&str], level: i32| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(flags);
+            let mut args = Args::parse_from(cmd.iter());
+            args.ground_level = level;
+            validate_args(&args)
+        };
+
+        for flags in [
+            &["--luanti"][..],
+            &["--luanti", "--disable-height-limit"][..],
+            &["--bedrock"][..],
+        ] {
+            assert!(gl(flags, -62).is_ok(), "{flags:?} rejected the default");
+            assert!(gl(flags, 304).is_ok(), "{flags:?} rejected 304");
+            assert!(gl(flags, 305).is_err(), "{flags:?} accepted 305");
+            assert!(gl(flags, -63).is_err(), "{flags:?} accepted -63");
+        }
+
+        // Bedrock's behavior pack raises the ceiling to 511 but leaves the floor vanilla.
+        let bedrock_dhl: &[&str] = &["--bedrock", "--disable-height-limit"];
+        assert!(gl(bedrock_dhl, 496).is_ok());
+        assert!(gl(bedrock_dhl, 497).is_err());
+        assert!(gl(bedrock_dhl, -63).is_err());
     }
 
     #[test]

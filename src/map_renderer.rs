@@ -15,6 +15,9 @@ use std::sync::Mutex;
 /// Longest allowed output image side; larger worlds are box-averaged down.
 const MAX_OUTPUT_SIDE: u32 = 4096;
 const COLOR_LUT_LIMIT: u16 = 512;
+/// Narrowest elevation band the shading spreads over. A bbox with no relief would otherwise
+/// split into two tones at the terrain base, with every roof pinned to the bright end.
+const MIN_SHADING_BAND: i32 = 128;
 
 /// Shared name->color table for the LUT builder and the out-of-range fallback.
 static BLOCK_COLORS: Lazy<FnvHashMap<&'static str, Rgb<u8>>> = Lazy::new(get_block_colors);
@@ -69,6 +72,9 @@ pub struct PreviewAccumulator {
     stride: u32,
     out_w: u32,
     out_h: u32,
+    /// Elevation band the shading normalises over: terrain base, half the terrain's own span.
+    shade_base: i32,
+    shade_half_band: f32,
     /// Per output pixel: [r_sum, g_sum, b_sum, sample_count].
     frame: Mutex<Vec<[u16; 4]>>,
 }
@@ -85,6 +91,12 @@ impl PreviewAccumulator {
         let step = width.max(height).div_ceil(max_side.max(1)).max(1);
         let out_w = width.div_ceil(step);
         let out_h = height.div_ceil(step);
+        // Read once: the scaler has settled long before the first region is written, and the
+        // band has to be the same for every sample that lands in the frame.
+        let shade_base = crate::world_editor::base_chunk_y();
+        let shade_band = crate::world_editor::common::terrain_top_y()
+            .saturating_sub(shade_base)
+            .max(MIN_SHADING_BAND);
         Self {
             min_x: xzbbox.min_x(),
             max_x: xzbbox.max_x(),
@@ -94,6 +106,8 @@ impl PreviewAccumulator {
             stride: step.div_ceil(16),
             out_w,
             out_h,
+            shade_base,
+            shade_half_band: shade_band as f32 / 2.0,
             frame: Mutex::new(vec![[0u16; 4]; out_w as usize * out_h as usize]),
         }
     }
@@ -145,7 +159,12 @@ impl PreviewAccumulator {
                         continue;
                     }
                     if let Some((color, y)) = top_block_color(&sections, lx as u8, lz as u8) {
-                        let c = apply_elevation_shading(color, y);
+                        let c = apply_elevation_shading(
+                            color,
+                            y,
+                            self.shade_base,
+                            self.shade_half_band,
+                        );
                         let px = (wx - self.min_x) as u32 / self.step;
                         let pz = (wz - self.min_z) as u32 / self.step;
                         let cell = &mut local[(pz - pz0) as usize * pw + (px - px0) as usize];
@@ -247,27 +266,15 @@ fn top_block_color(sections: &[(i8, &SectionToModify)], x: u8, z: u8) -> Option<
     None
 }
 
-/// Applies elevation-based shading to a color
-/// Higher elevations are brighter, lower are darker
+/// Applies elevation-based shading to a color: higher is brighter, lower is darker.
+/// The band is the terrain's own span, not the dimension's: the base sinks with the tall
+/// datapack, and terrain fills only a slice of a 4000-block build range.
 #[inline]
-fn apply_elevation_shading(color: Rgb<u8>, y: i32) -> Rgb<u8> {
-    // Base brightness boost of 10%, plus elevation shading
-    // Shading range: -20% darker to +20% brighter (asymmetric, more bright than dark)
+fn apply_elevation_shading(color: Rgb<u8>, y: i32, base: i32, half_band: f32) -> Rgb<u8> {
+    let normalized = (((y - base) as f32 - half_band) / half_band).clamp(-1.0, 1.0);
 
-    // Normalize Y to a -1.0 to 1.0 range (roughly)
-    // y=0 -> -0.5, y=0 -> 0, y=200 -> +1.0
-    let normalized = (y as f32 / 100.0).clamp(-1.0, 1.0);
-
-    // Base 10% brightness boost + asymmetric elevation shading
-    let elevation_adjust = if normalized >= 0.0 {
-        // Above sea level: up to +20% brighter
-        normalized * 0.20
-    } else {
-        // Below sea level: up to -20% darker
-        normalized * 0.20
-    };
-
-    let multiplier = 1.10 + elevation_adjust;
+    // Base 10% brightness boost, plus -20%..+20% for elevation.
+    let multiplier = 1.10 + normalized * 0.20;
 
     Rgb([
         (color.0[0] as f32 * multiplier).clamp(0.0, 255.0) as u8,
@@ -921,11 +928,11 @@ mod tests {
         assert_eq!(img.dimensions(), (16, 16));
         assert_eq!(
             *img.get_pixel(0, 0),
-            apply_elevation_shading(Rgb([128, 128, 128]), 0)
+            apply_elevation_shading(Rgb([128, 128, 128]), 0, a.shade_base, a.shade_half_band)
         );
         assert_eq!(
             *img.get_pixel(1, 0),
-            apply_elevation_shading(Rgb([86, 125, 70]), 5)
+            apply_elevation_shading(Rgb([86, 125, 70]), 5, a.shade_base, a.shade_half_band)
         );
         // Untouched column stays white.
         assert_eq!(*img.get_pixel(5, 5), Rgb([255, 255, 255]));
@@ -946,8 +953,8 @@ mod tests {
         halo.get_or_create_chunk(0, 0).set_block(0, 0, 0, STONE);
         a.ingest_region(-1, -1, &halo);
 
-        let s = apply_elevation_shading(Rgb([128, 128, 128]), 0);
-        let w = apply_elevation_shading(Rgb([59, 86, 165]), 0);
+        let s = apply_elevation_shading(Rgb([128, 128, 128]), 0, a.shade_base, a.shade_half_band);
+        let w = apply_elevation_shading(Rgb([59, 86, 165]), 0, a.shade_base, a.shade_half_band);
         let expected = Rgb([
             ((s.0[0] as u32 + w.0[0] as u32) / 2) as u8,
             ((s.0[1] as u32 + w.0[1] as u32) / 2) as u8,
@@ -960,5 +967,69 @@ mod tests {
         assert_eq!(img.dimensions(), (4096, 8));
         assert_eq!(*img.get_pixel(0, 0), expected);
         assert_eq!(*img.get_pixel(1, 0), Rgb([255, 255, 255]));
+    }
+}
+
+#[cfg(test)]
+mod elevation_shading_tests {
+    use super::*;
+
+    const GREY: Rgb<u8> = Rgb([100, 100, 100]);
+
+    fn shade(y: i32, base: i32, top: i32) -> i32 {
+        let half_band = (top - base).max(MIN_SHADING_BAND) as f32 / 2.0;
+        i32::from(apply_elevation_shading(GREY, y, base, half_band).0[0])
+    }
+
+    #[test]
+    fn a_city_band_spans_the_whole_multiplier_range() {
+        // Vanilla city: terrain -62..64, nowhere near the 319 dimension ceiling.
+        assert_eq!(shade(-62, -62, 64), 90, "terrain base is the darkest");
+        // 126 blocks of relief is just under the floor band, so the top lands a shade short.
+        assert!(
+            shade(64, -62, 64) >= 129,
+            "the highest hill is the brightest"
+        );
+        assert!(shade(-40, -62, 64) < shade(20, -62, 64));
+    }
+
+    #[test]
+    fn a_sunk_base_grades_the_whole_relief() {
+        // Matterhorn at scale 4: base -1876, terrain up to 2016.
+        assert_eq!(shade(-1876, -1876, 2016), 90);
+        assert_eq!(shade(2016, -1876, 2016), 130);
+        assert!(
+            shade(-100, -1876, 2016) < shade(1500, -1876, 2016),
+            "a 1600-block climb must change the shade"
+        );
+
+        // Y=0 carries no meaning in a 4000-block world: columns either side of it are
+        // 5% of the band apart and must shade alike, not split the range in two.
+        let across_zero = shade(101, -1876, 2016) - shade(-101, -1876, 2016);
+        assert!(across_zero * 4 < 40, "shading splits at Y=0: {across_zero}");
+    }
+
+    #[test]
+    fn a_flat_bbox_still_grades_what_stands_on_it() {
+        assert_eq!(shade(-62, -62, -62), 90);
+        let roof = shade(-42, -62, -62);
+        assert!(
+            roof > 90 && roof < 130,
+            "roof shade {roof} is a saturated tone"
+        );
+    }
+
+    #[test]
+    fn shading_stays_inside_the_multiplier_bounds_outside_the_band() {
+        assert_eq!(
+            shade(-2032, -1876, 2016),
+            90,
+            "below the base clamps to the darkest"
+        );
+        assert_eq!(
+            shade(4000, -1876, 2016),
+            130,
+            "above the terrain clamps to the brightest"
+        );
     }
 }

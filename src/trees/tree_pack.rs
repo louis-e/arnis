@@ -69,7 +69,13 @@ pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
 }
 
 /// Load the region tree pack (realm from bbox center), or None for legacy procedural trees.
-pub fn load(args: &Args, bbox: LLBBox, scale: f64, ground_level: i32) -> Option<RegionLibrary> {
+pub fn load(
+    args: &Args,
+    bbox: LLBBox,
+    scale: f64,
+    ground_level: i32,
+    blocks_per_meter: f64,
+) -> Option<RegionLibrary> {
     if args.legacy_trees {
         return None;
     }
@@ -81,7 +87,14 @@ pub fn load(args: &Args, bbox: LLBBox, scale: f64, ground_level: i32) -> Option<
     // No palms outside the subtropics (the wide ena realm also spans the Caribbean).
     let exclude_palms = lat.abs() > 35.0;
 
-    match RegionLibrary::load(&source, scale, ground_level, sizes, exclude_palms) {
+    match RegionLibrary::load(
+        &source,
+        scale,
+        ground_level,
+        blocks_per_meter,
+        sizes,
+        exclude_palms,
+    ) {
         Ok(lib) => {
             lib.report();
             Some(lib)

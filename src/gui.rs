@@ -597,8 +597,7 @@ fn set_player_spawn_in_level_dat(
     Ok(())
 }
 
-// Function to update player spawn Y coordinate based on terrain height after generation
-// This updates the spawn Y coordinate to be at terrain height + 3 blocks
+// Puts the player on the world spawn column at terrain height + 3, after generation.
 // `xzbbox` must be the box the world was generated from, post-rotation when a
 // rotation was applied, since `ground` is indexed against it.
 pub fn update_player_spawn_y_after_generation(
@@ -677,15 +676,21 @@ pub fn update_player_spawn_y_after_generation(
     // Update player position and world spawn point
     if let Value::Compound(ref mut root) = nbt_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            // Only update the Y coordinate, keep existing X and Z
             data.insert("SpawnY".to_string(), Value::Int(spawn_y));
 
-            // Update player position - only Y coordinate
+            // The template pins Pos to (-5, -5), a column that is neither the spawn point
+            // nor inside the generated regions. Move it onto the column just sampled,
+            // matching what set_spawn_in_level_dat writes.
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    // Safely update Y position with bounds checking
+                    if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
+                        *pos_x = existing_spawn_x as f64;
+                    }
                     if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
                         *pos_y = spawn_y as f64;
+                    }
+                    if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
+                        *pos_z = existing_spawn_z as f64;
                     }
                 }
             }
@@ -1072,6 +1077,9 @@ fn gui_start_generation(
     } else {
         celestial_body.world_scale()
     };
+    // apply_body_defaults clears this off Earth, but it runs after the datapack install below
+    // and after the Args literal is built, so both would still see the raw frontend value.
+    let disable_height_limit = disable_height_limit && celestial_body.is_earth();
 
     // The GUI builds Args directly and never runs validate_args, so guard the scale here
     // rather than letting it panic deep in the coordinate transform after the fetch.
@@ -1374,7 +1382,8 @@ fn gui_start_generation(
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
                 body: celestial_body,
             };
-            // Same helper the CLI uses, so the two cannot diverge.
+            // Same helper the CLI uses. Anything read before this point (the world prep
+            // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
             let args = args;
 
@@ -1652,6 +1661,70 @@ mod locale_tests {
             errors.is_empty(),
             "Locale key mismatches:\n{}",
             errors.join("\n")
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn read_level_dat(world: &Path) -> Value {
+        let raw = fs::read(world.join("level.dat")).unwrap();
+        let mut buf = Vec::new();
+        GzDecoder::new(raw.as_slice())
+            .read_to_end(&mut buf)
+            .unwrap();
+        fastnbt::from_bytes(&buf).unwrap()
+    }
+
+    fn write_level_dat(world: &Path, root: &Value) {
+        let bytes = fastnbt::to_bytes(root).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bytes).unwrap();
+        fs::write(world.join("level.dat"), encoder.finish().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_player_starts_on_the_world_spawn_column() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+
+        let mut root = read_level_dat(&world);
+        let Value::Compound(ref mut map) = root else {
+            panic!("root not a compound")
+        };
+        let Some(Value::Compound(data)) = map.get_mut("Data") else {
+            panic!("missing Data")
+        };
+        data.insert("SpawnX".to_string(), Value::Int(120));
+        data.insert("SpawnZ".to_string(), Value::Int(-340));
+        write_level_dat(&world, &root);
+
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 511, 511).unwrap();
+        update_player_spawn_y_after_generation(&world, &xzbbox, &Ground::new_flat(-62)).unwrap();
+
+        let root = read_level_dat(&world);
+        let Value::Compound(map) = root else {
+            panic!("root not a compound")
+        };
+        let Some(Value::Compound(data)) = map.get("Data") else {
+            panic!("missing Data")
+        };
+        assert_eq!(data.get("SpawnY"), Some(&Value::Int(-61)));
+        let Some(Value::Compound(player)) = data.get("Player") else {
+            panic!("missing Player")
+        };
+        let Some(Value::List(pos)) = player.get("Pos") else {
+            panic!("missing Pos")
+        };
+        assert_eq!(
+            pos.as_slice(),
+            [
+                Value::Double(120.0),
+                Value::Double(-61.0),
+                Value::Double(-340.0)
+            ]
         );
     }
 }
