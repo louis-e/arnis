@@ -35,6 +35,11 @@ const MAX_DIRECTORY_BYTES: u64 = 64 * 1024 * 1024;
 /// Guards against a directory whose entry count is inconsistent with its bytes.
 const MAX_DIRECTORY_ENTRIES: u64 = 8 * 1024 * 1024;
 
+/// Largest tile body this reader will fetch. Overture's densest z14 building
+/// tile is ~410 KB compressed; the entry length is a u32, so without a cap the
+/// archive could ask us to download 4 GB for one tile.
+const MAX_TILE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Leaf descents before a lookup gives up. The format allows nesting; two levels
 /// is all any published archive uses, and a cycle must not hang generation.
 const MAX_LEAF_DEPTH: usize = 4;
@@ -407,6 +412,14 @@ impl Archive {
             if entry.length == 0 {
                 return Ok(None);
             }
+            // `length` is a u32, so the file may ask for up to 4 GB. Refuse
+            // before the request rather than after the download.
+            if u64::from(entry.length) > MAX_DIRECTORY_BYTES {
+                return Err(format!(
+                    "leaf directory claims {} bytes, past the {MAX_DIRECTORY_BYTES} cap",
+                    entry.length
+                ));
+            }
             let key = (entry.offset, entry.length);
             if !self.leaves.contains_key(&key) {
                 let absolute = self
@@ -446,6 +459,14 @@ impl Archive {
     ) -> Result<Vec<u8>> {
         if location.length == 0 {
             return Ok(Vec::new());
+        }
+        // Same reasoning as the leaf cap: a tile length is a u32 the archive
+        // chooses, and no vector tile is hundreds of megabytes.
+        if u64::from(location.length) > MAX_TILE_BYTES {
+            return Err(format!(
+                "tile {z}/{x}/{y} claims {} bytes, past the {MAX_TILE_BYTES} cap",
+                location.length
+            ));
         }
         let path = self.cache_dir.as_ref().map(|d| {
             d.join("t")
@@ -494,7 +515,12 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
     if length == 0 {
         return Ok(Vec::new());
     }
-    let end = offset + length - 1;
+    // Offsets and lengths come out of the archive's own header and directories.
+    // An overflow here would wrap the range into a small one and quietly return
+    // the wrong bytes, so it is an error rather than a saturation.
+    let end = offset
+        .checked_add(length - 1)
+        .ok_or_else(|| format!("range {offset}+{length} overflows the archive"))?;
     let mut last_error = String::new();
 
     for attempt in 0..RANGE_ATTEMPTS {

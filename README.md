@@ -49,16 +49,6 @@ GUI Build: ```cargo run --release```<br>
 | `geo-only` | OSM objects on flat ground |
 | `terrain-only` | Real elevation terrain, no objects at all (skips the OpenStreetMap query and the Overture fetch entirely, so `--overture` has no effect) |
 
-`--overture-source` selects how the Overture Maps buildings are read. Both transports carry the same release's data, so this only changes what the fetch costs:
-
-| Source | Result |
-| --- | --- |
-| `auto` (default) | The published vector tiles, falling back to the GeoParquet partitions if the tile archive cannot be read or the area is continental |
-| `tiles` | Vector tiles only, so a broken archive fails visibly instead of silently costing more |
-| `parquet` | GeoParquet partitions only |
-
-Everything either transport downloads is cached under `arnis-overture-cache` in the OS cache directory, keyed by the Overture release. Releases are immutable, so a cached read never needs revalidating; the GUI's "clear cache" button empties it along with the other caches.
-
 After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`

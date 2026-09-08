@@ -96,8 +96,8 @@ impl Layer {
     pub fn attr(&self, feature: &Feature, key: &str) -> Option<&Value> {
         // Tags are (key, value) pairs; an odd trailing entry is malformed and
         // simply has no pair to read.
-        for pair in feature.tags.chunks_exact(2) {
-            let (k, v) = (pair[0] as usize, pair[1] as usize);
+        for &[key_index, value_index] in feature.tags.as_chunks::<2>().0 {
+            let (k, v) = (key_index as usize, value_index as usize);
             if self.keys.get(k).is_some_and(|name| name == key) {
                 return self.values.get(v);
             }
@@ -224,9 +224,10 @@ impl<'a> Reader<'a> {
             }
             WIRE_LEN => {
                 let mut inner = self.message()?;
-                // One varint is at least one byte, so the byte length is a hard
-                // upper bound on the element count and reserving it is safe.
-                out.reserve(inner.remaining());
+                // Deliberately no `reserve` here. The byte length bounds the
+                // element count, but each element is four bytes, so reserving
+                // from it would allocate four times a field size that the tile
+                // itself chooses. Amortised growth costs less than trusting it.
                 while !inner.done() {
                     out.push(u32::try_from(inner.varint()?).map_err(|_| "u32 out of range")?);
                 }

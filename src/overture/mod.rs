@@ -94,8 +94,15 @@ const OVERTURE_RELEASE_LIST_URL: &str =
 /// on a machine that has fetched before. Bump it when cutting a release.
 const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-08-19.0";
 
-/// How many releases to request before giving up, so a broken host cannot stall the fetch.
-const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
+/// How many releases to request before giving up, so a broken host cannot stall
+/// the fetch. Spent on at most two discovered releases plus the two fallbacks
+/// below, deduplicated - and since only two releases are ever online, the
+/// fallbacks usually collapse into the discovered ones and cost nothing.
+const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 4;
+
+/// Slots [`OVERTURE_MAX_RELEASE_ATTEMPTS`] reserves for the two fallbacks: the
+/// release that last worked on this machine, and the bundled constant.
+const RELEASE_FALLBACK_SLOTS: usize = 2;
 
 /// High bit marker for Overture IDs to avoid collision with OSM IDs.
 /// OSM IDs are sequential positive u64 (currently up to ~12 billion, well under 2^34).
@@ -1018,26 +1025,39 @@ fn release_candidates(client: &Client, debug: bool) -> Vec<String> {
         }
     };
 
-    // Reserve the last attempts for the fallbacks so they stay reachable on a
-    // long listing.
+    let candidates = build_release_candidates(discovered, cache::last_good_release());
+    if debug {
+        println!("Overture releases to try: {}", candidates.join(", "));
+    }
+    candidates
+}
+
+/// Order the releases to try, bounded by [`OVERTURE_MAX_RELEASE_ATTEMPTS`].
+///
+/// Split out from the network call so the bound itself is testable: the whole
+/// point of the constant is that a host answering slowly cannot stall a fetch
+/// indefinitely, and that guarantee is easy to lose when fallbacks are appended
+/// after a `take`.
+fn build_release_candidates(discovered: Vec<String>, last_good: Option<String>) -> Vec<String> {
+    // The two fallbacks get reserved slots so a long listing cannot push them
+    // out, and so appending them cannot push the total past the bound.
+    let discovered_slots = OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(RELEASE_FALLBACK_SLOTS);
     let mut candidates: Vec<String> = discovered
         .into_iter()
         .filter(|r| cache::is_valid_release(r))
-        .take(OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(1))
+        .take(discovered_slots)
         .collect();
 
-    for fallback in cache::last_good_release()
+    for fallback in last_good
         .into_iter()
         .chain(std::iter::once(OVERTURE_STAC_RELEASE_FALLBACK.to_string()))
     {
-        if !candidates.contains(&fallback) {
+        if cache::is_valid_release(&fallback) && !candidates.contains(&fallback) {
             candidates.push(fallback);
         }
     }
 
-    if debug {
-        println!("Overture releases to try: {}", candidates.join(", "));
-    }
+    debug_assert!(candidates.len() <= OVERTURE_MAX_RELEASE_ATTEMPTS);
     candidates
 }
 
@@ -2314,7 +2334,11 @@ fn fetch_range_with_attempts(
     if length == 0 {
         return Err("fetch_range called with length 0".into());
     }
-    let end = start + length - 1;
+    // Row-group offsets and lengths come from the partition footer, which is
+    // network data. Wrapping would turn a bad range into a plausible small one.
+    let end = start
+        .checked_add(length - 1)
+        .ok_or_else(|| format!("range {start}+{length} overflows the partition"))?;
     let mut last_error = String::new();
 
     for attempt in 0..max_attempts.max(1) {
@@ -2717,12 +2741,64 @@ mod tests {
 
     #[test]
     fn release_candidates_end_with_the_remembered_and_bundled_fallbacks() {
-        // Discovery is the first answer, but the list must always end somewhere
-        // usable: a machine offline at the bucket still has to try something.
-        assert!(cache::is_valid_release(OVERTURE_STAC_RELEASE_FALLBACK));
+        let discovered = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        // Discovery answers first, then the remembered release, then the
+        // bundled constant: a machine offline at the bucket still has something
+        // to try, and it is a release that actually worked here.
+        let candidates = build_release_candidates(
+            discovered(&["2026-09-16.0", "2026-09-01.0"]),
+            Some("2026-05-01.0".to_string()),
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                "2026-09-16.0",
+                "2026-09-01.0",
+                "2026-05-01.0",
+                OVERTURE_STAC_RELEASE_FALLBACK
+            ]
+        );
+
+        // Discovery failing leaves exactly the two fallbacks.
+        assert_eq!(
+            build_release_candidates(Vec::new(), Some("2026-05-01.0".to_string())),
+            vec!["2026-05-01.0", OVERTURE_STAC_RELEASE_FALLBACK]
+        );
+        assert_eq!(
+            build_release_candidates(Vec::new(), None),
+            vec![OVERTURE_STAC_RELEASE_FALLBACK]
+        );
+
+        // A fallback already discovered is not tried twice. In practice this is
+        // the normal case, since only two releases are ever online.
+        assert_eq!(
+            build_release_candidates(
+                discovered(&[OVERTURE_STAC_RELEASE_FALLBACK]),
+                Some(OVERTURE_STAC_RELEASE_FALLBACK.to_string()),
+            ),
+            vec![OVERTURE_STAC_RELEASE_FALLBACK]
+        );
+
+        // The bound holds however long the listing is. Losing this is how a
+        // slow host turns one fetch into an unbounded wait.
+        let many = discovered(&[
+            "2026-09-16.0",
+            "2026-09-01.0",
+            "2026-08-19.0",
+            "2026-07-22.0",
+            "2026-06-17.0",
+        ]);
+        let candidates = build_release_candidates(many, Some("2026-05-01.0".to_string()));
+        assert_eq!(candidates.len(), OVERTURE_MAX_RELEASE_ATTEMPTS);
+
         // Malformed names from a bucket listing never reach a URL or a path.
-        assert!(!cache::is_valid_release("release/2026-08-19.0"));
-        assert!(!cache::is_valid_release("latest"));
+        assert!(cache::is_valid_release(OVERTURE_STAC_RELEASE_FALLBACK));
+        let filtered = build_release_candidates(
+            discovered(&["release/2026-08-19.0", "latest", "../x"]),
+            None,
+        );
+        assert_eq!(filtered, vec![OVERTURE_STAC_RELEASE_FALLBACK]);
     }
 
     #[test]
