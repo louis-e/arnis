@@ -98,6 +98,13 @@ pub struct Args {
     #[arg(long = "overture", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub overture: bool,
 
+    /// Which Overture transport to read. Both carry the same buildings.
+    /// auto: vector tiles, falling back to the Parquet partitions (default)
+    /// tiles: vector tiles only, so a fallback cannot hide a broken archive
+    /// parquet: the GeoParquet partitions only
+    #[arg(long = "overture-source", value_enum, default_value_t = OvertureSource::Auto)]
+    pub overture_source: OvertureSource,
+
     /// Disable both external 3D models (3DMR + Wikimedia) and bundled schematic
     /// props (cars, boats, cranes, ...) with a single toggle.
     #[arg(long = "no-3d", default_value_t = true, action = ArgAction::SetFalse)]
@@ -169,6 +176,26 @@ pub struct Args {
     /// building signage: shop name plates, house numbers and crossing signs.
     #[arg(long, value_enum, default_value_t = SignageLevel::Basic)]
     pub signage: SignageLevel,
+}
+
+/// Which transport to read Overture Maps buildings through.
+///
+/// Both carry the same release's data; they differ in cost. The tile archive is
+/// one range request per z14 tile and is cached per release, so a city is about
+/// 1.3 MB and a repeat run is free. The Parquet partitions need a ~233 KB
+/// catalogue and a ~1.3 MB footer per partition before any building is read, but
+/// they win on continental areas, where whole row groups beat one request per
+/// square kilometre.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum OvertureSource {
+    /// Tiles where they are cheaper and available, Parquet otherwise.
+    #[default]
+    Auto,
+    /// Vector tiles only. Fails rather than falling back, so a broken archive is
+    /// visible instead of merely slow.
+    Tiles,
+    /// GeoParquet partitions only.
+    Parquet,
 }
 
 /// How much image signage to place.
