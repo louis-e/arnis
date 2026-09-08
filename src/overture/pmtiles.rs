@@ -35,6 +35,14 @@ const MAX_DIRECTORY_BYTES: u64 = 64 * 1024 * 1024;
 /// Guards against a directory whose entry count is inconsistent with its bytes.
 const MAX_DIRECTORY_ENTRIES: u64 = 8 * 1024 * 1024;
 
+/// Smallest number of bytes one directory entry can occupy: four varints of one
+/// byte each.
+const BYTES_PER_ENTRY_MIN: usize = 4;
+
+/// Entries reserved up front. Past this the vector grows as entries are read,
+/// so a directory cannot make us allocate for a count it never delivers.
+const ENTRY_PREALLOC: usize = 4096;
+
 /// Largest tile body this reader will fetch. Overture's densest z14 building
 /// tile is ~410 KB compressed; the entry length is a u32, so without a cap the
 /// archive could ask us to download 4 GB for one tile.
@@ -190,6 +198,10 @@ struct Varints<'a> {
 }
 
 impl Varints<'_> {
+    fn remaining(&self) -> usize {
+        self.buf.len().saturating_sub(self.pos)
+    }
+
     fn next(&mut self) -> Result<u64> {
         let mut value = 0u64;
         let mut shift = 0u32;
@@ -216,26 +228,34 @@ impl Varints<'_> {
 fn decode_directory(buf: &[u8]) -> Result<Vec<Entry>> {
     let mut reader = Varints { buf, pos: 0 };
     let count = reader.next()?;
-    if count > MAX_DIRECTORY_ENTRIES || count > buf.len() as u64 {
-        return Err(format!("directory claims {count} entries"));
+
+    // Each entry contributes four varints and a varint is at least one byte, so
+    // the bytes left are a hard ceiling on how many entries can really follow.
+    // Without this a 64 MB directory could claim 64 million of them.
+    let possible = (reader.remaining() / BYTES_PER_ENTRY_MIN) as u64;
+    if count > MAX_DIRECTORY_ENTRIES || count > possible {
+        return Err(format!(
+            "directory claims {count} entries, but {} bytes can hold at most {possible}",
+            reader.remaining()
+        ));
     }
     let count = count as usize;
-    let mut entries = vec![
-        Entry {
-            tile_id: 0,
-            run_length: 0,
-            length: 0,
-            offset: 0,
-        };
-        count
-    ];
 
+    // Grown as the tile ids are actually read rather than allocated from the
+    // count. A truncated directory then fails on a varint, having reserved only
+    // what its bytes justified.
+    let mut entries: Vec<Entry> = Vec::with_capacity(count.min(ENTRY_PREALLOC));
     let mut tile_id = 0u64;
-    for entry in entries.iter_mut() {
+    for _ in 0..count {
         tile_id = tile_id
             .checked_add(reader.next()?)
             .ok_or("tile id overflowed")?;
-        entry.tile_id = tile_id;
+        entries.push(Entry {
+            tile_id,
+            run_length: 0,
+            length: 0,
+            offset: 0,
+        });
     }
     for entry in entries.iter_mut() {
         entry.run_length = u32::try_from(reader.next()?).map_err(|_| "run length out of range")?;
@@ -748,6 +768,31 @@ mod tests {
         assert_eq!(find_entry(&entries, 39), Some(entries[1]));
         assert_eq!(find_entry(&entries, 40), Some(entries[2]));
         assert_eq!(find_entry(&entries, 41), None);
+    }
+
+    #[test]
+    fn a_directory_cannot_allocate_for_entries_it_does_not_hold() {
+        // A count is four varints per entry at minimum, so a handful of bytes
+        // cannot hold a million entries. Rejected on the arithmetic, before any
+        // vector is sized from the claim.
+        let mut lying = varint(1_000_000);
+        lying.extend([0u8; 16]);
+        let err = decode_directory(&lying).unwrap_err();
+        assert!(err.contains("can hold at most"), "{err}");
+
+        // The largest count these bytes could justify is accepted as far as the
+        // arithmetic goes, and then fails on the reads rather than on a guess.
+        let bytes = vec![0u8; 64];
+        let mut honest = varint((bytes.len() / BYTES_PER_ENTRY_MIN) as u64);
+        honest.extend(&bytes);
+        assert!(decode_directory(&honest).is_err());
+
+        // And a directory that really does deliver its entries still decodes,
+        // including one longer than the pre-allocation.
+        let many: Vec<Entry> = (0..ENTRY_PREALLOC + 100)
+            .map(|i| entry(i as u64 * 2, 1, 8, i as u64 * 8))
+            .collect();
+        assert_eq!(decode_directory(&serialize_directory(&many)).unwrap(), many);
     }
 
     #[test]
