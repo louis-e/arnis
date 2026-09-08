@@ -66,10 +66,23 @@ impl Value {
 #[derive(Debug, Clone)]
 pub struct Ring {
     pub points: Vec<(i32, i32)>,
-    /// True for an exterior ring. Per the MVT specification exterior rings wind
-    /// clockwise on screen, which in the tile's y-down coordinate system is a
-    /// positive shoelace sum.
-    pub exterior: bool,
+    /// Twice the ring's signed area, kept because callers need it both to tell
+    /// an exterior ring from a hole and to pick the largest part of a
+    /// multipolygon - and recomputing it per ring is pure waste.
+    pub area2: i128,
+}
+
+impl Ring {
+    /// Per the MVT specification exterior rings wind clockwise on screen, which
+    /// in the tile's y-down coordinate system is a positive shoelace sum.
+    pub fn exterior(&self) -> bool {
+        self.area2 > 0
+    }
+
+    /// Twice the ring's unsigned area, for comparing parts of one polygon.
+    pub fn area2_abs(&self) -> i128 {
+        self.area2.unsigned_abs() as i128
+    }
 }
 
 /// One feature. Attributes stay as indices into the layer's tables so a tile
@@ -377,10 +390,10 @@ fn decode_geometry(geometry: &[u32]) -> Vec<Ring> {
         // than passed on as a zero-area polygon.
         if points.len() >= 3 {
             let ring = std::mem::take(points);
-            let exterior = shoelace2(&ring) > 0;
+            let area2 = shoelace2(&ring);
             rings.push(Ring {
                 points: ring,
-                exterior,
+                area2,
             });
         } else {
             points.clear();
@@ -435,14 +448,19 @@ fn decode_geometry(geometry: &[u32]) -> Vec<Ring> {
 
 /// Twice the signed area of a ring. Positive means clockwise on screen in the
 /// tile's y-down coordinate system, which the MVT specification defines as an
-/// exterior ring. `i64` because coordinates can reach the buffer bounds and the
-/// products would overflow `i32`.
-fn shoelace2(points: &[(i32, i32)]) -> i64 {
-    let mut sum: i64 = 0;
+/// exterior ring.
+///
+/// `i128`, not `i64`. Coordinates accumulate from cursor deltas and can reach
+/// any `i32`, so one term is up to 2^62 and just three of them overflow an
+/// `i64` accumulator - which this crate builds with `overflow-checks = true`,
+/// so it would panic in release on a malformed tile rather than merely give a
+/// wrong sign. This function is on the no-panic path for network data.
+fn shoelace2(points: &[(i32, i32)]) -> i128 {
+    let mut sum: i128 = 0;
     for idx in 0..points.len() {
         let (x1, y1) = points[idx];
         let (x2, y2) = points[(idx + 1) % points.len()];
-        sum += i64::from(x1) * i64::from(y2) - i64::from(x2) * i64::from(y1);
+        sum += i128::from(x1) * i128::from(y2) - i128::from(x2) * i128::from(y1);
     }
     sum
 }
@@ -549,7 +567,7 @@ mod tests {
 
         assert_eq!(feature.rings.len(), 1);
         let ring = &feature.rings[0];
-        assert!(ring.exterior, "clockwise-on-screen ring must be exterior");
+        assert!(ring.exterior(), "clockwise-on-screen ring must be exterior");
         assert_eq!(
             ring.points,
             vec![(10, 10), (30, 10), (30, 30), (10, 30)],
@@ -576,7 +594,7 @@ mod tests {
             7 | (1 << 3),
         ]);
         assert_eq!(rings.len(), 1);
-        assert!(!rings[0].exterior);
+        assert!(!rings[0].exterior());
     }
 
     #[test]
@@ -591,7 +609,7 @@ mod tests {
 
         let rings = decode_geometry(&cmds);
         assert_eq!(rings.len(), 2);
-        assert!(rings.iter().all(|r| r.exterior));
+        assert!(rings.iter().all(|r| r.exterior()));
     }
 
     #[test]
@@ -624,6 +642,66 @@ mod tests {
         ]);
         assert_eq!(rings.len(), 1);
         assert_eq!(rings[0].points, vec![(0, 0), (10, 0), (10, 10)]);
+    }
+
+    #[test]
+    fn an_extreme_ring_computes_its_area_without_overflowing() {
+        // Coordinates accumulate from cursor deltas and can reach any i32. With
+        // an i64 accumulator three of these terms overflow, and this crate
+        // builds with overflow-checks on, so that would panic in release.
+        let extreme = vec![
+            (i32::MIN, i32::MIN),
+            (i32::MAX, i32::MIN),
+            (i32::MAX, i32::MAX),
+            (i32::MIN, i32::MAX),
+        ];
+        let area2 = shoelace2(&extreme);
+        assert!(area2.unsigned_abs() > u64::MAX as u128, "area needs i128");
+
+        // And the same through the public decoder, which is the contract that
+        // matters: malformed input must not panic.
+        let rings = decode_geometry(&[
+            (1 << 3) | 1,
+            zz(i32::MIN),
+            zz(i32::MIN),
+            (3 << 3) | 2,
+            zz(i32::MAX),
+            zz(0),
+            zz(0),
+            zz(i32::MAX),
+            zz(i32::MIN),
+            zz(0),
+            7 | (1 << 3),
+        ]);
+        assert_eq!(rings.len(), 1);
+    }
+
+    #[test]
+    fn the_largest_part_of_a_multipolygon_is_the_one_with_the_most_area() {
+        // A big plain square and a small many-sided one. Picking by vertex
+        // count would choose the outbuilding over the building.
+        let mut cmds = vec![(1 << 3) | 1, zz(0), zz(0), (3 << 3) | 2];
+        cmds.extend([zz(1000), zz(0), zz(0), zz(1000), zz(-1000), zz(0)]);
+        cmds.push(7 | (1 << 3));
+        cmds.extend([(1 << 3) | 1, zz(2000), zz(0), (7 << 3) | 2]);
+        for step in [
+            (10, 0),
+            (10, 0),
+            (0, 10),
+            (0, 10),
+            (-10, 0),
+            (-10, 0),
+            (0, -10),
+        ] {
+            cmds.extend([zz(step.0), zz(step.1)]);
+        }
+        cmds.push(7 | (1 << 3));
+
+        let rings = decode_geometry(&cmds);
+        assert_eq!(rings.len(), 2);
+        assert!(rings[1].points.len() > rings[0].points.len(), "setup");
+        let largest = rings.iter().max_by_key(|r| r.area2_abs()).unwrap();
+        assert_eq!(largest.points.len(), rings[0].points.len());
     }
 
     #[test]

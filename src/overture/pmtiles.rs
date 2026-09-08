@@ -131,20 +131,53 @@ impl Header {
     }
 }
 
-/// Undo the archive's declared compression.
-fn decompress(kind: u8, data: Vec<u8>) -> Result<Vec<u8>> {
+/// Undo the archive's declared compression, refusing output past `max_output`.
+///
+/// The caps elsewhere in this file bound what is *fetched*, which says nothing
+/// about what it expands to: a few hundred kilobytes of gzip can decode to
+/// gigabytes. These bytes come off the network, so the decoders are read
+/// through `take` and the result is rejected the moment it exceeds the limit,
+/// rather than after a decoder has already allocated it.
+fn decompress(kind: u8, data: Vec<u8>, max_output: u64) -> Result<Vec<u8>> {
+    /// Reads at most `max_output` bytes, then reports the overrun rather than
+    /// returning a truncated buffer that would parse as valid-but-wrong.
+    fn read_bounded(mut reader: impl Read, max_output: u64, what: &str) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        // One byte past the cap, so hitting it is distinguishable from a
+        // stream that happens to be exactly the maximum size.
+        reader
+            .by_ref()
+            .take(max_output.saturating_add(1))
+            .read_to_end(&mut out)
+            .map_err(|e| format!("{what} decode failed: {e}"))?;
+        if out.len() as u64 > max_output {
+            return Err(format!(
+                "{what} stream expands past the {max_output} byte limit"
+            ));
+        }
+        Ok(out)
+    }
+
     match kind {
-        COMPRESSION_NONE => Ok(data),
-        COMPRESSION_GZIP => {
-            let mut out = Vec::new();
-            flate2::read::GzDecoder::new(data.as_slice())
-                .read_to_end(&mut out)
-                .map_err(|e| format!("gzip decode failed: {e}"))?;
-            Ok(out)
+        COMPRESSION_NONE => {
+            if data.len() as u64 > max_output {
+                return Err(format!(
+                    "uncompressed block is {} bytes, past the {max_output} byte limit",
+                    data.len()
+                ));
+            }
+            Ok(data)
         }
-        COMPRESSION_ZSTD => {
-            zstd::decode_all(data.as_slice()).map_err(|e| format!("zstd decode failed: {e}"))
-        }
+        COMPRESSION_GZIP => read_bounded(
+            flate2::read::GzDecoder::new(data.as_slice()),
+            max_output,
+            "gzip",
+        ),
+        COMPRESSION_ZSTD => read_bounded(
+            zstd::Decoder::new(data.as_slice()).map_err(|e| format!("zstd decode failed: {e}"))?,
+            max_output,
+            "zstd",
+        ),
         COMPRESSION_BROTLI => Err("archive uses brotli, which Arnis does not link".into()),
         other => Err(format!("unknown PMTiles compression {other}")),
     }
@@ -362,7 +395,11 @@ impl Archive {
         };
 
         let header = Header::parse(&header_bytes)?;
-        let root = decode_directory(&decompress(header.internal_compression, root_bytes)?)?;
+        let root = decode_directory(&decompress(
+            header.internal_compression,
+            root_bytes,
+            MAX_DIRECTORY_BYTES,
+        )?)?;
         Ok(Archive {
             url: url.to_string(),
             header,
@@ -436,8 +473,11 @@ impl Archive {
                             .join(format!("{}_{}.bin", entry.offset, entry.length))
                     }),
                 )?;
-                let decoded =
-                    decode_directory(&decompress(self.header.internal_compression, raw)?)?;
+                let decoded = decode_directory(&decompress(
+                    self.header.internal_compression,
+                    raw,
+                    MAX_DIRECTORY_BYTES,
+                )?)?;
                 self.leaves.insert(key, decoded);
             }
             entries = &self.leaves[&key];
@@ -475,7 +515,7 @@ impl Archive {
                 .join(format!("{y}.bin"))
         });
         let raw = self.read_cached(client, location.offset, u64::from(location.length), path)?;
-        decompress(self.header.tile_compression, raw)
+        decompress(self.header.tile_compression, raw, MAX_TILE_BYTES)
     }
 
     /// Read a byte range, preferring the cache and populating it on a miss.
@@ -759,11 +799,29 @@ mod tests {
 
     #[test]
     fn brotli_is_refused_rather_than_silently_producing_nothing() {
-        assert!(decompress(COMPRESSION_BROTLI, vec![1, 2, 3]).is_err());
-        assert!(decompress(99, vec![1, 2, 3]).is_err());
+        assert!(decompress(COMPRESSION_BROTLI, vec![1, 2, 3], 1024).is_err());
+        assert!(decompress(99, vec![1, 2, 3], 1024).is_err());
         assert_eq!(
-            decompress(COMPRESSION_NONE, vec![1, 2, 3]).unwrap(),
+            decompress(COMPRESSION_NONE, vec![1, 2, 3], 1024).unwrap(),
             vec![1, 2, 3]
+        );
+
+        // A stream that expands past its cap is refused, not truncated: a
+        // short buffer would decode as a valid-looking, wrong directory.
+        let bomb = {
+            use std::io::Write;
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+            encoder.write_all(&vec![0u8; 512 * 1024]).unwrap();
+            encoder.finish().unwrap()
+        };
+        assert!(bomb.len() < 4096, "the test bomb must be small compressed");
+        assert!(decompress(COMPRESSION_GZIP, bomb.clone(), 4096).is_err());
+        assert_eq!(
+            decompress(COMPRESSION_GZIP, bomb, 1024 * 1024)
+                .unwrap()
+                .len(),
+            512 * 1024
         );
     }
 }

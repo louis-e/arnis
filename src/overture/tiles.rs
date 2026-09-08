@@ -72,8 +72,28 @@ pub(super) const MAX_TILES: usize = 4096;
 /// Whether this bounding box is small enough for the tile path to be the
 /// cheaper transport. Checked before any release is tried, so a continental
 /// request goes straight to Parquet instead of failing once per release.
+///
+/// Counts arithmetically rather than by building the list: at zoom 14 a
+/// world-sized bounding box is 268 million tiles, and materialising the
+/// coordinates just to reject them would exhaust memory on the very request
+/// this check exists to route away.
 pub(super) fn covers_area(bbox: &LLBBox) -> bool {
-    tiles_for_bbox(bbox).len() <= MAX_TILES
+    tile_count(bbox) <= MAX_TILES as u64
+}
+
+/// Inclusive `(min_x, max_x, min_y, max_y)` tile range covering the bbox.
+///
+/// Tile y grows southward while latitude grows northward, so the corners come
+/// from opposite edges.
+fn tile_range(bbox: &LLBBox) -> (u32, u32, u32, u32) {
+    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), QUERY_ZOOM);
+    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), QUERY_ZOOM);
+    (min_x, max_x, min_y, max_y)
+}
+
+fn tile_count(bbox: &LLBBox) -> u64 {
+    let (min_x, max_x, min_y, max_y) = tile_range(bbox);
+    u64::from(max_x - min_x + 1) * u64::from(max_y - min_y + 1)
 }
 
 /// Concurrent range requests. Enough to keep the link busy, few enough that a
@@ -112,10 +132,10 @@ fn archive_cache_dir(release: &str) -> Option<std::path::PathBuf> {
     cache::release_dir(release).map(|d| d.join("tiles").join(TILES_THEME))
 }
 
-/// Every z14 tile the bounding box touches.
+/// Every z14 tile the bounding box touches. Call [`covers_area`] first: this
+/// allocates one entry per tile.
 fn tiles_for_bbox(bbox: &LLBBox) -> Vec<(u32, u32)> {
-    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), QUERY_ZOOM);
-    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), QUERY_ZOOM);
+    let (min_x, max_x, min_y, max_y) = tile_range(bbox);
     let mut tiles = Vec::new();
     for x in min_x..=max_x {
         for y in min_y..=max_y {
@@ -144,10 +164,29 @@ struct TileBuilding {
     /// GERS id, which is stable across tiles and is what deduplication keys on.
     gers_id: String,
     building: OvertureBuilding,
-    /// Vertices in the ring before it was converted. A polygon clipped by a tile
-    /// boundary keeps fewer of them than the same polygon carried whole inside a
-    /// neighbouring tile's buffer, so this picks the intact copy.
-    vertex_count: usize,
+    /// Twice the footprint's unsigned area, in square degrees.
+    ///
+    /// Used to pick the intact copy when a building appears in several tiles.
+    /// Vertex count cannot do that job: clipping against a tile boundary *adds*
+    /// intersection vertices, and a clipped rectangle keeps the same four
+    /// corners as a whole one. Clipping can only ever remove area, so the
+    /// largest copy is the one that was carried whole.
+    area2: f64,
+}
+
+/// Twice the unsigned area of a ring in (longitude, latitude) degrees.
+///
+/// Only ever compared against another copy of the same building, a few hundred
+/// metres away at most, so treating degrees as planar is exact enough for the
+/// comparison and avoids a projection.
+fn ring_area2(ring: &[(f64, f64)]) -> f64 {
+    let mut sum = 0.0;
+    for index in 0..ring.len() {
+        let (x1, y1) = ring[index];
+        let (x2, y2) = ring[(index + 1) % ring.len()];
+        sum += x1 * y2 - x2 * y1;
+    }
+    sum.abs()
 }
 
 /// Pull the OSM back-reference out of the tiles' `sources` attribute.
@@ -192,12 +231,15 @@ fn feature_to_building(
     }
     let gers_id = layer.attr_str(feature, "id")?.to_string();
 
-    // Largest exterior ring; holes are dropped, as they are on the Parquet path.
+    // Largest exterior ring by area; holes are dropped, as they are on the
+    // Parquet path. By area rather than by vertex count, because a small,
+    // finely mapped outbuilding routinely carries more vertices than the main
+    // footprint it sits beside.
     let ring = feature
         .rings
         .iter()
-        .filter(|r| r.exterior && r.points.len() >= 3)
-        .max_by_key(|r| r.points.len())?;
+        .filter(|r| r.exterior() && r.points.len() >= 3)
+        .max_by_key(|r| r.area2_abs())?;
 
     let extent = f64::from(layer.extent);
     let exterior_ring: Vec<(f64, f64)> = ring
@@ -224,7 +266,7 @@ fn feature_to_building(
         || sources.is_some_and(|s| s.contains("OpenStreetMap"));
 
     Some(TileBuilding {
-        vertex_count: ring.points.len(),
+        area2: ring_area2(&exterior_ring),
         gers_id: gers_id.clone(),
         building: OvertureBuilding {
             id: gers_id,
@@ -293,14 +335,14 @@ pub fn collect_from_tiles(
     report_gaps: bool,
     debug: bool,
 ) -> Result<OvertureCollection> {
-    let tiles = tiles_for_bbox(bbox);
-    if tiles.len() > MAX_TILES {
+    let wanted = tile_count(bbox);
+    if wanted > MAX_TILES as u64 {
         return Err(format!(
-            "area needs {} tiles at zoom {QUERY_ZOOM}, past the {MAX_TILES} this path is \
-             cheaper for",
-            tiles.len()
+            "area needs {wanted} tiles at zoom {QUERY_ZOOM}, past the {MAX_TILES} this path \
+             is cheaper for"
         ));
     }
+    let tiles = tiles_for_bbox(bbox);
     if tiles.is_empty() {
         return Ok(OvertureCollection::default());
     }
@@ -339,9 +381,10 @@ pub fn collect_from_tiles(
     let archive = &archive;
 
     // Deduplicate across tile buffers. The same building appears in every tile
-    // whose buffer reaches it, sometimes clipped; the copy with the most
-    // vertices is the one that was carried whole.
+    // whose buffer reaches it, sometimes clipped; the largest copy is the one
+    // that was carried whole.
     let mut best: HashMap<String, TileBuilding> = HashMap::new();
+    let mut attempted = 0usize;
     let mut hints = super::OvertureHints::default();
     let mut lost_tiles = 0usize;
     let mut capped = false;
@@ -351,6 +394,7 @@ pub fn collect_from_tiles(
     // the whole area's footprints in memory before the cap was ever consulted,
     // which for a dense metropolitan bbox is millions of polygons.
     for batch in located.chunks(TILE_BATCH) {
+        attempted += batch.len();
         let results: Vec<std::result::Result<TileHarvest, String>> = pool.install(|| {
             batch
                 .par_iter()
@@ -360,6 +404,10 @@ pub fn collect_from_tiles(
                         return Ok(TileHarvest::default());
                     }
                     let layers = mvt::decode_tile(&raw)?;
+                    // The decoded layers own their bytes, so the compressed
+                    // tile is dead weight from here on - and eight of these
+                    // are in flight at once.
+                    drop(raw);
                     let mut harvest = TileHarvest::default();
                     for layer in layers.iter().filter(|l| l.name == BUILDING_LAYER) {
                         for feature in &layer.features {
@@ -407,7 +455,7 @@ pub fn collect_from_tiles(
                     for candidate in harvest.buildings {
                         match best.entry(candidate.gers_id.clone()) {
                             std::collections::hash_map::Entry::Occupied(mut slot) => {
-                                if candidate.vertex_count > slot.get().vertex_count {
+                                if candidate.area2 > slot.get().area2 {
                                     slot.insert(candidate);
                                 }
                             }
@@ -432,6 +480,14 @@ pub fn collect_from_tiles(
         }
     }
 
+    // Every tile failing is a broken archive, not an empty area. Returning an
+    // empty collection here would look like success, mark the release good, and
+    // rob `auto` of the Parquet fallback it promises.
+    if attempted > 0 && lost_tiles == attempted {
+        return Err(format!(
+            "all {lost_tiles} Overture tile(s) holding data could not be read"
+        ));
+    }
     if report_gaps && lost_tiles > 0 {
         eprintln!(
             "{} Overture Maps data incomplete: {lost_tiles} tile(s) could not be read. \
@@ -566,7 +622,42 @@ mod tests {
     #[test]
     fn a_continental_bbox_is_handed_back_to_the_parquet_path() {
         // Far more than MAX_TILES at zoom 14.
-        assert!(tiles_for_bbox(&bbox(42.0, -5.0, 51.0, 8.0)).len() > MAX_TILES);
+        assert!(!covers_area(&bbox(42.0, -5.0, 51.0, 8.0)));
+        assert!(covers_area(&bbox(
+            48.125768, 11.552296, 48.148565, 11.593838
+        )));
+    }
+
+    #[test]
+    fn a_world_sized_bbox_is_rejected_without_listing_its_tiles() {
+        // Hundreds of millions of tiles at zoom 14. Counting has to be
+        // arithmetic: building the coordinate list would need gigabytes just to
+        // decide not to use it.
+        let world = bbox(-85.0, -180.0, 85.0, 180.0);
+        let (min_x, max_x, min_y, max_y) = tile_range(&world);
+        assert_eq!((min_x, max_x), (0, 16383), "full longitude span");
+        assert_eq!(
+            tile_count(&world),
+            u64::from(max_y - min_y + 1) * 16384,
+            "count is the rectangle, computed not enumerated"
+        );
+        assert!(tile_count(&world) > 260_000_000);
+        assert!(!covers_area(&world));
+    }
+
+    #[test]
+    fn the_intact_copy_of_a_clipped_building_wins_on_area() {
+        // A square, and the same square cut in half by a tile edge. Clipping
+        // added a vertex, so the truncated copy has MORE vertices - which is
+        // why area, not vertex count, decides.
+        let whole = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let clipped = [(0.0, 0.0), (0.5, 0.0), (0.5, 0.5), (0.5, 1.0), (0.0, 1.0)];
+        assert!(clipped.len() > whole.len(), "setup: clipping adds vertices");
+        assert!(ring_area2(&whole) > ring_area2(&clipped));
+
+        // Winding must not decide it either; area is taken unsigned.
+        let reversed: Vec<(f64, f64)> = whole.iter().rev().copied().collect();
+        assert!((ring_area2(&whole) - ring_area2(&reversed)).abs() < 1e-12);
     }
 
     #[test]

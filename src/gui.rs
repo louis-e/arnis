@@ -1363,9 +1363,11 @@ fn gui_start_generation(
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
                 canopy_height: canopy_height_enabled,
                 overture: overture_enabled,
-                // Which transport carries the buildings is a fetch detail with
-                // no effect on the world, so the GUI leaves it on auto rather
-                // than spending a setting on it.
+                // Auto picks whichever transport is cheaper for the area. The
+                // two are not bit-identical - tiles quantise coordinates to a
+                // 0.4 m lattice and keep the largest ring of a multipolygon the
+                // Parquet reader drops entirely - but both differences are far
+                // below a block, so the choice is not worth a GUI setting.
                 overture_source: crate::args::OvertureSource::Auto,
                 use_3d: use_3d_enabled,
                 debug: false,
