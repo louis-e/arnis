@@ -11,9 +11,59 @@
 //! `building:levels` on OSM buildings that carry neither tag. That enrichment
 //! is strictly additive - an existing OSM tag is never overwritten.
 //!
-//! Data is read from GeoParquet files hosted on Azure Blob Storage using
-//! HTTP Range requests (same pattern as land_cover.rs COG reading).
+//! Two transports carry the same data, both over HTTP range requests:
+//!
+//! * **Tiles** ([`tiles`]) read the release's PMTiles archive, fetching only the
+//!   z14 tiles the bounding box covers. Cheapest for anything up to a large
+//!   metropolitan area, and cached on disk.
+//! * **Parquet** read the release's GeoParquet partitions, pulling a catalogue,
+//!   a footer per partition and then the matching row groups. Cheaper once an
+//!   area is continental, and the fallback whenever the archive cannot be read.
+//!
+//! Both are keyed by an Overture release. Releases are immutable and only the
+//! newest two stay online under a 60-day retention rule, so everything either
+//! transport downloads is cached under the release it came from (see [`cache`])
+//! and never needs revalidating.
 
+mod cache;
+mod mvt;
+mod pmtiles;
+mod tiles;
+
+pub use cache::clear_overture_cache;
+
+/// What a fetch actually cost, so the two transports can be compared on
+/// measurement rather than on the docstrings above.
+mod stats {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NETWORK_BYTES: AtomicU64 = AtomicU64::new(0);
+    static CACHED_BYTES: AtomicU64 = AtomicU64::new(0);
+    static REQUESTS: AtomicU64 = AtomicU64::new(0);
+
+    pub(super) fn record_network(bytes: u64) {
+        NETWORK_BYTES.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_cached(bytes: u64) {
+        CACHED_BYTES.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_request() {
+        REQUESTS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `(network bytes, cached bytes, http requests)` since process start.
+    pub(super) fn snapshot() -> (u64, u64, u64) {
+        (
+            NETWORK_BYTES.load(Ordering::Relaxed),
+            CACHED_BYTES.load(Ordering::Relaxed),
+            REQUESTS.load(Ordering::Relaxed),
+        )
+    }
+}
+
+use crate::args::OvertureSource;
 use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
@@ -37,11 +87,22 @@ const OVERTURE_STAC_ROOT: &str = "https://stac.overturemaps.org";
 const OVERTURE_RELEASE_LIST_URL: &str =
     "https://overturemaps-us-west-2.s3.amazonaws.com/?list-type=2&prefix=release/&delimiter=/";
 
-/// Used when release discovery fails; bump occasionally to a recent release.
-const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-07-22.0";
+/// Last resort when release discovery fails and this machine has never
+/// succeeded before. Overture retires a release 60 days after publishing it, so
+/// this constant rots: it is tried *after* the release that last worked here
+/// (see [`cache::last_good_release`]) precisely so a stale value costs nothing
+/// on a machine that has fetched before. Bump it when cutting a release.
+const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-08-19.0";
 
-/// How many releases to request before giving up, so a broken host cannot stall the fetch.
-const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 3;
+/// How many releases to request before giving up, so a broken host cannot stall
+/// the fetch. Spent on at most two discovered releases plus the two fallbacks
+/// below, deduplicated - and since only two releases are ever online, the
+/// fallbacks usually collapse into the discovered ones and cost nothing.
+const OVERTURE_MAX_RELEASE_ATTEMPTS: usize = 4;
+
+/// Slots [`OVERTURE_MAX_RELEASE_ATTEMPTS`] reserves for the two fallbacks: the
+/// release that last worked on this machine, and the bundled constant.
+const RELEASE_FALLBACK_SLOTS: usize = 2;
 
 /// High bit marker for Overture IDs to avoid collision with OSM IDs.
 /// OSM IDs are sequential positive u64 (currently up to ~12 billion, well under 2^34).
@@ -95,6 +156,21 @@ pub struct OsmRef {
     /// "way" or "relation" - matches `ProcessedElement::kind()`.
     kind: &'static str,
     id: u64,
+}
+
+impl OsmRef {
+    #[cfg(test)]
+    fn way(id: u64) -> Self {
+        Self { kind: "way", id }
+    }
+
+    #[cfg(test)]
+    fn relation(id: u64) -> Self {
+        Self {
+            kind: "relation",
+            id,
+        }
+    }
 }
 
 /// Attributes Overture holds for an OSM building that OSM itself does not.
@@ -335,6 +411,82 @@ pub(crate) struct OvertureBuilding {
     facade_material: Option<&'static str>,
 }
 
+// ─── Shared attribute interning ──────────────────────────────────────────
+//
+// Overture's schema is the same whether a row arrives as a Parquet record or as
+// a vector-tile attribute, so both providers intern through these tables. A
+// value outside the enum is dropped rather than carried as a heap string, and
+// keeping one definition is what stops the two paths drifting into rendering
+// the same building differently.
+
+/// Roof shape, mapped to its OSM spelling.
+///
+/// Both spellings of the three renamed values are accepted: the GeoParquet
+/// schema and the tile build do not always agree on `gable`/`gabled`.
+fn intern_roof_shape(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "gabled" | "gable" => "gabled",
+        "hipped" | "hip" => "hipped",
+        "flat" => "flat",
+        "pyramidal" => "pyramidal",
+        "dome" | "onion" => "dome",
+        "skillion" | "shed" => "skillion",
+        "gambrel" => "gambrel",
+        "mansard" => "mansard",
+        "round" => "round",
+        "half_hipped" => "half_hipped",
+        "saltbox" => "saltbox",
+        "sawtooth" => "sawtooth",
+        "spherical" => "spherical",
+        _ => return None,
+    })
+}
+
+fn intern_roof_material(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "concrete" => "concrete",
+        "copper" => "copper",
+        "eternit" => "eternit",
+        "glass" => "glass",
+        "grass" => "grass",
+        "gravel" => "gravel",
+        "metal" => "metal",
+        "plastic" => "plastic",
+        "roof_tiles" => "roof_tiles",
+        "slate" => "slate",
+        "solar_panels" => "solar_panels",
+        "thatch" => "thatch",
+        "tar_paper" => "tar_paper",
+        "wood" => "wood",
+        _ => return None,
+    })
+}
+
+fn intern_roof_orientation(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "along" => "along",
+        "across" => "across",
+        _ => return None,
+    })
+}
+
+fn intern_facade_material(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "brick" => "brick",
+        "cement_block" => "cement_block",
+        "clay" => "clay",
+        "concrete" => "concrete",
+        "glass" => "glass",
+        "metal" => "metal",
+        "plaster" => "plaster",
+        "plastic" => "plastic",
+        "stone" => "stone",
+        "timber_framing" => "timber_framing",
+        "wood" => "wood",
+        _ => return None,
+    })
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────
 
 /// What a generation-path Overture fetch produces.
@@ -355,8 +507,13 @@ pub struct OvertureData {
 /// Buildings whose primary source is "OpenStreetMap" are excluded from
 /// `elements` to avoid duplicates with the existing OSM data pipeline; their
 /// conflated heights survive in `hints`.
-pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool) -> OvertureData {
-    match fetch_overture_buildings_inner(bbox, scale, debug) {
+pub fn fetch_overture_buildings(
+    bbox: &LLBBox,
+    scale: f64,
+    source: OvertureSource,
+    debug: bool,
+) -> OvertureData {
+    match fetch_overture_buildings_inner(bbox, scale, source, debug) {
         Ok(data) => data,
         Err(e) => {
             eprintln!(
@@ -497,6 +654,130 @@ fn overture_building_budget(bbox: &LLBBox) -> usize {
 pub(crate) fn collect_overture_buildings(
     client: &Client,
     bbox: &LLBBox,
+    source: OvertureSource,
+    include_osm_sourced: bool,
+    max_buildings: usize,
+    report_gaps: bool,
+    debug: bool,
+) -> Result<OvertureCollection, Box<dyn std::error::Error>> {
+    let started = std::time::Instant::now();
+    let before = stats::snapshot();
+    let result = collect_by_transport(
+        client,
+        bbox,
+        source,
+        include_osm_sourced,
+        max_buildings,
+        report_gaps,
+        debug,
+    );
+    if debug {
+        let after = stats::snapshot();
+        println!(
+            "Overture fetch: {:.2} MB over the network, {:.2} MB from cache, \
+             {} request(s), {:.1}s",
+            (after.0 - before.0) as f64 / 1_048_576.0,
+            (after.1 - before.1) as f64 / 1_048_576.0,
+            after.2 - before.2,
+            started.elapsed().as_secs_f64(),
+        );
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_by_transport(
+    client: &Client,
+    bbox: &LLBBox,
+    source: OvertureSource,
+    include_osm_sourced: bool,
+    max_buildings: usize,
+    report_gaps: bool,
+    debug: bool,
+) -> Result<OvertureCollection, Box<dyn std::error::Error>> {
+    let candidates = release_candidates(client, debug);
+
+    // Tiles first, unless the caller pinned Parquet or the area is large enough
+    // that whole row groups beat one request per square kilometre.
+    let try_tiles = source != OvertureSource::Parquet && tiles::covers_area(bbox);
+    if source == OvertureSource::Tiles && !tiles::covers_area(bbox) {
+        return Err(format!(
+            "--overture-source tiles was requested, but this area needs more than the \
+             {} tiles that path is cheaper for. Use auto or parquet.",
+            tiles::MAX_TILES
+        )
+        .into());
+    }
+
+    let mut tile_errors: Vec<String> = Vec::new();
+    if try_tiles {
+        for release in &candidates {
+            match tiles::collect_from_tiles(
+                client,
+                bbox,
+                release,
+                include_osm_sourced,
+                max_buildings,
+                report_gaps,
+                debug,
+            ) {
+                Ok(collection) => {
+                    if debug {
+                        println!("Using Overture release {release} (vector tiles)");
+                    }
+                    accept_release(release);
+                    return Ok(collection);
+                }
+                Err(e) => {
+                    if debug {
+                        println!("Overture tiles unavailable for release {release}: {e}");
+                    }
+                    tile_errors.push(format!("{release}: {e}"));
+                }
+            }
+        }
+        if source == OvertureSource::Tiles {
+            return Err(format!(
+                "no Overture tile archive could be read ({})",
+                tile_errors.join("; ")
+            )
+            .into());
+        }
+        // Auto: the archive is the faster path, not the only one. Said once,
+        // because a silent switch hides a bucket that has stopped answering -
+        // but only where the caller wants coverage warnings, since the 3D
+        // preview re-fetches on every pan and would repeat this endlessly.
+        if report_gaps {
+            eprintln!(
+                "{} Overture vector tiles unavailable ({}); falling back to the Parquet \
+                 partitions, which is slower but carries the same data.",
+                "Warning:".yellow().bold(),
+                tile_errors
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("no releases to try")
+            );
+        }
+    }
+
+    collect_from_parquet(
+        client,
+        bbox,
+        &candidates,
+        include_osm_sourced,
+        max_buildings,
+        report_gaps,
+        debug,
+    )
+}
+
+/// The GeoParquet transport: a catalogue, then a footer and the matching row
+/// groups per overlapping partition.
+#[allow(clippy::too_many_arguments)]
+fn collect_from_parquet(
+    client: &Client,
+    bbox: &LLBBox,
+    candidates: &[String],
     include_osm_sourced: bool,
     max_buildings: usize,
     report_gaps: bool,
@@ -504,7 +785,33 @@ pub(crate) fn collect_overture_buildings(
 ) -> Result<OvertureCollection, Box<dyn std::error::Error>> {
     // List partition files whose geographic bounds overlap our bbox
     // (single ~230 KB STAC download instead of 512 HTTP requests)
-    let partition_urls = list_partition_files(client, bbox, debug)?;
+    let mut last_error: Box<dyn std::error::Error> =
+        "no Overture release candidates".to_string().into();
+    let mut resolved: Option<(&str, Vec<String>)> = None;
+    for release in candidates {
+        match list_partition_files(client, bbox, release, debug) {
+            Ok(urls) => {
+                if debug {
+                    println!("Using Overture release {release} (Parquet partitions)");
+                }
+                accept_release(release);
+                resolved = Some((release, urls));
+                break;
+            }
+            Err(e) => {
+                if debug {
+                    println!("Overture release {release} unavailable: {e}");
+                }
+                last_error = e;
+            }
+        }
+    }
+    // An empty list from a release that answered means the bbox covers no
+    // partitions - open ocean, say. Every release failing is a different thing
+    // entirely, and must not be reported as "no buildings here".
+    let Some((release, partition_urls)) = resolved else {
+        return Err(last_error);
+    };
     if partition_urls.is_empty() {
         if debug {
             println!("No Overture partitions overlap the bbox");
@@ -543,7 +850,7 @@ pub(crate) fn collect_overture_buildings(
             );
         }
 
-        match process_partition_file(client, url, bbox, debug) {
+        match process_partition_file(client, url, release, bbox, debug) {
             Ok((buildings, failed_row_groups)) => {
                 lost_row_groups += failed_row_groups;
                 for building in buildings {
@@ -607,6 +914,7 @@ pub(crate) fn collect_overture_buildings(
 fn fetch_overture_buildings_inner(
     bbox: &LLBBox,
     scale: f64,
+    source: OvertureSource,
     debug: bool,
 ) -> Result<OvertureData, Box<dyn std::error::Error>> {
     let client = overture_client()?;
@@ -617,7 +925,7 @@ fn fetch_overture_buildings_inner(
     let OvertureCollection {
         buildings: all_buildings,
         hints,
-    } = collect_overture_buildings(&client, bbox, false, budget, true, debug)?;
+    } = collect_overture_buildings(&client, bbox, source, false, budget, true, debug)?;
 
     if debug {
         println!(
@@ -689,69 +997,114 @@ fn parse_release_listing(body: &str) -> Result<Vec<String>, Box<dyn std::error::
 
 /// Release names currently published in the bucket, newest first.
 fn discover_releases(client: &Client) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    stats::record_request();
     let body = client
         .get(OVERTURE_RELEASE_LIST_URL)
         .send()?
         .error_for_status()?
         .text()?;
+    stats::record_network(body.len() as u64);
     parse_release_listing(&body)
 }
 
-/// Downloads the STAC index from the newest release that serves one, oldest tried last.
-fn fetch_stac_catalog(
-    client: &Client,
-    debug: bool,
-) -> Result<reqwest::blocking::Response, Box<dyn std::error::Error>> {
-    let releases = match discover_releases(client) {
+/// Releases to try, in order, newest first.
+///
+/// Discovery answers what is published right now. Behind it sit two fallbacks
+/// that matter only when discovery fails: the release that last actually served
+/// data on this machine, and finally the compile-time constant. That ordering is
+/// the point - the constant is a date, dates rot, and a machine that has fetched
+/// before already knows a better answer than a constant baked in months ago.
+fn release_candidates(client: &Client, debug: bool) -> Vec<String> {
+    let discovered = match discover_releases(client) {
         Ok(releases) => releases,
         Err(e) => {
             if debug {
-                println!("Overture release discovery failed ({e}), using bundled release");
+                println!("Overture release discovery failed ({e}), using remembered release");
             }
             Vec::new()
         }
     };
 
-    // Reserve the last attempt for the fallback so it stays reachable on a long listing.
-    let mut candidates: Vec<String> = releases
-        .into_iter()
-        .take(OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(1))
-        .collect();
-    if !candidates
-        .iter()
-        .any(|r| r == OVERTURE_STAC_RELEASE_FALLBACK)
-    {
-        candidates.push(OVERTURE_STAC_RELEASE_FALLBACK.to_string());
-    }
-
+    let candidates = build_release_candidates(discovered, cache::last_good_release());
     if debug {
         println!("Overture releases to try: {}", candidates.join(", "));
     }
+    candidates
+}
 
-    let mut last_error = String::from("no Overture release candidates");
-    for release in &candidates {
-        let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
-        match client.get(&url).send() {
-            Ok(response) if response.status().is_success() => {
-                if debug {
-                    println!("Using Overture release {release}");
-                }
-                return Ok(response);
-            }
-            Ok(response) => {
-                last_error = format!(
-                    "STAC catalog download failed with status {} (url: {url})",
-                    response.status()
-                );
-            }
-            Err(e) => last_error = format!("STAC catalog request failed: {e} (url: {url})"),
-        }
-        if debug {
-            println!("Overture release {release} unavailable: {last_error}");
+/// Order the releases to try, bounded by [`OVERTURE_MAX_RELEASE_ATTEMPTS`].
+///
+/// Split out from the network call so the bound itself is testable: the whole
+/// point of the constant is that a host answering slowly cannot stall a fetch
+/// indefinitely, and that guarantee is easy to lose when fallbacks are appended
+/// after a `take`.
+fn build_release_candidates(discovered: Vec<String>, last_good: Option<String>) -> Vec<String> {
+    // The two fallbacks get reserved slots so a long listing cannot push them
+    // out, and so appending them cannot push the total past the bound.
+    let discovered_slots = OVERTURE_MAX_RELEASE_ATTEMPTS.saturating_sub(RELEASE_FALLBACK_SLOTS);
+    let mut candidates: Vec<String> = discovered
+        .into_iter()
+        .filter(|r| cache::is_valid_release(r))
+        .take(discovered_slots)
+        .collect();
+
+    for fallback in last_good
+        .into_iter()
+        .chain(std::iter::once(OVERTURE_STAC_RELEASE_FALLBACK.to_string()))
+    {
+        if cache::is_valid_release(&fallback) && !candidates.contains(&fallback) {
+            candidates.push(fallback);
         }
     }
 
-    Err(last_error.into())
+    debug_assert!(candidates.len() <= OVERTURE_MAX_RELEASE_ATTEMPTS);
+    candidates
+}
+
+/// Record `release` as usable and drop cached data from older ones.
+fn accept_release(release: &str) {
+    cache::set_last_good_release(release);
+    cache::prune_releases_older_than(release);
+}
+
+/// The STAC index for one release, from disk if it has been read before.
+///
+/// A release is immutable, so a cached index for it can never be stale and is
+/// returned without so much as a revalidation request. That matters because the
+/// index is ~233 KB and every Parquet fetch begins by reading all of it.
+fn stac_index_for(
+    client: &Client,
+    release: &str,
+    debug: bool,
+) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
+    let path = cache::release_dir(release).map(|d| d.join("stac_index.parquet"));
+    if let Some(cached) = path.as_ref().and_then(|p| cache::read(p)) {
+        stats::record_cached(cached.len() as u64);
+        if debug {
+            println!(
+                "Overture release {release}: STAC index served from cache ({} KB)",
+                cached.len() / 1024
+            );
+        }
+        return Ok(bytes::Bytes::from(cached));
+    }
+
+    let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
+    stats::record_request();
+    let response = client.get(&url).send()?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "STAC catalog download failed with status {} (url: {url})",
+            response.status()
+        )
+        .into());
+    }
+    let body = response.bytes()?;
+    stats::record_network(body.len() as u64);
+    if let Some(path) = &path {
+        cache::write_atomic(path, &body);
+    }
+    Ok(body)
 }
 
 /// List partition file URLs that overlap the target bbox.
@@ -763,11 +1116,10 @@ fn fetch_stac_catalog(
 fn list_partition_files(
     client: &Client,
     bbox: &LLBBox,
+    release: &str,
     debug: bool,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // Resolve the current release dynamically; old releases are retired and 404.
-    let stac_bytes = fetch_stac_catalog(client, debug)?.bytes()?;
-    let reader = SerializedFileReader::new(stac_bytes)?;
+    let reader = SerializedFileReader::new(stac_index_for(client, release, debug)?)?;
 
     let target_min_lng = bbox.min().lng();
     let target_max_lng = bbox.max().lng();
@@ -894,21 +1246,15 @@ fn list_partition_files(
 fn process_partition_file(
     client: &Client,
     url: &str,
+    release: &str,
     bbox: &LLBBox,
     debug: bool,
 ) -> Result<(Vec<OvertureBuilding>, usize), Box<dyn std::error::Error>> {
-    // Step 1: Get file size via HEAD request
-    let head_resp = client.head(url).send()?;
-    if !head_resp.status().is_success() {
-        return Err(format!("HEAD request failed: {}", head_resp.status()).into());
-    }
+    let partition_cache = partition_cache_dir(release, url);
 
-    let file_size: u64 = head_resp
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .ok_or("Missing Content-Length header")?;
+    // Step 1: file size. Cached with the rest of the partition, because a
+    // release is immutable and so is the size of a file inside it.
+    let file_size: u64 = partition_size_cached(client, url, partition_cache.as_deref())?;
 
     if file_size < 12 {
         return Err("File too small to be valid Parquet".into());
@@ -917,7 +1263,7 @@ fn process_partition_file(
     // Step 2: Read the Parquet footer.
     // Parquet files end with: [footer bytes] [4-byte footer length (LE)] [4-byte magic "PAR1"]
     // First, read the last 8 bytes to get the footer length.
-    let tail = fetch_range(client, url, file_size - 8, 8)?;
+    let tail = fetch_partition_range(client, url, partition_cache.as_deref(), file_size - 8, 8)?;
     if tail.len() < 8 {
         return Err(format!(
             "Truncated Parquet tail: expected 8 bytes, got {}",
@@ -936,7 +1282,13 @@ fn process_partition_file(
 
     // Read the footer bytes
     let footer_start = file_size - 8 - footer_len;
-    let footer_bytes = fetch_range(client, url, footer_start, footer_len)?;
+    let footer_bytes = fetch_partition_range(
+        client,
+        url,
+        partition_cache.as_deref(),
+        footer_start,
+        footer_len,
+    )?;
 
     // Parse the footer using the parquet crate
     let metadata = parquet::file::metadata::ParquetMetaDataReader::decode_metadata(&footer_bytes)?;
@@ -979,7 +1331,14 @@ fn process_partition_file(
         } else {
             OVERTURE_RANGE_ATTEMPTS
         };
-        match fetch_range_with_attempts(client, url, rg_offset, rg_len, attempts) {
+        match fetch_partition_range_with_attempts(
+            client,
+            url,
+            partition_cache.as_deref(),
+            rg_offset,
+            rg_len,
+            attempts,
+        ) {
             Ok(rg_data) => {
                 downloaded_bytes += rg_len;
                 downloaded.insert(rg_idx);
@@ -1293,54 +1652,17 @@ fn parse_overture_row(
             }
             "roof_shape" => {
                 if let parquet::record::Field::Str(s) = field {
-                    // Closed enum, mapped to its OSM spelling here so the row carries
-                    // no heap string. A value outside the enum is dropped.
-                    roof_shape = match s.as_str() {
-                        "gabled" | "gable" => Some("gabled"),
-                        "hipped" | "hip" => Some("hipped"),
-                        "flat" => Some("flat"),
-                        "pyramidal" => Some("pyramidal"),
-                        "dome" | "onion" => Some("dome"),
-                        "skillion" | "shed" => Some("skillion"),
-                        "gambrel" => Some("gambrel"),
-                        "mansard" => Some("mansard"),
-                        "round" => Some("round"),
-                        "half_hipped" => Some("half_hipped"),
-                        "saltbox" => Some("saltbox"),
-                        "sawtooth" => Some("sawtooth"),
-                        "spherical" => Some("spherical"),
-                        _ => None,
-                    };
+                    roof_shape = intern_roof_shape(s);
                 }
             }
             "roof_material" => {
                 if let parquet::record::Field::Str(s) = field {
-                    roof_material = match s.as_str() {
-                        "concrete" => Some("concrete"),
-                        "copper" => Some("copper"),
-                        "eternit" => Some("eternit"),
-                        "glass" => Some("glass"),
-                        "grass" => Some("grass"),
-                        "gravel" => Some("gravel"),
-                        "metal" => Some("metal"),
-                        "plastic" => Some("plastic"),
-                        "roof_tiles" => Some("roof_tiles"),
-                        "slate" => Some("slate"),
-                        "solar_panels" => Some("solar_panels"),
-                        "thatch" => Some("thatch"),
-                        "tar_paper" => Some("tar_paper"),
-                        "wood" => Some("wood"),
-                        _ => None,
-                    };
+                    roof_material = intern_roof_material(s);
                 }
             }
             "roof_orientation" => {
                 if let parquet::record::Field::Str(s) = field {
-                    roof_orientation = match s.as_str() {
-                        "along" => Some("along"),
-                        "across" => Some("across"),
-                        _ => None,
-                    };
+                    roof_orientation = intern_roof_orientation(s);
                 }
             }
             "facade_color" => {
@@ -1362,21 +1684,7 @@ fn parse_overture_row(
             }
             "facade_material" => {
                 if let parquet::record::Field::Str(s) = field {
-                    // Interned, so the row allocates nothing and unknown values drop.
-                    facade_material = match s.as_str() {
-                        "brick" => Some("brick"),
-                        "cement_block" => Some("cement_block"),
-                        "clay" => Some("clay"),
-                        "concrete" => Some("concrete"),
-                        "glass" => Some("glass"),
-                        "metal" => Some("metal"),
-                        "plaster" => Some("plaster"),
-                        "plastic" => Some("plastic"),
-                        "stone" => Some("stone"),
-                        "timber_framing" => Some("timber_framing"),
-                        "wood" => Some("wood"),
-                        _ => None,
-                    };
+                    facade_material = intern_facade_material(s);
                 }
             }
             "bbox" => {
@@ -1912,14 +2220,107 @@ fn row_group_byte_range(metadata: &ParquetMetaData, rg_idx: usize) -> (u64, u64)
     (min_offset, max_end.saturating_sub(min_offset))
 }
 
-/// Fetch a byte range from a URL via HTTP Range request, retrying transient failures.
-fn fetch_range(
+// ─── Partition byte cache ────────────────────────────────────────────────
+//
+// A release is immutable, so every byte range read out of one of its partitions
+// is too. Row-group ranges are a function of the file rather than of the request,
+// so two runs over the same area - and usually two runs over the same city - ask
+// for exactly the same ranges. Without this the Parquet transport re-downloads
+// its ~1.3 MB footer and every matching row group on every single run.
+
+/// Cache directory for one partition file, or `None` when either the release or
+/// the file name is not something we will build a path from.
+fn partition_cache_dir(release: &str, url: &str) -> Option<std::path::PathBuf> {
+    let name = url.rsplit('/').next().filter(|segment| {
+        !segment.is_empty()
+            && segment.len() <= 128
+            && segment
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+            && !segment.starts_with('.')
+    })?;
+    cache::release_dir(release).map(|d| d.join("parquet").join(name))
+}
+
+/// Size of a partition file, from cache when it has been read before.
+fn partition_size_cached(
     client: &Client,
     url: &str,
+    cache_dir: Option<&std::path::Path>,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    let path = cache_dir.map(|d| d.join("size"));
+    if let Some(size) = path
+        .as_ref()
+        .and_then(|p| cache::read(p))
+        .and_then(|raw| String::from_utf8(raw).ok())
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .filter(|size| *size >= 12)
+    {
+        return Ok(size);
+    }
+
+    stats::record_request();
+    let head_resp = client.head(url).send()?;
+    if !head_resp.status().is_success() {
+        return Err(format!("HEAD request failed: {}", head_resp.status()).into());
+    }
+    let file_size: u64 = head_resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .ok_or("Missing Content-Length header")?;
+    if file_size < 12 {
+        return Err("File too small to be valid Parquet".into());
+    }
+    if let Some(path) = &path {
+        cache::write_atomic(path, file_size.to_string().as_bytes());
+    }
+    Ok(file_size)
+}
+
+/// Fetch a byte range of a partition, reading from and populating the cache.
+fn fetch_partition_range(
+    client: &Client,
+    url: &str,
+    cache_dir: Option<&std::path::Path>,
     start: u64,
     length: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    fetch_range_with_attempts(client, url, start, length, OVERTURE_RANGE_ATTEMPTS)
+    fetch_partition_range_with_attempts(
+        client,
+        url,
+        cache_dir,
+        start,
+        length,
+        OVERTURE_RANGE_ATTEMPTS,
+    )
+}
+
+fn fetch_partition_range_with_attempts(
+    client: &Client,
+    url: &str,
+    cache_dir: Option<&std::path::Path>,
+    start: u64,
+    length: u64,
+    max_attempts: u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let path = cache_dir.map(|d| d.join(format!("{start}_{length}.bin")));
+    if let Some(path) = &path {
+        if let Some(bytes) = cache::read(path) {
+            // A short file is a write that did not finish; refetching costs one
+            // request, trusting it would corrupt a row group.
+            if bytes.len() as u64 == length {
+                stats::record_cached(length);
+                return Ok(bytes);
+            }
+        }
+    }
+    let bytes = fetch_range_with_attempts(client, url, start, length, max_attempts)?;
+    if let Some(path) = &path {
+        cache::write_atomic(path, &bytes);
+    }
+    Ok(bytes)
 }
 
 /// As [`fetch_range`], with the retry budget chosen by the caller.
@@ -1933,13 +2334,18 @@ fn fetch_range_with_attempts(
     if length == 0 {
         return Err("fetch_range called with length 0".into());
     }
-    let end = start + length - 1;
+    // Row-group offsets and lengths come from the partition footer, which is
+    // network data. Wrapping would turn a bad range into a plausible small one.
+    let end = start
+        .checked_add(length - 1)
+        .ok_or_else(|| format!("range {start}+{length} overflows the partition"))?;
     let mut last_error = String::new();
 
     for attempt in 0..max_attempts.max(1) {
         if attempt > 0 {
             std::thread::sleep(Duration::from_millis(500 << (attempt - 1)));
         }
+        stats::record_request();
         let response = match client
             .get(url)
             .header("Range", format!("bytes={start}-{end}"))
@@ -1963,7 +2369,10 @@ fn fetch_range_with_attempts(
         }
 
         match response.bytes() {
-            Ok(body) => return Ok(body.to_vec()),
+            Ok(body) => {
+                stats::record_network(body.len() as u64);
+                return Ok(body.to_vec());
+            }
             Err(e) => last_error = format!("range body from {url} could not be read: {e}"),
         }
     }
@@ -2281,6 +2690,115 @@ mod tests {
             releases,
             vec!["2026-07-22.10", "2026-07-22.9", "2026-06-17.0"]
         );
+    }
+
+    #[test]
+    fn the_bundled_fallback_release_is_a_release_name() {
+        // It is used as a path segment for the cache and interpolated into a
+        // URL, so a typo here must fail the build, not a user's fetch.
+        assert!(cache::is_valid_release(OVERTURE_STAC_RELEASE_FALLBACK));
+    }
+
+    #[test]
+    fn partition_bytes_are_cached_under_their_release_and_file() {
+        let dir = partition_cache_dir(
+            "2026-08-19.0",
+            "https://overturemaps-us-west-2.s3.amazonaws.com/release/2026-08-19.0/\
+             theme=buildings/type=building/part-00042-abc-c000.zstd.parquet",
+        )
+        .expect("a normal partition URL is cacheable");
+        assert!(dir.ends_with("2026-08-19.0/parquet/part-00042-abc-c000.zstd.parquet"));
+
+        // Only the last URL segment is used, so `..` earlier in a path is
+        // discarded rather than traversed. What must be refused is a *segment*
+        // that would escape the directory or collide with our own bookkeeping.
+        for url in [
+            "https://host/a/..",
+            "https://host/a/.",
+            "https://host/a/",
+            "https://host/a/.hidden",
+            "https://host/a/name%2Fwith%2Fescapes",
+            "https://host/a/name with spaces",
+        ] {
+            assert!(
+                partition_cache_dir("2026-08-19.0", url).is_none(),
+                "{url} must not become a cache path"
+            );
+        }
+        // Whatever survives is a single harmless segment inside the release dir.
+        let odd = partition_cache_dir("2026-08-19.0", "https://host/release/../../etc/passwd")
+            .expect("a plain trailing name is usable");
+        assert_eq!(
+            odd,
+            cache::release_dir("2026-08-19.0")
+                .unwrap()
+                .join("parquet")
+                .join("passwd")
+        );
+
+        assert!(partition_cache_dir("../evil", "https://host/a/part-0.parquet").is_none());
+    }
+
+    #[test]
+    fn release_candidates_end_with_the_remembered_and_bundled_fallbacks() {
+        let discovered = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        // Discovery answers first, then the remembered release, then the
+        // bundled constant: a machine offline at the bucket still has something
+        // to try, and it is a release that actually worked here.
+        let candidates = build_release_candidates(
+            discovered(&["2026-09-16.0", "2026-09-01.0"]),
+            Some("2026-05-01.0".to_string()),
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                "2026-09-16.0",
+                "2026-09-01.0",
+                "2026-05-01.0",
+                OVERTURE_STAC_RELEASE_FALLBACK
+            ]
+        );
+
+        // Discovery failing leaves exactly the two fallbacks.
+        assert_eq!(
+            build_release_candidates(Vec::new(), Some("2026-05-01.0".to_string())),
+            vec!["2026-05-01.0", OVERTURE_STAC_RELEASE_FALLBACK]
+        );
+        assert_eq!(
+            build_release_candidates(Vec::new(), None),
+            vec![OVERTURE_STAC_RELEASE_FALLBACK]
+        );
+
+        // A fallback already discovered is not tried twice. In practice this is
+        // the normal case, since only two releases are ever online.
+        assert_eq!(
+            build_release_candidates(
+                discovered(&[OVERTURE_STAC_RELEASE_FALLBACK]),
+                Some(OVERTURE_STAC_RELEASE_FALLBACK.to_string()),
+            ),
+            vec![OVERTURE_STAC_RELEASE_FALLBACK]
+        );
+
+        // The bound holds however long the listing is. Losing this is how a
+        // slow host turns one fetch into an unbounded wait.
+        let many = discovered(&[
+            "2026-09-16.0",
+            "2026-09-01.0",
+            "2026-08-19.0",
+            "2026-07-22.0",
+            "2026-06-17.0",
+        ]);
+        let candidates = build_release_candidates(many, Some("2026-05-01.0".to_string()));
+        assert_eq!(candidates.len(), OVERTURE_MAX_RELEASE_ATTEMPTS);
+
+        // Malformed names from a bucket listing never reach a URL or a path.
+        assert!(cache::is_valid_release(OVERTURE_STAC_RELEASE_FALLBACK));
+        let filtered = build_release_candidates(
+            discovered(&["release/2026-08-19.0", "latest", "../x"]),
+            None,
+        );
+        assert_eq!(filtered, vec![OVERTURE_STAC_RELEASE_FALLBACK]);
     }
 
     #[test]

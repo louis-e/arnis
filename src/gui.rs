@@ -808,6 +808,7 @@ fn gui_clear_tile_caches() -> Result<String, String> {
     let combined = clear_all_cached_tiles()
         .combined(clear_land_cover_cache())
         .combined(crate::canopy::clear_canopy_cache())
+        .combined(crate::overture::clear_overture_cache())
         .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
@@ -1362,6 +1363,12 @@ fn gui_start_generation(
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
                 canopy_height: canopy_height_enabled,
                 overture: overture_enabled,
+                // Auto picks whichever transport is cheaper for the area. The
+                // two are not bit-identical - tiles quantise coordinates to a
+                // 0.4 m lattice and keep the largest ring of a multipolygon the
+                // Parquet reader drops entirely - but both differences are far
+                // below a block, so the choice is not worth a GUI setting.
+                overture_source: crate::args::OvertureSource::Auto,
                 use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
@@ -1445,7 +1452,12 @@ fn gui_start_generation(
             let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
                     if args.overture {
-                        overture::fetch_overture_buildings(&bbox, args.scale, args.debug)
+                        overture::fetch_overture_buildings(
+                            &bbox,
+                            args.scale,
+                            args.overture_source,
+                            args.debug,
+                        )
                     } else {
                         overture::OvertureData::default()
                     }

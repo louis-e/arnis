@@ -379,7 +379,12 @@ fn run_cli() {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
             let data = if args.overture && !skip_objects {
-                overture::fetch_overture_buildings(&effective_bbox, args.scale, args.debug)
+                overture::fetch_overture_buildings(
+                    &effective_bbox,
+                    args.scale,
+                    args.overture_source,
+                    args.debug,
+                )
             } else {
                 overture::OvertureData::default()
             };
