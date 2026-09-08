@@ -348,6 +348,62 @@ fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> 
     Ok(())
 }
 
+/// Lifts the superflat generator plane to `base_y` by prepending an air layer.
+/// Flat layers stack up from the dimension floor, so with the tall datapack's -2032 floor the
+/// terrain outside the written regions would sit up to ~2000 blocks above the generated plane.
+/// No-op when the plane already lands on `base_y` (a vanilla floor with an unlifted base) and
+/// on worlds whose overworld is not a flat generator.
+fn raise_superflat_floor(root: &mut Value, base_y: i32, min_y: i32) {
+    let air_height = base_y - min_y - 2;
+    if air_height <= 0 {
+        return;
+    }
+
+    let Value::Compound(root_map) = root else {
+        return;
+    };
+    let Some(Value::Compound(data)) = root_map.get_mut("Data") else {
+        return;
+    };
+    let Some(Value::Compound(settings)) = data.get_mut("WorldGenSettings") else {
+        return;
+    };
+    let Some(Value::Compound(dimensions)) = settings.get_mut("dimensions") else {
+        return;
+    };
+    let Some(Value::Compound(overworld)) = dimensions.get_mut("minecraft:overworld") else {
+        return;
+    };
+    let Some(Value::Compound(generator)) = overworld.get_mut("generator") else {
+        return;
+    };
+    if !matches!(generator.get("type"), Some(Value::String(t)) if t == "minecraft:flat") {
+        return;
+    }
+    let Some(Value::Compound(flat)) = generator.get_mut("settings") else {
+        return;
+    };
+    let Some(Value::List(layers)) = flat.get_mut("layers") else {
+        return;
+    };
+
+    match layers.first_mut() {
+        Some(Value::Compound(bottom)) if matches!(bottom.get("block"), Some(Value::String(b)) if b == "minecraft:air") =>
+        {
+            bottom.insert("height".to_string(), Value::Int(air_height));
+        }
+        _ => {
+            let mut air = std::collections::HashMap::new();
+            air.insert(
+                "block".to_string(),
+                Value::String("minecraft:air".to_string()),
+            );
+            air.insert("height".to_string(), Value::Int(air_height));
+            layers.insert(0, Value::Compound(air));
+        }
+    }
+}
+
 // Writes GameType, DayTime and the player's game mode into an existing level.dat.
 pub fn apply_java_world_settings(
     world_path: &Path,
@@ -385,6 +441,14 @@ pub fn apply_java_world_settings(
             player.insert("playerGameType".to_string(), Value::Int(game_type));
         }
     }
+
+    // Folded into this rewrite rather than a second read/write: both need the post-generation
+    // base, which is only known once the terrain has been scaled.
+    raise_superflat_floor(
+        &mut root,
+        crate::world_editor::base_chunk_y(),
+        crate::world_editor::min_y(),
+    );
 
     let serialized =
         fastnbt::to_bytes(&root).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
@@ -513,6 +577,107 @@ mod tests {
         if let Some(Value::Compound(player)) = data.get("Player") {
             assert_eq!(player.get("playerGameType"), Some(&Value::Int(0)));
         }
+    }
+
+    fn flat_layers(root: &Value) -> Vec<(String, i32)> {
+        let mut node = root;
+        for key in [
+            "Data",
+            "WorldGenSettings",
+            "dimensions",
+            "minecraft:overworld",
+            "generator",
+            "settings",
+            "layers",
+        ] {
+            let Value::Compound(map) = node else {
+                panic!("{key} parent not a compound");
+            };
+            node = map.get(key).unwrap_or_else(|| panic!("missing {key}"));
+        }
+        let Value::List(layers) = node else {
+            panic!("layers not a list");
+        };
+        layers
+            .iter()
+            .map(|l| {
+                let Value::Compound(l) = l else {
+                    panic!("layer not a compound");
+                };
+                match (l.get("block"), l.get("height")) {
+                    (Some(Value::String(b)), Some(Value::Int(h))) => (b.clone(), *h),
+                    _ => panic!("malformed layer"),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn superflat_floor_follows_the_extended_world_floor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let raw = fs::read(world.join("level.dat")).unwrap();
+        let mut decompressed = Vec::new();
+        GzDecoder::new(raw.as_slice())
+            .read_to_end(&mut decompressed)
+            .unwrap();
+        let mut root: Value = fastnbt::from_bytes(&decompressed).unwrap();
+        let vanilla = flat_layers(&root);
+
+        raise_superflat_floor(&mut root, -62, crate::world_editor::DEFAULT_MIN_Y);
+        assert_eq!(flat_layers(&root), vanilla);
+
+        raise_superflat_floor(&mut root, -1876, -2032);
+        let layers = flat_layers(&root);
+        assert_eq!(layers[0], ("minecraft:air".to_string(), 154));
+        assert_eq!(layers[1..], vanilla[..]);
+        // grass lands exactly on the terrain base
+        assert_eq!(-2032 + layers.iter().map(|l| l.1).sum::<i32>() - 1, -1876);
+
+        raise_superflat_floor(&mut root, -1876, -2032);
+        assert_eq!(flat_layers(&root), layers);
+    }
+
+    fn level_dat_root(world: &Path) -> Value {
+        let raw = fs::read(world.join("level.dat")).unwrap();
+        let mut decompressed = Vec::new();
+        GzDecoder::new(raw.as_slice())
+            .read_to_end(&mut decompressed)
+            .unwrap();
+        fastnbt::from_bytes(&decompressed).unwrap()
+    }
+
+    #[test]
+    fn applying_world_settings_lifts_the_superflat_plane_to_the_terrain_base() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+
+        let vanilla = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        crate::world_editor::set_world_bounds(
+            crate::world_editor::DEFAULT_MIN_Y,
+            crate::world_editor::DEFAULT_MAX_Y,
+        );
+        crate::world_editor::set_base_chunk_y(-62);
+        apply_java_world_settings(&vanilla, crate::args::GameMode::Creative, 6000).unwrap();
+        let vanilla_layers = flat_layers(&level_dat_root(&vanilla));
+
+        let tall = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        crate::world_editor::set_world_bounds(-2032, 2031);
+        crate::world_editor::set_base_chunk_y(-1876);
+        apply_java_world_settings(&tall, crate::args::GameMode::Creative, 6000).unwrap();
+        let tall_layers = flat_layers(&level_dat_root(&tall));
+
+        crate::world_editor::set_world_bounds(
+            crate::world_editor::DEFAULT_MIN_Y,
+            crate::world_editor::DEFAULT_MAX_Y,
+        );
+        crate::world_editor::set_base_chunk_y(-62);
+
+        assert_eq!(vanilla_layers[0].0, "minecraft:dirt");
+        assert_eq!(tall_layers[0], ("minecraft:air".to_string(), 154));
+        assert_eq!(tall_layers[1..], vanilla_layers[..]);
     }
 
     /// Highest format that still allows the deprecated `formats` key.

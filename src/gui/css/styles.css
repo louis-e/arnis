@@ -1312,10 +1312,21 @@ input[type="range"] {
   }
 }
 
-/* Options that do not apply to the selected celestial body */
+/* Options that do not apply to the selected celestial body or world format */
 .settings-row-unavailable {
   opacity: 0.4;
   pointer-events: none;
+}
+
+/* What a setting costs, shown under its row while it is on */
+.settings-row-note {
+  border-left: 3px solid #fecc44;
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  font-size: 0.75em;
+  line-height: 1.4;
+  color: #b8b8b8;
+  text-align: left;
 }
 
 .segmented-disabled {

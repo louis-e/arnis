@@ -14,8 +14,7 @@ pub const DEFAULT_MIN_Y: i32 = -64;
 /// this, an extended floor would make every bedrock/fill/ore column ~4000 blocks deep.
 pub const TERRAIN_FLOOR_DEPTH: i32 = 64;
 
-/// Default (vanilla 1.18+) world ceiling. Distinct from `MAX_Y`, which is the highest Y the
-/// editor will store; this is the top of the dimension the engine is actually told about.
+/// Default (vanilla 1.18+) world ceiling; the editor stores nothing above `world_max_y()`.
 pub const DEFAULT_MAX_Y: i32 = 319;
 
 static WORLD_MIN_Y: AtomicI32 = AtomicI32::new(DEFAULT_MIN_Y);
@@ -120,6 +119,19 @@ pub fn base_chunk_y() -> i32 {
     BASE_CHUNK_Y.load(MemOrdering::Relaxed)
 }
 
+static TERRAIN_TOP_Y: AtomicI32 = AtomicI32::new(DEFAULT_GROUND_LEVEL);
+
+/// Highest Y the elevation scaler placed terrain at. Consumers that need the band the terrain
+/// actually fills read this rather than the dimension ceiling, which the relief rarely reaches.
+pub fn set_terrain_top_y(y: i32) {
+    TERRAIN_TOP_Y.store(y, MemOrdering::Relaxed);
+}
+
+#[inline]
+pub fn terrain_top_y() -> i32 {
+    TERRAIN_TOP_Y.load(MemOrdering::Relaxed)
+}
+
 static BASE_CHUNK_BLOCK: AtomicU16 = AtomicU16::new(crate::block_definitions::GRASS_BLOCK.id());
 
 /// Surface block for those filler chunks; grass would ring a lunar world in green.
@@ -131,11 +143,7 @@ pub fn set_base_chunk_block(block: crate::block_definitions::Block) {
 pub fn base_chunk_block() -> crate::block_definitions::Block {
     crate::block_definitions::Block::from_raw_id(BASE_CHUNK_BLOCK.load(MemOrdering::Relaxed))
 }
-/// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
-/// Vanilla limit is 319, but data packs can extend this up to 2031.
-/// The world editor supports the full range; the elevation system controls
-/// the actual heights used based on the disable_height_limit setting.
-const MAX_Y: i32 = 2031;
+
 use fastnbt::{LongArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
@@ -1146,8 +1154,11 @@ pub(crate) struct ChunkToModify {
 impl ChunkToModify {
     #[inline]
     pub fn get_block(&self, x: u8, y: i32, z: u8) -> Option<Block> {
-        // Clamp Y to valid Minecraft range to prevent TryFromIntError
-        let y = y.clamp(min_y(), MAX_Y);
+        // Above the ceiling nothing was ever stored, and the section index would truncate.
+        if y > world_max_y() {
+            return None;
+        }
+        let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.get(&section_idx)?;
         section.get_block(x, (y & 15) as u8, z)
@@ -1155,8 +1166,12 @@ impl ChunkToModify {
 
     #[inline]
     pub fn set_block(&mut self, x: u8, y: i32, z: u8, block: Block) {
-        // Clamp Y to valid Minecraft range to prevent TryFromIntError
-        let y = y.clamp(min_y(), MAX_Y);
+        // Drop, never clamp: clamping would smear a slab across the ceiling under every
+        // overflowing structure. Below the floor still clamps, as the bedrock plane does.
+        if y > world_max_y() {
+            return;
+        }
+        let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.entry(section_idx).or_default();
         section.set_block(x, (y & 15) as u8, z, block);
@@ -1170,8 +1185,10 @@ impl ChunkToModify {
         z: u8,
         block_with_props: BlockWithProperties,
     ) {
-        // Clamp Y to valid Minecraft range to prevent TryFromIntError
-        let y = y.clamp(min_y(), MAX_Y);
+        if y > world_max_y() {
+            return;
+        }
+        let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.entry(section_idx).or_default();
         section.set_block_with_properties(x, (y & 15) as u8, z, block_with_props);
@@ -1295,7 +1312,7 @@ impl WorldToModify {
         // a fully out-of-world range onto a boundary block and report a hit the
         // caller never asked for.
         let min_y = min_y.max(crate::world_editor::min_y());
-        let max_y = max_y.min(MAX_Y);
+        let max_y = max_y.min(world_max_y());
         if min_y > max_y {
             return None;
         }
@@ -1382,7 +1399,10 @@ impl WorldToModify {
             .entry((chunk_x & 31, chunk_z & 31))
             .or_default();
 
-        let y = y.clamp(min_y(), MAX_Y);
+        if y > world_max_y() {
+            return;
+        }
+        let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
         let section = chunk.sections.entry(section_idx).or_default();
 
@@ -1427,8 +1447,12 @@ impl WorldToModify {
         let local_x = (x & 15) as u8;
         let local_z = (z & 15) as u8;
 
-        let y_min = y_min.clamp(min_y(), MAX_Y);
-        let y_max = y_max.clamp(min_y(), MAX_Y);
+        // A range entirely above the ceiling must vanish, not collapse into a slab on it.
+        if y_min > world_max_y() {
+            return;
+        }
+        let y_min = y_min.clamp(min_y(), world_max_y());
+        let y_max = y_max.clamp(min_y(), world_max_y());
 
         for y in y_min..=y_max {
             let section_idx: i8 = (y >> 4) as i8;
@@ -2556,15 +2580,15 @@ mod tests {
 
     #[test]
     fn highest_block_between_rejects_ranges_outside_the_world() {
-        // The clamp reads the world floor, so hold it at the default for the assertions.
+        // The intersection reads the world bounds, so hold them at the default.
         let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut world = WorldToModify::default();
         world.set_block_if_absent(3, DEFAULT_MIN_Y, 5, STONE);
-        world.set_block_if_absent(3, MAX_Y, 5, COBBLESTONE);
+        world.set_block_if_absent(3, DEFAULT_MAX_Y, 5, COBBLESTONE);
 
         // Wholly outside the world: no Y in the requested range can answer.
         assert_eq!(
-            world.highest_block_between(3, 5, MAX_Y + 1, MAX_Y + 50),
+            world.highest_block_between(3, 5, DEFAULT_MAX_Y + 1, DEFAULT_MAX_Y + 50),
             None
         );
         assert_eq!(
@@ -2579,9 +2603,117 @@ mod tests {
             Some(DEFAULT_MIN_Y)
         );
         assert_eq!(
-            world.highest_block_between(3, 5, MAX_Y, MAX_Y + 50),
-            Some(MAX_Y)
+            world.highest_block_between(3, 5, DEFAULT_MAX_Y, DEFAULT_MAX_Y + 50),
+            Some(DEFAULT_MAX_Y)
         );
+    }
+
+    #[test]
+    fn writes_above_the_ceiling_are_dropped_not_clamped_onto_it() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        let mut vanilla = ChunkToModify::default();
+        vanilla.set_block(0, DEFAULT_MAX_Y + 1, 0, STONE);
+        vanilla.set_block(1, 2031, 1, COBBLESTONE);
+        assert_eq!(vanilla.sections().count(), 0);
+
+        set_world_bounds(-2032, 2031);
+        let mut tall = ChunkToModify::default();
+        tall.set_block(0, 2031, 0, STONE);
+        tall.set_block(1, 2032, 1, COBBLESTONE);
+        assert_eq!(tall.get_block(0, 2031, 0), Some(STONE));
+        assert_eq!(tall.get_block(1, 2031, 1), None);
+        assert_eq!(tall.sections().count(), 1);
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn writes_below_the_floor_still_clamp_onto_it() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        for (floor, ceiling) in [(DEFAULT_MIN_Y, DEFAULT_MAX_Y), (-2032, 2031)] {
+            set_world_bounds(floor, ceiling);
+            let mut chunk = ChunkToModify::default();
+            chunk.set_block(0, floor - 40, 0, STONE);
+            assert_eq!(chunk.get_block(0, floor, 0), Some(STONE));
+
+            let mut world = WorldToModify::default();
+            world.set_block_if_absent(3, floor - 40, 5, STONE);
+            assert_eq!(world.get_block(3, floor, 5), Some(STONE));
+        }
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn reads_above_the_ceiling_report_nothing_instead_of_the_top_block() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        set_world_bounds(-2032, 2031);
+        let mut tall = ChunkToModify::default();
+        tall.set_block(2, 2031, 2, STONE);
+        assert_eq!(tall.get_block(2, 2031, 2), Some(STONE));
+        assert_eq!(tall.get_block(2, 2032, 2), None);
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        let mut vanilla = ChunkToModify::default();
+        vanilla.set_block(2, DEFAULT_MAX_Y, 2, STONE);
+        assert_eq!(vanilla.get_block(2, DEFAULT_MAX_Y, 2), Some(STONE));
+        assert_eq!(vanilla.get_block(2, DEFAULT_MAX_Y + 1, 2), None);
+    }
+
+    #[test]
+    fn the_bedrock_extended_ceiling_keeps_writes_above_the_vanilla_top() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        // Bedrock's behavior pack declares -512..512, so the editor ceiling is the section
+        // ending under it and the scaler puts terrain as high as Y 497.
+        set_world_bounds(DEFAULT_MIN_Y, 511);
+        let mut chunk = ChunkToModify::default();
+        chunk.set_block(4, 400, 6, STONE);
+        assert_eq!(chunk.get_block(4, 400, 6), Some(STONE));
+
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(4, 400, 6, STONE);
+        world.fill_column(4, 6, 480, 497, STONE, false);
+        assert_eq!(world.get_block(4, 400, 6), Some(STONE));
+        assert_eq!(
+            world.highest_block_between(4, 6, DEFAULT_MIN_Y, 511),
+            Some(497)
+        );
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn a_fill_reaching_past_the_ceiling_is_truncated_not_collapsed() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        let mut world = WorldToModify::default();
+        world.fill_column(3, 5, DEFAULT_MAX_Y + 10, DEFAULT_MAX_Y + 40, STONE, false);
+        assert_eq!(
+            world.highest_block_between(3, 5, DEFAULT_MIN_Y, DEFAULT_MAX_Y + 2000),
+            None
+        );
+        world.fill_column(3, 5, DEFAULT_MAX_Y - 2, DEFAULT_MAX_Y + 40, STONE, false);
+        assert_eq!(
+            world.highest_block_between(3, 5, DEFAULT_MIN_Y, DEFAULT_MAX_Y),
+            Some(DEFAULT_MAX_Y)
+        );
+        assert_eq!(world.get_block(3, DEFAULT_MAX_Y - 2, 5), Some(STONE));
+
+        set_world_bounds(-2032, 2031);
+        let mut tall = WorldToModify::default();
+        tall.fill_column(7, 9, 2040, 2050, STONE, false);
+        assert_eq!(tall.highest_block_between(7, 9, -2032, 2031), None);
+        tall.fill_column(7, 9, 2028, 2050, STONE, false);
+        assert_eq!(tall.highest_block_between(7, 9, -2032, 2031), Some(2031));
+        assert_eq!(tall.get_block(7, 2028, 9), Some(STONE));
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
     }
 }
 

@@ -7,6 +7,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use crate::elevation::providers::fixed_tile::MAX_TILES_PER_FETCH;
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -22,9 +23,6 @@ const MAX_ZOOM: u8 = 17;
 /// Pyramid floor; any land tile exists at z6, only mid-ocean is absent there.
 const MIN_ZOOM: u8 = 6;
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
-/// Tile budget per fetch; zoom is lowered until the covering count fits.
-/// Worst case ~400 MB downloaded; decoding stays bounded by chunked sampling.
-const MAX_TILES_PER_FETCH: usize = 2048;
 /// Grid rows sampled per chunk; bounds decoded tiles to a few tile rows.
 const SAMPLE_CHUNK_ROWS: usize = 1024;
 /// Chunk size between outage-breaker checks during downloads.

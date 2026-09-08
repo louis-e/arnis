@@ -41,6 +41,10 @@ pub struct ElevationData {
     /// elevation (e.g. the snow line) to a Minecraft Y threshold.
     pub(crate) min_height_m: f64,
     pub(crate) blocks_per_meter: f64,
+    /// Converts a Minecraft-Y difference into the `8 * tan(incline)` units the
+    /// slope thresholds are documented in: `args.scale / blocks_per_meter`.
+    /// 1.0 whenever vertical compression did not fire.
+    pub(crate) slope_correction: f64,
     /// Terrain base actually used: the requested ground level, or lower if the relief
     /// needed the extended floor. Every consumer of the affine must use this, not args.
     pub(crate) ground_level: i32,
@@ -57,9 +61,10 @@ pub struct ElevationData {
 /// capped and block-level elevation is filled via bilinear interpolation
 /// — terrain remains generated, just with sub-native sampling.
 ///
-/// Memory note: a full 16384 × 16384 f64 grid is ~2 GB; with the
-/// water_blend_grid and a snapshot during repair we can peak around
-/// 6 GB for the maximum case. Target deployment (MapSmith) has >20 GB
+/// Memory note: a full 16384 × 16384 f64 grid is ~2.1 GB. The peak is the
+/// land-cover Gaussian, which holds the height grid, one blur buffer of the
+/// same size and an f32 feathered mask alongside the land-cover grids: about
+/// 6.5 GB for the maximum case. Target deployment (MapSmith) has >20 GB
 /// available. Typical user bboxes stay well below the cap.
 pub const MAX_ELEVATION_GRID_DIM: usize = 16384;
 
@@ -152,13 +157,16 @@ pub fn fetch_elevation_data(
 
     // Shared post-processing pipeline
     let mut height_grid = raw.heights_meters;
-    // Both passes target Earth DSM defects and actively damage altimetry: a lunar
-    // mare is flat to within metres, so its IQR is near zero and a real central
-    // peak reads as corruption. PDS gaps are already NaN, so fill is all we need.
+    let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());
+    let m_per_cell = (bbox_width_m / grid_width as f64 + bbox_height_m / grid_height as f64) * 0.5;
+    // Both passes target Earth DSM defects and actively damage altimetry: the outlier
+    // gate is calibrated on Earth's elevation range, and a lunar mare is flat to within
+    // metres so a real central peak reads as an anomaly to the MAD filter. PDS gaps are
+    // already NaN, so fill is all we need.
     if source_mode.allows_earth_fallback() {
         filter_elevation_outliers(&mut height_grid);
         bench.mark("elev_filter_outliers");
-        repair_terrain_anomalies(&mut height_grid);
+        repair_terrain_anomalies(&mut height_grid, m_per_cell);
         bench.mark("elev_repair_anomalies");
     }
     emit_gui_progress_update(14.0, "Processing elevation...");
@@ -188,8 +196,6 @@ pub fn fetch_elevation_data(
     // cliff with stepped stone walls.
     const BUILT_UP_SIGMA_M: f64 = 30.0;
     const COASTAL_PULL_M: f64 = 25.0;
-    let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());
-    let m_per_cell = (bbox_width_m / grid_width as f64 + bbox_height_m / grid_height as f64) * 0.5;
     let (built_up_sigma_cells, coastal_pull_cells) = if m_per_cell > 0.0 {
         (
             BUILT_UP_SIGMA_M / m_per_cell,
@@ -255,6 +261,11 @@ pub fn fetch_elevation_data(
         world_height,
         min_height_m,
         blocks_per_meter,
+        slope_correction: if blocks_per_meter > 0.0 {
+            scale / blocks_per_meter
+        } else {
+            1.0
+        },
         ground_level: effective_ground_level,
     })
 }

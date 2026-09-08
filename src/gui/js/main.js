@@ -48,6 +48,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await initSavePath();
   initSettings();
   initVoxyLightingCoupling();
+  initHeightLimitNote();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
@@ -483,6 +484,9 @@ function setCelestialBody(body) {
     group.classList.toggle('segmented-disabled', off);
     markRow(group);
   });
+
+  // Also format-gated, so it cannot simply follow the earth-only loop.
+  refreshHeightLimitRow();
 
   const notice = document.getElementById('off-earth-notice');
   if (notice) {
@@ -1265,18 +1269,57 @@ function getEffectiveWorldFormat() {
   return selectedWorldFormat;
 }
 
+// The extended dimension is declared by the Java datapack and the Bedrock
+// behavior pack; Luanti ships neither, and off Earth the relief already fits
+// vanilla height, so the backend forces the flag off there.
+function heightLimitAvailable(format) {
+  return selectedCelestialBody === 'earth' && format !== 'luanti';
+}
+
+function refreshHeightLimitRow(format) {
+  const toggle = document.getElementById('disable-height-limit-toggle');
+  if (!toggle) return;
+
+  const available = heightLimitAvailable(format || selectedWorldFormat);
+  toggle.disabled = !available;
+
+  const row = toggle.closest('.settings-row');
+  if (row) {
+    // Cleared, not set to 1: an inline value would beat the class rule.
+    row.style.opacity = '';
+    row.classList.toggle('settings-row-unavailable', !available);
+  }
+
+  const note = document.getElementById('height-limit-note');
+  if (note) note.hidden = !(available && toggle.checked);
+}
+
+// Consequences the CLI prints to stderr, which a GUI user never sees.
+function initHeightLimitNote() {
+  const toggle = document.getElementById('disable-height-limit-toggle');
+  const row = toggle && toggle.closest('.settings-row');
+  if (!row || document.getElementById('height-limit-note')) return;
+
+  const note = document.createElement('div');
+  note.id = 'height-limit-note';
+  note.className = 'settings-row-note';
+  note.hidden = true;
+  note.textContent =
+    'Needs Java 1.21.4+ or Bedrock 1.21.40+. First load asks to enable Experimental ' +
+    'Features, the world cannot be uploaded to Realms, and generation is slower and ' +
+    'the world bigger.';
+  row.after(note);
+
+  toggle.addEventListener('change', () => refreshHeightLimitRow());
+  refreshHeightLimitRow();
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
   const luantiBtn = document.getElementById('format-luanti');
 
-  const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
-
-  // Toggle now supported on both formats (Java datapack + Bedrock BP).
-  if (heightLimitToggle) {
-    heightLimitToggle.disabled = false;
-    heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
-  }
+  refreshHeightLimitRow(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -2005,7 +2048,9 @@ async function startGeneration() {
     var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
     var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
-    var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
+    var heightLimitToggle = document.getElementById("disable-height-limit-toggle");
+    // Disabled means unsupported for this body or format, so never send a stale tick.
+    var disable_height_limit = !heightLimitToggle.disabled && heightLimitToggle.checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;

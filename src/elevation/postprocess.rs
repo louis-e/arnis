@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 const MAX_Y: i32 = 319;
 
 /// Buffer at the top for buildings, trees, and other structures
-const TERRAIN_HEIGHT_BUFFER: i32 = 15;
+pub(crate) const TERRAIN_HEIGHT_BUFFER: i32 = 15;
 
 /// Largest water component a steep-slope shadow blob can be. Real bodies are bigger.
 const MAX_STEEP_WATER_AREA_M2: f64 = 250_000.0;
@@ -32,7 +32,11 @@ const MIN_PERCHED_FRACTION: f64 = 0.10;
 /// writes only into the inner cells of `heights`, so the per-row work is independent
 /// and parallelised with rayon. On a 16k² grid (the worst case the elevation
 /// pipeline allows) this is the dominant elevation post-processing cost.
-pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
+///
+/// `m_per_cell` keeps the erosion reach at a constant physical scale: the window is
+/// cell-based, so at tens of metres per cell (a capped grid, or a very low `--scale`)
+/// the default 10 passes eat real landforms hundreds of metres across.
+pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
     let grid_h = heights.len();
     if grid_h < 5 {
         return;
@@ -43,9 +47,12 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
     }
 
     const RADIUS: i32 = 2; // 5x5 window (24 neighbors)
-    const PASSES: usize = 10; // max passes; early-break when no more anomalies found
-    const ABS_THRESHOLD: f64 = 6.0; // minimum deviation in meters
     const RELATIVE_FACTOR: f64 = 3.0; // deviation must exceed this × MAD
+
+    // At block resolution this is the 6 m / 10 pass behaviour; past a few metres per cell the
+    // window covers real landforms, so widen the gate and stop early.
+    let abs_threshold = 6.0f64.max(0.25 * m_per_cell);
+    let passes = if m_per_cell > 4.0 { 2 } else { 10 };
 
     let r = RADIUS as usize;
     // Reuse the snapshot buffer across passes (saves ~128 MB/pass of allocs
@@ -54,7 +61,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
     let mut total_repaired = 0usize;
     let mut passes_ran = 0usize;
 
-    for pass in 0..PASSES {
+    for pass in 0..passes {
         if pass > 0 {
             // Refresh the snapshot to last pass's writes — also done in
             // parallel because both sides are large contiguous allocs and
@@ -110,7 +117,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
                         let mad = abs_devs[mad_mid];
 
                         let deviation = (center - median).abs();
-                        if deviation > ABS_THRESHOLD && deviation > RELATIVE_FACTOR * mad.max(1.0) {
+                        if deviation > abs_threshold && deviation > RELATIVE_FACTOR * mad.max(1.0) {
                             row[x] = median;
                             row_repaired += 1;
                         }
@@ -139,7 +146,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
 
 /// Apply land-cover-aware repair to the raw elevation grid (in meters).
 ///
-/// This runs after the general MAD/IQR cleanup to target artifacts that are
+/// This runs after the general MAD cleanup to target artifacts that are
 /// too coherent for a small-window outlier filter:
 ///
 /// - **Small water blobs on steep terrain** (ESA shadow on cliff faces) are dropped
@@ -1259,43 +1266,25 @@ fn smooth_built_up_gaussian(
         return;
     }
 
-    // Binary built-up mask (1.0 = built-up, 0.0 = everything else).
-    let mask: Vec<Vec<f64>> = lc_grid
-        .par_iter()
-        .map(|row| {
-            row.iter()
-                .map(|&c| if c == LC_BUILT_UP { 1.0 } else { 0.0 })
-                .collect()
-        })
-        .collect();
-
-    // Blur the mask itself -> feathered weights with a smooth 0..1 falloff
-    // across the built-up boundary. Without this we'd get a visible seam.
+    // Blur the binary built-up mask -> feathered weights with a smooth 0..1 falloff
+    // across the built-up boundary. Without this we'd get a visible seam. The mask is
+    // read straight out of lc_grid and kept as f32: it is only ever a lerp weight.
     // Mask blur is the first half of this step's progress, heights blur the second.
-    let feathered_mask = gaussian_blur_grid_reported(&mask, sigma_cells, &|f| report(0.5 * f));
-    drop(mask);
+    let feathered_mask =
+        gaussian_blur_mask_to_f32_reported(lc_grid, LC_BUILT_UP, w, h, sigma_cells, &|f| {
+            report(0.5 * f)
+        });
 
-    // Build the source for the heights blur with *water-surface* cells set
-    // to NaN so they don't contribute. Without this the blur averages water
-    // (low) into nearby built-up cells and produces a visible "rising ramp"
-    // from water into the city — the coastal artifact we already fix with
-    // the explicit pull-down pass. Using is_water_surface (not LC_WATER)
-    // means canyon wall cells misclassified as water still contribute like
-    // the terrain they actually are.
-    let heights_for_blur: Vec<Vec<f64>> = heights
-        .par_iter()
-        .zip(is_water_surface.par_iter())
-        .map(|(h_row, ws_row)| {
-            h_row
-                .iter()
-                .zip(ws_row.iter())
-                .map(|(&v, &is_ws)| if is_ws { f64::NAN } else { v })
-                .collect()
-        })
-        .collect();
+    // Blur the heights with *water-surface* cells read as NaN so they don't
+    // contribute. Without this the blur averages water (low) into nearby built-up
+    // cells and produces a visible "rising ramp" from water into the city, the
+    // coastal artifact we already fix with the explicit pull-down pass. Using
+    // is_water_surface (not LC_WATER) means canyon wall cells misclassified as
+    // water still contribute like the terrain they actually are.
     let blurred_heights =
-        gaussian_blur_grid_reported(&heights_for_blur, sigma_cells, &|f| report(0.5 + 0.5 * f));
-    drop(heights_for_blur);
+        gaussian_blur_heights_masked(heights, is_water_surface, sigma_cells, &|f| {
+            report(0.5 + 0.5 * f)
+        });
 
     // Blend through the feathered mask. Water-surface cells are skipped so
     // the leveled water surface from the previous pass survives intact.
@@ -1305,7 +1294,7 @@ fn smooth_built_up_gaussian(
             if is_water_surface[y][x] {
                 continue;
             }
-            let m = feathered_mask[y][x].clamp(0.0, 1.0);
+            let m = (feathered_mask[y][x] as f64).clamp(0.0, 1.0);
             if m <= 1.0e-4 {
                 continue;
             }
@@ -1356,90 +1345,137 @@ fn gaussian_blur_grid_reported(
         return vec![Vec::new(); h];
     }
 
-    // ~10 chunks per pass: enough to animate the bar, few enough that the extra
-    // rayon barriers cost nothing measurable.
-    const CHUNKS: usize = 10;
-
-    // Horizontal pass — rows are independent.
-    let row_chunk = h.div_ceil(CHUNKS);
+    let row_chunk = h.div_ceil(BLUR_CHUNKS);
     let mut after_h: Vec<Vec<f64>> = Vec::with_capacity(h);
     for rows in grid.chunks(row_chunk) {
         let mut part: Vec<Vec<f64>> = rows
             .par_iter()
-            .map(|row| {
-                let row_len = row.len() as i32;
-                (0..row.len())
-                    .map(|i| {
-                        let mut sum = 0.0;
-                        let mut wsum = 0.0;
-                        for (j, &k) in kernel.iter().enumerate() {
-                            let idx = i as i32 + j as i32 - half;
-                            if idx >= 0 && idx < row_len {
-                                let v = row[idx as usize];
-                                if v.is_finite() {
-                                    sum += v * k;
-                                    wsum += k;
-                                }
-                            }
-                        }
-                        if wsum > 0.0 {
-                            sum / wsum
-                        } else {
-                            f64::NAN
-                        }
-                    })
-                    .collect()
-            })
+            .map(|row| blur_line(row.len(), &kernel, half, |i| row[i]))
             .collect();
         after_h.append(&mut part);
         report(0.5 * (after_h.len() as f64 / h as f64));
     }
 
-    // Vertical pass — columns are independent. Work column-at-a-time to keep
-    // memory access sequential within each parallel task.
-    let col_chunk = w.div_ceil(CHUNKS);
-    let mut out: Vec<Vec<f64>> = vec![vec![0.0; w]; h];
+    gaussian_blur_vertical_in_place(&mut after_h, &kernel, half, w, report);
+    after_h
+}
+
+/// `gaussian_blur_grid_reported` over `heights` with every `masked` cell read as NaN,
+/// so it contributes nothing. Identical output to blurring a pre-built masked copy,
+/// without allocating one.
+fn gaussian_blur_heights_masked(
+    heights: &[Vec<f64>],
+    masked: &[Vec<bool>],
+    sigma: f64,
+    report: &dyn Fn(f64),
+) -> Vec<Vec<f64>> {
+    let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
+    let kernel = create_gaussian_kernel(kernel_size, sigma);
+    let half = kernel_size as i32 / 2;
+
+    let h = heights.len().min(masked.len());
+    if h == 0 {
+        return Vec::new();
+    }
+    let w = heights[0].len().min(masked[0].len());
+    if w == 0 {
+        return vec![Vec::new(); h];
+    }
+
+    let row_chunk = h.div_ceil(BLUR_CHUNKS);
+    let mut after_h: Vec<Vec<f64>> = Vec::with_capacity(h);
+    let mut y0 = 0usize;
+    while y0 < h {
+        let y1 = (y0 + row_chunk).min(h);
+        let mut part: Vec<Vec<f64>> = (y0..y1)
+            .into_par_iter()
+            .map(|y| {
+                let (row, m_row) = (&heights[y], &masked[y]);
+                let len = row.len().min(m_row.len());
+                blur_line(
+                    len,
+                    &kernel,
+                    half,
+                    |i| if m_row[i] { f64::NAN } else { row[i] },
+                )
+            })
+            .collect();
+        after_h.append(&mut part);
+        y0 = y1;
+        report(0.5 * (after_h.len() as f64 / h as f64));
+    }
+
+    gaussian_blur_vertical_in_place(&mut after_h, &kernel, half, w, report);
+    after_h
+}
+
+/// ~10 chunks per pass: enough to animate the bar, few enough that the extra
+/// rayon barriers cost nothing measurable.
+const BLUR_CHUNKS: usize = 10;
+
+/// One separable pass over a line of `len` samples. `get` supplies the source value so
+/// a caller can synthesise masked-out cells without materialising a copy of the grid.
+/// Edges are handled by renormalizing over the valid samples.
+#[inline]
+fn blur_line(len: usize, kernel: &[f64], half: i32, get: impl Fn(usize) -> f64) -> Vec<f64> {
+    let line_len = len as i32;
+    (0..len)
+        .map(|i| {
+            let mut sum = 0.0;
+            let mut wsum = 0.0;
+            for (j, &k) in kernel.iter().enumerate() {
+                let idx = i as i32 + j as i32 - half;
+                if idx >= 0 && idx < line_len {
+                    let v = get(idx as usize);
+                    if v.is_finite() {
+                        sum += v * k;
+                        wsum += k;
+                    }
+                }
+            }
+            if wsum > 0.0 {
+                sum / wsum
+            } else {
+                f64::NAN
+            }
+        })
+        .collect()
+}
+
+/// Vertical half of the separable blur, written back over the horizontal result.
+/// Every column is copied out before it is computed and only reads its own column, and
+/// a chunk's writes land after all of its columns have been read, so nothing reads a
+/// cell that was already overwritten and no second full-grid buffer is needed.
+fn gaussian_blur_vertical_in_place(
+    after_h: &mut [Vec<f64>],
+    kernel: &[f64],
+    half: i32,
+    w: usize,
+    report: &dyn Fn(f64),
+) {
+    let col_chunk = w.div_ceil(BLUR_CHUNKS);
     let mut x0 = 0usize;
     while x0 < w {
         let x1 = (x0 + col_chunk).min(w);
-        let blurred: Vec<(usize, Vec<f64>)> = (x0..x1)
-            .into_par_iter()
-            .map(|x| {
-                let column: Vec<f64> = after_h.iter().map(|row| row[x]).collect();
-                let col_len = column.len() as i32;
-                let col: Vec<f64> = (0..column.len())
-                    .map(|y| {
-                        let mut sum = 0.0;
-                        let mut wsum = 0.0;
-                        for (j, &k) in kernel.iter().enumerate() {
-                            let idx = y as i32 + j as i32 - half;
-                            if idx >= 0 && idx < col_len {
-                                let v = column[idx as usize];
-                                if v.is_finite() {
-                                    sum += v * k;
-                                    wsum += k;
-                                }
-                            }
-                        }
-                        if wsum > 0.0 {
-                            sum / wsum
-                        } else {
-                            f64::NAN
-                        }
-                    })
-                    .collect();
-                (x, col)
-            })
-            .collect();
+        let blurred: Vec<(usize, Vec<f64>)> = {
+            let src: &[Vec<f64>] = after_h;
+            (x0..x1)
+                .into_par_iter()
+                .map(|x| {
+                    let column: Vec<f64> = src.iter().map(|row| row[x]).collect();
+                    let col = blur_line(column.len(), kernel, half, |i| column[i]);
+                    (x, col)
+                })
+                .collect()
+        };
         for (x, col) in blurred {
             for (y, v) in col.into_iter().enumerate() {
-                out[y][x] = v;
+                after_h[y][x] = v;
             }
         }
         x0 = x1;
         report(0.5 + 0.5 * (x0 as f64 / w as f64));
     }
-    out
 }
 
 /// Blur a binary `grid == target` mask straight to f32. Same kernel and f64
@@ -1453,6 +1489,19 @@ pub(crate) fn gaussian_blur_mask_to_f32(
     width: usize,
     height: usize,
     sigma: f64,
+) -> Vec<Vec<f32>> {
+    gaussian_blur_mask_to_f32_reported(grid, target, width, height, sigma, &|_| {})
+}
+
+/// `gaussian_blur_mask_to_f32` with the same progress reporting as
+/// `gaussian_blur_grid_reported`.
+pub(crate) fn gaussian_blur_mask_to_f32_reported(
+    grid: &[Vec<u8>],
+    target: u8,
+    width: usize,
+    height: usize,
+    sigma: f64,
+    report: &dyn Fn(f64),
 ) -> Vec<Vec<f32>> {
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel = create_gaussian_kernel(kernel_size, sigma);
@@ -1504,6 +1553,7 @@ pub(crate) fn gaussian_blur_mask_to_f32(
             })
             .collect();
         after_h.append(&mut part);
+        report(0.5 * (after_h.len() as f64 / h as f64));
     }
 
     // Vertical pass: f64 throughout, cast only on store.
@@ -1547,6 +1597,7 @@ pub(crate) fn gaussian_blur_mask_to_f32(
             }
         }
         x0 = x1;
+        report(0.5 + 0.5 * (x0 as f64 / w as f64));
     }
     out
 }
@@ -1579,9 +1630,16 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
     }
     let width: usize = height_grid[0].len();
 
-    let mut changes_made: bool = true;
-    while changes_made {
-        let snapshot: Vec<Vec<f64>> = height_grid.to_vec();
+    if !height_grid
+        .par_iter()
+        .any(|row| row.iter().any(|v| v.is_nan()))
+    {
+        return;
+    }
+
+    // One snapshot buffer for the whole loop; refreshed in place per iteration.
+    let mut snapshot: Vec<Vec<f64>> = height_grid.to_vec();
+    loop {
         let snapshot_ref: &[Vec<f64>] = &snapshot;
 
         let any_changed = height_grid
@@ -1617,65 +1675,33 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
             })
             .reduce(|| false, |a, b| a || b);
 
-        changes_made = any_changed;
+        if !any_changed {
+            break;
+        }
+        snapshot
+            .par_iter_mut()
+            .zip(height_grid.par_iter())
+            .for_each(|(dst, src)| dst.clone_from(src));
     }
 }
 
-/// Filter extreme elevation outliers using IQR-based detection.
-/// Uses 3× the interquartile range beyond Q1/Q3 to identify true outliers
-/// (corrupted data, sea-floor artifacts) without clipping real terrain on
-/// mountains or deep valleys.
+/// NaN out physically impossible elevations (provider sentinels, sea-floor artifacts),
+/// then interpolate the holes shut.
 ///
-/// A count guard prevents filtering when >5% of values fall outside the bounds,
-/// which indicates bimodal terrain (e.g., deep canyons) rather than corruption.
+/// A fixed gate, not a statistical one: a global IQR band flags any lone landform that
+/// stands well clear of its surroundings, so an island or an inselberg reads as
+/// corruption and gets levelled. Isolated spikes are `repair_terrain_anomalies`' job.
+/// The bounds sit outside the real range (Dead Sea shore ~-430 m, Everest 8849 m) with
+/// enough margin for providers that report ellipsoidal instead of orthometric heights.
 pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
+    const MIN_REASONABLE_M: f64 = -500.0;
+    const MAX_REASONABLE_M: f64 = 9000.0;
+
     let height = height_grid.len();
     if height == 0 {
         return;
     }
     let width = height_grid[0].len();
-
-    // Collect finite heights in parallel — flat-mapping per row, each thread
-    // builds its own Vec, then rayon stitches the segments together. Avoids
-    // a single sequential sweep over the whole grid.
-    let mut all_heights: Vec<f64> = height_grid
-        .par_iter()
-        .flat_map_iter(|row| row.iter().filter(|h| !h.is_nan() && h.is_finite()).copied())
-        .collect();
-
-    if all_heights.len() < 4 {
-        return;
-    }
-
-    let len = all_heights.len();
-    let q1_idx = len / 4;
-    let q3_idx = (len * 3) / 4;
-
-    let (_, q1_val, _) =
-        all_heights.select_nth_unstable_by(q1_idx, |a, b| a.partial_cmp(b).unwrap());
-    let q1 = *q1_val;
-
-    let (_, q3_val, _) =
-        all_heights.select_nth_unstable_by(q3_idx, |a, b| a.partial_cmp(b).unwrap());
-    let q3 = *q3_val;
-
-    let iqr = q3 - q1;
-    let min_reasonable = q1 - 3.0 * iqr;
-    let max_reasonable = q3 + 3.0 * iqr;
-
-    // Count guard: if >5% of values fall outside a bound, that tail represents
-    // real terrain (e.g., canyon floor), not corrupted data — skip that bound.
-    let (below_count, above_count) = all_heights
-        .par_iter()
-        .map(|&h| ((h < min_reasonable) as usize, (h > max_reasonable) as usize))
-        .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
-    let threshold = (len as f64 * 0.05) as usize;
-    let filter_lower = below_count > 0 && below_count <= threshold;
-    let filter_upper = above_count > 0 && above_count <= threshold;
-
-    if !filter_lower && !filter_upper {
-        return;
-    }
 
     // Per-row NaN-out, then sum the per-row counts back together. Each row
     // is mutated independently so this is data-race-free.
@@ -1685,13 +1711,9 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
         .map(|row| {
             let mut row_count = 0usize;
             for h in row.iter_mut().take(width) {
-                if !h.is_nan() {
-                    let is_outlier = (filter_lower && *h < min_reasonable)
-                        || (filter_upper && *h > max_reasonable);
-                    if is_outlier {
-                        *h = f64::NAN;
-                        row_count += 1;
-                    }
+                if !h.is_nan() && (*h < MIN_REASONABLE_M || *h > MAX_REASONABLE_M) {
+                    *h = f64::NAN;
+                    row_count += 1;
                 }
             }
             row_count
@@ -1700,8 +1722,8 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 
     if outliers_filtered > 0 {
         eprintln!(
-            "Filtered {} extreme outliers (IQR bounds: {:.1}m to {:.1}m, lower={}, upper={})",
-            outliers_filtered, min_reasonable, max_reasonable, filter_lower, filter_upper
+            "Filtered {} impossible elevations (outside {:.0}m..{:.0}m)",
+            outliers_filtered, MIN_REASONABLE_M, MAX_REASONABLE_M
         );
         fill_nan_values(height_grid);
     }
@@ -1709,7 +1731,8 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 
 /// Scale raw elevation (meters) to Minecraft Y coordinates, keeping f64 precision.
 /// `extended_max_y` is the cap when `disable_height_limit` is on (Java datapack:
-/// 2031; Bedrock BP: 512); ignored otherwise.
+/// 2031; Bedrock BP: 512; Luanti has no pack, so it keeps the vanilla ceiling);
+/// ignored otherwise.
 /// Scales real-world metre heights to Minecraft Y. Also returns the affine
 /// parameters `(min_height_m, blocks_per_meter)` so a real-world elevation can
 /// be converted back to a Minecraft Y threshold (e.g. for the snow line), plus the
@@ -1830,6 +1853,13 @@ pub fn scale_to_minecraft(
     } else {
         0.0
     };
+    // The map preview shades over the band the terrain fills, so publish where it ended up.
+    crate::world_editor::common::set_terrain_top_y(
+        (ground_level as f64 + scaled_range)
+            .min(upper_clamp)
+            .round() as i32,
+    );
+
     (mc_heights, min_height, blocks_per_meter, ground_level)
 }
 
@@ -2200,5 +2230,234 @@ mod tests {
                 assert!(!h.is_nan(), "NaN values should be filled");
             }
         }
+    }
+
+    fn wobbly(w: usize, h: usize) -> Vec<Vec<f64>> {
+        let mut s = 0x2545_f491_4f6c_dd1du64;
+        (0..h)
+            .map(|_| {
+                (0..w)
+                    .map(|_| {
+                        s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        ((s >> 40) % 2000) as f64 * 0.5
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn assert_bits_eq(got: &[Vec<f64>], want: &[Vec<f64>]) {
+        assert_eq!(got.len(), want.len());
+        for (y, (a, b)) in got.iter().zip(want.iter()).enumerate() {
+            assert_eq!(a.len(), b.len(), "row {y} length");
+            for (x, (p, q)) in a.iter().zip(b.iter()).enumerate() {
+                assert_eq!(p.to_bits(), q.to_bits(), "cell ({x},{y})");
+            }
+        }
+    }
+
+    /// Separable blur written with two buffers and no parallelism, in the same tap
+    /// order as the production kernel loop.
+    fn two_buffer_blur(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+        let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
+        let kernel = create_gaussian_kernel(kernel_size, sigma);
+        let half = kernel_size as i32 / 2;
+        let h = grid.len();
+        let w = grid[0].len();
+        let tap = |get: &dyn Fn(usize) -> f64, len: usize, i: usize| {
+            let mut sum = 0.0;
+            let mut wsum = 0.0;
+            for (j, &k) in kernel.iter().enumerate() {
+                let idx = i as i32 + j as i32 - half;
+                if idx >= 0 && idx < len as i32 {
+                    let v = get(idx as usize);
+                    if v.is_finite() {
+                        sum += v * k;
+                        wsum += k;
+                    }
+                }
+            }
+            if wsum > 0.0 {
+                sum / wsum
+            } else {
+                f64::NAN
+            }
+        };
+        let after_h: Vec<Vec<f64>> = (0..h)
+            .map(|y| (0..w).map(|x| tap(&|i| grid[y][i], w, x)).collect())
+            .collect();
+        (0..h)
+            .map(|y| (0..w).map(|x| tap(&|i| after_h[i][x], h, y)).collect())
+            .collect()
+    }
+
+    #[test]
+    fn the_vertical_blur_pass_writing_over_its_own_input_changes_nothing() {
+        let g = wobbly(37, 29);
+        assert_bits_eq(&gaussian_blur_grid(&g, 2.5), &two_buffer_blur(&g, 2.5));
+        let tall = wobbly(9, 61);
+        assert_bits_eq(
+            &gaussian_blur_grid(&tall, 1.5),
+            &two_buffer_blur(&tall, 1.5),
+        );
+    }
+
+    #[test]
+    fn blurring_through_a_mask_matches_blurring_a_masked_copy() {
+        let heights = wobbly(41, 33);
+        let masked: Vec<Vec<bool>> = (0..33)
+            .map(|y| (0..41).map(|x| (x * 7 + y * 3) % 5 == 0).collect())
+            .collect();
+        let materialised: Vec<Vec<f64>> = heights
+            .iter()
+            .zip(masked.iter())
+            .map(|(hr, mr)| {
+                hr.iter()
+                    .zip(mr.iter())
+                    .map(|(&v, &m)| if m { f64::NAN } else { v })
+                    .collect()
+            })
+            .collect();
+        assert_bits_eq(
+            &gaussian_blur_heights_masked(&heights, &masked, 3.0, &|_| {}),
+            &gaussian_blur_grid(&materialised, 3.0),
+        );
+    }
+
+    #[test]
+    fn the_reported_mask_blur_returns_the_same_grid_and_a_monotone_fraction() {
+        let lc: Vec<Vec<u8>> = (0..29)
+            .map(|y| {
+                (0..37)
+                    .map(|x| {
+                        if (x + y) % 3 == 0 {
+                            LC_BUILT_UP
+                        } else {
+                            LC_GRASSLAND
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let seen = std::cell::RefCell::new(Vec::new());
+        let got = gaussian_blur_mask_to_f32_reported(&lc, LC_BUILT_UP, 37, 29, 2.0, &|f| {
+            seen.borrow_mut().push(f)
+        });
+        let want = gaussian_blur_mask_to_f32(&lc, LC_BUILT_UP, 37, 29, 2.0);
+        assert_eq!(got, want);
+        let seen = seen.into_inner();
+        assert!(seen.windows(2).all(|p| p[0] <= p[1]), "{seen:?}");
+        assert_eq!(seen.last().copied(), Some(1.0));
+    }
+
+    #[test]
+    fn a_nan_free_grid_comes_back_untouched() {
+        let g = wobbly(19, 17);
+        let mut filled = g.clone();
+        fill_nan_values(&mut filled);
+        assert_bits_eq(&filled, &g);
+    }
+
+    #[test]
+    fn a_nan_blob_wider_than_one_dilation_ring_is_filled_from_the_previous_pass() {
+        let mut g = vec![vec![10.0; 13]; 13];
+        for row in g.iter_mut().take(9).skip(4) {
+            for c in row.iter_mut().take(9).skip(4) {
+                *c = f64::NAN;
+            }
+        }
+        fill_nan_values(&mut g);
+        assert!(g.iter().flatten().all(|v| *v == 10.0));
+    }
+
+    #[test]
+    fn a_lone_island_survives_the_elevation_gate() {
+        let mut g = vec![vec![0.0f64; 100]; 100];
+        for row in g.iter_mut().take(60).skip(40) {
+            for c in row.iter_mut().take(60).skip(40) {
+                *c = 900.0;
+            }
+        }
+        filter_elevation_outliers(&mut g);
+        assert_eq!(g[50][50], 900.0);
+        assert_eq!(g[0][0], 0.0);
+    }
+
+    #[test]
+    fn only_physically_impossible_elevations_are_gated() {
+        let mut g = vec![vec![100.0f64; 21]; 21];
+        g[2][2] = -9999.0;
+        g[2][18] = 1.0e38;
+        g[18][2] = -600.0;
+        g[18][18] = 9500.0;
+        // Real extremes, well outside any IQR band this grid could produce.
+        g[4][10] = -450.0;
+        g[16][10] = 8800.0;
+
+        filter_elevation_outliers(&mut g);
+
+        for (y, x) in [(2, 2), (2, 18), (18, 2), (18, 18)] {
+            assert_eq!(g[y][x], 100.0, "({x},{y}) should have been interpolated");
+        }
+        assert_eq!(g[4][10], -450.0);
+        assert_eq!(g[16][10], 8800.0);
+    }
+
+    /// 41x41 plateau at 100 m with a centred square tower of `width` cells at 180 m.
+    fn plateau_with_tower(width: usize) -> Vec<Vec<f64>> {
+        let mut g = vec![vec![100.0f64; 41]; 41];
+        let lo = 20 - width / 2;
+        for row in g.iter_mut().skip(lo).take(width) {
+            for c in row.iter_mut().skip(lo).take(width) {
+                *c = 180.0;
+            }
+        }
+        g
+    }
+
+    #[test]
+    fn anomaly_repair_keeps_its_six_metre_deviation_at_block_resolution() {
+        let spike = |d: f64| {
+            let mut g = vec![vec![100.0f64; 21]; 21];
+            g[10][10] += d;
+            g
+        };
+        for m_per_cell in [1.0, 4.0] {
+            let mut kept = spike(5.0);
+            repair_terrain_anomalies(&mut kept, m_per_cell);
+            assert_eq!(kept[10][10], 105.0, "at {m_per_cell} m/cell");
+
+            let mut repaired = spike(7.0);
+            repair_terrain_anomalies(&mut repaired, m_per_cell);
+            assert_eq!(repaired[10][10], 100.0, "at {m_per_cell} m/cell");
+        }
+    }
+
+    #[test]
+    fn anomaly_repair_raises_its_deviation_threshold_with_the_cell_size() {
+        let spike = |d: f64| {
+            let mut g = vec![vec![100.0f64; 21]; 21];
+            g[10][10] += d;
+            g
+        };
+        // 40 m/cell puts the gate at 0.25 * 40 = 10 m.
+        let mut kept = spike(7.0);
+        repair_terrain_anomalies(&mut kept, 40.0);
+        assert_eq!(kept[10][10], 107.0);
+
+        let mut repaired = spike(12.0);
+        repair_terrain_anomalies(&mut repaired, 40.0);
+        assert_eq!(repaired[10][10], 100.0);
+    }
+
+    #[test]
+    fn anomaly_repair_stops_eroding_landforms_when_a_cell_is_tens_of_metres() {
+        let mut fine = plateau_with_tower(9);
+        repair_terrain_anomalies(&mut fine, 1.0);
+        assert_eq!(fine[20][20], 100.0, "block resolution must erode as before");
+
+        let mut coarse = plateau_with_tower(9);
+        repair_terrain_anomalies(&mut coarse, 24.4);
+        assert_eq!(coarse[20][20], 180.0, "a 220 m landform must survive");
     }
 }

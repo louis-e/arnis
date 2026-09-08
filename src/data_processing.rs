@@ -488,16 +488,15 @@ fn process_element(
 /// Whether to stream regions to disk (lower peak RAM) for `num_regions` regions. Auto-enabled
 /// when the estimated resident world would crowd available RAM; trades some time for RAM, output
 /// unchanged (3D models + subways preserved). `ARNIS_STREAM_TO_DISK=1/0` overrides; constants tunable.
-fn should_stream_to_disk(num_regions: usize, available_mb: u64) -> bool {
+fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool) -> bool {
     match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
         Some("1") => return true,
         Some("0") => return false,
         _ => {}
     }
-    // Calibrated on a dense full-feature run (terrain + land cover + Overture + 3D): ~26 MB/region.
     const BASE_MB: u64 = 500;
-    const PER_REGION_MB: u64 = 26;
-    let est_peak_mb = BASE_MB + PER_REGION_MB * num_regions as u64;
+    let est_peak_mb =
+        BASE_MB + crate::world_editor::per_region_estimate_mb(fillground) * num_regions as u64;
 
     // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
@@ -629,9 +628,16 @@ pub fn generate_world_with_options(
     bench.mark("ground_warm");
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     // Uses the ground's real base, not args: the montane check measures blocks above it, and
-    // the base sinks when the relief needs the extended floor.
-    let tree_pack =
-        crate::trees::tree_pack::load(args, llbbox, args.scale, ground.base_level()).map(Arc::new);
+    // the base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
+    // blocks back into metres, which compression makes far smaller than args.scale.
+    let tree_pack = crate::trees::tree_pack::load(
+        args,
+        llbbox,
+        args.scale,
+        ground.base_level(),
+        ground.blocks_per_meter(),
+    )
+    .map(Arc::new);
     bench.reset();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
@@ -818,7 +824,7 @@ pub fn generate_world_with_options(
         // optimistic figure would skip streaming in exactly the runs that need it.
         let available_mb = available_memory_mb();
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
-            && should_stream_to_disk(tiles.len(), available_mb);
+            && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
 
         // Regions any 3D placement may write to: kept resident (not evicted in-loop)
         // so the post-merge placement pass lands in RAM, then flushed at finalize.
@@ -835,8 +841,11 @@ pub fn generate_world_with_options(
         };
 
         if eviction_active {
-            let (flush_threads, flush_queue) =
-                crate::world_editor::flush_pool_params(tile_batch_size, available_mb);
+            let (flush_threads, flush_queue) = crate::world_editor::flush_pool_params(
+                tile_batch_size,
+                available_mb,
+                args.fillground,
+            );
             if args.benchmark {
                 eprintln!("[BENCHMARK] flush_threads={flush_threads} flush_queue={flush_queue}");
             }
