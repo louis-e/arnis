@@ -19,6 +19,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::elevation::cache::CacheClearStats;
 
@@ -74,12 +75,21 @@ pub fn read(path: &Path) -> Option<Vec<u8>> {
 
 /// Write `bytes` to `path` atomically.
 ///
-/// The temp file carries the process id so two Arnis processes caching the same
-/// tile cannot write through each other's partial file; the rename then makes
-/// whichever finishes last the visible one, and both hold identical bytes.
-/// Every failure is silent by design - the cache is an optimisation, and a
+/// The temp name carries the process id and a per-write counter, so no two
+/// writers ever share one. Both halves are needed: the pid separates processes,
+/// and the counter separates writers inside a process, which happens whenever
+/// the 3D preview and a generation open the same release at once. Sharing a
+/// temp path would let one writer truncate a file another is still writing and
+/// then publish it.
+///
+/// The rename makes whichever finishes last visible, and since both writers
+/// hold identical bytes for a given path, either is correct.
+///
+/// Every failure is silent by design. The cache is an optimisation, and a
 /// read-only or full disk must not fail a generation.
 pub fn write_atomic(path: &Path, bytes: &[u8]) {
+    static WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
     let Some(parent) = path.parent() else {
         return;
     };
@@ -87,9 +97,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) {
         return;
     }
     let tmp = parent.join(format!(
-        ".{}.{}.tmp",
+        ".{}.{}.{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
-        std::process::id()
+        std::process::id(),
+        WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     let written = std::fs::File::create(&tmp).and_then(|mut f| {
         f.write_all(bytes)?;
@@ -214,6 +225,35 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn concurrent_writers_to_one_path_never_publish_a_mixed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("contended.bin");
+
+        // Same length, different bytes, so a torn write is visible as a mix.
+        let a = vec![b'a'; 512 * 1024];
+        let b = vec![b'b'; 512 * 1024];
+
+        std::thread::scope(|scope| {
+            for payload in [&a, &b] {
+                for _ in 0..8 {
+                    scope.spawn(|| write_atomic(&path, payload));
+                }
+            }
+        });
+
+        let got = read(&path).expect("one writer must have published");
+        assert!(got == a || got == b, "published a torn or mixed file");
+
+        // Every writer cleaned up after itself.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind");
     }
 
     #[test]
