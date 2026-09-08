@@ -48,9 +48,8 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = crate::celestial::CelestialBody::Earth)]
     pub body: crate::celestial::CelestialBody,
 
-    /// Projection mode for coordinate mapping
-    /// local: each generation starts at Minecraft (0,0) (default)
-    /// web_mercator: not supported, it stretches the world north-south by 1/cos(latitude)
+    /// Projection mode for coordinate mapping.
+    /// local: each generation starts at Minecraft (0,0). The only supported mode.
     #[arg(long, default_value = "local")]
     pub projection: crate::projection::ProjectionKind,
 
@@ -361,11 +360,12 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
     }
 
-    // X gets a cos(lat) factor and Z does not, so the world comes out stretched north-south
-    // by 1/cos(lat) against both the elevation grid and its own east-west scale.
+    // Never shipped working: X gets a cos(lat) factor and Z does not, so the world comes out
+    // stretched north-south by 1/cos(lat) against both the elevation grid and its own
+    // east-west scale. Still parsed so an old command line gets this instead of a parse error.
     if args.projection == crate::projection::ProjectionKind::WebMercator {
         return Err(
-            "--projection web_mercator is currently broken: it stretches the world north-south by 1/cos(latitude) (about 1.5x at 47 degrees), so OSM objects come out elongated and misaligned with the terrain. Use --projection local."
+            "--projection web_mercator was experimental and never worked: it stretches the world north-south by 1/cos(latitude) (about 1.5x at 47 degrees), so objects come out elongated and misaligned with the terrain. Use --projection local."
                 .to_string(),
         );
     }
