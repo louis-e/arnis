@@ -99,6 +99,7 @@
         </div>
 
         <!-- Section: Generation -->
+        <!-- Section: Generation -->
         <div class="settings-section-header" data-localize="settings_section_generation">Generation</div>
 
         <!-- Generation Mode Dropdown -->
@@ -328,28 +329,35 @@
           </div>
         </div>
 
-        <!-- Enable Luanti (experimental) -->
+        <!-- Enable Luanti -->
         <div class="settings-row">
           <label for="enable-luanti-toggle">
-            <span>Luanti (experimental)</span>
-            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format. Experimental: block mappings and lighting may be imperfect.">?</span>
+            <span data-localize="enable_luanti">Luanti</span>
+            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format alongside Java and Bedrock.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="enable-luanti-toggle" name="enable-luanti-toggle">
           </div>
         </div>
 
-        <!-- Section: Mapillary -->
-        <div class="settings-section-header" data-localize="settings_section_mapillary">Mapillary (experimental)</div>
+        <!-- Section: Building Facades -->
+        <div class="settings-section-header" data-localize="settings_section_facades">Building Facades</div>
 
-        <!-- Building facades from street-level photographs, the feature switch -->
+        <!-- One decision, not two toggles: both sources hang panels on the same
+             walls and write the same resource pack, so they were mutually
+             exclusive anyway and a single control cannot express an invalid
+             state. -->
         <div class="settings-row">
-          <label for="facades-toggle">
-            <span data-localize="mapillary_facades">Enable Mapillary</span>
-            <span class="tooltip-icon" data-tooltip="Builds real facades from street-level photos: wall colours per floor, and windows and doors from world scale 2 up. Works best where 360 degree coverage exists. Needs the token below.">?</span>
+          <label>
+            <span data-localize="facade_source">Facade Source</span>
+            <span class="tooltip-icon" data-tooltip="Preset uses bundled photographs picked by building type, everywhere, with no account. Mapillary uses real street photos of the actual buildings, where they exist.">?</span>
           </label>
           <div class="settings-control">
-            <input type="checkbox" id="facades-toggle" name="facades-toggle">
+            <div class="segmented-control" id="facade-source-group">
+              <button type="button" class="segment active" data-default data-facade-source="off" data-localize="facade_source_off">Off</button>
+              <button type="button" class="segment" data-facade-source="preset" data-localize="facade_source_preset">Preset</button>
+              <button type="button" class="segment" data-facade-source="mapillary" data-localize="facade_source_mapillary">Mapillary</button>
+            </div>
           </div>
         </div>
 
@@ -378,9 +386,18 @@
           </div>
         </div>
 
-        <!-- Why the panel modes are greyed out on a non-Java world -->
-        <div id="facade-java-only-notice" class="settings-notice" style="display: none;" data-localize="facade_mode_java_only">
-          Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.
+        <!-- How large an atlas the panels may fill, which is how sharp they are -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_detail">Facade Detail</span>
+            <span class="tooltip-icon" data-tooltip="Standard fits any graphics card the game runs on. High is sharper but needs a modern one on whatever machine opens the world.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-detail-group">
+              <button type="button" class="segment active" data-default data-facade-detail="standard" data-localize="facade_detail_standard">Standard</button>
+              <button type="button" class="segment" data-facade-detail="high" data-localize="facade_detail_high">High</button>
+            </div>
+          </div>
         </div>
 
         <!-- Fills the facade cache for the selected area ahead of generating -->
@@ -396,6 +413,11 @@
 
         <!-- What the precompute is doing, what it did, or why it cannot run -->
         <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
+
+        <!-- Why the panel modes are greyed out on a non-Java world -->
+        <div id="facade-java-only-notice" class="settings-notice" style="display: none;" data-localize="facade_mode_java_only">
+          Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.
+        </div>
 
         <!-- Section: Map & Input -->
         <div class="settings-section-header" data-localize="settings_section_map">Map & Input</div>
@@ -441,7 +463,6 @@
           </div>
         </div>
 
-        <!-- Section: Application -->
         <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
         <!-- Java Save Path -->

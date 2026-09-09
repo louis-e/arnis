@@ -160,7 +160,6 @@ async function applyLocalization(localization) {
     "span[data-localize='map_item']": "map_item",
     "span[data-localize='signage']": "signage",
     "span[data-localize='mapillary_token']": "mapillary_token",
-    "span[data-localize='mapillary_facades']": "mapillary_facades",
     "span[data-localize='facade_precompute']": "facade_precompute",
     "span[data-localize='facade_mode']": "facade_mode",
     "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
@@ -171,8 +170,16 @@ async function applyLocalization(localization) {
     "button[data-localize='signage_basic']": "signage_basic",
     "button[data-localize='signage_full']": "signage_full",
     "div[data-localize='settings_section_generation']": "settings_section_generation",
+    "div[data-localize='settings_section_facades']": "settings_section_facades",
+    "span[data-localize='facade_source']": "facade_source",
+    "span[data-localize='facade_detail']": "facade_detail",
+    "button[data-localize='facade_detail_standard']": "facade_detail_standard",
+    "button[data-localize='facade_detail_high']": "facade_detail_high",
+    "button[data-localize='facade_source_off']": "facade_source_off",
+    "button[data-localize='facade_source_preset']": "facade_source_preset",
+    "button[data-localize='facade_source_mapillary']": "facade_source_mapillary",
+    "span[data-localize='enable_luanti']": "enable_luanti",
     "div[data-localize='settings_section_world']": "settings_section_world",
-    "div[data-localize='settings_section_mapillary']": "settings_section_mapillary",
     "div[data-localize='settings_section_map']": "settings_section_map",
     "div[data-localize='settings_section_application']": "settings_section_application",
     "button[data-localize='facade_precompute_button']": "facade_precompute_button",
@@ -468,9 +475,62 @@ function getEffectiveFacadeMode() {
   return mode;
 }
 
+// One control decides where facades come from, so the two old switches are
+// gone: they were mutually exclusive anyway and could both be off in two
+// different ways. Java only, and the stored choice survives a trip through
+// Bedrock so coming back restores it.
+function getFacadeSource() {
+  const v = localStorage.getItem('facadeSource');
+  return v === 'preset' || v === 'mapillary' ? v : 'off';
+}
+
+function getEffectiveFacadeSource() {
+  return selectedWorldFormat === 'java' ? getFacadeSource() : 'off';
+}
+
 function getFacadesEnabled() {
-  const toggle = document.getElementById('facades-toggle');
-  return toggle ? toggle.checked : false;
+  return getEffectiveFacadeSource() === 'mapillary';
+}
+
+function getBuildingFacadesEnabled() {
+  return getEffectiveFacadeSource() === 'preset';
+}
+
+function getFacadeDetail() {
+  return localStorage.getItem('facadeDetail') === 'high' ? 'high' : 'standard';
+}
+
+// Every row under the source control only means something for one of the
+// sources, so each is greyed by the source rather than by a switch of its own.
+function refreshFacadeSourceRows() {
+  const group = document.getElementById('facade-source-group');
+  if (!group) return;
+  const java = selectedWorldFormat === 'java';
+  const source = getEffectiveFacadeSource();
+
+  group.querySelectorAll('.segment').forEach((btn) => {
+    btn.disabled = !java && btn.dataset.facadeSource !== 'off';
+    btn.classList.toggle('active', btn.dataset.facadeSource === source);
+  });
+
+  const grey = (id, live) => {
+    const el = document.getElementById(id);
+    const row = el && el.closest('.settings-row');
+    if (row) row.classList.toggle('settings-row-unavailable', !live);
+    if (el) {
+      el.querySelectorAll('.segment, input, button').forEach((c) => {
+        c.disabled = !live;
+      });
+      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON') el.disabled = !live;
+    }
+  };
+  grey('mapillary-token', source === 'mapillary');
+  grey('facade-mode-group', source === 'mapillary' && !!getMapillaryToken());
+  grey('facade-detail-group', source !== 'off');
+  grey('precompute-facades-button', source === 'mapillary' && !!getMapillaryToken());
+
+  const notice = document.getElementById('facade-java-only-notice');
+  if (notice) notice.style.display = java ? 'none' : '';
 }
 
 // The facade rows react to the world format (panels are Java only), the on/off
@@ -489,13 +549,7 @@ function refreshFacadeRows() {
     btn.classList.toggle('active', btn.dataset.facadeMode === effective);
   });
   if (notice) notice.style.display = java ? 'none' : '';
-
-  // Nothing can be applied without both the switch and a token, so the mode
-  // row is greyed until they are both there.
-  const active = getFacadesEnabled() && getMapillaryToken();
-  const row = group.closest('.settings-row');
-  if (row) row.classList.toggle('settings-row-unavailable', !active);
-
+  refreshFacadeSourceRows();
   refreshPrecomputeButton();
 }
 
@@ -1181,10 +1235,28 @@ function initSettings() {
     refreshFacadeRows();
   });
 
-  // The switch that turns the download on. Persisted by settings-store.js with
-  // the rest of the World section, so only the greying is handled here.
-  const facadesToggle = document.getElementById("facades-toggle");
-  if (facadesToggle) facadesToggle.addEventListener("change", refreshFacadeRows);
+  // The source control, and the detail beside it. Both persist their own key
+  // rather than going through settings-store.js, because the panel's Revert
+  // reads that store and the facade choice is not part of a world's settings.
+  const segmented = (id, storageKey, dataAttr, after) => {
+    const group = document.getElementById(id);
+    if (!group) return;
+    group.querySelectorAll(".segment").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        // A disabled segment is still clicked by settings-store.js when it
+        // restores or reverts, and refusing that would lose a choice made on
+        // Java the moment the format changed.
+        localStorage.setItem(storageKey, btn.dataset[dataAttr]);
+        group.querySelectorAll(".segment").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        if (after) after();
+      });
+    });
+  };
+  segmented("facade-source-group", "facadeSource", "facadeSource", refreshFacadeRows);
+  segmented("facade-detail-group", "facadeDetail", "facadeDetail", null);
+  refreshFacadeRows();
 
   // An older build kept a facade export folder here. The field is gone, the
   // preview reads the cache and generation fetches into it, so the leftover
@@ -1258,6 +1330,25 @@ function initSettings() {
       `<p><b>3D Model Repository (3DMR):</b></p>` +
       `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
     licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
+
+    // The premade facade set. All CC0, so attribution is a courtesy rather than
+    // a condition, but the sources are named because someone should be able to
+    // find them and because it says plainly that the pixels are free to ship.
+    const facadeTextureBlock =
+      `<p><b>Preset Building Facade Textures:</b></p>` +
+      `<p style="font-size: 0.9em;">The photographs hung on buildings by the Preset Facades setting, all released under ` +
+      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
+      `<ul style="padding-left: 20px; font-size: 0.9em;">` +
+      `<li>Urban building, apartment and shop front photographs by <b>Scouser</b>, from ` +
+      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" style="color: inherit;" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
+      `<li>Tiling facade materials from <b>TextureCan</b>: ` +
+      `<a href="https://www.texturecan.com/details/315/" style="color: inherit;" target="_blank" rel="noopener noreferrer">315</a>, ` +
+      `<a href="https://www.texturecan.com/details/316/" style="color: inherit;" target="_blank" rel="noopener noreferrer">316</a>, ` +
+      `<a href="https://www.texturecan.com/details/357/" style="color: inherit;" target="_blank" rel="noopener noreferrer">357</a>, ` +
+      `<a href="https://www.texturecan.com/details/360/" style="color: inherit;" target="_blank" rel="noopener noreferrer">360</a>, ` +
+      `<a href="https://www.texturecan.com/details/563/" style="color: inherit;" target="_blank" rel="noopener noreferrer">563</a></li>` +
+      `</ul>`;
+    licenseContent.insertAdjacentHTML("beforeend", facadeTextureBlock);
 
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
@@ -1539,9 +1630,10 @@ function initTelemetryConsent() {
 // call is in flight so repeated clicks can't fire multiple concurrent
 // wipes (Rust is idempotent, but the UI would look confused).
 // How much disk the caches hold, shown next to the Clear button so the user
-// can see whether clearing is worth doing. Refreshed when the settings panel
-// opens and again after a wipe, never on a timer: walking the trees is cheap
-// but not free.
+// can see whether clearing is worth doing. Asked for when the settings panel
+// opens and again after anything that changes the caches, never at startup and
+// never on a timer: the answer is a walk of every cached file, which is tenths
+// of a second once a facade run has filled the tile cache.
 async function refreshCacheSize() {
   const label = document.getElementById('cache-size');
   if (!label) {
@@ -1561,7 +1653,11 @@ function initClearCacheButton() {
   if (!button) {
     return;
   }
-  refreshCacheSize();
+  // Deliberately not asking for the size here. This runs on DOMContentLoaded,
+  // where the number cannot be seen by anyone: the label lives inside the
+  // settings panel, and `openSettings` asks for it there. Reading it at startup
+  // only bought a value that was stale by the time the panel opened, and paid
+  // for it with a walk of every cached file while the window was going up.
 
   // How long the success/error flash stays applied before reverting to
   // the default outline. Long enough to register as confirmation, short
@@ -2428,6 +2524,8 @@ async function startGeneration() {
         mapillaryToken: getMapillaryToken(),
         facadesEnabled: getFacadesEnabled(),
         facadeMode: getEffectiveFacadeMode(),
+        buildingFacadesEnabled: getBuildingFacadesEnabled(),
+        facadeDetail: getFacadeDetail(),
         celestialBodyName: selectedCelestialBody
     });
 
