@@ -1639,12 +1639,21 @@ $(document).ready(function () {
     // Add hint overlay at bottom-center of map when no bbox is selected
     var hintDiv = document.createElement('div');
     hintDiv.className = 'bbox-hint-overlay';
-    var hintText = (window.localization && window.localization.bbox_hint)
-        || 'Use the {tool} tool to draw an area';
-    // {tool} is where the icon goes, so a translation can put it wherever its
-    // own grammar wants it. Matching an English phrase here would have dropped
-    // the icon in every other language.
-    hintDiv.innerHTML = hintText.split('{tool}').join('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="vertical-align: -2px; opacity: 0.85;"><rect x="5" y="5" width="14" height="14" stroke-width="1.4"></rect><g fill="currentColor" stroke="none"><rect x="3" y="3" width="4" height="4"></rect><rect x="17" y="3" width="4" height="4"></rect><rect x="3" y="17" width="4" height="4"></rect><rect x="17" y="17" width="4" height="4"></rect></g></svg>');
+    // This script runs inside the map iframe, and the locale is loaded by the
+    // top document, so it is read through the parent (same origin). Exposed on
+    // the window so main.js can call it again after a language change.
+    function renderBboxHint() {
+        var loc = window.localization
+            || (window.parent && window.parent !== window && window.parent.localization)
+            || null;
+        var hintText = (loc && loc.bbox_hint) || 'Use the {tool} tool to draw an area';
+        // {tool} is where the icon goes, so a translation can put it wherever
+        // its own grammar wants it. Matching an English phrase here would have
+        // dropped the icon in every other language.
+        hintDiv.innerHTML = hintText.split('{tool}').join('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="vertical-align: -2px; opacity: 0.85;"><rect x="5" y="5" width="14" height="14" stroke-width="1.4"></rect><g fill="currentColor" stroke="none"><rect x="3" y="3" width="4" height="4"></rect><rect x="17" y="3" width="4" height="4"></rect><rect x="3" y="17" width="4" height="4"></rect><rect x="17" y="17" width="4" height="4"></rect></g></svg>');
+    }
+    renderBboxHint();
+    window.renderBboxHint = renderBboxHint;
     map.getContainer().appendChild(hintDiv);
 
     // Add world preview button to the edit toolbar after drawControl is added

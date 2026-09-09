@@ -254,11 +254,19 @@ function writeValue(entry, value) {
   if (!el || value === undefined) return;
 
   if (entry.kind === 'segmented') {
-    // The group's click handler owns the active class, so click it.
+    // The group's click handler owns the active class, so click it. A greyed
+    // group has disabled segments, and a disabled button ignores click(), so
+    // it is lifted for the one call: the value still has to land, or a choice
+    // made on Java is lost the moment the format changed.
     const seg = el.querySelector(
       `.segment[${entry.valueAttr}="${CSS.escape(String(value))}"]`
     );
-    if (seg && !seg.classList.contains('active')) seg.click();
+    if (seg && !seg.classList.contains('active')) {
+      const wasDisabled = seg.disabled;
+      seg.disabled = false;
+      seg.click();
+      seg.disabled = wasDisabled;
+    }
     return;
   }
 
@@ -273,6 +281,15 @@ function writeValue(entry, value) {
 
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// A segmented group is a div and never carries `disabled` itself; it is
+// greyed by disabling every segment in it.
+function isDisabled(entry, el) {
+  if (el.disabled) return true;
+  if (entry.kind !== 'segmented') return false;
+  const segments = el.querySelectorAll('.segment');
+  return segments.length > 0 && Array.from(segments).every((s) => s.disabled);
 }
 
 function isModified(entry) {
@@ -455,7 +472,7 @@ function refresh() {
 
     // A greyed out control must not advertise an action. Its stored value is
     // still restored and the button returns once it is enabled again.
-    const modified = !el.disabled && isModified(entry);
+    const modified = !isDisabled(entry, el) && isModified(entry);
     if (modified) anyModified = true;
 
     row.classList.toggle('is-modified', modified);

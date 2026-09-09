@@ -218,6 +218,16 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+  // The map hint lives in the map iframe, which cannot see this assignment.
+  document.querySelectorAll('iframe').forEach((frame) => {
+    try {
+      const w = frame.contentWindow;
+      if (w && typeof w.renderBboxHint === 'function') w.renderBboxHint();
+    } catch (_) {
+      // A frame that is not ours or not loaded yet; the hint renders itself
+      // once it is.
+    }
+  });
 
   // The line above has just written the idle label over a button that may be
   // saying Cancel, so put the running state back.
