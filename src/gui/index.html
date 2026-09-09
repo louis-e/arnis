@@ -37,18 +37,23 @@
             <!-- Combined Button Block -->
             <div class="button-block">
               <div class="button-block-row">
-                <button type="button" id="start-button" class="start-button" onclick="startGeneration()">
-                  <span data-localize="start_generation">Start Generation</span>
-                  <span class="world-name-row">
+                <div class="start-button-wrap">
+                  <button type="button" id="start-button" class="start-button" onclick="startGeneration()">
+                    <span data-localize="start_generation">Start Generation</span>
+                  </button>
+                  <!-- Lives outside #start-button (not nested inside it): the HTML spec
+                       forbids interactive content (inputs, buttons, or anything with a
+                       tabindex) inside a <button>. Clicking the label/background here
+                       still starts generation via its own onclick; the input and pencil
+                       button stop propagation so their own clicks don't also trigger it. -->
+                  <div class="world-name-row" onclick="startGeneration()">
                     <span id="world-name-label" class="world-name-label" data-placeholder="true">No world generated yet</span>
                     <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="48" autocomplete="off" spellcheck="false">
-                    <!-- Not a real <button>: it lives inside #start-button, and nested buttons are invalid HTML.
-                         role="button" + tabindex + the keydown handler in main.js keep it keyboard accessible. -->
-                    <span id="world-name-edit-button" class="world-name-edit-button" role="button" tabindex="0" title="Set a custom world name" aria-label="Set a custom world name" style="display: none;">
+                    <button type="button" id="world-name-edit-button" class="world-name-edit-button" title="Set a custom world name" aria-label="Set a custom world name" style="display: none;">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75z"/></svg>
-                    </span>
-                  </span>
-                </button>
+                    </button>
+                  </div>
+                </div>
                 <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings">
                     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>

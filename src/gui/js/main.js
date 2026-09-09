@@ -780,13 +780,13 @@ function setupProgressListener() {
 
       if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
-        generationButtonEnabled = true;
+        setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
         setWorldNameLabel("");
         resetEta();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
-        generationButtonEnabled = true;
+        setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
         resetEta();
       } else {
@@ -1955,11 +1955,19 @@ let customWorldName = "";
 // stale real name would keep showing instead of what was just typed).
 let worldNameEditedSinceLastCreate = false;
 
-function isCustomWorldNameEnabled() {
+function isCustomWorldNameFeatureEnabled() {
   const toggle = document.getElementById('custom-world-name-toggle');
   // Custom names are Java-only: creating a Bedrock/Luanti world never calls
-  // gui_create_world, so offering the editor there would silently do nothing.
+  // gui_create_world, so offering the feature there would silently do
+  // nothing.
   return !!(toggle && toggle.checked) && selectedWorldFormat === 'java';
+}
+
+function canEditCustomWorldName() {
+  // While a generation or rename is in flight, the world directory may be
+  // actively written to on disk, so renaming/recreating it out from under
+  // that write would corrupt or orphan the in-progress world.
+  return isCustomWorldNameFeatureEnabled() && generationButtonEnabled;
 }
 
 // Shows the pending custom name (if any) unless a world already exists for
@@ -1967,7 +1975,16 @@ function isCustomWorldNameEnabled() {
 // de-duplicated) name from the backend is authoritative.
 function updateWorldNamePreviewLabel() {
   if (worldPath && !worldNameEditedSinceLastCreate) return;
-  setWorldNameLabel(isCustomWorldNameEnabled() ? customWorldName : "");
+  if (!isCustomWorldNameFeatureEnabled()) {
+    // Feature off: fall back to showing whatever world actually exists
+    // rather than blanking a real name to "".
+    setWorldNameLabel(basenameFromPath(worldPath));
+    return;
+  }
+  // customWorldName can be "" right after committing a blank edit on an
+  // already-existing world; that must keep showing the real name, not the
+  // "no world generated yet" placeholder (setWorldNameLabel("") would).
+  setWorldNameLabel(customWorldName || basenameFromPath(worldPath));
 }
 
 // Cancels any in-progress edit and shows/hides the pencil to match the
@@ -1977,7 +1994,7 @@ function refreshWorldNameEditUI() {
   endWorldNameEdit();
   const editButton = document.getElementById('world-name-edit-button');
   if (editButton) {
-    editButton.style.display = isCustomWorldNameEnabled() ? '' : 'none';
+    editButton.style.display = canEditCustomWorldName() ? '' : 'none';
   }
   updateWorldNamePreviewLabel();
 }
@@ -1987,17 +2004,21 @@ function startWorldNameEdit(event) {
     event.preventDefault();
     event.stopPropagation();
   }
-  if (!isCustomWorldNameEnabled()) return;
+  if (!canEditCustomWorldName()) return;
 
   const label = document.getElementById('world-name-label');
   const input = document.getElementById('world-name-input');
   const editButton = document.getElementById('world-name-edit-button');
   if (!label || !input) return;
 
-  // Prefer an in-progress edit; otherwise pre-fill with the currently
-  // generated world's real name (if any) so re-opening the editor lets the
-  // user rename an already-created world instead of starting from blank.
-  input.value = customWorldName || basenameFromPath(worldPath);
+  // Prefer an in-progress edit; otherwise pre-fill with the currently shown
+  // real world name (if any) so re-opening the editor lets the user rename
+  // an already-created world instead of starting from blank. Falling back
+  // to the directory basename keeps the input useful even if the label was
+  // not yet refreshed from disk.
+  const visibleName = label.hasAttribute('data-placeholder') ? '' : label.textContent.trim();
+  input.value = customWorldName || visibleName || basenameFromPath(worldPath);
+  input.dataset.originalValue = input.value;
   label.style.display = 'none';
   if (editButton) editButton.style.display = 'none';
   input.style.display = '';
@@ -2005,9 +2026,48 @@ function startWorldNameEdit(event) {
   input.select();
 }
 
-function commitWorldNameEdit() {
+// Commits the pencil editor. If no world has been created yet, this just
+// remembers the name for the next generation. If a world already exists,
+// this actually renames it on disk right away via gui_rename_world (moves
+// the directory + updates level.dat), rather than silently deferring to
+// "the next Start Generation click creates a new, separate world" - that
+// would leave the already-generated world's real name unchanged, which is
+// not what "rename" means to someone editing an existing world's name.
+async function commitWorldNameEdit() {
   const input = document.getElementById('world-name-input');
-  if (input) customWorldName = input.value.trim();
+  if (!input) {
+    endWorldNameEdit();
+    return;
+  }
+  const newName = input.value.trim();
+
+  if (worldPath) {
+    const currentName = input.dataset.originalValue || basenameFromPath(worldPath);
+    endWorldNameEdit();
+    if (!newName || newName === currentName) return; // nothing to rename
+
+    // Block Start Generation (and re-opening the editor) for the brief
+    // window the rename is in flight, so nothing else can read/write
+    // worldPath while it's changing.
+    setGenerationButtonEnabled(false);
+    try {
+      const renamedPath = await invoke('gui_rename_world', { worldPath: worldPath, worldName: newName });
+      if (renamedPath) {
+        worldPath = renamedPath;
+        customWorldName = basenameFromPath(renamedPath);
+        setWorldNameLabel(customWorldName);
+      }
+    } catch (error) {
+      console.error("Failed to rename world:", error);
+      // Nothing changed on disk; make sure the label still reflects that.
+      setWorldNameLabel(currentName);
+    } finally {
+      setGenerationButtonEnabled(true);
+    }
+    return;
+  }
+
+  customWorldName = newName;
   worldNameEditedSinceLastCreate = true;
   endWorldNameEdit();
 }
@@ -2032,7 +2092,7 @@ function endWorldNameEdit() {
   if (!input || input.style.display === 'none') return;
   input.style.display = 'none';
   if (label) label.style.display = '';
-  if (editButton && isCustomWorldNameEnabled()) editButton.style.display = '';
+  if (editButton && canEditCustomWorldName()) editButton.style.display = '';
   updateWorldNamePreviewLabel();
 }
 
@@ -2050,16 +2110,13 @@ function initCustomWorldNameToggle() {
   if (editButton) {
     editButton.addEventListener('click', startWorldNameEdit);
     editButton.addEventListener('mousedown', (event) => event.stopPropagation());
-    editButton.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        startWorldNameEdit(event);
-      }
-    });
   }
 
   if (input) {
-    // The input lives inside #start-button; without this, any click to
-    // place the caret bubbles up and triggers startGeneration().
+    // The input lives inside .world-name-row, a sibling of #start-button
+    // (not nested inside it) that has its own onclick="startGeneration()"
+    // for clicks on the label/background; without this, placing the caret
+    // would bubble up and trigger that too.
     input.addEventListener('click', (event) => event.stopPropagation());
     input.addEventListener('mousedown', (event) => event.stopPropagation());
     input.addEventListener('keydown', (event) => {
@@ -2107,6 +2164,14 @@ function handleWorldSelectionError(errorCode) {
 
 let generationButtonEnabled = true;
 
+// Central setter so every place that toggles generation state also
+// refreshes the world-name pencil (hidden/blocked while a generation, or a
+// rename, is in flight - see canEditCustomWorldName()).
+function setGenerationButtonEnabled(enabled) {
+  generationButtonEnabled = enabled;
+  refreshWorldNameEditUI();
+}
+
 /**
  * Initiates the world generation process
  * Validates required inputs and sends generation parameters to the backend
@@ -2119,7 +2184,7 @@ async function startGeneration() {
   // Claim the guard before the first await. gui_create_world and gui_start_generation are
   // both awaited round-trips, so leaving the claim until after them lets a second click
   // through and starts a parallel run against the same process-global world floor.
-  generationButtonEnabled = false;
+  setGenerationButtonEnabled(false);
   let started = false;
 
   try {
@@ -2136,7 +2201,7 @@ async function startGeneration() {
         return;
       }
       try {
-        const requestedName = isCustomWorldNameEnabled() && customWorldName ? customWorldName : null;
+        const requestedName = isCustomWorldNameFeatureEnabled() && customWorldName ? customWorldName : null;
         const worldName = await invoke('gui_create_world', { savePath: savePath, worldName: requestedName });
         if (worldName) {
           worldPath = worldName;
@@ -2254,7 +2319,7 @@ async function startGeneration() {
     // Hand the guard back unless a run actually started; once it has, the Done!/Error!
     // progress message releases it instead.
     if (!started) {
-      generationButtonEnabled = true;
+      setGenerationButtonEnabled(true);
       window.arnisPreview3D?.setGenerationRunning(false);
     }
   }

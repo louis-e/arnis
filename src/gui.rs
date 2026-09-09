@@ -151,6 +151,7 @@ pub fn run_gui() -> Result<(), String> {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             gui_create_world,
+            gui_rename_world,
             gui_get_default_save_path,
             gui_get_default_bedrock_save_path,
             gui_get_default_luanti_save_path,
@@ -377,6 +378,22 @@ fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<Str
 
 fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
     crate::world_utils::create_new_world_with_name(base_path, custom_name)
+}
+
+/// Renames an already-created Java world in place (moves its directory and
+/// updates `LevelName` in `level.dat`). Called when the user commits an edit
+/// via the custom-world-name pencil after a world already exists.
+///
+/// Returns the world's new full path on success, or a human-readable error
+/// message on failure (e.g. the world no longer exists, the name is blank,
+/// or the filesystem rename failed).
+#[tauri::command]
+fn gui_rename_world(world_path: String, world_name: String) -> Result<String, String> {
+    let trimmed = world_path.trim();
+    if trimmed.is_empty() {
+        return Err("No world selected".to_string());
+    }
+    crate::world_utils::rename_world(Path::new(trimmed), &world_name)
 }
 
 /// Adds localized area name to the world name in level.dat

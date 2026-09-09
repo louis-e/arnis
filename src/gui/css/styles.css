@@ -182,8 +182,10 @@ a:hover {
   gap: 4px;
   width: 100%;
   min-width: 0;
-  margin-top: 3px;
-  margin-bottom: -3px;
+  padding: 0 12px 8px;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.3s;
 }
 
 .world-name-label {
@@ -199,8 +201,9 @@ a:hover {
 }
 
 /* Inline editor for the custom world name, swapped in for .world-name-label
-   while editing. Sits inside .start-button, so it must not inherit the
-   button's pointer cursor or centered button text styling. */
+   while editing. Sits inside .world-name-row (a sibling of #start-button,
+   not nested inside it), so it must not inherit the row's pointer cursor or
+   centered button text styling. */
 .world-name-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -223,15 +226,23 @@ a:hover {
 /* Pencil icon toggled on via Settings > Custom World Name. Mirrors
    .setting-revert's colors (the settings modal's per-row "Reset to
    default" icon button) so it reads as the same family of small,
-   golden-accented icon actions. */
+   golden-accented icon actions. A real <button> (valid here since it's
+   nested in .world-name-row, a <div>, not in #start-button), so the
+   generic `button` rule's chrome must be reset first. */
 .world-name-edit-button {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: none;
   border-radius: 50%;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  background: transparent;
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -239,6 +250,7 @@ a:hover {
 .world-name-edit-button:hover,
 .world-name-edit-button:focus-visible {
   background: rgba(254, 204, 68, 0.3);
+  border-color: transparent;
 }
 
 .world-name-edit-button:focus-visible {
@@ -1326,8 +1338,19 @@ input[type="range"] {
   width: 100%;
 }
 
-.start-button {
+.start-button-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1;
+}
+
+.start-button-wrap:hover .start-button,
+.start-button-wrap:hover .world-name-row {
+  background-color: #4caf50;
+}
+
+.start-button {
   padding: 14px 20px;
   border: none;
   border-radius: 8px 0 0 0;
@@ -1337,10 +1360,6 @@ input[type="range"] {
   transition: background-color 0.3s;
   margin-top: 0;
   box-shadow: none;
-}
-
-.start-button:hover {
-  background-color: #4caf50;
 }
 
 .settings-button {
