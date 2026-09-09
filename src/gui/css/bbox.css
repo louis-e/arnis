@@ -448,15 +448,22 @@ body,
 
 /* Hint overlay shown when no bbox is selected */
 .bbox-hint-overlay {
-  background: rgba(255, 255, 255, 0.92);
-  color: #333;
-  padding: 8px 16px;
-  border-radius: 4px;
+  /* Arnis's own surface, not Leaflet's. A white pill reads as a control the map
+     library put there, and over the Smooth Dark and Satellite themes it is a
+     bright box on a dark picture. The radius is the 8px the start button and
+     the panel corners use, and the grey is the panel's #717171 darkened enough
+     to carry light text over a bright map. */
+  background: rgba(58, 58, 58, 0.82);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  color: #ececec;
+  padding: 7px 14px;
+  border-radius: 8px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.4;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.16);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   pointer-events: none;
   position: absolute;
   bottom: 18px;
