@@ -150,7 +150,11 @@ pub(super) fn quadrants(cell: Cell) -> [Cell; 4] {
 }
 
 /// Splits `llbbox` into cells small enough for the Graph API's bbox limit.
-pub(super) fn search_cells(llbbox: &LLBBox) -> Vec<Cell> {
+///
+/// A box needing more than [`MAX_CELLS`] is refused rather than truncated: the
+/// caller reports what comes back as coverage for the whole box, and a band
+/// across the bottom of it is not that.
+pub(super) fn search_cells(llbbox: &LLBBox) -> Result<Vec<Cell>, String> {
     let (min_lat, min_lon) = (llbbox.min().lat(), llbbox.min().lng());
     let (max_lat, max_lon) = (llbbox.max().lat(), llbbox.max().lng());
 
@@ -159,6 +163,14 @@ pub(super) fn search_cells(llbbox: &LLBBox) -> Vec<Cell> {
 
     let lat_span = (max_lat - min_lat) / lat_steps as f64;
     let lon_span = (max_lon - min_lon) / lon_steps as f64;
+
+    if lat_steps.saturating_mul(lon_steps) > MAX_CELLS {
+        return Err(format!(
+            "this area needs {} imagery search cells and the limit is {MAX_CELLS}. \
+             Search a smaller area.",
+            lat_steps * lon_steps
+        ));
+    }
 
     let mut cells = Vec::with_capacity(lat_steps * lon_steps);
     for i in 0..lat_steps {
@@ -171,12 +183,9 @@ pub(super) fn search_cells(llbbox: &LLBBox) -> Vec<Cell> {
                 (lo_lon + lon_span).min(max_lon),
                 (lo_lat + lat_span).min(max_lat),
             ));
-            if cells.len() >= MAX_CELLS {
-                return cells;
-            }
         }
     }
-    cells
+    Ok(cells)
 }
 
 /// Mapillary's error envelope, so a rejected request can say why.
@@ -326,7 +335,7 @@ pub fn fetch_panoramas(
     timeout: Duration,
 ) -> Result<Vec<PanoMeta>, String> {
     let client = client(timeout)?;
-    let cells = search_cells(llbbox);
+    let cells = search_cells(llbbox)?;
 
     let results: Vec<Result<Vec<PanoMeta>, String>> = cells
         .par_iter()
@@ -405,7 +414,7 @@ mod tests {
     fn cells_stay_under_the_api_bbox_limit() {
         // ~2.2 km square, comfortably over one cell.
         let bbox = LLBBox::new(52.50, 13.40, 52.52, 13.42).unwrap();
-        let cells = search_cells(&bbox);
+        let cells = search_cells(&bbox).unwrap();
         assert!(cells.len() > 1);
         for (min_lon, min_lat, max_lon, max_lat) in cells {
             assert!(max_lon - min_lon < 0.01, "cell too wide");
@@ -416,7 +425,7 @@ mod tests {
     #[test]
     fn cells_cover_the_whole_bbox() {
         let bbox = LLBBox::new(52.50, 13.40, 52.53, 13.44).unwrap();
-        let cells = search_cells(&bbox);
+        let cells = search_cells(&bbox).unwrap();
         let max_lon = cells.iter().map(|c| c.2).fold(f64::MIN, f64::max);
         let max_lat = cells.iter().map(|c| c.3).fold(f64::MIN, f64::max);
         assert!((max_lon - 13.44).abs() < 1e-9);
@@ -426,7 +435,15 @@ mod tests {
     #[test]
     fn tiny_bbox_yields_one_cell() {
         let bbox = LLBBox::new(52.5000, 13.4000, 52.5005, 13.4005).unwrap();
-        assert_eq!(search_cells(&bbox).len(), 1);
+        assert_eq!(search_cells(&bbox).unwrap().len(), 1);
+    }
+
+    /// A box past the ceiling is refused, not answered with a slice of itself.
+    #[test]
+    fn an_oversized_search_area_is_refused() {
+        let bbox = LLBBox::new(40.0, -5.0, 48.0, 5.0).unwrap();
+        let err = search_cells(&bbox).unwrap_err();
+        assert!(err.contains("smaller area"), "{err}");
     }
 
     /// Builds an otherwise-valid API record so each case can vary one field.

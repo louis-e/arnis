@@ -661,7 +661,7 @@ pub fn fetch_metadata(cfg: &FetchConfig) -> Result<Fetched, String> {
         padded.max_lat,
         padded.max_lon,
     )?;
-    let cells = api::search_cells(&llbbox);
+    let cells = api::search_cells(&llbbox)?;
 
     emit_gui_progress_update(MESSAGE_ONLY, "Facades: searching coverage...");
     let results: Vec<Result<CellResult, String>> = cells
