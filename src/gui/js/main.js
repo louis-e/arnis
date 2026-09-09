@@ -1770,6 +1770,11 @@ function setPrecomputeStatus(text, kind, detail) {
 // Why the button cannot be pressed, or "" when it can. The wording is what the
 // button's tooltip says, so a disabled button always explains itself.
 function precomputeBlockedReason() {
+  // The source control decides this, and it is the reason the row above greys
+  // the button out; without it here the next refresh switches it back on.
+  if (getEffectiveFacadeSource() !== 'mapillary') {
+    return "Set Facade Source to Mapillary first.";
+  }
   if (!getMapillaryToken()) return "Add a Mapillary token above first.";
   if (!selectedBBox || selectedBBox === "0.000000 0.000000 0.000000 0.000000") {
     return "Select an area on the map first.";
