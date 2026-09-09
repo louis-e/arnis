@@ -189,14 +189,19 @@ const WARM_STONE: &[Block] = &[
 /// Whether a tag colour reads as warm building stone rather than a painted or
 /// coloured wall.
 ///
-/// In OkLab: yellow present, not red or orange, not green, not saturated, and
-/// light enough to be stone rather than timber. Measured against the family it
-/// has to admit (buff, sand, khaki, cream) and the neighbours it has to refuse
-/// (brick red, orange, salmon, green, blue, grey, white, dark brown).
+/// In OkLab: yellow present, not green, not saturated, light enough to be
+/// stone rather than timber, and a hue of at least 60 degrees from the red
+/// axis. The hue floor is what separates stone from render: every buff, sand,
+/// khaki and cream tag measured in Manhattan and San Francisco sits at 65
+/// degrees or more, and every peach, salmon and rosy brown (`#E0AF94`,
+/// `#9B6950`, `#A17665`) at 52 or less, so a plain bound on `a` let those in
+/// while a hue floor admits the same stone family and refuses them.
 fn reads_as_warm_stone(color: RGBTuple) -> bool {
     let (l, a, b) = crate::colors::oklab_components(&color);
     let chroma = (a * a + b * b).sqrt();
-    b > 0.030 && (-0.05..0.06).contains(&a) && b < 0.13 && l > 0.55 && chroma < 0.11
+    // tan(60 degrees): on the warm side of the a axis, b has to lead a by that.
+    let yellow_enough = a <= 0.0 || b > 1.73 * a;
+    b > 0.030 && a > -0.05 && yellow_enough && b < 0.13 && l > 0.55 && chroma < 0.11
 }
 
 /// Wall block for a `building:colour`/`colour` tag value.
@@ -569,6 +574,10 @@ mod tests {
             ("pale sand", (222u8, 205u8, 160u8)),
             ("khaki", (195, 176, 145)),
             ("cream", (240, 230, 205)),
+            // The darkest tans that are still stone: 65 and 70 degrees of hue.
+            ("dark buff #BB9066", (187, 144, 102)),
+            ("buff #B8946B", (184, 148, 107)),
+            ("greige #C4C4A2", (196, 196, 162)),
         ] {
             assert!(reads_as_warm_stone(c), "{name} should read as warm stone");
         }
@@ -579,8 +588,16 @@ mod tests {
             ("green", (90, 150, 80)),
             ("blue", (80, 110, 180)),
             ("grey", (160, 160, 160)),
+            ("grey beige #9F9281", (159, 146, 129)),
             ("white", (245, 245, 245)),
             ("dark brown", (90, 60, 40)),
+            // Render and brick colours real tags carry, all under 56 degrees.
+            ("peach #E0AF94", (224, 175, 148)),
+            ("reddish brown #9B6950", (155, 105, 80)),
+            ("rosy brown #A17665", (161, 118, 101)),
+            ("rosy brown #987266", (152, 114, 102)),
+            ("rosy tan #B48C76", (180, 140, 118)),
+            ("taupe #876E5D", (135, 110, 93)),
         ] {
             assert!(!reads_as_warm_stone(c), "{name} must not");
         }
