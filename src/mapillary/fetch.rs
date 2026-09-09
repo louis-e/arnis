@@ -2189,11 +2189,13 @@ mod tests {
     #[test]
     fn a_cluster_that_inflates_past_the_cap_is_refused() {
         use std::io::Write;
-        let mut enc =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
         enc.write_all(&vec![0u8; 4096]).unwrap();
         let deflated = enc.finish().unwrap();
-        assert!(inflate_capped(&deflated, 4096).is_ok(), "exactly the cap is fine");
+        assert!(
+            inflate_capped(&deflated, 4096).is_ok(),
+            "exactly the cap is fine"
+        );
         let err = inflate_capped(&deflated, 4095).unwrap_err();
         assert!(err.contains("more than"), "{err}");
     }

@@ -1519,6 +1519,9 @@ pub fn generate_world_with_options(
 
     // Save world
     if let Err(e) = editor.save() {
+        // The panels were waiting for the pack this save was going to make a
+        // world for; without one they are only memory.
+        crate::mapillary::displays::discard();
         return Err(e.to_string());
     }
     bench.mark("save");
@@ -1565,6 +1568,10 @@ pub fn generate_world_with_options(
             Ok(None) => {}
             Err(e) => eprintln!("Warning: Failed to write facade panels: {e}"),
         }
+        // The Mapillary walls have no reader past this point, and in the GUI
+        // the process lives on with the next generation: every exported wall's
+        // image would otherwise stay resident until that one installs its own.
+        crate::mapillary::facades::clear();
     }
 
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.

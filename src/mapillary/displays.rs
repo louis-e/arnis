@@ -55,13 +55,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::io::{Cursor, Write};
+use std::io::{BufWriter, Cursor, Seek, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
 use image::{RgbImage, RgbaImage};
+use rayon::prelude::*;
 
 use super::atlas::{atlas_budget, MIN_PX_PER_BLOCK};
 use super::facades::{self, FacadeStore};
@@ -1031,7 +1032,17 @@ pub fn write_packs(world_path: &Path) -> Result<Option<PackReport>, String> {
         (std::mem::take(&mut r.panels), r.px)
     };
     emit_gui_progress_update(98.0, "Writing facade panels...");
-    write_packs_for(world_path, &panels, px).map(Some)
+    write_packs_for(world_path, panels, px).map(Some)
+}
+
+/// Drops the panels of a run that will not reach [`write_packs`].
+///
+/// The registry lives for the process, and a city's crops are a few hundred
+/// megabytes that would otherwise sit there from a failed save until the next
+/// generation resets it.
+pub fn discard() {
+    let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    r.panels = Vec::new();
 }
 
 /// Total panel texture area at `px` pixels per block.
@@ -1054,7 +1065,7 @@ fn pixel_hash(p: &Panel) -> u64 {
 /// is taken once here instead of once per `fit_px` step and once more while
 /// the zip is written.
 fn pixel_hashes(panels: &[Panel]) -> Vec<u64> {
-    panels.iter().map(pixel_hash).collect()
+    panels.par_iter().map(pixel_hash).collect()
 }
 
 fn panel_key(p: &Panel, pixels: u64, px: u32) -> (u64, u32, u32) {
@@ -1119,10 +1130,19 @@ fn pack_mcmeta(pack_format: u32) -> String {
     .to_string()
 }
 
-/// The resource pack as zip bytes: pack.mcmeta plus a model definition, a
-/// model and a texture per panel.
-fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
-    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+/// Writes the resource pack into `out`: pack.mcmeta, the marker, an item
+/// definition and a model per panel, and one texture per distinct picture.
+///
+/// The pictures are resized and PNG encoded in parallel, a chunk at a time,
+/// and every crop leaves the panel list before that starts. On a city the
+/// serial encode was nine tenths of the time the panels added to a run, and
+/// the crops held through it were most of the memory.
+fn write_resource_zip<W: Write + Seek>(
+    out: W,
+    mut panels: Vec<(Panel, u64)>,
+    px: u32,
+) -> Result<(), String> {
+    let mut zip = zip::ZipWriter::new(out);
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     // A PNG carries deflated pixels already, so deflating it a second time
@@ -1140,14 +1160,12 @@ fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
         pack_mcmeta(RESOURCEPACK_FORMAT).as_bytes(),
         options,
     )?;
-    put(
-        PACK_MARKER.to_string(),
-        b"arnis facade panels
-",
-        options,
-    )?;
+    put(PACK_MARKER.to_string(), b"arnis facade panels\n", options)?;
+
+    // The definitions and models, and which panel owns each distinct picture.
     let mut texture_of: FnvHashMap<(u64, u32, u32), String> = FnvHashMap::default();
-    for (p, pixels) in panels {
+    let mut owners: Vec<usize> = Vec::new();
+    for (i, (p, pixels)) in panels.iter().enumerate() {
         put(
             format!("assets/{NAMESPACE}/items/{}.json", p.name),
             item_definition_json(&p.name).as_bytes(),
@@ -1155,7 +1173,7 @@ fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
         )?;
         let key = panel_key(p, *pixels, px);
         if let Some(shared) = texture_of.get(&key) {
-            // An identical panel already wrote this picture; point at it.
+            // An identical panel already owns this picture; point at it.
             put(
                 format!("assets/{NAMESPACE}/models/item/{}.json", p.name),
                 model_json_for(shared).as_bytes(),
@@ -1169,23 +1187,52 @@ fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
             model_json(&p.name).as_bytes(),
             options,
         )?;
-        let img = image::imageops::resize(
-            &p.tex,
-            tex_side(p.w, px),
-            tex_side(p.h, px),
-            image::imageops::FilterType::Triangle,
-        );
-        let mut png = Vec::new();
-        img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
-            .map_err(|e| format!("encode {}: {e}", p.name))?;
-        put(
-            format!("assets/{NAMESPACE}/textures/block/{}.png", p.name),
-            &png,
-            png_options,
-        )?;
+        owners.push(i);
     }
-    let cursor = zip.finish().map_err(|e| e.to_string())?;
-    Ok(cursor.into_inner())
+
+    // The pictures. Every crop leaves the list here, the owners into the queue
+    // and the duplicates straight to the drop, so from now on the run holds
+    // the crops still to be written plus one chunk of PNGs, not the crops
+    // plus the whole pack.
+    let mut queue: Vec<(String, RgbImage, u32, u32)> = Vec::with_capacity(owners.len());
+    for i in owners {
+        let (p, _) = &mut panels[i];
+        let tex = std::mem::replace(&mut p.tex, RgbImage::new(0, 0));
+        queue.push((p.name.clone(), tex, tex_side(p.w, px), tex_side(p.h, px)));
+    }
+    drop(panels);
+    // Chunked so the encoded bytes waiting for the zip stay a few megabytes.
+    const CHUNK: usize = 64;
+    while !queue.is_empty() {
+        let n = queue.len().min(CHUNK);
+        let batch: Vec<_> = queue.drain(..n).collect();
+        let encoded: Vec<Result<(String, Vec<u8>), String>> = batch
+            .into_par_iter()
+            .map(|(name, tex, w, h)| {
+                // A crop already at the pack's size is encoded as it is
+                // rather than copied first.
+                let img = if tex.width() == w && tex.height() == h {
+                    tex
+                } else {
+                    image::imageops::resize(&tex, w, h, image::imageops::FilterType::Triangle)
+                };
+                let mut png = Vec::new();
+                img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+                    .map_err(|e| format!("encode {name}: {e}"))?;
+                Ok((name, png))
+            })
+            .collect();
+        for item in encoded {
+            let (name, png) = item?;
+            put(
+                format!("assets/{NAMESPACE}/textures/block/{name}.png"),
+                &png,
+                png_options,
+            )?;
+        }
+    }
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// The entry that marks a world pack as ours.
@@ -1217,10 +1264,13 @@ pub(super) fn is_arnis_pack(path: &Path) -> bool {
     })
 }
 
-/// Installs the world pack at `path`, stepping a pack we did not write aside
-/// first rather than overwriting it. The backup is numbered so a second
-/// generation cannot bury the first one's rescue.
-pub(super) fn write_world_pack(path: &Path, bytes: &[u8]) -> Result<(), String> {
+/// Installs the staged pack file at `path`, stepping a pack we did not write
+/// aside first rather than overwriting it. The backup is numbered so a second
+/// generation cannot bury the first one's rescue. The staged file is a sibling
+/// of `path`, so the last step is one rename: a run that dies half way leaves
+/// the world with the pack it had, not a truncated zip that the next run would
+/// take for someone else's and move aside.
+pub(super) fn install_world_pack(path: &Path, staged: &Path) -> Result<(), String> {
     if path.exists() && !is_arnis_pack(path) {
         let mut backup = path.with_extension("zip.bak");
         let mut n = 1;
@@ -1235,46 +1285,70 @@ pub(super) fn write_world_pack(path: &Path, bytes: &[u8]) -> Result<(), String> 
             backup.display()
         ));
     }
-    std::fs::write(path, bytes).map_err(|e| format!("write {}: {e}", path.display()))
+    std::fs::rename(staged, path).map_err(|e| format!("install {}: {e}", path.display()))
+}
+
+/// [`install_world_pack`] for bytes already in memory.
+#[cfg(test)]
+pub(super) fn write_world_pack(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let staged = path.with_extension("zip.tmp");
+    std::fs::write(&staged, bytes).map_err(|e| format!("write {}: {e}", staged.display()))?;
+    install_world_pack(path, &staged)
 }
 
 /// Writes the resource pack for `panels` into `world_path`, at `requested_px`
 /// pixels per block or the highest resolution below it that fits the atlas.
 fn write_packs_for(
     world_path: &Path,
-    panels: &[Panel],
+    panels: Vec<Panel>,
     requested_px: u32,
 ) -> Result<PackReport, String> {
-    let hashes = pixel_hashes(panels);
-    let px = fit_px(panels, &hashes, requested_px);
+    let hashes = pixel_hashes(&panels);
+    let px = fit_px(&panels, &hashes, requested_px);
     if px < requested_px {
         warn(&format!(
             "Facade panels: {} panels would not fit the game's block atlas at {requested_px} px per block; using {px} px.",
             panels.len()
         ));
     }
-    if atlas_area(panels, &hashes, px) > atlas_budget() {
+    if atlas_area(&panels, &hashes, px) > atlas_budget() {
         warn(&format!(
             "Facade panels: {} panels exceed the block atlas even at {px} px per block; the game may fail to stitch them.",
             panels.len()
         ));
     }
-    let mut panels: Vec<(&Panel, u64)> = panels.iter().zip(hashes).collect();
+    let count = panels.len();
+    let mut panels: Vec<(Panel, u64)> = panels.into_iter().zip(hashes).collect();
     panels.sort_by(|a, b| a.0.name.cmp(&b.0.name));
 
-    // The same zip at both places the game has looked for a world's pack.
-    let bytes = resource_zip(&panels, px)?;
     let rp_dir = world_path.join("resourcepacks");
     std::fs::create_dir_all(&rp_dir).map_err(|e| format!("create {}: {e}", rp_dir.display()))?;
-    for path in [
-        world_path.join("resources.zip"),
-        rp_dir.join("resources.zip"),
-    ] {
-        write_world_pack(&path, &bytes)?;
+    let primary = world_path.join("resources.zip");
+    let secondary = rp_dir.join("resources.zip");
+
+    // Streamed to disk beside its final name: assembled in memory the zip was
+    // as large again as the crops on a city. The game has looked in two places
+    // for a world's pack, so the finished file is copied to the other one.
+    let staged = primary.with_extension("zip.tmp");
+    let written = (|| -> Result<(), String> {
+        let file = std::fs::File::create(&staged)
+            .map_err(|e| format!("create {}: {e}", staged.display()))?;
+        let mut out = BufWriter::new(file);
+        write_resource_zip(&mut out, panels, px)?;
+        out.flush()
+            .map_err(|e| format!("write {}: {e}", staged.display()))
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&staged);
+        return Err(e);
     }
+    install_world_pack(&primary, &staged)?;
+    let staged = secondary.with_extension("zip.tmp");
+    std::fs::copy(&primary, &staged).map_err(|e| format!("copy {}: {e}", staged.display()))?;
+    install_world_pack(&secondary, &staged)?;
 
     Ok(PackReport {
-        panels: panels.len(),
+        panels: count,
         px,
         requested_px,
     })
@@ -1541,7 +1615,7 @@ mod tests {
             h: 2.0,
             tex: RgbImage::from_pixel(24, 16, Rgb([10, 20, 30])),
         }];
-        let report = write_packs_for(&world, &panels, 16).unwrap();
+        let report = write_packs_for(&world, panels, 16).unwrap();
         assert_eq!((report.panels, report.px), (1, 16));
         // Display panels are resource pack only: no variants, no level.dat.
         assert!(!world.join("datapacks").exists());
@@ -2238,7 +2312,10 @@ mod tests {
             h: 3.0,
             tex: RgbImage::from_pixel(32, 24, Rgb([7, 8, 9])),
         }];
-        write_packs_for(&world, &panels, 16).unwrap();
+        write_packs_for(&world, panels, 16).unwrap();
+        // Staged beside its final name and renamed into place, nothing left.
+        assert!(!world.join("resources.zip.tmp").exists());
+        assert!(!world.join("resourcepacks/resources.zip.tmp").exists());
 
         let file = std::fs::File::open(world.join("resources.zip")).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
