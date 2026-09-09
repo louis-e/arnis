@@ -894,20 +894,20 @@ struct MapillaryCreditRow {
 /// recreate the directory tree.
 #[tauri::command]
 async fn gui_clear_tile_caches() -> Result<String, String> {
-    // A running generation or precompute reads and writes these caches; wiped
-    // under it, a precompute's own work comes back as misses half way through.
-    if BUSY.load(std::sync::atomic::Ordering::Acquire) != BUSY_IDLE {
-        return Err(
-            "A generation or precompute is running. Clear the caches once it has finished."
-                .to_string(),
-        );
-    }
+    // Held for the whole wipe, not checked once: a generation that took the
+    // slot while the files were still going would read its caches out from
+    // under itself.
+    let slot = BusySlot::acquire(BUSY_CLEAR)
+        .map_err(|e| format!("{e} Clear the caches once it has finished."))?;
     // Off the webview thread for the same reason as `gui_get_cache_size`: the
     // cost is in the number of files, and a facade cache reaches tens of
     // thousands.
-    tauri::async_runtime::spawn_blocking(clear_tile_caches_now)
-        .await
-        .map_err(|e| format!("Cache clear task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let _slot = slot;
+        clear_tile_caches_now()
+    })
+    .await
+    .map_err(|e| format!("Cache clear task failed: {e}"))?
 }
 
 fn clear_tile_caches_now() -> Result<String, String> {
@@ -1233,6 +1233,7 @@ static BUSY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(BUSY
 const BUSY_IDLE: u8 = 0;
 const BUSY_GENERATION: u8 = 1;
 const BUSY_PRECOMPUTE: u8 = 2;
+const BUSY_CLEAR: u8 = 3;
 
 /// Owns [`BUSY`] for the length of one job and clears it on drop, including
 /// on the early-return paths before the worker is spawned.
@@ -1249,6 +1250,7 @@ impl BusySlot {
             // characters, and a sentence that ends mid-word says less than a
             // short one that finishes.
             Err(BUSY_PRECOMPUTE) => Err("A precompute is running.".to_string()),
+            Err(BUSY_CLEAR) => Err("The caches are being cleared.".to_string()),
             Err(_) => Err("A generation is already running.".to_string()),
         }
     }
@@ -1876,11 +1878,28 @@ fn gui_start_generation(
 
 #[cfg(test)]
 mod generation_slot_tests {
-    use super::{BusySlot, BUSY_GENERATION, BUSY_PRECOMPUTE};
+    use super::{BusySlot, BUSY_CLEAR, BUSY_GENERATION, BUSY_PRECOMPUTE};
 
     /// The slot is one process global, so two tests taking it at once would
     /// each see the other's claim and fail for no reason of their own.
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The wipe holds the slot for its whole length, so a generation cannot
+    /// start reading the caches while the files are still going.
+    #[test]
+    fn a_cache_wipe_and_a_generation_exclude_each_other() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+
+        let clearing = BusySlot::acquire(BUSY_CLEAR).expect("the wipe gets the slot");
+        let refused = BusySlot::acquire(BUSY_GENERATION).expect_err("the generation waits");
+        assert!(refused.contains("cleared"), "{refused}");
+        drop(clearing);
+
+        let generating = BusySlot::acquire(BUSY_GENERATION).expect("the generation gets it");
+        let refused = BusySlot::acquire(BUSY_CLEAR).expect_err("the wipe waits");
+        assert!(refused.contains("generation"), "{refused}");
+        drop(generating);
+    }
 
     #[test]
     fn second_generation_is_refused_until_the_first_finishes() {
