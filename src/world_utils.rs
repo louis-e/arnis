@@ -46,10 +46,54 @@ pub fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
     }
 }
 
-/// Sanitizes an area name for safe use in filesystem paths.
-/// Replaces characters that are invalid on Windows/macOS/Linux, trims whitespace,
-/// and limits length to prevent excessively long filenames.
-pub fn sanitize_for_filename(name: &str) -> String {
+/// Replaces characters that are invalid on Windows/macOS/Linux with `_`, trims
+/// whitespace, and limits length to prevent excessively long filenames.
+/// Unlike [`sanitize_for_filename`], an all-invalid/empty input is returned
+/// as an empty string rather than masked behind a fallback label, so callers
+/// that need to distinguish "nothing usable survived" from a real sanitized
+/// value (e.g. a custom world name) can do so unambiguously.
+fn sanitize_chars_and_trim(name: &str) -> String {
+    sanitize_chars_and_trim_capped(name, MAX_FILENAME_BYTES)
+}
+
+/// Byte budget for a name derived from an area/place lookup. Kept well under
+/// the 255-byte limit filesystems put on a single path component, because
+/// these names get wrapped in longer strings (`Arnis {name}.mcworld`).
+const MAX_FILENAME_BYTES: usize = 64;
+
+/// Longest custom world name a user may set, counted in characters (not
+/// bytes) so the limit means the same thing in every script. Mirrored by the
+/// world-name editor's `maxlength` and character counter in the GUI, so what
+/// the user is allowed to type is exactly what lands on disk.
+pub const MAX_CUSTOM_WORLD_NAME_CHARS: usize = 48;
+
+/// Byte budget for a custom world name. Sized so the character cap above is
+/// always the binding limit - even at UTF-8's 4 bytes per character, plus
+/// room for a `" (99)"` de-duplication suffix - while still leaving the
+/// directory name inside the filesystem's 255-byte component limit.
+const MAX_CUSTOM_WORLD_NAME_BYTES: usize = MAX_CUSTOM_WORLD_NAME_CHARS * 4 + 5;
+
+/// Sanitizes a user-supplied world name, capping it by characters so a
+/// non-Latin name isn't silently cut to a fraction of what was typed the way
+/// a byte cap would (48 Japanese characters are 144 bytes).
+fn sanitize_custom_world_name(name: &str) -> String {
+    let capped: String = name.chars().take(MAX_CUSTOM_WORLD_NAME_CHARS).collect();
+    sanitize_chars_and_trim_capped(&capped, MAX_CUSTOM_WORLD_NAME_BYTES)
+}
+
+/// Shared body of [`sanitize_chars_and_trim`], with the byte budget supplied
+/// by the caller.
+fn sanitize_chars_and_trim_capped(name: &str, max_bytes: usize) -> String {
+    // Windows forbids directory/file names ending in '.' or ' ' (trailing
+    // dots/spaces are silently stripped by the OS, which would make our
+    // sanitized name mismatch the actual created directory). Strip any
+    // trailing run of either so what we return is what actually lands on
+    // disk on every platform.
+    let strip_trailing_unsafe = |s: &str| -> String {
+        s.trim_end_matches(|c: char| c == '.' || c.is_whitespace())
+            .to_string()
+    };
+
     let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     let mut sanitized: String = name
         .chars()
@@ -61,22 +105,30 @@ pub fn sanitize_for_filename(name: &str) -> String {
             }
         })
         .collect();
-    sanitized = sanitized.trim().to_string();
+    sanitized = strip_trailing_unsafe(sanitized.trim());
 
     // Limit length to avoid excessively long filenames
-    const MAX_LEN: usize = 64;
-    if sanitized.len() > MAX_LEN {
-        // Find a valid UTF-8 char boundary at or before MAX_LEN bytes
+    if sanitized.len() > max_bytes {
+        // Find a valid UTF-8 char boundary at or before max_bytes
         let cutoff = sanitized
             .char_indices()
-            .take_while(|(idx, _)| *idx < MAX_LEN)
+            .take_while(|(idx, _)| *idx < max_bytes)
             .last()
             .map(|(idx, ch)| idx + ch.len_utf8())
             .unwrap_or(0);
         sanitized.truncate(cutoff);
-        sanitized = sanitized.trim_end().to_string();
+        // Truncation can newly expose a trailing dot/space/whitespace run.
+        sanitized = strip_trailing_unsafe(&sanitized);
     }
 
+    sanitized
+}
+
+/// Sanitizes an area name for safe use in filesystem paths.
+/// Replaces characters that are invalid on Windows/macOS/Linux, trims whitespace,
+/// and limits length to prevent excessively long filenames.
+pub fn sanitize_for_filename(name: &str) -> String {
+    let sanitized = sanitize_chars_and_trim(name);
     if sanitized.is_empty() {
         "Unknown Location".to_string()
     } else {
@@ -102,31 +154,24 @@ pub fn build_bedrock_output(bbox: &LLBBox, output_dir: PathBuf) -> (PathBuf, Str
 ///
 /// Returns the full path to the newly created world directory.
 pub fn create_new_world(base_path: &Path) -> Result<String, String> {
-    // Generate a unique world name with proper counter
-    // Check for both "Arnis World X" and "Arnis World X: Location" patterns
-    let mut counter: i32 = 1;
-    let unique_name: String = loop {
-        let candidate_name: String = format!("Arnis World {counter}");
-        let candidate_path: PathBuf = base_path.join(&candidate_name);
+    create_new_world_with_name(base_path, None)
+}
 
-        // Check for exact match (no location suffix)
-        let exact_match_exists = candidate_path.exists();
-
-        // Check for worlds with location suffix (Arnis World X: Location)
-        let location_pattern = format!("Arnis World {counter}: ");
-        let location_match_exists = fs::read_dir(base_path)
-            .map(|entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .any(|name| name.starts_with(&location_pattern))
-            })
-            .unwrap_or(false);
-
-        if !exact_match_exists && !location_match_exists {
-            break candidate_name;
-        }
-        counter += 1;
+/// Same as [`create_new_world`], but lets the caller request a specific world
+/// name instead of the auto-generated "Arnis World N" scheme. `custom_name` is
+/// sanitized for filesystem safety and de-duplicated against existing worlds
+/// in `base_path` (appending " (2)", " (3)", ... on collision). A `None`,
+/// empty/whitespace-only, or entirely-invalid custom name falls back to the
+/// default "Arnis World N" scheme.
+///
+/// Returns the full path to the newly created world directory.
+pub fn create_new_world_with_name(
+    base_path: &Path,
+    custom_name: Option<&str>,
+) -> Result<String, String> {
+    let unique_name: String = match custom_name.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw_name) => generate_unique_custom_world_name(base_path, raw_name),
+        None => generate_unique_default_world_name(base_path),
     };
 
     let new_world_path: PathBuf = base_path.join(&unique_name);
@@ -223,6 +268,202 @@ pub fn create_new_world(base_path: &Path) -> Result<String, String> {
     const ICON_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/icon.png");
     fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
         .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
+
+    Ok(new_world_path.display().to_string())
+}
+
+/// Generates a unique "Arnis World N" name.
+/// Checks for both "Arnis World X" and "Arnis World X: Location" patterns.
+fn generate_unique_default_world_name(base_path: &Path) -> String {
+    let mut counter: i32 = 1;
+    loop {
+        let candidate_name: String = format!("Arnis World {counter}");
+        let candidate_path: PathBuf = base_path.join(&candidate_name);
+
+        // Check for exact match (no location suffix)
+        let exact_match_exists = candidate_path.exists();
+
+        // Check for worlds with location suffix (Arnis World X: Location)
+        let location_pattern = format!("Arnis World {counter}: ");
+        let location_match_exists = fs::read_dir(base_path)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .any(|name| name.starts_with(&location_pattern))
+            })
+            .unwrap_or(false);
+
+        if !exact_match_exists && !location_match_exists {
+            return candidate_name;
+        }
+        counter += 1;
+    }
+}
+
+/// Builds a unique world name from a user-supplied custom name: sanitizes it
+/// for filesystem safety, then de-duplicates against existing worlds in
+/// `base_path` by appending " (2)", " (3)", etc. Falls back to the default
+/// "Arnis World N" scheme if nothing usable survives sanitization (e.g. the
+/// input was only invalid characters).
+fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String {
+    generate_unique_custom_world_name_excluding(base_path, raw_name, None)
+}
+
+/// True when both paths exist and resolve to the same directory entry.
+/// Canonicalizing normalises the case on case-insensitive filesystems, which
+/// a textual `Path` comparison would not. Returns false if either side can't
+/// be resolved, so an unreadable path is never mistaken for a match.
+fn is_same_existing_path(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Same as [`generate_unique_custom_world_name`], but a candidate path that
+/// resolves to `exclude` is treated as available. Used when renaming a world
+/// in place so keeping (or case-tweaking) its current name doesn't get bumped
+/// to " (2)" just because its own directory already "collides" with itself.
+fn generate_unique_custom_world_name_excluding(
+    base_path: &Path,
+    raw_name: &str,
+    exclude: Option<&Path>,
+) -> String {
+    let sanitized = sanitize_custom_world_name(raw_name);
+
+    // Nothing usable survived sanitization (e.g. the input was only invalid
+    // characters), so fall back to the default naming scheme instead of
+    // creating a world named after an empty string.
+    if sanitized.is_empty() {
+        return generate_unique_default_world_name(base_path);
+    }
+
+    let is_available = |candidate: &Path| -> bool {
+        if !candidate.exists() {
+            return true;
+        }
+        // The candidate is taken - unless it *is* the excluded world's own
+        // directory. Compared canonically rather than by path equality: on
+        // Windows and macOS the filesystem matches case-insensitively, so
+        // re-capitalising a world ("My World" -> "my world") finds an
+        // existing directory whose path text differs from `exclude`, and a
+        // plain `==` would read the world's own directory as a collision and
+        // bump it to " (2)".
+        exclude.is_some_and(|excluded| is_same_existing_path(candidate, excluded))
+    };
+
+    let candidate_path = base_path.join(&sanitized);
+    if is_available(&candidate_path) {
+        return sanitized;
+    }
+
+    let mut counter: i32 = 2;
+    loop {
+        let candidate = format!("{sanitized} ({counter})");
+        let candidate_path = base_path.join(&candidate);
+        if is_available(&candidate_path) {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
+/// Overwrites the `LevelName` field in an existing world's `level.dat`.
+fn update_level_name(world_path: &Path, new_name: &str) -> Result<(), String> {
+    let level_path = world_path.join("level.dat");
+    let level_data = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
+
+    let mut decoder = GzDecoder::new(level_data.as_slice());
+    let mut decompressed_data = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed_data)
+        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
+
+    let mut nbt_data: Value = fastnbt::from_bytes(&decompressed_data)
+        .map_err(|e| format!("Failed to parse level.dat: {e}"))?;
+
+    match nbt_data {
+        Value::Compound(ref mut root) => match root.get_mut("Data") {
+            Some(Value::Compound(ref mut data)) => {
+                data.insert("LevelName".to_string(), Value::String(new_name.to_string()));
+            }
+            _ => return Err("level.dat is missing its Data compound".to_string()),
+        },
+        _ => return Err("level.dat root is not a compound".to_string()),
+    }
+
+    let serialized_data =
+        fastnbt::to_bytes(&nbt_data).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
+
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized_data)
+        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
+    let compressed_data = encoder
+        .finish()
+        .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
+
+    fs::write(&level_path, compressed_data).map_err(|e| format!("Failed to write level.dat: {e}"))
+}
+
+/// Renames an already-created Java world in place: moves its directory to a
+/// sanitized, de-duplicated version of `new_name` (excluding the world's own
+/// current directory from collision checks) and updates `LevelName` in its
+/// `level.dat` to match. Returns the world's new full path.
+///
+/// Fails (without touching anything) if `world_path` isn't an existing
+/// directory or doesn't look like a world (no `level.dat`), so callers can't
+/// accidentally rename an arbitrary/unrelated folder. A failure to rewrite
+/// `level.dat` also moves the directory back, so an `Err` means the world is
+/// still where and what the caller last saw it - unless the rollback itself
+/// fails, which the error message then spells out.
+pub fn rename_world(world_path: &Path, new_name: &str) -> Result<String, String> {
+    if !world_path.is_dir() {
+        return Err("World directory does not exist".to_string());
+    }
+    if !world_path.join("level.dat").is_file() {
+        return Err("Not a valid world directory (missing level.dat)".to_string());
+    }
+    let base_path = world_path
+        .parent()
+        .ok_or_else(|| "World path has no parent directory".to_string())?;
+
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("World name cannot be blank".to_string());
+    }
+    // Same sanitizer the new name is actually built with, so this check can't
+    // pass a name that later resolves to nothing.
+    if sanitize_custom_world_name(trimmed).is_empty() {
+        return Err("World name is invalid after sanitization".to_string());
+    }
+
+    let unique_name =
+        generate_unique_custom_world_name_excluding(base_path, trimmed, Some(world_path));
+    let new_world_path = base_path.join(&unique_name);
+
+    let moved = new_world_path != world_path;
+    if moved {
+        fs::rename(world_path, &new_world_path)
+            .map_err(|e| format!("Failed to rename world directory: {e}"))?;
+    }
+
+    if let Err(update_error) = update_level_name(&new_world_path, &unique_name) {
+        // Put the directory back. Without this, a reported failure would still
+        // have moved the world, leaving the caller holding a `world_path` that
+        // no longer exists while it believes nothing changed.
+        if moved {
+            if let Err(rollback_error) = fs::rename(&new_world_path, world_path) {
+                return Err(format!(
+                    "{update_error}. The world was also left renamed to \
+                     \"{unique_name}\" because it could not be moved back: \
+                     {rollback_error}"
+                ));
+            }
+        }
+        return Err(update_error);
+    }
 
     Ok(new_world_path.display().to_string())
 }
@@ -553,6 +794,247 @@ pub fn set_spawn_in_level_dat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn level_name(world: &Path) -> String {
+        let raw = fs::read(world.join("level.dat")).unwrap();
+        let mut decompressed = Vec::new();
+        GzDecoder::new(raw.as_slice())
+            .read_to_end(&mut decompressed)
+            .unwrap();
+        let root: Value = fastnbt::from_bytes(&decompressed).unwrap();
+        let Value::Compound(root) = root else {
+            panic!("root not a compound");
+        };
+        let Some(Value::Compound(data)) = root.get("Data") else {
+            panic!("missing Data");
+        };
+        let Some(Value::String(name)) = data.get("LevelName") else {
+            panic!("missing LevelName");
+        };
+        name.clone()
+    }
+
+    #[test]
+    fn create_new_world_with_name_uses_custom_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My Cool World")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "My Cool World");
+        assert_eq!(level_name(&world), "My Cool World");
+    }
+
+    #[test]
+    fn create_new_world_with_name_dedupes_on_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Metropolis")).unwrap());
+        let second =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Metropolis")).unwrap());
+        let third =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Metropolis")).unwrap());
+        assert_eq!(first.file_name().unwrap(), "Metropolis");
+        assert_eq!(second.file_name().unwrap(), "Metropolis (2)");
+        assert_eq!(third.file_name().unwrap(), "Metropolis (3)");
+    }
+
+    #[test]
+    fn create_new_world_with_name_sanitizes_invalid_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My:World/Name?")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "My_World_Name_");
+    }
+
+    #[test]
+    fn create_new_world_with_name_falls_back_when_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("   ")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "Arnis World 1");
+    }
+
+    #[test]
+    fn create_new_world_with_name_accepts_literal_unknown_location() {
+        // Regression guard: must not be confused with sanitize_for_filename's
+        // internal fallback label for a genuinely empty/invalid name.
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(
+            create_new_world_with_name(tmp.path(), Some("Unknown Location")).unwrap(),
+        );
+        assert_eq!(world.file_name().unwrap(), "Unknown Location");
+    }
+
+    #[test]
+    fn create_new_world_with_name_none_uses_default_scheme() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), None).unwrap());
+        assert_eq!(world.file_name().unwrap(), "Arnis World 1");
+    }
+
+    #[test]
+    fn sanitize_for_filename_strips_trailing_dots() {
+        // Windows silently drops trailing dots/spaces from directory names,
+        // so a sanitized name must not end in one or the created directory
+        // would end up named differently than what we return.
+        assert_eq!(sanitize_for_filename("My World..."), "My World");
+        assert_eq!(sanitize_for_filename("My World. "), "My World");
+        assert_eq!(sanitize_for_filename("Trailing.dot."), "Trailing.dot");
+    }
+
+    #[test]
+    fn a_full_length_custom_name_survives_in_any_script() {
+        // The editor caps input at MAX_CUSTOM_WORLD_NAME_CHARS characters, so
+        // a name of exactly that many characters must come back untouched -
+        // in every script, not just Latin-1. A byte-based cap would quietly
+        // cut a Japanese or Cyrillic name to a third of what was typed.
+        let tmp = tempfile::tempdir().unwrap();
+        for name in [
+            "a".repeat(MAX_CUSTOM_WORLD_NAME_CHARS),
+            "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS),
+            "Мир"
+                .chars()
+                .cycle()
+                .take(MAX_CUSTOM_WORLD_NAME_CHARS)
+                .collect(),
+        ] {
+            let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some(&name)).unwrap());
+            assert_eq!(
+                world.file_name().unwrap().to_str().unwrap().chars().count(),
+                MAX_CUSTOM_WORLD_NAME_CHARS,
+                "{name} was truncated"
+            );
+            assert_eq!(world.file_name().unwrap(), name.as_str());
+        }
+    }
+
+    #[test]
+    fn area_names_keep_the_tighter_byte_budget() {
+        // Area names are wrapped in longer strings ("Arnis {name}.mcworld"),
+        // so they stay on the 64-byte budget, while a custom world name the
+        // user typed is capped by characters. Same input, deliberately
+        // different results - roughly 22 characters is all a 64-byte budget
+        // buys in a 3-bytes-per-character script (the cut keeps the character
+        // that starts inside the budget, so it can spill a couple of bytes
+        // past it), and that is what custom names used to be cut down to.
+        let long = "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS);
+        assert_eq!(sanitize_for_filename(&long).chars().count(), 22);
+        assert_eq!(
+            sanitize_custom_world_name(&long).chars().count(),
+            MAX_CUSTOM_WORLD_NAME_CHARS
+        );
+    }
+
+    #[test]
+    fn an_over_length_custom_name_is_capped_by_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let long = "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS + 20);
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some(&long)).unwrap());
+        assert_eq!(
+            world.file_name().unwrap(),
+            "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS).as_str()
+        );
+    }
+
+    #[test]
+    fn rename_world_moves_directory_and_updates_level_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
+        let renamed = PathBuf::from(rename_world(&world, "New Name").unwrap());
+
+        assert_eq!(renamed.file_name().unwrap(), "New Name");
+        assert!(!world.exists());
+        assert!(renamed.exists());
+        assert_eq!(level_name(&renamed), "New Name");
+    }
+
+    #[test]
+    fn rename_world_dedupes_against_other_worlds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world_a = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Alpha")).unwrap());
+        let _world_b = create_new_world_with_name(tmp.path(), Some("Beta")).unwrap();
+
+        // Renaming "Alpha" to the already-taken "Beta" must not clobber it.
+        let renamed = PathBuf::from(rename_world(&world_a, "Beta").unwrap());
+        assert_eq!(renamed.file_name().unwrap(), "Beta (2)");
+        assert_eq!(level_name(&renamed), "Beta (2)");
+    }
+
+    #[test]
+    fn rename_world_to_its_own_name_is_a_no_op() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Same Name")).unwrap());
+        let renamed = PathBuf::from(rename_world(&world, "Same Name").unwrap());
+        assert_eq!(renamed, world);
+        assert!(renamed.exists());
+        assert_eq!(level_name(&renamed), "Same Name");
+    }
+
+    #[test]
+    fn rename_world_allows_case_only_change() {
+        // On Windows/macOS the new directory "exists" (the filesystem matches
+        // case-insensitively) *and* is the world's own directory, so a plain
+        // path comparison against `exclude` misses it and the world gets
+        // bumped to "... (2)" for merely re-capitalising its own name.
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My World")).unwrap());
+        let renamed = PathBuf::from(rename_world(&world, "my world").unwrap());
+
+        assert_eq!(renamed.file_name().unwrap(), "my world");
+        assert_eq!(level_name(&renamed), "my world");
+        // Exactly one world directory, not an extra "my world (2)".
+        let dirs: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        assert_eq!(
+            dirs.len(),
+            1,
+            "case-only rename must not create a second world"
+        );
+    }
+
+    #[test]
+    fn rename_world_rejects_blank_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
+        assert!(rename_world(&world, "   ").is_err());
+        // Nothing should have moved on failure.
+        assert!(world.exists());
+    }
+
+    #[test]
+    fn rename_world_rejects_name_that_becomes_empty_after_sanitization() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
+        assert!(rename_world(&world, "...  ").is_err());
+        assert!(world.exists());
+        assert_eq!(level_name(&world), "Keep Me");
+    }
+
+    #[test]
+    fn rename_world_rolls_back_the_move_when_level_dat_cannot_be_updated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
+        // Unreadable as NBT, but still a file, so the up-front validation
+        // passes and the failure lands after the directory has been moved.
+        fs::write(world.join("level.dat"), b"not gzipped nbt").unwrap();
+
+        assert!(rename_world(&world, "New Name").is_err());
+        // An Err must mean nothing moved.
+        assert!(world.exists(), "world should have been moved back");
+        assert!(!tmp.path().join("New Name").exists());
+    }
+
+    #[test]
+    fn rename_world_rejects_nonexistent_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("Does Not Exist");
+        assert!(rename_world(&missing, "New Name").is_err());
+    }
 
     #[test]
     fn apply_java_world_settings_writes_gametype_and_daytime() {

@@ -175,17 +175,137 @@ a:hover {
   opacity: 1;
 }
 
+/* Bottom strip of the start button. Deliberately paints no background of its
+   own: .start-button-wrap owns the button's fill for both colour schemes, and
+   this row is transparent on top of it, so the row and #start-button read as
+   one button. The horizontal padding mirrors .start-button's, and the 3px/11px
+   vertical split reproduces the label spacing from back when the row was still
+   nested inside the button (3px below the button text, 11px to its bottom
+   edge). */
+.world-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  /* No `width: 100%`: the row is a stretch item of the flex-column wrapper, so
+     it already spans it. Setting it explicitly would add the padding on top
+     (content-box is the default here) and push the row out past the settings
+     button. */
+  min-width: 0;
+  padding: 3px 20px 11px;
+  cursor: pointer;
+}
+
 .world-name-label {
   font-size: 0.8em;
   color: #fecc44;
-  display: block;
   line-height: 1;
   min-height: 1em;
-  margin-top: 3px;
-  margin-bottom: -3px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* Inline editor for the custom world name, swapped in for .world-name-label
+   while editing. Sits inside .world-name-row (a sibling of #start-button,
+   not nested inside it), so it must not inherit the row's pointer cursor or
+   centered button text styling. */
+.world-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  font-size: 0.8em;
+  font-family: inherit;
+  line-height: 1.3;
+  color: #fecc44;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #fecc44;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin: 0;
+  box-shadow: none;
+  outline: none;
+  cursor: text;
+  text-align: left;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+/* At the character cap the field's own maxlength silently refuses anything
+   further, which on its own just feels like the keyboard stopped working.
+   Flipping the editor's gold accent to the red used for errors elsewhere is
+   the signal that the name is being held back rather than dropped. */
+.world-name-input[data-at-limit] {
+  color: #fa7878;
+  border-color: #fa7878;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-name-input {
+    transition: none;
+  }
+}
+
+/* Pencil icon toggled on via Settings > Custom World Name. Mirrors
+   .setting-revert's colors (the settings modal's per-row "Reset to
+   default" icon button) so it reads as the same family of small,
+   golden-accented icon actions. A real <button> (valid here since it's
+   nested in .world-name-row, a <div>, not in #start-button), so the
+   generic `button` rule's chrome must be reset first. The selector is
+   descendant-qualified so `width` outranks `.controls-box button`'s
+   `width: 100%`, which would otherwise stretch the icon across the whole
+   row (the same clash .settings-button solves with !important). */
+.world-name-row .world-name-edit-button {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.world-name-edit-button:hover,
+.world-name-edit-button:focus-visible {
+  background: rgba(254, 204, 68, 0.3);
+  border-color: transparent;
+}
+
+.world-name-edit-button:focus-visible {
+  outline: 1px solid #fecc44;
+  outline-offset: 1px;
+}
+
+.world-name-edit-button svg {
+  width: 12px;
+  height: 12px;
+  fill: rgba(254, 204, 68, 0.75);
+  display: block;
+  transition: fill 0.15s ease;
+  pointer-events: none;
+}
+
+.world-name-edit-button:hover svg,
+.world-name-edit-button:focus-visible svg {
+  fill: #fecc44;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-name-edit-button {
+    transition: none;
+  }
+  .world-name-edit-button svg {
+    transition: none;
+  }
 }
 
 .map-container {
@@ -1245,21 +1365,49 @@ input[type="range"] {
   width: 100%;
 }
 
-.start-button {
+/* #start-button and .world-name-row are two elements (the world-name editor
+   can't be nested inside a <button>) that have to look like one. The wrapper
+   paints the fill, corner and hover for both of them; giving each its own
+   background instead would mean re-deriving the generic `button` colours per
+   colour scheme in two places and risking a visible seam between them. */
+.start-button-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1;
-  padding: 14px 20px;
-  border: none;
+  background-color: #ffffff;
   border-radius: 8px 0 0 0;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+@media (prefers-color-scheme: dark) {
+  .start-button-wrap {
+    background-color: #0f0f0f98;
+  }
+}
+
+.start-button-wrap:hover {
+  background-color: #4caf50;
+}
+
+/* The :active variant is not cosmetic: dark mode's `button:active` rule is
+   more specific than a bare `.start-button`, so without it the button would
+   flash its own fill over the wrapper's while held down. */
+.start-button,
+.start-button:active {
+  background-color: transparent;
+}
+
+.start-button {
+  padding: 14px 20px 0;
+  border: none;
+  border-radius: 0;
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.3s;
   margin-top: 0;
   box-shadow: none;
-}
-
-.start-button:hover {
-  background-color: #4caf50;
 }
 
 .settings-button {

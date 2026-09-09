@@ -151,6 +151,7 @@ pub fn run_gui() -> Result<(), String> {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             gui_create_world,
+            gui_rename_world,
             gui_get_default_save_path,
             gui_get_default_bedrock_save_path,
             gui_get_default_luanti_save_path,
@@ -357,8 +358,13 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
 
 /// Creates a new Java Edition world in the given base save directory.
 /// Called when the user clicks "Create World".
+///
+/// `world_name` is `Some` only when the user has enabled the custom world
+/// name setting and typed a name; it is sanitized and de-duplicated by
+/// [`crate::world_utils::create_new_world_with_name`], which falls back to
+/// the default "Arnis World N" scheme when it is `None` or unusable.
 #[tauri::command]
-fn gui_create_world(save_path: String) -> Result<String, i32> {
+fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<String, i32> {
     let trimmed = save_path.trim();
     if trimmed.is_empty() {
         return Err(3);
@@ -367,11 +373,27 @@ fn gui_create_world(save_path: String) -> Result<String, i32> {
     if !base.is_dir() {
         return Err(3); // Error code 3: Failed to create new world
     }
-    create_new_world(&base).map_err(|_| 3)
+    create_new_world(&base, world_name.as_deref()).map_err(|_| 3)
 }
 
-fn create_new_world(base_path: &Path) -> Result<String, String> {
-    crate::world_utils::create_new_world(base_path)
+fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
+    crate::world_utils::create_new_world_with_name(base_path, custom_name)
+}
+
+/// Renames an already-created Java world in place (moves its directory and
+/// updates `LevelName` in `level.dat`). Called when the user commits an edit
+/// via the custom-world-name pencil after a world already exists.
+///
+/// Returns the world's new full path on success, or a human-readable error
+/// message on failure (e.g. the world no longer exists, the name is blank,
+/// or the filesystem rename failed).
+#[tauri::command]
+fn gui_rename_world(world_path: String, world_name: String) -> Result<String, String> {
+    let trimmed = world_path.trim();
+    if trimmed.is_empty() {
+        return Err("No world selected".to_string());
+    }
+    crate::world_utils::rename_world(Path::new(trimmed), &world_name)
 }
 
 /// Adds localized area name to the world name in level.dat
