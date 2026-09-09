@@ -844,6 +844,8 @@ fn cache_size_string() -> String {
     let mut total = dir_size_bytes(&get_base_cache_dir());
     total = total.saturating_add(dir_size_bytes(&crate::land_cover::land_cover_cache_dir()));
     total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
+    // Its own root beside the tile cache, and Clear Cache deletes it.
+    total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
     for root in crate::models_3d::model_cache_roots() {
         total = total.saturating_add(dir_size_bytes(&root));
     }
@@ -1164,11 +1166,10 @@ fn precompute_facades(bbox_text: &str, token: &str) -> Result<PrecomputeOutcome,
         // the front end hangs on the row as its tooltip.
         return Err(format!(
             "This area is {:.2} km², over the {:.2} km² limit.\n\n\
-             The pipeline registers every photograph that can see into the box, so what it \
-             costs follows the ground the box covers: 0.034 km² of Munich took 25 minutes and \
-             568 MB from cold, which puts this limit at about an hour already. Precompute a \
-             large area in pieces instead; the cache keeps every wall each piece builds, and \
-             no piece redoes another's.",
+             What the pipeline costs follows the ground the box covers: 0.034 km² of Munich \
+             took under twenty minutes and 470 MB from cold, which puts this limit at the \
+             better part of an hour already. Precompute a large area in pieces instead; the \
+             cache keeps every wall each piece builds, and no piece redoes another's.",
             area / 1e6,
             PRECOMPUTE_MAX_AREA_M2 / 1e6,
         ));
