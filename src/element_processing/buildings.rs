@@ -2394,25 +2394,31 @@ fn get_wall_block_for_category(
         }
         BuildingCategory::ModernSkyscraper => {
             // Modern skyscrapers use clean concrete/stone wall materials
-            const MODERN_SKYSCRAPER_WALL_OPTIONS: [Block; 6] = [
+            const MODERN_SKYSCRAPER_WALL_OPTIONS: [Block; 7] = [
                 GRAY_CONCRETE,
                 LIGHT_GRAY_CONCRETE,
                 WHITE_CONCRETE,
                 POLISHED_ANDESITE,
                 SMOOTH_STONE,
                 QUARTZ_BLOCK,
+                SMOOTH_SANDSTONE,
             ];
             MODERN_SKYSCRAPER_WALL_OPTIONS
                 [rng.random_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
         }
         BuildingCategory::ContemporarySkyscraper | BuildingCategory::GridSkyscraper => {
-            // Light modern concrete/stone frame.
-            const CONTEMPORARY: [Block; 5] = [
+            // Light modern concrete/stone frame. Sandstone belongs here for the
+            // same reason it belongs in the masonry and historic palettes: a
+            // buff stone frame around glass is as common as a pale concrete
+            // one, and without it every untagged tower comes out grey.
+            const CONTEMPORARY: [Block; 7] = [
                 LIGHT_GRAY_CONCRETE,
                 WHITE_CONCRETE,
                 GRAY_CONCRETE,
                 QUARTZ_BLOCK,
                 SMOOTH_STONE,
+                SMOOTH_SANDSTONE,
+                SANDSTONE,
             ];
             CONTEMPORARY[rng.random_range(0..CONTEMPORARY.len())]
         }
