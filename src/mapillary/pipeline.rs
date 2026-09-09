@@ -373,7 +373,10 @@ impl Default for PipelineResult {
 /// What the geometry stage produced and every later stage reads.
 pub struct Geometry {
     pub frame: Frame,
+    /// Every building the OSM margin returned, occluders included.
     pub buildings: Vec<Building>,
+    /// Only the walls a world over this box can place; see
+    /// [`footprints_and_walls`].
     pub walls: Vec<Wall>,
     pub cameras: BTreeMap<String, Camera>,
     pub metas: BTreeMap<String, PanoMeta>,
@@ -1888,10 +1891,16 @@ fn run_from_osm(cfg: &PipelineConfig, osm: Value, t0: Instant) -> Result<Pipelin
 
 /// The frame, the footprints and the walls, which is everything the OSM half of
 /// the fetch decides on its own.
+///
+/// Every building the Overpass margin returned comes back, because they are the
+/// occluders. The walls do not: a wall on a building outside the world box can
+/// never be placed (`geometry::WALL_MARGIN_M`), and building one costs the align
+/// stage its candidates and the texture stage a download.
 fn footprints_and_walls(cfg: &PipelineConfig, osm: &Value) -> (Frame, Vec<Building>, Vec<Wall>) {
     let frame = geometry::build_frame(cfg.fetch.bbox);
     let buildings = geometry::parse_overpass(osm, &frame, &cfg.params, Some(cfg.fetch.bbox));
-    let walls = geometry::walls_from_buildings(&buildings, &cfg.params);
+    let walls =
+        geometry::walls_from_buildings(&buildings, &cfg.params, &frame, Some(cfg.fetch.bbox));
     (frame, buildings, walls)
 }
 
@@ -1943,9 +1952,9 @@ const SEARCH_REACH_SLACK_M: f64 = 1.0;
 /// Files what this run proved about the walls that carry no facade.
 ///
 /// A wall that came back with no blocks cost the whole align stage to decide,
-/// and that answer is per wall like every other: on the Munich box it is 912 of
-/// 1030 walls, so without it a later generation over the same buildings has an
-/// answer for a tenth of them and redoes the rest.
+/// and that answer is per wall like every other: on the Munich box it is 411 of
+/// the 491 walls the box can place, so without it a later generation over the
+/// same buildings has an answer for a sixth of them and redoes the rest.
 ///
 /// It used to be filed per bbox, under a hash of the four corners, which meant
 /// a box moved by 22 cm found no record at all and repeated an area's align
@@ -2867,16 +2876,16 @@ mod tests {
     /// Two pieces precomputed side by side answer the box that covers both.
     ///
     /// This is the whole of the advice a box over the cap is given, so it is
-    /// worth a test of its own rather than a corollary of the one above. It is
-    /// also what the reach rule in `cache::store_wall` exists for: each piece
-    /// judges the other's walls as occluders and reaches nothing round them, so
-    /// filing that would put a zero over the proof its neighbour had paid for
-    /// and leave the wide box with no answer along the seam.
+    /// worth a test of its own rather than a corollary of the one above. Each
+    /// piece files its own half and nothing of its neighbour's, because a
+    /// building 23 m outside a box is an occluder there and
+    /// `geometry::WALL_MARGIN_M` keeps its walls out of that piece's work; the
+    /// seam holds because the two halves together are the whole.
     #[test]
     fn an_area_precomputed_in_two_pieces_answers_the_box_that_covers_both() {
         let tmp = tempfile::tempdir().unwrap();
         // A building in each half, 40 m apart, which is inside `osm_margin_m`
-        // of the other half's box: each piece sees the other's wall.
+        // of the other half's box: each piece sees the other as an occluder.
         let mut elements = osm_square(1, 11.5795, 48.13580, 20.0);
         elements.extend(osm_square(2, 11.5795, 48.13640, 20.0));
         let osm = json!({ "elements": elements });
@@ -2886,14 +2895,15 @@ mod tests {
         let north = super::super::types::BBox::new(48.13610, 11.5790, 48.13670, 11.5800);
 
         // Precomputed one piece at a time, the way the refusal tells the user to.
-        let walls = file_verdicts(&scratch_cfg(tmp.path(), south), &osm);
-        assert_eq!(file_verdicts(&scratch_cfg(tmp.path(), north), &osm), walls);
+        let in_south = file_verdicts(&scratch_cfg(tmp.path(), south), &osm);
+        let in_north = file_verdicts(&scratch_cfg(tmp.path(), north), &osm);
+        assert!(in_south > 0 && in_south == in_north, "one square each");
 
         let mut generation = scratch_cfg(tmp.path(), wide);
         generation.cache_only = Some("would have been refused".to_string());
         let result = run_from_osm(&generation, osm, Instant::now())
             .expect("both pieces together cover the box");
-        assert_eq!(result.stats.walls, walls);
+        assert_eq!(result.stats.walls, in_south + in_north);
         assert_eq!(result.stats.cache_misses, 0);
     }
 
@@ -3278,13 +3288,17 @@ mod tests {
         fetch_cfg.area_label = Some("Munich".to_string());
         let cfg = PipelineConfig::new(fetch_cfg, Params::default());
 
-        // First pass: an empty facade tree, so every wall is built. A few walls
-        // also dump everything they were made of, which is the only way to see
-        // that path run over real imagery. Beside `r147094_8p0`, which is there
-        // to exercise the dump, the list is the three walls this comparison
-        // disagrees with the reference on by the most metres of height, so the
-        // run leaves the gate table and the crops behind for exactly the walls
-        // somebody will want to look at next.
+        // First pass: an empty facade tree, so every wall the box can place is
+        // built. A few walls also dump everything they were made of, which is
+        // the only way to see that path run over real imagery. `r2379713_2p0`
+        // is there to exercise the dump on a relation wall that was split into
+        // pieces; the rest are walls this comparison disagrees with the
+        // reference on by the most metres of height, so the run leaves the gate
+        // table and the crops behind for exactly the walls somebody will want
+        // to look at next. `r147094_8p0` and `w79817227_4` used to head this
+        // list and are gone from it because they sit outside the box
+        // (`geometry::WALL_MARGIN_M`), so no run builds them and no dump could
+        // ever be written for them.
         let _ = std::fs::remove_dir_all(&cfg.facade_cache);
         let dump = std::env::temp_dir().join("arnis-facade-debug");
         let _ = std::fs::remove_dir_all(&dump);
@@ -3293,10 +3307,10 @@ mod tests {
                 debug: Some(DebugDump {
                     dir: dump.clone(),
                     walls: vec![
-                        "r147094_8p0".to_string(),
+                        "r2379713_2p0".to_string(),
                         "w81190185_2".to_string(),
                         "w81190199_0".to_string(),
-                        "w79817227_4".to_string(),
+                        "w87406534_0".to_string(),
                     ],
                 }),
                 ..cfg.clone()
@@ -3306,10 +3320,10 @@ mod tests {
         .expect("the pipeline runs");
         println!("cold: {}", cold.stats.summary());
         for name in [
-            "r147094_8p0.json",
-            "r147094_8p0_tex.png",
-            "r147094_8p0_blocks.png",
-            "r147094_8p0_gates.tsv",
+            "w81190185_2.json",
+            "w81190185_2_tex.png",
+            "w81190185_2_blocks.png",
+            "w81190185_2_gates.tsv",
         ] {
             assert!(
                 dump.join(name).exists(),
@@ -3405,10 +3419,36 @@ mod tests {
         );
         assert!(!theirs.is_empty(), "the reference export must be readable");
 
+        // The comparison runs over the walls this run set out to build, which
+        // `geometry::WALL_MARGIN_M` makes fewer than the reference's: the lab
+        // textures the occluders outside the box too, and no world can place
+        // one of those. A reference wall this run never built is not a wall it
+        // failed to texture, so it is taken out of `only_theirs` rather than
+        // out of the equality, which stays an equality over everything the run
+        // did build.
+        let built: BTreeSet<&str> = cold.walls.iter().map(|w| w.key.as_str()).collect();
         let mut only_ours: Vec<&String> =
             ours.keys().filter(|k| !theirs.contains_key(*k)).collect();
-        let mut only_theirs: Vec<&String> =
-            theirs.keys().filter(|k| !ours.contains_key(*k)).collect();
+        let pruned: Vec<&String> = theirs
+            .keys()
+            .filter(|k| !ours.contains_key(*k) && !built.contains(k.as_str()))
+            .collect();
+        // Or the filter below could hide a wall the run should have built.
+        for key in &pruned {
+            let owner = cold
+                .buildings
+                .iter()
+                .find(|b| key.starts_with(&format!("{}_", b.key)));
+            assert!(
+                owner.is_some_and(|b| !b.target),
+                "{key} was not built but its building is inside the box"
+            );
+        }
+        let pruned = pruned.len();
+        let mut only_theirs: Vec<&String> = theirs
+            .keys()
+            .filter(|k| !ours.contains_key(*k) && built.contains(k.as_str()))
+            .collect();
         only_ours.sort();
         only_theirs.sort();
 
@@ -3532,7 +3572,8 @@ mod tests {
             (v[0], v[v.len() / 2], v[v.len() - 1])
         };
         println!(
-            "walls: {} ours, {} theirs, {} shared; only ours {only_ours:?}; only theirs {only_theirs:?}",
+            "walls: {} ours, {} theirs, {} shared, {pruned} of theirs on buildings outside the \
+             box; only ours {only_ours:?}; only theirs {only_theirs:?}",
             ours.len(),
             theirs.len(),
             ours.keys().filter(|k| theirs.contains_key(*k)).count()
@@ -3623,6 +3664,20 @@ mod tests {
         // the same table to the last cell. The room is for a compiler or an
         // `image` release moving a rounding, not for the run wandering.
         //
+        // The four counts below were restated on 2026-09-09, when
+        // `geometry::WALL_MARGIN_M` stopped the run building the walls of
+        // buildings no world can place. Nothing about a wall changed: the two
+        // exports were compared file by file and every wall that survives
+        // carries the same bytes it carried before. What changed is how many
+        // walls there are to count. The reference textures 111 and 36 of those
+        // are on buildings this box cannot place, so the comparison is over 75
+        // walls of which 60 land on the same number of blocks, and each count
+        // below is the old measurement restricted to those 60. The medians and
+        // the worst cases are left where they were, because they moved only by
+        // walls leaving the set: 0.915 to 0.917 on the class grid, 0.887 to
+        // 0.886 pooled, 0.625 to 0.637 on windows, 3.58 to 3.34 on texture
+        // MAD, and the worst wall of each is the same wall.
+        //
         // The first two columns are the two defects the numbers were once blind
         // to, measured by putting each one back. The last four are this run
         // against four references: `munich_ref` (the lab before the registration
@@ -3700,19 +3755,22 @@ mod tests {
         // stone), 45.3 per cent are inside 0.06, and 10.9 per cent are more than
         // 0.12 apart and read as a different colour.
         const ONLY_OURS_MAX: usize = 2;
-        const TIER_MOVES_MAX: usize = 8;
-        const RECT_MOVED_MAX: usize = 50;
-        const CELLS_PASS_MIN: usize = 26;
+        const TIER_MOVES_MAX: usize = 6;
+        const RECT_MOVED_MAX: usize = 36;
+        const CELLS_PASS_MIN: usize = 19;
         const CELLS_MEDIAN_MIN: f64 = 0.87;
         const CELLS_POOLED_MIN: f64 = 0.84;
         const WINDOW_IOU_MIN: f64 = 0.59;
-        const COLOUR_PASS_MIN: usize = 49;
+        const COLOUR_PASS_MIN: usize = 34;
         const TEX_MAD_MEDIAN_MAX: f64 = 3.8;
         const TEX_MAD_MAX: f64 = 55.0;
         const TEX_IOU_MEDIAN_MIN: f64 = 0.99;
         const TEX_IOU_MIN: f64 = 0.80;
         const HEIGHT_MOVED_MAX: usize = 5;
-        const ORIGINALS_MIN: usize = 200;
+        // A floor on the `hires` ladder actually reading originals rather than
+        // quietly falling back to thumbnails, so it follows the walls the run
+        // builds: the union of their near views, not the box's.
+        const ORIGINALS_MIN: usize = 130;
         assert!(
             only_theirs.is_empty(),
             "the reference textured {} walls this run did not: {only_theirs:?}",

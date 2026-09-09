@@ -761,10 +761,39 @@ pub fn walls_from_building(b: &Building, params: &Params) -> Vec<Wall> {
     walls
 }
 
-/// Every wall of every building, in building order.
-pub fn walls_from_buildings(buildings: &[Building], params: &Params) -> Vec<Wall> {
+/// How far outside the world box a building may lie and still have its walls
+/// built.
+///
+/// A wall reaches the world only through `facades::project_cells`, which looks
+/// its owner up in the world's own OSM elements, so a wall on a building that
+/// answer never carried is worked on for nothing. Not the strict `target` flag,
+/// because the world asks Overpass again later and truncates every node to a
+/// block, which pulls a footprint up to 3.34 m back inside the box at the
+/// smallest scale that still builds objects. Keeping a few extra is much
+/// cheaper than losing one: 491 walls of 1030 on the Munich box against 445
+/// strict, for align 833 s instead of 1135 and texture 214 instead of 314.
+pub const WALL_MARGIN_M: f64 = 5.0;
+
+/// Every wall of every building this box can place one on, in building order.
+///
+/// `bbox` is the world box, grown by [`WALL_MARGIN_M`]; `None` keeps every
+/// wall, which is what a comparison against the Python reference wants, since
+/// the lab builds the walls of its occluders too. The buildings themselves are
+/// never dropped: they are the occluders `visibility::line_of_sight` and the
+/// distance transform are built from.
+pub fn walls_from_buildings(
+    buildings: &[Building],
+    params: &Params,
+    frame: &Frame,
+    bbox: Option<BBox>,
+) -> Vec<Wall> {
+    let placeable = bbox.map(|b| to_geo_polygon(&bbox_polygon_xy(b, frame, WALL_MARGIN_M)));
     buildings
         .iter()
+        .filter(|b| match &placeable {
+            Some(rect) => to_geo_polygon(&b.ring).intersects(rect),
+            None => true,
+        })
         .flat_map(|b| walls_from_building(b, params))
         .collect()
 }
@@ -836,6 +865,50 @@ mod tests {
         tags.insert("building:min_level".into(), "2".into());
         let (_, _, min_h) = height_from_tags(&tags, &p);
         assert!((min_h - 6.0).abs() < 1e-12);
+    }
+
+    /// A building the world cannot place a wall on keeps its footprint and
+    /// loses its walls, and the margin is what decides which is which.
+    #[test]
+    fn only_the_buildings_a_world_can_place_get_walls() {
+        let p = params();
+        // A box about 200 m across, and three 10 m squares: one inside it, one
+        // just past the east edge but inside the margin, and one clear of it.
+        let bbox = BBox::new(48.135635, 11.578243, 48.137225, 11.580818);
+        let frame = build_frame(bbox);
+        let east = frame.to_enu(bbox.max_lon, bbox.max_lat)[0];
+        let square = |key: &str, x0: f64| Building {
+            key: key.into(),
+            osm_id: 1,
+            kind: OsmKind::Way,
+            ring: vec![[x0, 0.0], [x0 + 10.0, 0.0], [x0 + 10.0, 10.0], [x0, 10.0]],
+            holes: vec![],
+            node_ids: vec![1, 2, 3, 4],
+            tags: BTreeMap::new(),
+            height_osm: Some(12.0),
+            height_source: HeightSource::Tag,
+            min_height: 0.0,
+            target: false,
+            member_ways: vec![],
+        };
+        let buildings = [
+            square("inside", 0.0),
+            square("near", east + WALL_MARGIN_M - 1.0),
+            square("far", east + WALL_MARGIN_M + 1.0),
+        ];
+
+        let walls = walls_from_buildings(&buildings, &p, &frame, Some(bbox));
+        let owners: Vec<&str> = walls
+            .iter()
+            .map(|w| w.building_key.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(owners, vec!["inside", "near"]);
+
+        // No box means no pruning, which is how the golden comparison runs.
+        let all = walls_from_buildings(&buildings, &p, &frame, None);
+        assert_eq!(all.len(), 12, "four walls each");
     }
 
     #[test]
@@ -962,8 +1035,10 @@ mod tests {
         assert!((frame.lat0 - gf.lat0).abs() < 1e-12);
         let osm = golden::load_value("osm.json");
         let p = params();
+        // `None`: the reference builds every wall, occluders included, so the
+        // comparison below has to as well.
         let buildings = parse_overpass(&osm, &frame, &p, Some(gf.bbox()));
-        let walls = walls_from_buildings(&buildings, &p);
+        let walls = walls_from_buildings(&buildings, &p, &frame, None);
         (buildings, walls)
     }
 

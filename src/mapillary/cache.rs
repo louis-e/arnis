@@ -372,11 +372,11 @@ struct EdgeRecord {
 /// `reach_m` is only read back for a wall with no facade; see [`WallRecord`].
 ///
 /// A blank verdict keeps the **furthest** reach any run has proved it against,
-/// and never the one this run happens to carry. Every run judges the walls in
-/// its OSM margin as well as the ones in its box, and those neighbours reach
-/// zero, so without this a precompute of one piece overwrote the record its
-/// neighbour had just paid the whole align stage for, and how much the cache
-/// remembered came down to the order the user drew the boxes in. Reach is
+/// and never the one this run happens to carry. A run judges the walls just
+/// outside its box too (`geometry::WALL_MARGIN_M`) and reaches short of the cap
+/// round those, so without this a precompute of one piece overwrote the record
+/// its neighbour had just paid the whole align stage for, and how much the
+/// cache remembered came down to the order the boxes were drawn in. Reach is
 /// monotone information, "this wall was proved blank against everything within
 /// R metres", so the larger R is the one that was actually proved; the thirty
 /// day sweep, and not a smaller number written over it later, is what eventually
@@ -807,12 +807,12 @@ mod tests {
 
     /// A blank verdict keeps the furthest reach anything has proved it against.
     ///
-    /// Every run judges the walls in its OSM margin too, and those neighbours
-    /// reach zero, so a precompute of one piece used to write a 0 over the 45 the
-    /// piece beside it had just paid the whole align stage for. What survived in
-    /// the cache then depended on the order the boxes were drawn in, and a
-    /// generation over the pieces together found no answer for the walls along
-    /// every seam and did the area's align work again.
+    /// A run judges the walls just outside its box too, and reaches short of
+    /// the cap round those, so a precompute of one piece used to write a 0 over
+    /// the 45 the piece beside it had just paid the whole align stage for. What
+    /// survived in the cache then depended on the order the boxes were drawn
+    /// in, and a generation over the pieces together found no answer for the
+    /// walls along every seam and did the area's align work again.
     #[test]
     fn a_neighbouring_run_cannot_shorten_a_reach_already_proved() {
         let tmp = tempfile::tempdir().unwrap();
