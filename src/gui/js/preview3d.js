@@ -341,6 +341,11 @@
 
   async function loadFacades(bboxText) {
     try {
+      // The preview shows Mapillary walls from the cache. With another source
+      // selected the generation will not use them, and walking every cached
+      // export on each map move is a cost someone who tried the feature once
+      // should not keep paying.
+      if (localStorage.getItem("facadeSource") !== "mapillary") return;
       // Same bound the buildings layer uses. Every call parses each cached
       // export's building JSON and base64s its textures, so an unbounded box
       // makes each map move pay for every area ever precomputed, including for

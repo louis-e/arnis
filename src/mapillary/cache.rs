@@ -481,8 +481,6 @@ pub fn load_wall(dir: &Path, key: &str) -> Option<CachedWall> {
     let record: WallRecord = serde_json::from_slice(&read_cached(&json_path)?).ok()?;
 
     let cells = (record.cols as usize) * (record.rows as usize);
-    let mut rgb = Vec::with_capacity(cells);
-    let mut cls = Vec::with_capacity(cells);
     // Counted in characters, not bytes: a damaged file whose `observed` holds a
     // multibyte character would pass a byte length check and then hand back a
     // mask shorter than the grid, which the export indexes cell by cell.
@@ -490,6 +488,10 @@ pub fn load_wall(dir: &Path, key: &str) -> Option<CachedWall> {
     if observed.len() != cells {
         return None;
     }
+    // Sized only once the record has proven it holds that many cells: the file
+    // is user-writable, and `cols` and `rows` alone could ask for gigabytes.
+    let mut rgb = Vec::with_capacity(cells);
+    let mut cls = Vec::with_capacity(cells);
     // A wall with no facade carries no PNG, so there is nothing to open and
     // nothing to check against the record.
     if cells > 0 {
