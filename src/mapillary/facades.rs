@@ -34,6 +34,7 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
@@ -323,7 +324,35 @@ pub struct FacadeStore {
 /// made a run silently reuse the previous world's store).
 static STORE: RwLock<Option<Arc<FacadeStore>>> = RwLock::new(None);
 
+/// Whether [`STORE`] holds anything, written under its own write lock.
+///
+/// [`block_at`] and [`band_block_at`] are called from `apply_block_variety` for
+/// every wall block of every building of every generation, facades or not, and
+/// on a world without them the only thing `store` did was take a lock to hand
+/// back `None`. Sixteen `rayon` tile threads sharing one `RwLock` word cost 69 ns
+/// a call, measured on this machine under the lock on 2026-09-07 over 20 M calls
+/// at 16 threads, against 0.2 ns for the relaxed load below: on a large world
+/// that is about a second of contended cache line, spent by every user who never
+/// turned the feature on.
+///
+/// Written while the write lock is held, so a reader that sees `true` and then
+/// takes the read lock is ordered after the store it belongs to. A reader that
+/// sees `false` returns `None`, which is either right or a race with an install,
+/// and there is no install while a world is being built: `data_processing` calls
+/// `install` or `clear` before the first tile thread starts.
+static STORE_SET: AtomicBool = AtomicBool::new(false);
+
+/// The one place [`STORE`] is written, so the flag beside it cannot drift.
+fn set_store(value: Option<Arc<FacadeStore>>) {
+    let mut guard = STORE.write().unwrap_or_else(|e| e.into_inner());
+    STORE_SET.store(value.is_some(), Ordering::Release);
+    *guard = value;
+}
+
 pub(super) fn store() -> Option<Arc<FacadeStore>> {
+    if !STORE_SET.load(Ordering::Acquire) {
+        return None;
+    }
     STORE.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -527,14 +556,14 @@ fn install_for_test_mode(
         wall_dir,
         relation_rings: FnvHashMap::default(),
     };
-    *STORE.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(FacadeStore::build(
+    set_store(Some(Arc::new(FacadeStore::build(
         walls,
         FnvHashMap::default(),
         projection,
         paintings,
         displays,
         scale,
-    )));
+    ))));
 }
 
 /// Installs `walls` projected onto the buildings in `elements` the way
@@ -604,19 +633,19 @@ fn install_elements_for_test_mode(
     displays: bool,
 ) {
     let projection = project_cells(&mut walls, elements, xzbbox, scale);
-    *STORE.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(FacadeStore::build(
+    set_store(Some(Arc::new(FacadeStore::build(
         walls,
         FnvHashMap::default(),
         projection,
         paintings,
         displays,
         scale,
-    )));
+    ))));
 }
 
 /// Forgets any loaded textures, for runs without a facade directory.
 pub fn clear() {
-    *STORE.write().unwrap_or_else(|e| e.into_inner()) = None;
+    set_store(None);
 }
 
 /// Whether the building built under `element_id` has at least one exported
@@ -675,6 +704,19 @@ pub fn colour_only() -> bool {
 }
 
 fn png_rgba(dir: &Path, name: &str) -> Option<RgbaImage> {
+    // The name comes out of an export's own JSON, and `--mapillary-facades-dir`
+    // will read a folder the user names, so it is not necessarily one we wrote.
+    // A name is a file in the export, never a path: anything with a separator,
+    // a parent segment or a drive letter would read outside the folder.
+    if name.is_empty()
+        || name.len() > 128
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+        || name.contains("..")
+    {
+        return None;
+    }
     // Flat export first, then the lab's run layout.
     for candidate in [
         dir.join(name),
@@ -938,7 +980,7 @@ fn project_cells(
     let mut way_cells: FnvHashMap<u64, Vec<(i32, i32)>> = FnvHashMap::default();
     let mut wall_dir = vec![(0, 0); walls.len()];
     let mut relation_rings: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
-    let world = Clip { xzbbox, scale };
+    let world = Clip { scale };
 
     for element in elements {
         match element {
@@ -999,31 +1041,28 @@ fn project_cells(
     }
 }
 
-/// What the projection needs to know about the world's edge: where it runs,
-/// and how many blocks a metre is there.
-struct Clip<'a> {
-    xzbbox: &'a XZBBox,
+/// What the projection needs to know about the world's edge.
+struct Clip {
     /// Blocks per metre, the world scale. Only a wall the world edge cut needs
     /// it, to measure the surviving stub of the OSM edge in the metres the
     /// export's columns are numbered in.
     scale: f64,
 }
 
-impl Clip<'_> {
+impl Clip {
     /// Whether this ring vertex is one `clipping::clip_way_to_bbox` invented.
     ///
-    /// Every vertex Sutherland-Hodgman creates is an intersection with a side
-    /// of the world, clamped and rounded onto it, so it sits exactly on the
-    /// boundary; a vertex that survived the clip keeps its OSM node id
-    /// (`assign_node_ids_preserving_endpoints`). A real node that happens to
-    /// sit on the boundary reads as invented here, which costs nothing: the
-    /// stub rule below only runs on an edge that failed to match whole, and it
-    /// measures the same metres the whole-edge rule would.
+    /// The id says so outright: everything the clipper invents is numbered
+    /// above `clipping::INVENTED_NODE_BASE`, clear of any id OSM can hand out,
+    /// while a vertex that survived the clip keeps its own OSM node id
+    /// (`assign_node_ids_preserving_endpoints`).
+    ///
+    /// Sitting on the world's edge is the weaker test and used to be this one:
+    /// every invented vertex does sit there, but so does a real node that
+    /// happens to, and that read as invented. Harmless, since the stub rule
+    /// only runs on an edge that failed to match whole, but no longer needed.
     fn invented(&self, n: &ProcessedNode) -> bool {
-        n.x == self.xzbbox.min_x()
-            || n.x == self.xzbbox.max_x()
-            || n.z == self.xzbbox.min_z()
-            || n.z == self.xzbbox.max_z()
+        crate::clipping::is_invented_node_id(n.id)
     }
 }
 
@@ -1032,7 +1071,7 @@ impl Clip<'_> {
 struct Ring<'a> {
     id: u64,
     nodes: &'a [ProcessedNode],
-    world: &'a Clip<'a>,
+    world: &'a Clip,
 }
 
 /// Where one exported edge sits on the ring: which ring segment carries it,
@@ -1389,7 +1428,7 @@ pub fn install(dir: &Path, elements: &[ProcessedElement], args: &Args, xzbbox: &
     }
     if matched == 0 {
         let msg = format!(
-            "Facade textures: {} walls loaded but none of their buildings are in this area.              The export covers a different bbox.",
+            "Facade textures: {} walls loaded but none of their buildings are in this area. The export covers a different bbox.",
             walls.len()
         );
         eprintln!("Warning: {msg}");
@@ -1427,9 +1466,9 @@ pub fn install(dir: &Path, elements: &[ProcessedElement], args: &Args, xzbbox: &
             ""
         }
     );
-    *STORE.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(FacadeStore::build(
+    set_store(Some(Arc::new(FacadeStore::build(
         walls, colours, projection, paintings, displays, args.scale,
-    )));
+    ))));
 }
 
 /// Block for a wall position, if a facade cell of the building built under
@@ -1814,6 +1853,34 @@ mod tests {
         ProcessedMember, ProcessedMemberRole, ProcessedRelation, ProcessedWay,
     };
     use std::collections::HashMap;
+
+    /// The fast path past the store's lock must agree with the store itself.
+    ///
+    /// `store` returns `None` on the flag alone, so a flag left behind by an
+    /// install would hand every wall block of a facade world its texture back as
+    /// `None`, silently, and a flag left set by `clear` would only cost a lock.
+    /// The first is facade loss with nothing to see, so both directions are
+    /// pinned here rather than left to the placement tests.
+    #[test]
+    fn the_store_gate_never_says_empty_while_a_store_is_installed() {
+        let _guard = TEST_GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 64, 64).unwrap();
+
+        clear();
+        assert!(!STORE_SET.load(Ordering::Acquire));
+        assert!(store().is_none());
+
+        install_elements_for_test_mode(Vec::new(), &[], &xzbbox, 2.0, false, false);
+        assert!(STORE_SET.load(Ordering::Acquire));
+        assert!(
+            store().is_some(),
+            "the gate hid a store the generator would have used"
+        );
+
+        clear();
+        assert!(!STORE_SET.load(Ordering::Acquire));
+        assert!(store().is_none());
+    }
 
     // ---------------------------------------------------- the 3D preview
 

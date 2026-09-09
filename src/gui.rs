@@ -1249,6 +1249,8 @@ fn gui_start_generation(
     mapillary_token: String,
     facades_enabled: bool,
     facade_mode: String,
+    building_facades_enabled: bool,
+    facade_detail: String,
     celestial_body_name: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
@@ -1608,6 +1610,14 @@ fn gui_start_generation(
                 // out loud. Coercing it here would only hide a stale setting.
                 mapillary_facade_mode: crate::args::FacadeMode::from_str_lossy(&facade_mode),
                 mapillary_paintings_px: 16,
+                // The frontend already sends false on a world format that
+                // cannot show item displays, and `data_processing` checks the
+                // format again, so a stale setting cannot leak through.
+                building_facades: building_facades_enabled,
+                facade_detail: crate::args::FacadeDetail::from_str_lossy(&facade_detail),
+                // The GUI ships the set beside the executable; pointing at a
+                // replacement set is a CLI aid.
+                building_facades_dir: None,
                 body: celestial_body,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep

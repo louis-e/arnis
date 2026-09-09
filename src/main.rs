@@ -7,6 +7,7 @@ mod biome;
 mod block_definitions;
 mod block_palette;
 mod bresenham;
+mod building_facades;
 mod canopy;
 mod celestial;
 mod climate;

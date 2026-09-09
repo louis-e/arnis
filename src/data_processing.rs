@@ -621,8 +621,42 @@ pub fn generate_world_with_options(
         crate::mapillary::facades::paintings_enabled(),
         args.mapillary_paintings_px,
     );
+    // Preset facades hang on the same display entities and write into the same
+    // resource pack, so the display registry is on when either source is. The
+    // Mapillary side still decides for itself whether to collect anything: its
+    // `collect` also asks the facade store, which is off unless the export
+    // asked for the panel mode.
+    //
+    // The `paintings` mode writes its own textures into that one resource pack
+    // and the second writer would replace the first, so the presets stand
+    // down. `validate_args` refuses the combination on the command line; the
+    // GUI builds its arguments directly and never runs it, so it is said here
+    // too rather than left to produce a world with half a pack.
+    let java = world_format == WorldFormat::JavaAnvil;
+    let paintings_own_the_pack = crate::mapillary::facades::paintings_enabled();
+    if args.building_facades && java && paintings_own_the_pack {
+        let msg =
+            "Preset facades: off, the Paintings facade mode owns this world's resource pack. \
+                   Paintings v2 shares it with them.";
+        eprintln!("Warning: {msg}");
+        crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, msg);
+    }
+    // The atlas the panels are budgeted against, before anything measures one.
+    // Both panel paths read it, so it is set whichever of them is running.
+    crate::mapillary::paintings::set_atlas_side(args.facade_detail.atlas_side());
+    crate::building_facades::reset(
+        args.building_facades && java && !paintings_own_the_pack,
+        args.building_facades_dir.as_deref(),
+        args.mapillary_paintings_px,
+        args.scale,
+    );
+    // A panel hangs in the cell in front of its wall, and nothing is written
+    // outside the world, so the outermost ring of blocks can carry none. Said
+    // after the reset, which clears it, and before any building is built: a
+    // wall that cannot be photographed must keep its windows.
+    crate::building_facades::set_world_extent(&xzbbox);
     crate::mapillary::displays::reset(
-        crate::mapillary::facades::displays_enabled(),
+        crate::mapillary::facades::displays_enabled() || crate::building_facades::enabled(),
         args.mapillary_paintings_px,
     );
 
@@ -1190,6 +1224,7 @@ pub fn generate_world_with_options(
                                         d.1,
                                     );
                                     crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
+                                    crate::building_facades::flush_region(&mut editor, d.0, d.1);
                                     if let Some(w) = flush_worker.as_ref() {
                                         editor.flush_region_via(w, d.0, d.1)?;
                                     }
@@ -1447,6 +1482,7 @@ pub fn generate_world_with_options(
             }
             crate::mapillary::paintings::flush_region(&mut editor, rx, rz);
             crate::mapillary::displays::flush_region(&mut editor, rx, rz);
+            crate::building_facades::flush_region(&mut editor, rx, rz);
             if let Some(w) = flush_worker.as_ref() {
                 editor.flush_region_via(w, rx, rz)?;
             }
@@ -1502,6 +1538,9 @@ pub fn generate_world_with_options(
             println!("{report}");
         }
         if let Some(report) = crate::mapillary::displays::finalize(&mut editor) {
+            println!("{report}");
+        }
+        if let Some(report) = crate::building_facades::finalize(&mut editor) {
             println!("{report}");
         }
     }

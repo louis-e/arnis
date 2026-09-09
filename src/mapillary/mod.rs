@@ -532,6 +532,12 @@ fn pipeline_config(args: &Args, llbbox: LLBBox) -> Option<pipeline::PipelineConf
     );
     let fetch = fetch::FetchConfig::new(token, bbox);
     let mut cfg = pipeline::PipelineConfig::new(fetch, types::Params::default());
+    // The world build waits on this job, so a box whose cold run takes hours may
+    // only be answered out of the cache. See `PRECOMPUTE_MAX_AREA_M2`.
+    let area = bbox_area_m2(llbbox);
+    if area > PRECOMPUTE_MAX_AREA_M2 {
+        cfg.cache_only = Some(too_large_for_a_cold_run(area));
+    }
     if let Some(dir) = args.mapillary_facade_debug_dir.clone() {
         cfg.debug = Some(pipeline::DebugDump {
             dir,
@@ -556,6 +562,22 @@ fn pipeline_config(args: &Args, llbbox: LLBBox) -> Option<pipeline::PipelineConf
 /// network outage may cost the user their world. Reporting it here rather than
 /// at the wall is the difference between one line and one line per wall.
 fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
+    // A generation that failed before collecting this job sets cancel and does
+    // not wait, so this thread can still be winding down while the next
+    // generation is under way. Its own progress lines would then land in that
+    // generation's status bar, describing work nobody asked for. A cancelled
+    // run reports to the terminal and stays out of the GUI.
+    let cancel = cfg.cancel.clone();
+    let abandoned = move || {
+        cancel
+            .as_ref()
+            .is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire))
+    };
+    let say = |msg: &str| {
+        if !abandoned() {
+            emit_gui_progress_update(MESSAGE_ONLY, msg);
+        }
+    };
     // The Graph API has no title field, so the credit line names the place; see
     // the `fetch` module header. A reverse geocode is not worth failing over.
     let bbox = cfg.fetch.bbox;
@@ -590,16 +612,13 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
                     )
                 };
                 println!("  {}", msg.yellow());
-                emit_gui_progress_update(MESSAGE_ONLY, &msg);
+                say(&msg);
                 return None;
             }
-            emit_gui_progress_update(
-                MESSAGE_ONLY,
-                &format!(
-                    "Mapillary facades: {} walls on {} buildings",
-                    result.stats.exported_walls, result.stats.exported_buildings
-                ),
-            );
+            say(&format!(
+                "Mapillary facades: {} walls on {} buildings",
+                result.stats.exported_walls, result.stats.exported_buildings
+            ));
             // The run's own export directory, not a place the config names: two
             // generations at once each get their own and neither clears the
             // other's.
@@ -608,7 +627,7 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
         Err(e) => {
             let msg = format!("Mapillary facades skipped: {e}");
             eprintln!("{} {msg}", "Warning:".yellow().bold());
-            emit_gui_progress_update(MESSAGE_ONLY, &msg);
+            say(&msg);
             None
         }
     }
@@ -616,7 +635,7 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
 
 // --------------------------------------------------------------------------- precomputing an area
 
-/// The largest box [`precompute`] will take on, in square metres.
+/// The largest box the pipeline will fetch imagery for, in square metres.
 ///
 /// The Munich test box is 0.034 km2. Measured cold on this machine under the
 /// lock on 2026-09-06, a precompute of it took **1499 s and 568 MB** of imagery
@@ -631,14 +650,42 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
 /// piece redoes another's walls. A larger box is refused with its own size,
 /// this one, and that advice, so the user knows what to do rather than guessing.
 ///
-/// Generation is not capped this way, and the asymmetry is deliberate. There
-/// the pipeline runs beside the world build, every failure of it is swallowed
-/// ([`run_facade_pipeline`]) and the user gets their world either way, so the
-/// worst a huge box costs is a long wait for facades that may not arrive. Here
-/// the whole job is the pipeline: a box that cannot finish is a button that
-/// cannot do anything, and it is better to say so before the first download
-/// than after twenty minutes of them.
+/// **Generation holds to the same cap**, and it used not to. The argument for
+/// exempting it was that the pipeline runs beside the world build and every
+/// failure of it is swallowed ([`run_facade_pipeline`]), so the worst a huge box
+/// could cost was facades that never arrived. That was wrong about the wait:
+/// `data_processing` calls [`FacadeJob::join`] before it builds a single
+/// building, so the world stops there until the pipeline is done, and generation
+/// has no cancel button. An ordinary 1 km2 selection is thirty times this cap on
+/// ground and more than that in align work, which is photographs times walls, so
+/// a user who turned the feature on and drew a normal Arnis box got a generation
+/// parked on "Waiting for Mapillary facades..." for hours with a frozen progress
+/// bar and no way out but killing the app, which costs them the world as well.
+///
+/// Above the cap, generation therefore runs the pipeline in cache-only mode
+/// ([`pipeline::PipelineConfig::cache_only`]): an area already precomputed in
+/// pieces still gets its facades, out of the per wall cache and with no
+/// downloads, and an area that is not is told so in one Overpass query instead
+/// of holding the world for an afternoon.
 pub const PRECOMPUTE_MAX_AREA_M2: f64 = 100_000.0;
+
+/// What a generation over a box past [`PRECOMPUTE_MAX_AREA_M2`] is told when the
+/// cache cannot answer it.
+///
+/// It names the two numbers and the way out, because the way out exists and is
+/// the same one the Precompute button's own refusal points at.
+fn too_large_for_a_cold_run(area_m2: f64) -> String {
+    format!(
+        "this area is {:.2} km² and the facade pipeline only fetches imagery for boxes up to \
+         {:.2} km², since the world build waits for it and a box this size takes hours from \
+         cold. The cache does not hold all of this area yet, so no facades were built. \
+         Precompute it in pieces (Settings, Mapillary, Precompute) and generate again: the \
+         cache keeps every wall each piece builds and a generation then uses them without \
+         downloading anything.",
+        area_m2 / 1e6,
+        PRECOMPUTE_MAX_AREA_M2 / 1e6,
+    )
+}
 
 /// Where the finished walls of the current tunables live.
 ///
@@ -1122,6 +1169,38 @@ mod tests {
         let bbox = LLBBox::from_str("48.1,11.5,48.2,11.6").unwrap();
         // The folder is the export, so nothing may be fetched for this world.
         assert!(!FacadeJob::start(&args, bbox).is_running());
+    }
+
+    /// The cap reaches generation and not only the Precompute button.
+    ///
+    /// The world build waits on `FacadeJob::join`, so a box whose cold run takes
+    /// hours is a generation with no visible end and no cancel. Above the cap the
+    /// job may only answer out of the cache; below it nothing changes, which is
+    /// what keeps the Munich test box and every fixture on the ordinary path.
+    #[test]
+    fn a_generation_box_past_the_cap_may_only_answer_from_the_cache() {
+        let mut args = bare_args();
+        args.mapillary_token = Some("MLY|test".to_string());
+
+        // The Munich test box: 0.034 km2, well under the cap, cold path as ever.
+        let munich = LLBBox::from_str("48.135635,11.578243,48.137225,11.580818").unwrap();
+        assert!(bbox_area_m2(munich) < PRECOMPUTE_MAX_AREA_M2);
+        let cfg = pipeline_config(&args, munich).expect("a token is set");
+        assert!(cfg.cache_only.is_none(), "a small box still fetches");
+
+        // An ordinary Arnis selection, about 1 km2, is thirty times the cap.
+        let big = LLBBox::from_str("48.130000,11.570000,48.139000,11.583400").unwrap();
+        let area = bbox_area_m2(big);
+        assert!(
+            area > PRECOMPUTE_MAX_AREA_M2,
+            "{area} m2 must be over the cap"
+        );
+        let cfg = pipeline_config(&args, big).expect("a token is set");
+        let why = cfg.cache_only.expect("a box this size may not fetch");
+        // The refusal has to carry both numbers and the way out, since it is all
+        // the user is given.
+        assert!(why.contains("km²"), "{why}");
+        assert!(why.contains("Precompute"), "{why}");
     }
 
     #[test]

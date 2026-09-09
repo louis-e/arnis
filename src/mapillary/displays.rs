@@ -65,9 +65,7 @@ use fnv::{FnvHashMap, FnvHashSet};
 use image::RgbImage;
 
 use super::facades::{self, FacadeStore};
-use super::paintings::{
-    crop_texture, cut, pack_mcmeta_described, ATLAS_BUDGET_PX, MIN_PX_PER_BLOCK,
-};
+use super::paintings::{atlas_budget, crop_texture, cut, pack_mcmeta_described, MIN_PX_PER_BLOCK};
 use crate::progress::{emit_gui_progress_update, MESSAGE_ONLY};
 use crate::world_editor::WorldEditor;
 
@@ -471,8 +469,13 @@ pub fn collect(
 /// Name of one panel, unique because a wall is claimed once and each of its
 /// pieces is named by where it starts. Resource paths take lowercase letters,
 /// digits and underscores, and every part here is a non-negative number.
-fn panel_name(way_id: u64, wall: u32, along: i32, row: i32) -> String {
-    format!("f{way_id}_{wall}_{along}_{row}")
+///
+/// `prefix` separates the two facade sources, which number their walls
+/// differently: `f` for a wall of the Mapillary export, `b` for a ring segment
+/// of the preset facades. Without it one building could name two different
+/// panels the same and the pack would carry only one of them.
+fn panel_name(prefix: char, way_id: u64, wall: u32, along: i32, row: i32) -> String {
+    format!("{prefix}{way_id}_{wall}_{along}_{row}")
 }
 
 /// UUID seed contribution of a panel. Two panels meeting at a corner can put
@@ -540,29 +543,99 @@ fn display_nbt(name: &str, quad: &Quad) -> HashMap<String, Value> {
     extra
 }
 
+/// Whether a wall shows above the ground it stands on. A wall buried in the
+/// hillside shows nothing; the blocks are enough there.
+pub(crate) fn wall_is_visible(
+    editor: &mut WorldEditor,
+    cells: impl IntoIterator<Item = (i32, i32)>,
+    top: i32,
+) -> bool {
+    cells
+        .into_iter()
+        .any(|(bx, bz)| top > editor.get_absolute_y(bx, 0, bz) + 1)
+}
+
+/// Cuts one wall into pieces the block atlas can hold and hangs each as an
+/// item display entity, asking `crop` for the pixels of each piece.
+///
+/// **Both facade sources come through here.** The Mapillary export and the
+/// preset facades disagree about where their pixels come from and about
+/// nothing else: the quad on the wall's true line, the entity NBT, the item
+/// model and the resource pack are one mechanism, so they live in one place
+/// and neither source can drift from the other.
+///
+/// `cells` are the wall's world columns, already sorted along the outside
+/// viewer's right so that a piece's crop and its world position run the same
+/// way. `crop(p0, p1, b0, b1)` is given the half-open cell range and wall row
+/// range of a piece and returns its image, or `None` to leave that piece bare.
+/// Returns how many panels were hung.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hang_wall(
+    editor: &mut WorldEditor,
+    prefix: char,
+    way_id: u64,
+    wall: u32,
+    cells: &[(i32, i32)],
+    n: (f64, f64),
+    step: f64,
+    base_y: i32,
+    total_h: i32,
+    crop: &mut dyn FnMut(i32, i32, i32, i32) -> Option<RgbImage>,
+) -> usize {
+    // Pieces of at most MAX_PANEL blocks of wall, which is fewer cells the
+    // more the wall leans off its major axis.
+    let max_cells = ((f64::from(MAX_PANEL) / step).floor() as i32).max(1);
+    let mut hung = 0usize;
+    for (p0, p1) in cut(cells.len() as i32, max_cells) {
+        let footprint = &cells[p0 as usize..p1 as usize];
+        for (b0, b1) in cut(total_h, MAX_PANEL) {
+            let Some(tex) = crop(p0, p1, b0, b1) else {
+                continue;
+            };
+            // The panel covers the wall the picture covers and no more, so the
+            // bottom piece stops at the shell's first wall block. On a slope
+            // the fill below it stays bare: the photograph has no pixels for
+            // ground the camera never saw, and the block wall down there is
+            // the building's own colour-matched material, which reads as a
+            // plinth where invented pixels read as a smear.
+            let quad = quad_for(footprint, n, step, base_y + b0, b1 - b0);
+            let name = panel_name(prefix, way_id, wall, p0, b0);
+            let nbt = display_nbt(&name, &quad);
+            if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
+                continue;
+            }
+            let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+            if !r.enabled {
+                return hung;
+            }
+            r.panels.push(Panel {
+                name,
+                w: quad.w,
+                h: quad.h,
+                tex,
+            });
+            hung += 1;
+        }
+    }
+    hung
+}
+
 /// Places one collected wall: works out its quad, cuts it into pieces the
 /// atlas can hold and writes one display entity per piece, each cropped out of
-/// the 8 px/m wall texture.
-fn place_candidate(editor: &mut WorldEditor, s: &FacadeStore, cand: Candidate, r: &mut Registry) {
+/// the 8 px/m wall texture. Returns how many pieces were hung.
+fn place_candidate(editor: &mut WorldEditor, s: &FacadeStore, cand: Candidate) -> usize {
     let wall = &s.walls[cand.wall as usize];
     let dir = s.wall_dir[cand.wall as usize];
     let (Some(tex), Some(n)) = (
         wall.tex.as_ref(),
         outward_normal(dir, cand.snapped.0, cand.snapped.1),
     ) else {
-        r.stats.dropped += 1;
-        return;
+        return 0;
     };
 
-    // A wall buried in the hillside shows nothing; the blocks are enough there.
     let top = cand.base_y + cand.total_h;
-    if !cand
-        .cells
-        .iter()
-        .any(|&(bx, bz, _)| top > editor.get_absolute_y(bx, 0, bz) + 1)
-    {
-        r.stats.dropped += 1;
-        return;
+    if !wall_is_visible(editor, cand.cells.iter().map(|&(bx, bz, _)| (bx, bz)), top) {
+        return 0;
     }
 
     // The outside viewer's left first, so a piece's crop and its world
@@ -578,63 +651,41 @@ fn place_candidate(editor: &mut WorldEditor, s: &FacadeStore, cand: Candidate, r
     let flip = flip_crop(dir, n);
     let fallback = s.building_colour(cand.way_id);
     let scale = s.scale;
-    // Pieces of at most MAX_PANEL blocks of wall, which is fewer cells the
-    // more the wall leans off its major axis.
-    let max_cells = ((f64::from(MAX_PANEL) / step).floor() as i32).max(1);
+    let footprints: Vec<(i32, i32)> = cells.iter().map(|c| (c.0, c.1)).collect();
+    let rows = f64::from(wall.rows);
 
-    let mut hung = 0usize;
-    for (p0, p1) in cut(cells.len() as i32, max_cells) {
-        let slice = &cells[p0 as usize..p1 as usize];
+    let mut crop = |p0: i32, p1: i32, b0: i32, b1: i32| {
         // The piece covers whole texture columns. Two pieces can share or skip
         // one metre at their seam, where the Bresenham walk doubled a column
         // or stepped over one; that is a sub-metre seam every 32 blocks.
-        let (cmin, cmax) = slice
+        let (cmin, cmax) = cells[p0 as usize..p1 as usize]
             .iter()
             .fold((u16::MAX, 0u16), |(a, b), c| (a.min(c.2), b.max(c.2)));
-        let footprint: Vec<(i32, i32)> = slice.iter().map(|c| (c.0, c.1)).collect();
-        for (b0, b1) in cut(cand.total_h, MAX_PANEL) {
-            let h = b1 - b0;
-            // Metres down from the top of the texture.
-            let va = f64::from(wall.rows) - f64::from(b1) / scale;
-            let vb = f64::from(wall.rows) - f64::from(b0) / scale;
-            let Some(crop) = crop_texture(
-                tex,
-                f64::from(cmin),
-                f64::from(cmax) + 1.0,
-                va,
-                vb,
-                flip,
-                fallback,
-            ) else {
-                continue;
-            };
-            // The panel covers the wall the photograph covers and no more, so
-            // the bottom piece stops at the shell's first wall block. On a
-            // slope the fill below it stays bare: the photograph has no pixels
-            // for ground the camera never saw, and the block wall down there
-            // is the building's own colour-matched material, which reads as a
-            // plinth where invented pixels read as a smear.
-            let quad = quad_for(&footprint, n, step, cand.base_y + b0, h);
-            let name = panel_name(cand.way_id, cand.wall, p0, b0);
-            let nbt = display_nbt(&name, &quad);
-            if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
-                continue;
-            }
-            r.panels.push(Panel {
-                name,
-                w: quad.w,
-                h: quad.h,
-                tex: crop,
-            });
-            hung += 1;
-        }
-    }
-    r.stats.displays += hung;
-    if hung == 0 {
-        r.stats.dropped += 1;
-    } else {
-        r.stats.placed += 1;
-    }
+        // Metres down from the top of the texture.
+        let va = rows - f64::from(b1) / scale;
+        let vb = rows - f64::from(b0) / scale;
+        crop_texture(
+            tex,
+            f64::from(cmin),
+            f64::from(cmax) + 1.0,
+            va,
+            vb,
+            flip,
+            fallback,
+        )
+    };
+    hang_wall(
+        editor,
+        'f',
+        cand.way_id,
+        cand.wall,
+        &footprints,
+        n,
+        step,
+        cand.base_y,
+        cand.total_h,
+        &mut crop,
+    )
 }
 
 /// Settles the candidates at `indices` that are still pending.
@@ -642,15 +693,28 @@ fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usi
     let Some(s) = facades::store() else {
         return;
     };
-    let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-    if !r.enabled {
-        return;
-    }
     for i in indices {
-        let Some(cand) = r.candidates.get_mut(i).and_then(Option::take) else {
-            continue;
+        // The registry lock is taken around the bookkeeping and released
+        // across the placement, because `hang_wall` takes it once per panel to
+        // push it and a re-entrant lock would deadlock.
+        let cand = {
+            let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+            if !r.enabled {
+                return;
+            }
+            match r.candidates.get_mut(i).and_then(Option::take) {
+                Some(cand) => cand,
+                None => continue,
+            }
         };
-        place_candidate(editor, &s, cand, &mut r);
+        let hung = place_candidate(editor, &s, cand);
+        let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        r.stats.displays += hung;
+        if hung == 0 {
+            r.stats.dropped += 1;
+        } else {
+            r.stats.placed += 1;
+        }
     }
 }
 
@@ -745,7 +809,13 @@ pub fn item_definition_json(name: &str) -> String {
 /// face cancel, which is why the crop the outside viewer sees is the one
 /// `right_of` laid out and not its mirror.
 pub fn model_json(name: &str) -> String {
-    let texture = format!("{NAMESPACE}:block/{name}");
+    model_json_for(name)
+}
+
+/// The model for a panel whose picture lives under `texture_name`, which is the
+/// panel's own name unless an identical panel got there first.
+pub fn model_json_for(texture_name: &str) -> String {
+    let texture = format!("{NAMESPACE}:block/{texture_name}");
     serde_json::json!({
         "textures": { "0": texture, "particle": texture },
         "elements": [{
@@ -821,44 +891,124 @@ pub fn write_packs(world_path: &Path) -> Result<Option<PackReport>, String> {
 }
 
 /// Total panel texture area at `px` pixels per block.
-fn atlas_area(panels: &[Panel], px: u32) -> u64 {
+/// What makes two panels the same picture: the pixels, and the size they are
+/// written at. A city hangs the same facade on hundreds of walls, so most
+/// panels are byte identical to another one.
+fn pixel_hash(p: &Panel) -> u64 {
+    use std::hash::Hasher;
+    let mut h = fnv::FnvHasher::default();
+    h.write(p.tex.as_raw());
+    h.write_u32(p.tex.width());
+    h.write_u32(p.tex.height());
+    h.finish()
+}
+
+/// The hash of every panel's pixels, in panel order.
+///
+/// Hashing a city's panels is a pass over a couple of hundred megabytes, and
+/// what comes out does not depend on the resolution the pack ends up at, so it
+/// is taken once here instead of once per `fit_px` step and once more while
+/// the zip is written.
+fn pixel_hashes(panels: &[Panel]) -> Vec<u64> {
+    panels.iter().map(pixel_hash).collect()
+}
+
+fn panel_key(p: &Panel, pixels: u64, px: u32) -> (u64, u32, u32) {
+    (pixels, tex_side(p.w, px), tex_side(p.h, px))
+}
+
+/// `atlas_area` from the panels alone, for tests that are about the budget and
+/// not about who hashes what.
+#[cfg(test)]
+fn atlas_area_of(panels: &[Panel], px: u32) -> u64 {
+    atlas_area(panels, &pixel_hashes(panels), px)
+}
+
+/// `fit_px` from the panels alone, for the same reason.
+#[cfg(test)]
+fn fit_px_of(panels: &[Panel], requested_px: u32) -> u32 {
+    fit_px(panels, &pixel_hashes(panels), requested_px)
+}
+
+/// Atlas pixels the pack costs, counting each distinct picture once.
+///
+/// The game stitches one texture per file, so two panels sharing a file cost
+/// the atlas one entry, not two. Counting per panel made a small town look like
+/// it needed the whole budget and pushed `fit_px` down a step or two for
+/// nothing, which is where the panels lost their sharpness.
+fn atlas_area(panels: &[Panel], hashes: &[u64], px: u32) -> u64 {
+    let mut seen: FnvHashSet<(u64, u32, u32)> = FnvHashSet::default();
     panels
         .iter()
-        .map(|p| u64::from(tex_side(p.w, px)) * u64::from(tex_side(p.h, px)))
+        .zip(hashes)
+        .filter(|(p, &pixels)| seen.insert(panel_key(p, pixels, px)))
+        .map(|(p, _)| u64::from(tex_side(p.w, px)) * u64::from(tex_side(p.h, px)))
         .sum()
 }
 
 /// Halves the resolution until the atlas budget holds, down to 4 px per block.
-fn fit_px(panels: &[Panel], requested_px: u32) -> u32 {
+fn fit_px(panels: &[Panel], hashes: &[u64], requested_px: u32) -> u32 {
     let mut px = requested_px.max(MIN_PX_PER_BLOCK);
-    while px > MIN_PX_PER_BLOCK && atlas_area(panels, px) > ATLAS_BUDGET_PX {
-        px /= 2;
+    // One step at a time, not `px /= 2`: halving is a four times jump in
+    // area, and on a real box it lands at 8 where 11 would have fitted. The
+    // atlas only cares that a sprite side is a multiple of 16, which
+    // `tex_side` gives for any integer px, so nothing here wants a power of
+    // two.
+    while px > MIN_PX_PER_BLOCK && atlas_area(panels, hashes, px) > atlas_budget() {
+        px -= 1;
     }
     px
 }
 
 /// The resource pack as zip bytes: pack.mcmeta plus a model definition, a
 /// model and a texture per panel.
-fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
+fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let mut put = |path: String, bytes: &[u8]| -> Result<(), String> {
-        zip.start_file(path, options).map_err(|e| e.to_string())?;
-        zip.write_all(bytes).map_err(|e| e.to_string())
-    };
+    // A PNG carries deflated pixels already, so deflating it a second time
+    // shrinks the pack by a few per cent and costs more than everything else
+    // the writer does put together.
+    let png_options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let mut put =
+        |path: String, bytes: &[u8], opts: zip::write::FileOptions| -> Result<(), String> {
+            zip.start_file(path, opts).map_err(|e| e.to_string())?;
+            zip.write_all(bytes).map_err(|e| e.to_string())
+        };
     put(
         "pack.mcmeta".to_string(),
         pack_mcmeta_described(RESOURCEPACK_FORMAT, "Arnis facade panels").as_bytes(),
+        options,
     )?;
-    for p in panels {
+    put(
+        PACK_MARKER.to_string(),
+        b"arnis facade panels
+",
+        options,
+    )?;
+    let mut texture_of: FnvHashMap<(u64, u32, u32), String> = FnvHashMap::default();
+    for (p, pixels) in panels {
         put(
             format!("assets/{NAMESPACE}/items/{}.json", p.name),
             item_definition_json(&p.name).as_bytes(),
+            options,
         )?;
+        let key = panel_key(p, *pixels, px);
+        if let Some(shared) = texture_of.get(&key) {
+            // An identical panel already wrote this picture; point at it.
+            put(
+                format!("assets/{NAMESPACE}/models/item/{}.json", p.name),
+                model_json_for(shared).as_bytes(),
+                options,
+            )?;
+            continue;
+        }
+        texture_of.insert(key, p.name.clone());
         put(
             format!("assets/{NAMESPACE}/models/item/{}.json", p.name),
             model_json(&p.name).as_bytes(),
+            options,
         )?;
         let img = image::imageops::resize(
             &p.tex,
@@ -872,11 +1022,20 @@ fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
         put(
             format!("assets/{NAMESPACE}/textures/block/{}.png", p.name),
             &png,
+            png_options,
         )?;
     }
     let cursor = zip.finish().map_err(|e| e.to_string())?;
     Ok(cursor.into_inner())
 }
+
+/// The entry that marks a world pack as ours.
+///
+/// A file, not a word in the description: the description was matched on the
+/// substring "Arnis", so a user's own pack that merely mentioned Arnis in its
+/// description was taken for ours and replaced. Nothing but this writer puts
+/// this path in a pack.
+pub(super) const PACK_MARKER: &str = ".arnis_facade_pack";
 
 /// Whether the pack at `path` is one Arnis wrote.
 ///
@@ -886,18 +1045,17 @@ fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
 /// dressed themselves holds theirs, and losing it to a regeneration is not
 /// something they can undo. Ours says so in `pack.mcmeta`.
 pub(super) fn is_arnis_pack(path: &Path) -> bool {
-    use std::io::Read;
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
     let Ok(mut zip) = zip::ZipArchive::new(file) else {
         return false;
     };
-    let Ok(mut meta) = zip.by_name("pack.mcmeta") else {
-        return false;
-    };
-    let mut text = String::new();
-    meta.read_to_string(&mut text).is_ok() && text.contains("Arnis")
+    (0..zip.len()).any(|i| {
+        zip.by_index_raw(i)
+            .map(|f| f.name() == PACK_MARKER)
+            .unwrap_or(false)
+    })
 }
 
 /// Installs the world pack at `path`, stepping a pack we did not write aside
@@ -928,21 +1086,22 @@ fn write_packs_for(
     panels: &[Panel],
     requested_px: u32,
 ) -> Result<PackReport, String> {
-    let px = fit_px(panels, requested_px);
+    let hashes = pixel_hashes(panels);
+    let px = fit_px(panels, &hashes, requested_px);
     if px < requested_px {
         warn(&format!(
             "Facade panels: {} panels would not fit the game's block atlas at {requested_px} px per block; using {px} px.",
             panels.len()
         ));
     }
-    if atlas_area(panels, px) > ATLAS_BUDGET_PX {
+    if atlas_area(panels, &hashes, px) > atlas_budget() {
         warn(&format!(
             "Facade panels: {} panels exceed the block atlas even at {px} px per block; the game may fail to stitch them.",
             panels.len()
         ));
     }
-    let mut panels: Vec<&Panel> = panels.iter().collect();
-    panels.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut panels: Vec<(&Panel, u64)> = panels.iter().zip(hashes).collect();
+    panels.sort_by(|a, b| a.0.name.cmp(&b.0.name));
 
     // The same zip at both places the game has looked for a world's pack.
     let bytes = resource_zip(&panels, px)?;
@@ -1163,7 +1322,7 @@ mod tests {
     }
 
     #[test]
-    fn texture_sides_stay_mipmappable_and_the_budget_halves() {
+    fn texture_sides_stay_mipmappable_and_the_ladder_finds_the_largest_that_fits() {
         // A whole multiple of 16 in every case, never zero.
         assert_eq!(tex_side(20.0, 16), 320);
         assert_eq!(tex_side(12.0, 16), 192);
@@ -1171,21 +1330,45 @@ mod tests {
         assert_eq!(tex_side(0.5, 4), 16, "never below one texel row");
         assert_eq!(tex_side(1.0, 4), 16);
 
+        // Each panel gets its own picture: the atlas counts distinct pictures,
+        // so panels sharing one would rightly cost a single entry and this is
+        // measuring the budget, not the sharing.
         let panel = |i: usize| Panel {
             name: format!("p{i}"),
             w: 32.0,
             h: 32.0,
-            tex: RgbImage::new(1, 1),
+            tex: RgbImage::from_pixel(1, 1, Rgb([(i % 251) as u8, (i / 251) as u8, 7])),
         };
-        // 250 full panels: 65.5 M px at 16, 16.4 M at 8.
+        // 250 full panels: 65.5 M px at 16, and the budget holds 12.
+        // The ladder steps by one, so it lands on the largest px that fits
+        // rather than on the next power of two below it.
         let many: Vec<Panel> = (0..250).map(panel).collect();
-        assert_eq!(fit_px(&many, 16), 8);
-        assert_eq!(fit_px(&many, 32), 8);
-        assert_eq!(fit_px(&many[..2], 16), 16);
-        assert_eq!(fit_px(&many[..2], 32), 32);
+        assert_eq!(fit_px_of(&many, 16), 12);
+        assert_eq!(fit_px_of(&many, 32), 12, "the same answer from higher up");
+        assert!(atlas_area(&many, &pixel_hashes(&many), 12) <= atlas_budget());
+        assert!(
+            atlas_area(&many, &pixel_hashes(&many), 13) > atlas_budget(),
+            "12 must be the largest that fits, not merely one that does"
+        );
+        assert_eq!(fit_px_of(&many[..2], 16), 16);
+        assert_eq!(fit_px_of(&many[..2], 32), 32);
+
+        // The same picture on 250 walls is one atlas entry, so the budget that
+        // could not hold them apart holds them together. This is what a city
+        // does: one facade hung on hundreds of identical walls.
+        let same: Vec<Panel> = (0..250)
+            .map(|i| Panel {
+                name: format!("s{i}"),
+                w: 32.0,
+                h: 32.0,
+                tex: RgbImage::from_pixel(1, 1, Rgb([9, 9, 9])),
+            })
+            .collect();
+        assert_eq!(atlas_area_of(&same, 16), atlas_area_of(&same[..1], 16));
+        assert_eq!(fit_px_of(&same, 16), 16);
         // Never below 4, even when that still does not fit.
         let huge: Vec<Panel> = (0..20_000).map(panel).collect();
-        assert_eq!(fit_px(&huge, 16), 4);
+        assert_eq!(fit_px_of(&huge, 16), 4);
     }
 
     #[test]
@@ -1924,6 +2107,8 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                // The marker that tells our pack from a user's own.
+                PACK_MARKER.to_string(),
                 "assets/arnis/items/f7_1_0_0.json".to_string(),
                 "assets/arnis/models/item/f7_1_0_0.json".to_string(),
                 "assets/arnis/textures/block/f7_1_0_0.png".to_string(),
@@ -2017,7 +2202,7 @@ mod tests {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let opts = zip::write::FileOptions::default();
         zip.start_file("pack.mcmeta", opts).unwrap();
-        zip.write_all(br#"{"pack":{"description":"My own textures"}}"#)
+        zip.write_all(br#"{"pack":{"description":"Made with Arnis, then hand painted"}}"#)
             .unwrap();
         let theirs = zip.finish().unwrap().into_inner();
         std::fs::write(&path, &theirs).unwrap();
@@ -2038,6 +2223,8 @@ mod tests {
         zip.start_file("pack.mcmeta", opts).unwrap();
         zip.write_all(br#"{"pack":{"description":"Arnis facade panels"}}"#)
             .unwrap();
+        zip.start_file(PACK_MARKER, opts).unwrap();
+        zip.write_all(b"arnis").unwrap();
         std::fs::write(&path, zip.finish().unwrap().into_inner()).unwrap();
         write_world_pack(&path, b"ours-v2").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"ours-v2");

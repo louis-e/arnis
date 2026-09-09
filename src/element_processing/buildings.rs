@@ -1348,6 +1348,14 @@ struct BuildingConfig {
     /// panels, where the export supplies colours only and the building keeps
     /// every procedural feature.
     facade_shell: Arc<FnvHashSet<(i32, i32)>>,
+    /// The wall columns a preset facade photograph covers, flattened for the
+    /// same reason a Mapillary-photographed column is
+    /// (`building_facades::collect`). Per column and not per run: the
+    /// presets hang nothing on a courtyard ring inside a building, on a ring
+    /// too short or too low to carry a panel, or on a wall the Mapillary store
+    /// already owns, and a column flattened for a photograph that never comes
+    /// loses its window, its plinth and its accent line for nothing.
+    preset_shell: Arc<FnvHashSet<(i32, i32)>>,
 }
 
 /// Window frame styles distilled from the reference schematics, one per building.
@@ -1540,6 +1548,23 @@ impl BuildingConfig {
     #[inline]
     fn is_photo_column(&self, bx: i32, bz: i32) -> bool {
         self.facade_shell.contains(&(bx, bz))
+    }
+
+    /// Whether the wall column at `(bx, bz)` has a photograph of some kind
+    /// coming over it, from Mapillary or from the preset set, and so is built
+    /// as a plain shell.
+    ///
+    /// A panel hangs `displays::PUSH_OUT` in front of the outermost wall
+    /// cell, so anything the building sticks out past its own wall stands
+    /// between the viewer and the picture: a window frame, a quoin, a cornice
+    /// or a downpipe reads as a lump of concrete floating on the photograph.
+    /// The Mapillary path has always flattened for this reason. Doors are the
+    /// deliberate exception and keep using [`Self::is_photo_column`]: a door
+    /// sits in the wall plane rather than in front of it, so the panel hides
+    /// it anyway, and suppressing it would seal every building in the world.
+    #[inline]
+    fn is_flat_column(&self, bx: i32, bz: i32) -> bool {
+        self.is_photo_column(bx, bz) || self.preset_shell.contains(&(bx, bz))
     }
 
     /// Grammar anchor: +2 at ground level; elevated parts already carry the
@@ -3577,10 +3602,14 @@ fn build_wall_ring(
                 // Resolved once per column rather than per block: it is a
                 // lookup in the facade store, and the whole column shares it.
                 let photo = config.is_photo_column(bx, bz);
+                // The wall follows whichever source is going to cover it;
+                // `photographed` stays Mapillary's own, because the facade
+                // diagnostic below counts photographed segments.
+                let flat = config.is_flat_column(bx, bz);
                 kind.photographed |= photo;
                 for h in wall_start..=column_top {
-                    let block = determine_wall_block_at_position(bx, h, bz, config, col, photo);
-                    kind.windowed |= !photo && (block == config.window_block || block == GLASS);
+                    let block = determine_wall_block_at_position(bx, h, bz, config, col, flat);
+                    kind.windowed |= !flat && (block == config.window_block || block == GLASS);
                     editor.set_block_absolute(
                         block,
                         bx,
@@ -3658,6 +3687,9 @@ fn build_wall_ring(
             config.building_height,
         );
     }
+    // The preset facades are not recorded here but in `generate_buildings`,
+    // before this runs: their panels decide which columns are built as a plain
+    // shell, and this function has already built them by now.
 
     (current_building, corner_count, segments)
 }
@@ -3952,13 +3984,14 @@ fn determine_wall_block_at_position(
     bz: i32,
     config: &BuildingConfig,
     col: ColumnFacade,
-    photo: bool,
+    flat: bool,
 ) -> Block {
-    // A photographed column is a plain shell: the facade cell over it decides
-    // what shows, and a procedural window or accent line underneath would
-    // come through wherever the texture has no data. `photo` is
-    // `config.is_photo_column(bx, bz)`, hoisted out of the height loop.
-    let chosen = if photo {
+    // A column with a photograph coming over it is a plain shell: the facade
+    // cell or panel above it decides what shows, and a procedural window or
+    // accent line underneath would come through wherever the picture has no
+    // data. `flat` is `config.is_flat_column(bx, bz)`, hoisted out of the
+    // height loop.
+    let chosen = if flat {
         config.wall_block
     } else {
         determine_wall_block_at_position_pristine(h, config, col)
@@ -4839,7 +4872,7 @@ fn generate_residential_window_decorations(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
-                    || config.is_photo_column(bx, bz)
+                    || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
@@ -5227,7 +5260,7 @@ fn generate_corner_quoins(
         // A corner block a photograph reaches belongs to the photograph: the
         // quoin would overwrite the one column two ring segments share, which
         // is exactly where a photographed wall meets a normal one.
-        if facade.is_party(cx, cz) || config.is_photo_column(cx, cz) {
+        if facade.is_party(cx, cz) || config.is_flat_column(cx, cz) {
             continue;
         }
         // When only the street corner qualified (roll failed), frame it alone.
@@ -5350,7 +5383,7 @@ fn generate_wall_depth_features(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
-                    || config.is_photo_column(bx, bz)
+                    || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
@@ -5558,7 +5591,7 @@ fn generate_window_frames(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
-                    || config.is_photo_column(bx, bz)
+                    || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
@@ -5801,7 +5834,7 @@ fn generate_facade_cornices(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
-                    || config.is_photo_column(bx, bz)
+                    || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
@@ -5877,7 +5910,7 @@ fn generate_archetype_window_headers(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
-                    || config.is_photo_column(bx, bz)
+                    || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
@@ -5952,7 +5985,7 @@ fn generate_storefront_awnings(
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
                     || facade.is_door(bx, bz)
-                    || config.is_photo_column(bx, bz)
+                    || config.is_flat_column(bx, bz)
                     || !facade.is_street(bx, bz)
                     || config.window_col(wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz))
                         >= 4
@@ -6026,7 +6059,7 @@ fn generate_corner_downpipes(
         // A pipe off a photographed corner stands in front of the photograph.
         if (dx == 0 && dz == 0)
             || building_passages.contains(px, pz)
-            || config.is_photo_column(px, pz)
+            || config.is_flat_column(px, pz)
         {
             continue;
         }
@@ -7345,6 +7378,9 @@ pub fn generate_buildings(
         .then(|| pick_window_frame(category, era, detail, wall_block, group_seed))
         .flatten(),
         facade_shell: photo_shell_columns(element),
+        // Filled in below, once the podium massing has settled the wall height
+        // `building_facades::collect` will be given.
+        preset_shell: Arc::default(),
     };
 
     // Passages only apply to ground-level buildings. Elevated building:part
@@ -7374,6 +7410,26 @@ pub fn generate_buildings(
             ..config.clone()
         },
         None => config,
+    };
+    // The preset facades are recorded before the wall is built, not after it:
+    // the columns they return are the columns built as a plain shell, so the
+    // shell is exactly what the photographs cover and a wall they hang nothing
+    // on is built exactly as it is with the feature off. Nothing is written
+    // into the world here; the panels are hung once it is finished.
+    let config = BuildingConfig {
+        preset_shell: crate::building_facades::collect(
+            editor,
+            &element.nodes,
+            config.element_id,
+            // The shared style seed, so the parts of one building hang one
+            // photograph the way they already share one wall block.
+            config.style_seed,
+            config.category,
+            config.start_y_offset,
+            config.abs_terrain_offset,
+            config.building_height,
+        ),
+        ..config
     };
     // Interiors must stop at the podium roof or rooms would float.
     let effective_building_height = match &podium_tower {
@@ -11687,6 +11743,7 @@ mod style_tests {
             has_storefront: false,
             window_frame: None,
             facade_shell: Arc::default(),
+            preset_shell: Arc::default(),
         }
     }
 
@@ -12476,6 +12533,12 @@ mod facade_integration_tests {
 
     #[test]
     fn party_wall_has_no_windows_but_free_wall_does() {
+        // The two facade tests install a process-global picture source while
+        // they run, and a dressed ring has no windows at all, so this one has
+        // to take the same lock rather than race them.
+        let _guard = crate::mapillary::facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
         let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
         // Attached neighbor east of the house.
@@ -12661,8 +12724,232 @@ mod facade_integration_tests {
         }
     }
 
+    /// A preset facade covers a building's whole ring, so the whole ring is
+    /// built as a plain shell, which is the same flattening a photographed
+    /// wall gets and for the same reason: the panel hangs a fraction of a
+    /// block in front of the wall, so a sill, a quoin or a cornice stands
+    /// between the viewer and the picture. Measured on Leipzig, this is the
+    /// difference between a fifth of the average panel being hidden by the
+    /// building's own blocks and a tenth.
+    #[test]
+    fn a_preset_facade_flattens_the_whole_ring() {
+        let _guard = crate::mapillary::facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 38, 59, 40);
+        let footprints = CoordinateBitmap::new(&xz);
+        let way = rect_way(
+            4712,
+            20,
+            20,
+            40,
+            32,
+            &[
+                ("building", "apartments"),
+                ("building:levels", "4"),
+                ("roof:shape", "flat"),
+            ],
+        );
+        let args = scaled_args("1");
+
+        // The same building twice: once with no preset set, which is what the
+        // dressed one has to stop looking like, and once with one installed.
+        crate::building_facades::reset(false, None, 16, 1.0);
+        let mut plain = test_editor(&xz);
+        run_building_with(&mut plain, &way, &road, &footprints, &args);
+
+        let dir = tempfile::tempdir().unwrap();
+        // An empty file is enough: the loader only checks that the picture the
+        // manifest names is there, and the panels are never hung here because
+        // the test editor writes no hanging entities.
+        std::fs::write(dir.path().join("wall.png"), b"").unwrap();
+        std::fs::write(
+            dir.path()
+                .join(crate::building_facades::manifest::MANIFEST_NAME),
+            br#"{"version": 1, "textures": [{"file": "wall.png",
+                 "categories": ["Default"], "metres_wide": 20.0,
+                 "metres_tall": 12.0, "storeys": 4,
+                 "tiles_horizontally": true, "has_ground_floor": true}]}"#,
+        )
+        .unwrap();
+        crate::building_facades::reset(true, Some(dir.path()), 16, 1.0);
+        assert!(crate::building_facades::enabled());
+        let mut dressed = test_editor(&xz);
+        // The shell is only as wide as the panels are, and a world that hangs
+        // no display entities gets no panels, so the flattening has to be asked
+        // for on an editor that would hang them.
+        dressed.set_map_decals(true);
+        run_building_with(&mut dressed, &way, &road, &footprints, &args);
+        crate::building_facades::reset(false, None, 16, 1.0);
+
+        // Windows first, so a shell that flattened nothing cannot pass.
+        assert!(
+            (21..40).any(|x| column_has_window(&plain, x, 20)),
+            "the test building has to glaze its walls without a preset set"
+        );
+        for x in 20..=40 {
+            for z in [20, 32] {
+                assert!(
+                    !column_has_window(&dressed, x, z),
+                    "column ({x}, {z}) of a dressed ring kept a procedural window"
+                );
+            }
+        }
+        for z in 20..=32 {
+            for x in [20, 40] {
+                assert!(
+                    !column_has_window(&dressed, x, z),
+                    "column ({x}, {z}) of a dressed ring kept a procedural window"
+                );
+            }
+        }
+
+        // And nothing of the building's own stands in the cells the panels
+        // hang in, all the way round, below the roof line.
+        let outside = |e: &WorldEditor| {
+            let mut n = 0;
+            for y in 1..=10 {
+                for x in 19..=41 {
+                    n += usize::from(e.get_block_absolute(x, y, 19).is_some());
+                    n += usize::from(e.get_block_absolute(x, y, 33).is_some());
+                }
+                for z in 19..=33 {
+                    n += usize::from(e.get_block_absolute(19, y, z).is_some());
+                    n += usize::from(e.get_block_absolute(41, y, z).is_some());
+                }
+            }
+            n
+        };
+        assert!(
+            outside(&plain) > 0,
+            "the test building has to stick something out without a preset set"
+        );
+        assert_eq!(
+            outside(&dressed),
+            0,
+            "a dressed ring left {} blocks standing in front of its panels",
+            outside(&dressed)
+        );
+    }
+
+    /// Writes a one-texture preset set into `dir` and switches it on.
+    fn install_preset_set(dir: &std::path::Path) {
+        // An empty file is enough for the loader, which only checks that the
+        // picture the manifest names is there.
+        std::fs::write(dir.join("wall.png"), b"").unwrap();
+        std::fs::write(
+            dir.join(crate::building_facades::manifest::MANIFEST_NAME),
+            br#"{"version": 1, "textures": [{"file": "wall.png",
+                 "categories": ["Default"], "metres_wide": 20.0,
+                 "metres_tall": 12.0, "storeys": 4,
+                 "tiles_horizontally": true, "has_ground_floor": true}]}"#,
+        )
+        .unwrap();
+        crate::building_facades::reset(true, Some(dir), 16, 1.0);
+        assert!(crate::building_facades::enabled());
+    }
+
+    /// A wall the presets hang nothing on is built exactly as it is with the
+    /// feature off.
+    ///
+    /// The courtyard ring of a building with a hole is the case that shows it:
+    /// `building_facades::collect` claims a building once, from its outer ring,
+    /// so the inner ring never records a candidate and no panel is ever hung
+    /// there. Flattening it anyway costs the courtyard every window, plinth and
+    /// accent line it would have had and gives it nothing back, which is how a
+    /// building ends up a featureless box of its own wall material.
+    #[test]
+    fn a_courtyard_ring_the_presets_never_reach_keeps_its_windows() {
+        let _guard = crate::mapillary::facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let xz = XZBBox::rect_from_xz_lengths(70.0, 70.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 52, 69, 54);
+        let footprints = CoordinateBitmap::new(&xz);
+        let way = rect_way(
+            4713,
+            16,
+            16,
+            48,
+            48,
+            &[
+                ("building", "apartments"),
+                ("building:levels", "4"),
+                ("roof:shape", "flat"),
+            ],
+        );
+        let hole = [HolePolygon {
+            way: rect_way(4714, 26, 26, 38, 38, &[]),
+            add_walls: true,
+        }];
+        let args = scaled_args("1");
+
+        let build = |editor: &mut WorldEditor| {
+            let cache = FloodFillCache::new();
+            let passages = CoordinateBitmap::new_empty();
+            let groups: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+            let ctx = BuildingContext {
+                flood_fill_cache: &cache,
+                building_passages: &passages,
+                road_mask: &road,
+                building_footprints: &footprints,
+                group_members: &groups,
+            };
+            generate_buildings(editor, &way, &args, None, Some(&hole), &ctx, way.id);
+        };
+
+        crate::building_facades::reset(false, None, 16, 1.0);
+        let mut plain = test_editor(&xz);
+        plain.set_map_decals(true);
+        build(&mut plain);
+
+        let dir = tempfile::tempdir().unwrap();
+        install_preset_set(dir.path());
+        let mut dressed = test_editor(&xz);
+        dressed.set_map_decals(true);
+        build(&mut dressed);
+        crate::building_facades::reset(false, None, 16, 1.0);
+
+        // The courtyard walls, whose four corners are the hole's.
+        let courtyard: Vec<(i32, i32)> = (26..=38)
+            .flat_map(|i| [(i, 26), (i, 38), (26, i), (38, i)])
+            .collect();
+        let glazed = |e: &WorldEditor| {
+            courtyard
+                .iter()
+                .filter(|&&(x, z)| column_has_window(e, x, z))
+                .count()
+        };
+        assert!(
+            glazed(&plain) > 0,
+            "the test courtyard has to glaze its walls without a preset set"
+        );
+        assert_eq!(
+            glazed(&dressed),
+            glazed(&plain),
+            "the courtyard ring lost windows to a photograph that never comes"
+        );
+
+        // And the outer ring, which does get panels, is still flattened.
+        assert!(
+            (17..48).any(|x| column_has_window(&plain, x, 16)),
+            "the test building has to glaze its outer wall without a preset set"
+        );
+        assert!(
+            !(16..=48).any(|x| column_has_window(&dressed, x, 16)),
+            "the photographed outer wall kept a procedural window"
+        );
+    }
+
     #[test]
     fn street_aware_generation_is_deterministic() {
+        // The two facade tests install a process-global picture source while
+        // they run, and a dressed ring has no windows at all, so this one has
+        // to take the same lock rather than race them.
+        let _guard = crate::mapillary::facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
         let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
         let footprints = bitmap_with_rect(&xz, 41, 20, 52, 32);
@@ -12721,6 +13008,11 @@ mod facade_dump {
     #[test]
     #[ignore]
     fn dump_street_facades() {
+        // Same reason as the tests above: this dump reads wall blocks, and a
+        // facade test running beside it would flatten them.
+        let _guard = crate::mapillary::facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         for (label, tags) in [
             (
                 "apartments 4 levels, pre-war",

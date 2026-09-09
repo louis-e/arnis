@@ -185,6 +185,15 @@ pub struct PipelineConfig {
     /// stop button today, so the only thing that sets this is `FacadeJob`'s
     /// `Drop`, on a generation that failed before it reached the buildings.
     pub cancel: Option<Arc<AtomicBool>>,
+    /// When set, this run may only answer out of the facade cache: if the cache
+    /// does not already hold every wall of the area, it stops here and this is
+    /// the sentence the user is told, rather than fetching imagery.
+    ///
+    /// The caller that sets it is `FacadeJob::start`, on a box too large for the
+    /// cold path to finish in a time anybody would wait ([`crate::mapillary::PRECOMPUTE_MAX_AREA_M2`]).
+    /// It is not a cancel: a run that the cache can answer produces a full
+    /// export and the world gets its facades as usual.
+    pub cache_only: Option<String>,
     pub debug: Option<DebugDump>,
 }
 
@@ -199,6 +208,7 @@ impl PipelineConfig {
             facade_cache,
             threads: 0,
             cancel: None,
+            cache_only: None,
             debug: None,
         }
     }
@@ -271,7 +281,8 @@ impl RunStats {
     /// The one line a run prints, in the shape `run.py` prints its stages in.
     pub fn summary(&self) -> String {
         format!(
-            "{} buildings, {} walls ({} reachable, {} with views); reg {} local / {} global / {} none;              tiers A {} / B {} / C {} / D {}; \
+            "{} buildings, {} walls ({} reachable, {} with views); \
+             reg {} local / {} global / {} none; tiers A {} / B {} / C {} / D {}; \
              cache {} hit / {} built; {} thumbnails and {} originals ({:.0} MB); \
              {} buildings and {} walls exported, {} images credited; \
              fetch {:.0} s, geometry {:.0} s, align {:.0} s, hires {:.0} s, texture {:.0} s, export {:.0} s, total {:.0} s",
@@ -1768,6 +1779,15 @@ fn dump_wall(
 pub fn run(cfg: &PipelineConfig) -> Result<PipelineResult, String> {
     credits::reset();
     let t0 = Instant::now();
+    // Nothing has ever been built with these tunables, so a cache-only run has
+    // nothing to look for and there is no reason to ask Overpass either. One
+    // arm with a guard rather than two nested `if`s, which edition 2024's
+    // `collapsible_if` would want written as a let chain this edition has not
+    // got.
+    match &cfg.cache_only {
+        Some(why) if !cfg.facade_cache.exists() => return Err(why.clone()),
+        _ => {}
+    }
     // The buildings come first, and not because Overpass is the interesting
     // half: they are what says which walls this run needs, and if the cache
     // already holds every one of them there is no reason to search Mapillary
@@ -1777,10 +1797,27 @@ pub fn run(cfg: &PipelineConfig) -> Result<PipelineResult, String> {
         "Mapillary facades: reading OpenStreetMap buildings...",
     );
     let osm = fetch::fetch_osm(&cfg.fetch)?;
+    run_from_osm(cfg, osm, t0)
+}
+
+/// The rest of [`run`] once Overpass has answered: the cache first, then the
+/// cold path.
+///
+/// Split out from `run` so the cache-only rule can be tested against a fixture
+/// Overpass answer, which is the only way to reach it without a network. `t0` is
+/// the whole run's clock and belongs to the caller, because the Overpass query
+/// is part of what `stats.fetch_s` reports.
+fn run_from_osm(cfg: &PipelineConfig, osm: Value, t0: Instant) -> Result<PipelineResult, String> {
     if let Some(mut result) = run_from_cache(cfg, &osm)? {
         result.stats.fetch_s = t0.elapsed().as_secs_f64();
         result.stats.total_s = t0.elapsed().as_secs_f64();
         return Ok(result);
+    }
+    // The cache could not answer, and this caller may not pay for the cold path.
+    // Everything past here is the part that takes hours on a large box, and the
+    // caller that sets `cache_only` is one whose world is waiting on the answer.
+    if let Some(why) = &cfg.cache_only {
+        return Err(why.clone());
     }
     // The imagery search is the first thing that costs the network, and on a
     // cold area everything after it runs for minutes without a stop, so this is
@@ -2653,6 +2690,89 @@ mod tests {
         // Each run wrote its own export, so neither took the other's.
         assert_ne!(same.export_dir, after.export_dir);
         assert!(after.export_dir.join("manifest.json").exists());
+    }
+
+    /// A generation whose box is too large for a cold run must not start one.
+    ///
+    /// `data_processing` joins the facade job before it builds a single
+    /// building, so a cold pipeline is the world waiting, and a box thirty times
+    /// the cap is hours of it with no cancel button. Cache-only says so at once
+    /// instead, and does not even ask Overpass when nothing has ever been built.
+    #[test]
+    fn a_box_too_large_for_a_cold_run_refuses_instead_of_fetching() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = scratch_cfg(tmp.path(), munich_box());
+        cfg.cache_only = Some("too large, precompute it in pieces".to_string());
+        assert!(!cfg.facade_cache.exists(), "the fixture starts cold");
+
+        // `run` and not `run_from_osm`: with nothing built there is no reason to
+        // ask Overpass either, so this returns before the first request. A test
+        // that reached the network would hang here rather than fail.
+        let err = run(&cfg).expect_err("a cold cache-only run cannot answer");
+        assert_eq!(err, "too large, precompute it in pieces");
+
+        // And with buildings on record but no verdict for them, it still refuses
+        // rather than falling through to the imagery search.
+        let osm = json!({"elements": osm_square(1, 11.5795, 48.1364, 20.0)});
+        std::fs::create_dir_all(&cfg.facade_cache).unwrap();
+        let err = run_from_osm(&cfg, osm, Instant::now())
+            .expect_err("an unbuilt area cannot be served from the cache");
+        assert_eq!(err, "too large, precompute it in pieces");
+    }
+
+    /// Cache-only is not "no facades": an area precomputed in pieces is exactly
+    /// what it exists to serve, and it must still export the whole run.
+    ///
+    /// This is the way out the refusal above tells the user about, so it has to
+    /// work or the advice is wrong.
+    #[test]
+    fn a_precomputed_area_still_exports_under_the_cache_only_rule() {
+        let tmp = tempfile::tempdir().unwrap();
+        let osm = json!({"elements": osm_square(1, 11.5795, 48.1364, 20.0)});
+        let precompute = scratch_cfg(tmp.path(), munich_box());
+        let walls = file_verdicts(&precompute, &osm);
+        assert!(walls > 0, "the fixture must have walls");
+
+        let mut generation = scratch_cfg(tmp.path(), munich_box());
+        generation.cache_only = Some("would have been refused".to_string());
+        let result = run_from_osm(&generation, osm, Instant::now())
+            .expect("the cache holds every wall of this area");
+        assert_eq!(result.stats.walls, walls);
+        assert_eq!(result.stats.cache_misses, 0, "nothing was built");
+        assert!(result.export_dir.join("manifest.json").exists());
+    }
+
+    /// Two pieces precomputed side by side answer the box that covers both.
+    ///
+    /// This is the whole of the advice a box over the cap is given, so it is
+    /// worth a test of its own rather than a corollary of the one above. It is
+    /// also what the reach rule in `cache::store_wall` exists for: each piece
+    /// judges the other's walls as occluders and reaches nothing round them, so
+    /// filing that would put a zero over the proof its neighbour had paid for
+    /// and leave the wide box with no answer along the seam.
+    #[test]
+    fn an_area_precomputed_in_two_pieces_answers_the_box_that_covers_both() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A building in each half, 40 m apart, which is inside `osm_margin_m`
+        // of the other half's box: each piece sees the other's wall.
+        let mut elements = osm_square(1, 11.5795, 48.13580, 20.0);
+        elements.extend(osm_square(2, 11.5795, 48.13640, 20.0));
+        let osm = json!({ "elements": elements });
+
+        let wide = super::super::types::BBox::new(48.13550, 11.5790, 48.13670, 11.5800);
+        let south = super::super::types::BBox::new(48.13550, 11.5790, 48.13610, 11.5800);
+        let north = super::super::types::BBox::new(48.13610, 11.5790, 48.13670, 11.5800);
+
+        // Precomputed one piece at a time, the way the refusal tells the user to.
+        let walls = file_verdicts(&scratch_cfg(tmp.path(), south), &osm);
+        assert_eq!(file_verdicts(&scratch_cfg(tmp.path(), north), &osm), walls);
+
+        let mut generation = scratch_cfg(tmp.path(), wide);
+        generation.cache_only = Some("would have been refused".to_string());
+        let result = run_from_osm(&generation, osm, Instant::now())
+            .expect("both pieces together cover the box");
+        assert_eq!(result.stats.walls, walls);
+        assert_eq!(result.stats.cache_misses, 0);
     }
 
     /// The one thing the bbox still decides: whether this run searched enough of

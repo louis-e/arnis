@@ -891,7 +891,7 @@ pub fn download_images(cfg: &FetchConfig, ids: &[String]) -> Batch {
         ids.par_iter()
             .map(|id| {
                 let outcome = ensure_image(&http, cfg, &layout, id, &guard);
-                report(&done, total, "Downloading Mapillary imagery");
+                report(&done, total, "downloading imagery");
                 (id.clone(), outcome)
             })
             .collect()
@@ -1035,7 +1035,7 @@ pub fn download_clusters(cfg: &FetchConfig, clusters: &[ClusterRef]) -> Batch {
             .par_iter()
             .map(|cluster| {
                 let outcome = ensure_cluster(&http, cfg, &layout, cluster, &guard);
-                report(&done, total, "Downloading Mapillary reconstructions");
+                report(&done, total, "downloading reconstructions");
                 (cluster.id.clone(), outcome)
             })
             .collect()

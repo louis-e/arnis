@@ -60,7 +60,44 @@ const MIN_VALID_FRACTION: f64 = 0.25;
 
 /// The paintings atlas has to fit the smallest common GPU texture limit,
 /// 8192 x 8192, with room for the vanilla paintings and stitching padding.
-pub(super) const ATLAS_BUDGET_PX: u64 = 8192 * 8192 * 6 / 10;
+/// The atlas side the panels are budgeted against, in pixels.
+///
+/// Minecraft stitches every block texture into one image and grows it in powers
+/// of two up to the largest texture the driver actually accepts. Overflowing it
+/// is not a soft failure: the game drops the whole pack, switches off the
+/// player's other resource packs with it, and saves that to options.txt.
+///
+/// 8192 is the safe floor. The game's own stated minimum is an OpenGL 4.4 GPU,
+/// and that specification requires at least 16384, so `ATLAS_SIDE_HIGH` is
+/// defensible; it is not the default because 16384 x 8192 is 716 MB of atlas
+/// VRAM against a stated 2 GB minimum, which is the player's call and not ours.
+pub const ATLAS_SIDE_STANDARD: u32 = 8192;
+pub const ATLAS_SIDE_HIGH: u32 = 16384;
+
+/// Usable pixels in an atlas of `side`, after packing waste.
+///
+/// The six tenths is a packing allowance, not room for vanilla: every vanilla
+/// block sprite together is 0.44 Mpx, which is under one per cent of an 8192
+/// atlas. Measured packing efficiency is 84 to 95 per cent, so this is
+/// conservative by a third, deliberately: from 1.21.11 the player's
+/// anisotropic filtering setting pads every sprite and can add 29 per cent to
+/// the same pack, and a pack that stitches here must still stitch there.
+pub(super) const fn atlas_budget_for(side: u32) -> u64 {
+    (side as u64) * (side as u64) * 6 / 10
+}
+
+/// The budget this run is working to, set once from the settings.
+static ATLAS_BUDGET: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(atlas_budget_for(ATLAS_SIDE_STANDARD));
+
+/// Chooses the atlas the panels are budgeted against for this generation.
+pub fn set_atlas_side(side: u32) {
+    ATLAS_BUDGET.store(atlas_budget_for(side), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(super) fn atlas_budget() -> u64 {
+    ATLAS_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Lowest resolution the budget rule falls back to.
 pub(super) const MIN_PX_PER_BLOCK: u32 = 4;
@@ -1031,8 +1068,13 @@ fn atlas_area(panels: &[Panel], px: u32) -> u64 {
 /// Halves the resolution until the atlas budget holds, down to 4 px per block.
 fn fit_px(panels: &[Panel], requested_px: u32) -> u32 {
     let mut px = requested_px.max(MIN_PX_PER_BLOCK);
-    while px > MIN_PX_PER_BLOCK && atlas_area(panels, px) > ATLAS_BUDGET_PX {
-        px /= 2;
+    // One step at a time, not `px /= 2`: halving is a four times jump in
+    // area, and on a real box it lands at 8 where 11 would have fitted. The
+    // atlas only cares that a sprite side is a multiple of 16, which
+    // `tex_side` gives for any integer px, so nothing here wants a power of
+    // two.
+    while px > MIN_PX_PER_BLOCK && atlas_area(panels, px) > atlas_budget() {
+        px -= 1;
     }
     px
 }
@@ -1074,10 +1116,22 @@ fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    // A PNG carries deflated pixels already; deflating it again is the most
+    // expensive thing this writer does and shrinks the pack by a few per cent.
+    let png_options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     zip.start_file("pack.mcmeta", options)
         .map_err(|e| e.to_string())?;
     zip.write_all(pack_mcmeta(RESOURCEPACK_FORMAT).as_bytes())
         .map_err(|e| e.to_string())?;
+    // Marks the pack as ours, so installing over it never has to guess.
+    zip.start_file(super::displays::PACK_MARKER, options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(
+        b"arnis facade paintings
+",
+    )
+    .map_err(|e| e.to_string())?;
     for p in panels {
         let img = image::imageops::resize(
             &p.tex,
@@ -1090,7 +1144,7 @@ fn resource_zip(panels: &[&Panel], px: u32) -> Result<Vec<u8>, String> {
             .map_err(|e| format!("encode {}: {e}", p.name))?;
         zip.start_file(
             format!("assets/{NAMESPACE}/textures/painting/{}.png", p.name),
-            options,
+            png_options,
         )
         .map_err(|e| e.to_string())?;
         zip.write_all(&png).map_err(|e| e.to_string())?;
@@ -1113,7 +1167,7 @@ fn write_packs_for(
             panels.len()
         ));
     }
-    if atlas_area(panels, px) > ATLAS_BUDGET_PX {
+    if atlas_area(panels, px) > atlas_budget() {
         warn(&format!(
             "Facade paintings: {} panels exceed the painting atlas even at {px} px per block; the game may fail to stitch them.",
             panels.len()
@@ -1453,17 +1507,22 @@ mod tests {
     }
 
     #[test]
-    fn fit_px_halves_until_the_atlas_budget_holds() {
+    fn fit_px_steps_down_to_the_largest_size_the_atlas_budget_holds() {
         let panel = |i: usize| Panel {
             name: format!("p{i}"),
             w: 16,
             h: 16,
             tex: RgbImage::new(1, 1),
         };
-        // 1000 full panels: 65.5 M px at 16, 16.4 M at 8.
+        // 1000 full panels: 65.5 M px at 16, and the budget holds 12.
         let many: Vec<Panel> = (0..1000).map(panel).collect();
-        assert_eq!(fit_px(&many, 16), 8);
-        assert_eq!(fit_px(&many, 32), 8);
+        assert_eq!(fit_px(&many, 16), 12);
+        assert_eq!(fit_px(&many, 32), 12);
+        assert!(atlas_area(&many, 12) <= atlas_budget());
+        assert!(
+            atlas_area(&many, 13) > atlas_budget(),
+            "12 must be the largest that fits"
+        );
         assert_eq!(fit_px(&many[..10], 16), 16);
         assert_eq!(fit_px(&many[..10], 32), 32);
         // Never below 4, even when that still does not fit.

@@ -74,5 +74,11 @@ gen/
 /tests/golden/facade/**/*.png
 /tests/golden/facade/**/*.jpg
 
+# The delivery those textures were built from, 228 MB of the source
+# photographs, which is dropped beside the repository rather than in it. Named
+# here because it is otherwise untracked and unignored, and one `git add -A`
+# would commit the whole library.
+/buildingfacadetextures/
+
 # Working notes for coding agents, not part of the project.
 /CLAUDE.md

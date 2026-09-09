@@ -1,0 +1,1527 @@
+{
+  "version": 1,
+  "textures": [
+    {
+      "file": "apartment_block5.jpg",
+      "categories": [
+        "Residential",
+        "Office",
+        "Default"
+      ],
+      "metres_wide": 16.1,
+      "metres_tall": 6.4,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick and grey panel, full-height glazed flats, two storeys"
+    },
+    {
+      "file": "apartment_block6.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 23.5,
+      "metres_tall": 40.0,
+      "storeys": 14,
+      "tiles_horizontally": false,
+      "has_ground_floor": false,
+      "note": "whole 14 storey brick tower with its own returns; place it once"
+    },
+    {
+      "file": "apartment_block7.jpg",
+      "categories": [
+        "Residential",
+        "Default"
+      ],
+      "metres_wide": 19.3,
+      "metres_tall": 11.6,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick walk-up with recessed balcony bays"
+    },
+    {
+      "file": "apartment_block8.jpg",
+      "categories": [
+        "Residential",
+        "Default"
+      ],
+      "metres_wide": 23.2,
+      "metres_tall": 11.6,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick walk-up with an open stair core"
+    },
+    {
+      "file": "apartments1.jpg",
+      "categories": [
+        "Residential"
+      ],
+      "metres_wide": 24.4,
+      "metres_tall": 16.8,
+      "storeys": 6,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick and timber balconies either side of a white stair core"
+    },
+    {
+      "file": "apartments2-2.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 41.0,
+      "metres_tall": 32.4,
+      "storeys": 12,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "1970s slab, brick and cream bands, tiles almost perfectly"
+    },
+    {
+      "file": "apartments2.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 41.4,
+      "metres_tall": 43.0,
+      "storeys": 16,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "16 storey brick slab, tiles almost perfectly"
+    },
+    {
+      "file": "apartments2_side.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 12.4,
+      "metres_tall": 46.0,
+      "storeys": 17,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "narrow render gable of a tower, one window column"
+    },
+    {
+      "file": "apartments4.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 13.8,
+      "metres_tall": 20.8,
+      "storeys": 7,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "concrete panel block; the angled balcony returns are cropped off"
+    },
+    {
+      "file": "apartments5.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 28.4,
+      "metres_tall": 36.4,
+      "storeys": 13,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "13 storey brick tower with recessed balconies"
+    },
+    {
+      "file": "apartments6.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 27.1,
+      "metres_tall": 33.6,
+      "storeys": 12,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick and timber balconies, white stair core"
+    },
+    {
+      "file": "apartments7.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 27.3,
+      "metres_tall": 41.0,
+      "storeys": 15,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "15 storey brick tower, dark spandrel bands"
+    },
+    {
+      "file": "apartments8.jpg",
+      "categories": [
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 30.8,
+      "metres_tall": 30.8,
+      "storeys": 11,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick tower with a balcony core, tiles almost perfectly"
+    },
+    {
+      "file": "apartments9.jpg",
+      "categories": [
+        "Residential"
+      ],
+      "metres_wide": 27.1,
+      "metres_tall": 19.6,
+      "storeys": 7,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "white render with brown recessed bays"
+    },
+    {
+      "file": "building_5c.jpg",
+      "categories": [
+        "Commercial",
+        "Default"
+      ],
+      "metres_wide": 8.2,
+      "metres_tall": 5.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "brick with a green shopfront and a door"
+    },
+    {
+      "file": "building_church_side1.jpg",
+      "categories": [
+        "Religious"
+      ],
+      "metres_wide": 12.2,
+      "metres_tall": 9.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "two gothic nave windows in coursed sandstone"
+    },
+    {
+      "file": "building_church_side_bottom1.jpg",
+      "categories": [
+        "Religious",
+        "Historic"
+      ],
+      "metres_wide": 10.0,
+      "metres_tall": 10.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "gothic window over a stone plinth"
+    },
+    {
+      "file": "building_church_side_bottom2.jpg",
+      "categories": [
+        "Religious",
+        "Historic"
+      ],
+      "metres_wide": 11.2,
+      "metres_tall": 10.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "two gothic windows over a stone plinth"
+    },
+    {
+      "file": "building_church_side_top.jpg",
+      "categories": [
+        "Religious",
+        "Historic"
+      ],
+      "metres_wide": 16.0,
+      "metres_tall": 8.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "traceried clerestory windows, tiles cleanly"
+    },
+    {
+      "file": "building_derelict1.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Commercial"
+      ],
+      "metres_wide": 14.6,
+      "metres_tall": 7.5,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "boarded and broken windows in tile and panel, derelict"
+    },
+    {
+      "file": "building_dks-1.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Historic"
+      ],
+      "metres_wide": 10.8,
+      "metres_tall": 16.0,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "red brick mill, green steel windows, four storeys"
+    },
+    {
+      "file": "building_dks-2.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Historic"
+      ],
+      "metres_wide": 10.8,
+      "metres_tall": 16.0,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "red brick mill, sister elevation to dks-1"
+    },
+    {
+      "file": "building_dock.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Office"
+      ],
+      "metres_wide": 27.0,
+      "metres_tall": 10.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "clad shed over a dock office band; the quay wall is cropped off"
+    },
+    {
+      "file": "building_dock2.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial",
+        "Historic"
+      ],
+      "metres_wide": 17.0,
+      "metres_tall": 8.5,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick warehouse, segmental heads, pilaster"
+    },
+    {
+      "file": "building_dock_apartments.jpg",
+      "categories": [
+        "Warehouse",
+        "Historic",
+        "Residential"
+      ],
+      "metres_wide": 24.7,
+      "metres_tall": 15.0,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "victorian dock warehouse, arched windows and a cornice"
+    },
+    {
+      "file": "building_dock_apartments2.jpg",
+      "categories": [
+        "Residential",
+        "Hotel",
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 32.1,
+      "metres_tall": 23.2,
+      "storeys": 8,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "plain concrete block, small punched windows, tiles almost perfectly"
+    },
+    {
+      "file": "building_empty.jpg",
+      "categories": [
+        "Commercial",
+        "Office"
+      ],
+      "metres_wide": 11.9,
+      "metres_tall": 7.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "1960s civic band, relief panels over a boarded shopfront"
+    },
+    {
+      "file": "building_factory.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse"
+      ],
+      "metres_wide": 8.7,
+      "metres_tall": 11.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "red brick with two glass block factory windows"
+    },
+    {
+      "file": "building_front3.jpg",
+      "categories": [
+        "Industrial",
+        "Commercial",
+        "Default"
+      ],
+      "metres_wide": 7.0,
+      "metres_tall": 7.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "painted render wall, one window, paint failing at the base"
+    },
+    {
+      "file": "building_front4.jpg",
+      "categories": [
+        "Office",
+        "School"
+      ],
+      "metres_wide": 3.2,
+      "metres_tall": 5.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "single window bay in dark brick under a concrete band"
+    },
+    {
+      "file": "building_front5.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse"
+      ],
+      "metres_wide": 6.9,
+      "metres_tall": 5.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brick with a caged industrial window"
+    },
+    {
+      "file": "building_front8.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Garage"
+      ],
+      "metres_wide": 7.3,
+      "metres_tall": 5.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "blue profiled steel with a roller shutter and a door"
+    },
+    {
+      "file": "building_garage.jpg",
+      "categories": [
+        "Garage",
+        "Shed",
+        "Commercial"
+      ],
+      "metres_wide": 11.0,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "render lock-up with a door and a roller shutter, tiles cleanly"
+    },
+    {
+      "file": "building_h_windows.jpg",
+      "categories": [
+        "School",
+        "Office",
+        "Hospital"
+      ],
+      "metres_wide": 6.9,
+      "metres_tall": 7.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "maroon tile cladding with tall two-storey windows"
+    },
+    {
+      "file": "building_house1.jpg",
+      "categories": [
+        "House",
+        "Residential"
+      ],
+      "metres_wide": 5.8,
+      "metres_tall": 6.2,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "rendered terrace house over a red brick plinth, boarded windows"
+    },
+    {
+      "file": "building_hsp.jpg",
+      "categories": [
+        "Office",
+        "School",
+        "Hospital"
+      ],
+      "metres_wide": 6.2,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "concrete band with a continuous ribbon window"
+    },
+    {
+      "file": "building_jmu.jpg",
+      "categories": [
+        "School",
+        "Office",
+        "ModernSkyscraper"
+      ],
+      "metres_wide": 23.0,
+      "metres_tall": 16.0,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "dark brick university block, four ribbon windows, tiles cleanly"
+    },
+    {
+      "file": "building_jmu2.jpg",
+      "categories": [
+        "School",
+        "Office",
+        "ModernSkyscraper"
+      ],
+      "metres_wide": 26.0,
+      "metres_tall": 14.4,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "same building as jmu without the blank top band, tiles cleanly"
+    },
+    {
+      "file": "building_l2.jpg",
+      "categories": [
+        "Office",
+        "Commercial",
+        "Historic"
+      ],
+      "metres_wide": 13.7,
+      "metres_tall": 9.0,
+      "storeys": 3,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "white faience office over stone piers"
+    },
+    {
+      "file": "building_lb1.jpg",
+      "categories": [
+        "Historic",
+        "Commercial",
+        "Office",
+        "MasonrySkyscraper"
+      ],
+      "metres_wide": 10.2,
+      "metres_tall": 8.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "edwardian stone with big arched windows and a balustrade"
+    },
+    {
+      "file": "building_lh1.jpg",
+      "categories": [
+        "GridSkyscraper",
+        "GlassySkyscraper",
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 19.5,
+      "metres_tall": 13.0,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "full curtain wall grid with lit office floors"
+    },
+    {
+      "file": "building_liver.jpg",
+      "categories": [
+        "Historic",
+        "MasonrySkyscraper",
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 12.3,
+      "metres_tall": 24.6,
+      "storeys": 7,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "portland stone classical office, arcaded top storey"
+    },
+    {
+      "file": "building_mirrored.jpg",
+      "categories": [
+        "GlassySkyscraper",
+        "ModernSkyscraper",
+        "TallBuilding",
+        "Office"
+      ],
+      "metres_wide": 29.0,
+      "metres_tall": 44.0,
+      "storeys": 13,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "bronze mirror glass tower between brick piers"
+    },
+    {
+      "file": "building_modern.jpg",
+      "categories": [
+        "Office",
+        "School",
+        "Hospital"
+      ],
+      "metres_wide": 7.1,
+      "metres_tall": 7.2,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "precast concrete panels with rounded window openings"
+    },
+    {
+      "file": "building_modern2.jpg",
+      "categories": [
+        "Office",
+        "Commercial",
+        "ModernSkyscraper"
+      ],
+      "metres_wide": 13.3,
+      "metres_tall": 6.8,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "terracotta bands with blue ribbon windows"
+    },
+    {
+      "file": "building_modern3.jpg",
+      "categories": [
+        "Office",
+        "School"
+      ],
+      "metres_wide": 8.9,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "ribbed precast panels with square windows"
+    },
+    {
+      "file": "building_office.jpg",
+      "categories": [
+        "Office",
+        "Commercial",
+        "School"
+      ],
+      "metres_wide": 17.0,
+      "metres_tall": 8.5,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "red brick office, ribbon windows and a clerestory"
+    },
+    {
+      "file": "building_office10.jpg",
+      "categories": [
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 16.6,
+      "metres_tall": 19.8,
+      "storeys": 6,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "1960s concrete and glass, six storeys"
+    },
+    {
+      "file": "building_office11.jpg",
+      "categories": [
+        "Office"
+      ],
+      "metres_wide": 15.5,
+      "metres_tall": 16.5,
+      "storeys": 5,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "brown brick with continuous ribbon windows"
+    },
+    {
+      "file": "building_office12.jpg",
+      "categories": [
+        "Office",
+        "School",
+        "Commercial"
+      ],
+      "metres_wide": 7.1,
+      "metres_tall": 8.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "buff brick with large paired windows"
+    },
+    {
+      "file": "building_office13.jpg",
+      "categories": [
+        "Office",
+        "Industrial",
+        "Commercial"
+      ],
+      "metres_wide": 7.2,
+      "metres_tall": 7.2,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "grey ribbed cladding with ribbon windows"
+    },
+    {
+      "file": "building_office2.jpg",
+      "categories": [
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 14.1,
+      "metres_tall": 28.8,
+      "storeys": 9,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "narrow 1960s office slab, nine storeys of ribbon window"
+    },
+    {
+      "file": "building_office3.jpg",
+      "categories": [
+        "Office",
+        "Hotel",
+        "School"
+      ],
+      "metres_wide": 16.3,
+      "metres_tall": 16.5,
+      "storeys": 5,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "white tile with red framed windows"
+    },
+    {
+      "file": "building_office4.jpg",
+      "categories": [
+        "Office",
+        "GlassySkyscraper",
+        "GridSkyscraper"
+      ],
+      "metres_wide": 17.3,
+      "metres_tall": 7.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "blue mullion curtain wall, two storeys"
+    },
+    {
+      "file": "building_office5.jpg",
+      "categories": [
+        "Office"
+      ],
+      "metres_wide": 15.8,
+      "metres_tall": 10.2,
+      "storeys": 3,
+      "tiles_horizontally": false,
+      "has_ground_floor": false,
+      "note": "ribbon windows between dark brick spandrels"
+    },
+    {
+      "file": "building_office7.jpg",
+      "categories": [
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 17.4,
+      "metres_tall": 18.0,
+      "storeys": 5,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "concrete frame office, paired windows, top parapet"
+    },
+    {
+      "file": "building_office8.jpg",
+      "categories": [
+        "Office"
+      ],
+      "metres_wide": 16.0,
+      "metres_tall": 16.0,
+      "storeys": 5,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "1960s ribbon window office, five storeys"
+    },
+    {
+      "file": "building_office9.jpg",
+      "categories": [
+        "Office",
+        "GridSkyscraper",
+        "ContemporarySkyscraper",
+        "TallBuilding"
+      ],
+      "metres_wide": 21.9,
+      "metres_tall": 13.2,
+      "storeys": 4,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "deep concrete grid with recessed windows"
+    },
+    {
+      "file": "building_oldfirm.jpg",
+      "categories": [
+        "Historic",
+        "Office",
+        "Commercial",
+        "School"
+      ],
+      "metres_wide": 4.6,
+      "metres_tall": 8.4,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "victorian red brick with arched sash windows"
+    },
+    {
+      "file": "building_portacabin.jpg",
+      "categories": [
+        "Shed"
+      ],
+      "metres_wide": 4.4,
+      "metres_tall": 3.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "portacabin units, the only site hut in the set"
+    },
+    {
+      "file": "building_pub_old.jpg",
+      "categories": [
+        "Commercial",
+        "Historic"
+      ],
+      "metres_wide": 8.4,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "old pub in faience tile, boarded windows and a door"
+    },
+    {
+      "file": "building_showroom_vacant.jpg",
+      "categories": [
+        "Commercial",
+        "Warehouse"
+      ],
+      "metres_wide": 5.0,
+      "metres_tall": 5.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "vacant showroom boarded with OSB under a clad fascia"
+    },
+    {
+      "file": "building_side.jpg",
+      "categories": [
+        "Historic",
+        "Religious",
+        "School"
+      ],
+      "metres_wide": 6.0,
+      "metres_tall": 11.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "pink brick arched gable bay over a blue engineering brick plinth"
+    },
+    {
+      "file": "building_side2.jpg",
+      "categories": [
+        "Office",
+        "School",
+        "Hospital",
+        "Residential"
+      ],
+      "metres_wide": 9.2,
+      "metres_tall": 7.2,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "modern brick and louvred windows; grass and a garden wall cropped off"
+    },
+    {
+      "file": "building_side3.jpg",
+      "categories": [
+        "House",
+        "Residential",
+        "Shed"
+      ],
+      "metres_wide": 5.3,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "pebbledash render with three small windows"
+    },
+    {
+      "file": "building_side4.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial"
+      ],
+      "metres_wide": 6.2,
+      "metres_tall": 5.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "white profiled cladding on a brick plinth"
+    },
+    {
+      "file": "building_side5.jpg",
+      "categories": [
+        "Commercial",
+        "Industrial"
+      ],
+      "metres_wide": 5.9,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "brick with barred windows under a blue fascia"
+    },
+    {
+      "file": "building_side6.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial"
+      ],
+      "metres_wide": 6.0,
+      "metres_tall": 6.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "grey profiled cladding over a buff brick base"
+    },
+    {
+      "file": "building_side7.jpg",
+      "categories": [
+        "School",
+        "Historic",
+        "Residential",
+        "Office"
+      ],
+      "metres_wide": 7.4,
+      "metres_tall": 6.8,
+      "storeys": 2,
+      "tiles_horizontally": false,
+      "has_ground_floor": false,
+      "note": "red brick with sash windows; the downpipe is cropped off"
+    },
+    {
+      "file": "building_side_dks1.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse"
+      ],
+      "metres_wide": 7.3,
+      "metres_tall": 8.0,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "factory steel glazing over a brick base"
+    },
+    {
+      "file": "building_side_long.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial",
+        "School"
+      ],
+      "metres_wide": 18.0,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "long low brick shed with small windows and a door"
+    },
+    {
+      "file": "loading_bays.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial"
+      ],
+      "metres_wide": 6.9,
+      "metres_tall": 6.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "two dock levellers, brick base and bollards"
+    },
+    {
+      "file": "restaurant_window.jpg",
+      "categories": [
+        "Commercial",
+        "Historic"
+      ],
+      "metres_wide": 3.5,
+      "metres_tall": 5.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "arched restaurant window in stone over a brick base"
+    },
+    {
+      "file": "shop_front10.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 7.6,
+      "metres_tall": 3.4,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "bakery, half shuttered, timber doors"
+    },
+    {
+      "file": "shop_front11.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 6.5,
+      "metres_tall": 3.6,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "blue sandwich bar with a deep fascia"
+    },
+    {
+      "file": "shop_front12.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 3.9,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "green painted shop with a caged window"
+    },
+    {
+      "file": "shop_front13.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 5.1,
+      "metres_tall": 3.6,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "closed shutter under an ice cream fascia"
+    },
+    {
+      "file": "shop_front14.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 4.9,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "red and yellow takeaway front"
+    },
+    {
+      "file": "shop_front15.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 5.2,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "takeaway in red brick with a timber door"
+    },
+    {
+      "file": "shop_front16.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 5.0,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "boarded internet cafe with a white door"
+    },
+    {
+      "file": "shop_front17_derelict.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 4.7,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "derelict shop boarded with mismatched ply"
+    },
+    {
+      "file": "shop_front2.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 5.2,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "flooring shop, yellow fascia and a blue stall riser"
+    },
+    {
+      "file": "shop_front3.jpg",
+      "categories": [
+        "Commercial",
+        "Residential"
+      ],
+      "metres_wide": 10.1,
+      "metres_tall": 7.5,
+      "storeys": 2,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "white painted shop with two flats above"
+    },
+    {
+      "file": "shop_front4.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 5.9,
+      "metres_tall": 4.2,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "red shutter under a painted name board"
+    },
+    {
+      "file": "shop_front5.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 7.0,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "timber shopfront between brick piers"
+    },
+    {
+      "file": "shop_front6.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 12.0,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "restaurant with awnings over a tiled stall riser"
+    },
+    {
+      "file": "shop_front7.jpg",
+      "categories": [
+        "Commercial",
+        "Garage",
+        "Shed"
+      ],
+      "metres_wide": 5.6,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "weathered timber cladding with a window and a wide door"
+    },
+    {
+      "file": "shop_front8.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 4.6,
+      "metres_tall": 4.4,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "tiled takeaway front with an arched window"
+    },
+    {
+      "file": "shop_front9.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 7.7,
+      "metres_tall": 3.4,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "pharmacy, full width glazing under a white fascia"
+    },
+    {
+      "file": "shop_front_top1.jpg",
+      "categories": [
+        "Commercial",
+        "Residential"
+      ],
+      "metres_wide": 5.8,
+      "metres_tall": 3.6,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "the first floor above a shop, render and two sash windows"
+    },
+    {
+      "file": "shopfront_neon.jpg",
+      "categories": [
+        "Commercial"
+      ],
+      "metres_wide": 5.6,
+      "metres_tall": 4.4,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "sign maker with a lit neon board and deep glazing"
+    },
+    {
+      "file": "shutters_1.jpg",
+      "categories": [
+        "Commercial",
+        "Garage",
+        "Warehouse"
+      ],
+      "metres_wide": 4.3,
+      "metres_tall": 3.6,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "single roller shutter between painted brick piers"
+    },
+    {
+      "file": "shutters_door.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial",
+        "Garage"
+      ],
+      "metres_wide": 4.5,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "wide roller shutter with a steel personnel door"
+    },
+    {
+      "file": "shutters_door2.jpg",
+      "categories": [
+        "Garage",
+        "Warehouse"
+      ],
+      "metres_wide": 2.0,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": false,
+      "has_ground_floor": true,
+      "note": "narrow shutter in a red painted frame"
+    },
+    {
+      "file": "shutters_large1.jpg",
+      "categories": [
+        "Warehouse",
+        "Garage",
+        "Industrial"
+      ],
+      "metres_wide": 5.6,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "large shutter in a concrete frame"
+    },
+    {
+      "file": "shutters_large3.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Shed",
+        "Garage"
+      ],
+      "metres_wide": 3.5,
+      "metres_tall": 4.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "green vertical profiled steel wall"
+    },
+    {
+      "file": "shutters_large4.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Shed"
+      ],
+      "metres_wide": 3.8,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "blue vertical profiled steel wall"
+    },
+    {
+      "file": "shutters_large_dirty.jpg",
+      "categories": [
+        "Warehouse",
+        "Garage",
+        "Industrial"
+      ],
+      "metres_wide": 5.7,
+      "metres_tall": 3.6,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "dirty shutter in a red frame"
+    },
+    {
+      "file": "wall_shutter1.jpg",
+      "categories": [
+        "Garage",
+        "Warehouse",
+        "Commercial"
+      ],
+      "metres_wide": 4.2,
+      "metres_tall": 5.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "red blockwork with a shutter over a dark plinth"
+    },
+    {
+      "file": "wall_shutter2.jpg",
+      "categories": [
+        "Garage",
+        "Commercial",
+        "Warehouse"
+      ],
+      "metres_wide": 5.9,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "painted brick with a shutter under a blue fascia"
+    },
+    {
+      "file": "wall_shutter3.jpg",
+      "categories": [
+        "Garage",
+        "Warehouse",
+        "Industrial"
+      ],
+      "metres_wide": 6.6,
+      "metres_tall": 4.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "old brick with a shutter, patched and repointed"
+    },
+    {
+      "file": "wall_steel_corrugated_2tone.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial",
+        "Shed"
+      ],
+      "metres_wide": 4.8,
+      "metres_tall": 6.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "white corrugated steel with a red band and eaves"
+    },
+    {
+      "file": "wall_steel_corrugated_door.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial",
+        "Garage"
+      ],
+      "metres_wide": 6.7,
+      "metres_tall": 5.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "corrugated steel with a painted disc and a door"
+    },
+    {
+      "file": "warehouse_front.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial"
+      ],
+      "metres_wide": 22.1,
+      "metres_tall": 6.0,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "long clad warehouse with red doors, tiles cleanly"
+    },
+    {
+      "file": "warehouse_shutters1.jpg",
+      "categories": [
+        "Warehouse",
+        "Industrial"
+      ],
+      "metres_wide": 8.1,
+      "metres_tall": 5.5,
+      "storeys": 1,
+      "tiles_horizontally": true,
+      "has_ground_floor": true,
+      "note": "brick merchant's warehouse with a wide shutter and signage"
+    },
+    {
+      "file": "Building-Facade-Texture_01.jpg",
+      "categories": [
+        "Residential",
+        "Office",
+        "Hotel",
+        "TallBuilding"
+      ],
+      "metres_wide": 24.8,
+      "metres_tall": 33.0,
+      "storeys": 11,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "white panel slab with rows of small windows"
+    },
+    {
+      "file": "Building-Facade-Texture_02.jpg",
+      "categories": [
+        "Residential",
+        "Office",
+        "ContemporarySkyscraper",
+        "TallBuilding"
+      ],
+      "metres_wide": 14.7,
+      "metres_tall": 21.7,
+      "storeys": 7,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "pale stone cladding with irregular deep-set windows"
+    },
+    {
+      "file": "Building-Facade-Texture_03.jpg",
+      "categories": [
+        "GlassySkyscraper",
+        "GridSkyscraper",
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 22.2,
+      "metres_tall": 28.0,
+      "storeys": 8,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "blue glass office tower, spandrel bands"
+    },
+    {
+      "file": "tileable_glass_curtain_wall.jpg",
+      "categories": [
+        "GlassySkyscraper",
+        "GridSkyscraper",
+        "ModernSkyscraper",
+        "Office",
+        "TallBuilding"
+      ],
+      "metres_wide": 25.2,
+      "metres_tall": 25.2,
+      "storeys": 7,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "seamless curtain wall, blue glass between concrete piers (PBR set others_0021)"
+    },
+    {
+      "file": "tileable_brick_loft.jpg",
+      "categories": [
+        "Historic",
+        "Office",
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 32.7,
+      "metres_tall": 34.0,
+      "storeys": 10,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "seamless brick and steel loft, ten storeys of subdivided sashes (PBR set others_0022)"
+    },
+    {
+      "file": "tileable_precast_panels.jpg",
+      "categories": [
+        "Office",
+        "Hospital",
+        "School",
+        "Residential",
+        "TallBuilding"
+      ],
+      "metres_wide": 19.6,
+      "metres_tall": 19.8,
+      "storeys": 6,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "seamless precast panels with staggered windows and louvres (PBR set others_0025)"
+    },
+    {
+      "file": "tileable_brick_mill.jpg",
+      "categories": [
+        "Industrial",
+        "Warehouse",
+        "Historic",
+        "School"
+      ],
+      "metres_wide": 20.0,
+      "metres_tall": 20.0,
+      "storeys": 5,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "seamless red brick mill with arched windows (PBR set others_0026)"
+    },
+    {
+      "file": "tileable_warehouse_office.jpg",
+      "categories": [
+        "Office",
+        "Industrial",
+        "Warehouse",
+        "GridSkyscraper",
+        "TallBuilding"
+      ],
+      "metres_wide": 18.0,
+      "metres_tall": 18.0,
+      "storeys": 5,
+      "tiles_horizontally": true,
+      "has_ground_floor": false,
+      "note": "seamless concrete pier and glazing, abandoned warehouse (PBR set others_0029)"
+    }
+  ]
+}

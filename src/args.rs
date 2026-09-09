@@ -179,7 +179,13 @@ pub struct Args {
 
     /// Mapillary API token, from https://www.mapillary.com/developer. Required by
     /// --mapillary-facades and --mapillary-probe.
-    #[arg(long, env = "MAPILLARY_TOKEN")]
+    ///
+    /// `hide_env_values` because clap prints `[env: NAME=value]` in `--help` by
+    /// default, and this value is a credential: `arnis --help` with the variable
+    /// set would put the token on stdout, which is where a bug report or a CI log
+    /// picks it up. The variable's name still shows, so the help still says where
+    /// the token can come from.
+    #[arg(long, env = "MAPILLARY_TOKEN", hide_env_values = true)]
     pub mapillary_token: Option<String>,
 
     /// Build building facades from Mapillary street-level photographs: wall colours
@@ -237,6 +243,26 @@ pub struct Args {
     /// game's atlas.
     #[arg(long, default_value_t = 16, value_parser = parse_paintings_px)]
     pub mapillary_paintings_px: u32,
+
+    /// Hang a premade facade photograph on every building, picked by what kind
+    /// of building it is. Needs no token and no download, so it covers the
+    /// buildings street photography never reached. The two facade sources are
+    /// alternatives: this one turns the Mapillary facades off, since both hang
+    /// panels on the same walls. Java 1.21.4+ only (item display entities).
+    #[arg(long, default_value_t = false)]
+    pub building_facades: bool,
+
+    /// How sharp the facade panels may be, by how large an atlas they may fill.
+    /// `standard` fits any GPU the game runs on; `high` is sharper and wants a
+    /// modern one on whatever machine opens the world.
+    #[arg(long, value_enum, default_value_t = FacadeDetail::Standard)]
+    pub facade_detail: FacadeDetail,
+
+    /// Directory holding the preset facade set: a manifest.json and the images
+    /// it names. Defaults to assets/building-facades beside the executable, so
+    /// this only has to be given to run a replacement set from elsewhere.
+    #[arg(long)]
+    pub building_facades_dir: Option<PathBuf>,
 }
 
 /// Accepts the painting resolutions the atlas budget logic can halve cleanly.
@@ -267,6 +293,37 @@ pub enum OvertureSource {
     Tiles,
     /// GeoParquet partitions only.
     Parquet,
+}
+
+/// How much of the graphics card the facade panels are allowed to ask for.
+///
+/// Minecraft stitches every block texture into one atlas, and overflowing it
+/// makes the game drop the world's whole resource pack and switch off the
+/// player's other packs with it. `Standard` budgets for an 8192 atlas, which
+/// every card the game runs on can hold. `High` budgets for 16384, which about
+/// nine cards in ten manage, and spends up to 716 MB of video memory on it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum FacadeDetail {
+    #[default]
+    Standard,
+    High,
+}
+
+impl FacadeDetail {
+    /// The atlas side this detail level budgets against, in pixels.
+    pub fn atlas_side(self) -> u32 {
+        match self {
+            FacadeDetail::Standard => crate::mapillary::paintings::ATLAS_SIDE_STANDARD,
+            FacadeDetail::High => crate::mapillary::paintings::ATLAS_SIDE_HIGH,
+        }
+    }
+
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "high" => FacadeDetail::High,
+            _ => FacadeDetail::Standard,
+        }
+    }
 }
 
 /// How much image signage to place.
@@ -384,8 +441,16 @@ impl Args {
     ///
     /// A token alone turns the feature on: there is nothing else to configure,
     /// and asking for a second flag would only be a way to get it wrong.
+    /// The preset facades take the walls: the two sources are alternatives, not
+    /// layers, so asking for the presets switches the download off rather than
+    /// letting the pair fight over a wall and a resource pack. A token in the
+    /// environment is often ambient rather than deliberate, so this is quiet
+    /// precedence and not a refusal; `validate_args` says so once when both
+    /// were actually asked for.
     pub fn mapillary_facades_on(&self) -> bool {
-        self.mapillary_facades.unwrap_or(true) && self.mapillary_api_token().is_some()
+        !self.building_facades
+            && self.mapillary_facades.unwrap_or(true)
+            && self.mapillary_api_token().is_some()
     }
 
     /// Whether the facade pipeline itself runs for this world.
@@ -593,6 +658,37 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                  Use `blocks`, which works on every world format."
                     .to_string(),
             );
+        }
+    }
+
+    // The preset facades hang item display entities and write their textures
+    // into the world's `resources.zip`. `paintings` writes its own textures
+    // into the same file, and the second writer replaces the first, so the two
+    // cannot both run. `paintings-v2` shares the display registry and the one
+    // pack with them, which is the whole design, so only v1 is refused.
+    if args.building_facades && args.mapillary_facades_wanted() {
+        println!(
+            "Note: --building-facades takes the walls, so the Mapillary facades are off for this run."
+        );
+    }
+
+    // The preset facades hang on the same item display entities, so they are
+    // refused here for the same reason and in the same words. Said out loud
+    // rather than dropped at the wall.
+    if args.building_facades && (args.bedrock || args.luanti) {
+        return Err(
+            "--building-facades needs a Java world (item display entities, 1.21.4+). \
+             Leave it off and the buildings are generated with their usual block walls."
+                .to_string(),
+        );
+    }
+
+    if let Some(dir) = &args.building_facades_dir {
+        if !dir.is_dir() {
+            return Err(format!(
+                "--building-facades-dir: {} is not a directory.",
+                dir.display()
+            ));
         }
     }
 
@@ -1079,6 +1175,36 @@ mod tests {
         assert!(validate_args(&args).is_ok());
     }
 
+    /// `--help` must not print the Mapillary token.
+    ///
+    /// clap renders `[env: NAME=value]` for an env-backed argument unless
+    /// `hide_env_values` is set, so without it `MAPILLARY_TOKEN=MLY|... arnis
+    /// --help` puts the credential on stdout. The env var is read here rather
+    /// than set, because setting one is process wide and every other test in
+    /// this binary shares the process.
+    #[test]
+    fn the_help_names_the_token_variable_and_never_its_value() {
+        use clap::CommandFactory;
+        let cmd = Args::command();
+        let token = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "mapillary_token")
+            .expect("the token argument");
+        assert!(
+            token.is_hide_env_values_set(),
+            "--help would print the value of MAPILLARY_TOKEN"
+        );
+        // And the variable's name is still shown, so the help still says where
+        // a token may come from.
+        assert!(!token.is_hide_env_set());
+        let help = Args::command().render_long_help().to_string();
+        assert!(
+            help.contains("[env: MAPILLARY_TOKEN]"),
+            "the help should name the variable without its value"
+        );
+        assert!(!help.contains("MAPILLARY_TOKEN="));
+    }
+
     #[test]
     fn facade_modes_parse_and_need_a_java_world() {
         let tmpdir = tempfile::tempdir().unwrap();
@@ -1152,6 +1278,75 @@ mod tests {
         args.bedrock = true;
         let err = validate_args(&args).unwrap_err();
         assert!(err.contains("paintings") && err.contains("Java"), "{err}");
+    }
+
+    #[test]
+    fn preset_facades_are_off_by_default_and_need_a_java_world() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd: Vec<&str> = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+
+        // Off unless asked for, and asking for it needs no token and no other
+        // setting: that is the whole point of the second source.
+        let args = parse(&[]);
+        assert!(!args.building_facades);
+        assert!(args.building_facades_dir.is_none());
+        assert!(validate_args(&args).is_ok());
+
+        let mut args = parse(&["--building-facades"]);
+        assert!(args.building_facades);
+        assert!(validate_args(&args).is_ok());
+
+        // Panels are Java entities, on this source as on the other one.
+        args.bedrock = true;
+        let err = validate_args(&args).unwrap_err();
+        assert!(
+            err.contains("--building-facades") && err.contains("Java"),
+            "{err}"
+        );
+        args.bedrock = false;
+        args.luanti = true;
+        assert!(validate_args(&args).is_err());
+        // And turning it off leaves those formats generating as they always did.
+        args.building_facades = false;
+        assert!(validate_args(&args).is_ok());
+
+        // The two facade sources are alternatives: asking for the presets turns
+        // the Mapillary facades off, so no mode of theirs can clash with them
+        // and none of these is refused.
+        let mut args = parse(&["--building-facades", "--mapillary-token", "MLY|test"]);
+        for mode in [
+            FacadeMode::PaintingsV2,
+            FacadeMode::Blocks,
+            FacadeMode::Paintings,
+        ] {
+            args.mapillary_facade_mode = mode;
+            assert!(validate_args(&args).is_ok(), "{mode:?} was refused");
+            assert!(
+                !args.mapillary_facades_on(),
+                "{mode:?} left the Mapillary facades on beside the presets"
+            );
+        }
+        // And with the presets off, a token alone still turns Mapillary on.
+        args.building_facades = false;
+        assert!(args.mapillary_facades_on());
+
+        // A replacement set is pointed at by directory, and a directory that is
+        // not there is a mistake worth saying out loud.
+        let set = tempfile::tempdir().unwrap();
+        let args = parse(&[
+            "--building-facades",
+            "--building-facades-dir",
+            set.path().to_str().unwrap(),
+        ]);
+        assert!(validate_args(&args).is_ok());
+        let args = parse(&["--building-facades-dir", "no/such/place"]);
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("--building-facades-dir"), "{err}");
     }
 
     #[test]

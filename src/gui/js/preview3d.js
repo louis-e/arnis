@@ -341,6 +341,11 @@
 
   async function loadFacades(bboxText) {
     try {
+      // Same bound the buildings layer uses. Every call parses each cached
+      // export's building JSON and base64s its textures, so an unbounded box
+      // makes each map move pay for every area ever precomputed, including for
+      // someone who tried the feature once and turned it off.
+      if (bboxAreaM2(bboxText) > BUILDINGS_MAX_AREA_M2) return;
       const key = bboxText + "|" + facadesGen;
       if (facadesCache.key !== key) {
         const raw = await window.__TAURI__.core.invoke("gui_get_preview_facades", {
