@@ -495,8 +495,12 @@ function getFacadeSource() {
   return v === 'preset' || v === 'mapillary' ? v : 'off';
 }
 
+// Only the presets are Java only. Mapillary falls back to block facades on
+// Bedrock and Luanti, which is what the notice under the mode control says.
 function getEffectiveFacadeSource() {
-  return selectedWorldFormat === 'java' ? getFacadeSource() : 'off';
+  const source = getFacadeSource();
+  if (source === 'preset' && selectedWorldFormat !== 'java') return 'off';
+  return source;
 }
 
 function getFacadesEnabled() {
@@ -520,7 +524,7 @@ function refreshFacadeSourceRows() {
   const source = getEffectiveFacadeSource();
 
   group.querySelectorAll('.segment').forEach((btn) => {
-    btn.disabled = !java && btn.dataset.facadeSource !== 'off';
+    btn.disabled = !java && btn.dataset.facadeSource === 'preset';
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
@@ -537,7 +541,8 @@ function refreshFacadeSourceRows() {
   };
   grey('mapillary-token', source === 'mapillary');
   grey('facade-mode-group', source === 'mapillary' && !!getMapillaryToken());
-  grey('facade-detail-group', source !== 'off');
+  // Panel resolution, so it means nothing where no panels are hung.
+  grey('facade-detail-group', source !== 'off' && java);
   grey('precompute-facades-button', source === 'mapillary' && !!getMapillaryToken());
 
   const notice = document.getElementById('facade-java-only-notice');
