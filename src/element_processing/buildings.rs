@@ -4393,6 +4393,32 @@ fn weathered_variant(block: Block, rng: &mut impl Rng) -> Block {
     }
 }
 
+/// Glass a tower can be walled in, so a corner can tell it apart from stone.
+fn is_glass_wall(block: Block) -> bool {
+    const GLASS_WALLS: [Block; 9] = [
+        GLASS,
+        WHITE_STAINED_GLASS,
+        GRAY_STAINED_GLASS,
+        LIGHT_GRAY_STAINED_GLASS,
+        BLACK_STAINED_GLASS,
+        BROWN_STAINED_GLASS,
+        CYAN_STAINED_GLASS,
+        BLUE_STAINED_GLASS,
+        LIGHT_BLUE_STAINED_GLASS,
+    ];
+    GLASS_WALLS.contains(&block)
+}
+
+/// The pier at a glass tower's corner. Half the glassy towers draw a glass
+/// accent, which would leave no corner at all.
+fn corner_pier(config: &BuildingConfig) -> Block {
+    if is_glass_wall(config.accent_block) {
+        LIGHT_GRAY_CONCRETE
+    } else {
+        config.accent_block
+    }
+}
+
 fn determine_wall_block_at_position_pristine(
     h: i32,
     config: &BuildingConfig,
@@ -4411,6 +4437,16 @@ fn determine_wall_block_at_position_pristine(
     // attached neighbor of a terraced row.
     if !config.has_windows || col.party {
         let above_floor = h > config.start_y_offset + 1;
+        // Glass carried around a corner reads as a box of panes. Only the glass
+        // towers: a greenhouse is glass walled too and wants no piers. A party
+        // wall is not seen, so it keeps its plain treatment.
+        let glass_tower = matches!(
+            config.category,
+            BuildingCategory::GlassySkyscraper | BuildingCategory::GlassCornerSkyscraper
+        );
+        if col.corner && !col.party && glass_tower {
+            return corner_pier(config);
+        }
         let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
         if use_accent_line {
             return config.accent_block;
@@ -4423,7 +4459,10 @@ fn determine_wall_block_at_position_pristine(
     if config.use_horizontal_windows {
         // Modern skyscraper pattern: continuous horizontal window bands
         // with stone separation bands at floor levels (every floor cycle)
-        if above_floor && config.has_lobby_base && h <= config.ground_floor_top() {
+        if col.corner {
+            // Ahead of the bands, so the pier is not cut by one every storey.
+            config.wall_block
+        } else if above_floor && config.has_lobby_base && h <= config.ground_floor_top() {
             // Solid lobby base: first floor cycle uses wall block
             config.wall_block
         } else if above_floor && floor_row == 0 {
@@ -11821,6 +11860,94 @@ mod style_tests {
             facade_shell: Arc::default(),
             preset_shell: Arc::default(),
         }
+    }
+
+    /// Every glass tower turns its corner on something solid, whether the glass
+    /// is the wall itself or a band running round it.
+    #[test]
+    fn a_glass_tower_turns_its_corner_on_a_pier() {
+        use crate::element_processing::building_facade::ColumnFacade;
+        let corner = ColumnFacade {
+            wall_u: 0,
+            corner: true,
+            ..Default::default()
+        };
+        let middle = ColumnFacade {
+            wall_u: 3,
+            ..Default::default()
+        };
+
+        // Walled in glass, with a glass accent: the pier falls back to concrete.
+        let mut glassy = test_config(30, false, false);
+        glassy.category = BuildingCategory::GlassySkyscraper;
+        glassy.has_windows = false;
+        glassy.wall_block = BLUE_STAINED_GLASS;
+        glassy.accent_block = WHITE_STAINED_GLASS;
+        assert_eq!(
+            determine_wall_block_at_position_pristine(12, &glassy, corner),
+            LIGHT_GRAY_CONCRETE
+        );
+        assert_eq!(
+            determine_wall_block_at_position_pristine(12, &glassy, middle),
+            BLUE_STAINED_GLASS
+        );
+
+        // A solid accent is the pier.
+        glassy.accent_block = BLACKSTONE;
+        assert_eq!(
+            determine_wall_block_at_position_pristine(12, &glassy, corner),
+            BLACKSTONE
+        );
+
+        // The party wall of a glass tower keeps its plain treatment.
+        let party = ColumnFacade {
+            wall_u: 0,
+            corner: true,
+            party: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            determine_wall_block_at_position_pristine(12, &glassy, party),
+            BLUE_STAINED_GLASS
+        );
+
+        // Horizontal bands: the pier runs unbroken past every storey line.
+        let mut banded = test_config(30, false, false);
+        banded.category = BuildingCategory::ModernSkyscraper;
+        banded.use_horizontal_windows = true;
+        banded.wall_block = GRAY_CONCRETE;
+        banded.window_block = GLASS;
+        banded.accent_block = SMOOTH_STONE;
+        for h in [9, 12, 13] {
+            assert_eq!(
+                determine_wall_block_at_position_pristine(h, &banded, corner),
+                GRAY_CONCRETE,
+                "row {h} of the corner pier"
+            );
+        }
+        assert_eq!(
+            determine_wall_block_at_position_pristine(13, &banded, middle),
+            GLASS,
+            "the band itself is still glass"
+        );
+
+        // A windowless brick shed is not a glass tower and keeps its corners.
+        let mut shed = test_config(6, false, false);
+        shed.has_windows = false;
+        assert_eq!(
+            determine_wall_block_at_position_pristine(3, &shed, corner),
+            BRICK
+        );
+
+        // Nor is a greenhouse, which is glass walled for its own reasons.
+        let mut greenhouse = test_config(6, false, false);
+        greenhouse.category = BuildingCategory::Greenhouse;
+        greenhouse.has_windows = false;
+        greenhouse.wall_block = GLASS;
+        assert_eq!(
+            determine_wall_block_at_position_pristine(3, &greenhouse, corner),
+            GLASS
+        );
     }
 
     #[test]
