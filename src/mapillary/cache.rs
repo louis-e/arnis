@@ -356,9 +356,25 @@ struct EdgeRecord {
 /// Writes one finished wall into a facade tree.
 ///
 /// `reach_m` is only read back for a wall with no facade; see [`WallRecord`].
+///
+/// A blank verdict keeps the **furthest** reach any run has proved it against,
+/// and never the one this run happens to carry. Every run judges the walls in
+/// its OSM margin as well as the ones in its box, and those neighbours reach
+/// zero, so without this a precompute of one piece overwrote the record its
+/// neighbour had just paid the whole align stage for, and how much the cache
+/// remembered came down to the order the user drew the boxes in. Reach is
+/// monotone information, "this wall was proved blank against everything within
+/// R metres", so the larger R is the one that was actually proved; the thirty
+/// day sweep, and not a smaller number written over it later, is what eventually
+/// makes the pipeline look again.
 pub fn store_wall(dir: &Path, product: &WallProduct, reach_m: f64) -> Result<String, String> {
     let key = wall_cache_key(&wall_node_ids(product), product.piece);
     let (json_path, png_path, tex_path) = wall_paths(dir, &key)?;
+    let reach_m = if product.cols == 0 {
+        reach_m.max(stored_reach_m(&json_path))
+    } else {
+        reach_m
+    };
 
     let cells = (product.cols as usize) * (product.rows as usize);
     if product.rgb.len() != cells || product.cls.len() != cells {
@@ -433,6 +449,18 @@ pub fn store_wall(dir: &Path, product: &WallProduct, reach_m: f64) -> Result<Str
     let json = serde_json::to_vec(&record).map_err(|e| format!("wall {key}: {e}"))?;
     write_atomic(&json_path, &json)?;
     Ok(key)
+}
+
+/// The reach already on record for a wall, or 0 when there is none.
+///
+/// Only the one number, because it is read on the write path of every blank
+/// verdict and the grid beside it is not wanted there.
+fn stored_reach_m(json_path: &Path) -> f64 {
+    read_cached(json_path)
+        .and_then(|bytes| serde_json::from_slice::<WallRecord>(&bytes).ok())
+        .filter(|record| record.cols == 0)
+        .map(|record| record.reach_m)
+        .unwrap_or(0.0)
 }
 
 /// One wall as the cache holds it.
@@ -751,11 +779,42 @@ mod tests {
 
         // And a verdict from a box that only half looked at the wall says how
         // far it did look, which is what stops it being reused by a box that
-        // reaches further round that wall.
-        let key = store_wall(tmp.path(), &blank(Tier::C), 12.5).unwrap();
-        let after = load_wall(tmp.path(), &key).unwrap();
+        // reaches further round that wall. Its own tree, because a second write
+        // of the same wall now keeps the furthest reach on record; that is the
+        // next test.
+        let half = tempfile::tempdir().unwrap();
+        let key = store_wall(half.path(), &blank(Tier::C), 12.5).unwrap();
+        let after = load_wall(half.path(), &key).unwrap();
         assert!((after.reach_m - 12.5).abs() < 1e-12);
         assert_eq!(after.product.tier, Tier::C);
+    }
+
+    /// A blank verdict keeps the furthest reach anything has proved it against.
+    ///
+    /// Every run judges the walls in its OSM margin too, and those neighbours
+    /// reach zero, so a precompute of one piece used to write a 0 over the 45 the
+    /// piece beside it had just paid the whole align stage for. What survived in
+    /// the cache then depended on the order the boxes were drawn in, and a
+    /// generation over the pieces together found no answer for the walls along
+    /// every seam and did the area's align work again.
+    #[test]
+    fn a_neighbouring_run_cannot_shorten_a_reach_already_proved() {
+        let tmp = tempfile::tempdir().unwrap();
+        // The piece that contains the wall proves it against everything.
+        let key = store_wall(tmp.path(), &blank(Tier::D), 45.0).unwrap();
+        // The piece next door, for which the same wall is only an occluder.
+        assert_eq!(store_wall(tmp.path(), &blank(Tier::D), 0.0).unwrap(), key);
+        let after = load_wall(tmp.path(), &key).expect("the verdict is still there");
+        assert!(
+            (after.reach_m - 45.0).abs() < 1e-12,
+            "the occluder's view of the wall overwrote the proof, reach={}",
+            after.reach_m
+        );
+
+        // A wall that comes back with a facade is not a verdict at all, and its
+        // reach is never read, so nothing is carried over into one.
+        let key = store_wall(tmp.path(), &product(5, 4), 0.0).unwrap();
+        assert!((load_wall(tmp.path(), &key).unwrap().reach_m - 0.0).abs() < 1e-12);
     }
 
     /// A wall that had a facade and then lost it must not keep serving the old

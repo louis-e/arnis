@@ -6,6 +6,27 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::osm_parser::ProcessedNode;
 use std::collections::HashMap;
 
+/// Where the ids invented for clipped corners live.
+///
+/// A vertex the clipper creates has no OSM node behind it and still needs an
+/// id, and the facade projection now identifies a wall by the ids of its two
+/// ends. `way_id * 10_000_000 + i` alone lands inside the real node id range
+/// for a low way id (OSM is around 1.3e10 today), so an invented corner could
+/// collide with a real node somewhere else in the world. Everything invented
+/// sits above this instead, which is four orders of magnitude clear of OSM and
+/// still inside the positive half of an i64 for anything that serialises ids.
+const INVENTED_NODE_BASE: u64 = 1 << 62;
+
+/// The id for the `i`th vertex the clipper invented on `way_id`.
+fn invented_node_id(way_id: u64, i: u64) -> u64 {
+    INVENTED_NODE_BASE | (way_id.wrapping_mul(10000000).wrapping_add(i) & (INVENTED_NODE_BASE - 1))
+}
+
+/// Whether `id` was invented by the clipper rather than read from OSM.
+pub fn is_invented_node_id(id: u64) -> bool {
+    id >= INVENTED_NODE_BASE
+}
+
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
 /// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
 pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
@@ -212,10 +233,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
                     find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
 
                 for intersection in intersections {
-                    let synthetic_id = nodes[0]
-                        .id
-                        .wrapping_mul(10000000)
-                        .wrapping_add(result.len() as u64);
+                    let synthetic_id = invented_node_id(nodes[0].id, result.len() as u64);
                     result.push(ProcessedNode {
                         id: synthetic_id,
                         x: intersection.0.round() as i32,
@@ -241,10 +259,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
                     });
 
                     for intersection in intersections {
-                        let synthetic_id = nodes[0]
-                            .id
-                            .wrapping_mul(10000000)
-                            .wrapping_add(result.len() as u64);
+                        let synthetic_id = invented_node_id(nodes[0].id, result.len() as u64);
                         result.push(ProcessedNode {
                             id: synthetic_id,
                             x: intersection.0.round() as i32,
@@ -591,7 +606,7 @@ fn assign_node_ids_preserving_endpoints(
             let (x, z) = (coord.0.round() as i32, coord.1.round() as i32);
             let id = match by_block.get(&(x, z)) {
                 Some(&id) => id,
-                None => way_id.wrapping_mul(10000000).wrapping_add(i as u64),
+                None => invented_node_id(way_id, i as u64),
             };
             ProcessedNode {
                 id,
@@ -694,5 +709,29 @@ mod tests {
             node(1, 4, 4),
         ];
         assert!(clip_water_ring_to_bbox(&ring, &bbox).is_some());
+    }
+
+    /// An id the clipper invents must never be one OSM could hand out. The old
+    /// scheme, `way_id * 10_000_000 + i`, put way 100's first corner at
+    /// 1_000_000_000, which is an ordinary node id.
+    #[test]
+    fn an_invented_node_id_cannot_collide_with_a_real_one() {
+        // Comfortably above OSM's highest node id today, about 1.3e10.
+        const HIGHEST_PLAUSIBLE_OSM_ID: u64 = 1_000_000_000_000;
+        for way_id in [1u64, 100, 12_345, 987_654_321, 1_234_567_890_123] {
+            for i in 0..64u64 {
+                let id = invented_node_id(way_id, i);
+                assert!(
+                    id > HIGHEST_PLAUSIBLE_OSM_ID,
+                    "way {way_id} corner {i} invented {id}, inside the OSM range"
+                );
+                assert!(is_invented_node_id(id));
+                assert!(id < u64::MAX / 2, "must stay positive as an i64");
+            }
+        }
+        assert!(!is_invented_node_id(1_000_000_000));
+        // Deterministic, and distinct per corner of a way.
+        assert_eq!(invented_node_id(42, 7), invented_node_id(42, 7));
+        assert_ne!(invented_node_id(42, 7), invented_node_id(42, 8));
     }
 }
