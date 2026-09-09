@@ -661,7 +661,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // The two facade sources hang on the same walls, so the presets take them
     // and the Mapillary facades stand down for the run. Said out loud, since a
     // token the user went and created would otherwise be ignored in silence.
-    if args.building_facades && args.mapillary_facades_wanted() {
+    if args.building_facades
+        && (args.mapillary_api_token().is_some() || args.mapillary_facades_dir.is_some())
+    {
         println!(
             "Note: --building-facades takes the walls, so the Mapillary facades are off for this run."
         );

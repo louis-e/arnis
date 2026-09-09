@@ -3691,8 +3691,9 @@ fn build_wall_ring(
                 if !has_sloped_roof {
                     // An accent line over a photographed wall belongs to a
                     // building the photograph does not show, so the shell
-                    // keeps its own colour up here too.
-                    let roof_line_block = if config.use_accent_roof_line && !photo {
+                    // keeps its own colour up here too, and so does a wall
+                    // the presets flatten for a picture of their own.
+                    let roof_line_block = if config.use_accent_roof_line && !photo && !flat {
                         config.accent_block
                     } else {
                         config.wall_block
