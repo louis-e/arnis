@@ -48,7 +48,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await initSavePath();
   initSettings();
   initVoxyLightingCoupling();
-  initHeightLimitNote();
+  refreshHeightLimitRow();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
@@ -1289,29 +1289,6 @@ function refreshHeightLimitRow(format) {
     row.style.opacity = '';
     row.classList.toggle('settings-row-unavailable', !available);
   }
-
-  const note = document.getElementById('height-limit-note');
-  if (note) note.hidden = !(available && toggle.checked);
-}
-
-// Consequences the CLI prints to stderr, which a GUI user never sees.
-function initHeightLimitNote() {
-  const toggle = document.getElementById('disable-height-limit-toggle');
-  const row = toggle && toggle.closest('.settings-row');
-  if (!row || document.getElementById('height-limit-note')) return;
-
-  const note = document.createElement('div');
-  note.id = 'height-limit-note';
-  note.className = 'settings-row-note';
-  note.hidden = true;
-  note.textContent =
-    'Needs Java 1.21.4+ or Bedrock 1.21.40+. First load asks to enable Experimental ' +
-    'Features, the world cannot be uploaded to Realms, and generation is slower and ' +
-    'the world bigger.';
-  row.after(note);
-
-  toggle.addEventListener('change', () => refreshHeightLimitRow());
-  refreshHeightLimitRow();
 }
 
 function updateFormatToggleUI(format) {
