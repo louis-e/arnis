@@ -19,6 +19,7 @@
   "minecraft_directory_not_found": "Minecraft mappa nem található",
   "world_in_use": "A kiválasztott világ már használatban van",
   "failed_to_create_world": "Nem sikerült új világot létrehozni",
+  "failed_to_rename_world": "Nem sikerült átnevezni a világot",
   "no_world_selected_error": "Nincs kiválasztott világ",
   "create_world_first": "Először hozz létre egy világot!",
   "select_location_first": "Válassz egy helyet először!",

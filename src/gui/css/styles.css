@@ -175,17 +175,25 @@ a:hover {
   opacity: 1;
 }
 
+/* Bottom strip of the start button. Deliberately paints no background of its
+   own: .start-button-wrap owns the button's fill for both colour schemes, and
+   this row is transparent on top of it, so the row and #start-button read as
+   one button. The horizontal padding mirrors .start-button's, and the 3px/11px
+   vertical split reproduces the label spacing from back when the row was still
+   nested inside the button (3px below the button text, 11px to its bottom
+   edge). */
 .world-name-row {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  width: 100%;
+  /* No `width: 100%`: the row is a stretch item of the flex-column wrapper, so
+     it already spans it. Setting it explicitly would add the padding on top
+     (content-box is the default here) and push the row out past the settings
+     button. */
   min-width: 0;
-  padding: 0 12px 8px;
-  background-color: #ffffff;
+  padding: 3px 20px 11px;
   cursor: pointer;
-  transition: background-color 0.3s;
 }
 
 .world-name-label {
@@ -228,8 +236,11 @@ a:hover {
    default" icon button) so it reads as the same family of small,
    golden-accented icon actions. A real <button> (valid here since it's
    nested in .world-name-row, a <div>, not in #start-button), so the
-   generic `button` rule's chrome must be reset first. */
-.world-name-edit-button {
+   generic `button` rule's chrome must be reset first. The selector is
+   descendant-qualified so `width` outranks `.controls-box button`'s
+   `width: 100%`, which would otherwise stretch the icon across the whole
+   row (the same clash .settings-button solves with !important). */
+.world-name-row .world-name-edit-button {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
@@ -1338,26 +1349,47 @@ input[type="range"] {
   width: 100%;
 }
 
+/* #start-button and .world-name-row are two elements (the world-name editor
+   can't be nested inside a <button>) that have to look like one. The wrapper
+   paints the fill, corner and hover for both of them; giving each its own
+   background instead would mean re-deriving the generic `button` colours per
+   colour scheme in two places and risking a visible seam between them. */
 .start-button-wrap {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   flex: 1;
+  background-color: #ffffff;
+  border-radius: 8px 0 0 0;
+  cursor: pointer;
+  transition: background-color 0.3s;
 }
 
-.start-button-wrap:hover .start-button,
-.start-button-wrap:hover .world-name-row {
+@media (prefers-color-scheme: dark) {
+  .start-button-wrap {
+    background-color: #0f0f0f98;
+  }
+}
+
+.start-button-wrap:hover {
   background-color: #4caf50;
 }
 
+/* The :active variant is not cosmetic: dark mode's `button:active` rule is
+   more specific than a bare `.start-button`, so without it the button would
+   flash its own fill over the wrapper's while held down. */
+.start-button,
+.start-button:active {
+  background-color: transparent;
+}
+
 .start-button {
-  padding: 14px 20px;
+  padding: 14px 20px 0;
   border: none;
-  border-radius: 8px 0 0 0;
+  border-radius: 0;
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.3s;
   margin-top: 0;
   box-shadow: none;
 }

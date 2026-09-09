@@ -19,6 +19,7 @@
   "minecraft_directory_not_found": "未找到 Minecraft 目录",
   "world_in_use": "所选世界正在使用中",
   "failed_to_create_world": "无法创建新世界",
+  "failed_to_rename_world": "重命名世界失败",
   "no_world_selected_error": "未选择世界",
   "create_world_first": "请先创建一个世界！",
   "select_location_first": "请先选择一个位置！",

@@ -19,6 +19,7 @@
   "minecraft_directory_not_found": "Nerastas „Minecraft“ aplankas",
   "world_in_use": "Pasirinktas pasaulis dabar užimtas",
   "failed_to_create_world": "Klaida sukuriant naują pasaulį",
+  "failed_to_rename_world": "Klaida pervadinant pasaulį",
   "no_world_selected_error": "Nėra pasirinktas pasaulis",
   "create_world_first": "Pirmiausia sukurkite pasaulį!",
   "select_location_first": "Pirma pasirinkite vietą!",

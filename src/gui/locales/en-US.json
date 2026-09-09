@@ -26,6 +26,7 @@
   "minecraft_directory_not_found": "Minecraft directory not found",
   "world_in_use": "The selected world is currently in use",
   "failed_to_create_world": "Failed to create new world",
+  "failed_to_rename_world": "Failed to rename world",
   "no_world_selected_error": "No world selected",
   "create_world_first": "Create a world first!",
   "select_location_first": "Select a location first!",

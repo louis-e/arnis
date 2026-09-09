@@ -19,6 +19,7 @@
   "minecraft_directory_not_found": "Minecraft Verzeichnis nicht gefunden",
   "world_in_use": "Die ausgewählte Welt ist gerade in Benutzung",
   "failed_to_create_world": "Neue Welt konnte nicht erstellt werden",
+  "failed_to_rename_world": "Welt konnte nicht umbenannt werden",
   "no_world_selected_error": "Keine Welt ausgewählt",
   "create_world_first": "Erstelle zuerst eine Welt!",
   "select_location_first": "Wähle zuerst einen Standort aus!",

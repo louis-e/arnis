@@ -2059,8 +2059,17 @@ async function commitWorldNameEdit() {
       }
     } catch (error) {
       console.error("Failed to rename world:", error);
-      // Nothing changed on disk; make sure the label still reflects that.
+      // Nothing changed on disk; make sure the label still reflects that,
+      // and say why. A rename fails for reasons the user can act on - the
+      // world is open in Minecraft holding a lock on the directory, or the
+      // name was left with nothing usable after sanitization - and silently
+      // snapping the old name back just reads as a dead pencil.
       setWorldNameLabel(currentName);
+      const progressInfo = document.getElementById('progress-info');
+      if (progressInfo) {
+        localizeElement(window.localization, { element: progressInfo }, "failed_to_rename_world");
+        progressInfo.style.color = "#fa7878";
+      }
     } finally {
       setGenerationButtonEnabled(true);
     }
@@ -2072,15 +2081,13 @@ async function commitWorldNameEdit() {
   endWorldNameEdit();
 }
 
-// Hiding the (still-focused) input fires a native blur, which would
-// otherwise re-enter the blur handler below and commit the very edit
-// Escape just discarded. Suppress that one follow-up blur.
+// Hiding the still-focused input fires a native blur (asynchronously, after
+// the handler that hid it has returned), which would otherwise re-enter the
+// blur handler below and re-run the edit we are already finishing: Escape
+// would re-commit what it just discarded, and Enter would fire a second
+// gui_rename_world against the path the first one is still renaming.
+// endWorldNameEdit() sets this whenever it hides a focused input.
 let suppressNextWorldNameBlur = false;
-
-function cancelWorldNameEdit() {
-  suppressNextWorldNameBlur = true;
-  endWorldNameEdit();
-}
 
 // Shared teardown for both commit and cancel: hides the input, restores the
 // label (and the pencil, if the feature is still enabled), and refreshes
@@ -2090,6 +2097,9 @@ function endWorldNameEdit() {
   const input = document.getElementById('world-name-input');
   const editButton = document.getElementById('world-name-edit-button');
   if (!input || input.style.display === 'none') return;
+  // Only when the input still holds focus: a teardown reached *from* the blur
+  // handler must not arm this, or it would swallow the next real blur.
+  if (document.activeElement === input) suppressNextWorldNameBlur = true;
   input.style.display = 'none';
   if (label) label.style.display = '';
   if (editButton && canEditCustomWorldName()) editButton.style.display = '';
@@ -2125,8 +2135,9 @@ function initCustomWorldNameToggle() {
         event.preventDefault();
         commitWorldNameEdit();
       } else if (event.key === 'Escape') {
+        // Discard: tear the editor down without committing.
         event.preventDefault();
-        cancelWorldNameEdit();
+        endWorldNameEdit();
       }
     });
     input.addEventListener('blur', () => {
