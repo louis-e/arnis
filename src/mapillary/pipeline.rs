@@ -46,10 +46,10 @@
 //!
 //! The output is the same export format `tools/facade_lab/export_arnis.py`
 //! writes, put in the cache, and `facades::install` loads it as it already
-//! does. One format and one consumer: the block, painting and display modes
-//! keep working untouched, the cache is the export so reuse and clearing are
-//! the same mechanism, and a golden test is a directory comparison against the
-//! Python output.
+//! does. One format and one consumer: the block and photo modes keep working
+//! untouched, the cache is the export so reuse and clearing are the same
+//! mechanism, and a golden test is a directory comparison against the Python
+//! output.
 //!
 //! Two trees under `arnis-tile-cache/mapillary/facades/<params digest>/`, and
 //! the split is the difference between what survives a new bbox and what does

@@ -14,11 +14,11 @@
 //! because the pipeline supersedes it; see the comment on [`sample_area`].
 
 pub mod api;
+pub mod atlas;
 pub mod credits;
 pub mod displays;
 pub mod facade;
 pub mod facades;
-pub mod paintings;
 pub mod project;
 
 // The orthofacade port, one module per module of `tools/facade_lab/`, each

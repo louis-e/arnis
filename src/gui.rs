@@ -1627,17 +1627,20 @@ fn gui_start_generation(
                 // Dumping a wall's intermediate products is a CLI debug aid.
                 mapillary_facade_debug_dir: None,
                 mapillary_facade_debug_walls: String::new(),
-                // Passed through even on Bedrock and Luanti, where the panel
-                // modes cannot work: `facades::install` builds the blocks and
+                // Passed through even on Bedrock and Luanti, where the photo
+                // panels cannot work: `facades::install` builds the blocks and
                 // drops the panels, and `generate_world_with_options` says so
                 // out loud. Coercing it here would only hide a stale setting.
                 mapillary_facade_mode: crate::args::FacadeMode::from_str_lossy(&facade_mode),
-                mapillary_paintings_px: 16,
                 // The frontend already sends false on a world format that
                 // cannot show item displays, and `data_processing` checks the
                 // format again, so a stale setting cannot leak through.
                 building_facades: building_facades_enabled,
                 facade_detail: crate::args::FacadeDetail::from_str_lossy(&facade_detail),
+                // No GUI field: the detail level above already says how much
+                // atlas the panels may take, and the budget lowers this when
+                // it has to.
+                facade_px: 16,
                 // The GUI ships the set beside the executable; pointing at a
                 // replacement set is a CLI aid.
                 building_facades_dir: None,

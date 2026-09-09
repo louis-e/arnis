@@ -10,14 +10,11 @@
 //! the synthetic way id `generate_building_from_relation` builds each ring
 //! under, because that is the id the wall builder asks with.
 //!
-//! Three ways to apply a wall:
+//! Two ways to apply a wall:
 //! * blocks: every wall cell takes the palette block nearest its colour, window
 //!   cells take the style's window block, door cells a plank. This is what the
 //!   generator consults from `apply_block_variety`.
-//! * paintings: blocks as above, plus the 8 px/m texture hung as custom
-//!   painting variants, one per wall panel of up to 16 x 16 blocks
-//!   (`paintings.rs`). Java 1.21+ only.
-//! * paintings v2: blocks as above, plus the same texture hung as item display
+//! * photos: blocks as above, plus the 8 px/m texture hung as item display
 //!   entities on the wall's true line, one flat quad per wall face whatever
 //!   angle the wall runs at (`displays.rs`). Java 1.21.4+ only.
 //!
@@ -27,7 +24,7 @@
 //! building colour and every plain wall block takes the colour of the lab's
 //! floor band at its height (`band_block_at`). The full grid, windows and
 //! doors included, applies from two blocks per metre up (`block_at`). The
-//! paintings work either way.
+//! photo panels hang either way.
 //!
 //! Everything is loaded in a pre-pass into a process-wide table, the same way
 //! the sampled colours are, so tile threads only read.
@@ -122,7 +119,7 @@ pub struct FacadeWall {
     /// row's wall cells, or the nearest such row's when the row has none.
     /// Empty when no row has a wall cell.
     bands: Vec<RGBTuple>,
-    /// 8 px/m texture for the painting mode, alpha = valid.
+    /// 8 px/m texture for the photo panels, alpha = valid.
     pub(super) tex: Option<RgbaImage>,
 }
 
@@ -294,7 +291,9 @@ struct Projection {
 pub(super) struct CellRef {
     pub(super) wall: u32,
     pub(super) col: u16,
-    /// Axis-snapped outward normal, for hanging paintings.
+    /// Axis-snapped outward normal. Summed over a wall's cells it picks the
+    /// side of the wall the building is not on, which is where its photo
+    /// panel hangs (`displays.rs`).
     pub(super) nx: i8,
     pub(super) nz: i8,
 }
@@ -305,15 +304,14 @@ pub struct FacadeStore {
     by_way: FnvHashMap<u64, Vec<usize>>,
     building_colour: FnvHashMap<u64, RGBTuple>,
     pub(super) cells: FnvHashMap<(i32, i32), CellRef>,
-    /// World columns per way, so painting placement can walk one building.
+    /// World columns per way, so panel placement can walk one building.
     pub(super) way_cells: FnvHashMap<u64, Vec<(i32, i32)>>,
     /// Per wall, the vector from its node A to its node B in world blocks:
     /// the direction the texture's columns run, which decides whether a
-    /// painting has to mirror its crop.
+    /// panel has to mirror its crop.
     pub(super) wall_dir: Vec<(i32, i32)>,
-    pub(super) paintings: bool,
-    /// Paintings v2: the texture hangs as item display entities instead
-    /// (`displays.rs`). Never on at the same time as `paintings`.
+    /// The photos mode: the texture hangs as item display entities on top of
+    /// the blocks (`displays.rs`).
     pub(super) displays: bool,
     /// Blocks per metre of this run; facade cells are one metre.
     pub(super) scale: f64,
@@ -356,10 +354,10 @@ pub(super) fn store() -> Option<Arc<FacadeStore>> {
     STORE.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// The panel placement tests of `paintings.rs` and `displays.rs` share this
-/// store and their own registries, so they run one at a time. The building
-/// generator's facade tests take it too, since a test that installs a store
-/// while another is reading one sees the wrong walls.
+/// The panel placement tests of `displays.rs` share this store and their
+/// registry, so they run one at a time. The building generator's facade tests
+/// take it too, since a test that installs a store while another is reading
+/// one sees the wrong walls.
 #[cfg(test)]
 pub(crate) static TEST_GLOBALS: Mutex<()> = Mutex::new(());
 
@@ -370,7 +368,6 @@ impl FacadeStore {
         walls: Vec<FacadeWall>,
         colours: FnvHashMap<Owner, RGBTuple>,
         projection: Projection,
-        paintings: bool,
         displays: bool,
         scale: f64,
     ) -> Self {
@@ -400,7 +397,6 @@ impl FacadeStore {
             cells: projection.cells,
             way_cells: projection.way_cells,
             wall_dir: projection.wall_dir,
-            paintings,
             displays,
             scale,
         }
@@ -508,20 +504,8 @@ impl FacadeStore {
     }
 }
 
-/// Installs a hand-built store for the painting tests, which need walls on
-/// known cells without an export directory.
-#[cfg(test)]
-pub(super) fn install_for_test(
-    walls: Vec<FacadeWall>,
-    cells: FnvHashMap<(i32, i32), CellRef>,
-    wall_dir: Vec<(i32, i32)>,
-    scale: f64,
-) {
-    install_for_test_mode(walls, cells, wall_dir, scale, true, false)
-}
-
-/// Like `install_for_test`, with the display panels on instead of the
-/// paintings, for the `displays.rs` tests.
+/// Installs a hand-built store with the photo panels on, for the `displays.rs`
+/// tests, which need walls on known cells without an export directory.
 #[cfg(test)]
 pub(super) fn install_displays_for_test(
     walls: Vec<FacadeWall>,
@@ -529,7 +513,19 @@ pub(super) fn install_displays_for_test(
     wall_dir: Vec<(i32, i32)>,
     scale: f64,
 ) {
-    install_for_test_mode(walls, cells, wall_dir, scale, false, true)
+    install_for_test_mode(walls, cells, wall_dir, scale, true)
+}
+
+/// Like `install_displays_for_test` with the panels off: the walls apply as
+/// blocks only, which is what the `blocks` mode does.
+#[cfg(test)]
+pub(super) fn install_blocks_for_test(
+    walls: Vec<FacadeWall>,
+    cells: FnvHashMap<(i32, i32), CellRef>,
+    wall_dir: Vec<(i32, i32)>,
+    scale: f64,
+) {
+    install_for_test_mode(walls, cells, wall_dir, scale, false)
 }
 
 #[cfg(test)]
@@ -538,7 +534,6 @@ fn install_for_test_mode(
     cells: FnvHashMap<(i32, i32), CellRef>,
     wall_dir: Vec<(i32, i32)>,
     scale: f64,
-    paintings: bool,
     displays: bool,
 ) {
     let mut way_cells: FnvHashMap<u64, Vec<(i32, i32)>> = FnvHashMap::default();
@@ -560,26 +555,14 @@ fn install_for_test_mode(
         walls,
         FnvHashMap::default(),
         projection,
-        paintings,
         displays,
         scale,
     ))));
 }
 
 /// Installs `walls` projected onto the buildings in `elements` the way
-/// `install` does, with paintings on, for tests that need the real ring
-/// mapping.
-#[cfg(test)]
-pub(super) fn install_elements_for_test(
-    walls: Vec<FacadeWall>,
-    elements: &[ProcessedElement],
-    xzbbox: &XZBBox,
-    scale: f64,
-) {
-    install_elements_for_test_mode(walls, elements, xzbbox, scale, true, false)
-}
-
-/// Like `install_elements_for_test`, with the display panels on instead.
+/// `install` does, with the photo panels on, for tests that need the real
+/// ring mapping.
 #[cfg(test)]
 pub(super) fn install_display_elements_for_test(
     walls: Vec<FacadeWall>,
@@ -587,7 +570,7 @@ pub(super) fn install_display_elements_for_test(
     xzbbox: &XZBBox,
     scale: f64,
 ) {
-    install_elements_for_test_mode(walls, elements, xzbbox, scale, false, true)
+    install_elements_for_test_mode(walls, elements, xzbbox, scale, true)
 }
 
 /// The colour every cell `install_wall_blocks_for_test` writes carries, so a
@@ -598,8 +581,8 @@ pub(crate) const TEST_WALL_RGB: RGBTuple = (128, 128, 128);
 /// Installs a blocks-mode store for the building generator's tests: one wall
 /// of plain `TEST_WALL_RGB` cells, `cols` metres by `rows` metres, over each
 /// `(way_id, node_a, node_b, cols, rows)` ring edge given, projected onto
-/// `elements` the way `install` does. Neither photo panel mode is on, so the
-/// walls apply as blocks only, which is what a scale of 2 or more does.
+/// `elements` the way `install` does. The photo panels are off, so the walls
+/// apply as blocks only, which is what a scale of 2 or more does.
 #[cfg(test)]
 pub(crate) fn install_wall_blocks_for_test(
     walls: &[(u64, u64, u64, u32, u32)],
@@ -620,7 +603,7 @@ pub(crate) fn install_wall_blocks_for_test(
             )
         })
         .collect();
-    install_elements_for_test_mode(walls, elements, xzbbox, scale, false, false);
+    install_elements_for_test_mode(walls, elements, xzbbox, scale, false);
 }
 
 #[cfg(test)]
@@ -629,7 +612,6 @@ fn install_elements_for_test_mode(
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
     scale: f64,
-    paintings: bool,
     displays: bool,
 ) {
     let projection = project_cells(&mut walls, elements, xzbbox, scale);
@@ -637,7 +619,6 @@ fn install_elements_for_test_mode(
         walls,
         FnvHashMap::default(),
         projection,
-        paintings,
         displays,
         scale,
     ))));
@@ -661,21 +642,11 @@ pub fn building_colour(element_id: u64) -> Option<RGBTuple> {
     store()?.building_colour(element_id)
 }
 
-/// Whether painting panels are on for this run.
-pub fn paintings_enabled() -> bool {
-    store().is_some_and(|s| s.paintings)
-}
-
-/// Whether the Paintings v2 item display panels are on for this run.
+/// Whether the photo panels are on for this run. Buildings with panels are
+/// built as flat shells whatever the scale, since procedural ledges and window
+/// frames would poke through the photograph.
 pub fn displays_enabled() -> bool {
     store().is_some_and(|s| s.displays)
-}
-
-/// Whether any photo panel mode hangs something on the walls. Buildings with
-/// panels are built as flat shells whatever the scale, since procedural ledges
-/// and window frames would poke through the photograph.
-pub fn panels_enabled() -> bool {
-    store().is_some_and(|s| s.paintings || s.displays)
 }
 
 /// Whether a photographed wall of the building built under `element_id`
@@ -1233,7 +1204,7 @@ fn project_wall(
             continue;
         }
         // Outward normal of this edge in Arnis' frame (x east, z south),
-        // the rule facade.rs uses, snapped to an axis for the paintings.
+        // the rule facade.rs uses, snapped to an axis for the photo panels.
         let (dx, dz) = ((nb.x - na.x) as f64, (nb.z - na.z) as f64);
         let len = (dx * dx + dz * dz).sqrt().max(1e-9);
         let (tx, tz) = (dx / len, dz / len);
@@ -1441,24 +1412,16 @@ pub fn install(dir: &Path, elements: &[ProcessedElement], args: &Args, xzbbox: &
             &format!("Facade textures: {matched} buildings matched, {columns} wall columns"),
         );
     }
-    // Both panel modes are Java entities; other formats build the blocks only.
-    // The two are alternatives, so at most one of these is ever true.
+    // The photo panels are Java entities; other formats build the blocks only.
     let java = !(args.bedrock || args.luanti);
-    let paintings = args.mapillary_facade_mode.places_paintings() && java;
     let displays = args.mapillary_facade_mode.places_displays() && java;
     println!(
         "  Facade textures: {} walls on {loaded_buildings} buildings loaded, {matched} buildings matched in this area, {columns} wall columns{}{}",
         walls.len(),
-        match (paintings, displays) {
-            (true, _) => format!(
-                ", paintings at {} px per block",
-                args.mapillary_paintings_px
-            ),
-            (_, true) => format!(
-                ", item display panels at {} px per block",
-                args.mapillary_paintings_px
-            ),
-            _ => String::new(),
+        if displays {
+            format!(", photo panels at {} px per block", args.facade_px)
+        } else {
+            String::new()
         },
         if args.scale < 2.0 {
             ", colours only (world below 2 blocks per metre)"
@@ -1467,7 +1430,7 @@ pub fn install(dir: &Path, elements: &[ProcessedElement], args: &Args, xzbbox: &
         }
     );
     set_store(Some(Arc::new(FacadeStore::build(
-        walls, colours, projection, paintings, displays, args.scale,
+        walls, colours, projection, displays, args.scale,
     ))));
 }
 
@@ -1749,7 +1712,7 @@ fn collect_preview_walls(
 
 /// The building relation r147094 of the Munich export
 /// (`tools/facade_lab/out/munich_ref`), for the tests here and in
-/// `paintings.rs`: a retail block whose south wall the lab merged over five
+/// `displays.rs`: a retail block whose south wall the lab merged over five
 /// ring edges and exported in three pieces.
 #[cfg(test)]
 pub(super) mod test_fixtures {
@@ -1870,7 +1833,7 @@ mod tests {
         assert!(!STORE_SET.load(Ordering::Acquire));
         assert!(store().is_none());
 
-        install_elements_for_test_mode(Vec::new(), &[], &xzbbox, 2.0, false, false);
+        install_elements_for_test_mode(Vec::new(), &[], &xzbbox, 2.0, false);
         assert!(STORE_SET.load(Ordering::Acquire));
         assert!(
             store().is_some(),
@@ -2254,7 +2217,7 @@ mod tests {
         );
 
         assert_eq!(projection.way_cells[&55].len(), 15 + 21 + 20);
-        // Every wall runs the way the lab's columns do, which the paintings
+        // Every wall runs the way the lab's columns do, which the photo panels
         // crop by; the cut ones over the blocks of them the world holds.
         assert_eq!(projection.wall_dir, vec![(0, -15), (20, 0), (-20, 0)]);
     }
@@ -2350,7 +2313,7 @@ mod tests {
         // and not under the relation id. At two blocks per metre the grid
         // answers, below that the bands.
         let colours = FnvHashMap::from_iter([(Owner::Relation(7), (200, 100, 50))]);
-        let store = FacadeStore::build(walls, colours, projection, false, false, 2.0);
+        let store = FacadeStore::build(walls, colours, projection, false, 2.0);
         assert!(store.has_building(ring_id));
         assert!(!store.has_building(7));
         assert_eq!(store.building_colour(ring_id), Some((200, 100, 50)));
@@ -2399,7 +2362,7 @@ mod tests {
         let projection = project_cells(&mut walls, &elements, &xzbbox, 1.0);
         assert_eq!(walls[0].way_id, UNPLACED);
         assert!(projection.cells.is_empty());
-        let store = FacadeStore::build(walls, FnvHashMap::default(), projection, false, false, 1.0);
+        let store = FacadeStore::build(walls, FnvHashMap::default(), projection, false, 1.0);
         assert!(!store.has_building(UNPLACED));
         assert!(!store.has_building(8));
     }
@@ -2533,7 +2496,7 @@ mod tests {
             let mut walls = vec![FacadeWall::for_test_cells(56, 1, 2, 20, 6, cells)];
             let projection = project_cells(&mut walls, &elements, &xzbbox, 1.0);
             let colours = FnvHashMap::from_iter([(Owner::Way(56), (200, 100, 50))]);
-            FacadeStore::build(walls, colours, projection, false, false, scale)
+            FacadeStore::build(walls, colours, projection, false, scale)
         };
 
         let store = build(1.0);

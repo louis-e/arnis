@@ -1,17 +1,18 @@
-//! Facade textures as item display entities (Java 1.21.4+, "Paintings v2").
+//! Facade textures as item display entities (Java 1.21.4+): the `photos`
+//! facade mode.
 //!
-//! `paintings.rs` hangs the photograph as painting entities. A painting is
-//! nailed to a block face, so a wall that runs diagonally through the block
-//! grid becomes a staircase of axis-aligned panels, and two panels meeting at
-//! a step fight over the air cell between them: one of the two faces has to
-//! stay bare. An item display has neither problem. It is a free entity, not a
-//! hanging one, so it can sit anywhere at any angle, nothing has to be solid
-//! behind it, nothing may block the air in front of it, and it never drops.
+//! An item display is a free entity, not a hanging one, so it can sit anywhere
+//! at any angle, nothing has to be solid behind it, nothing may block the air
+//! in front of it, and it never drops. A painting entity, which is what an
+//! earlier mode hung, is nailed to a block face: a wall that runs diagonally
+//! through the block grid became a staircase of axis-aligned panels, and two
+//! panels meeting at a step fought over the air cell between them, so one of
+//! the two faces had to stay bare.
 //!
 //! So this mode puts **one flat quad on the wall's true line**, whatever angle
-//! that line runs at, instead of one panel per axis run. A wall is cut only
-//! when it is longer or taller than `MAX_PANEL` blocks, and then only because
-//! one texture per panel is stitched into the game's block atlas.
+//! that line runs at. A wall is cut only when it is longer or taller than
+//! `MAX_PANEL` blocks, and then only because one texture per panel is stitched
+//! into the game's block atlas.
 //!
 //! A panel carries the photograph at its own metre scale and nothing else. On
 //! a slope the shell's floor sits at the building's highest corner and the
@@ -19,11 +20,10 @@
 //! panel stops short of the street and the fill there stays bare. That gap was
 //! once covered by repeating the crop's bottom row down to the ground, which
 //! read as a vertical smear: the photograph ends at the ground the camera saw,
-//! and there is nothing honest to put below it. `paintings.rs` and the block
-//! facades anchor the texture at the same first wall block and never reach
-//! below it either.
+//! and there is nothing honest to put below it. The block facades anchor the
+//! texture at the same first wall block and never reach below it either.
 //!
-//! Three steps, the same shape as `paintings.rs`:
+//! Three steps:
 //! * `collect` runs when a building's wall ring has been built and records one
 //!   candidate per textured wall: its cells, its texture columns and how tall
 //!   it was built. A building is processed by every tile it overlaps, so the
@@ -34,11 +34,10 @@
 //!   flushed region is lost). It works out each candidate's quad, writes one
 //!   `minecraft:item_display` per piece and crops that piece out of the 8 px/m
 //!   wall texture.
-//! * `write_packs` runs once the world is saved. Unlike the paintings there is
-//!   no data pack: an item's model is chosen by the `minecraft:item_model`
-//!   component, which is pure resource pack, so everything goes into
-//!   `<world>/resources.zip` (and the same file under `resourcepacks/`, where
-//!   26.1 looks).
+//! * `write_packs` runs once the world is saved. An item's model is chosen by
+//!   the `minecraft:item_model` component, which is pure resource pack, so
+//!   there is no data pack: everything goes into `<world>/resources.zip` (and
+//!   the same file under `resourcepacks/`, where 26.1 looks).
 //!
 //! Per panel the pack carries three files: the item model definition
 //! (`assets/arnis/items/<name>.json`), the model itself
@@ -62,10 +61,11 @@ use std::sync::Mutex;
 
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 
+use super::atlas::{atlas_budget, MIN_PX_PER_BLOCK};
 use super::facades::{self, FacadeStore};
-use super::paintings::{atlas_budget, crop_texture, cut, pack_mcmeta_described, MIN_PX_PER_BLOCK};
+use crate::colors::RGBTuple;
 use crate::progress::{emit_gui_progress_update, MESSAGE_ONLY};
 use crate::world_editor::WorldEditor;
 
@@ -116,11 +116,16 @@ const ITEM: &str = "minecraft:stone";
 /// every later version loads the pack as well.
 const RESOURCEPACK_FORMAT: u32 = 46;
 
+/// Pixels per metre of the lab's `_tex.png` wall textures.
+const TEX_PX_PER_M: f64 = 8.0;
+
+/// Panels whose crop carries fewer valid pixels than this stay plain blocks.
+const MIN_VALID_FRACTION: f64 = 0.25;
+
 /// The wall's outward unit normal in Arnis' frame (x east, z south): the
 /// perpendicular of the node A to node B direction `dir` that points the way
-/// the axis-snapped normal `(snx, snz)` does. This is the same choice
-/// `paintings::outward_faces` makes, only kept at its true angle instead of
-/// being split into axis faces. None for a wall with no direction at all.
+/// the axis-snapped normal `(snx, snz)` does, kept at its true angle rather
+/// than snapped to an axis. None for a wall with no direction at all.
 pub fn outward_normal(dir: (i32, i32), snx: i32, snz: i32) -> Option<(f64, f64)> {
     let (dx, dz) = (f64::from(dir.0), f64::from(dir.1));
     let len = (dx * dx + dz * dz).sqrt();
@@ -315,8 +320,8 @@ struct Registry {
     px: u32,
     panels: Vec<Panel>,
     /// Walls already collected. A building is processed by every tile it
-    /// overlaps, and unlike a painting a display claims no air cell, so the
-    /// duplicates have to be turned away by name.
+    /// overlaps, and a display claims no air cell that a second pass could
+    /// find taken, so the duplicates have to be turned away by name.
     claimed: FnvHashSet<u32>,
     /// Candidates in collection order; `None` once settled.
     candidates: Vec<Option<Candidate>>,
@@ -555,6 +560,18 @@ pub(crate) fn wall_is_visible(
         .any(|(bx, bz)| top > editor.get_absolute_y(bx, 0, bz) + 1)
 }
 
+/// Cuts `len` into pieces of at most `max`, as [start, end) ranges.
+pub fn cut(len: i32, max: i32) -> Vec<(i32, i32)> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < len {
+        let end = (start + max).min(len);
+        out.push((start, end));
+        start = end;
+    }
+    out
+}
+
 /// Cuts one wall into pieces the block atlas can hold and hangs each as an
 /// item display entity, asking `crop` for the pixels of each piece.
 ///
@@ -686,6 +703,133 @@ fn place_candidate(editor: &mut WorldEditor, s: &FacadeStore, cand: Candidate) -
         cand.total_h,
         &mut crop,
     )
+}
+
+/// Crops metres [ua, ub) along the wall and [va, vb) down from the top out of
+/// the 8 px/m wall texture, mirrors it when asked and fills missing pixels
+/// with the wall colour around them (`fill_missing`, with `fallback` as the
+/// last resort). None when too little of the crop carries texture.
+fn crop_texture(
+    tex: &RgbaImage,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    flip: bool,
+    fallback: Option<RGBTuple>,
+) -> Option<RgbImage> {
+    let (tw, th) = (i64::from(tex.width()), i64::from(tex.height()));
+    if tw == 0 || th == 0 {
+        return None;
+    }
+    let x0 = ((ua * TEX_PX_PER_M).floor() as i64).clamp(0, tw - 1);
+    let x1 = ((ub * TEX_PX_PER_M).ceil() as i64).clamp(x0 + 1, tw);
+    let y0 = ((va * TEX_PX_PER_M).floor() as i64).clamp(0, th - 1);
+    let y1 = ((vb * TEX_PX_PER_M).ceil() as i64).clamp(y0 + 1, th);
+    let crop = image::imageops::crop_imm(
+        tex,
+        x0 as u32,
+        y0 as u32,
+        (x1 - x0) as u32,
+        (y1 - y0) as u32,
+    )
+    .to_image();
+    let mut rgb = fill_missing(&crop, fallback)?;
+    if flip {
+        image::imageops::flip_horizontal_in_place(&mut rgb);
+    }
+    Some(rgb)
+}
+
+/// Fills the alpha-0 pixels so a hole reads as flat wall, not as a streak,
+/// and drops the alpha. A missing pixel takes the median colour of the valid
+/// pixels in its own texture row of the crop (one row is one height on the
+/// facade, so that is the wall around the hole), the crop's valid median
+/// when its row has none, and `fallback`, the lab's building colour, after
+/// that. The filled pixels then get a 3 px box blur so the seam to the
+/// photograph does not cut; the photograph itself is left alone. None when
+/// fewer than `MIN_VALID_FRACTION` of the pixels were valid.
+fn fill_missing(crop: &RgbaImage, fallback: Option<RGBTuple>) -> Option<RgbImage> {
+    let (w, h) = (crop.width() as usize, crop.height() as usize);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let rgb: Vec<[u8; 3]> = crop.pixels().map(|p| [p[0], p[1], p[2]]).collect();
+    let valid: Vec<bool> = crop.pixels().map(|p| p[3] > 0).collect();
+    let valid_count = valid.iter().filter(|ok| **ok).count();
+    if valid_count == 0 || (valid_count as f64) < MIN_VALID_FRACTION * (w * h) as f64 {
+        return None;
+    }
+    let to_image = |px: Vec<[u8; 3]>| {
+        RgbImage::from_raw(w as u32, h as u32, px.into_iter().flatten().collect())
+    };
+    if valid_count == w * h {
+        return to_image(rgb);
+    }
+
+    let valid_pixels = |px: &[[u8; 3]], ok: &[bool]| -> Vec<[u8; 3]> {
+        px.iter()
+            .zip(ok)
+            .filter(|(_, ok)| **ok)
+            .map(|(p, _)| *p)
+            .collect()
+    };
+    let crop_median = median_colour(&valid_pixels(&rgb, &valid))
+        .or(fallback.map(|(r, g, b)| [r, g, b]))
+        .unwrap_or([128, 128, 128]);
+    let mut filled = rgb.clone();
+    for y in 0..h {
+        let (row, ok) = (&rgb[y * w..(y + 1) * w], &valid[y * w..(y + 1) * w]);
+        if ok.iter().all(|v| *v) {
+            continue;
+        }
+        let colour = median_colour(&valid_pixels(row, ok)).unwrap_or(crop_median);
+        for x in 0..w {
+            if !ok[x] {
+                filled[y * w + x] = colour;
+            }
+        }
+    }
+
+    // The blur reads the filled image and writes the filled pixels only.
+    let mut out = filled.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if valid[i] {
+                continue;
+            }
+            let mut acc = [0u32; 3];
+            let mut n = 0u32;
+            for sy in y.saturating_sub(1)..(y + 2).min(h) {
+                for sx in x.saturating_sub(1)..(x + 2).min(w) {
+                    for (a, c) in acc.iter_mut().zip(filled[sy * w + sx]) {
+                        *a += u32::from(c);
+                    }
+                    n += 1;
+                }
+            }
+            out[i] = acc.map(|a| (a / n) as u8);
+        }
+    }
+    to_image(out)
+}
+
+/// Per-channel median of `pixels`; None when there are none.
+fn median_colour(pixels: &[[u8; 3]]) -> Option<[u8; 3]> {
+    if pixels.is_empty() {
+        return None;
+    }
+    let mut channels: [Vec<u8>; 3] = Default::default();
+    for px in pixels {
+        for (c, v) in channels.iter_mut().zip(px) {
+            c.push(*v);
+        }
+    }
+    Some(channels.map(|mut c| {
+        c.sort_unstable();
+        c[c.len() / 2]
+    }))
 }
 
 /// Settles the candidates at `indices` that are still pending.
@@ -960,6 +1104,21 @@ fn fit_px(panels: &[Panel], hashes: &[u64], requested_px: u32) -> u32 {
     px
 }
 
+/// pack.mcmeta accepted by every 1.21.x and later: the old keys for 1.21 to
+/// 1.21.8, `min_format`/`max_format` for 1.21.9+, each open-ended upwards.
+fn pack_mcmeta(pack_format: u32) -> String {
+    serde_json::json!({
+        "pack": {
+            "pack_format": pack_format,
+            "supported_formats": [pack_format, 999],
+            "min_format": pack_format,
+            "max_format": [999, 0],
+            "description": "Arnis facade panels"
+        }
+    })
+    .to_string()
+}
+
 /// The resource pack as zip bytes: pack.mcmeta plus a model definition, a
 /// model and a texture per panel.
 fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
@@ -978,7 +1137,7 @@ fn resource_zip(panels: &[(&Panel, u64)], px: u32) -> Result<Vec<u8>, String> {
         };
     put(
         "pack.mcmeta".to_string(),
-        pack_mcmeta_described(RESOURCEPACK_FORMAT, "Arnis facade panels").as_bytes(),
+        pack_mcmeta(RESOURCEPACK_FORMAT).as_bytes(),
         options,
     )?;
     put(
@@ -1039,7 +1198,7 @@ pub(super) const PACK_MARKER: &str = ".arnis_facade_pack";
 
 /// Whether the pack at `path` is one Arnis wrote.
 ///
-/// Both facade modes install the world pack at the two names the game reads,
+/// Both facade sources install the world pack at the two names the game reads,
 /// and `fs::write` would replace whatever is there. A world Arnis generated
 /// holds its own pack and replacing that is the point; a world the user has
 /// dressed themselves holds theirs, and losing it to a regeneration is not
@@ -1126,7 +1285,7 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::mapillary::facades::{CellRef, FacadeWall, TEST_GLOBALS as GLOBALS};
-    use image::{Rgb, RgbaImage};
+    use image::Rgb;
     use std::path::PathBuf;
 
     /// Unit normals of the four cardinal walls plus one at 45 degrees.
@@ -1199,7 +1358,7 @@ mod tests {
             [0.0, 0.923_879_532_5, 0.0, 0.382_683_432_4]
         ));
 
-        // The viewer's right matches the paintings' axis rule.
+        // The viewer's right on each axis normal, standing outside the wall.
         assert_eq!(right_of((0.0, 1.0)), (1.0, 0.0), "facing south, right east");
         assert_eq!(
             right_of((-1.0, 0.0)),
@@ -1266,8 +1425,9 @@ mod tests {
 
     #[test]
     fn crop_is_mirrored_when_node_a_is_on_the_viewers_right() {
-        // The same cases `paintings::flip_crop` covers, keyed on the true
-        // normal instead of a facing byte.
+        // The texture's columns run from node A to node B. Seen from the side
+        // where that runs left to right the crop is used as it is; from the
+        // other side it has to be mirrored, or the facade reads backwards.
         assert!(
             !flip_crop((10, 0), (0.0, 1.0)),
             "facing south, right is east"
@@ -1661,11 +1821,10 @@ mod tests {
     fn a_diagonal_wall_gets_one_flat_quad_instead_of_a_staircase() {
         let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
         const WAY: u64 = 5353;
-        // The wall of `paintings::a_diagonal_wall_gets_panels_on_both_faces`:
-        // 45 degrees from node A at (100, 50) to node B at (107, 57), eight
-        // Bresenham cells, one texture column each. That mode hangs nine
-        // paintings there, one per open axis face; this one hangs a single
-        // quad along the true line.
+        // A wall at 45 degrees from node A at (100, 50) to node B at (107, 57):
+        // eight Bresenham cells, one texture column each. Hung on the block
+        // grid this would be a staircase of nine axis-aligned panels, one per
+        // open axis face; here it is a single quad along the true line.
         let walls = vec![FacadeWall::for_test(WAY, 11, 12, 8, 6, two_tone_tex(8, 6))];
         let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
         for i in 0..8 {
@@ -1818,8 +1977,7 @@ mod tests {
         // r147094's south wall as one exported wall of 65 columns over its
         // five OSM edges (see `facades::test_fixtures`), textured with one
         // colour per metre column so a crop tells which columns it holds.
-        // `paintings.rs` hangs five paintings here, capped at 16 blocks each;
-        // this hangs three, capped at 32.
+        // Cut at `MAX_PANEL` that is three pieces: 32, 32 and 1.
         use crate::element_processing::buildings::relation_ring_id;
         use crate::osm_parser::ProcessedElement;
         let relation = facades::test_fixtures::r147094_relation();
@@ -1897,17 +2055,11 @@ mod tests {
     }
 
     #[test]
-    fn the_two_panel_modes_never_run_together() {
+    fn only_the_photos_mode_hangs_displays() {
         let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
         use crate::args::FacadeMode;
-        assert!(!FacadeMode::Blocks.places_paintings() && !FacadeMode::Blocks.places_displays());
-        assert!(
-            FacadeMode::Paintings.places_paintings() && !FacadeMode::Paintings.places_displays()
-        );
-        assert!(
-            FacadeMode::PaintingsV2.places_displays()
-                && !FacadeMode::PaintingsV2.places_paintings()
-        );
+        assert!(!FacadeMode::Blocks.places_displays());
+        assert!(FacadeMode::Photos.places_displays());
 
         const WAY: u64 = 5656;
         let make = || {
@@ -1932,32 +2084,20 @@ mod tests {
             }
         }
 
-        // Paintings v2 selected: the painting registry stays empty.
+        // Blocks selected: the store carries the textured wall, but nothing is
+        // collected however willing the registry is.
+        let (walls, cells) = make();
+        facades::install_blocks_for_test(walls, cells, vec![(3, 0)], 1.0);
+        assert!(!facades::displays_enabled());
+        reset(true, 16);
+        assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 0);
+
+        // Photos selected: the same wall is recorded.
         let (walls, cells) = make();
         facades::install_displays_for_test(walls, cells, vec![(3, 0)], 1.0);
-        assert!(facades::displays_enabled() && !facades::paintings_enabled());
-        assert!(facades::panels_enabled());
+        assert!(facades::displays_enabled());
         reset(true, 16);
-        crate::mapillary::paintings::reset(false, 16);
-        assert_eq!(
-            crate::mapillary::paintings::collect(&mut editor, WAY, 0, 0, 6),
-            0
-        );
         assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 1);
-
-        // Paintings selected: the display registry stays empty.
-        let (walls, cells) = make();
-        facades::install_for_test(walls, cells, vec![(3, 0)], 1.0);
-        assert!(facades::paintings_enabled() && !facades::displays_enabled());
-        assert!(facades::panels_enabled());
-        reset(false, 16);
-        crate::mapillary::paintings::reset(true, 16);
-        assert_eq!(collect(&mut editor, WAY, 0, 0, 6), 0);
-        assert_eq!(
-            crate::mapillary::paintings::collect(&mut editor, WAY, 0, 0, 6),
-            1
-        );
-        crate::mapillary::paintings::reset(false, 16);
     }
 
     /// Every tag of one finished display, key by key and type by type, against
@@ -2229,5 +2369,61 @@ mod tests {
         write_world_pack(&path, b"ours-v2").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"ours-v2");
         assert!(!dir.path().join("resources.zip.bak1").exists());
+    }
+
+    #[test]
+    fn walls_cut_at_max_panel() {
+        assert_eq!(cut(33, MAX_PANEL), vec![(0, 32), (32, 33)]);
+        assert_eq!(cut(32, MAX_PANEL), vec![(0, 32)]);
+        assert_eq!(cut(65, MAX_PANEL), vec![(0, 32), (32, 64), (64, 65)]);
+        assert!(cut(0, MAX_PANEL).is_empty());
+    }
+
+    #[test]
+    fn pack_mcmeta_has_the_shape_every_1_21_accepts() {
+        let v: serde_json::Value = serde_json::from_str(&pack_mcmeta(46)).unwrap();
+        assert_eq!(v["pack"]["pack_format"], 46);
+        assert_eq!(v["pack"]["supported_formats"], serde_json::json!([46, 999]));
+        assert_eq!(v["pack"]["min_format"], 46);
+        assert_eq!(v["pack"]["max_format"], serde_json::json!([999, 0]));
+        assert!(v["pack"]["description"].is_string());
+        assert!(v.get("overlays").is_none());
+    }
+
+    #[test]
+    fn missing_pixels_take_the_wall_colour_of_their_row_and_thin_panels_are_skipped() {
+        // A 6 x 9 crop: three rows of colour A, three of colour B with one
+        // hole, three rows without any data.
+        let a = image::Rgba([10, 20, 30, 255]);
+        let b = image::Rgba([200, 210, 220, 255]);
+        let none = image::Rgba([1, 2, 3, 0]);
+        let img = RgbaImage::from_fn(6, 9, |x, y| match y {
+            0..=2 => a,
+            3..=5 if (x, y) != (2, 4) => b,
+            _ => none,
+        });
+        let out = fill_missing(&img, Some((90, 90, 90))).unwrap();
+        // The photograph is untouched.
+        assert_eq!(out.get_pixel(0, 0).0, [10, 20, 30]);
+        assert_eq!(out.get_pixel(5, 5).0, [200, 210, 220]);
+        // The hole takes its row's colour, not a smear of the rows above.
+        assert_eq!(out.get_pixel(2, 4).0, [200, 210, 220]);
+        // Rows without data take the crop's median, A (18 pixels against
+        // 17). The first of them still sees row 5 through the blur; the
+        // others are flat.
+        assert!(out.get_pixel(3, 6).0[0] > 10);
+        assert_eq!(out.get_pixel(3, 7).0, [10, 20, 30]);
+        assert_eq!(out.get_pixel(3, 8).0, [10, 20, 30]);
+        // Fewer than a quarter valid: no panel. A quarter: a panel.
+        let mut thin = RgbaImage::from_pixel(4, 4, none);
+        for x in 0..3 {
+            thin.put_pixel(x, 0, a);
+        }
+        assert!(fill_missing(&thin, None).is_none());
+        thin.put_pixel(3, 0, a);
+        assert!(fill_missing(&thin, None).is_some());
+        // Nothing valid at all: no panel, whatever the fallback.
+        let empty = RgbaImage::from_pixel(4, 4, none);
+        assert!(fill_missing(&empty, Some((1, 2, 3))).is_none());
     }
 }

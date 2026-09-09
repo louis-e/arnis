@@ -227,22 +227,15 @@ pub struct Args {
     #[arg(long, default_value = "")]
     pub mapillary_facade_debug_walls: String,
 
-    /// How facade textures are applied: `blocks` picks the palette block nearest
-    /// each cell's colour and places windows and doors from the classes;
-    /// `paintings` builds the blocks and hangs the texture as custom painting
-    /// variants, one per wall panel of up to 16 x 16 blocks (Java 1.21+ only,
-    /// bundled as a data pack and a resource pack); `paintings-v2` builds the
-    /// blocks and hangs one item display entity per wall face on the wall's true
-    /// line, so a diagonal wall gets one flat quad instead of a staircase of
-    /// axis-aligned panels (Java 1.21.4+ only, resource pack only).
-    #[arg(long, value_enum, default_value_t = FacadeMode::Blocks)]
+    /// How facade textures are applied: `photos` builds colour-matched blocks
+    /// and hangs the photograph itself as one item display entity per wall
+    /// face on the wall's true line, so a diagonal wall gets one flat quad
+    /// rather than a staircase of axis-aligned panels (Java 1.21.4+ only,
+    /// carried by the world's resource pack); `blocks` picks the palette block
+    /// nearest each cell's colour and places windows and doors from the
+    /// classes, and works on every world format.
+    #[arg(long, value_enum, default_value_t = FacadeMode::Photos)]
     pub mapillary_facade_mode: FacadeMode,
-
-    /// With `paintings` or `paintings-v2`: texture resolution in pixels per block
-    /// (4, 8, 16 or 32). Lowered automatically when the panels would not fit the
-    /// game's atlas.
-    #[arg(long, default_value_t = 16, value_parser = parse_paintings_px)]
-    pub mapillary_paintings_px: u32,
 
     /// Hang a premade facade photograph on every building, picked by what kind
     /// of building it is. Needs no token and no download, so it covers the
@@ -258,6 +251,13 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = FacadeDetail::Standard)]
     pub facade_detail: FacadeDetail,
 
+    /// Texture resolution of the facade panels in pixels per block (4, 8, 16 or
+    /// 32), for the Mapillary photos and the preset facades alike. Lowered
+    /// automatically when the panels would not fit the atlas --facade-detail
+    /// allows.
+    #[arg(long, default_value_t = 16, value_parser = parse_facade_px)]
+    pub facade_px: u32,
+
     /// Directory holding the preset facade set: a manifest.json and the images
     /// it names. Defaults to assets/building-facades beside the executable, so
     /// this only has to be given to run a replacement set from elsewhere.
@@ -265,13 +265,11 @@ pub struct Args {
     pub building_facades_dir: Option<PathBuf>,
 }
 
-/// Accepts the painting resolutions the atlas budget logic can halve cleanly.
-fn parse_paintings_px(s: &str) -> Result<u32, String> {
+/// Accepts the panel resolutions the atlas budget logic can halve cleanly.
+fn parse_facade_px(s: &str) -> Result<u32, String> {
     match s.trim().parse::<u32>() {
         Ok(v) if matches!(v, 4 | 8 | 16 | 32) => Ok(v),
-        _ => Err(format!(
-            "{s}: --mapillary-paintings-px must be 4, 8, 16 or 32"
-        )),
+        _ => Err(format!("{s}: --facade-px must be 4, 8, 16 or 32")),
     }
 }
 
@@ -313,8 +311,8 @@ impl FacadeDetail {
     /// The atlas side this detail level budgets against, in pixels.
     pub fn atlas_side(self) -> u32 {
         match self {
-            FacadeDetail::Standard => crate::mapillary::paintings::ATLAS_SIDE_STANDARD,
-            FacadeDetail::High => crate::mapillary::paintings::ATLAS_SIDE_HIGH,
+            FacadeDetail::Standard => crate::mapillary::atlas::ATLAS_SIDE_STANDARD,
+            FacadeDetail::High => crate::mapillary::atlas::ATLAS_SIDE_HIGH,
         }
     }
 
@@ -472,33 +470,38 @@ impl Args {
 pub enum FacadeMode {
     /// Colour-matched wall blocks, with windows and doors from the texture.
     Blocks,
-    /// Blocks plus one custom painting per wall panel. Java 1.21+ only.
-    Paintings,
-    /// Blocks plus one item display entity per wall face, hung on the wall's
-    /// true line rather than on the block grid. Java 1.21.4+ only.
-    #[value(name = "paintings-v2", alias = "paintings2")]
-    PaintingsV2,
+    /// Blocks plus the photograph itself, one item display entity per wall
+    /// face hung on the wall's true line rather than on the block grid. Java
+    /// 1.21.4+ only.
+    ///
+    /// The aliases are the names this mode and its predecessor went by while
+    /// a `paintings` mode hung painting entities beside it. A script written
+    /// back then should still get photographs, not an error.
+    #[value(alias = "paintings-v2", alias = "paintings2", alias = "paintings")]
+    Photos,
 }
 
 impl FacadeMode {
+    /// Reads the mode the GUI stored or a settings file carries.
     pub fn from_str_lossy(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
-            "paintings" => FacadeMode::Paintings,
-            "paintings-v2" | "paintings_v2" | "paintings2" | "paintingsv2" => {
-                FacadeMode::PaintingsV2
+            "blocks" => FacadeMode::Blocks,
+            // The photo panels were `paintings-v2` while a `paintings` mode
+            // hung painting entities beside them. Both names are gone from
+            // the choices, but a setting saved by an earlier build still says
+            // one of them, and it should keep giving photographs.
+            "paintings" | "paintings-v2" | "paintings_v2" | "paintings2" | "paintingsv2" => {
+                FacadeMode::Photos
             }
-            _ => FacadeMode::Blocks,
+            // `photos`, and anything else an older build left behind, which
+            // takes the default.
+            _ => FacadeMode::Photos,
         }
-    }
-
-    /// Whether the texture is hung as painting variants.
-    pub fn places_paintings(self) -> bool {
-        matches!(self, FacadeMode::Paintings)
     }
 
     /// Whether the texture is hung as item display entities.
     pub fn places_displays(self) -> bool {
-        matches!(self, FacadeMode::PaintingsV2)
+        matches!(self, FacadeMode::Photos)
     }
 }
 
@@ -641,31 +644,23 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         }
     }
 
-    // Both panel modes are Java entities carried by a resource pack, so no other
-    // world format can show them. Said here rather than dropped silently at the
-    // wall, and checked for the fetch too, not only for a facade folder.
-    if args.mapillary_facades_wanted() && (args.bedrock || args.luanti) {
-        if args.mapillary_facade_mode.places_paintings() {
-            return Err(
-                "--mapillary-facade-mode paintings needs a Java world (painting variants, 1.21.4+). \
-                 Use `blocks`, which works on every world format."
-                    .to_string(),
-            );
-        }
-        if args.mapillary_facade_mode.places_displays() {
-            return Err(
-                "--mapillary-facade-mode paintings-v2 needs a Java world (item display entities, 1.21.4+). \
-                 Use `blocks`, which works on every world format."
-                    .to_string(),
-            );
-        }
+    // The photo panels are Java entities carried by a resource pack, so no
+    // other world format can show them. Said here rather than dropped silently
+    // at the wall, and checked for the fetch too, not only for a facade folder.
+    if args.mapillary_facades_wanted()
+        && (args.bedrock || args.luanti)
+        && args.mapillary_facade_mode.places_displays()
+    {
+        return Err(
+            "--mapillary-facade-mode photos needs a Java world (item display entities, 1.21.4+). \
+             Use `blocks`, which works on every world format."
+                .to_string(),
+        );
     }
 
-    // The preset facades hang item display entities and write their textures
-    // into the world's `resources.zip`. `paintings` writes its own textures
-    // into the same file, and the second writer replaces the first, so the two
-    // cannot both run. `paintings-v2` shares the display registry and the one
-    // pack with them, which is the whole design, so only v1 is refused.
+    // The two facade sources hang on the same walls, so the presets take them
+    // and the Mapillary facades stand down for the run. Said out loud, since a
+    // token the user went and created would otherwise be ignored in silence.
     if args.building_facades && args.mapillary_facades_wanted() {
         println!(
             "Note: --building-facades takes the walls, so the Mapillary facades are off for this run."
@@ -1219,47 +1214,49 @@ mod tests {
             Args::parse_from(cmd.iter())
         };
 
-        assert_eq!(parse(&[]).mapillary_facade_mode, FacadeMode::Blocks);
-        for value in ["paintings-v2", "paintings2"] {
+        // Photos unless asked otherwise, and the names the mode went by before
+        // it was called that still select it, so an old script keeps working.
+        assert_eq!(parse(&[]).mapillary_facade_mode, FacadeMode::Photos);
+        for value in ["photos", "paintings-v2", "paintings2", "paintings"] {
             let args = parse(&["--mapillary-facade-mode", value]);
-            assert_eq!(
-                args.mapillary_facade_mode,
-                FacadeMode::PaintingsV2,
-                "{value}"
-            );
+            assert_eq!(args.mapillary_facade_mode, FacadeMode::Photos, "{value}");
             assert!(args.mapillary_facade_mode.places_displays());
-            assert!(!args.mapillary_facade_mode.places_paintings());
         }
+        let args = parse(&["--mapillary-facade-mode", "blocks"]);
+        assert_eq!(args.mapillary_facade_mode, FacadeMode::Blocks);
+        assert!(!args.mapillary_facade_mode.places_displays());
         // The GUI hands the mode over as the same strings.
         assert_eq!(FacadeMode::from_str_lossy("blocks"), FacadeMode::Blocks);
-        assert_eq!(
-            FacadeMode::from_str_lossy("paintings"),
-            FacadeMode::Paintings
-        );
-        for value in ["paintings-v2", "paintings_v2", "paintings2", "PaintingsV2"] {
+        for value in [
+            "photos",
+            "Photos",
+            "paintings",
+            "paintings-v2",
+            "paintings_v2",
+            "paintings2",
+            "PaintingsV2",
+        ] {
             assert_eq!(
                 FacadeMode::from_str_lossy(value),
-                FacadeMode::PaintingsV2,
+                FacadeMode::Photos,
                 "{value}"
             );
         }
-        // Anything an older build left behind falls back to blocks.
-        assert_eq!(FacadeMode::from_str_lossy("v2"), FacadeMode::Blocks);
+        // Anything an older build left behind takes the default.
+        assert_eq!(FacadeMode::from_str_lossy("v2"), FacadeMode::Photos);
+        assert_eq!(FacadeMode::from_str_lossy(""), FacadeMode::Photos);
 
-        // Both panel modes are Java entities.
+        // The photo panels are Java entities.
         let mut args = parse(&[
             "--mapillary-facades-dir",
             facade_path,
             "--mapillary-facade-mode",
-            "paintings-v2",
+            "photos",
         ]);
         assert!(validate_args(&args).is_ok());
         args.bedrock = true;
         let err = validate_args(&args).unwrap_err();
-        assert!(
-            err.contains("paintings-v2") && err.contains("Java"),
-            "{err}"
-        );
+        assert!(err.contains("photos") && err.contains("Java"), "{err}");
         args.bedrock = false;
         args.luanti = true;
         assert!(validate_args(&args).is_err());
@@ -1267,17 +1264,39 @@ mod tests {
         args.mapillary_facade_mode = FacadeMode::Blocks;
         assert!(validate_args(&args).is_ok());
 
-        // The same check has to reach the fetch path, which has no folder.
-        let mut args = parse(&[
-            "--mapillary-token",
-            "MLY|test",
-            "--mapillary-facade-mode",
-            "paintings",
-        ]);
+        // The same check has to reach the fetch path, which has no folder, and
+        // it applies to the default too: a Bedrock run with a token has to say
+        // `blocks` rather than get a world with a pack it cannot show.
+        let mut args = parse(&["--mapillary-token", "MLY|test"]);
         assert!(validate_args(&args).is_ok());
         args.bedrock = true;
         let err = validate_args(&args).unwrap_err();
-        assert!(err.contains("paintings") && err.contains("Java"), "{err}");
+        assert!(err.contains("photos") && err.contains("Java"), "{err}");
+        args.mapillary_facade_mode = FacadeMode::Blocks;
+        assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn facade_px_takes_the_resolutions_the_atlas_budget_halves() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd: Vec<&str> = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::try_parse_from(cmd.iter())
+        };
+
+        assert_eq!(parse(&[]).unwrap().facade_px, 16);
+        for value in ["4", "8", "16", "32"] {
+            let px = parse(&["--facade-px", value]).unwrap().facade_px;
+            assert_eq!(px.to_string(), value);
+        }
+        // Anything the ladder cannot step down from cleanly is refused with
+        // the flag named, not rounded to something else in silence.
+        for value in ["12", "0", "64", "sixteen"] {
+            let err = parse(&["--facade-px", value]).unwrap_err().to_string();
+            assert!(err.contains("--facade-px"), "{value}: {err}");
+        }
     }
 
     #[test]
@@ -1319,11 +1338,7 @@ mod tests {
         // the Mapillary facades off, so no mode of theirs can clash with them
         // and none of these is refused.
         let mut args = parse(&["--building-facades", "--mapillary-token", "MLY|test"]);
-        for mode in [
-            FacadeMode::PaintingsV2,
-            FacadeMode::Blocks,
-            FacadeMode::Paintings,
-        ] {
+        for mode in [FacadeMode::Photos, FacadeMode::Blocks] {
             args.mapillary_facade_mode = mode;
             assert!(validate_args(&args).is_ok(), "{mode:?} was refused");
             assert!(

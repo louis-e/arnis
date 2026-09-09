@@ -457,7 +457,7 @@ impl RegionWriteCtx {
 
 /// Helper function to get entity coordinates
 /// Extracts a block entity or entity position for coordinate dedup. Hanging entities
-/// (item frames, paintings) add their `Facing`, so several decals can share one cell.
+/// (item frames) add their `Facing`, so several decals can share one cell.
 ///
 /// An entity's UUID beats `Facing` where there is one. Every UUID this writer
 /// produces comes from `build_deterministic_uuid`, so the two copies a tile

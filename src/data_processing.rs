@@ -576,14 +576,13 @@ pub fn generate_world_with_options(
     if let Some(t) = mapillary_start {
         eprintln!("[BENCHMARK] mapillary_join_ms={}", t.elapsed().as_millis());
     }
-    // Both panel modes are Java entities carried by a resource pack. The blocks
+    // The photo panels are Java entities carried by a resource pack. The blocks
     // are ordinary blocks and work on every format, so the feature stays on and
     // says what it dropped rather than dropping it in silence. The CLI refuses
     // the combination outright in `validate_args`; this catches the GUI, which
     // builds `Args` directly.
     if world_format != WorldFormat::JavaAnvil
-        && (args.mapillary_facade_mode.places_paintings()
-            || args.mapillary_facade_mode.places_displays())
+        && args.mapillary_facade_mode.places_displays()
         && args.mapillary_facades_wanted()
     {
         let msg = format!(
@@ -614,40 +613,22 @@ pub fn generate_world_with_options(
         None => crate::mapillary::facades::clear(),
     }
     // Panel candidates collect in a process-wide registry while the buildings
-    // are built, are hung before the world is saved and become packs after it;
-    // a run without them must not inherit the previous world's. The two panel
-    // modes are alternatives, so at most one registry is ever enabled.
-    crate::mapillary::paintings::reset(
-        crate::mapillary::facades::paintings_enabled(),
-        args.mapillary_paintings_px,
-    );
+    // are built, are hung before the world is saved and become a pack after
+    // it; a run without them must not inherit the previous world's.
+    //
     // Preset facades hang on the same display entities and write into the same
     // resource pack, so the display registry is on when either source is. The
     // Mapillary side still decides for itself whether to collect anything: its
     // `collect` also asks the facade store, which is off unless the export
-    // asked for the panel mode.
-    //
-    // The `paintings` mode writes its own textures into that one resource pack
-    // and the second writer would replace the first, so the presets stand
-    // down. `validate_args` refuses the combination on the command line; the
-    // GUI builds its arguments directly and never runs it, so it is said here
-    // too rather than left to produce a world with half a pack.
+    // asked for the photos mode.
     let java = world_format == WorldFormat::JavaAnvil;
-    let paintings_own_the_pack = crate::mapillary::facades::paintings_enabled();
-    if args.building_facades && java && paintings_own_the_pack {
-        let msg =
-            "Preset facades: off, the Paintings facade mode owns this world's resource pack. \
-                   Paintings v2 shares it with them.";
-        eprintln!("Warning: {msg}");
-        crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, msg);
-    }
     // The atlas the panels are budgeted against, before anything measures one.
-    // Both panel paths read it, so it is set whichever of them is running.
-    crate::mapillary::paintings::set_atlas_side(args.facade_detail.atlas_side());
+    // Both sources read it, so it is set whichever of them is running.
+    crate::mapillary::atlas::set_atlas_side(args.facade_detail.atlas_side());
     crate::building_facades::reset(
-        args.building_facades && java && !paintings_own_the_pack,
+        args.building_facades && java,
         args.building_facades_dir.as_deref(),
-        args.mapillary_paintings_px,
+        args.facade_px,
         args.scale,
     );
     // A panel hangs in the cell in front of its wall, and nothing is written
@@ -657,7 +638,7 @@ pub fn generate_world_with_options(
     crate::building_facades::set_world_extent(&xzbbox);
     crate::mapillary::displays::reset(
         crate::mapillary::facades::displays_enabled() || crate::building_facades::enabled(),
-        args.mapillary_paintings_px,
+        args.facade_px,
     );
 
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
@@ -1218,11 +1199,6 @@ pub fn generate_world_with_options(
                                     }
                                     // Facade panels check the region's final blocks
                                     // and must be in before it leaves memory.
-                                    crate::mapillary::paintings::flush_region(
-                                        &mut editor,
-                                        d.0,
-                                        d.1,
-                                    );
                                     crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
                                     crate::building_facades::flush_region(&mut editor, d.0, d.1);
                                     if let Some(w) = flush_worker.as_ref() {
@@ -1480,7 +1456,6 @@ pub fn generate_world_with_options(
             if hash_check {
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
-            crate::mapillary::paintings::flush_region(&mut editor, rx, rz);
             crate::mapillary::displays::flush_region(&mut editor, rx, rz);
             crate::building_facades::flush_region(&mut editor, rx, rz);
             if let Some(w) = flush_worker.as_ref() {
@@ -1534,9 +1509,6 @@ pub fn generate_world_with_options(
     // eviction most were settled as their regions were flushed; this hangs the
     // rest and reports the outcome.
     if world_format == WorldFormat::JavaAnvil {
-        if let Some(report) = crate::mapillary::paintings::finalize(&mut editor) {
-            println!("{report}");
-        }
         if let Some(report) = crate::mapillary::displays::finalize(&mut editor) {
             println!("{report}");
         }
@@ -1585,15 +1557,9 @@ pub fn generate_world_with_options(
         println!("{}", ctx.summary(args.debug));
     }
 
-    // Facade panels: the paintings need their variants as a data pack and
-    // their textures as the world's resource pack; the display panels are a
-    // resource pack alone. The world folder and its level.dat exist by now.
+    // Facade panels: their textures and models are the world's resource pack,
+    // which wants the world folder to exist, and it does by now.
     if world_format == WorldFormat::JavaAnvil {
-        match crate::mapillary::paintings::write_packs(&output_path) {
-            Ok(Some(report)) => println!("{report}"),
-            Ok(None) => {}
-            Err(e) => eprintln!("Warning: Failed to write facade paintings: {e}"),
-        }
         match crate::mapillary::displays::write_packs(&output_path) {
             Ok(Some(report)) => println!("{report}"),
             Ok(None) => {}

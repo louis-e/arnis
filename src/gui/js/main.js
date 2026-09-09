@@ -163,8 +163,7 @@ async function applyLocalization(localization) {
     "span[data-localize='facade_precompute']": "facade_precompute",
     "span[data-localize='facade_mode']": "facade_mode",
     "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
-    "button[data-localize='facade_mode_paintings']": "facade_mode_paintings",
-    "button[data-localize='facade_mode_paintings_v2']": "facade_mode_paintings_v2",
+    "button[data-localize='facade_mode_photos']": "facade_mode_photos",
     "div[data-localize='facade_mode_java_only']": "facade_mode_java_only",
     "button[data-localize='signage_none']": "signage_none",
     "button[data-localize='signage_basic']": "signage_basic",
@@ -470,13 +469,15 @@ function getMapillaryToken() {
 }
 
 function getFacadeMode() {
-  // Only the modes that exist; a value left behind by an older build falls
-  // back to blocks, the same way the backend reads it.
   const stored = localStorage.getItem('facadeMode');
-  return ['paintings', 'paintings-v2'].includes(stored) ? stored : 'blocks';
+  if (stored === 'blocks') return 'blocks';
+  // Anything else means the photographs: 'photos' itself, the 'paintings' and
+  // 'paintings-v2' an earlier build saved for what are now the photo panels,
+  // and nothing at all, which takes the default the same way the backend does.
+  return 'photos';
 }
 
-// Both panel modes hang Java entities carried by a resource pack, so no other
+// The photo panels are Java entities carried by a resource pack, so no other
 // world format can show them. The stored choice is left alone so that going
 // back to Java restores it; only what the backend is asked for changes.
 function getEffectiveFacadeMode() {

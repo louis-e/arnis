@@ -3719,20 +3719,9 @@ fn build_wall_ring(
         previous_node = Some((x, z));
     }
 
-    // Painting panels are recorded once the wall exists: they need the wall
-    // behind them in place and the air in front of it known. They are hung at
-    // the end of the run, once every later block is in.
-    if crate::mapillary::facades::paintings_enabled() {
-        crate::mapillary::paintings::collect(
-            editor,
-            config.element_id,
-            config.start_y_offset,
-            config.abs_terrain_offset,
-            config.building_height,
-        );
-    }
-    // Paintings v2 records the wall itself rather than its open faces; the
-    // quads are placed at the end of the run like the paintings.
+    // Photo panels are recorded once the wall exists, since how tall it was
+    // built decides the panel. They are placed at the end of the run, once
+    // every later block is in and the finished world can be checked.
     if crate::mapillary::facades::displays_enabled() {
         crate::mapillary::displays::collect(
             editor,
@@ -3768,7 +3757,7 @@ fn photo_shell_columns(element: &ProcessedWay) -> Arc<FnvHashSet<(i32, i32)>> {
     let mut shell = FnvHashSet::default();
     if !crate::mapillary::facades::has_building(element.id)
         || (crate::mapillary::facades::colour_only()
-            && !crate::mapillary::facades::panels_enabled())
+            && !crate::mapillary::facades::displays_enabled())
     {
         return Arc::new(shell);
     }

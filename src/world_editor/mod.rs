@@ -244,9 +244,6 @@ pub struct WorldEditor<'a> {
     strict_bounds: Option<(i32, i32, i32, i32)>,
     /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
     frame_cells: FnvHashSet<(i32, i32, i32)>,
-    /// Air cells covered by a facade painting. A frame hung in one of these would
-    /// overlap the painting and the game would drop both.
-    painting_cells: FnvHashSet<(i32, i32, i32)>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -288,7 +285,6 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
-            painting_cells: FnvHashSet::default(),
         }
     }
 
@@ -336,7 +332,6 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
-            painting_cells: FnvHashSet::default(),
         }
     }
 
@@ -384,7 +379,6 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
-            painting_cells: FnvHashSet::default(),
         }
     }
 
@@ -589,18 +583,12 @@ impl<'a> WorldEditor<'a> {
         self.cell_is_open(x, abs_y, z)
     }
 
-    /// True if a decal frame or a facade painting already hangs here.
+    /// True if a decal frame already hangs here.
     pub fn cell_has_frame(&self, x: i32, abs_y: i32, z: i32) -> bool {
-        (!self.frame_cells.is_empty() && self.frame_cells.contains(&(x, abs_y, z)))
-            || self.cell_has_painting(x, abs_y, z)
+        !self.frame_cells.is_empty() && self.frame_cells.contains(&(x, abs_y, z))
     }
 
-    /// True if a facade painting covers this air cell.
-    pub fn cell_has_painting(&self, x: i32, abs_y: i32, z: i32) -> bool {
-        !self.painting_cells.is_empty() && self.painting_cells.contains(&(x, abs_y, z))
-    }
-
-    /// Whether hanging Java entities (item frame decals, paintings) are written.
+    /// Whether Java entities (item frame decals, facade panels) are written.
     #[inline]
     pub fn map_decals_enabled(&self) -> bool {
         self.map_decals
@@ -637,10 +625,6 @@ impl<'a> WorldEditor<'a> {
         // Skip a face whose cell sits in the terrain; that frame would be culled on load.
         let rel_y = fy - self.get_absolute_y(fx, 0, fz);
         if rel_y < 1 {
-            return false;
-        }
-        // A frame overlapping a painting takes the painting down with it.
-        if self.cell_has_painting(fx, fy, fz) {
             return false;
         }
         if require_air && !self.cell_is_open(fx, fy, fz) {
@@ -685,48 +669,10 @@ impl<'a> WorldEditor<'a> {
         true
     }
 
-    /// One painting entity showing `variant` (a `namespace:name` id), anchored in
-    /// the air cell `(ax, abs_y, az)`. `facing` is the painting's front direction
-    /// as the game encodes it: 0 south, 1 west, 2 north, 3 east. Which air cells
-    /// a wider panel covers follows from the anchor, see
-    /// `mapillary::paintings::anchor`; the caller registers them with
-    /// `reserve_painting_cells` once the entity is in. False outside the editor's
-    /// area, in a flushed region or below the terrain.
-    pub fn add_painting(
-        &mut self,
-        ax: i32,
-        abs_y: i32,
-        az: i32,
-        facing: i8,
-        variant: &str,
-    ) -> bool {
-        if !self.xzbbox.contains(&XZPoint::new(ax, az)) || self.is_region_flushed(ax, az) {
-            return false;
-        }
-        let rel_y = abs_y - self.get_absolute_y(ax, 0, az);
-        if rel_y < 1 {
-            return false;
-        }
-
-        let mut extra = HashMap::new();
-        extra.insert("facing".to_string(), Value::Byte(facing));
-        extra.insert("variant".to_string(), Value::String(variant.to_string()));
-        // 1.21 to 1.21.4 read TileX/Y/Z, 1.21.5+ read block_pos; both are written.
-        extra.insert("TileX".to_string(), Value::Int(ax));
-        extra.insert("TileY".to_string(), Value::Int(abs_y));
-        extra.insert("TileZ".to_string(), Value::Int(az));
-        extra.insert(
-            "block_pos".to_string(),
-            Value::IntArray(IntArray::new(vec![ax, abs_y, az])),
-        );
-        self.add_entity("minecraft:painting", ax, rel_y, az, Some(extra));
-        true
-    }
-
-    /// One item display entity at an exact position, for the Paintings v2
-    /// facade panels. Unlike a painting this is not a hanging entity: it sits
-    /// wherever `Pos` puts it, which is a sub-block point off the wall plane,
-    /// so the caller owns the whole placement and this only writes it.
+    /// One item display entity at an exact position, for the facade photo
+    /// panels. Not a hanging entity: it sits wherever `Pos` puts it, which is
+    /// a sub-block point off the wall plane, so the caller owns the whole
+    /// placement and this only writes it.
     ///
     /// `seed` separates two displays whose `Pos` falls in the same block, which
     /// is all the UUID is built from; two panels meeting at a corner would
@@ -781,41 +727,6 @@ impl<'a> WorldEditor<'a> {
         out
     }
 
-    /// Marks air cells as covered by a painting, so no decal frame is hung in them.
-    pub fn reserve_painting_cells(&mut self, cells: impl IntoIterator<Item = (i32, i32, i32)>) {
-        self.painting_cells.extend(cells);
-    }
-
-    /// Every painting currently in the world, as (anchor x, y, z, facing, variant).
-    #[cfg(test)]
-    pub fn paintings(&self) -> Vec<(i32, i32, i32, i8, String)> {
-        let mut out = Vec::new();
-        for region in self.world.regions.values() {
-            for chunk in region.chunks.values() {
-                let Some(Value::List(entities)) = chunk.other.get("entities") else {
-                    continue;
-                };
-                for entity in entities {
-                    let Value::Compound(e) = entity else { continue };
-                    if !matches!(e.get("id"), Some(Value::String(id)) if id == "minecraft:painting")
-                    {
-                        continue;
-                    }
-                    let (Some(Value::IntArray(pos)), Some(Value::Byte(f)), Some(Value::String(v))) =
-                        (e.get("block_pos"), e.get("facing"), e.get("variant"))
-                    else {
-                        continue;
-                    };
-                    let p: Vec<i32> = pos.iter().copied().collect();
-                    if p.len() == 3 {
-                        out.push((p[0], p[1], p[2], *f, v.clone()));
-                    }
-                }
-            }
-        }
-        out
-    }
-
     /// Places a registered decal on one face of a block. Multi-tile keys are laid out with
     /// this block behind the viewer's top-left tile; see `place_decal_panel`.
     pub fn place_decal(
@@ -858,10 +769,7 @@ impl<'a> WorldEditor<'a> {
                 if !self.xzbbox.contains(&XZPoint::new(fx, fz)) || self.is_region_flushed(fx, fz) {
                     return false;
                 }
-                if fy - self.get_absolute_y(fx, 0, fz) < 1
-                    || !self.cell_is_open(fx, fy, fz)
-                    || self.cell_has_painting(fx, fy, fz)
-                {
+                if fy - self.get_absolute_y(fx, 0, fz) < 1 || !self.cell_is_open(fx, fy, fz) {
                     return false;
                 }
                 if require_hosts && self.cell_is_open(hx, hy, hz) {
@@ -1646,12 +1554,8 @@ impl<'a> WorldEditor<'a> {
         extra_data: Option<HashMap<String, Value>>,
     ) {
         // Two hanging entities can share a cell on opposite faces, so the face belongs in
-        // the UUID seed; without it they collide and the game keeps only one. Item
-        // frames spell the key `Facing`, paintings `facing`.
-        let face = match extra_data
-            .as_ref()
-            .and_then(|e| e.get("Facing").or_else(|| e.get("facing")))
-        {
+        // the UUID seed; without it they collide and the game keeps only one.
+        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
             Some(Value::Byte(f)) => *f as i64,
             _ => -1,
         };
