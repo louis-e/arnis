@@ -33,6 +33,7 @@ const SETTINGS = [
   { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
+  { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
   // The facade controls. Registered here like every other segmented control,
   // so the panel's Revert and Reset to defaults reach them: the store reads the
