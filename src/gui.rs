@@ -788,9 +788,20 @@ fn gui_get_version() -> String {
 }
 
 /// Latest release info from the GitHub Releases API + a comparison to the running version.
+///
+/// Off the main thread for the same reason as [`gui_get_cache_size`]: this is a
+/// blocking HTTPS request with a 5s connect and 10s read timeout, the front end
+/// asks for it while the window is already on screen, and a command without
+/// `async` runs inline on the thread that owns the webview. On a network that
+/// drops the connection to GitHub rather than refusing it, that timeout was the
+/// window not repainting.
 #[tauri::command]
-fn gui_get_update_info() -> Result<version_check::UpdateInfo, String> {
-    version_check::check_for_updates().map_err(|e| format!("Update check failed: {e}"))
+async fn gui_get_update_info() -> Result<version_check::UpdateInfo, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        version_check::check_for_updates().map_err(|e| format!("Update check failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Update check task failed: {e}"))?
 }
 
 /// Compile-time target platform: "windows" / "macos" / "linux" / "unknown".
@@ -809,11 +820,23 @@ fn gui_get_platform() -> &'static str {
 
 /// How much disk every Arnis cache holds together, as a short string like
 /// "812 MB". The settings panel shows it next to the clear button so the user
-/// can tell whether clearing is worth it. Walking the trees costs a few
-/// milliseconds even when they are large, so it is computed on demand rather
-/// than tracked.
+/// can tell whether clearing is worth it.
+///
+/// Off the main thread, because the cost is in the number of cached files
+/// rather than in their size, and a `#[tauri::command]` without `async` runs
+/// inline on the thread that owns the webview. A tile cache with a Mapillary
+/// facade run in it reaches tens of thousands of files, and the walk was
+/// freezing the window for seconds at a time; a late number is fine, a frozen
+/// window is not.
 #[tauri::command]
-fn gui_get_cache_size() -> String {
+async fn gui_get_cache_size() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(cache_size_string)
+        .await
+        .map_err(|e| format!("Cache size task failed: {e}"))
+}
+
+/// Every cache root's size added up, as a short human string.
+fn cache_size_string() -> String {
     use crate::elevation::cache::{dir_size_bytes, format_size, get_base_cache_dir};
 
     // The tile cache root already contains the Mapillary facade cache, which
