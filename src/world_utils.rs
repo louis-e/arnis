@@ -46,10 +46,13 @@ pub fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
     }
 }
 
-/// Sanitizes an area name for safe use in filesystem paths.
-/// Replaces characters that are invalid on Windows/macOS/Linux, trims whitespace,
-/// and limits length to prevent excessively long filenames.
-pub fn sanitize_for_filename(name: &str) -> String {
+/// Replaces characters that are invalid on Windows/macOS/Linux with `_`, trims
+/// whitespace, and limits length to prevent excessively long filenames.
+/// Unlike [`sanitize_for_filename`], an all-invalid/empty input is returned
+/// as an empty string rather than masked behind a fallback label, so callers
+/// that need to distinguish "nothing usable survived" from a real sanitized
+/// value (e.g. a custom world name) can do so unambiguously.
+fn sanitize_chars_and_trim(name: &str) -> String {
     let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     let mut sanitized: String = name
         .chars()
@@ -77,6 +80,14 @@ pub fn sanitize_for_filename(name: &str) -> String {
         sanitized = sanitized.trim_end().to_string();
     }
 
+    sanitized
+}
+
+/// Sanitizes an area name for safe use in filesystem paths.
+/// Replaces characters that are invalid on Windows/macOS/Linux, trims whitespace,
+/// and limits length to prevent excessively long filenames.
+pub fn sanitize_for_filename(name: &str) -> String {
+    let sanitized = sanitize_chars_and_trim(name);
     if sanitized.is_empty() {
         "Unknown Location".to_string()
     } else {
@@ -102,31 +113,24 @@ pub fn build_bedrock_output(bbox: &LLBBox, output_dir: PathBuf) -> (PathBuf, Str
 ///
 /// Returns the full path to the newly created world directory.
 pub fn create_new_world(base_path: &Path) -> Result<String, String> {
-    // Generate a unique world name with proper counter
-    // Check for both "Arnis World X" and "Arnis World X: Location" patterns
-    let mut counter: i32 = 1;
-    let unique_name: String = loop {
-        let candidate_name: String = format!("Arnis World {counter}");
-        let candidate_path: PathBuf = base_path.join(&candidate_name);
+    create_new_world_with_name(base_path, None)
+}
 
-        // Check for exact match (no location suffix)
-        let exact_match_exists = candidate_path.exists();
-
-        // Check for worlds with location suffix (Arnis World X: Location)
-        let location_pattern = format!("Arnis World {counter}: ");
-        let location_match_exists = fs::read_dir(base_path)
-            .map(|entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .any(|name| name.starts_with(&location_pattern))
-            })
-            .unwrap_or(false);
-
-        if !exact_match_exists && !location_match_exists {
-            break candidate_name;
-        }
-        counter += 1;
+/// Same as [`create_new_world`], but lets the caller request a specific world
+/// name instead of the auto-generated "Arnis World N" scheme. `custom_name` is
+/// sanitized for filesystem safety and de-duplicated against existing worlds
+/// in `base_path` (appending " (2)", " (3)", ... on collision). A `None`,
+/// empty/whitespace-only, or entirely-invalid custom name falls back to the
+/// default "Arnis World N" scheme.
+///
+/// Returns the full path to the newly created world directory.
+pub fn create_new_world_with_name(
+    base_path: &Path,
+    custom_name: Option<&str>,
+) -> Result<String, String> {
+    let unique_name: String = match custom_name.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw_name) => generate_unique_custom_world_name(base_path, raw_name),
+        None => generate_unique_default_world_name(base_path),
     };
 
     let new_world_path: PathBuf = base_path.join(&unique_name);
@@ -225,6 +229,64 @@ pub fn create_new_world(base_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
 
     Ok(new_world_path.display().to_string())
+}
+
+/// Generates a unique "Arnis World N" name.
+/// Checks for both "Arnis World X" and "Arnis World X: Location" patterns.
+fn generate_unique_default_world_name(base_path: &Path) -> String {
+    let mut counter: i32 = 1;
+    loop {
+        let candidate_name: String = format!("Arnis World {counter}");
+        let candidate_path: PathBuf = base_path.join(&candidate_name);
+
+        // Check for exact match (no location suffix)
+        let exact_match_exists = candidate_path.exists();
+
+        // Check for worlds with location suffix (Arnis World X: Location)
+        let location_pattern = format!("Arnis World {counter}: ");
+        let location_match_exists = fs::read_dir(base_path)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .any(|name| name.starts_with(&location_pattern))
+            })
+            .unwrap_or(false);
+
+        if !exact_match_exists && !location_match_exists {
+            return candidate_name;
+        }
+        counter += 1;
+    }
+}
+
+/// Builds a unique world name from a user-supplied custom name: sanitizes it
+/// for filesystem safety, then de-duplicates against existing worlds in
+/// `base_path` by appending " (2)", " (3)", etc. Falls back to the default
+/// "Arnis World N" scheme if nothing usable survives sanitization (e.g. the
+/// input was only invalid characters).
+fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String {
+    let sanitized = sanitize_chars_and_trim(raw_name);
+
+    // Nothing usable survived sanitization (e.g. the input was only invalid
+    // characters), so fall back to the default naming scheme instead of
+    // creating a world named after an empty string.
+    if sanitized.is_empty() {
+        return generate_unique_default_world_name(base_path);
+    }
+
+    if !base_path.join(&sanitized).exists() {
+        return sanitized;
+    }
+
+    let mut counter: i32 = 2;
+    loop {
+        let candidate = format!("{sanitized} ({counter})");
+        if !base_path.join(&candidate).exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
 }
 
 /// Name of the bundled Java datapack that extends the Overworld build height.
@@ -553,6 +615,80 @@ pub fn set_spawn_in_level_dat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn level_name(world: &Path) -> String {
+        let raw = fs::read(world.join("level.dat")).unwrap();
+        let mut decompressed = Vec::new();
+        GzDecoder::new(raw.as_slice())
+            .read_to_end(&mut decompressed)
+            .unwrap();
+        let root: Value = fastnbt::from_bytes(&decompressed).unwrap();
+        let Value::Compound(root) = root else {
+            panic!("root not a compound");
+        };
+        let Some(Value::Compound(data)) = root.get("Data") else {
+            panic!("missing Data");
+        };
+        let Some(Value::String(name)) = data.get("LevelName") else {
+            panic!("missing LevelName");
+        };
+        name.clone()
+    }
+
+    #[test]
+    fn create_new_world_with_name_uses_custom_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My Cool World")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "My Cool World");
+        assert_eq!(level_name(&world), "My Cool World");
+    }
+
+    #[test]
+    fn create_new_world_with_name_dedupes_on_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Metropolis")).unwrap());
+        let second =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Metropolis")).unwrap());
+        let third =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Metropolis")).unwrap());
+        assert_eq!(first.file_name().unwrap(), "Metropolis");
+        assert_eq!(second.file_name().unwrap(), "Metropolis (2)");
+        assert_eq!(third.file_name().unwrap(), "Metropolis (3)");
+    }
+
+    #[test]
+    fn create_new_world_with_name_sanitizes_invalid_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My:World/Name?")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "My_World_Name_");
+    }
+
+    #[test]
+    fn create_new_world_with_name_falls_back_when_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("   ")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "Arnis World 1");
+    }
+
+    #[test]
+    fn create_new_world_with_name_accepts_literal_unknown_location() {
+        // Regression guard: must not be confused with sanitize_for_filename's
+        // internal fallback label for a genuinely empty/invalid name.
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Unknown Location")).unwrap());
+        assert_eq!(world.file_name().unwrap(), "Unknown Location");
+    }
+
+    #[test]
+    fn create_new_world_with_name_none_uses_default_scheme() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), None).unwrap());
+        assert_eq!(world.file_name().unwrap(), "Arnis World 1");
+    }
 
     #[test]
     fn apply_java_world_settings_writes_gametype_and_daytime() {

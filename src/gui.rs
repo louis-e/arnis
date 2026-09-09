@@ -357,8 +357,13 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
 
 /// Creates a new Java Edition world in the given base save directory.
 /// Called when the user clicks "Create World".
+///
+/// `world_name` is `Some` only when the user has enabled the custom world
+/// name setting and typed a name; it is sanitized and de-duplicated by
+/// [`crate::world_utils::create_new_world_with_name`], which falls back to
+/// the default "Arnis World N" scheme when it is `None` or unusable.
 #[tauri::command]
-fn gui_create_world(save_path: String) -> Result<String, i32> {
+fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<String, i32> {
     let trimmed = save_path.trim();
     if trimmed.is_empty() {
         return Err(3);
@@ -367,11 +372,11 @@ fn gui_create_world(save_path: String) -> Result<String, i32> {
     if !base.is_dir() {
         return Err(3); // Error code 3: Failed to create new world
     }
-    create_new_world(&base).map_err(|_| 3)
+    create_new_world(&base, world_name.as_deref()).map_err(|_| 3)
 }
 
-fn create_new_world(base_path: &Path) -> Result<String, String> {
-    crate::world_utils::create_new_world(base_path)
+fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
+    crate::world_utils::create_new_world_with_name(base_path, custom_name)
 }
 
 /// Adds localized area name to the world name in level.dat

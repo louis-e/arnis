@@ -85,6 +85,7 @@
   "gamemode_spectator": "관전자",
   "world_time": "월드 시간",
   "map_item": "월드 지도 아이템",
+  "custom_world_name": "사용자 지정 월드 이름",
   "signage": "표지판",
   "signage_none": "없음",
   "signage_basic": "기본",

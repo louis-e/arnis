@@ -157,6 +157,7 @@ async function applyLocalization(localization) {
     "button[data-localize='gamemode_spectator']": "gamemode_spectator",
     "span[data-localize='world_time']": "world_time",
     "span[data-localize='map_item']": "map_item",
+    "span[data-localize='custom_world_name']": "custom_world_name",
     "span[data-localize='signage']": "signage",
     "button[data-localize='signage_none']": "signage_none",
     "button[data-localize='signage_basic']": "signage_basic",
@@ -1019,6 +1020,9 @@ function initSettings() {
   // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
 
+  // Custom world name editor (Java only), gated by its Settings toggle
+  initCustomWorldNameToggle();
+
   // Save path setting
   initSavePathSetting();
 
@@ -1312,6 +1316,10 @@ function updateFormatToggleUI(format) {
     if (luantiBtn) luantiBtn.classList.add('format-active');
     worldPath = "";
   }
+
+  // Custom names are Java-only; hide/show the pencil and re-derive the
+  // label preview whenever the active format changes.
+  refreshWorldNameEditUI();
 }
 
 // Expose to window for onclick handlers
@@ -1934,6 +1942,145 @@ function basenameFromPath(p) {
   return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
 }
 
+/* Custom world name (Java only, opt-in via Settings > Custom World Name) */
+
+// Holds the user's typed name across edits/generations. Only ever sent to
+// the backend while the setting is enabled; the backend sanitizes and
+// de-duplicates it, so this is just what the pencil editor shows/pre-fills.
+let customWorldName = "";
+
+// True from the moment the user commits an edit until the next world is
+// actually created. Lets the label preview the pending name even when
+// `worldPath` still points at a previously generated world (otherwise that
+// stale real name would keep showing instead of what was just typed).
+let worldNameEditedSinceLastCreate = false;
+
+function isCustomWorldNameEnabled() {
+  const toggle = document.getElementById('custom-world-name-toggle');
+  // Custom names are Java-only: creating a Bedrock/Luanti world never calls
+  // gui_create_world, so offering the editor there would silently do nothing.
+  return !!(toggle && toggle.checked) && selectedWorldFormat === 'java';
+}
+
+// Shows the pending custom name (if any) unless a world already exists for
+// the current pending state, in which case its real (possibly
+// de-duplicated) name from the backend is authoritative.
+function updateWorldNamePreviewLabel() {
+  if (worldPath && !worldNameEditedSinceLastCreate) return;
+  setWorldNameLabel(isCustomWorldNameEnabled() ? customWorldName : "");
+}
+
+// Cancels any in-progress edit and shows/hides the pencil to match the
+// current setting + world format. Safe to call anytime state that affects
+// availability changes (toggle flipped, format switched, language changed).
+function refreshWorldNameEditUI() {
+  endWorldNameEdit();
+  const editButton = document.getElementById('world-name-edit-button');
+  if (editButton) {
+    editButton.style.display = isCustomWorldNameEnabled() ? '' : 'none';
+  }
+  updateWorldNamePreviewLabel();
+}
+
+function startWorldNameEdit(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (!isCustomWorldNameEnabled()) return;
+
+  const label = document.getElementById('world-name-label');
+  const input = document.getElementById('world-name-input');
+  const editButton = document.getElementById('world-name-edit-button');
+  if (!label || !input) return;
+
+  input.value = customWorldName;
+  label.style.display = 'none';
+  if (editButton) editButton.style.display = 'none';
+  input.style.display = '';
+  input.focus();
+  input.select();
+}
+
+function commitWorldNameEdit() {
+  const input = document.getElementById('world-name-input');
+  if (input) customWorldName = input.value.trim();
+  worldNameEditedSinceLastCreate = true;
+  endWorldNameEdit();
+}
+
+// Hiding the (still-focused) input fires a native blur, which would
+// otherwise re-enter the blur handler below and commit the very edit
+// Escape just discarded. Suppress that one follow-up blur.
+let suppressNextWorldNameBlur = false;
+
+function cancelWorldNameEdit() {
+  suppressNextWorldNameBlur = true;
+  endWorldNameEdit();
+}
+
+// Shared teardown for both commit and cancel: hides the input, restores the
+// label (and the pencil, if the feature is still enabled), and refreshes
+// what the label shows.
+function endWorldNameEdit() {
+  const label = document.getElementById('world-name-label');
+  const input = document.getElementById('world-name-input');
+  const editButton = document.getElementById('world-name-edit-button');
+  if (!input || input.style.display === 'none') return;
+  input.style.display = 'none';
+  if (label) label.style.display = '';
+  if (editButton && isCustomWorldNameEnabled()) editButton.style.display = '';
+  updateWorldNamePreviewLabel();
+}
+
+function initCustomWorldNameToggle() {
+  const toggle = document.getElementById('custom-world-name-toggle');
+  const editButton = document.getElementById('world-name-edit-button');
+  const input = document.getElementById('world-name-input');
+  if (!toggle) return;
+
+  // Covers manual clicks and settings-store restoring/reverting the value
+  // (both dispatch a real "change" event), as long as this listener is
+  // attached before initSettingsStore() runs its restore().
+  toggle.addEventListener('change', refreshWorldNameEditUI);
+
+  if (editButton) {
+    editButton.addEventListener('click', startWorldNameEdit);
+    editButton.addEventListener('mousedown', (event) => event.stopPropagation());
+    editButton.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        startWorldNameEdit(event);
+      }
+    });
+  }
+
+  if (input) {
+    // The input lives inside #start-button; without this, any click to
+    // place the caret bubbles up and triggers startGeneration().
+    input.addEventListener('click', (event) => event.stopPropagation());
+    input.addEventListener('mousedown', (event) => event.stopPropagation());
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commitWorldNameEdit();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelWorldNameEdit();
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (suppressNextWorldNameBlur) {
+        suppressNextWorldNameBlur = false;
+        return;
+      }
+      commitWorldNameEdit();
+    });
+  }
+
+  refreshWorldNameEditUI();
+}
+
 /**
  * Handles world selection errors and displays appropriate messages
  * @param {number} errorCode - Error code from the backend
@@ -1986,10 +2133,16 @@ async function startGeneration() {
         return;
       }
       try {
-        const worldName = await invoke('gui_create_world', { savePath: savePath });
+        const requestedName = isCustomWorldNameEnabled() && customWorldName ? customWorldName : null;
+        const worldName = await invoke('gui_create_world', { savePath: savePath, worldName: requestedName });
         if (worldName) {
           worldPath = worldName;
-          setWorldNameLabel(basenameFromPath(worldName));
+          worldNameEditedSinceLastCreate = false;
+          const createdName = basenameFromPath(worldName);
+          setWorldNameLabel(createdName);
+          // Pre-fill the editor with the real (possibly de-duplicated) name,
+          // so editing again starts from what was actually created.
+          if (requestedName) customWorldName = createdName;
         }
       } catch (error) {
         handleWorldSelectionError(error);

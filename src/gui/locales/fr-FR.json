@@ -85,6 +85,7 @@
   "gamemode_spectator": "Spectateur",
   "world_time": "Heure du monde",
   "map_item": "Objet carte du monde",
+  "custom_world_name": "Nom du monde personnalisé",
   "signage": "Signalétique",
   "signage_none": "Aucune",
   "signage_basic": "Basique",

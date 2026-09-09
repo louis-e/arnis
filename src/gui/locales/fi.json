@@ -85,6 +85,7 @@
   "gamemode_spectator": "Katselija",
   "world_time": "Maailman aika",
   "map_item": "Maailmankarttaesine",
+  "custom_world_name": "Mukautettu maailman nimi",
   "signage": "Kyltit",
   "signage_none": "Ei mitään",
   "signage_basic": "Perus",

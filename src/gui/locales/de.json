@@ -85,6 +85,7 @@
   "gamemode_spectator": "Zuschauer",
   "world_time": "Weltzeit",
   "map_item": "Weltkarte im Inventar",
+  "custom_world_name": "Eigener Weltname",
   "signage": "Beschilderung",
   "signage_none": "Keine",
   "signage_basic": "Standard",

@@ -85,6 +85,7 @@
   "gamemode_spectator": "Obserwator",
   "world_time": "Czas świata",
   "map_item": "Przedmiot mapy świata",
+  "custom_world_name": "Własna nazwa świata",
   "signage": "Oznakowanie",
   "signage_none": "Brak",
   "signage_basic": "Podstawowe",

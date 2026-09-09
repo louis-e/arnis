@@ -85,6 +85,7 @@
   "gamemode_spectator": "Наблюдатель",
   "world_time": "Время мира",
   "map_item": "Предмет карты мира",
+  "custom_world_name": "Собственное имя мира",
   "signage": "Указатели",
   "signage_none": "Нет",
   "signage_basic": "Базовые",
