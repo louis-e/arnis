@@ -7200,8 +7200,15 @@ pub fn generate_buildings(
             }
         }
     }
+    // The building's own footprint, which is what the preset facades measure a
+    // neighbour against: a wall of one `building:part` that stands against
+    // another part of the same building faces that part all the same, and
+    // its panel is hung above that part's roof or not at all. The facade plan
+    // keeps counting the group as its own, so the procedural walls between
+    // two parts stay as they are.
+    let own_fill: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
     let mut facade = if min_level_offset == 0 && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
-        let mut own_cells: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        let mut own_cells = own_fill.clone();
         own_cells.extend(group_other_cells.iter().copied());
         compute_facade_plan(element, ctx, args.scale, &own_cells)
     } else {
@@ -7466,7 +7473,7 @@ pub fn generate_buildings(
     // on is built exactly as it is with the feature off. Nothing is written
     // into the world here; the panels are hung once it is finished.
     let config = BuildingConfig {
-        preset_shell: crate::building_facades::collect(
+        preset_shell: crate::building_facades::collect_facing(
             editor,
             &element.nodes,
             config.element_id,
@@ -7477,6 +7484,21 @@ pub fn generate_buildings(
             config.start_y_offset,
             config.abs_terrain_offset,
             config.building_height,
+            // A wall column faces into another building when the cell one or
+            // two out from it belongs to a footprint that is not this
+            // element's own: the party test of `compute_facade_plan`, asked
+            // per wall direction so a corner is party along one wall and
+            // free along the other, and against the element alone so a part
+            // standing against another part of its building counts too. An
+            // elevated part stands on the building below it and faces nothing
+            // at ground level, so it is not asked.
+            &|bx, bz, (ox, oz)| {
+                config.is_ground_level
+                    && (1..=2).any(|d| {
+                        let c = (bx + ox * d, bz + oz * d);
+                        ctx.building_footprints.contains(c.0, c.1) && !own_fill.contains(&c)
+                    })
+            },
         ),
         ..config
     };

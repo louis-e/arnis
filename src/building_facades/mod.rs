@@ -23,6 +23,12 @@
 //! other, because the drop is per column and the remaining columns are split
 //! into runs. A wall covered end to end produces no candidate at all.
 //!
+//! A wall that faces into the building next door is split off the same way,
+//! column by column, when the building pass says which columns those are
+//! ([`collect_facing`]). Those columns are hung against the finished world:
+//! not at all where the neighbour is as tall, since the panel would hang
+//! inside it, and from its roof up where it is lower.
+//!
 //! # The three steps
 //!
 //! The same shape as `displays.rs`, for the same reasons:
@@ -78,6 +84,19 @@ const MIN_RUN_CELLS: usize = 2;
 /// Shortest wall that gets a panel, in blocks.
 const MIN_WALL_BLOCKS: i32 = 2;
 
+/// Panel names per run: a party wall is hung in pieces that start at
+/// different heights along it, one per neighbour it stands against, and each
+/// piece needs a name of its own. Sixteen is far more than a wall ever meets.
+const SUBRUNS: u32 = 16;
+
+/// How many rows the neighbour's height may vary along one piece of a party
+/// wall. A pitched roof or a parapet against the wall steps up and down by a
+/// row or two per cell, and a piece per step would be one cell wide and too
+/// short to hang, so a stretch is allowed this much spread and hung from its
+/// highest point. What that costs is at most this many rows of wall above the
+/// lower end of the roof, which stay the party wall's own blocks.
+const ROOF_STEP: i32 = 2;
+
 /// Most output pixels per real-world metre. The panels are resampled again to
 /// the atlas budget when the pack is written, so going above this only costs
 /// memory while the run is on: a 32 m panel would otherwise be built at 4096
@@ -91,6 +110,12 @@ const MIN_PX_PER_M: f64 = 4.0;
 /// Whether this process prints one line per building's choice. Read once, like
 /// `ARNIS_FACADE_WALL_STATS` next door, so a run without it set pays nothing.
 static DUMP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Whether `ARNIS_FACADE_DUMP` is set. One branch on a cached bool, so the
+/// lines below cost a run without it nothing.
+fn dump() -> bool {
+    *DUMP.get_or_init(|| std::env::var_os("ARNIS_FACADE_DUMP").is_some())
+}
 
 /// One run of wall waiting for the finished world.
 struct Candidate {
@@ -111,6 +136,9 @@ struct Candidate {
     choice: Choice,
     /// The building this run belongs to. See [`Registry::groups`].
     group: u64,
+    /// Whether the run faces into another building, and so is hung only
+    /// above that building's roof. See [`collect_facing`].
+    party: bool,
 }
 
 /// The member of a building whose picture the whole of it wears.
@@ -152,6 +180,9 @@ pub struct Stats {
     pub placed: usize,
     /// Candidates that produced none.
     pub dropped: usize,
+    /// Of those, the runs that face a building as tall as their own wall,
+    /// which is the one reason a run is meant to produce nothing.
+    pub behind: usize,
 }
 
 struct Registry {
@@ -194,6 +225,7 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
         panels: 0,
         placed: 0,
         dropped: 0,
+        behind: 0,
     },
 });
 
@@ -205,6 +237,15 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
 /// outwards can carry no photograph at all. Said after [`reset`], which clears
 /// it. Left unset the world is boundless, which is what the unit tests want.
 pub fn set_world_extent(bbox: &crate::coordinate_system::cartesian::XZBBox) {
+    if dump() {
+        eprintln!(
+            "FACADEWORLD {} {} {} {}",
+            bbox.min_x(),
+            bbox.min_z(),
+            bbox.max_x(),
+            bbox.max_z()
+        );
+    }
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).world =
         Some((bbox.min_x(), bbox.min_z(), bbox.max_x(), bbox.max_z()));
 }
@@ -316,33 +357,46 @@ fn outward_of(dir: (i32, i32), area2: i64) -> (i32, i32) {
 }
 
 /// Splits a segment's cells into runs the presets may cover: consecutive cells
-/// `photographed` says no to. Runs shorter than [`MIN_RUN_CELLS`] are dropped,
-/// because a sliver between two photographed stretches reads as a patch.
+/// `photographed` says no to, and consecutive cells that agree about
+/// `blocked`, which is the flag each run comes back with. Runs shorter than
+/// [`MIN_RUN_CELLS`] are dropped, because a sliver between two photographed
+/// stretches reads as a patch.
 ///
 /// This is where Mapillary wins for a wall it has. The test is per column, not
 /// per wall, so a corner building photographed down one side keeps the
 /// photograph there and gets a preset facade on the other side; a wall covered
-/// end to end produces no run at all.
+/// end to end produces no run at all. A blocked stretch is kept as a run of
+/// its own rather than dropped, because what is hung on it is decided against
+/// the finished world: nothing where the neighbour is as tall, and the storeys
+/// above its roof where it is not.
 fn open_runs(
     cells: &[(i32, i32)],
     photographed: &dyn Fn(i32, i32) -> bool,
-) -> Vec<Vec<(i32, i32)>> {
+    blocked: &dyn Fn(i32, i32) -> bool,
+) -> Vec<(Vec<(i32, i32)>, bool)> {
+    fn close(current: &mut Vec<(i32, i32)>, party: bool, runs: &mut Vec<(Vec<(i32, i32)>, bool)>) {
+        if current.len() >= MIN_RUN_CELLS {
+            runs.push((std::mem::take(current), party));
+        } else {
+            current.clear();
+        }
+    }
     let mut runs = Vec::new();
     let mut current: Vec<(i32, i32)> = Vec::new();
+    let mut party = false;
     for &(bx, bz) in cells {
         if photographed(bx, bz) {
-            if current.len() >= MIN_RUN_CELLS {
-                runs.push(std::mem::take(&mut current));
-            } else {
-                current.clear();
-            }
+            close(&mut current, party, &mut runs);
             continue;
+        }
+        let now = blocked(bx, bz);
+        if now != party {
+            close(&mut current, party, &mut runs);
+            party = now;
         }
         current.push((bx, bz));
     }
-    if current.len() >= MIN_RUN_CELLS {
-        runs.push(current);
-    }
+    close(&mut current, party, &mut runs);
     runs
 }
 
@@ -352,6 +406,8 @@ struct Run {
     dir: (i32, i32),
     outward: (i32, i32),
     cells: Vec<(i32, i32)>,
+    /// Whether every cell faces into another building.
+    party: bool,
 }
 
 /// Whether a run can carry a panel at all given the world's extent.
@@ -377,15 +433,25 @@ fn front_reaches_the_world(
     })
 }
 
+/// Which wall columns face into another building, and so can carry no panel
+/// below that building's roof. Given a column and the axis-signed step out of the
+/// building from it, so the corner cell two ring segments share is answered
+/// for each of them separately: it is blocked along the party wall and free
+/// along the street wall, and only a per-direction answer keeps the street
+/// panel from stopping one block short of the corner.
+pub type Blocked<'a> = &'a dyn Fn(i32, i32, (i32, i32)) -> bool;
+
 /// The runs of `nodes`' ring a preset panel may cover.
 ///
-/// A pure function of the ring, the Mapillary store and the world's extent, so
-/// every tile that walks the same building gets the same runs whether or not it
-/// is the one that records them, and they all build the same wall.
+/// A pure function of the ring, the Mapillary store, `blocked` and the world's
+/// extent, so every tile that walks the same building gets the same runs
+/// whether or not it is the one that records them, and they all build the same
+/// wall.
 fn ring_runs(
     nodes: &[ProcessedNode],
     element_id: u64,
     world: Option<(i32, i32, i32, i32)>,
+    blocked: Blocked<'_>,
 ) -> Vec<Run> {
     let photographed = |bx: i32, bz: i32| facades::photo_column(bx, bz, element_id);
     let area2 = signed_area2(nodes);
@@ -397,11 +463,13 @@ fn ring_runs(
             continue;
         }
         let outward = outward_of(dir, area2);
+        let step_out = (outward.0.signum(), outward.1.signum());
+        let blocked_here = |bx: i32, bz: i32| blocked(bx, bz, step_out);
         let cells: Vec<(i32, i32)> = bresenham_line(a.x, 0, a.z, b.x, 0, b.z)
             .into_iter()
             .map(|(bx, _, bz)| (bx, bz))
             .collect();
-        for cells in open_runs(&cells, &photographed) {
+        for (cells, party) in open_runs(&cells, &photographed, &blocked_here) {
             if !front_reaches_the_world(world, outward, &cells) {
                 continue;
             }
@@ -409,6 +477,7 @@ fn ring_runs(
                 dir,
                 outward,
                 cells,
+                party,
             });
         }
     }
@@ -451,8 +520,24 @@ fn group_of(group_seed: u64) -> u64 {
 /// `group_seed` is the building's shared style seed (`BuildingConfig`'s
 /// `style_seed`), which is what makes every `building:part` of one building
 /// hang one photograph rather than one each.
+///
+/// `blocked` says which wall columns face into another building.
+///
+/// A panel hangs in the cell in front of its wall, so a wall that shares its
+/// line with the house next door, or stands inside a mall, or lies under an
+/// outline that overlaps this one, would put its photograph inside that other
+/// building: unseen from the street and wrong from inside. The wall pass
+/// already knows those columns, it is the test behind `FacadePlan::is_party`,
+/// which is why they are asked for here rather than guessed from the finished
+/// blocks: the neighbour's interior is hollow, so the blocks alone cannot tell
+/// a wall inside it from a wall in the open. What the blocks can tell, once
+/// the world is built, is how tall the neighbour is, and that is how a blocked
+/// run is hung: not at all where the neighbour reaches the top, and from its
+/// roof up where it does not, which is the part of a party wall a street does
+/// see. On the Munich test box, two fifths of the panel rows hung before this
+/// were inside the building next door.
 #[allow(clippy::too_many_arguments)]
-pub fn collect(
+pub fn collect_facing(
     editor: &mut WorldEditor,
     nodes: &[ProcessedNode],
     element_id: u64,
@@ -461,8 +546,24 @@ pub fn collect(
     start_y_offset: i32,
     abs_terrain_offset: i32,
     building_height: i32,
+    blocked: Blocked<'_>,
 ) -> Arc<FnvHashSet<(i32, i32)>> {
+    // The ring as the generator sees it, once per tile that walks it, so the
+    // world can be read back against every building and not only the ones
+    // that got a candidate. Deduplicated by id downstream.
+    if dump() {
+        let ring: Vec<String> = nodes.iter().map(|n| format!("{},{}", n.x, n.z)).collect();
+        eprintln!(
+            "FACADEWALK {element_id} {} {} {building_height} {start_y_offset} {abs_terrain_offset} {}",
+            group_of(group_seed),
+            manifest::category_name(category),
+            ring.join(" ")
+        );
+    }
     if nodes.len() < 3 || building_height < MIN_WALL_BLOCKS {
+        if dump() {
+            eprintln!("FACADESKIP {element_id} short");
+        }
         return Arc::default();
     }
     // Claimed under the lock, and then the lock is dropped: choosing the
@@ -490,10 +591,13 @@ pub fn collect(
         return Arc::default();
     }
 
-    let runs = ring_runs(nodes, element_id, world);
+    let runs = ring_runs(nodes, element_id, world, blocked);
     let shell: Arc<FnvHashSet<(i32, i32)>> =
         Arc::new(runs.iter().flat_map(|r| r.cells.iter().copied()).collect());
     if !first || runs.is_empty() {
+        if first && dump() {
+            eprintln!("FACADESKIP {element_id} noruns");
+        }
         return shell;
     }
 
@@ -508,6 +612,9 @@ pub fn collect(
     // No shell either: a wall stripped for a picture nobody picked is a
     // building left plainer than it would ever have been.
     let Some(choice) = choose::choose(&set, category, wall_h_m, element_id, anchor) else {
+        if dump() {
+            eprintln!("FACADESKIP {element_id} nochoice");
+        }
         return Arc::default();
     };
     let group = group_of(group_seed);
@@ -515,7 +622,7 @@ pub fn collect(
     // question "does one building wear one picture" is answered over a real
     // area: the entry printed is what this element would hang on its own, and
     // the group key says which of them are the same building.
-    if *DUMP.get_or_init(|| std::env::var_os("ARNIS_FACADE_DUMP").is_some()) {
+    if dump() {
         eprintln!(
             "FACADEPICK {element_id} {group} {} {} {wall_h_m:.3} {}",
             anchor.0, anchor.1, choice.entry
@@ -535,9 +642,31 @@ pub fn collect(
             cells: run.cells,
             choice,
             group,
+            party: run.party,
         });
     }
 
+    if dump() {
+        for cand in &pending {
+            let cells: Vec<String> = cand
+                .cells
+                .iter()
+                .map(|c| format!("{},{}", c.0, c.1))
+                .collect();
+            eprintln!(
+                "FACADERUN {element_id} {} {},{} {},{} {} {} {} {}",
+                cand.run,
+                cand.dir.0,
+                cand.dir.1,
+                cand.outward.0,
+                cand.outward.1,
+                cand.base_y,
+                cand.total_h,
+                if cand.party { "party" } else { "free" },
+                cells.join(" ")
+            );
+        }
+    }
     let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
     for cand in pending {
         // The quad hangs just outside the wall, so the cell in front of each
@@ -615,13 +744,22 @@ fn place_candidate(
     scale: f64,
 ) -> usize {
     let Some(n) = outward_normal(cand.dir, cand.outward.0, cand.outward.1) else {
+        if dump() {
+            eprintln!("FACADEPLACE {} {} 0 nonormal", cand.way_id, cand.run);
+        }
         return 0;
     };
     let top = cand.base_y + cand.total_h;
     if !displays::wall_is_visible(editor, cand.cells.iter().copied(), top) {
+        if dump() {
+            eprintln!("FACADEPLACE {} {} 0 buried", cand.way_id, cand.run);
+        }
         return 0;
     }
     let Some(src) = set.image(choice.entry) else {
+        if dump() {
+            eprintln!("FACADEPLACE {} {} 0 noimage", cand.way_id, cand.run);
+        }
         return 0;
     };
     let entry = &set.entries()[choice.entry];
@@ -630,44 +768,151 @@ fn place_candidate(
     // position run the same way.
     let (rx, rz) = right_of(n);
     let mut cells = cand.cells;
-    cells.sort_by(|a, b| {
-        let along = |c: &(i32, i32)| f64::from(c.0) * rx + f64::from(c.1) * rz;
-        along(a).total_cmp(&along(b))
-    });
+    let along = |c: &(i32, i32)| f64::from(c.0) * rx + f64::from(c.1) * rz;
+    cells.sort_by(|a, b| along(a).total_cmp(&along(b)));
+    let positions: Vec<f64> = cells.iter().map(along).collect();
 
     let step = cell_step(cand.dir);
     let px_per_m = set.px_per_m();
-    // Exactly the quad's own width, not an estimate of it: `quad_for` spans
-    // the gaps between the cell centres plus half a step at each end, which
-    // for the one-cell-per-major-axis-step run a Bresenham walk produces is
-    // the cell count times the step. The picture therefore covers the panel
-    // edge to edge and nothing has to be scaled to make it reach.
-    let wall_w_m = cells.len() as f64 * step / scale;
+    // The quad's own width, which is the spread of the cell centres along the
+    // wall plus half a step at each end (`quad_for`), and not the cell count
+    // times the step: a Bresenham walk along an oblique wall can put its last
+    // cell up to one minor step short of or past where the count says, and a
+    // picture built for the count is then stretched by that much to reach the
+    // quad's edges. Read the same way per piece, the pieces tile the wall's
+    // metres exactly and meet without a shift.
+    let wall_w_m = span_m(&positions, 0, positions.len(), step, scale).1;
     let wall_h_m = f64::from(cand.total_h) / scale;
     let fit = Fit::new(entry, px_per_m, wall_w_m, wall_h_m, choice.phase_m);
 
-    let mut crop = |p0: i32, p1: i32, b0: i32, b1: i32| {
-        // Metres along the wall from its left end, and metres up from its
-        // foot. The pieces of one wall therefore read one continuous picture:
-        // they address the same metres the whole wall would.
-        let x0 = f64::from(p0) * step / scale;
-        let x1 = f64::from(p1) * step / scale;
-        let y0 = f64::from(b0) / scale;
-        let y1 = f64::from(b1) / scale;
-        fit.region(&src, x0, x1, y0, y1)
+    // Rows behind the neighbour, per cell. Nothing hides a free run.
+    let hidden: Vec<i32> = if cand.party {
+        let (ox, oz) = (cand.outward.0.signum(), cand.outward.1.signum());
+        cells
+            .iter()
+            .map(|&(bx, bz)| {
+                rows_behind_neighbour(editor, bx, bz, ox, oz, cand.base_y, cand.total_h)
+            })
+            .collect()
+    } else {
+        vec![0; cells.len()]
     };
-    displays::hang_wall(
-        editor,
-        'b',
-        cand.way_id,
-        cand.run,
-        &cells,
-        n,
-        step,
-        cand.base_y,
-        cand.total_h,
-        &mut crop,
-    )
+
+    // One hanging per stretch of cells hidden to about the same height, so a
+    // wall against two neighbours of different heights gets a piece above
+    // each, and a wall above a pitched roof gets one piece from the ridge up.
+    let mut hung = 0usize;
+    let mut sub: u32 = 0;
+    let mut start = 0usize;
+    while start < cells.len() {
+        let (mut lowest, mut highest) = (hidden[start], hidden[start]);
+        let mut end = start + 1;
+        while end < cells.len() && hidden[end].max(highest) - hidden[end].min(lowest) <= ROOF_STEP {
+            lowest = lowest.min(hidden[end]);
+            highest = highest.max(hidden[end]);
+            end += 1;
+        }
+        let rows_hidden = highest;
+        let stretch = start..end;
+        start = end;
+        if rows_hidden >= cand.total_h || stretch.len() < MIN_RUN_CELLS || sub >= SUBRUNS {
+            continue;
+        }
+        let wall = cand.run * SUBRUNS + sub;
+        sub += 1;
+        let base_y = cand.base_y + rows_hidden;
+        let rows = cand.total_h - rows_hidden;
+        let footprint = &cells[stretch.clone()];
+        let mut crop = |p0: i32, p1: i32, b0: i32, b1: i32| {
+            // Metres along the whole run from its left end, and metres up
+            // from the foot of the whole wall. The pieces of one wall, and
+            // the stretches of one party wall, therefore read one continuous
+            // picture: they address the same metres the whole wall would, and
+            // a stretch hung from the neighbour's roof up shows the storeys
+            // that stand there rather than the ground floor again.
+            let (x0, x1) = span_m(
+                &positions,
+                stretch.start + p0 as usize,
+                stretch.start + p1 as usize,
+                step,
+                scale,
+            );
+            let y0 = f64::from(b0 + rows_hidden) / scale;
+            let y1 = f64::from(b1 + rows_hidden) / scale;
+            let piece = fit.region(&src, x0, x1, y0, y1);
+            if dump() {
+                let covered: Vec<String> = footprint[p0 as usize..p1 as usize]
+                    .iter()
+                    .map(|c| format!("{},{}", c.0, c.1))
+                    .collect();
+                eprintln!(
+                    "FACADEPIECE {} {} {} {p0} {p1} {b0} {b1} {} {} {} {}",
+                    cand.way_id,
+                    cand.run,
+                    wall - cand.run * SUBRUNS,
+                    base_y + b0,
+                    base_y + b1,
+                    if piece.is_some() { "ok" } else { "none" },
+                    covered.join(" ")
+                );
+            }
+            piece
+        };
+        hung += displays::hang_wall(
+            editor,
+            'b',
+            cand.way_id,
+            wall,
+            footprint,
+            n,
+            step,
+            base_y,
+            rows,
+            &mut crop,
+        );
+    }
+    if dump() {
+        eprintln!("FACADEPLACE {} {} {hung} ok", cand.way_id, cand.run);
+    }
+    hung
+}
+
+/// Metres along the wall that the cells `p0..p1` of a run span, from the
+/// run's left end: the quad's own extent (`quad_for`), which is the spread of
+/// the cell centres along the wall plus half a step at each end.
+fn span_m(positions: &[f64], p0: usize, p1: usize, step: f64, scale: f64) -> (f64, f64) {
+    let left = positions[0] - step / 2.0;
+    let x0 = (positions[p0] - step / 2.0 - left) / scale;
+    let x1 = (positions[p1 - 1] + step / 2.0 - left) / scale;
+    (x0, x1)
+}
+
+/// How many of the wall rows `base_y..base_y + total_h` at `(bx, bz)` stand
+/// behind the building in front of it: everything up to the highest block one
+/// or two cells out along `(ox, oz)`, which on a party wall is that
+/// building's roof, parapet or eave. Only asked of a blocked run, where the
+/// wall pass has said what is in front, so a tree or a lamp post cannot be
+/// mistaken for a neighbour. Rows below the wall's own foot are not looked
+/// at: the ground there is not a building.
+fn rows_behind_neighbour(
+    editor: &WorldEditor,
+    bx: i32,
+    bz: i32,
+    ox: i32,
+    oz: i32,
+    base_y: i32,
+    total_h: i32,
+) -> i32 {
+    for y in (base_y..base_y + total_h).rev() {
+        if (1..=2).any(|d| {
+            editor
+                .get_block_absolute(bx + ox * d, y, bz + oz * d)
+                .is_some()
+        }) {
+            return y + 1 - base_y;
+        }
+    }
+    0
 }
 
 /// The photograph a run hangs: its building's when it is one part of several,
@@ -711,11 +956,15 @@ fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usi
         }) else {
             continue;
         };
+        let party = cand.party;
         let hung = place_candidate(editor, &set, cand, choice, scale);
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         r.stats.panels += hung;
         if hung == 0 {
             r.stats.dropped += 1;
+            if party {
+                r.stats.behind += 1;
+            }
         } else {
             r.stats.placed += 1;
         }
@@ -761,6 +1010,13 @@ fn collected_pictures() -> Vec<(u64, usize)> {
         .collect()
 }
 
+/// How many pending candidates face into another building.
+#[cfg(test)]
+fn collected_party_runs() -> usize {
+    let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    r.candidates.iter().flatten().filter(|c| c.party).count()
+}
+
 /// Settles every candidate still pending against the finished world, right
 /// before it is saved. `None` when the run collected nothing.
 pub fn finalize(editor: &mut WorldEditor) -> Option<Report> {
@@ -791,7 +1047,7 @@ pub fn finalize(editor: &mut WorldEditor) -> Option<Report> {
             r.stats.grouped = grouped_parts(&r.groups);
             // One line per building under `ARNIS_FACADE_DUMP=1`, sorted, so
             // two generations of one area can be diffed against each other.
-            if *DUMP.get_or_init(|| std::env::var_os("ARNIS_FACADE_DUMP").is_some()) {
+            if dump() {
                 let mut picks: Vec<(u64, &GroupPick)> =
                     r.groups.iter().map(|(&k, p)| (k, p)).collect();
                 picks.sort_by_key(|&(k, _)| k);
@@ -827,9 +1083,16 @@ impl Report {
                 s.grouped
             )
         };
+        // A run behind a building as tall as itself is meant to hang nothing;
+        // only the rest is a crop that failed.
         format!(
-            "Preset facades: {} panels on {} of {} wall runs over {} buildings{parts} ({} without a usable crop)",
-            s.panels, s.placed, s.candidates, s.buildings, s.dropped
+            "Preset facades: {} panels on {} of {} wall runs over {} buildings{parts} ({} behind the building next door, {} without a usable crop)",
+            s.panels,
+            s.placed,
+            s.candidates,
+            s.buildings,
+            s.behind,
+            s.dropped - s.behind
         )
     }
 }
@@ -916,9 +1179,10 @@ mod tests {
     #[test]
     fn a_wall_with_no_photograph_is_one_run() {
         let cells: Vec<(i32, i32)> = (0..10).map(|i| (i, 0)).collect();
-        let runs = open_runs(&cells, &|_, _| false);
+        let runs = open_runs(&cells, &|_, _| false, &|_, _| false);
         assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].len(), 10);
+        assert_eq!(runs[0].0.len(), 10);
+        assert!(!runs[0].1, "nothing in front of it");
     }
 
     #[test]
@@ -926,12 +1190,13 @@ mod tests {
         let cells: Vec<(i32, i32)> = (0..20).map(|i| (i, 0)).collect();
         // A photograph covering the middle of the wall, as a corner building
         // shot from one street gets.
-        let runs = open_runs(&cells, &|bx, _| (6..14).contains(&bx));
+        let free = |_: i32, _: i32| false;
+        let runs = open_runs(&cells, &|bx, _| (6..14).contains(&bx), &free);
         assert_eq!(runs.len(), 2);
-        assert_eq!(runs[0], (0..6).map(|i| (i, 0)).collect::<Vec<_>>());
-        assert_eq!(runs[1], (14..20).map(|i| (i, 0)).collect::<Vec<_>>());
+        assert_eq!(runs[0].0, (0..6).map(|i| (i, 0)).collect::<Vec<_>>());
+        assert_eq!(runs[1].0, (14..20).map(|i| (i, 0)).collect::<Vec<_>>());
         // Covered end to end, nothing is left for the presets.
-        assert!(open_runs(&cells, &|_, _| true).is_empty());
+        assert!(open_runs(&cells, &|_, _| true, &free).is_empty());
     }
 
     #[test]
@@ -968,14 +1233,326 @@ mod tests {
         );
     }
 
+    /// A terrace's end house: the east wall stands against the neighbour, so
+    /// a panel there would hang inside the neighbour. It becomes a run of its
+    /// own, marked, and the corner cells it shares with the north and south
+    /// walls stay in those walls' free runs, because the question is asked
+    /// per wall direction.
+    #[test]
+    fn a_wall_facing_another_building_is_a_party_run_of_its_own() {
+        let ring = square();
+        let neighbour_to_the_east =
+            |bx: i32, _bz: i32, step: (i32, i32)| bx == 10 && step == (1, 0);
+        let free = ring_runs(&ring, 1, None, &|_, _, _| false);
+        assert_eq!(free.len(), 4, "every wall of a free-standing house");
+        assert!(free.iter().all(|r| !r.party));
+        let runs = ring_runs(&ring, 1, None, &neighbour_to_the_east);
+        assert_eq!(runs.len(), 4);
+        let east = runs
+            .iter()
+            .find(|r| r.outward == (10, 0))
+            .expect("the east wall is still a run");
+        assert!(east.party, "and it is the one that faces the neighbour");
+        assert_eq!(east.cells.len(), 11);
+        assert!(
+            runs.iter().filter(|r| r.party).count() == 1,
+            "no other wall faces anything"
+        );
+        let north = runs
+            .iter()
+            .find(|r| r.outward == (0, -10))
+            .expect("the north wall is free");
+        assert!(!north.party);
+        assert_eq!(
+            north.cells.len(),
+            11,
+            "the corner cell (10, 0) is still the north wall's"
+        );
+        assert!(north.cells.contains(&(10, 0)));
+        // A neighbour that reaches only half way along: the free half and
+        // the party half are two runs, the same shape `open_runs` gives a
+        // wall Mapillary half covers.
+        let half = |bx: i32, bz: i32, step: (i32, i32)| bx == 10 && step == (1, 0) && bz >= 5;
+        let runs = ring_runs(&ring, 1, None, &half);
+        let east: Vec<&Run> = runs.iter().filter(|r| r.outward == (10, 0)).collect();
+        assert_eq!(east.len(), 2);
+        assert_eq!(east[0].cells, (0..5).map(|z| (10, z)).collect::<Vec<_>>());
+        assert!(!east[0].party);
+        assert_eq!(east[1].cells, (5..11).map(|z| (10, z)).collect::<Vec<_>>());
+        assert!(east[1].party);
+    }
+
+    /// The columns of a party wall are flattened like any other the presets
+    /// may hang on, and recorded as a candidate that knows what it faces.
+    #[test]
+    fn collect_records_a_party_wall_as_a_party_candidate() {
+        let _guard = facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = set_dir();
+        let xz =
+            crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(0, 0, 200, 200).unwrap();
+        reset(true, Some(dir.path()), 16, 1.0);
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xz);
+        editor.set_map_decals(true);
+        let ring = part_ring(20, 20, 20);
+        let neighbour_to_the_east =
+            |bx: i32, _bz: i32, step: (i32, i32)| bx == 40 && step == (1, 0);
+        let shell = collect_facing(
+            &mut editor,
+            &ring,
+            901,
+            901,
+            BuildingCategory::Default,
+            0,
+            0,
+            12,
+            &neighbour_to_the_east,
+        );
+        assert!(shell.contains(&(30, 20)) && shell.contains(&(40, 30)));
+        assert_eq!(collected_pictures().len(), 4, "four walls, four runs");
+        assert_eq!(collected_party_runs(), 1, "one of them faces the neighbour");
+
+        // The same call with nobody next door.
+        reset(true, Some(dir.path()), 16, 1.0);
+        collect_facing(
+            &mut editor,
+            &ring,
+            902,
+            902,
+            BuildingCategory::Default,
+            0,
+            0,
+            12,
+            &|_, _, _| false,
+        );
+        assert_eq!(collected_pictures().len(), 4);
+        assert_eq!(collected_party_runs(), 0);
+        reset(false, None, 16, 1.0);
+    }
+
+    /// Hangs the square house at (20, 20) with a neighbour along its east
+    /// wall, filling x 41..=42 up to `roof(z)` for each z of the wall, and
+    /// reads the panels back from the entities as (name, centre y, height).
+    /// Wall rows are 1..=12.
+    fn hang_beside(dir: &std::path::Path, roof: &dyn Fn(i32) -> i32) -> Vec<(String, f64, f64)> {
+        let xz =
+            crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(0, 0, 200, 200).unwrap();
+        let ring = part_ring(20, 20, 20);
+        let neighbour_to_the_east =
+            |bx: i32, _bz: i32, step: (i32, i32)| bx == 40 && step == (1, 0);
+        reset(true, Some(dir), 16, 1.0);
+        displays::reset(true, 16);
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xz);
+        editor.set_map_decals(true);
+        for x in 41..=42 {
+            for z in 20..=40 {
+                for y in 1..=roof(z) {
+                    editor.set_block_absolute(crate::block_definitions::STONE, x, y, z, None, None);
+                }
+            }
+        }
+        collect_facing(
+            &mut editor,
+            &ring,
+            901,
+            901,
+            BuildingCategory::Default,
+            0,
+            0,
+            12,
+            &neighbour_to_the_east,
+        );
+        finalize(&mut editor).expect("something was collected");
+        let mut out: Vec<(String, f64, f64)> = editor
+            .item_displays()
+            .iter()
+            .map(|e| {
+                let name = match e.get("item") {
+                    Some(fastnbt::Value::Compound(item)) => match item.get("components") {
+                        Some(fastnbt::Value::Compound(c)) => match c.get("minecraft:item_model") {
+                            Some(fastnbt::Value::String(m)) => m.clone(),
+                            _ => String::new(),
+                        },
+                        _ => String::new(),
+                    },
+                    _ => String::new(),
+                };
+                let cy = match e.get("Pos") {
+                    Some(fastnbt::Value::List(p)) => match p.get(1) {
+                        Some(fastnbt::Value::Double(y)) => *y,
+                        _ => f64::NAN,
+                    },
+                    _ => f64::NAN,
+                };
+                let h = match e.get("transformation") {
+                    Some(fastnbt::Value::Compound(t)) => match t.get("scale") {
+                        Some(fastnbt::Value::List(sc)) => match sc.get(1) {
+                            Some(fastnbt::Value::Float(h)) => f64::from(*h),
+                            _ => f64::NAN,
+                        },
+                        _ => f64::NAN,
+                    },
+                    _ => f64::NAN,
+                };
+                (name, cy, h)
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        reset(false, None, 16, 1.0);
+        displays::reset(false, 16);
+        out
+    }
+
+    /// The east wall is run 1 of the ring (north, east, south, west), and a
+    /// run's panels are named by `run * SUBRUNS + stretch`.
+    fn is_east(name: &str) -> bool {
+        name.strip_prefix("arnis:b901_")
+            .and_then(|rest| rest.split('_').next())
+            .and_then(|wall| wall.parse::<u32>().ok())
+            .is_some_and(|wall| wall / SUBRUNS == 1)
+    }
+
+    /// The panel a party wall gets, read back from the entities: none where
+    /// the neighbour is as tall, and only the storeys above its roof where it
+    /// is lower, with the free walls hung top to bottom either way.
+    #[test]
+    fn a_party_wall_hangs_only_above_the_neighbours_roof() {
+        let _guard = facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = set_dir_with_pictures();
+
+        // A neighbour as tall as the wall: three panels, none on the east.
+        let panels = hang_beside(dir.path(), &|_| 12);
+        assert_eq!(panels.len(), 3, "{panels:?}");
+        assert!(panels.iter().all(|(n, _, _)| !is_east(n)), "{panels:?}");
+        for (_, cy, h) in &panels {
+            assert!(
+                (h - 12.0).abs() < 1e-6 && (cy - 7.0).abs() < 1e-6,
+                "{panels:?}"
+            );
+        }
+
+        // A neighbour six rows tall: the east wall is hung from row 7 up.
+        let panels = hang_beside(dir.path(), &|_| 6);
+        assert_eq!(panels.len(), 4, "{panels:?}");
+        let (_, cy, h) = panels
+            .iter()
+            .find(|(n, _, _)| is_east(n))
+            .expect("the storeys above the neighbour get their picture");
+        assert!(
+            (h - 6.0).abs() < 1e-6,
+            "six rows above a six row neighbour: {panels:?}"
+        );
+        assert!(
+            (cy - 10.0).abs() < 1e-6,
+            "centred on rows 7 to 12: {panels:?}"
+        );
+    }
+
+    /// Two neighbours of different heights along one wall: a piece above each,
+    /// and a pitched roof stepping up along the wall is one piece from its
+    /// ridge rather than a one-cell sliver per step.
+    #[test]
+    fn a_party_wall_gets_a_piece_above_each_neighbour_and_one_over_a_pitched_roof() {
+        let _guard = facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = set_dir_with_pictures();
+
+        // A four row house on the south half, an eight row one on the north.
+        let panels = hang_beside(dir.path(), &|z| if z < 30 { 8 } else { 4 });
+        let mut east: Vec<(f64, f64)> = panels
+            .iter()
+            .filter(|(n, _, _)| is_east(n))
+            .map(|(_, cy, h)| (*cy, *h))
+            .collect();
+        east.sort_by(|a, b| a.1.total_cmp(&b.1));
+        assert_eq!(
+            east,
+            vec![(11.0, 4.0), (9.0, 8.0)],
+            "rows 9 to 12 over the tall house, rows 5 to 12 over the low one: {panels:?}"
+        );
+
+        // A roof rising a row every seven cells: hidden 5, 6 and 7 along the
+        // wall, within `ROOF_STEP` of each other, so one piece from row 8 up.
+        let panels = hang_beside(dir.path(), &|z| 5 + (z - 20) / 7);
+        let east: Vec<(f64, f64)> = panels
+            .iter()
+            .filter(|(n, _, _)| is_east(n))
+            .map(|(_, cy, h)| (*cy, *h))
+            .collect();
+        assert_eq!(east, vec![(10.5, 5.0)], "{panels:?}");
+    }
+
+    /// A piece of an oblique wall reads the metres its quad spans, so the
+    /// pieces tile the wall exactly and the picture is never stretched to
+    /// reach the quad's edge: a Bresenham walk can leave its last cell up to
+    /// a minor step short of where the cell count says.
+    #[test]
+    fn a_piece_reads_the_metres_its_quad_spans() {
+        let dir = (7, 3);
+        let cells: Vec<(i32, i32)> = bresenham_line(0, 0, 0, 7, 0, 3)
+            .into_iter()
+            .map(|(x, _, z)| (x, z))
+            .collect();
+        let n = outward_normal(dir, 0, -1).unwrap();
+        let (rx, rz) = right_of(n);
+        let mut sorted = cells.clone();
+        sorted.sort_by(|a, b| {
+            let along = |c: &(i32, i32)| f64::from(c.0) * rx + f64::from(c.1) * rz;
+            along(a).total_cmp(&along(b))
+        });
+        let positions: Vec<f64> = sorted
+            .iter()
+            .map(|c| f64::from(c.0) * rx + f64::from(c.1) * rz)
+            .collect();
+        let step = cell_step(dir);
+        let quad = displays::quad_for(&sorted, n, step, 0, 1);
+        let (x0, x1) = span_m(&positions, 0, positions.len(), step, 1.0);
+        assert!(x0.abs() < 1e-9);
+        assert!(
+            (x1 - quad.w).abs() < 1e-9,
+            "{x1} against the quad's {}",
+            quad.w
+        );
+        // Each piece is exactly its own quad, from the run's left end to its
+        // right end. Two neighbouring quads share or skip a sliver of less
+        // than a step where the walk's cells sit closer or further apart than
+        // the step, and the crops share or skip the same sliver, so the
+        // pictures line up across the seam instead of one being stretched to
+        // hide it. The count would have said four steps for the left piece;
+        // the cells it actually holds span less.
+        let (a0, a1) = span_m(&positions, 0, 4, step, 1.0);
+        let (b0, b1) = span_m(&positions, 4, positions.len(), step, 1.0);
+        assert!(a0.abs() < 1e-9 && (b1 - x1).abs() < 1e-9);
+        assert!((a1 - b0).abs() < step, "{a1} against {b0}");
+        let left = displays::quad_for(&sorted[..4], n, step, 0, 1);
+        let right = displays::quad_for(&sorted[4..], n, step, 0, 1);
+        assert!((a1 - a0 - left.w).abs() < 1e-9);
+        assert!((b1 - b0 - right.w).abs() < 1e-9);
+        assert!(
+            (a1 - a0 - 4.0 * step).abs() > 0.05,
+            "the count would have said {}, the piece's quad is {}",
+            4.0 * step,
+            a1 - a0
+        );
+    }
+
     #[test]
     fn a_run_of_one_cell_is_dropped() {
         // A sliver between two photographed stretches reads as a patch, so it
         // is left to the blocks.
-        assert!(open_runs(&[(0, 0)], &|_, _| false).is_empty());
-        assert_eq!(open_runs(&[(0, 0), (1, 0)], &|_, _| false).len(), 1);
+        let free = |_: i32, _: i32| false;
+        assert!(open_runs(&[(0, 0)], &free, &free).is_empty());
+        assert_eq!(open_runs(&[(0, 0), (1, 0)], &free, &free).len(), 1);
         let cells: Vec<(i32, i32)> = (0..10).map(|i| (i, 0)).collect();
-        assert_eq!(open_runs(&cells, &|bx, _| bx == 1).len(), 1);
+        assert_eq!(open_runs(&cells, &|bx, _| bx == 1, &free).len(), 1);
+        // A party stretch of one cell is a sliver too.
+        let runs = open_runs(&cells, &free, &|bx, _| bx == 4);
+        assert_eq!(runs.len(), 2);
+        assert!(runs.iter().all(|(_, party)| !party));
     }
 
     #[test]
@@ -1011,6 +1588,16 @@ mod tests {
     /// differently. The files are empty: the loader only checks that the
     /// picture the manifest names is there, and nothing here hangs a panel.
     fn set_dir() -> tempfile::TempDir {
+        set_dir_with(false)
+    }
+
+    /// The same set with a real picture behind every entry, for a test that
+    /// hangs panels and so has to get past the decoder.
+    fn set_dir_with_pictures() -> tempfile::TempDir {
+        set_dir_with(true)
+    }
+
+    fn set_dir_with(pictures: bool) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let mut textures = String::new();
         for (i, (w, h, storeys)) in [
@@ -1027,7 +1614,13 @@ mod tests {
         .enumerate()
         {
             let file = format!("r{i:02}.png");
-            std::fs::write(dir.path().join(&file), b"").unwrap();
+            if pictures {
+                image::RgbImage::from_pixel(32, 32, image::Rgb([180, 120, 90]))
+                    .save(dir.path().join(&file))
+                    .unwrap();
+            } else {
+                std::fs::write(dir.path().join(&file), b"").unwrap();
+            }
             if i > 0 {
                 textures.push(',');
             }
@@ -1065,7 +1658,7 @@ mod tests {
         z: i32,
         height: i32,
     ) {
-        collect(
+        collect_facing(
             editor,
             &part_ring(x, z, 20),
             id,
@@ -1074,6 +1667,7 @@ mod tests {
             0,
             0,
             height,
+            &|_, _, _| false,
         );
     }
 
