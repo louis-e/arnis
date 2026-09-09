@@ -648,36 +648,17 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
 
 /// The largest box the pipeline will fetch imagery for, in square metres.
 ///
-/// The Munich test box is 0.034 km2. Measured cold on this machine under the
-/// lock on 2026-09-06, a precompute of it took **1499 s and 568 MB** of imagery
-/// (align 1168 s of that, which is the registration of every photograph that
-/// can see into the box, and texture 315 s). The brief's own figure of 215 s
-/// and 3.1 GB is a warm one; this is what a first look at an area costs.
+/// A cold precompute of the 0.034 km2 Munich box measured 1052 s and 472 MB on
+/// 2026-09-09, of which only about 134 s is computation; the rest is waiting on
+/// Mapillary. The cost follows the ground the box covers, so this cap, three
+/// times that box, is already the better part of an hour.
 ///
-/// Both numbers follow the ground the box covers, so this cap, three times that
-/// box, is about an hour. That is a great deal to ask of one button press, and
-/// it is as far as it goes: the answer to a larger area is to precompute it in
-/// pieces, because the per wall cache keeps everything each piece builds and no
-/// piece redoes another's walls. A larger box is refused with its own size,
-/// this one, and that advice, so the user knows what to do rather than guessing.
-///
-/// **Generation holds to the same cap**, and it used not to. The argument for
-/// exempting it was that the pipeline runs beside the world build and every
-/// failure of it is swallowed ([`run_facade_pipeline`]), so the worst a huge box
-/// could cost was facades that never arrived. That was wrong about the wait:
-/// `data_processing` calls [`FacadeJob::join`] before it builds a single
-/// building, so the world stops there until the pipeline is done, and generation
-/// has no cancel button. An ordinary 1 km2 selection is thirty times this cap on
-/// ground and more than that in align work, which is photographs times walls, so
-/// a user who turned the feature on and drew a normal Arnis box got a generation
-/// parked on "Waiting for Mapillary facades..." for hours with a frozen progress
-/// bar and no way out but killing the app, which costs them the world as well.
-///
-/// Above the cap, generation therefore runs the pipeline in cache-only mode
-/// ([`pipeline::PipelineConfig::cache_only`]): an area already precomputed in
-/// pieces still gets its facades, out of the per wall cache and with no
-/// downloads, and an area that is not is told so in one Overpass query instead
-/// of holding the world for an afternoon.
+/// Generation holds to the same cap because `data_processing` calls
+/// [`FacadeJob::join`] before it builds a single building, so a cold run is the
+/// world waiting with a frozen bar and no cancel button. Above the cap it runs
+/// in cache-only mode ([`pipeline::PipelineConfig::cache_only`]): an area
+/// precomputed in pieces still gets its facades out of the per wall cache, and
+/// one that is not is told so in a single Overpass query.
 pub const PRECOMPUTE_MAX_AREA_M2: f64 = 100_000.0;
 
 /// The part of a message the status line has room for.
