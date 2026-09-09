@@ -1994,7 +1994,10 @@ function startWorldNameEdit(event) {
   const editButton = document.getElementById('world-name-edit-button');
   if (!label || !input) return;
 
-  input.value = customWorldName;
+  // Prefer an in-progress edit; otherwise pre-fill with the currently
+  // generated world's real name (if any) so re-opening the editor lets the
+  // user rename an already-created world instead of starting from blank.
+  input.value = customWorldName || basenameFromPath(worldPath);
   label.style.display = 'none';
   if (editButton) editButton.style.display = 'none';
   input.style.display = '';
