@@ -1137,11 +1137,27 @@ fn to_deflated(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("deflate cluster: {e}"))
 }
 
+/// The most a cluster may inflate to. Real reconstructions run to a few tens
+/// of megabytes; a stream that grows past this is corrupt or hostile, and the
+/// cache it came from is user-writable, so the cap is what stands between a
+/// bad file and an allocation that aborts the process.
+const INFLATE_CAP: u64 = 256 * 1024 * 1024;
+
 fn inflate(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    inflate_capped(bytes, INFLATE_CAP)
+}
+
+fn inflate_capped(bytes: &[u8], cap: u64) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
+    // One byte past the cap is read on purpose: it is how a stream that is
+    // exactly at the cap is told apart from one that only stopped there.
     flate2::read::ZlibDecoder::new(bytes)
+        .take(cap + 1)
         .read_to_end(&mut out)
         .map_err(|e| format!("inflate: {e}"))?;
+    if out.len() as u64 > cap {
+        return Err(format!("inflate: more than {} bytes", cap));
+    }
     Ok(out)
 }
 
@@ -2167,6 +2183,19 @@ mod tests {
         );
         let path = cfg.layout().image_path("42", ImageSize::W2048).unwrap();
         assert!(cache::read_cached(&path).is_none());
+    }
+
+    /// A stream that inflates past the cap is refused, not held in memory.
+    #[test]
+    fn a_cluster_that_inflates_past_the_cap_is_refused() {
+        use std::io::Write;
+        let mut enc =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&vec![0u8; 4096]).unwrap();
+        let deflated = enc.finish().unwrap();
+        assert!(inflate_capped(&deflated, 4096).is_ok(), "exactly the cap is fine");
+        let err = inflate_capped(&deflated, 4095).unwrap_err();
+        assert!(err.contains("more than"), "{err}");
     }
 
     #[test]
