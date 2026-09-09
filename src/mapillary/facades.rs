@@ -1676,6 +1676,12 @@ fn collect_preview_walls(
             let Some(tex_name) = w.get("tex").and_then(|t| t.as_str()) else {
                 continue;
             };
+            // A bare file name beside the record, nothing else: the export is
+            // read from the cache, which anything on the machine can write,
+            // and a path here would be read from wherever it points.
+            if Path::new(tex_name).file_name().and_then(|f| f.to_str()) != Some(tex_name) {
+                continue;
+            }
             let key = w.get("key").and_then(|k| k.as_str()).unwrap_or("");
             // An unkeyed record cannot be deduplicated, so it is dropped rather
             // than drawn once per export that carries it.

@@ -891,7 +891,24 @@ struct MapillaryCreditRow {
 /// are removed, so the next elevation/land-cover fetch doesn't have to
 /// recreate the directory tree.
 #[tauri::command]
-fn gui_clear_tile_caches() -> Result<String, String> {
+async fn gui_clear_tile_caches() -> Result<String, String> {
+    // A running generation or precompute reads and writes these caches; wiped
+    // under it, a precompute's own work comes back as misses half way through.
+    if BUSY.load(std::sync::atomic::Ordering::Acquire) != BUSY_IDLE {
+        return Err(
+            "A generation or precompute is running. Clear the caches once it has finished."
+                .to_string(),
+        );
+    }
+    // Off the webview thread for the same reason as `gui_get_cache_size`: the
+    // cost is in the number of files, and a facade cache reaches tens of
+    // thousands.
+    tauri::async_runtime::spawn_blocking(clear_tile_caches_now)
+        .await
+        .map_err(|e| format!("Cache clear task failed: {e}"))?
+}
+
+fn clear_tile_caches_now() -> Result<String, String> {
     use crate::elevation::cache::clear_all_cached_tiles;
     use crate::land_cover::clear_land_cover_cache;
     use crate::models_3d::clear_model_caches;
