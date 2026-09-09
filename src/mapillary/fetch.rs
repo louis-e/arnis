@@ -579,7 +579,7 @@ pub fn fetch_metadata(cfg: &FetchConfig) -> Result<Fetched, String> {
     )?;
     let cells = api::search_cells(&llbbox);
 
-    emit_gui_progress_update(MESSAGE_ONLY, "Mapillary facades: searching coverage...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: searching coverage...");
     let results: Vec<Result<CellResult, String>> = cells
         .par_iter()
         .map(|&cell| search_cell(&http, cfg, cell, 0))
@@ -884,14 +884,14 @@ pub fn download_images(cfg: &FetchConfig, ids: &[String]) -> Batch {
     let layout = cfg.layout();
     let done = AtomicUsize::new(0);
     let total = ids.len();
-    emit_gui_progress_update(MESSAGE_ONLY, "Mapillary facades: downloading imagery...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: downloading photos...");
 
     let guard = BatchGuard::new(cfg);
     let results: Vec<(String, Result<PathBuf, String>)> = in_pool(cfg.parallel, || {
         ids.par_iter()
             .map(|id| {
                 let outcome = ensure_image(&http, cfg, &layout, id, &guard);
-                report(&done, total, "downloading imagery");
+                report(&done, total, "downloading photos");
                 (id.clone(), outcome)
             })
             .collect()
@@ -1024,10 +1024,7 @@ pub fn download_clusters(cfg: &FetchConfig, clusters: &[ClusterRef]) -> Batch {
     let layout = cfg.layout();
     let done = AtomicUsize::new(0);
     let total = clusters.len();
-    emit_gui_progress_update(
-        MESSAGE_ONLY,
-        "Mapillary facades: downloading reconstructions...",
-    );
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: downloading camera data...");
 
     let guard = BatchGuard::new(cfg);
     let results: Vec<(String, Result<PathBuf, String>)> = in_pool(cfg.parallel, || {
@@ -1035,7 +1032,7 @@ pub fn download_clusters(cfg: &FetchConfig, clusters: &[ClusterRef]) -> Batch {
             .par_iter()
             .map(|cluster| {
                 let outcome = ensure_cluster(&http, cfg, &layout, cluster, &guard);
-                report(&done, total, "downloading reconstructions");
+                report(&done, total, "downloading camera data");
                 (cluster.id.clone(), outcome)
             })
             .collect()
@@ -1426,10 +1423,7 @@ fn report(done: &AtomicUsize, total: usize, what: &str) {
     let n = done.fetch_add(1, Ordering::Relaxed) + 1;
     let step = (total / 100).max(1);
     if n == total || n.is_multiple_of(step) {
-        emit_gui_progress_update(
-            MESSAGE_ONLY,
-            &format!("Mapillary facades: {what} {n}/{total}..."),
-        );
+        emit_gui_progress_update(MESSAGE_ONLY, &format!("Facades: {what} {n}/{total}..."));
     }
 }
 

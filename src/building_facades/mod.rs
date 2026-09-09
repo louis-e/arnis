@@ -273,19 +273,23 @@ pub fn reset(want: bool, dir: Option<&std::path::Path>, px: u32, scale: f64) {
                     Some(Arc::new(set))
                 }
                 Err(e) => {
-                    warn(&format!(
-                        "Preset facades: {e}. Buildings keep their blocks."
-                    ));
+                    warn(
+                        "Facades: textures would not load",
+                        &format!("Preset facades: {e}. Buildings keep their blocks."),
+                    );
                     None
                 }
             },
             None => {
-                warn(&format!(
-                    "Preset facades: no {} found beside the executable or in assets/{}. \
-                     Buildings keep their blocks.",
-                    manifest::MANIFEST_NAME,
-                    manifest::DIR_NAME
-                ));
+                warn(
+                    "Facades: textures not found",
+                    &format!(
+                        "Preset facades: no {} found beside the executable or in assets/{}. \
+                         Buildings keep their blocks.",
+                        manifest::MANIFEST_NAME,
+                        manifest::DIR_NAME
+                    ),
+                );
                 None
             }
         }
@@ -322,10 +326,13 @@ fn px_per_m(px: u32, scale: f64) -> f64 {
     (f64::from(px) * scale).min(SET_PX_PER_M)
 }
 
-fn warn(msg: &str) {
-    eprintln!("Warning: {msg}");
+/// One warning in the two lengths its two destinations have room for: see the
+/// twin of this in `mapillary::displays`. `short` has to stand on its own and
+/// `long` has to hold everything `short` leaves out.
+fn warn(short: &str, long: &str) {
+    eprintln!("Warning: {long}");
     // -1 leaves the progress bar alone and only shows the text.
-    emit_gui_progress_update(MESSAGE_ONLY, msg);
+    emit_gui_progress_update(MESSAGE_ONLY, short);
 }
 
 /// Twice the signed area of the ring, whose sign is its winding. Positive when
@@ -1235,7 +1242,20 @@ pub struct Report {
 }
 
 impl Report {
+    /// What the status line gets: the two numbers that say whether it worked,
+    /// on one line. The breakdown behind them is in [`std::fmt::Display`],
+    /// which goes to the terminal.
     fn summary(&self) -> String {
+        let s = self.stats;
+        format!(
+            "Preset facades: {} panels on {} buildings",
+            s.panels, s.buildings
+        )
+    }
+}
+
+impl std::fmt::Display for Report {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.stats;
         // Only said where there are any, so an area with no S3DB parts reads
         // the way it always has.
@@ -1249,8 +1269,9 @@ impl Report {
         };
         // A run behind a building as tall as itself is meant to hang nothing;
         // only the rest is a crop that failed.
-        format!(
-            "Preset facades: {} panels on {} of {} wall runs over {} buildings{parts} ({} behind the building next door, {} without a usable crop)",
+        write!(
+            f,
+            "  Preset facades: {} panels on {} of {} wall runs over {} buildings{parts} ({} behind the building next door, {} without a usable crop)",
             s.panels,
             s.placed,
             s.candidates,
@@ -1258,12 +1279,6 @@ impl Report {
             s.behind,
             s.dropped - s.behind
         )
-    }
-}
-
-impl std::fmt::Display for Report {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "  {}", self.summary())
     }
 }
 

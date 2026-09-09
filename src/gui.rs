@@ -1159,11 +1159,16 @@ fn precompute_facades(bbox_text: &str, token: &str) -> Result<PrecomputeOutcome,
     // Generate button unavailable for as long as it takes to say so.
     let area = bbox_area_m2(bbox);
     if area > PRECOMPUTE_MAX_AREA_M2 {
+        // The row is one line of the settings panel, so a refusal says what is
+        // wrong there and puts the reason behind it after a blank line, which
+        // the front end hangs on the row as its tooltip.
         return Err(format!(
-            "This area is {:.2} km² and the limit is {:.2} km². The pipeline registers every \
-             photograph that can see into the box: 0.034 km² of Munich took 25 minutes and \
-             568 MB from cold, so the limit is already about an hour. Precompute a large area \
-             in pieces instead; the cache keeps every wall each piece builds.",
+            "This area is {:.2} km², over the {:.2} km² limit.\n\n\
+             The pipeline registers every photograph that can see into the box, so what it \
+             costs follows the ground the box covers: 0.034 km² of Munich took 25 minutes and \
+             568 MB from cold, which puts this limit at about an hour already. Precompute a \
+             large area in pieces instead; the cache keeps every wall each piece builds, and \
+             no piece redoes another's.",
             area / 1e6,
             PRECOMPUTE_MAX_AREA_M2 / 1e6,
         ));

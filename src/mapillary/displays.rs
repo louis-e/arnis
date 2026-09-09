@@ -398,10 +398,17 @@ pub(crate) fn px_for_test() -> u32 {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).px
 }
 
-fn warn(msg: &str) {
-    eprintln!("Warning: {msg}");
+/// One warning in the two lengths its two destinations have room for.
+///
+/// The status line is one line of a narrow panel: a sentence with a path or a
+/// count in it wraps across the panel and pushes the progress bar down while it
+/// shows. The terminal has the width for the whole of it and keeps it after the
+/// run, so that is where the numbers go. `short` has to stand on its own and
+/// `long` has to hold everything `short` leaves out.
+fn warn(short: &str, long: &str) {
+    eprintln!("Warning: {long}");
     // -1 leaves the progress bar alone and only shows the text.
-    emit_gui_progress_update(MESSAGE_ONLY, msg);
+    emit_gui_progress_update(MESSAGE_ONLY, short);
 }
 
 /// Records one candidate per textured wall of the building built under
@@ -970,18 +977,23 @@ pub struct PlacementReport {
 }
 
 impl PlacementReport {
+    /// What the status line gets: the two numbers that say whether it worked,
+    /// on one line. The counts behind them are in [`fmt::Display`], which goes
+    /// to the terminal.
     fn summary(&self) -> String {
         let s = self.stats;
-        format!(
-            "Facade panels: {} display entities on {} of {} walls ({} without a usable crop)",
-            s.displays, s.placed, s.candidates, s.dropped
-        )
+        format!("Facade panels: {} on {} walls", s.displays, s.placed)
     }
 }
 
 impl fmt::Display for PlacementReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "  {}", self.summary())
+        let s = self.stats;
+        write!(
+            f,
+            "  Facade panels: {} display entities on {} of {} walls ({} without a usable crop)",
+            s.displays, s.placed, s.candidates, s.dropped
+        )
     }
 }
 
@@ -1549,10 +1561,14 @@ pub(super) fn install_world_pack(path: &Path, staged: &Path) -> Result<(), Strin
         }
         std::fs::rename(path, &backup)
             .map_err(|e| format!("move {} aside: {e}", path.display()))?;
-        warn(&format!(
-            "Facade panels: this world already had a resource pack Arnis did not write; it is kept at {}.",
-            backup.display()
-        ));
+        warn(
+            "Facades: your own resource pack was kept",
+            &format!(
+                "Facade panels: this world already had a resource pack Arnis did not write; \
+                 it is kept at {}.",
+                backup.display()
+            ),
+        );
     }
     std::fs::rename(staged, path).map_err(|e| format!("install {}: {e}", path.display()))
 }
@@ -1579,16 +1595,24 @@ fn write_packs_for(
     let all = extents(&panels, &hashes);
     let px = fit_px(&all, px);
     if px < requested_px {
-        warn(&format!(
-            "Facade panels: {} panels would not fit the game's block atlas at {requested_px} px per block; using {px} px.",
-            panels.len()
-        ));
+        warn(
+            &format!("Facades: lowered to {px} px per block"),
+            &format!(
+                "Facade panels: {} panels would not fit the game's block atlas at \
+                 {requested_px} px per block; using {px} px.",
+                panels.len()
+            ),
+        );
     }
     if atlas_area(&all, px) > atlas_budget() {
-        warn(&format!(
-            "Facade panels: {} panels exceed the block atlas even at {px} px per block; the game may fail to stitch them.",
-            panels.len()
-        ));
+        warn(
+            "Facades: too many panels for the block atlas",
+            &format!(
+                "Facade panels: {} panels exceed the block atlas even at {px} px per block; \
+                 the game may fail to stitch them.",
+                panels.len()
+            ),
+        );
     }
     let count = panels.len();
     let mut panels: Vec<(Panel, u64)> = panels.into_iter().zip(hashes).collect();

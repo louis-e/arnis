@@ -1136,7 +1136,7 @@ pub fn stage_texture(
                 if n.is_multiple_of((total / 20).max(1)) || n == total {
                     emit_gui_progress_update(
                         MESSAGE_ONLY,
-                        &format!("Mapillary facades: building {n}/{total}..."),
+                        &format!("Facades: texturing {n}/{total}..."),
                     );
                 }
                 product
@@ -1792,10 +1792,7 @@ pub fn run(cfg: &PipelineConfig) -> Result<PipelineResult, String> {
     // half: they are what says which walls this run needs, and if the cache
     // already holds every one of them there is no reason to search Mapillary
     // for imagery, let alone download it.
-    emit_gui_progress_update(
-        MESSAGE_ONLY,
-        "Mapillary facades: reading OpenStreetMap buildings...",
-    );
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: reading buildings...");
     let osm = fetch::fetch_osm(&cfg.fetch)?;
     run_from_osm(cfg, osm, t0)
 }
@@ -1823,7 +1820,7 @@ fn run_from_osm(cfg: &PipelineConfig, osm: Value, t0: Instant) -> Result<Pipelin
     // cold area everything after it runs for minutes without a stop, so this is
     // the last cheap place a cancelled run can be turned back.
     cfg.check()?;
-    emit_gui_progress_update(MESSAGE_ONLY, "Mapillary facades: searching coverage...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: searching coverage...");
     let mut fetched = fetch::fetch_metadata(&cfg.fetch)?;
     fetched.osm = osm;
     let fetch_s = t0.elapsed().as_secs_f64();
@@ -2047,10 +2044,7 @@ pub fn run_with(cfg: &PipelineConfig, fetched: &Fetched) -> Result<PipelineResul
 
     // ---- geometry
     let mark = Instant::now();
-    emit_gui_progress_update(
-        MESSAGE_ONLY,
-        "Mapillary facades: reading reconstructions...",
-    );
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: reading camera data...");
     let geo = stage_geometry(cfg, fetched)?;
     stats.geometry_s = mark.elapsed().as_secs_f64();
     stats.buildings = geo.buildings.len();
@@ -2059,7 +2053,7 @@ pub fn run_with(cfg: &PipelineConfig, fetched: &Fetched) -> Result<PipelineResul
     // ---- align, which downloads the thumbnails it needs partway through
     cfg.check()?;
     let mark = Instant::now();
-    emit_gui_progress_update(MESSAGE_ONLY, "Mapillary facades: registering imagery...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: matching photos...");
     let (align, batch) = stage_align(cfg, &geo);
     stats.align_s = mark.elapsed().as_secs_f64();
     stats.images_downloaded = batch.ready.len();

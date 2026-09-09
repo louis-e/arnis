@@ -585,16 +585,16 @@ pub fn generate_world_with_options(
         && args.mapillary_facade_mode.places_displays()
         && args.mapillary_facades_wanted()
     {
-        let msg = format!(
-            "Facade photo panels need a Java world; building the {} facade blocks only.",
-            if world_format == WorldFormat::LuantiWorld {
-                "Luanti"
-            } else {
-                "Bedrock"
-            }
+        let other = if world_format == WorldFormat::LuantiWorld {
+            "Luanti"
+        } else {
+            "Bedrock"
+        };
+        eprintln!(
+            "{} Facade photo panels need a Java world; building the {other} facade blocks only.",
+            "Warning:".yellow().bold()
         );
-        eprintln!("{} {msg}", "Warning:".yellow().bold());
-        emit_gui_progress_update(MESSAGE_ONLY, &msg);
+        emit_gui_progress_update(MESSAGE_ONLY, "Facades: photo panels need a Java world");
     }
     // A folder is the review loop's override, but an explicit "off" still means
     // off: the GUI toggle sends Some(false), and a `--mapillary-facades-dir`

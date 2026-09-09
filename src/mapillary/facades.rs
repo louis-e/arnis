@@ -1387,29 +1387,39 @@ pub fn install(dir: &Path, elements: &[ProcessedElement], args: &Args, xzbbox: &
     if args.mapillary_facades_dir.is_some() && matched > 0 {
         record_folder_credits(dir, &images);
     }
+    // Each of these says the same thing twice: a short line for the status
+    // line, which is one line of a narrow panel and wraps a sentence across the
+    // progress bar, and the whole of it for the terminal, which has the width
+    // for the path or the count behind it and keeps it after the run.
     if walls.is_empty() {
-        let msg = format!(
-            "Facade textures: nothing usable in {} (no tier A/B walls). Run export_arnis.py first.",
+        eprintln!(
+            "Warning: Facade textures: nothing usable in {} (no tier A/B walls). \
+             Run export_arnis.py first.",
             dir.display()
         );
-        eprintln!("Warning: {msg}");
-        crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, &msg);
+        crate::progress::emit_gui_progress_update(
+            crate::progress::MESSAGE_ONLY,
+            "Facades: nothing usable in that export",
+        );
         clear();
         return;
     }
     if matched == 0 {
-        let msg = format!(
-            "Facade textures: {} walls loaded but none of their buildings are in this area. The export covers a different bbox.",
+        eprintln!(
+            "Warning: Facade textures: {} walls loaded but none of their buildings are in this \
+             area. The export covers a different bbox.",
             walls.len()
         );
-        eprintln!("Warning: {msg}");
-        crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, &msg);
+        crate::progress::emit_gui_progress_update(
+            crate::progress::MESSAGE_ONLY,
+            "Facades: that export covers a different area",
+        );
     } else {
         // MESSAGE_ONLY, like the two branches above: a real fraction here sends
         // the GUI bar back to 0 per cent in the middle of a generation.
         crate::progress::emit_gui_progress_update(
             crate::progress::MESSAGE_ONLY,
-            &format!("Facade textures: {matched} buildings matched, {columns} wall columns"),
+            &format!("Facades: textures for {matched} buildings"),
         );
     }
     // The photo panels are Java entities; other formats build the blocks only.

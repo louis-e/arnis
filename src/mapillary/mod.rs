@@ -236,7 +236,7 @@ pub fn sample_area(
         return Err("no building footprints in this area".to_string());
     }
 
-    emit_gui_progress_update(MESSAGE_ONLY, "Searching Mapillary coverage...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: searching coverage...");
     let metas = api::fetch_panoramas(&llbbox, token, HTTP_TIMEOUT)?;
     let listed = metas.len();
     if metas.is_empty() {
@@ -257,7 +257,7 @@ pub fn sample_area(
     });
     metas.truncate(MAX_PANORAMA_DOWNLOADS);
 
-    emit_gui_progress_update(MESSAGE_ONLY, "Downloading Mapillary panoramas...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: downloading panoramas...");
     let panoramas = api::download_panoramas(&metas, HTTP_TIMEOUT)?;
     if panoramas.is_empty() {
         return Err("every panorama download failed".to_string());
@@ -268,7 +268,7 @@ pub fn sample_area(
         .filter_map(|pano| Some((camera_pose(&pano.meta, llbbox, args)?, pano)))
         .collect();
 
-    emit_gui_progress_update(MESSAGE_ONLY, "Sampling building facades...");
+    emit_gui_progress_update(MESSAGE_ONLY, "Facades: sampling walls...");
     let samples: Vec<BuildingSample> = buildings
         .iter()
         .filter_map(|(way_id, points, height)| {
@@ -575,7 +575,7 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
     };
     let say = |msg: &str| {
         if !abandoned() {
-            emit_gui_progress_update(MESSAGE_ONLY, msg);
+            emit_gui_progress_update(MESSAGE_ONLY, &short_line(msg));
         }
     };
     // The Graph API has no title field, so the credit line names the place; see
@@ -603,20 +603,27 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
                 }
             }
             if result.stats.exported_walls == 0 {
-                let msg = if result.stats.images == 0 {
-                    "Mapillary facades: no street-level imagery covers this area".to_string()
+                let (short, long) = if result.stats.images == 0 {
+                    (
+                        "Facades: no photos cover this area".to_string(),
+                        "Mapillary facades: no street-level imagery covers this area".to_string(),
+                    )
                 } else {
-                    format!(
-                        "Mapillary facades: {} images found, but no wall was seen well enough to texture",
-                        result.stats.images
+                    (
+                        "Facades: no wall is seen well enough".to_string(),
+                        format!(
+                            "Mapillary facades: {} images found, but no wall was seen well \
+                             enough to texture",
+                            result.stats.images
+                        ),
                     )
                 };
-                println!("  {}", msg.yellow());
-                say(&msg);
+                println!("  {}", long.yellow());
+                say(&short);
                 return None;
             }
             say(&format!(
-                "Mapillary facades: {} walls on {} buildings",
+                "Facades: {} walls on {} buildings",
                 result.stats.exported_walls, result.stats.exported_buildings
             ));
             // The run's own export directory, not a place the config names: two
@@ -625,9 +632,13 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
             Some(result.export_dir)
         }
         Err(e) => {
-            let msg = format!("Mapillary facades skipped: {e}");
-            eprintln!("{} {msg}", "Warning:".yellow().bold());
-            say(&msg);
+            eprintln!(
+                "{} Mapillary facades skipped: {e}",
+                "Warning:".yellow().bold()
+            );
+            // `say` keeps the first line of it, which is where the writers of
+            // these put the part that fits a status line.
+            say(&format!("Facades: {e}"));
             None
         }
     }
@@ -669,14 +680,40 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
 /// of holding the world for an afternoon.
 pub const PRECOMPUTE_MAX_AREA_M2: f64 = 100_000.0;
 
+/// The part of a message the status line has room for.
+///
+/// The controls panel is 32 per cent of a 1000 pixel window, so its progress
+/// line holds about fifty characters: a sentence longer than that wraps across
+/// the panel and pushes the progress bar down it for as long as the message
+/// shows. A message written for both places therefore puts the short form
+/// first, then a blank line, then the detail, and this is the first part of it.
+/// A message with no blank line is short already, and one that is neither, an
+/// operating system error in some other language, is cut rather than left to
+/// wrap.
+fn short_line(message: &str) -> String {
+    const MAX_CHARS: usize = 48;
+    let head = message
+        .split_once("\n\n")
+        .map_or(message, |(head, _)| head)
+        .trim();
+    if head.chars().count() <= MAX_CHARS {
+        return head.to_string();
+    }
+    let cut: String = head.chars().take(MAX_CHARS - 3).collect();
+    format!("{}...", cut.trim_end())
+}
+
 /// What a generation over a box past [`PRECOMPUTE_MAX_AREA_M2`] is told when the
 /// cache cannot answer it.
 ///
-/// It names the two numbers and the way out, because the way out exists and is
-/// the same one the Precompute button's own refusal points at.
+/// The way out exists and is the same one the Precompute button's own refusal
+/// points at, so the short line spends its fifty characters on that rather than
+/// on the numbers, which the terminal gets along with the reason for them. See
+/// [`short_line`] for the two part shape.
 fn too_large_for_a_cold_run(area_m2: f64) -> String {
     format!(
-        "this area is {:.2} km² and the facade pipeline only fetches imagery for boxes up to \
+        "area too large, precompute it in pieces\n\n\
+         This area is {:.2} km² and the facade pipeline only fetches imagery for boxes up to \
          {:.2} km², since the world build waits for it and a box this size takes hours from \
          cold. The cache does not hold all of this area yet, so no facades were built. \
          Precompute it in pieces (Settings, Mapillary, Precompute) and generate again: the \
@@ -904,10 +941,7 @@ impl FacadeJob {
             .spawn(move || run_facade_pipeline(cfg));
         match handle {
             Ok(handle) => {
-                emit_gui_progress_update(
-                    MESSAGE_ONLY,
-                    "Mapillary facades: fetching street-level imagery...",
-                );
+                emit_gui_progress_update(MESSAGE_ONLY, "Facades: starting...");
                 Self {
                     inner: Some(Arc::new(JobInner {
                         handle: Mutex::new(Some(handle)),
@@ -942,7 +976,7 @@ impl FacadeJob {
             .unwrap_or_else(|e| e.into_inner())
             .take()?;
         if !handle.is_finished() {
-            emit_gui_progress_update(MESSAGE_ONLY, "Waiting for Mapillary facades...");
+            emit_gui_progress_update(MESSAGE_ONLY, "Waiting for facades...");
         }
         match handle.join() {
             Ok(dir) => dir,
@@ -1177,6 +1211,22 @@ mod tests {
     /// hours is a generation with no visible end and no cancel. Above the cap the
     /// job may only answer out of the cache; below it nothing changes, which is
     /// what keeps the Munich test box and every fixture on the ordinary path.
+    /// The status line gets the first paragraph, and never more than a line of
+    /// it.
+    #[test]
+    fn the_status_line_takes_the_first_paragraph_and_no_more_than_a_line() {
+        assert_eq!(short_line("short enough"), "short enough");
+        assert_eq!(
+            short_line("the way out\n\nAnd every number behind it, at length."),
+            "the way out"
+        );
+        // Counted in characters and not bytes, or a message in a language with
+        // accents on it would be cut in the middle of one.
+        let cut = short_line(&"uberlang".replace('u', "\u{fc}").repeat(20));
+        assert_eq!(cut.chars().count(), 48);
+        assert!(cut.ends_with("..."), "{cut}");
+    }
+
     #[test]
     fn a_generation_box_past_the_cap_may_only_answer_from_the_cache() {
         let mut args = bare_args();
@@ -1197,8 +1247,13 @@ mod tests {
         );
         let cfg = pipeline_config(&args, big).expect("a token is set");
         let why = cfg.cache_only.expect("a box this size may not fetch");
-        // The refusal has to carry both numbers and the way out, since it is all
-        // the user is given.
+        // The first line is all the status line shows, so it has to fit one and
+        // to carry the way out on its own; the numbers and the reason behind
+        // them are in the rest, which the terminal gets.
+        let head = short_line(&why);
+        assert!(head.chars().count() <= 48, "{head}");
+        assert!(head.contains("pieces"), "{head}");
+        assert!(!head.ends_with("..."), "the first line was cut: {head}");
         assert!(why.contains("km²"), "{why}");
         assert!(why.contains("Precompute"), "{why}");
     }

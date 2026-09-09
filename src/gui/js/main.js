@@ -1743,6 +1743,11 @@ let precomputeTicker = null;
 // looking at, under a progress bar that is not moving.
 let precomputeStage = "";
 
+// What the pipeline prefixes its stage lines with. Kept short because the same
+// lines go to the progress bar's status line, which is one line of a 320px
+// panel.
+const FACADE_STAGE_PREFIX = "Facades:";
+
 function setPrecomputeStatus(text, kind, detail) {
   const el = document.getElementById('facade-precompute-status');
   if (!el) return;
@@ -1801,8 +1806,8 @@ function showPrecomputeProgress() {
 // Called by the progress listener for every line the facade pipeline emits, so
 // the row says which stage is running rather than only that something is.
 function notePrecomputeStage(message) {
-  if (!precomputeRunning || !message.startsWith("Mapillary facades:")) return;
-  precomputeStage = message.slice("Mapillary facades:".length).trim();
+  if (!precomputeRunning || !message.startsWith(FACADE_STAGE_PREFIX)) return;
+  precomputeStage = message.slice(FACADE_STAGE_PREFIX.length).trim();
   showPrecomputeProgress();
 }
 
@@ -1851,8 +1856,14 @@ function initPrecomputeFacadesButton() {
       if (outcome.built) window.arnisPreview3D?.refreshFacades();
       refreshCacheSize();
     } catch (error) {
-      // Every refusal from the backend is a sentence meant to be read.
-      setPrecomputeStatus(String(error), 'error');
+      // Every refusal from the backend is a sentence meant to be read. The
+      // longer ones are written as that sentence, a blank line, and the reason
+      // behind it: the row holds one line, so the reason becomes its tooltip.
+      const text = String(error);
+      const split = text.indexOf("\n\n");
+      const head = split < 0 ? text : text.slice(0, split).trim();
+      const rest = split < 0 ? "" : text.slice(split + 2).trim();
+      setPrecomputeStatus(head, 'error', rest || undefined);
       refreshCacheSize();
     } finally {
       clearInterval(precomputeTicker);
