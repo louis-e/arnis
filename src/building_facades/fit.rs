@@ -126,6 +126,40 @@ impl Fit {
         self.ground_m + (m - self.ground_m).rem_euclid(self.upper_m)
     }
 
+    /// A name for the pixels `region` would return for these metres from a
+    /// source brought to `px_per_m`, before there is a source to read them
+    /// from: the same for two regions whose gathers read the same source
+    /// pixels, so the atlas can be sized from the walls' geometry before
+    /// anything is cropped.
+    ///
+    /// Built from the gather's own lookup tables and not from the metres. An
+    /// oblique wall's width is a projection of world positions, and two walls
+    /// of one shape come out a thousandth of a block apart from one building
+    /// to the next; they read the very same pixels once the lookups have
+    /// rounded, and the pack then shares one texture between them. Naming
+    /// them by their metres charged a city block for enough textures it did
+    /// not carry to push the resolution a step below where the pack fitted.
+    /// The source's size is the one `load_scaled` makes at this resolution.
+    pub fn region_key_at(&self, px_per_m: f64, x0_m: f64, x1_m: f64, y0_m: f64, y1_m: f64) -> u64 {
+        use std::hash::Hasher;
+        let at = Fit { px_per_m, ..*self };
+        let (src_w, src_h) = super::manifest::scaled_size(self.tex_w_m, self.tex_h_m, px_per_m);
+        let mut h = fnv::FnvHasher::default();
+        h.write_u32(src_w);
+        h.write_u32(src_h);
+        if let Some((cols, rows)) = at.tables(src_w, src_h, x0_m, x1_m, y0_m, y1_m) {
+            h.write_usize(cols.len());
+            h.write_usize(rows.len());
+            for c in cols {
+                h.write_usize(c);
+            }
+            for r in rows {
+                h.write_u32(r);
+            }
+        }
+        h.finish()
+    }
+
     /// Source pixel column for `m` metres along the wall.
     fn src_x(&self, m: f64, src_w: u32) -> u32 {
         let (u, _) = self.map_u(m);
@@ -146,15 +180,22 @@ impl Fit {
     /// The source has already been brought to `px_per_m`, so this is a
     /// per-pixel copy with an index table: no filtering, and no way for a
     /// metre of building to come out as anything but a metre.
-    pub fn region(
+    /// The source columns and rows the part of the wall from `x0_m` to `x1_m`
+    /// along it and `y0_m` to `y1_m` up it reads from a source `src_w` by
+    /// `src_h` pixels: one lookup per output column, as a byte offset into a
+    /// source row, and one per output row. `None` when that is not a whole
+    /// pixel of anything. `region` gathers through these and `region_key_at`
+    /// names a region by them, so a name is made of exactly what its gather
+    /// reads.
+    fn tables(
         &self,
-        src: &RgbImage,
+        src_w: u32,
+        src_h: u32,
         x0_m: f64,
         x1_m: f64,
         y0_m: f64,
         y1_m: f64,
-    ) -> Option<RgbImage> {
-        let (src_w, src_h) = (src.width(), src.height());
+    ) -> Option<(Vec<usize>, Vec<u32>)> {
         if src_w == 0 || src_h == 0 {
             return None;
         }
@@ -174,6 +215,20 @@ impl Fit {
         let rows: Vec<u32> = (0..out_h)
             .map(|j| self.src_y(y1_m - (f64::from(j) + 0.5) / self.px_per_m, src_h))
             .collect();
+        Some((cols, rows))
+    }
+
+    pub fn region(
+        &self,
+        src: &RgbImage,
+        x0_m: f64,
+        x1_m: f64,
+        y0_m: f64,
+        y1_m: f64,
+    ) -> Option<RgbImage> {
+        let (src_w, src_h) = (src.width(), src.height());
+        let (cols, rows) = self.tables(src_w, src_h, x0_m, x1_m, y0_m, y1_m)?;
+        let (out_w, out_h) = (cols.len() as u32, rows.len() as u32);
         let raw = src.as_raw();
         let src_stride = src_w as usize * 3;
         let stride = out_w as usize * 3;
@@ -428,6 +483,77 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_region_key_names_the_pixels_a_region_reads() {
+        // 12 m by 12 m at 30 px per metre, a scale 2 world at 15 px per block.
+        let e = entry(12.0, 12.0, 4, true, true);
+        let src = ramp(360, 360);
+        let fit = Fit::new(&e, 30.0, 24.0, 12.0, 0.0);
+        let key = fit.region_key_at(30.0, 0.0, 12.0, 0.0, 12.0);
+        // The fit's own resolution has no part in it: the name is asked at one.
+        assert_eq!(
+            Fit::new(&e, 8.0, 24.0, 12.0, 0.0).region_key_at(30.0, 0.0, 12.0, 0.0, 12.0),
+            key
+        );
+        // Two walls whose widths differ by a hair, as two oblique walls of
+        // one shape on two buildings do, read the same pixels and so get one
+        // name, which is how the pack treats them.
+        let a = Fit::new(&e, 30.0, 2.0, 12.0, 0.0);
+        let b = Fit::new(&e, 30.0, 2.000_643_467_482_092_3, 12.0, 0.0);
+        assert_eq!(
+            a.region(&src, 0.0, 2.0, 0.0, 12.0).unwrap(),
+            b.region(&src, 0.0, 2.000_643_467_482_092_3, 0.0, 12.0)
+                .unwrap()
+        );
+        assert_eq!(
+            a.region_key_at(30.0, 0.0, 2.0, 0.0, 12.0),
+            b.region_key_at(30.0, 0.0, 2.000_643_467_482_092_3, 0.0, 12.0)
+        );
+        // A wider wall tiling the same photograph from the same phase reads
+        // the same metres the same way: its first piece is the same picture.
+        assert_eq!(
+            Fit::new(&e, 8.0, 45.0, 12.0, 0.0).region_key_at(30.0, 0.0, 12.0, 0.0, 12.0),
+            key
+        );
+        // Two walls shorter than the photograph crop it from the foot
+        // whatever their height, so the same rows are the same picture.
+        assert_eq!(
+            Fit::new(&e, 8.0, 24.0, 9.0, 0.0).region_key_at(30.0, 0.0, 12.0, 0.0, 9.0),
+            fit.region_key_at(30.0, 0.0, 12.0, 0.0, 9.0)
+        );
+        // The piece one whole period along the wall reads the photograph
+        // again from its left edge: the same picture, and one name, which is
+        // what lets a long wall's pieces share a texture.
+        assert_eq!(fit.region_key_at(30.0, 12.0, 24.0, 0.0, 12.0), key);
+        // A piece that wraps part way through, another phase, another
+        // photograph, another resolution, or a mirrored copy where a tiling
+        // one wraps: not the same picture, and the pixels say so too.
+        assert_ne!(fit.region_key_at(30.0, 6.0, 18.0, 0.0, 12.0), key);
+        assert_ne!(
+            Fit::new(&e, 8.0, 24.0, 12.0, 3.0).region_key_at(30.0, 0.0, 12.0, 0.0, 12.0),
+            key
+        );
+        let other = entry(12.0, 9.0, 3, true, false);
+        assert_ne!(
+            Fit::new(&other, 8.0, 24.0, 12.0, 0.0).region_key_at(30.0, 0.0, 12.0, 0.0, 12.0),
+            key
+        );
+        assert_ne!(fit.region_key_at(8.0, 0.0, 12.0, 0.0, 12.0), key);
+        let mirrored = Fit::new(&entry(12.0, 12.0, 4, false, true), 30.0, 24.0, 12.0, 0.0);
+        assert_ne!(mirrored.region_key_at(30.0, 12.0, 24.0, 0.0, 12.0), key);
+        assert_ne!(
+            mirrored.region(&src, 12.0, 24.0, 0.0, 12.0).unwrap(),
+            fit.region(&src, 12.0, 24.0, 0.0, 12.0).unwrap()
+        );
+        // Two narrow walls of clearly different widths take different middles.
+        assert_ne!(
+            Fit::new(&e, 8.0, 8.0, 12.0, 0.0).region_key_at(30.0, 0.0, 8.0, 0.0, 12.0),
+            Fit::new(&e, 8.0, 10.0, 12.0, 0.0).region_key_at(30.0, 0.0, 8.0, 0.0, 12.0)
+        );
+        // A region that is not a whole pixel of anything still has a name.
+        let _ = fit.region_key_at(30.0, 4.0, 4.0, 0.0, 12.0);
     }
 
     #[test]

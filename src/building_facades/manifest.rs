@@ -241,13 +241,26 @@ pub struct FacadeSet {
     /// Entry indices per category name, in manifest order, so the choice does
     /// not depend on a hash map's iteration order.
     by_category: FnvHashMap<&'static str, Vec<usize>>,
+    /// The decoded photographs and the scale they are at, under one lock so a
+    /// picture is never handed out at a scale other than the one its caller
+    /// was told.
+    scaled: Mutex<Scaled>,
+}
+
+/// The photographs decoded so far, at one scale.
+struct Scaled {
     /// Output pixels per real-world metre. One resample per texture, to this,
     /// is the only resampling the pixels ever see, and it is uniform in both
     /// axes by construction, so nothing is ever stretched out of proportion.
+    ///
+    /// Set from the requested resolution at load and lowered once, before the
+    /// pending walls are cropped, to the resolution the pack will be written
+    /// at (`building_facades::finalize`), so the crops come out the size the
+    /// writer puts in the pack and nothing is shrunk twice.
     px_per_m: f64,
     /// `None` for an entry whose file would not decode; the chooser then skips
     /// it and the run carries on.
-    scaled: Mutex<FnvHashMap<usize, Option<std::sync::Arc<RgbImage>>>>,
+    images: FnvHashMap<usize, Option<std::sync::Arc<RgbImage>>>,
 }
 
 /// What loading a set produced, for the one-line summary and for tests.
@@ -284,8 +297,24 @@ impl FacadeSet {
         &self.entries
     }
 
+    /// Output pixels per real-world metre the photographs are at.
     pub fn px_per_m(&self) -> f64 {
-        self.px_per_m
+        self.scaled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .px_per_m
+    }
+
+    /// Brings the set to `px_per_m` output pixels per metre. The photographs
+    /// decoded at the old scale are forgotten, so the next `image` for each
+    /// resamples it afresh from the file rather than from a smaller copy.
+    pub fn set_px_per_m(&self, px_per_m: f64) {
+        let mut cache = self.scaled.lock().unwrap_or_else(|e| e.into_inner());
+        if (cache.px_per_m - px_per_m).abs() < 1e-9 {
+            return;
+        }
+        cache.px_per_m = px_per_m;
+        cache.images.clear();
     }
 
     /// Entry indices listing `name`, in manifest order. Empty when none do.
@@ -305,25 +334,27 @@ impl FacadeSet {
     /// megabytes handed back exactly where they are worth most.
     pub fn release_images(&self) {
         let mut cache = self.scaled.lock().unwrap_or_else(|e| e.into_inner());
-        cache.clear();
-        cache.shrink_to_fit();
+        cache.images.clear();
+        cache.images.shrink_to_fit();
     }
 
-    /// The entry's photograph at this run's metre scale, decoded on first use.
-    /// `None` when the file is missing or will not decode, which drops that
-    /// one texture and leaves the rest of the set working.
-    pub fn image(&self, index: usize) -> Option<std::sync::Arc<RgbImage>> {
+    /// The entry's photograph at this run's metre scale, decoded on first use,
+    /// with the pixels per metre it is at, which is what a fit built on it has
+    /// to be told. `None` when the file is missing or will not decode, which
+    /// drops that one texture and leaves the rest of the set working.
+    pub fn image(&self, index: usize) -> Option<(std::sync::Arc<RgbImage>, f64)> {
         let mut cache = self.scaled.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(hit) = cache.get(&index) {
-            return hit.clone();
+        let px_per_m = cache.px_per_m;
+        if let Some(hit) = cache.images.get(&index) {
+            return hit.clone().map(|img| (img, px_per_m));
         }
         let loaded = self
             .entries
             .get(index)
-            .and_then(|e| load_scaled(&self.dir, e, self.px_per_m))
+            .and_then(|e| load_scaled(&self.dir, e, px_per_m))
             .map(std::sync::Arc::new);
-        cache.insert(index, loaded.clone());
-        loaded
+        cache.images.insert(index, loaded.clone());
+        loaded.map(|img| (img, px_per_m))
     }
 }
 
@@ -347,8 +378,7 @@ fn load_scaled(dir: &Path, entry: &Entry, px_per_m: f64) -> Option<RgbImage> {
             return None;
         }
     };
-    let w = ((entry.metres_wide * px_per_m).round() as u32).max(1);
-    let h = ((entry.metres_tall * px_per_m).round() as u32).max(1);
+    let (w, h) = scaled_size(entry.metres_wide, entry.metres_tall, px_per_m);
     if img.width() == w && img.height() == h {
         return Some(img);
     }
@@ -358,6 +388,16 @@ fn load_scaled(dir: &Path, entry: &Entry, px_per_m: f64) -> Option<RgbImage> {
         h,
         image::imageops::FilterType::Lanczos3,
     ))
+}
+
+/// The size a photograph `metres_wide` by `metres_tall` is brought to at
+/// `px_per_m`: what `load_scaled` makes, and what a fit naming a region's
+/// pixels before the picture is decoded has to assume (`Fit::region_key_at`).
+pub fn scaled_size(metres_wide: f64, metres_tall: f64, px_per_m: f64) -> (u32, u32) {
+    (
+        ((metres_wide * px_per_m).round() as u32).max(1),
+        ((metres_tall * px_per_m).round() as u32).max(1),
+    )
 }
 
 /// A file name inside the facade directory, never a path: the manifest may be
@@ -467,8 +507,10 @@ pub fn parse(bytes: &[u8], dir: &Path, px_per_m: f64) -> Result<(FacadeSet, Load
             dir: dir.to_path_buf(),
             entries,
             by_category: by_category.into_iter().collect(),
-            px_per_m,
-            scaled: Mutex::new(FnvHashMap::default()),
+            scaled: Mutex::new(Scaled {
+                px_per_m,
+                images: FnvHashMap::default(),
+            }),
         },
         report,
     ))

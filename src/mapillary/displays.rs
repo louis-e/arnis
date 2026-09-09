@@ -318,7 +318,13 @@ pub struct PlacementStats {
 /// Panels of the world being generated, filled from the tile threads.
 struct Registry {
     enabled: bool,
+    /// Pixels per block the pack is written at, at most. Starts at the
+    /// requested resolution and is lowered by `fit_pending` once the atlas
+    /// has been sized from the whole run, so the writer's own ladder starts
+    /// where the crops were built rather than above it.
     px: u32,
+    /// The resolution the settings asked for, kept for the pack report.
+    requested_px: u32,
     panels: Vec<Panel>,
     /// Walls already collected. A building is processed by every tile it
     /// overlaps, and a display claims no air cell that a second pass could
@@ -337,6 +343,7 @@ struct Registry {
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     enabled: false,
     px: 16,
+    requested_px: 16,
     panels: Vec::new(),
     claimed: FnvHashSet::with_hasher(fnv::FnvBuildHasher::new()),
     candidates: Vec::new(),
@@ -356,6 +363,7 @@ pub fn reset(enabled: bool, px: u32) {
     *r = Registry {
         enabled,
         px,
+        requested_px: px,
         panels: Vec::new(),
         claimed: FnvHashSet::default(),
         candidates: Vec::new(),
@@ -368,6 +376,26 @@ pub fn reset(enabled: bool, px: u32) {
 #[cfg(test)]
 fn stats() -> PlacementStats {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).stats
+}
+
+/// The registry's panels as (name, quad width, quad height, crop width, crop
+/// height), for tests of the sources that feed it.
+#[cfg(test)]
+pub(crate) fn panel_sizes_for_test() -> Vec<(String, f64, f64, u32, u32)> {
+    let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    let mut v: Vec<_> = r
+        .panels
+        .iter()
+        .map(|p| (p.name.clone(), p.w, p.h, p.tex.width(), p.tex.height()))
+        .collect();
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v
+}
+
+/// The resolution the pack will be written at, for tests.
+#[cfg(test)]
+pub(crate) fn px_for_test() -> u32 {
+    REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).px
 }
 
 fn warn(msg: &str) {
@@ -573,6 +601,56 @@ pub fn cut(len: i32, max: i32) -> Vec<(i32, i32)> {
     out
 }
 
+/// One piece of a wall: the half-open cell range and wall row range it
+/// covers, and the quad it hangs as.
+pub(crate) struct Piece {
+    pub p0: i32,
+    pub p1: i32,
+    pub b0: i32,
+    pub b1: i32,
+    pub quad: Quad,
+}
+
+/// The pieces a wall of `cells` (sorted along the outside viewer's right) and
+/// `total_h` rows from `base_y` is cut into: at most `MAX_PANEL` blocks a
+/// side, so one texture per piece fits the atlas.
+///
+/// Both `hang_wall` and the atlas estimate the preset facades take before
+/// they crop anything (`fit_pending`) read this, so the estimate sizes the
+/// same quads the hanging produces.
+pub(crate) fn pieces(
+    cells: &[(i32, i32)],
+    n: (f64, f64),
+    step: f64,
+    base_y: i32,
+    total_h: i32,
+) -> Vec<Piece> {
+    // Pieces of at most MAX_PANEL blocks of wall, which is fewer cells the
+    // more the wall leans off its major axis.
+    let max_cells = ((f64::from(MAX_PANEL) / step).floor() as i32).max(1);
+    let mut out = Vec::new();
+    for (p0, p1) in cut(cells.len() as i32, max_cells) {
+        let footprint = &cells[p0 as usize..p1 as usize];
+        for (b0, b1) in cut(total_h, MAX_PANEL) {
+            // The panel covers the wall the picture covers and no more, so the
+            // bottom piece stops at the shell's first wall block. On a slope
+            // the fill below it stays bare: the photograph has no pixels for
+            // ground the camera never saw, and the block wall down there is
+            // the building's own colour-matched material, which reads as a
+            // plinth where invented pixels read as a smear.
+            let quad = quad_for(footprint, n, step, base_y + b0, b1 - b0);
+            out.push(Piece {
+                p0,
+                p1,
+                b0,
+                b1,
+                quad,
+            });
+        }
+    }
+    out
+}
+
 /// Cuts one wall into pieces the block atlas can hold and hangs each as an
 /// item display entity, asking `crop` for the pixels of each piece.
 ///
@@ -600,40 +678,28 @@ pub(crate) fn hang_wall(
     total_h: i32,
     crop: &mut dyn FnMut(i32, i32, i32, i32) -> Option<RgbImage>,
 ) -> usize {
-    // Pieces of at most MAX_PANEL blocks of wall, which is fewer cells the
-    // more the wall leans off its major axis.
-    let max_cells = ((f64::from(MAX_PANEL) / step).floor() as i32).max(1);
     let mut hung = 0usize;
-    for (p0, p1) in cut(cells.len() as i32, max_cells) {
-        let footprint = &cells[p0 as usize..p1 as usize];
-        for (b0, b1) in cut(total_h, MAX_PANEL) {
-            let Some(tex) = crop(p0, p1, b0, b1) else {
-                continue;
-            };
-            // The panel covers the wall the picture covers and no more, so the
-            // bottom piece stops at the shell's first wall block. On a slope
-            // the fill below it stays bare: the photograph has no pixels for
-            // ground the camera never saw, and the block wall down there is
-            // the building's own colour-matched material, which reads as a
-            // plinth where invented pixels read as a smear.
-            let quad = quad_for(footprint, n, step, base_y + b0, b1 - b0);
-            let name = panel_name(prefix, way_id, wall, p0, b0);
-            let nbt = display_nbt(&name, &quad);
-            if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
-                continue;
-            }
-            let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-            if !r.enabled {
-                return hung;
-            }
-            r.panels.push(Panel {
-                name,
-                w: quad.w,
-                h: quad.h,
-                tex,
-            });
-            hung += 1;
+    for piece in pieces(cells, n, step, base_y, total_h) {
+        let Some(tex) = crop(piece.p0, piece.p1, piece.b0, piece.b1) else {
+            continue;
+        };
+        let quad = piece.quad;
+        let name = panel_name(prefix, way_id, wall, piece.p0, piece.b0);
+        let nbt = display_nbt(&name, &quad);
+        if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
+            continue;
         }
+        let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        if !r.enabled {
+            return hung;
+        }
+        r.panels.push(Panel {
+            name,
+            w: quad.w,
+            h: quad.h,
+            tex,
+        });
+        hung += 1;
     }
     hung
 }
@@ -932,7 +998,7 @@ pub fn item_definition_json(name: &str) -> String {
 }
 
 /// The model itself: one flat element in the middle of the block, textured on
-/// both of its wide faces.
+/// both of its wide faces with the part of the texture the picture fills.
 ///
 /// No parent. `minecraft:block/block` would look like the natural one, but its
 /// `fixed` display transform scales to half a block and would silently halve
@@ -942,33 +1008,39 @@ pub fn item_definition_json(name: &str) -> String {
 /// The element spans the whole 16 by 16 of the model in x and y and is 0.2
 /// thick around z = 8, so its centre is the model's centre and the display
 /// entity's position is the middle of the photograph. Its wide faces are
-/// `north` (-z) and `south` (+z); `uv` [0, 0, 16, 16] is the identity mapping
-/// on both, which reads upright and unmirrored to a viewer of either, the same
-/// way one texture on `block/cube_all` reads on every side of a block.
+/// `north` (-z) and `south` (+z); the `uv` runs from the texture's top left
+/// corner over the `used` part of it (see [`Sprite`]), in the game's 0 to 16
+/// texture units, and is the same mapping on both faces, which reads upright
+/// and unmirrored to a viewer of either, the same way one texture on
+/// `block/cube_all` reads on every side of a block.
 ///
 /// Both faces have to be textured. The renderer turns the model half a circle
 /// about +y before drawing it (`left_rotation` documents why), so it is
-/// `north` that faces the street, and identity `uv` on a `north` face runs its
-/// u to the right of a viewer standing outside it, exactly as identity `uv` on
-/// a `south` face does for a viewer of that one. The half turn and the swapped
-/// face cancel, which is why the crop the outside viewer sees is the one
-/// `right_of` laid out and not its mirror.
-pub fn model_json(name: &str) -> String {
-    model_json_for(name)
+/// `north` that faces the street, and an unmirrored `uv` on a `north` face
+/// runs its u to the right of a viewer standing outside it, exactly as the
+/// same `uv` on a `south` face does for a viewer of that one. The half turn
+/// and the swapped face cancel, which is why the crop the outside viewer sees
+/// is the one `right_of` laid out and not its mirror.
+pub fn model_json(name: &str, sprite: Sprite) -> String {
+    model_json_for(name, sprite)
 }
 
 /// The model for a panel whose picture lives under `texture_name`, which is the
-/// panel's own name unless an identical panel got there first.
-pub fn model_json_for(texture_name: &str) -> String {
+/// panel's own name unless an identical panel got there first. `sprite` says
+/// how much of that texture the picture fills; a shared texture is shared
+/// between panels of one sprite only, so the mapping is the same for each.
+pub fn model_json_for(texture_name: &str, sprite: Sprite) -> String {
     let texture = format!("{NAMESPACE}:block/{texture_name}");
+    let (u, v) = sprite.uv_extent();
+    let uv = serde_json::json!([0.0, 0.0, u, v]);
     serde_json::json!({
         "textures": { "0": texture, "particle": texture },
         "elements": [{
             "from": [0.0, 0.0, 7.9],
             "to": [16.0, 16.0, 8.1],
             "faces": {
-                "north": { "uv": [0, 0, 16, 16], "texture": "#0" },
-                "south": { "uv": [0, 0, 16, 16], "texture": "#0" }
+                "north": { "uv": uv, "texture": "#0" },
+                "south": { "uv": uv, "texture": "#0" }
             }
         }],
         "display": {
@@ -985,14 +1057,104 @@ pub fn model_json_for(texture_name: &str) -> String {
 /// Texture side in pixels for `blocks` blocks at `px` pixels per block,
 /// rounded to a whole multiple of 16 and at least 16.
 ///
-/// The model maps the whole texture onto the whole quad, so this only chooses
-/// the resolution and can never stretch the photograph. The multiple of 16 is
-/// what the block atlas wants: it is mipmapped four levels deep, and one
-/// texture that cannot be halved four times costs every block in the world
-/// its mipmaps.
+/// The multiple of 16 is what the block atlas wants: it is mipmapped four
+/// levels deep, and one texture that cannot be halved four times costs every
+/// block in the world its mipmaps. This is the side the atlas is charged for;
+/// how much of it the picture fills is [`Sprite`]'s business.
 fn tex_side(blocks: f64, px: u32) -> u32 {
     let raw = blocks * f64::from(px) / 16.0;
     (raw.round() as u32).max(1) * 16
+}
+
+/// How a panel's picture sits in its texture.
+///
+/// The texture is `side_w` by `side_h`, the multiples of 16 `tex_side` gives,
+/// and the picture fills `used_w` by `used_h` of it from the top left corner,
+/// the rest repeating the picture's last column and row. The model's `uv`
+/// then maps only the used part onto the quad.
+///
+/// Rounding each side to its own multiple of 16 and mapping the whole texture
+/// onto the quad, which is what this replaced, stretched every panel under
+/// about 8 blocks a side: a 2 by 3 block panel at 11 px per block was drawn
+/// from a 16 by 32 texture, a quarter off its own aspect. The used part is the
+/// picture at its exact size, `round(blocks * px)`, unless a side rounded down
+/// below that, in which case the picture is shrunk uniformly to fit, so the
+/// aspect is kept and the atlas is charged what `tex_side` says and no more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Sprite {
+    pub side_w: u32,
+    pub side_h: u32,
+    pub used_w: u32,
+    pub used_h: u32,
+}
+
+impl Sprite {
+    /// The sprite of a quad `w` by `h` blocks at `px` pixels per block.
+    pub fn of(w: f64, h: f64, px: u32) -> Sprite {
+        let side_w = tex_side(w, px);
+        let side_h = tex_side(h, px);
+        let exact_w = (w * f64::from(px)).round().max(1.0);
+        let exact_h = (h * f64::from(px)).round().max(1.0);
+        // One factor for both axes, or the shrink would be the stretch again.
+        let fit = (f64::from(side_w) / exact_w)
+            .min(f64::from(side_h) / exact_h)
+            .min(1.0);
+        Sprite {
+            side_w,
+            side_h,
+            used_w: ((exact_w * fit).round() as u32).clamp(1, side_w),
+            used_h: ((exact_h * fit).round() as u32).clamp(1, side_h),
+        }
+    }
+
+    /// The far corner of the used part in the model's 0 to 16 texture units.
+    pub fn uv_extent(self) -> (f64, f64) {
+        (
+            16.0 * f64::from(self.used_w) / f64::from(self.side_w),
+            16.0 * f64::from(self.used_h) / f64::from(self.side_h),
+        )
+    }
+
+    /// Atlas pixels the texture costs.
+    fn area(self) -> u64 {
+        u64::from(self.side_w) * u64::from(self.side_h)
+    }
+}
+
+/// `tex` laid out as `sprite`: brought to the used size when it is not there
+/// already, and the texture's remaining columns and rows filled by repeating
+/// the picture's last ones. Not transparent or black: the atlas is mipmapped,
+/// and a mip level averages the padding into the picture's edge, which with
+/// a dark padding draws a dark fringe along every panel.
+fn lay_out(tex: RgbImage, sprite: Sprite) -> RgbImage {
+    let Sprite {
+        side_w,
+        side_h,
+        used_w,
+        used_h,
+    } = sprite;
+    let picture = if tex.width() == used_w && tex.height() == used_h {
+        tex
+    } else {
+        image::imageops::resize(&tex, used_w, used_h, image::imageops::FilterType::Triangle)
+    };
+    if used_w == side_w && used_h == side_h {
+        return picture;
+    }
+    let (uw, uh, sw) = (used_w as usize, used_h as usize, side_w as usize);
+    let src = picture.as_raw();
+    let mut out = vec![0u8; sw * 3 * side_h as usize];
+    for y in 0..side_h as usize {
+        let sy = y.min(uh - 1);
+        let row = &src[sy * uw * 3..(sy + 1) * uw * 3];
+        let at = y * sw * 3;
+        out[at..at + uw * 3].copy_from_slice(row);
+        let last = &row[(uw - 1) * 3..];
+        for x in uw..sw {
+            out[at + x * 3..at + x * 3 + 3].copy_from_slice(last);
+        }
+    }
+    RgbImage::from_raw(side_w, side_h, out).expect("a side_w by side_h buffer")
 }
 
 /// Summary of what `write_packs` produced.
@@ -1024,15 +1186,15 @@ impl fmt::Display for PackReport {
 /// item model definitions are resource pack files. `Ok(None)` when the run
 /// placed nothing.
 pub fn write_packs(world_path: &Path) -> Result<Option<PackReport>, String> {
-    let (panels, px) = {
+    let (panels, px, requested_px) = {
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         if !r.enabled || r.panels.is_empty() {
             return Ok(None);
         }
-        (std::mem::take(&mut r.panels), r.px)
+        (std::mem::take(&mut r.panels), r.px, r.requested_px)
     };
     emit_gui_progress_update(98.0, "Writing facade panels...");
-    write_packs_for(world_path, panels, px).map(Some)
+    write_packs_for(world_path, panels, px, requested_px).map(Some)
 }
 
 /// Drops the panels of a run that will not reach [`write_packs`].
@@ -1045,7 +1207,6 @@ pub fn discard() {
     r.panels = Vec::new();
 }
 
-/// Total panel texture area at `px` pixels per block.
 /// What makes two panels the same picture: the pixels, and the size they are
 /// written at. A city hangs the same facade on hundreds of walls, so most
 /// panels are byte identical to another one.
@@ -1068,51 +1229,161 @@ fn pixel_hashes(panels: &[Panel]) -> Vec<u64> {
     panels.par_iter().map(pixel_hash).collect()
 }
 
-fn panel_key(p: &Panel, pixels: u64, px: u32) -> (u64, u32, u32) {
-    (pixels, tex_side(p.w, px), tex_side(p.h, px))
+/// What a panel's texture is: its pixels and the sprite they are laid out as.
+/// Two panels with the same key share one file in the pack.
+fn panel_key(p: &Panel, pixels: u64, px: u32) -> (u64, Sprite) {
+    (pixels, Sprite::of(p.w, p.h, px))
+}
+
+/// Which picture a texture carries at one resolution, for telling the atlas
+/// entries apart.
+///
+/// A panel that has been cropped is known by its pixels. A piece the preset
+/// facades have not cropped yet is known by a name for the pixels its gather
+/// will read at that resolution, which is what the atlas is sized from before
+/// the cropping starts; two such pieces with one name will hold one picture.
+/// Two with different names may still turn out identical, which only makes
+/// the estimate charge the atlas for a texture the pack will not carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Picture {
+    Pixels(u64),
+    Geometry(u64),
+}
+
+/// Where a texture's picture comes from: pixels already cropped, or a piece
+/// still to be cropped, whose name depends on the resolution it is asked at.
+enum PictureOf<'a> {
+    Pixels(u64),
+    Geometry(&'a dyn Fn(u32) -> u64),
+}
+
+impl PictureOf<'_> {
+    fn at(&self, px: u32) -> Picture {
+        match self {
+            PictureOf::Pixels(pixels) => Picture::Pixels(*pixels),
+            PictureOf::Geometry(name) => Picture::Geometry(name(px)),
+        }
+    }
+}
+
+/// One texture the pack may carry: the picture and the quad it covers, which
+/// with the pack's px is its sprite.
+struct Extent<'a> {
+    picture: PictureOf<'a>,
+    w: f64,
+    h: f64,
+}
+
+/// The extents of cropped panels.
+fn extents<'a>(panels: &[Panel], hashes: &[u64]) -> Vec<Extent<'a>> {
+    panels
+        .iter()
+        .zip(hashes)
+        .map(|(p, &pixels)| Extent {
+            picture: PictureOf::Pixels(pixels),
+            w: p.w,
+            h: p.h,
+        })
+        .collect()
+}
+
+/// A piece a facade source is about to crop, for [`fit_pending`]: its quad's
+/// blocks and a name for the picture it will carry at a given pixels per
+/// block, under which pieces that will hold the same pixels count as one
+/// texture. Asked per resolution because the gather rounds to its own source
+/// pixels, and two pieces identical at one resolution can differ at another.
+pub(crate) struct Pending {
+    pub w: f64,
+    pub h: f64,
+    pub picture: Box<dyn Fn(u32) -> u64>,
 }
 
 /// `atlas_area` from the panels alone, for tests that are about the budget and
 /// not about who hashes what.
 #[cfg(test)]
 fn atlas_area_of(panels: &[Panel], px: u32) -> u64 {
-    atlas_area(panels, &pixel_hashes(panels), px)
+    atlas_area(&extents(panels, &pixel_hashes(panels)), px)
 }
 
 /// `fit_px` from the panels alone, for the same reason.
 #[cfg(test)]
 fn fit_px_of(panels: &[Panel], requested_px: u32) -> u32 {
-    fit_px(panels, &pixel_hashes(panels), requested_px)
+    fit_px(&extents(panels, &pixel_hashes(panels)), requested_px)
 }
 
-/// Atlas pixels the pack costs, counting each distinct picture once.
+/// Atlas pixels the pack costs and the textures it carries at `px`, counting
+/// each distinct texture once.
 ///
 /// The game stitches one texture per file, so two panels sharing a file cost
 /// the atlas one entry, not two. Counting per panel made a small town look like
 /// it needed the whole budget and pushed `fit_px` down a step or two for
 /// nothing, which is where the panels lost their sharpness.
-fn atlas_area(panels: &[Panel], hashes: &[u64], px: u32) -> u64 {
-    let mut seen: FnvHashSet<(u64, u32, u32)> = FnvHashSet::default();
-    panels
+fn atlas_cost(extents: &[Extent], px: u32) -> (u64, usize) {
+    let mut seen: FnvHashSet<(Picture, Sprite)> = FnvHashSet::default();
+    extents
         .iter()
-        .zip(hashes)
-        .filter(|(p, &pixels)| seen.insert(panel_key(p, pixels, px)))
-        .map(|(p, _)| u64::from(tex_side(p.w, px)) * u64::from(tex_side(p.h, px)))
-        .sum()
+        .map(|e| (e.picture.at(px), Sprite::of(e.w, e.h, px)))
+        .filter(|key| seen.insert(*key))
+        .fold((0, 0), |(area, n), (_, sprite)| {
+            (area + sprite.area(), n + 1)
+        })
 }
 
-/// Halves the resolution until the atlas budget holds, down to 4 px per block.
-fn fit_px(panels: &[Panel], hashes: &[u64], requested_px: u32) -> u32 {
+/// Atlas pixels the pack costs at `px`.
+fn atlas_area(extents: &[Extent], px: u32) -> u64 {
+    atlas_cost(extents, px).0
+}
+
+/// Lowers the resolution until the atlas budget holds, down to 4 px per block.
+fn fit_px(extents: &[Extent], requested_px: u32) -> u32 {
     let mut px = requested_px.max(MIN_PX_PER_BLOCK);
     // One step at a time, not `px /= 2`: halving is a four times jump in
     // area, and on a real box it lands at 8 where 11 would have fitted. The
     // atlas only cares that a sprite side is a multiple of 16, which
     // `tex_side` gives for any integer px, so nothing here wants a power of
     // two.
-    while px > MIN_PX_PER_BLOCK && atlas_area(panels, hashes, px) > atlas_budget() {
+    while px > MIN_PX_PER_BLOCK && atlas_area(extents, px) > atlas_budget() {
         px -= 1;
     }
     px
+}
+
+/// What [`fit_pending`] settled on: the pixels per block, and the textures and
+/// atlas pixels the whole pack is expected to cost at it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PendingFit {
+    pub px: u32,
+    pub textures: usize,
+    pub area: u64,
+}
+
+/// Sizes the atlas from everything the pack will carry before the pieces in
+/// `pending` are cropped: the panels already in the registry, which are the
+/// Mapillary walls and whatever eviction settled early, plus the pending
+/// pieces by their geometry. Returns the pixels per block the pack will be
+/// written at, and lowers the registry's own px to it, so the pending crops
+/// can be built at that resolution and the writer, whose ladder now starts
+/// there, finds them already the size it wants. None when the registry is off.
+///
+/// Before this the preset facades cropped every panel at the requested
+/// resolution and the writer shrank them all afterwards: on a city block that
+/// was two thirds of the run's peak memory held in pixels the pack never used.
+pub(crate) fn fit_pending(pending: &[Pending]) -> Option<PendingFit> {
+    let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    if !r.enabled {
+        return None;
+    }
+    let hashes = pixel_hashes(&r.panels);
+    let mut all = extents(&r.panels, &hashes);
+    all.extend(pending.iter().map(|p| Extent {
+        picture: PictureOf::Geometry(&*p.picture),
+        w: p.w,
+        h: p.h,
+    }));
+    let px = fit_px(&all, r.px);
+    r.px = px;
+    let (area, textures) = atlas_cost(&all, px);
+    Some(PendingFit { px, textures, area })
 }
 
 /// pack.mcmeta accepted by every 1.21.x and later: the old keys for 1.21 to
@@ -1162,8 +1433,8 @@ fn write_resource_zip<W: Write + Seek>(
     )?;
     put(PACK_MARKER.to_string(), b"arnis facade panels\n", options)?;
 
-    // The definitions and models, and which panel owns each distinct picture.
-    let mut texture_of: FnvHashMap<(u64, u32, u32), String> = FnvHashMap::default();
+    // The definitions and models, and which panel owns each distinct texture.
+    let mut texture_of: FnvHashMap<(u64, Sprite), String> = FnvHashMap::default();
     let mut owners: Vec<usize> = Vec::new();
     for (i, (p, pixels)) in panels.iter().enumerate() {
         put(
@@ -1173,10 +1444,12 @@ fn write_resource_zip<W: Write + Seek>(
         )?;
         let key = panel_key(p, *pixels, px);
         if let Some(shared) = texture_of.get(&key) {
-            // An identical panel already owns this picture; point at it.
+            // An identical panel already owns this picture; point at it. The
+            // key carries the sprite, so the shared texture has this panel's
+            // used part and the model maps the same fraction of it.
             put(
                 format!("assets/{NAMESPACE}/models/item/{}.json", p.name),
-                model_json_for(shared).as_bytes(),
+                model_json_for(shared, key.1).as_bytes(),
                 options,
             )?;
             continue;
@@ -1184,7 +1457,7 @@ fn write_resource_zip<W: Write + Seek>(
         texture_of.insert(key, p.name.clone());
         put(
             format!("assets/{NAMESPACE}/models/item/{}.json", p.name),
-            model_json(&p.name).as_bytes(),
+            model_json(&p.name, key.1).as_bytes(),
             options,
         )?;
         owners.push(i);
@@ -1194,11 +1467,11 @@ fn write_resource_zip<W: Write + Seek>(
     // and the duplicates straight to the drop, so from now on the run holds
     // the crops still to be written plus one chunk of PNGs, not the crops
     // plus the whole pack.
-    let mut queue: Vec<(String, RgbImage, u32, u32)> = Vec::with_capacity(owners.len());
+    let mut queue: Vec<(String, RgbImage, Sprite)> = Vec::with_capacity(owners.len());
     for i in owners {
         let (p, _) = &mut panels[i];
         let tex = std::mem::replace(&mut p.tex, RgbImage::new(0, 0));
-        queue.push((p.name.clone(), tex, tex_side(p.w, px), tex_side(p.h, px)));
+        queue.push((p.name.clone(), tex, Sprite::of(p.w, p.h, px)));
     }
     drop(panels);
     // Chunked so the encoded bytes waiting for the zip stay a few megabytes.
@@ -1208,14 +1481,10 @@ fn write_resource_zip<W: Write + Seek>(
         let batch: Vec<_> = queue.drain(..n).collect();
         let encoded: Vec<Result<(String, Vec<u8>), String>> = batch
             .into_par_iter()
-            .map(|(name, tex, w, h)| {
-                // A crop already at the pack's size is encoded as it is
-                // rather than copied first.
-                let img = if tex.width() == w && tex.height() == h {
-                    tex
-                } else {
-                    image::imageops::resize(&tex, w, h, image::imageops::FilterType::Triangle)
-                };
+            .map(|(name, tex, sprite)| {
+                // A crop built at the pack's resolution and already a multiple
+                // of 16 a side is encoded as it is rather than copied first.
+                let img = lay_out(tex, sprite);
                 let mut png = Vec::new();
                 img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
                     .map_err(|e| format!("encode {name}: {e}"))?;
@@ -1296,22 +1565,26 @@ pub(super) fn write_world_pack(path: &Path, bytes: &[u8]) -> Result<(), String> 
     install_world_pack(path, &staged)
 }
 
-/// Writes the resource pack for `panels` into `world_path`, at `requested_px`
-/// pixels per block or the highest resolution below it that fits the atlas.
+/// Writes the resource pack for `panels` into `world_path`, at `px` pixels per
+/// block or the highest resolution below it that fits the atlas. `px` is the
+/// resolution the run settled on, `requested_px` the one the settings asked
+/// for; the report names the second when the pack ends below it.
 fn write_packs_for(
     world_path: &Path,
     panels: Vec<Panel>,
+    px: u32,
     requested_px: u32,
 ) -> Result<PackReport, String> {
     let hashes = pixel_hashes(&panels);
-    let px = fit_px(&panels, &hashes, requested_px);
+    let all = extents(&panels, &hashes);
+    let px = fit_px(&all, px);
     if px < requested_px {
         warn(&format!(
             "Facade panels: {} panels would not fit the game's block atlas at {requested_px} px per block; using {px} px.",
             panels.len()
         ));
     }
-    if atlas_area(&panels, &hashes, px) > atlas_budget() {
+    if atlas_area(&all, px) > atlas_budget() {
         warn(&format!(
             "Facade panels: {} panels exceed the block atlas even at {px} px per block; the game may fail to stitch them.",
             panels.len()
@@ -1529,7 +1802,9 @@ mod tests {
         assert_eq!(v["model"]["type"], "minecraft:model");
         assert_eq!(v["model"]["model"], "arnis:item/f1_0_0_0");
 
-        let v: serde_json::Value = serde_json::from_str(&model_json("f1_0_0_0")).unwrap();
+        // A 4 by 3 block panel at 16 px fills its 64 by 48 texture exactly.
+        let v: serde_json::Value =
+            serde_json::from_str(&model_json("f1_0_0_0", Sprite::of(4.0, 3.0, 16))).unwrap();
         // block/block would halve the quad through its own `fixed` transform.
         assert!(v.get("parent").is_none(), "the model must have no parent");
         assert_eq!(v["textures"]["0"], "arnis:block/f1_0_0_0");
@@ -1542,12 +1817,12 @@ mod tests {
         let element = &v["elements"][0];
         assert_eq!(element["from"], serde_json::json!([0.0, 0.0, 7.9]));
         assert_eq!(element["to"], serde_json::json!([16.0, 16.0, 8.1]));
-        // Both wide faces carry the identity mapping, so the photograph reads
-        // upright and unmirrored whichever side the viewer stands on.
+        // Both wide faces carry the same unmirrored mapping, so the photograph
+        // reads upright and unmirrored whichever side the viewer stands on.
         for face in ["north", "south"] {
             assert_eq!(
                 element["faces"][face]["uv"],
-                serde_json::json!([0, 0, 16, 16]),
+                serde_json::json!([0.0, 0.0, 16.0, 16.0]),
                 "{face}"
             );
             assert_eq!(element["faces"][face]["texture"], "#0", "{face}");
@@ -1556,7 +1831,93 @@ mod tests {
     }
 
     #[test]
+    fn a_sprite_keeps_the_pictures_aspect_whichever_way_its_sides_round() {
+        // 2.5 by 2 blocks at 16 px is 40 by 32 exact; the width rounds up to
+        // 48 and the picture fills 40 of it.
+        assert_eq!(
+            Sprite::of(2.5, 2.0, 16),
+            Sprite {
+                side_w: 48,
+                side_h: 32,
+                used_w: 40,
+                used_h: 32
+            }
+        );
+        let (u, v) = Sprite::of(2.5, 2.0, 16).uv_extent();
+        assert!((u - 40.0 / 3.0).abs() < 1e-9 && v == 16.0, "{u} {v}");
+
+        // 2 by 3 blocks at 11 px is 22 by 33 exact, and both sides round
+        // down, to 16 and 32. Mapped whole, that texture was a quarter off the
+        // panel's aspect. The picture is shrunk by one factor instead, the
+        // width's 16/22, so it fills 16 by 24 and keeps its 2 to 3.
+        let s = Sprite::of(2.0, 3.0, 11);
+        assert_eq!((s.side_w, s.side_h), (16, 32));
+        assert_eq!((s.used_w, s.used_h), (16, 24));
+        assert_eq!(s.uv_extent(), (16.0, 12.0));
+
+        // Whole blocks at 16 px fill their texture and cost what they did.
+        let s = Sprite::of(20.0, 12.0, 16);
+        assert_eq!(
+            s,
+            Sprite {
+                side_w: 320,
+                side_h: 192,
+                used_w: 320,
+                used_h: 192
+            }
+        );
+        assert_eq!(s.area(), 320 * 192);
+        // Never below one texel, and never wider than the texture.
+        let s = Sprite::of(0.3, 0.3, 4);
+        assert_eq!(
+            s,
+            Sprite {
+                side_w: 16,
+                side_h: 16,
+                used_w: 1,
+                used_h: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_texture_is_padded_by_repeating_the_pictures_edge() {
+        // A 5 by 3 picture in an 8 by 4 texture: the last column and the last
+        // row carry on to the edge, and the corner is the last pixel.
+        let pic = RgbImage::from_fn(5, 3, |x, y| Rgb([x as u8 * 10, y as u8 * 10, 7]));
+        let sprite = Sprite {
+            side_w: 8,
+            side_h: 4,
+            used_w: 5,
+            used_h: 3,
+        };
+        let out = lay_out(pic.clone(), sprite);
+        assert_eq!((out.width(), out.height()), (8, 4));
+        for y in 0..4u32 {
+            for x in 0..8u32 {
+                let want = pic.get_pixel(x.min(4), y.min(2));
+                assert_eq!(out.get_pixel(x, y), want, "{x},{y}");
+            }
+        }
+        // A picture at its texture's size is handed back as it is.
+        let full = Sprite {
+            side_w: 5,
+            side_h: 3,
+            used_w: 5,
+            used_h: 3,
+        };
+        assert_eq!(lay_out(pic.clone(), full), pic);
+        // A crop at another size is brought to the used size first.
+        let big = RgbImage::from_pixel(10, 6, Rgb([1, 2, 3]));
+        let out = lay_out(big, sprite);
+        assert_eq!((out.width(), out.height()), (8, 4));
+        assert_eq!(out.get_pixel(7, 3).0, [1, 2, 3]);
+    }
+
+    #[test]
     fn texture_sides_stay_mipmappable_and_the_ladder_finds_the_largest_that_fits() {
+        // The registry is process-wide and reset below.
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
         // A whole multiple of 16 in every case, never zero.
         assert_eq!(tex_side(20.0, 16), 320);
         assert_eq!(tex_side(12.0, 16), 192);
@@ -1579,9 +1940,9 @@ mod tests {
         let many: Vec<Panel> = (0..250).map(panel).collect();
         assert_eq!(fit_px_of(&many, 16), 12);
         assert_eq!(fit_px_of(&many, 32), 12, "the same answer from higher up");
-        assert!(atlas_area(&many, &pixel_hashes(&many), 12) <= atlas_budget());
+        assert!(atlas_area_of(&many, 12) <= atlas_budget());
         assert!(
-            atlas_area(&many, &pixel_hashes(&many), 13) > atlas_budget(),
+            atlas_area_of(&many, 13) > atlas_budget(),
             "12 must be the largest that fits, not merely one that does"
         );
         assert_eq!(fit_px_of(&many[..2], 16), 16);
@@ -1603,6 +1964,47 @@ mod tests {
         // Never below 4, even when that still does not fit.
         let huge: Vec<Panel> = (0..20_000).map(panel).collect();
         assert_eq!(fit_px_of(&huge, 16), 4);
+
+        // Pieces not cropped yet are sized by their geometry, under the panels
+        // already in the registry, and the registry's px comes down with the
+        // answer so the writer starts where the crops are built. The same
+        // picture on two pieces is one texture; two pictures are two.
+        reset(true, 16);
+        let pending = |i: u64| Pending {
+            w: 32.0,
+            h: 32.0,
+            picture: Box::new(move |_| i),
+        };
+        let same: Vec<Pending> = (0..250).map(|_| pending(1)).collect();
+        assert_eq!(
+            fit_pending(&same),
+            Some(PendingFit {
+                px: 16,
+                textures: 1,
+                area: 512 * 512
+            })
+        );
+        let distinct: Vec<Pending> = (0..250).map(pending).collect();
+        assert_eq!(
+            fit_pending(&distinct),
+            Some(PendingFit {
+                px: 12,
+                textures: 250,
+                area: 250 * 384 * 384
+            })
+        );
+        assert_eq!(
+            REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).px,
+            12,
+            "the writer's ladder starts at the estimate"
+        );
+        assert_eq!(
+            fit_pending(&distinct[..2]).map(|f| f.px),
+            Some(12),
+            "and never climbs back above it"
+        );
+        reset(false, 16);
+        assert_eq!(fit_pending(&distinct), None, "nothing to fit when off");
     }
 
     #[test]
@@ -1615,7 +2017,7 @@ mod tests {
             h: 2.0,
             tex: RgbImage::from_pixel(24, 16, Rgb([10, 20, 30])),
         }];
-        let report = write_packs_for(&world, panels, 16).unwrap();
+        let report = write_packs_for(&world, panels, 16, 16).unwrap();
         assert_eq!((report.panels, report.px), (1, 16));
         // Display panels are resource pack only: no variants, no level.dat.
         assert!(!world.join("datapacks").exists());
@@ -2312,7 +2714,7 @@ mod tests {
             h: 3.0,
             tex: RgbImage::from_pixel(32, 24, Rgb([7, 8, 9])),
         }];
-        write_packs_for(&world, panels, 16).unwrap();
+        write_packs_for(&world, panels, 16, 16).unwrap();
         // Staged beside its final name and renamed into place, nothing left.
         assert!(!world.join("resources.zip.tmp").exists());
         assert!(!world.join("resourcepacks/resources.zip.tmp").exists());
@@ -2369,8 +2771,8 @@ mod tests {
                     "from": [0.0, 0.0, 7.9],
                     "to": [16.0, 16.0, 8.1],
                     "faces": {
-                        "north": { "uv": [0, 0, 16, 16], "texture": "#0" },
-                        "south": { "uv": [0, 0, 16, 16], "texture": "#0" }
+                        "north": { "uv": [0.0, 0.0, 16.0, 16.0], "texture": "#0" },
+                        "south": { "uv": [0.0, 0.0, 16.0, 16.0], "texture": "#0" }
                     }
                 }],
                 "display": {
@@ -2406,6 +2808,105 @@ mod tests {
             std::fs::read(world.join("resources.zip")).unwrap(),
             std::fs::read(world.join("resourcepacks/resources.zip")).unwrap()
         );
+    }
+
+    /// A panel whose blocks are not a multiple of 16 pixels gets a texture
+    /// padded out to one, and its model maps only the part the picture fills:
+    /// the photograph is drawn at its own aspect, not stretched to the
+    /// texture's. A second panel with the same picture shares the texture and
+    /// gets the same mapping.
+    #[test]
+    fn a_narrow_panel_fills_part_of_its_texture_and_the_model_says_which_part() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(tmp.path());
+        // 2.5 by 2 blocks at 16 px: 40 by 32 pixels of picture, whose last
+        // column is green so the padding can be told from the picture.
+        let pic = RgbImage::from_fn(40, 32, |x, _| {
+            if x == 39 {
+                Rgb([0, 255, 0])
+            } else {
+                Rgb([200, 30, 30])
+            }
+        });
+        let panels = vec![
+            Panel {
+                name: "b7_1_0_0".to_string(),
+                w: 2.5,
+                h: 2.0,
+                tex: pic.clone(),
+            },
+            Panel {
+                name: "b7_2_0_0".to_string(),
+                w: 2.5,
+                h: 2.0,
+                tex: pic,
+            },
+        ];
+        let report = write_packs_for(&world, panels, 16, 16).unwrap();
+        assert_eq!((report.panels, report.px), (2, 16));
+
+        let file = std::fs::File::open(world.join("resources.zip")).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                PACK_MARKER.to_string(),
+                "assets/arnis/items/b7_1_0_0.json".to_string(),
+                "assets/arnis/items/b7_2_0_0.json".to_string(),
+                "assets/arnis/models/item/b7_1_0_0.json".to_string(),
+                "assets/arnis/models/item/b7_2_0_0.json".to_string(),
+                "assets/arnis/textures/block/b7_1_0_0.png".to_string(),
+                "pack.mcmeta".to_string(),
+            ],
+            "one texture for the two identical panels"
+        );
+        let read = |archive: &mut zip::ZipArchive<std::fs::File>, name: &str| {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut archive.by_name(name).unwrap(), &mut text).unwrap();
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()
+        };
+        // 40 of 48 texture pixels wide is 13.333 of the model's 16, and the
+        // whole 32 high.
+        for name in ["b7_1_0_0", "b7_2_0_0"] {
+            let model = read(
+                &mut archive,
+                &format!("assets/arnis/models/item/{name}.json"),
+            );
+            assert_eq!(model["textures"]["0"], "arnis:block/b7_1_0_0", "{name}");
+            for face in ["north", "south"] {
+                let uv = model["elements"][0]["faces"][face]["uv"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_f64().unwrap())
+                    .collect::<Vec<f64>>();
+                assert_eq!(uv.len(), 4);
+                assert_eq!((uv[0], uv[1], uv[3]), (0.0, 0.0, 16.0), "{name} {face}");
+                assert!((uv[2] - 40.0 / 3.0).abs() < 1e-9, "{name} {face}: {uv:?}");
+            }
+        }
+
+        let mut png = Vec::new();
+        std::io::Read::read_to_end(
+            &mut archive
+                .by_name("assets/arnis/textures/block/b7_1_0_0.png")
+                .unwrap(),
+            &mut png,
+        )
+        .unwrap();
+        let img = image::load_from_memory(&png).unwrap().into_rgb8();
+        assert_eq!((img.width(), img.height()), (48, 32));
+        // The picture is intact and the padding repeats its last column, so
+        // the mipmaps blend green into green at the edge and not black.
+        assert_eq!(img.get_pixel(0, 0).0, [200, 30, 30]);
+        assert_eq!(img.get_pixel(38, 31).0, [200, 30, 30]);
+        assert_eq!(img.get_pixel(39, 15).0, [0, 255, 0]);
+        for x in 40..48 {
+            assert_eq!(img.get_pixel(x, 0).0, [0, 255, 0], "{x}");
+            assert_eq!(img.get_pixel(x, 31).0, [0, 255, 0], "{x}");
+        }
     }
 
     /// A world the user has dressed themselves keeps its pack: ours goes in,
