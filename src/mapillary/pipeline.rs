@@ -267,6 +267,8 @@ pub struct RunStats {
     pub exported_walls: usize,
     /// Images whose pixels reached a wall and so have to be credited.
     pub credited: usize,
+    /// What the run asked of the network.
+    pub net: fetch::NetCounts,
     pub fetch_s: f64,
     pub geometry_s: f64,
     pub align_s: f64,
@@ -285,7 +287,7 @@ impl RunStats {
              reg {} local / {} global / {} none; tiers A {} / B {} / C {} / D {}; \
              cache {} hit / {} built; {} thumbnails and {} originals ({:.0} MB); \
              {} buildings and {} walls exported, {} images credited; \
-             fetch {:.0} s, geometry {:.0} s, align {:.0} s, hires {:.0} s, texture {:.0} s, export {:.0} s, total {:.0} s",
+             fetch {:.0} s, geometry {:.0} s, align {:.0} s, hires {:.0} s, texture {:.0} s, export {:.0} s, total {:.0} s{}",
             self.buildings,
             self.walls,
             self.reachable,
@@ -311,7 +313,27 @@ impl RunStats {
             self.hires_s,
             self.texture_s,
             self.export_s,
-            self.total_s
+            self.total_s,
+            self.net_summary()
+        )
+    }
+
+    /// Appended to the line above, and empty when nothing was fetched.
+    fn net_summary(&self) -> String {
+        let n = self.net;
+        if n.requests == 0 {
+            return String::new();
+        }
+        format!(
+            "; http {} requests ({} retried, {} rate limited), {:.0} MB, \
+             {:.0} s slept, {:.0} s in requests over {} workers",
+            n.requests,
+            n.retries,
+            n.rate_limited,
+            n.bytes as f64 / 1e6,
+            n.slept_ms as f64 / 1e3,
+            n.request_ms as f64 / 1e3,
+            fetch::DEFAULT_PARALLEL,
         )
     }
 }
@@ -1808,6 +1830,7 @@ fn dump_wall(
 
 /// Runs every stage for one world bbox, from the network.
 pub fn run(cfg: &PipelineConfig) -> Result<PipelineResult, String> {
+    fetch::net_reset();
     credits::reset();
     let t0 = Instant::now();
     // Nothing has ever been built with these tunables, so a cache-only run has
@@ -1839,6 +1862,7 @@ fn run_from_osm(cfg: &PipelineConfig, osm: Value, t0: Instant) -> Result<Pipelin
     if let Some(mut result) = run_from_cache(cfg, &osm)? {
         result.stats.fetch_s = t0.elapsed().as_secs_f64();
         result.stats.total_s = t0.elapsed().as_secs_f64();
+        result.stats.net = fetch::net_counts();
         return Ok(result);
     }
     // The cache could not answer, and this caller may not pay for the cold path.
@@ -1858,6 +1882,7 @@ fn run_from_osm(cfg: &PipelineConfig, osm: Value, t0: Instant) -> Result<Pipelin
     let mut result = run_with(cfg, &fetched)?;
     result.stats.fetch_s = fetch_s;
     result.stats.total_s = t0.elapsed().as_secs_f64();
+    result.stats.net = fetch::net_counts();
     Ok(result)
 }
 

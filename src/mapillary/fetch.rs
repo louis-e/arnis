@@ -99,9 +99,9 @@ const MAX_BODY_BYTES: usize = 96 * 1024 * 1024;
 
 const CHUNK_BYTES: usize = 64 * 1024;
 
-/// Downloads in flight. Well under the global 16 of `net::request_permit`, so
-/// imagery never crowds out the elevation and OSM fetches it runs beside.
-const DEFAULT_PARALLEL: usize = 6;
+/// Downloads in flight. Measured on 330 KB files: 46 files/s at 6, 62 at 12,
+/// 66 at 16. Twelve leaves four of the global 16 in `net::request_permit`.
+pub const DEFAULT_PARALLEL: usize = 12;
 
 /// Overpass mirrors, the Arnis one first. Same list and same order as the rest
 /// of Arnis uses, so its server sees one client.
@@ -294,6 +294,68 @@ enum Attempt {
     Undelivered(String),
 }
 
+/// What one run's HTTP traffic did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetCounts {
+    pub requests: u64,
+    /// Requests that were a second or later try of the same call.
+    pub retries: u64,
+    pub rate_limited: u64,
+    pub slept_ms: u64,
+    /// Summed over the workers, so it runs ahead of the wall clock.
+    pub request_ms: u64,
+    pub bytes: u64,
+}
+
+struct NetCounters {
+    requests: AtomicU64,
+    retries: AtomicU64,
+    rate_limited: AtomicU64,
+    slept_ms: AtomicU64,
+    request_ms: AtomicU64,
+    bytes: AtomicU64,
+}
+
+impl NetCounters {
+    const fn new() -> Self {
+        Self {
+            requests: AtomicU64::new(0),
+            retries: AtomicU64::new(0),
+            rate_limited: AtomicU64::new(0),
+            slept_ms: AtomicU64::new(0),
+            request_ms: AtomicU64::new(0),
+            bytes: AtomicU64::new(0),
+        }
+    }
+}
+
+static NET: NetCounters = NetCounters::new();
+
+/// Zeroes the counters. The GUI builds many worlds in one process.
+pub fn net_reset() {
+    for c in [
+        &NET.requests,
+        &NET.retries,
+        &NET.rate_limited,
+        &NET.slept_ms,
+        &NET.request_ms,
+        &NET.bytes,
+    ] {
+        c.store(0, Ordering::Relaxed);
+    }
+}
+
+pub fn net_counts() -> NetCounts {
+    NetCounts {
+        requests: NET.requests.load(Ordering::Relaxed),
+        retries: NET.retries.load(Ordering::Relaxed),
+        rate_limited: NET.rate_limited.load(Ordering::Relaxed),
+        slept_ms: NET.slept_ms.load(Ordering::Relaxed),
+        request_ms: NET.request_ms.load(Ordering::Relaxed),
+        bytes: NET.bytes.load(Ordering::Relaxed),
+    }
+}
+
 struct Http {
     client: reqwest::blocking::Client,
     limits: Limits,
@@ -346,15 +408,34 @@ impl Http {
     /// `graph` marks a Graph API call, whose 500 means "ask for less" whatever
     /// the wording; a download's 500 is just a 500.
     fn get(&self, url: &str, query: &[(&str, &str)], graph: bool) -> Result<Vec<u8>, HttpError> {
+        let started = Instant::now();
+        let out = self.get_counted(url, query, graph);
+        NET.request_ms
+            .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        out
+    }
+
+    fn get_counted(
+        &self,
+        url: &str,
+        query: &[(&str, &str)],
+        graph: bool,
+    ) -> Result<Vec<u8>, HttpError> {
         let mut last = String::new();
         let mut undelivered = 0u32;
         let attempts = self.limits.attempts.max(1);
 
         for attempt in 0..attempts {
             let mut wait = self.limits.backoff * (attempt + 1);
+            NET.requests.fetch_add(1, Ordering::Relaxed);
+            if attempt > 0 {
+                NET.retries.fetch_add(1, Ordering::Relaxed);
+            }
             match self.attempt(url, query) {
                 Attempt::Got(reply) => {
                     if reply.status.is_success() {
+                        NET.bytes
+                            .fetch_add(reply.body.len() as u64, Ordering::Relaxed);
                         return Ok(reply.body);
                     }
                     let text = String::from_utf8_lossy(&reply.body);
@@ -383,6 +464,7 @@ impl Http {
                         return Err(HttpError::Forbidden);
                     }
                     if reply.status.as_u16() == 429 {
+                        NET.rate_limited.fetch_add(1, Ordering::Relaxed);
                         // Honour Retry-After when it is a plain number of
                         // seconds, else back off exponentially; either way cap
                         // the wait so one rate limit cannot hang a generation.
@@ -406,6 +488,8 @@ impl Http {
                 }
             }
             if attempt + 1 < attempts {
+                NET.slept_ms
+                    .fetch_add(wait.as_millis() as u64, Ordering::Relaxed);
                 std::thread::sleep(wait);
             }
         }
@@ -2102,6 +2186,47 @@ mod tests {
             sleeps * (60.0 / DEFAULT_PARALLEL as f64),
         );
         assert_eq!(batch.ready.len(), 0);
+    }
+
+    /// The counters that say whether a slow run was computing or waiting.
+    #[test]
+    fn the_run_counts_what_it_asked_of_the_network() {
+        let jpeg = tiny_jpeg();
+        let body = jpeg.clone();
+        let _serial = serialized();
+        // Rate limited once, then served.
+        let server = Server::new(move |target, _base, _n| {
+            if !target.contains(".jpg") {
+                return Act::text(404, "");
+            }
+            static SERVED: AtomicUsize = AtomicUsize::new(0);
+            if SERVED.fetch_add(1, Ordering::Relaxed) == 0 {
+                Act::text(429, "slow down")
+            } else {
+                Act::Reply(200, body.clone())
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = config(&server, tmp.path());
+        store_meta(
+            &cfg.layout(),
+            "42",
+            &serde_json::json!({"id": "42", "thumb_2048_url": format!("{}/a.jpg", server.base)}),
+        );
+
+        net_reset();
+        let batch = download_images(&cfg, &["42".to_string()]);
+        assert_eq!(batch.ready.len(), 1);
+
+        let n = net_counts();
+        assert_eq!(n.requests, 2, "one refused and one served");
+        assert_eq!(n.retries, 1);
+        assert_eq!(n.rate_limited, 1);
+        assert!(n.slept_ms >= 1, "the 429 was waited out");
+        assert_eq!(n.bytes, jpeg.len() as u64);
+
+        net_reset();
+        assert_eq!(net_counts(), NetCounts::default());
     }
 
     #[test]
