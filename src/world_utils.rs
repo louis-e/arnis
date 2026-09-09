@@ -6,6 +6,30 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
 
+/// Replaces `path` by writing a temporary beside it and renaming it into place.
+///
+/// `level.dat` is rewritten by several features, and a plain `fs::write`
+/// truncates it first: a crash, a full disk or a pulled plug in that window
+/// leaves a zero length or half written `level.dat`, which Minecraft cannot
+/// open, and the world is gone. A rename either happens or does not.
+pub fn replace_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    // A rename is only atomic within one filesystem, so the temporary has to be
+    // a sibling; `with_extension` keeps it in the same directory by
+    // construction, and a path with no directory at all has nowhere to put one.
+    if path.parent().is_none() {
+        return Err(format!("{} has no parent directory", path.display()));
+    }
+    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    if let Err(e) = fs::write(&tmp, bytes) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("write {}: {e}", tmp.display()));
+    }
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("replace {}: {e}", path.display())
+    })
+}
+
 /// Returns the Desktop directory for Bedrock .mcworld file output.
 /// Falls back to home directory, then current directory.
 pub fn get_bedrock_output_directory() -> PathBuf {
@@ -518,15 +542,17 @@ pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
     fs::write(dp_root.join("pack.mcmeta"), PACK_MCMETA)
         .map_err(|e| format!("Failed to write pack.mcmeta: {e}"))?;
 
-    register_tall_datapack_in_level_dat(world_path)?;
+    enable_datapack_in_level_dat(world_path, TALL_DATAPACK_NAME)?;
 
     Ok(())
 }
 
-/// Appends the pack entry if missing. Expected to run on a fresh level.dat
-/// template whose Enabled list starts with `["vanilla"]`, so the appended
-/// entry naturally lands after vanilla and our dimension_type override wins.
-fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> {
+/// Appends `file/<pack_dir_name>` to `Data.DataPacks.Enabled` if missing, so the
+/// folder pack in `<world>/datapacks/<pack_dir_name>` loads when the world opens.
+/// Expected to run on a fresh level.dat template whose Enabled list starts with
+/// `["vanilla"]`, so the appended entry naturally lands after vanilla and the
+/// pack's overrides win.
+pub fn enable_datapack_in_level_dat(world_path: &Path, pack_dir_name: &str) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
         return Err(format!("level.dat not found at {level_path:?}"));
@@ -542,7 +568,7 @@ fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> 
     let mut root: Value = fastnbt::from_bytes(&decompressed)
         .map_err(|e| format!("Failed to parse level.dat NBT: {e}"))?;
 
-    let entry = format!("file/{TALL_DATAPACK_NAME}");
+    let entry = format!("file/{pack_dir_name}");
 
     {
         let data = match root {
@@ -584,7 +610,8 @@ fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> 
     let compressed = encoder
         .finish()
         .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
-    fs::write(&level_path, compressed).map_err(|e| format!("Failed to write level.dat: {e}"))?;
+    replace_file_atomically(&level_path, &compressed)
+        .map_err(|e| format!("Failed to write level.dat: {e}"))?;
 
     Ok(())
 }
@@ -700,7 +727,8 @@ pub fn apply_java_world_settings(
     let compressed = encoder
         .finish()
         .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
-    fs::write(&level_path, compressed).map_err(|e| format!("Failed to write level.dat: {e}"))?;
+    replace_file_atomically(&level_path, &compressed)
+        .map_err(|e| format!("Failed to write level.dat: {e}"))?;
 
     Ok(())
 }
@@ -785,7 +813,7 @@ pub fn set_spawn_in_level_dat(
         .finish()
         .map_err(|e| format!("Failed to finalize compression for level.dat: {e}"))?;
 
-    fs::write(&level_path, compressed_data)
+    replace_file_atomically(&level_path, &compressed_data)
         .map_err(|e| format!("Failed to write updated level.dat: {e}"))?;
 
     Ok(())

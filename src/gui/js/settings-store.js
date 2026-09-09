@@ -35,6 +35,18 @@ const SETTINGS = [
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
+  // The facade controls. Registered here like every other segmented control,
+  // so the panel's Revert and Reset to defaults reach them: the store reads the
+  // active segment and restores one by clicking it, which is also what keeps
+  // each group's own stored key in step.
+  { id: 'facade-source-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-source' },
+  // The token keeps its own key, set up in initSettings(). Its row gets the
+  // revert arrow like any other text field, but the panel's Reset leaves it
+  // alone: it is a credential the user had to go and create, not a world
+  // setting, and a clean slate should not cost them that.
+  { id: 'mapillary-token', kind: 'text', store: EXTERNAL, resettable: false },
+  { id: 'facade-mode-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-mode' },
+  { id: 'facade-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-detail' },
   { id: 'disable-height-limit-toggle', kind: 'checkbox', store: OWN },
   { id: 'aws-only-elevation-toggle', kind: 'checkbox', store: OWN },
   { id: 'bake-lighting-toggle', kind: 'checkbox', store: OWN },
@@ -228,7 +240,7 @@ function sanitize(entry, value) {
     case 'segmented': {
       if (typeof value !== 'string') return undefined;
       const known = el.querySelector(
-        `.segment[data-gamemode="${CSS.escape(value)}"]`
+        `.segment[${entry.valueAttr}="${CSS.escape(value)}"]`
       );
       return known ? value : undefined;
     }
@@ -243,11 +255,19 @@ function writeValue(entry, value) {
   if (!el || value === undefined) return;
 
   if (entry.kind === 'segmented') {
-    // The group's click handler owns the active class, so click it.
+    // The group's click handler owns the active class, so click it. A greyed
+    // group has disabled segments, and a disabled button ignores click(), so
+    // it is lifted for the one call: the value still has to land, or a choice
+    // made on Java is lost the moment the format changed.
     const seg = el.querySelector(
       `.segment[${entry.valueAttr}="${CSS.escape(String(value))}"]`
     );
-    if (seg && !seg.classList.contains('active')) seg.click();
+    if (seg && !seg.classList.contains('active')) {
+      const wasDisabled = seg.disabled;
+      seg.disabled = false;
+      seg.click();
+      seg.disabled = wasDisabled;
+    }
     return;
   }
 
@@ -262,6 +282,15 @@ function writeValue(entry, value) {
 
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// A segmented group is a div and never carries `disabled` itself; it is
+// greyed by disabling every segment in it.
+function isDisabled(entry, el) {
+  if (el.disabled) return true;
+  if (entry.kind !== 'segmented') return false;
+  const segments = el.querySelectorAll('.segment');
+  return segments.length > 0 && Array.from(segments).every((s) => s.disabled);
 }
 
 function isModified(entry) {
@@ -348,7 +377,7 @@ function resetAll() {
   applying = true;
   try {
     for (const entry of SETTINGS) {
-      if (entry.revertable === false) continue;
+      if (entry.revertable === false || entry.resettable === false) continue;
       const def = defaultValue(entry);
       if (def === undefined) continue;
       writeValue(entry, def);
@@ -444,7 +473,7 @@ function refresh() {
 
     // A greyed out control must not advertise an action. Its stored value is
     // still restored and the button returns once it is enabled again.
-    const modified = !el.disabled && isModified(entry);
+    const modified = !isDisabled(entry, el) && isModified(entry);
     if (modified) anyModified = true;
 
     row.classList.toggle('is-modified', modified);

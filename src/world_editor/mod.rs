@@ -588,6 +588,12 @@ impl<'a> WorldEditor<'a> {
         !self.frame_cells.is_empty() && self.frame_cells.contains(&(x, abs_y, z))
     }
 
+    /// Whether Java entities (item frame decals, facade panels) are written.
+    #[inline]
+    pub fn map_decals_enabled(&self) -> bool {
+        self.map_decals
+    }
+
     /// True if the cell holds nothing a sign could not sit in front of (air, plants, snow).
     fn cell_is_open(&self, x: i32, abs_y: i32, z: i32) -> bool {
         match self.world.get_block(x, abs_y, z) {
@@ -661,6 +667,64 @@ impl<'a> WorldEditor<'a> {
         self.add_entity(id, fx, rel_y, fz, Some(extra));
         self.frame_cells.insert((fx, fy, fz));
         true
+    }
+
+    /// One item display entity at an exact position, for the facade photo
+    /// panels. Not a hanging entity: it sits wherever `Pos` puts it, which is
+    /// a sub-block point off the wall plane, so the caller owns the whole
+    /// placement and this only writes it.
+    ///
+    /// `seed` separates two displays whose `Pos` falls in the same block, which
+    /// is all the UUID is built from; two panels meeting at a corner would
+    /// otherwise get the same UUID and the game would keep one of them.
+    /// `extra` carries the display's own tags. False outside the editor's area
+    /// or in a region already flushed to disk.
+    pub fn add_item_display(
+        &mut self,
+        x: f64,
+        abs_y: f64,
+        z: f64,
+        seed: i64,
+        mut extra: HashMap<String, Value>,
+    ) -> bool {
+        let (bx, bz) = (x.floor() as i32, z.floor() as i32);
+        if !self.xzbbox.contains(&XZPoint::new(bx, bz)) || self.is_region_flushed(bx, bz) {
+            return false;
+        }
+        // add_entity_seeded works in ground-relative Y and would centre Pos on
+        // the block; the exact position goes in as an override.
+        let rel_y = abs_y.floor() as i32 - self.get_absolute_y(bx, 0, bz);
+        extra.insert(
+            "Pos".to_string(),
+            Value::List(vec![
+                Value::Double(x),
+                Value::Double(abs_y),
+                Value::Double(z),
+            ]),
+        );
+        self.add_entity_seeded("minecraft:item_display", bx, rel_y, bz, seed, Some(extra));
+        true
+    }
+
+    /// Every item display currently in the world, as its raw NBT compound.
+    #[cfg(test)]
+    pub fn item_displays(&self) -> Vec<HashMap<String, Value>> {
+        let mut out = Vec::new();
+        for region in self.world.regions.values() {
+            for chunk in region.chunks.values() {
+                let Some(Value::List(entities)) = chunk.other.get("entities") else {
+                    continue;
+                };
+                for entity in entities {
+                    let Value::Compound(e) = entity else { continue };
+                    if matches!(e.get("id"), Some(Value::String(id)) if id == "minecraft:item_display")
+                    {
+                        out.push(e.clone());
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Places a registered decal on one face of a block. Multi-tile keys are laid out with
@@ -1489,6 +1553,28 @@ impl<'a> WorldEditor<'a> {
         z: i32,
         extra_data: Option<HashMap<String, Value>>,
     ) {
+        // Two hanging entities can share a cell on opposite faces, so the face belongs in
+        // the UUID seed; without it they collide and the game keeps only one.
+        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
+            Some(Value::Byte(f)) => *f as i64,
+            _ => -1,
+        };
+        self.add_entity_seeded(id, x, y, z, face, extra_data);
+    }
+
+    /// `add_entity` with the UUID's extra seed given outright, for entities
+    /// that share a block cell without carrying a face byte. Entries in
+    /// `extra_data` are written last, so they can also override a base tag
+    /// (the item displays replace `Pos` with their exact sub-block position).
+    fn add_entity_seeded(
+        &mut self,
+        id: &str,
+        x: i32,
+        y: i32,
+        z: i32,
+        seed: i64,
+        extra_data: Option<HashMap<String, Value>>,
+    ) {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
@@ -1498,13 +1584,7 @@ impl<'a> WorldEditor<'a> {
         }
 
         let absolute_y = self.get_absolute_y(x, y, z);
-
-        // Two hanging entities can share a cell on opposite faces, so the face belongs in
-        // the UUID seed; without it they collide and the game keeps only one.
-        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
-            Some(Value::Byte(f)) => *f as i64,
-            _ => -1,
-        };
+        let face = seed;
         let mut entity = HashMap::new();
         entity.insert("id".to_string(), Value::String(id.to_string()));
         entity.insert(

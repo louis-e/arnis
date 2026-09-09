@@ -327,8 +327,176 @@
     return d;
   }
 
+  // ---------- facade textures ----------
+  // Walls from the Mapillary facade cache, drawn as textured quads in a custom
+  // WebGL layer so the real facade can be checked against the extrusions.
+  // Whatever a generation or the Precompute button has already built for this
+  // area is there; an area nothing has been built for comes back empty and the
+  // layer is simply not added.
+  let facadesCache = { key: "", walls: null };
+  // Bumped when the cache has changed under us, which is the only thing the
+  // bbox key cannot notice: the same box asked twice is a different answer
+  // once a precompute has filled it in.
+  let facadesGen = 0;
+
+  async function loadFacades(bboxText) {
+    try {
+      // The preview shows Mapillary walls from the cache. With another source
+      // selected the generation will not use them, and walking every cached
+      // export on each map move is a cost someone who tried the feature once
+      // should not keep paying.
+      if (localStorage.getItem("facadeSource") !== "mapillary") return;
+      // Same bound the buildings layer uses. Every call parses each cached
+      // export's building JSON and base64s its textures, so an unbounded box
+      // makes each map move pay for every area ever precomputed, including for
+      // someone who tried the feature once and turned it off.
+      if (bboxAreaM2(bboxText) > BUILDINGS_MAX_AREA_M2) return;
+      const key = bboxText + "|" + facadesGen;
+      if (facadesCache.key !== key) {
+        const raw = await window.__TAURI__.core.invoke("gui_get_preview_facades", {
+          bboxText: bboxText,
+        });
+        const walls = JSON.parse(raw);
+        if (!Array.isArray(walls) || walls.length === 0) return;
+        facadesCache = { key: key, walls: walls };
+      }
+      attachFacades(miniView, bboxText);
+      attachFacades(modalView, bboxText);
+    } catch (e) {
+      console.warn("Facade preview unavailable:", e);
+    }
+  }
+
+  function facadeLayer(d, walls) {
+    const exag = currentExaggeration();
+    // Geometry: four corners per wall, base on the drawn (exaggerated) terrain,
+    // top = base + real height, so it lines up with the fill-extrusion walls.
+    const quads = walls.map((w) => {
+      const baseA = terrainElevation(d, w.a[1], w.a[0]) * exag;
+      const baseB = terrainElevation(d, w.b[1], w.b[0]) * exag;
+      const base = Math.min(baseA, baseB);
+      const ma0 = maplibregl.MercatorCoordinate.fromLngLat([w.a[0], w.a[1]], base);
+      const mb0 = maplibregl.MercatorCoordinate.fromLngLat([w.b[0], w.b[1]], base);
+      const ma1 = maplibregl.MercatorCoordinate.fromLngLat([w.a[0], w.a[1]], base + w.h);
+      const mb1 = maplibregl.MercatorCoordinate.fromLngLat([w.b[0], w.b[1]], base + w.h);
+      // Two triangles; texture u runs a->b, v runs top(0)->bottom(1).
+      return {
+        tex: w.tex,
+        data: new Float32Array([
+          ma0.x, ma0.y, ma0.z, 0, 1,
+          mb0.x, mb0.y, mb0.z, 1, 1,
+          mb1.x, mb1.y, mb1.z, 1, 0,
+          ma0.x, ma0.y, ma0.z, 0, 1,
+          mb1.x, mb1.y, mb1.z, 1, 0,
+          ma1.x, ma1.y, ma1.z, 0, 0,
+        ]),
+      };
+    });
+    let program = null;
+    let items = [];
+    return {
+      id: "facades",
+      type: "custom",
+      renderingMode: "3d",
+      onAdd(map, gl) {
+        const vs = `
+          attribute vec3 a_pos; attribute vec2 a_uv; uniform mat4 u_matrix; varying vec2 v_uv;
+          void main() { v_uv = a_uv; gl_Position = u_matrix * vec4(a_pos, 1.0); }`;
+        const fs = `
+          precision mediump float; varying vec2 v_uv; uniform sampler2D u_tex;
+          void main() { vec4 c = texture2D(u_tex, v_uv); if (c.a < 0.5) discard; gl_FragColor = c; }`;
+        const compile = (type, src) => {
+          const sh = gl.createShader(type);
+          gl.shaderSource(sh, src);
+          gl.compileShader(sh);
+          return sh;
+        };
+        program = gl.createProgram();
+        gl.attachShader(program, compile(gl.VERTEX_SHADER, vs));
+        gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fs));
+        gl.linkProgram(program);
+        items = quads.map((q) => {
+          const buf = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+          gl.bufferData(gl.ARRAY_BUFFER, q.data, gl.STATIC_DRAW);
+          const tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          // 1x1 placeholder until the image decodes, so nothing is drawn black.
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+          const img = new Image();
+          img.onload = () => {
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            map.triggerRepaint();
+          };
+          img.src = q.tex;
+          return { buf: buf, tex: tex };
+        });
+      },
+      render(gl, args) {
+        if (!program || items.length === 0) return;
+        const matrix = args && args.defaultProjectionData ? args.defaultProjectionData.mainMatrix : args;
+        gl.useProgram(program);
+        gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_matrix"), false, matrix);
+        gl.uniform1i(gl.getUniformLocation(program, "u_tex"), 0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.disable(gl.CULL_FACE);
+        // The quad and the extruded footprint it hangs on are almost coplanar,
+        // so their depth values collide and the wall flickers through the photo
+        // as the camera moves. Bias the quad towards the viewer; the geometric
+        // clearance alone is not enough at low zoom, where depth precision is
+        // worst. Reset it below so the rest of the map draws unbiased.
+        gl.enable(gl.POLYGON_OFFSET_FILL);
+        gl.polygonOffset(-1.0, -1.0);
+        const aPos = gl.getAttribLocation(program, "a_pos");
+        const aUv = gl.getAttribLocation(program, "a_uv");
+        gl.activeTexture(gl.TEXTURE0);
+        for (const it of items) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, it.buf);
+          gl.enableVertexAttribArray(aPos);
+          gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 20, 0);
+          gl.enableVertexAttribArray(aUv);
+          gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 20, 12);
+          gl.bindTexture(gl.TEXTURE_2D, it.tex);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        gl.polygonOffset(0.0, 0.0);
+        gl.disable(gl.POLYGON_OFFSET_FILL);
+      },
+    };
+  }
+
+  function attachFacades(view, bboxText) {
+    if (!view || !view.map || !facadesCache.walls) return;
+    const d = datasets.get(view.gen);
+    if (!d || d.bboxText !== bboxText) return;
+    const map = view.map;
+    let attempts = 0;
+    const tryAdd = () => {
+      if (view !== miniView && view !== modalView) return;
+      try {
+        if (map.getLayer("facades")) map.removeLayer("facades");
+        map.addLayer(facadeLayer(d, facadesCache.walls));
+        return;
+      } catch (e) {
+        if (++attempts < 20) setTimeout(tryAdd, 250);
+      }
+    };
+    tryAdd();
+  }
+
   // Best-effort Overture buildings; every failure is silent by design.
   async function loadBuildings(bboxText) {
+    // First, and not after the fetch below: the facades are their own layer
+    // reading their own cache, and every early return in here used to take
+    // them with it. An area Overture has no footprint for is exactly an area
+    // whose facades are worth seeing.
+    loadFacades(bboxText);
     try {
       if (buildingsCache.key !== bboxText) {
         if (bboxAreaM2(bboxText) > BUILDINGS_MAX_AREA_M2) return;
@@ -342,6 +510,7 @@
         buildingsCache = { key: bboxText, geojson: gj };
       }
       attachBuildings(miniView, bboxText);
+      attachFacades(miniView, bboxText);
       attachBuildings(modalView, bboxText);
     } catch (e) {
       console.warn("Building preview unavailable:", e);
@@ -690,6 +859,7 @@
       map.once("load", () => map.once("render", () => requestAnimationFrame(reveal)));
       setTimeout(reveal, 2500);
       attachBuildings(miniView, bboxText);
+      attachFacades(miniView, bboxText);
     } catch (e) {
       console.warn("Mini preview render failed:", e);
       miniError("Preview unavailable", miniToken);
@@ -713,6 +883,15 @@
     },
     setGenerationRunning: function (running) {
       generationRunning = !!running;
+    },
+    // Called after a precompute or a generation has written facades into the
+    // cache. The rendered preview is left alone until there is a payload to
+    // hang the quads on, which is the same rule every other overlay follows.
+    refreshFacades: function () {
+      facadesGen++;
+      facadesCache = { key: "", walls: null };
+      const bboxText = payloadCache.data && payloadCache.data.bboxText;
+      if (bboxText) loadFacades(bboxText);
     },
   };
 
@@ -766,6 +945,7 @@
       : "";
     modalView = { map: map, gen: d.gen };
     attachBuildings(modalView, bboxText);
+    attachFacades(modalView, bboxText);
     gcDatasets();
   }
 

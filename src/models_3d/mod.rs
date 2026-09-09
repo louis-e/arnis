@@ -60,6 +60,16 @@ pub(crate) fn region_keys_around(cx: i32, cz: i32, r: i32) -> Vec<(i32, i32)> {
     out
 }
 
+/// Every root the 3D model fetchers cache into, for the settings panel's size
+/// readout.
+pub fn model_cache_roots() -> Vec<std::path::PathBuf> {
+    vec![
+        three_dmr::client::cache_root(),
+        wikidata::client::cache_root(),
+        custom::client::cache_root(),
+    ]
+}
+
 /// Clears on-disk caches for every 3D-model fetcher.
 pub fn clear_model_caches() -> CacheClearStats {
     clear_cache_dir(&three_dmr::client::cache_root())
