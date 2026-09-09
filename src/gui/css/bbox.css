@@ -450,15 +450,16 @@ body,
 .bbox-hint-overlay {
   /* Arnis's own surface, not Leaflet's. A white pill reads as a control the map
      library put there, and over the Smooth Dark and Satellite themes it is a
-     bright box on a dark picture. The radius is the 8px the start button and
-     the panel corners use, and the grey is the panel's #717171 darkened enough
-     to carry light text over a bright map. */
+     bright box on a dark picture. The grey is the panel's #717171 darkened
+     enough to carry light text over a bright map. The radius sits between the
+     app's 8px panels and the 4px of the map's own floating overlays (the
+     rotation toast, the coordinate menu), which the pill sits among. */
   background: rgba(58, 58, 58, 0.82);
   -webkit-backdrop-filter: blur(10px) saturate(120%);
   backdrop-filter: blur(10px) saturate(120%);
   color: #ececec;
   padding: 7px 14px;
-  border-radius: 8px;
+  border-radius: 5px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 12.5px;
   line-height: 1.4;
