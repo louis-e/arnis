@@ -588,11 +588,11 @@ mod tests {
     #[test]
     #[ignore = "needs the installed facade set, which is not in the repository"]
     fn repetition_on_the_installed_set() {
-        let Some(dir) = manifest::resolve_dir(None) else {
+        let Some(source) = manifest::resolve(None) else {
             panic!("no facade set installed");
         };
-        let (set, report) = manifest::load(&dir, 16.0).unwrap();
-        println!("{} from {}", report.summary(), dir.display());
+        let (set, report) = manifest::load(&source, 16.0).unwrap();
+        println!("{} from {source}", report.summary());
         for (what, buildings) in [
             ("terraced street", terraced_street()),
             ("mixed district", mixed_district()),

@@ -262,14 +262,10 @@ pub fn enabled() -> bool {
 pub fn reset(want: bool, dir: Option<&std::path::Path>, px: u32, scale: f64) {
     let px_per_m = px_per_m(px, scale);
     let set = if want {
-        match manifest::resolve_dir(dir) {
+        match manifest::resolve(dir) {
             Some(found) => match manifest::load(&found, px_per_m) {
                 Ok((set, report)) => {
-                    println!(
-                        "  Preset facades: {} from {}",
-                        report.summary(),
-                        found.display()
-                    );
+                    println!("  Preset facades: {} from {found}", report.summary());
                     Some(Arc::new(set))
                 }
                 Err(e) => {
@@ -280,14 +276,15 @@ pub fn reset(want: bool, dir: Option<&std::path::Path>, px: u32, scale: f64) {
                     None
                 }
             },
+            // Only a directory that was asked for by name and has no manifest
+            // in it; without one the bundled set always answers.
             None => {
                 warn(
-                    "Facades: textures not found",
+                    "Facades: no textures in that folder",
                     &format!(
-                        "Preset facades: no {} found beside the executable or in assets/{}. \
-                         Buildings keep their blocks.",
-                        manifest::MANIFEST_NAME,
-                        manifest::DIR_NAME
+                        "Preset facades: no {} in the directory given. Buildings keep their \
+                         blocks.",
+                        manifest::MANIFEST_NAME
                     ),
                 );
                 None

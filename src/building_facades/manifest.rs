@@ -1,27 +1,58 @@
 //! The preset facade set: which photographs exist, which buildings they suit,
 //! and what each one measures in the real world.
 //!
-//! # Why this is read from disk and not `include_bytes!`
+//! The set is compiled in, like the tree packs and the climate grid, because a
+//! release is one executable with nothing beside it: a set that lived only in
+//! `assets/` would never reach a user and the feature would do nothing. It
+//! costs every binary about 8.8 MB, including the users who never turn it on.
 //!
-//! `climate.rs` embeds `koppen_0p1.bin` because every world consults the
-//! climate grid, so the 6.5 MB is paid for by every user because every user
-//! uses it. The facade set is the opposite case:
-//!
-//! * It is off by default. A user who never turns it on would still carry it.
-//! * Even downsampled to the resolution the game can show, a hundred facade
-//!   photographs are several megabytes, and the source set is 228 MB.
-//! * The licence of the shipped set is unconfirmed (see `PROVENANCE.md`), and
-//!   pixels baked into a binary cannot be swapped out by whoever redistributes
-//!   it. On disk, replacing the set with a CC0 one is a manifest change and
-//!   nothing else, which is the property the brief asks for.
-//!
-//! So the set lives in `assets/building-facades/` next to the executable, and
-//! a missing or unreadable set turns the feature off with one warning rather
-//! than failing a run.
+//! A directory still wins over the bundled set, from `--building-facades-dir`,
+//! the `ARNIS_BUILDING_FACADES_DIR` variable, or an `assets/` directory beside
+//! the executable, so swapping the pictures is a flag and not a rebuild.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+use include_dir::{include_dir, Dir};
+
+static EMBEDDED: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets/building-facades");
+
+/// Where a set's files are read from.
+#[derive(Clone, Debug)]
+pub enum Source {
+    Dir(PathBuf),
+    Embedded,
+}
+
+impl Source {
+    /// Cheap enough to ask once per manifest entry, which is what `validate`
+    /// does rather than reading nine megabytes to find out.
+    fn has(&self, file: &str) -> bool {
+        match self {
+            Source::Dir(dir) => dir.join(file).is_file(),
+            Source::Embedded => EMBEDDED.get_file(file).is_some(),
+        }
+    }
+
+    fn read(&self, file: &str) -> Option<Cow<'static, [u8]>> {
+        match self {
+            Source::Dir(dir) => std::fs::read(dir.join(file)).ok().map(Cow::Owned),
+            Source::Embedded => EMBEDDED.get_file(file).map(|f| Cow::Borrowed(f.contents())),
+        }
+    }
+}
+
+impl fmt::Display for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Source::Dir(dir) => write!(f, "{}", dir.display()),
+            Source::Embedded => write!(f, "the bundled set"),
+        }
+    }
+}
 
 use fnv::FnvHashMap;
 use image::RgbImage;
@@ -236,7 +267,7 @@ pub fn related(category: BuildingCategory) -> &'static [&'static str] {
 /// live in, with each image decoded and rescaled to this run's metre scale
 /// only when a building first asks for it.
 pub struct FacadeSet {
-    dir: PathBuf,
+    source: Source,
     entries: Vec<Entry>,
     /// Entry indices per category name, in manifest order, so the choice does
     /// not depend on a hash map's iteration order.
@@ -351,7 +382,7 @@ impl FacadeSet {
         let loaded = self
             .entries
             .get(index)
-            .and_then(|e| load_scaled(&self.dir, e, px_per_m))
+            .and_then(|e| load_scaled(&self.source, e, px_per_m))
             .map(std::sync::Arc::new);
         cache.images.insert(index, loaded.clone());
         loaded.map(|img| (img, px_per_m))
@@ -364,17 +395,14 @@ impl FacadeSet {
 /// This is where the manifest's metres turn into pixels, and it is the only
 /// resample: everything after it crops or repeats whole pixels, so a storey
 /// can never come out taller than a storey.
-fn load_scaled(dir: &Path, entry: &Entry, px_per_m: f64) -> Option<RgbImage> {
-    let path = dir.join(&entry.file);
-    let img = match image::open(&path) {
+fn load_scaled(source: &Source, entry: &Entry, px_per_m: f64) -> Option<RgbImage> {
+    let bytes = source.read(&entry.file)?;
+    let img = match image::load_from_memory(&bytes) {
         // `into_rgb8` takes the decoder's own buffer when the file decoded to
         // RGB already; `to_rgb8` copies the whole image to do the same.
         Ok(img) => img.into_rgb8(),
         Err(e) => {
-            eprintln!(
-                "Warning: preset facade {} could not be read: {e}",
-                path.display()
-            );
+            eprintln!("Warning: preset facade {}: {e}", entry.file);
             return None;
         }
     };
@@ -415,14 +443,14 @@ fn safe_name(name: &str) -> bool {
 
 /// Validates one manifest entry. `Err` carries the reason for the summary.
 ///
-/// `dir` is checked for the file itself, so a manifest that has been committed
-/// without its pictures, or a set with one image missing, drops those entries
-/// at load rather than producing a bare panel for each of them later.
-fn validate(raw: TextureEntry, dir: &Path) -> Result<Entry, String> {
+/// The source is checked for the file itself, so a manifest that has been
+/// committed without its pictures, or a set with one image missing, drops those
+/// entries at load rather than producing a bare panel for each of them later.
+fn validate(raw: TextureEntry, source: &Source) -> Result<Entry, String> {
     if !safe_name(&raw.file) {
         return Err(format!("{}: not a plain file name", raw.file));
     }
-    if !dir.join(&raw.file).is_file() {
+    if !source.has(&raw.file) {
         return Err(format!("{}: no such file in the set", raw.file));
     }
     if !(raw.metres_wide.is_finite() && raw.metres_wide > 0.0) {
@@ -464,7 +492,11 @@ fn validate(raw: TextureEntry, dir: &Path) -> Result<Entry, String> {
 /// Parses a manifest's bytes and validates its entries. A single bad entry is
 /// dropped with a reason; only a manifest that will not parse at all, or that
 /// has no usable entry left, is an error.
-pub fn parse(bytes: &[u8], dir: &Path, px_per_m: f64) -> Result<(FacadeSet, LoadReport), String> {
+pub fn parse(
+    bytes: &[u8],
+    source: &Source,
+    px_per_m: f64,
+) -> Result<(FacadeSet, LoadReport), String> {
     let manifest: Manifest = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     if manifest.version == 0 {
         return Err("version must be at least 1".to_string());
@@ -484,7 +516,7 @@ pub fn parse(bytes: &[u8], dir: &Path, px_per_m: f64) -> Result<(FacadeSet, Load
     // the category keys in a fixed one; the chooser must not see a hash order.
     let mut by_category: BTreeMap<&'static str, Vec<usize>> = BTreeMap::new();
     for raw in manifest.textures {
-        match validate(raw, dir) {
+        match validate(raw, source) {
             Ok(entry) => {
                 let index = entries.len();
                 for name in &entry.categories {
@@ -504,7 +536,7 @@ pub fn parse(bytes: &[u8], dir: &Path, px_per_m: f64) -> Result<(FacadeSet, Load
     };
     Ok((
         FacadeSet {
-            dir: dir.to_path_buf(),
+            source: source.clone(),
             entries,
             by_category: by_category.into_iter().collect(),
             scaled: Mutex::new(Scaled {
@@ -534,7 +566,8 @@ pub(crate) fn set_for_test(
             std::fs::write(dir.path().join(&entry.file), b"").unwrap();
         }
     }
-    let (set, report) = parse(json.as_bytes(), dir.path(), px_per_m).unwrap();
+    let source = Source::Dir(dir.path().to_path_buf());
+    let (set, report) = parse(json.as_bytes(), &source, px_per_m).unwrap();
     (set, report, dir)
 }
 
@@ -543,12 +576,15 @@ pub(crate) fn set_for_test(
 /// A directory given on the command line is the answer, right or wrong: it is
 /// how a replacement set is run, and quietly falling back to the bundled set
 /// when it turns out to be empty would hide the mistake behind a world full of
-/// the wrong pictures. Without one, the environment override is tried, then
-/// the directory beside the executable, then the source tree, which is where a
-/// `cargo run` finds them since it has no packaged assets.
-pub fn resolve_dir(explicit: Option<&Path>) -> Option<PathBuf> {
+/// the wrong pictures, so that case is the only `None`. Without one, the
+/// environment override is tried, then a directory beside the executable, and
+/// the bundled set answers when neither is there.
+pub fn resolve(explicit: Option<&Path>) -> Option<Source> {
     if let Some(dir) = explicit {
-        return dir.join(MANIFEST_NAME).is_file().then(|| dir.to_path_buf());
+        return dir
+            .join(MANIFEST_NAME)
+            .is_file()
+            .then(|| Source::Dir(dir.to_path_buf()));
     }
     let mut tried: Vec<PathBuf> = Vec::new();
     if let Ok(dir) = std::env::var(DIR_ENV) {
@@ -556,11 +592,9 @@ pub fn resolve_dir(explicit: Option<&Path>) -> Option<PathBuf> {
             tried.push(PathBuf::from(dir));
         }
     }
-    // Beside the executable is where a released build carries the set, and the
-    // parents above it are where a build tree keeps it: `target/release/arnis`
-    // is three levels below the repository's own `assets/`. Walking up finds
-    // both without baking `CARGO_MANIFEST_DIR` into the binary, which is a path
-    // on the build machine and resolves nowhere on a user's disk.
+    // A set dropped beside the executable, or the repository's own `assets/`
+    // a few levels above a `cargo run`, so an edited picture shows without a
+    // rebuild.
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent();
         for _ in 0..MAX_SEARCH_DEPTH {
@@ -569,14 +603,20 @@ pub fn resolve_dir(explicit: Option<&Path>) -> Option<PathBuf> {
             dir = d.parent();
         }
     }
-    tried.into_iter().find(|d| d.join(MANIFEST_NAME).is_file())
+    Some(
+        tried
+            .into_iter()
+            .find(|d| d.join(MANIFEST_NAME).is_file())
+            .map_or(Source::Embedded, Source::Dir),
+    )
 }
 
-/// Loads the set from `dir`. `Err` describes what was wrong with it.
-pub fn load(dir: &Path, px_per_m: f64) -> Result<(FacadeSet, LoadReport), String> {
-    let path = dir.join(MANIFEST_NAME);
-    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    parse(&bytes, dir, px_per_m).map_err(|e| format!("{}: {e}", path.display()))
+/// Loads the set. `Err` describes what was wrong with it.
+pub fn load(source: &Source, px_per_m: f64) -> Result<(FacadeSet, LoadReport), String> {
+    let bytes = source
+        .read(MANIFEST_NAME)
+        .ok_or_else(|| format!("{source}: no {MANIFEST_NAME}"))?;
+    parse(&bytes, source, px_per_m).map_err(|e| format!("{source}: {e}"))
 }
 
 #[cfg(test)]
@@ -695,10 +735,10 @@ mod tests {
     #[test]
     fn an_empty_manifest_is_an_error_not_a_panic() {
         let dir = tempfile::tempdir().unwrap();
-        let d = dir.path();
-        assert!(parse(br#"{"version": 1, "textures": []}"#, d, 8.0).is_err());
-        assert!(parse(b"not json", d, 8.0).is_err());
-        assert!(parse(br#"{"version": 0, "textures": []}"#, d, 8.0).is_err());
+        let d = Source::Dir(dir.path().to_path_buf());
+        assert!(parse(br#"{"version": 1, "textures": []}"#, &d, 8.0).is_err());
+        assert!(parse(b"not json", &d, 8.0).is_err());
+        assert!(parse(br#"{"version": 0, "textures": []}"#, &d, 8.0).is_err());
     }
 
     #[test]
@@ -710,14 +750,14 @@ mod tests {
         let raw = br#"{"version": 1, "textures": [
           {"file": "gone.png", "categories": ["House"], "metres_wide": 8.0,
            "metres_tall": 6.0, "storeys": 2}]}"#;
-        let err = match parse(raw, dir.path(), 8.0) {
+        let err = match parse(raw, &Source::Dir(dir.path().to_path_buf()), 8.0) {
             Ok(_) => panic!("a set of one missing picture should not load"),
             Err(e) => e,
         };
         assert!(err.contains("no usable textures"), "{err}");
 
         std::fs::write(dir.path().join("gone.png"), b"").unwrap();
-        let (_set, report) = parse(raw, dir.path(), 8.0).unwrap();
+        let (_set, report) = parse(raw, &Source::Dir(dir.path().to_path_buf()), 8.0).unwrap();
         assert_eq!(report.textures, 1);
         assert_eq!(report.summary(), "1 textures");
     }
@@ -742,6 +782,44 @@ mod tests {
     #[test]
     fn a_missing_manifest_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load(dir.path(), 8.0).is_err());
+        assert!(load(&Source::Dir(dir.path().to_path_buf()), 8.0).is_err());
+    }
+
+    /// The bundled set is the one a release actually ships, and nothing else
+    /// in the suite reads it: a build tree always finds `assets/` on disk.
+    #[test]
+    fn the_bundled_set_loads_and_its_pictures_decode() {
+        let (set, report) = load(&Source::Embedded, 16.0).expect("the bundled set loads");
+        assert!(
+            report.textures >= 100,
+            "{} textures, {:?} rejected",
+            report.textures,
+            report.rejected
+        );
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+
+        // One picture off each end of the manifest, decoded to the size the
+        // metres and the scale ask for.
+        for index in [0, set.entries().len() - 1] {
+            let entry = &set.entries()[index];
+            let (img, px_per_m) = set.image(index).expect("the picture decodes");
+            assert!((px_per_m - 16.0).abs() < 1e-9);
+            let (w, h) = scaled_size(entry.metres_wide, entry.metres_tall, 16.0);
+            assert_eq!((img.width(), img.height()), (w, h), "{}", entry.file);
+        }
+    }
+
+    /// Asking without a directory always finds a set: the disk copy in a build
+    /// tree, the bundled one in a release. That is what makes the feature work
+    /// for a user who downloads a bare executable.
+    #[test]
+    fn a_set_is_always_found_unless_a_bad_one_was_named() {
+        assert!(resolve(None).is_some());
+
+        // A directory named on the command line is not second guessed: falling
+        // back to the bundled set would hide the mistake behind a world full of
+        // the wrong pictures.
+        let empty = tempfile::tempdir().unwrap();
+        assert!(resolve(Some(empty.path())).is_none());
     }
 }

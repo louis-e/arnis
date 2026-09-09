@@ -1666,8 +1666,8 @@ fn gui_start_generation(
                 // atlas the panels may take, and the budget lowers this when
                 // it has to.
                 facade_px: 16,
-                // The GUI ships the set beside the executable; pointing at a
-                // replacement set is a CLI aid.
+                // The set is compiled in; pointing at a replacement is a CLI
+                // aid.
                 building_facades_dir: None,
                 body: celestial_body,
             };

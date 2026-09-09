@@ -259,8 +259,8 @@ pub struct Args {
     pub facade_px: u32,
 
     /// Directory holding the preset facade set: a manifest.json and the images
-    /// it names. Defaults to assets/building-facades beside the executable, so
-    /// this only has to be given to run a replacement set from elsewhere.
+    /// it names. The set is compiled in, so this only has to be given to run a
+    /// replacement one.
     #[arg(long)]
     pub building_facades_dir: Option<PathBuf>,
 }
