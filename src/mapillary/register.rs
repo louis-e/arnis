@@ -20,11 +20,12 @@
 //! The shift is `(dx, dy, theta_deg)` about the raw camera centre, applied by
 //! [`super::sfm::shift_points`]. OSM never moves.
 //!
-//! [`run_align`] is the stage driver: it registers every pano, builds the depth
-//! maps, re-runs the visibility gates from the *registered* centres (CRITIQUE
-//! C22), fits a plane per (wall, view) (A5) with a per view foot z (A3), renders
-//! the preview crop of each surviving candidate to run the image gates, and then
-//! calls [`super::visibility::select_views`] once per wall.
+//! [`run_align`] is the stage driver: it registers every pano, re-runs the
+//! visibility gates from the *registered* centres (CRITIQUE C22), fits a plane
+//! per (wall, view) (A5) with a per view foot z (A3), builds a depth map for
+//! each pano a gate will read, renders the preview crop of each surviving
+//! candidate to run the image gates, and then calls
+//! [`super::visibility::select_views`] once per wall.
 //!
 //! Where this differs from the Python, and why:
 //!
@@ -1188,18 +1189,16 @@ pub fn run_align(
         .collect();
     let mut local_attempts: BTreeMap<String, Registration> = BTreeMap::new();
     let mut cams_reg: BTreeMap<String, Camera> = BTreeMap::new();
-    let mut depths: BTreeMap<String, DepthMap> = BTreeMap::new();
     let mut ground_points: BTreeMap<String, usize> = BTreeMap::new();
-    // The fallback, the registered camera and its depth map, per pano. Each
+    // The fallback, the registered camera and its ground level, per pano. Each
     // one reads its own cluster and the shared distance transform and writes
-    // nothing, so the whole thing is a parallel map; the depth map alone is a
-    // 720 by 360 pass over the cloud for every camera of the run.
+    // nothing, so the whole thing is a parallel map.
     type PanoOutcome = (
         String,
         Option<Registration>,
         Option<Registration>,
         Camera,
-        Option<(usize, DepthMap)>,
+        Option<usize>,
     );
     let outcomes: Vec<PanoOutcome> = input
         .cameras
@@ -1247,25 +1246,21 @@ pub fn run_align(
                 }
             }
             let cam_reg = apply_registration(cam, &reg.result);
-            let cloud = cluster.map(|cl| {
-                (
-                    sfm::ground_level(cl, cam.centre, params).1,
-                    sfm::depth_map(cl, &cam_reg, None, params),
-                )
-            });
-            (pid.clone(), attempt, replaced, cam_reg, cloud)
+            // Not this camera's depth map: which panos are ever read for one is
+            // not known until the gates below have their candidate lists.
+            let ground = cluster.map(|cl| sfm::ground_level(cl, cam.centre, params).1);
+            (pid.clone(), attempt, replaced, cam_reg, ground)
         })
         .collect();
-    for (pid, attempt, replaced, cam_reg, cloud) in outcomes {
+    for (pid, attempt, replaced, cam_reg, ground) in outcomes {
         if let Some(a) = attempt {
             local_attempts.insert(pid.clone(), a);
         }
         if let Some(r) = replaced {
             regs.insert(pid.clone(), r);
         }
-        if let Some((points, depth)) = cloud {
+        if let Some(points) = ground {
             ground_points.insert(pid.clone(), points);
-            depths.insert(pid.clone(), depth);
         }
         cams_reg.insert(pid, cam_reg);
     }
@@ -1378,6 +1373,19 @@ pub fn run_align(
             }
         }
     }
+    // The depth maps, built now that the run knows which panos are read for
+    // one. Each is 720 by 360 and about a megabyte, and one per registered
+    // camera was 1042 of them on the Munich box against the 467 the gates ask
+    // for. `by_pano`'s keys are the only ids `depths` is indexed by, here and
+    // in the selected view lists, which `select_views` only ever narrows.
+    let mut depths: BTreeMap<String, DepthMap> = by_pano
+        .par_iter()
+        .filter_map(|(pid, _)| {
+            let cam = &cams_reg[pid];
+            let cl = cluster_for(cam)?;
+            Some((pid.clone(), sfm::depth_map(cl, cam, None, params)))
+        })
+        .collect();
     // One photograph decodes once and is measured against every wall it can
     // see, so the parallelism is per pano rather than per candidate; the
     // verdicts are applied afterwards in pano order.
@@ -1543,10 +1551,9 @@ pub fn run_align(
         entry.candidates = cands_by_wall.remove(&w.key).unwrap_or_default();
     }
     let reachable = walls.iter().filter(|w| w.reachable).count();
-    // A depth map is a megabyte a camera and the run made one for every camera
-    // it registered, but past this point only the views a wall actually took
-    // are ever asked for one again. On the Munich box that is 1.1 GB handed
-    // back as about 60 MB.
+    // Past this point only the views a wall actually took are ever asked for a
+    // depth map again. On the Munich box that keeps 221 of the 467 the gates
+    // read and hands the rest back.
     let selected_panos: std::collections::BTreeSet<&str> = views
         .values()
         .flat_map(|v| v.views.iter().map(|c| c.pano_id.as_str()))
