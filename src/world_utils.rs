@@ -53,6 +53,37 @@ pub fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
 /// that need to distinguish "nothing usable survived" from a real sanitized
 /// value (e.g. a custom world name) can do so unambiguously.
 fn sanitize_chars_and_trim(name: &str) -> String {
+    sanitize_chars_and_trim_capped(name, MAX_FILENAME_BYTES)
+}
+
+/// Byte budget for a name derived from an area/place lookup. Kept well under
+/// the 255-byte limit filesystems put on a single path component, because
+/// these names get wrapped in longer strings (`Arnis {name}.mcworld`).
+const MAX_FILENAME_BYTES: usize = 64;
+
+/// Longest custom world name a user may set, counted in characters (not
+/// bytes) so the limit means the same thing in every script. Mirrored by the
+/// world-name editor's `maxlength` and character counter in the GUI, so what
+/// the user is allowed to type is exactly what lands on disk.
+pub const MAX_CUSTOM_WORLD_NAME_CHARS: usize = 48;
+
+/// Byte budget for a custom world name. Sized so the character cap above is
+/// always the binding limit - even at UTF-8's 4 bytes per character, plus
+/// room for a `" (99)"` de-duplication suffix - while still leaving the
+/// directory name inside the filesystem's 255-byte component limit.
+const MAX_CUSTOM_WORLD_NAME_BYTES: usize = MAX_CUSTOM_WORLD_NAME_CHARS * 4 + 5;
+
+/// Sanitizes a user-supplied world name, capping it by characters so a
+/// non-Latin name isn't silently cut to a fraction of what was typed the way
+/// a byte cap would (48 Japanese characters are 144 bytes).
+fn sanitize_custom_world_name(name: &str) -> String {
+    let capped: String = name.chars().take(MAX_CUSTOM_WORLD_NAME_CHARS).collect();
+    sanitize_chars_and_trim_capped(&capped, MAX_CUSTOM_WORLD_NAME_BYTES)
+}
+
+/// Shared body of [`sanitize_chars_and_trim`], with the byte budget supplied
+/// by the caller.
+fn sanitize_chars_and_trim_capped(name: &str, max_bytes: usize) -> String {
     // Windows forbids directory/file names ending in '.' or ' ' (trailing
     // dots/spaces are silently stripped by the OS, which would make our
     // sanitized name mismatch the actual created directory). Strip any
@@ -77,12 +108,11 @@ fn sanitize_chars_and_trim(name: &str) -> String {
     sanitized = strip_trailing_unsafe(sanitized.trim());
 
     // Limit length to avoid excessively long filenames
-    const MAX_LEN: usize = 64;
-    if sanitized.len() > MAX_LEN {
-        // Find a valid UTF-8 char boundary at or before MAX_LEN bytes
+    if sanitized.len() > max_bytes {
+        // Find a valid UTF-8 char boundary at or before max_bytes
         let cutoff = sanitized
             .char_indices()
-            .take_while(|(idx, _)| *idx < MAX_LEN)
+            .take_while(|(idx, _)| *idx < max_bytes)
             .last()
             .map(|(idx, ch)| idx + ch.len_utf8())
             .unwrap_or(0);
@@ -300,7 +330,7 @@ fn generate_unique_custom_world_name_excluding(
     raw_name: &str,
     exclude: Option<&Path>,
 ) -> String {
-    let sanitized = sanitize_chars_and_trim(raw_name);
+    let sanitized = sanitize_custom_world_name(raw_name);
 
     // Nothing usable survived sanitization (e.g. the input was only invalid
     // characters), so fall back to the default naming scheme instead of
@@ -403,7 +433,9 @@ pub fn rename_world(world_path: &Path, new_name: &str) -> Result<String, String>
     if trimmed.is_empty() {
         return Err("World name cannot be blank".to_string());
     }
-    if sanitize_chars_and_trim(trimmed).is_empty() {
+    // Same sanitizer the new name is actually built with, so this check can't
+    // pass a name that later resolves to nothing.
+    if sanitize_custom_world_name(trimmed).is_empty() {
         return Err("World name is invalid after sanitization".to_string());
     }
 
@@ -846,6 +878,60 @@ mod tests {
         assert_eq!(sanitize_for_filename("My World..."), "My World");
         assert_eq!(sanitize_for_filename("My World. "), "My World");
         assert_eq!(sanitize_for_filename("Trailing.dot."), "Trailing.dot");
+    }
+
+    #[test]
+    fn a_full_length_custom_name_survives_in_any_script() {
+        // The editor caps input at MAX_CUSTOM_WORLD_NAME_CHARS characters, so
+        // a name of exactly that many characters must come back untouched -
+        // in every script, not just Latin-1. A byte-based cap would quietly
+        // cut a Japanese or Cyrillic name to a third of what was typed.
+        let tmp = tempfile::tempdir().unwrap();
+        for name in [
+            "a".repeat(MAX_CUSTOM_WORLD_NAME_CHARS),
+            "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS),
+            "Мир"
+                .chars()
+                .cycle()
+                .take(MAX_CUSTOM_WORLD_NAME_CHARS)
+                .collect(),
+        ] {
+            let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some(&name)).unwrap());
+            assert_eq!(
+                world.file_name().unwrap().to_str().unwrap().chars().count(),
+                MAX_CUSTOM_WORLD_NAME_CHARS,
+                "{name} was truncated"
+            );
+            assert_eq!(world.file_name().unwrap(), name.as_str());
+        }
+    }
+
+    #[test]
+    fn area_names_keep_the_tighter_byte_budget() {
+        // Area names are wrapped in longer strings ("Arnis {name}.mcworld"),
+        // so they stay on the 64-byte budget, while a custom world name the
+        // user typed is capped by characters. Same input, deliberately
+        // different results - roughly 22 characters is all a 64-byte budget
+        // buys in a 3-bytes-per-character script (the cut keeps the character
+        // that starts inside the budget, so it can spill a couple of bytes
+        // past it), and that is what custom names used to be cut down to.
+        let long = "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS);
+        assert_eq!(sanitize_for_filename(&long).chars().count(), 22);
+        assert_eq!(
+            sanitize_custom_world_name(&long).chars().count(),
+            MAX_CUSTOM_WORLD_NAME_CHARS
+        );
+    }
+
+    #[test]
+    fn an_over_length_custom_name_is_capped_by_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let long = "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS + 20);
+        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some(&long)).unwrap());
+        assert_eq!(
+            world.file_name().unwrap(),
+            "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS).as_str()
+        );
     }
 
     #[test]

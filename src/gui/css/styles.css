@@ -229,6 +229,22 @@ a:hover {
   outline: none;
   cursor: text;
   text-align: left;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+/* At the character cap the field's own maxlength silently refuses anything
+   further, which on its own just feels like the keyboard stopped working.
+   Flipping the editor's gold accent to the red used for errors elsewhere is
+   the signal that the name is being held back rather than dropped. */
+.world-name-input[data-at-limit] {
+  color: #fa7878;
+  border-color: #fa7878;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-name-input {
+    transition: none;
+  }
 }
 
 /* Pencil icon toggled on via Settings > Custom World Name. Mirrors

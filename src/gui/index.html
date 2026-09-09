@@ -48,6 +48,11 @@
                        button stop propagation so their own clicks don't also trigger it. -->
                   <div class="world-name-row" onclick="startGeneration()">
                     <span id="world-name-label" class="world-name-label" data-placeholder="true">No world generated yet</span>
+                    <!-- maxlength both stops further typing at the cap and mirrors
+                         MAX_CUSTOM_WORLD_NAME_CHARS in src/world_utils.rs, which caps by
+                         characters too - so nothing typed here is ever silently truncated
+                         on the way to disk. main.js reads the limit off this attribute to
+                         colour the field red once it's reached. -->
                     <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="48" autocomplete="off" spellcheck="false">
                     <button type="button" id="world-name-edit-button" class="world-name-edit-button" title="Set a custom world name" aria-label="Set a custom world name" style="display: none;">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75z"/></svg>

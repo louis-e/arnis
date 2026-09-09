@@ -1999,6 +1999,21 @@ function refreshWorldNameEditUI() {
   updateWorldNamePreviewLabel();
 }
 
+// Marks the editor red once it is full. The input's own maxlength is what
+// actually refuses further characters; this only makes that visible. The
+// limit is read off that same attribute rather than duplicating the number
+// here, so the colour can never disagree with what the field accepts.
+function updateWorldNameLimitState() {
+  const input = document.getElementById('world-name-input');
+  if (!input) return;
+  const limit = input.maxLength;
+  if (limit > 0 && input.value.length >= limit) {
+    input.setAttribute('data-at-limit', 'true');
+  } else {
+    input.removeAttribute('data-at-limit');
+  }
+}
+
 function startWorldNameEdit(event) {
   if (event) {
     event.preventDefault();
@@ -2022,6 +2037,7 @@ function startWorldNameEdit(event) {
   label.style.display = 'none';
   if (editButton) editButton.style.display = 'none';
   input.style.display = '';
+  updateWorldNameLimitState();
   input.focus();
   input.select();
 }
@@ -2129,6 +2145,9 @@ function initCustomWorldNameToggle() {
     // would bubble up and trigger that too.
     input.addEventListener('click', (event) => event.stopPropagation());
     input.addEventListener('mousedown', (event) => event.stopPropagation());
+    // "input" rather than "keydown": it also covers pasting, cutting and
+    // undo, and fires after the value has actually changed.
+    input.addEventListener('input', updateWorldNameLimitState);
     input.addEventListener('keydown', (event) => {
       event.stopPropagation();
       if (event.key === 'Enter') {
