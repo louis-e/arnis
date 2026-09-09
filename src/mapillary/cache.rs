@@ -294,6 +294,20 @@ pub fn read_cached(path: &Path) -> Option<Vec<u8>> {
     }
 }
 
+/// Whether a cache entry is there, answered without reading it.
+///
+/// The same question [`read_cached`] answers, for a caller that wants nothing
+/// but the answer. The download batches ask it of every file they are about to
+/// skip, so on an area whose imagery is already here the check used to read the
+/// whole download off the disk and throw it away: the Munich box's 470
+/// thumbnails and 218 originals are 246 MB and 401 MB (see the `pipeline`
+/// header), and the texture stage then read the same files again to decode them.
+pub fn is_cached(path: &Path) -> bool {
+    // `is_file` because `read_cached` fails on a directory, and a directory has
+    // a non-zero length on some filesystems.
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
+}
+
 // --------------------------------------------------------------------------- the wall product
 
 /// A wall product as it is stored: the scalars in JSON next to the two PNGs.

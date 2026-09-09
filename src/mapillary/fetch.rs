@@ -918,7 +918,10 @@ fn ensure_image(
     guard: &BatchGuard,
 ) -> Result<PathBuf, String> {
     let path = layout.image_path(id, cfg.size)?;
-    if cache::read_cached(&path).is_some() {
+    // Existence, not bytes: the caller wants the path, and on a warm area every
+    // file in the batch is already here, so reading each one to decide that
+    // costs the whole download over again off the disk.
+    if cache::is_cached(&path) {
         // Before the guard, always. A batch that has given up on the network
         // must still hand back everything already on disk, or a run that lost
         // its last few downloads would lose the hundreds it already had.
@@ -1058,8 +1061,10 @@ fn ensure_cluster(
     guard: &BatchGuard,
 ) -> Result<PathBuf, String> {
     let path = layout.cluster_path(&cluster.id)?;
-    if cache::read_cached(&path).is_some() {
-        // Cache first, guard second: see [`ensure_image`].
+    if cache::is_cached(&path) {
+        // Cache first, guard second, and existence rather than bytes: see
+        // [`ensure_image`]. A reconstruction is half a megabyte compressed, so
+        // this is the larger half of what the check used to read.
         guard.record(true);
         return Ok(path);
     }
@@ -2116,6 +2121,119 @@ mod tests {
         assert_eq!(server.count("/a.jpg"), 1);
         assert_eq!(download_images(&cfg, &["42".to_string()]).ready.len(), 1);
         assert_eq!(server.count("/a.jpg"), 1, "the second run reads the cache");
+    }
+
+    /// An HTTP/1.1 server that keeps the connection open and counts the sockets
+    /// it accepts as well as the requests it answers.
+    ///
+    /// [`Server`] answers `Connection: close`, which is what keeps its request
+    /// log simple, and a test about connection reuse needs exactly the opposite.
+    struct PoolServer {
+        base: String,
+        connections: Arc<AtomicUsize>,
+        requests: Arc<AtomicUsize>,
+        listener: Arc<TcpListener>,
+        stopping: Arc<AtomicBool>,
+    }
+
+    impl PoolServer {
+        fn new(body: Vec<u8>) -> Self {
+            let listener = Arc::new(TcpListener::bind("127.0.0.1:0").unwrap());
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let connections = Arc::new(AtomicUsize::new(0));
+            let requests = Arc::new(AtomicUsize::new(0));
+            let stopping = Arc::new(AtomicBool::new(false));
+
+            let accept = Arc::clone(&listener);
+            let conns = Arc::clone(&connections);
+            let reqs = Arc::clone(&requests);
+            let stop = Arc::clone(&stopping);
+            std::thread::spawn(move || {
+                while let Ok((mut stream, _)) = accept.accept() {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    conns.fetch_add(1, Ordering::Relaxed);
+                    let reqs = Arc::clone(&reqs);
+                    let body = body.clone();
+                    std::thread::spawn(move || {
+                        // So a pooled connection nobody asks anything more of
+                        // ends its thread instead of holding it to the end of
+                        // the test binary.
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        while read_request_line(&stream).is_some() {
+                            reqs.fetch_add(1, Ordering::Relaxed);
+                            let head = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+                                body.len()
+                            );
+                            if stream.write_all(head.as_bytes()).is_err()
+                                || stream.write_all(&body).is_err()
+                                || stream.flush().is_err()
+                            {
+                                return;
+                            }
+                        }
+                    });
+                }
+            });
+
+            PoolServer {
+                base,
+                connections,
+                requests,
+                listener,
+                stopping,
+            }
+        }
+    }
+
+    impl Drop for PoolServer {
+        fn drop(&mut self) {
+            self.stopping.store(true, Ordering::Relaxed);
+            let _ = TcpStream::connect(self.listener.local_addr().unwrap());
+        }
+    }
+
+    /// One HTTP client for the whole batch, so a batch of many small files is a
+    /// handful of connections and not a TCP and TLS handshake per file.
+    ///
+    /// [`Http::new`] is called once in [`download_images`] and the `reqwest`
+    /// client it builds pools its connections across the `rayon` workers. That
+    /// is worth pinning: on a real run a batch is hundreds of files of a few
+    /// hundred kilobytes each, where a fresh handshake per file is most of the
+    /// per file cost, and moving the client construction inside the per file
+    /// closure would look harmless and cost exactly that.
+    #[test]
+    fn a_download_batch_reuses_its_connections() {
+        let _serial = serialized();
+        let server = PoolServer::new(tiny_jpeg());
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = FetchConfig::new("MLY|test", BBox::new(48.1356, 11.5782, 48.1360, 11.5786));
+        cfg.cache_dir = tmp.path().to_path_buf();
+        cfg.parallel = 3;
+
+        let ids: Vec<String> = (0..24).map(|i| format!("{i:04}")).collect();
+        for id in &ids {
+            store_meta(
+                &cfg.layout(),
+                id,
+                &serde_json::json!({
+                    "id": id,
+                    "thumb_2048_url": format!("{}/{id}.jpg", server.base),
+                }),
+            );
+        }
+
+        let batch = download_images(&cfg, &ids);
+        assert_eq!(batch.ready.len(), 24, "{:?}", batch.failed);
+        assert_eq!(server.requests.load(Ordering::Relaxed), 24);
+        let opened = server.connections.load(Ordering::Relaxed);
+        assert!(
+            opened <= 2 * cfg.parallel,
+            "24 files at {} in flight opened {opened} connections",
+            cfg.parallel
+        );
     }
 
     /// The texture stage's `hires` ladder is only worth anything if asking for
