@@ -30,7 +30,7 @@ mod mvt;
 mod pmtiles;
 mod tiles;
 
-pub use cache::clear_overture_cache;
+pub use cache::{cache_root, clear_overture_cache};
 
 /// What a fetch actually cost, so the two transports can be compared on
 /// measurement rather than on the docstrings above.

@@ -21,6 +21,7 @@ use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
@@ -162,12 +163,17 @@ pub fn run_gui() -> Result<(), String> {
             gui_get_update_info,
             gui_get_platform,
             gui_clear_tile_caches,
+            gui_get_cache_size,
+            gui_get_mapillary_attributions,
             gui_get_world_map_data,
             gui_show_in_folder,
             gui_get_3d_model_attributions,
             gui_get_terrain_preview,
             gui_get_preview_landcover,
             gui_get_preview_buildings,
+            gui_get_preview_facades,
+            gui_precompute_facades,
+            gui_cancel_precompute,
             gui_log
         ])
         .setup(|app| {
@@ -771,6 +777,22 @@ async fn gui_get_preview_landcover(bbox_text: String) -> Result<tauri::ipc::Resp
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Facade wall quads for the 3D preview: lon/lat corners pushed clear of the
+/// extruded footprint (see `preview_walls_from_cache`), wall height, and the
+/// 8 px/m texture as a data URL.
+///
+/// Read from the facade cache, so whatever a generation or the Precompute
+/// button has already built for this area shows without a setting and without
+/// the network. An area nothing has been built for yields an empty list.
+#[tauri::command]
+async fn gui_get_preview_facades(bbox_text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::mapillary::facades::preview_walls_from_cache(&bbox_text)
+    })
+    .await
+    .map_err(|e| format!("Preview facades task failed: {e}"))?
+}
+
 /// Overture building footprints for the 3D preview as GeoJSON. Size-gated;
 /// the frontend ignores all errors (buildings are a best-effort overlay).
 #[tauri::command]
@@ -788,9 +810,20 @@ fn gui_get_version() -> String {
 }
 
 /// Latest release info from the GitHub Releases API + a comparison to the running version.
+///
+/// Off the main thread for the same reason as [`gui_get_cache_size`]: this is a
+/// blocking HTTPS request with a 5s connect and 10s read timeout, the front end
+/// asks for it while the window is already on screen, and a command without
+/// `async` runs inline on the thread that owns the webview. On a network that
+/// drops the connection to GitHub rather than refusing it, that timeout was the
+/// window not repainting.
 #[tauri::command]
-fn gui_get_update_info() -> Result<version_check::UpdateInfo, String> {
-    version_check::check_for_updates().map_err(|e| format!("Update check failed: {e}"))
+async fn gui_get_update_info() -> Result<version_check::UpdateInfo, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        version_check::check_for_updates().map_err(|e| format!("Update check failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Update check task failed: {e}"))?
 }
 
 /// Compile-time target platform: "windows" / "macos" / "linux" / "unknown".
@@ -807,22 +840,99 @@ fn gui_get_platform() -> &'static str {
     }
 }
 
-/// Wipe both the elevation-tile and ESA-land-cover on-disk caches, so
-/// subsequent generations re-download from the upstream providers. This
-/// is what the "Clean tile cache" button in the GUI's Application
-/// settings panel calls into.
+/// How much disk every Arnis cache holds together, as a short string like
+/// "812 MB". The settings panel shows it next to the clear button so the user
+/// can tell whether clearing is worth it.
+///
+/// Off the main thread, because the cost is in the number of cached files
+/// rather than in their size, and a `#[tauri::command]` without `async` runs
+/// inline on the thread that owns the webview. A tile cache with a Mapillary
+/// facade run in it reaches tens of thousands of files, and the walk was
+/// freezing the window for seconds at a time; a late number is fine, a frozen
+/// window is not.
+#[tauri::command]
+async fn gui_get_cache_size() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(cache_size_string)
+        .await
+        .map_err(|e| format!("Cache size task failed: {e}"))
+}
+
+/// Every cache root's size added up, as a short human string.
+fn cache_size_string() -> String {
+    use crate::elevation::cache::{dir_size_bytes, format_size, get_base_cache_dir};
+
+    // The tile cache root already contains the Mapillary facade cache, which
+    // lives under it as its own provider directory.
+    let mut total = dir_size_bytes(&get_base_cache_dir());
+    total = total.saturating_add(dir_size_bytes(&crate::land_cover::land_cover_cache_dir()));
+    total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
+    // Its own root beside the tile cache, and Clear Cache deletes it.
+    total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
+    for root in crate::models_3d::model_cache_roots() {
+        total = total.saturating_add(dir_size_bytes(&root));
+    }
+    format_size(total)
+}
+
+/// The Mapillary imagery this generation used, one row per photograph, for the
+/// License and Credits panel. Mapillary imagery is CC BY-SA and every image has
+/// to name its photographer, so this is an obligation, not a nicety.
+#[tauri::command]
+fn gui_get_mapillary_attributions() -> Vec<MapillaryCreditRow> {
+    crate::mapillary::credits::list()
+        .into_iter()
+        .map(|c| MapillaryCreditRow {
+            title: c.title.clone(),
+            username: c.uploader().to_string(),
+            image_url: c.image_url(),
+            // Empty where the export named no uploader; the panel then shows
+            // the name as plain text rather than as a link that goes nowhere.
+            profile_url: c.profile_url(),
+        })
+        .collect()
+}
+
+#[derive(serde::Serialize)]
+struct MapillaryCreditRow {
+    title: String,
+    username: String,
+    image_url: String,
+    profile_url: String,
+}
+
+/// Wipe the elevation-tile, ESA-land-cover and Mapillary facade on-disk caches,
+/// so subsequent generations re-download from the upstream providers. This is
+/// what the "Clean tile cache" button in the GUI's Application settings panel
+/// calls into.
 ///
 /// Returns a single human-readable status line on success (the JS side
 /// surfaces it as a toast-style notification), and an `Err` only when
-/// one or more files couldn't be deleted — that case is rare (usually
+/// one or more files couldn't be deleted; that case is rare (usually
 /// a file still locked by a live generation run) but worth making
 /// visible so the user knows the wipe was partial.
 ///
-/// Both cache roots themselves are left on disk; only their *contents*
+/// The cache roots themselves are left on disk; only their *contents*
 /// are removed, so the next elevation/land-cover fetch doesn't have to
 /// recreate the directory tree.
 #[tauri::command]
-fn gui_clear_tile_caches() -> Result<String, String> {
+async fn gui_clear_tile_caches() -> Result<String, String> {
+    // Held for the whole wipe, not checked once: a generation that took the
+    // slot while the files were still going would read its caches out from
+    // under itself.
+    let slot = BusySlot::acquire(BUSY_CLEAR)
+        .map_err(|e| format!("{e} Clear the caches once it has finished."))?;
+    // Off the webview thread for the same reason as `gui_get_cache_size`: the
+    // cost is in the number of files, and a facade cache reaches tens of
+    // thousands.
+    tauri::async_runtime::spawn_blocking(move || {
+        let _slot = slot;
+        clear_tile_caches_now()
+    })
+    .await
+    .map_err(|e| format!("Cache clear task failed: {e}"))?
+}
+
+fn clear_tile_caches_now() -> Result<String, String> {
     use crate::elevation::cache::clear_all_cached_tiles;
     use crate::land_cover::clear_land_cover_cache;
     use crate::models_3d::clear_model_caches;
@@ -1016,30 +1126,161 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// What the settings row shows after a precompute: one line and its tooltip.
+///
+/// `built` is what the row's colour means. Green is "there are facades here
+/// now", so a run that was cancelled and a run that found nothing both come
+/// back plain rather than as a success or as a failure: neither is something
+/// the user did wrong, and neither left a facade behind.
+#[derive(serde::Serialize)]
+struct PrecomputeOutcome {
+    summary: String,
+    detail: String,
+    built: bool,
+}
+
+/// Set by [`gui_cancel_precompute`] and read by the running pipeline.
+///
+/// One flag for the process, because [`BUSY`] already allows only one
+/// precompute at a time. It is cleared when a precompute starts, so a cancel
+/// left over from the previous one cannot stop the next before it begins.
+static PRECOMPUTE_CANCEL: std::sync::OnceLock<Arc<std::sync::atomic::AtomicBool>> =
+    std::sync::OnceLock::new();
+
+fn precompute_cancel() -> &'static Arc<std::sync::atomic::AtomicBool> {
+    PRECOMPUTE_CANCEL.get_or_init(|| Arc::new(std::sync::atomic::AtomicBool::new(false)))
+}
+
+/// Fetches the Mapillary imagery for the selected box and runs the whole facade
+/// pipeline over it, so the walls are in the cache before any world asks.
+///
+/// Returns the line the settings row shows, `Ok` or `Err` alike: what came back
+/// is what the user reads, because the point of the button is that pressing it
+/// never leaves them wondering what happened. `Err` is only for a refusal or a
+/// failure; a run that was cancelled or found nothing is an `Ok` with `built`
+/// false, since neither is something the user did wrong.
+#[tauri::command]
+async fn gui_precompute_facades(
+    bbox_text: String,
+    mapillary_token: String,
+) -> Result<PrecomputeOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || precompute_facades(&bbox_text, &mapillary_token))
+        .await
+        .map_err(|e| format!("Precompute task failed: {e}"))?
+}
+
+fn precompute_facades(bbox_text: &str, token: &str) -> Result<PrecomputeOutcome, String> {
+    use crate::mapillary::{bbox_area_m2, PRECOMPUTE_MAX_AREA_M2};
+
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("Add a Mapillary token above: there is nothing to fetch without one.".into());
+    }
+    let bbox = LLBBox::from_str(bbox_text.trim())
+        .map_err(|_| "Select an area on the map first.".to_string())?;
+
+    // Before the slot, so a box that will be refused does not first make the
+    // Generate button unavailable for as long as it takes to say so.
+    let area = bbox_area_m2(bbox);
+    if area > PRECOMPUTE_MAX_AREA_M2 {
+        // The row is one line of the settings panel, so a refusal says what is
+        // wrong there and puts the reason behind it after a blank line, which
+        // the front end hangs on the row as its tooltip.
+        return Err(format!(
+            "This area is {:.2} km², over the {:.2} km² limit.\n\n\
+             What the pipeline costs follows the ground the box covers: 0.034 km² of Munich \
+             took under twenty minutes and 470 MB from cold, which puts this limit at the \
+             better part of an hour already. Precompute a large area in pieces instead; the \
+             cache keeps every wall each piece builds, and no piece redoes another's.",
+            area / 1e6,
+            PRECOMPUTE_MAX_AREA_M2 / 1e6,
+        ));
+    }
+
+    let _slot = BusySlot::acquire(BUSY_PRECOMPUTE)?;
+    let cancel = precompute_cancel();
+    cancel.store(false, std::sync::atomic::Ordering::Release);
+
+    match crate::mapillary::precompute(bbox, token, Arc::clone(cancel)) {
+        Ok(report) => Ok(PrecomputeOutcome {
+            summary: report.summary(),
+            detail: report.detail(),
+            built: report.walls > 0,
+        }),
+        // Not an error: the user asked for it. The pipeline stops between
+        // stages, and the walls it had already finished are written per wall as
+        // they are built rather than at the end, so they are kept and the next
+        // precompute over this area starts from them.
+        Err(e) if e == "cancelled" => Ok(PrecomputeOutcome {
+            summary: "Precompute cancelled. The walls it had already built are cached.".to_string(),
+            detail: format!(
+                "Cancelling waits for the stage in flight, so the run may have gone on for some \
+                 minutes after the button. Press Precompute again to carry on from what is in {}.",
+                crate::mapillary::facade_cache_dir().display()
+            ),
+            built: false,
+        }),
+        // A refused token, an Overpass outage, a download that never arrived:
+        // the pipeline's own words, said whole rather than summarised, because
+        // they are the only thing that says which of those it was. The prefix
+        // is here so the row is not a bare technical sentence with no subject.
+        Err(e) => Err(format!("Precompute failed: {e}")),
+    }
+}
+
+/// Asks a running precompute to stop.
+///
+/// It stops at the next stage boundary or the next wall, not immediately: the
+/// imagery search and the registration stage are each one call and neither is
+/// interruptible, so a cancel during the long middle of a cold run is noticed
+/// when that stage ends. Idempotent, and harmless when nothing is running.
+#[tauri::command]
+fn gui_cancel_precompute() {
+    precompute_cancel().store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// What owns the process: nothing, a generation, or a facade precompute.
+///
 /// Set while a generation owns the process. The world floor, terrain floor and filler-chunk
 /// base are process globals read from deep inside the block writers, and the terrain floor
 /// is derived from the bbox's own elevation, so a second run would retune all three under the
 /// first one's feet. The progress channel and world path are shared besides.
-static GENERATION_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+///
+/// One value rather than a flag per job, because two atomics can be taken by
+/// two callers at once. The precompute has to exclude a generation for a reason
+/// of its own: `pipeline::run` clears the Mapillary attribution store on entry,
+/// so a precompute started beside a generation would take the credits of the
+/// world being built with it.
+static BUSY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(BUSY_IDLE);
+const BUSY_IDLE: u8 = 0;
+const BUSY_GENERATION: u8 = 1;
+const BUSY_PRECOMPUTE: u8 = 2;
+const BUSY_CLEAR: u8 = 3;
 
-/// Owns `GENERATION_ACTIVE` for the length of one generation and clears it on drop, including
+/// Owns [`BUSY`] for the length of one job and clears it on drop, including
 /// on the early-return paths before the worker is spawned.
-struct GenerationSlot;
+#[derive(Debug)]
+struct BusySlot;
 
-impl GenerationSlot {
-    /// `None` when a generation is already running.
-    fn acquire() -> Option<Self> {
+impl BusySlot {
+    /// `Err` naming the holder when something else already owns the process.
+    fn acquire(job: u8) -> Result<Self, String> {
         use std::sync::atomic::Ordering;
-        GENERATION_ACTIVE
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .ok()
-            .map(|_| Self)
+        match BUSY.compare_exchange(BUSY_IDLE, job, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => Ok(Self),
+            // Short on purpose: `emit_gui_error` cuts a message at 35
+            // characters, and a sentence that ends mid-word says less than a
+            // short one that finishes.
+            Err(BUSY_PRECOMPUTE) => Err("A precompute is running.".to_string()),
+            Err(BUSY_CLEAR) => Err("The caches are being cleared.".to_string()),
+            Err(_) => Err("A generation is already running.".to_string()),
+        }
     }
 }
 
-impl Drop for GenerationSlot {
+impl Drop for BusySlot {
     fn drop(&mut self) {
-        GENERATION_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+        BUSY.store(BUSY_IDLE, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -1075,6 +1316,11 @@ fn gui_start_generation(
     world_time: i64,
     map_item: bool,
     signage: String,
+    mapillary_token: String,
+    facades_enabled: bool,
+    facade_mode: String,
+    building_facades_enabled: bool,
+    facade_detail: String,
     celestial_body_name: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
@@ -1082,10 +1328,12 @@ fn gui_start_generation(
 
     // Claim the process before touching any shared state. The frontend disables its button
     // for the same reason; this is the authoritative check behind it.
-    let Some(generation_slot) = GenerationSlot::acquire() else {
-        let msg = "A generation is already running.".to_string();
-        emit_gui_error(&msg);
-        return Err(msg);
+    let generation_slot = match BusySlot::acquire(BUSY_GENERATION) {
+        Ok(slot) => slot,
+        Err(msg) => {
+            emit_gui_error(&msg);
+            return Err(msg);
+        }
     };
 
     progress::reset_progress_floor();
@@ -1344,14 +1592,16 @@ fn gui_start_generation(
                 None
             };
 
-            // Create generation options
-            let generation_options = GenerationOptions {
+            // Create generation options. The facade job is filled in below,
+            // once `Args` exists to say whether there is one.
+            let mut generation_options = GenerationOptions {
                 path: generation_path.clone(),
                 format: world_format,
                 level_name,
                 spawn_point: mc_spawn_point,
                 luanti_game,
                 ground_level,
+                facades: crate::mapillary::FacadeJob::default(),
             };
 
             // Create an Args instance with the chosen bounding box
@@ -1409,12 +1659,50 @@ fn gui_start_generation(
                 map_preview: world_format != WorldFormat::LuantiWorld
                     && rotation_angle.abs() <= f64::EPSILON,
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
+                // The settings toggle and the token together: the toggle is what
+                // the user turns off to keep a saved token without paying for the
+                // download, and without a token there is nothing to fetch.
+                mapillary_facades: Some(facades_enabled),
+                mapillary_token: Some(mapillary_token.trim().to_string()).filter(|t| !t.is_empty()),
+                mapillary_probe: false,
+                mapillary_debug_dir: None,
+                // A CLI aid only: `--mapillary-facades-dir` builds from a
+                // prepared export instead of fetching one, which is how the
+                // Python lab's output is reviewed. The GUI fetches into the
+                // cache and the Precompute button fills it, so it has no field.
+                mapillary_facades_dir: None,
+                // Dumping a wall's intermediate products is a CLI debug aid.
+                mapillary_facade_debug_dir: None,
+                mapillary_facade_debug_walls: String::new(),
+                // Passed through even on Bedrock and Luanti, where the photo
+                // panels cannot work: `facades::install` builds the blocks and
+                // drops the panels, and `generate_world_with_options` says so
+                // out loud. Coercing it here would only hide a stale setting.
+                mapillary_facade_mode: crate::args::FacadeMode::from_str_lossy(&facade_mode),
+                // The frontend already sends false on a world format that
+                // cannot show item displays, and `data_processing` checks the
+                // format again, so a stale setting cannot leak through.
+                building_facades: building_facades_enabled,
+                facade_detail: crate::args::FacadeDetail::from_str_lossy(&facade_detail),
+                // No GUI field: the detail level above already says how much
+                // atlas the panels may take, and the budget lowers this when
+                // it has to.
+                facade_px: 16,
+                // The set is compiled in; pointing at a replacement is a CLI
+                // aid.
+                building_facades_dir: None,
                 body: celestial_body,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
             let args = args;
+
+            // Same as run_cli: the facade pipeline needs only the bbox, and its
+            // downloads are the longest part of a run that uses it, so it starts
+            // now and is collected just before the buildings.
+            generation_options.facades = crate::mapillary::FacadeJob::start(&args, bbox);
+            let generation_options = generation_options;
 
             // Same as run_cli: fix the dimension span before the editor is touched.
             crate::world_editor::set_world_bounds(
@@ -1612,22 +1900,66 @@ fn gui_start_generation(
 
 #[cfg(test)]
 mod generation_slot_tests {
-    use super::GenerationSlot;
+    use super::{BusySlot, BUSY_CLEAR, BUSY_GENERATION, BUSY_PRECOMPUTE};
+
+    /// The slot is one process global, so two tests taking it at once would
+    /// each see the other's claim and fail for no reason of their own.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The wipe holds the slot for its whole length, so a generation cannot
+    /// start reading the caches while the files are still going.
+    #[test]
+    fn a_cache_wipe_and_a_generation_exclude_each_other() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+
+        let clearing = BusySlot::acquire(BUSY_CLEAR).expect("the wipe gets the slot");
+        let refused = BusySlot::acquire(BUSY_GENERATION).expect_err("the generation waits");
+        assert!(refused.contains("cleared"), "{refused}");
+        drop(clearing);
+
+        let generating = BusySlot::acquire(BUSY_GENERATION).expect("the generation gets it");
+        let refused = BusySlot::acquire(BUSY_CLEAR).expect_err("the wipe waits");
+        assert!(refused.contains("generation"), "{refused}");
+        drop(generating);
+    }
 
     #[test]
     fn second_generation_is_refused_until_the_first_finishes() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         // The world floor, terrain floor and filler base are process globals, so a second
         // concurrent run would retune them under the first one's feet.
-        let first = GenerationSlot::acquire().expect("the first generation must get the slot");
+        let first = BusySlot::acquire(BUSY_GENERATION).expect("the first generation gets the slot");
         assert!(
-            GenerationSlot::acquire().is_none(),
+            BusySlot::acquire(BUSY_GENERATION).is_err(),
             "a second generation must be refused while the first holds the slot"
         );
         drop(first);
         assert!(
-            GenerationSlot::acquire().is_some(),
+            BusySlot::acquire(BUSY_GENERATION).is_ok(),
             "the slot must be free again once the first generation finishes"
         );
+    }
+
+    /// The two jobs exclude each other, and each is told which one is in the
+    /// way: a precompute refused with "a generation is running" would send the
+    /// user looking for a generation they had already finished.
+    #[test]
+    fn a_precompute_and_a_generation_exclude_each_other_and_say_which() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let generating = BusySlot::acquire(BUSY_GENERATION).expect("the generation gets the slot");
+        let refused = BusySlot::acquire(BUSY_PRECOMPUTE).expect_err("the precompute is refused");
+        assert!(refused.contains("generation"), "{refused}");
+        drop(generating);
+
+        let precomputing = BusySlot::acquire(BUSY_PRECOMPUTE).expect("the precompute gets it");
+        let refused = BusySlot::acquire(BUSY_GENERATION).expect_err("the generation is refused");
+        assert!(refused.contains("precompute"), "{refused}");
+        assert!(
+            BusySlot::acquire(BUSY_PRECOMPUTE).is_err(),
+            "and so is a second precompute, which is the double click"
+        );
+        drop(precomputing);
+        assert!(BusySlot::acquire(BUSY_GENERATION).is_ok());
     }
 }
 

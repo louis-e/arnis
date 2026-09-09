@@ -7,6 +7,10 @@
 
 # Build artifacts
 /target
+# Side build directories. The running app holds a lock on target/arnis.exe, so
+# a check or a test run beside it has to build into its own --target-dir, and
+# each of those is a Cargo build tree of the same size as /target.
+/target-*/
 **/*.rs.bk
 
 # IDE/editor files
@@ -33,6 +37,10 @@ Thumbs.db
 /*debug*.png
 /terrain-tile-cache
 /arnis-tile-cache
+# Scratch dumps from the facade work: the lab's preview sheets
+# (tools/facade_lab/prefetch.py writes ../../facade_debug/previews.tsv beside
+# the crops) and whatever --mapillary-facade-debug-dir is pointed at here.
+/facade_debug/
 
 /gen/
 /build/
@@ -43,6 +51,13 @@ Thumbs.db
 flake/
 gen/
 
+# The Mapillary facade lab. It is its own git repository, checked out here for
+# the golden fixtures it exports and the reference runs the port is measured
+# against, and its image caches and run outputs come to tens of gigabytes. It
+# is versioned where it lives; what this repository keeps of it is the exported
+# fixtures under tests/golden.
+/tools/
+
 # Miscellaneous
 *.bak
 *.old
@@ -52,3 +67,18 @@ gen/
 /flake/*
 !/flake/flake.nix
 !/flake/flake.lock
+
+# The facade golden fixtures. The numbers travel with the repo; the images are
+# 27 MB that compress to nothing and that git stores a fresh copy of on every
+# re-export, so they stay out and the ten tests that read pixels skip.
+/tests/golden/facade/**/*.png
+/tests/golden/facade/**/*.jpg
+
+# The delivery those textures were built from, 228 MB of the source
+# photographs, which is dropped beside the repository rather than in it. Named
+# here because it is otherwise untracked and unignored, and one `git add -A`
+# would commit the whole library.
+/buildingfacadetextures/
+
+# Working notes for coding agents, not part of the project.
+/CLAUDE.md

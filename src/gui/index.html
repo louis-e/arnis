@@ -117,6 +117,7 @@
         </div>
 
         <!-- Section: Generation -->
+        <!-- Section: Generation -->
         <div class="settings-section-header" data-localize="settings_section_generation">Generation</div>
 
         <!-- Generation Mode Dropdown -->
@@ -357,15 +358,93 @@
           </div>
         </div>
 
-        <!-- Enable Luanti (experimental) -->
+        <!-- Enable Luanti -->
         <div class="settings-row">
           <label for="enable-luanti-toggle">
-            <span>Luanti (experimental)</span>
-            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format. Experimental: block mappings and lighting may be imperfect.">?</span>
+            <span data-localize="enable_luanti">Luanti</span>
+            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format alongside Java and Bedrock.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="enable-luanti-toggle" name="enable-luanti-toggle">
           </div>
+        </div>
+
+        <!-- Section: Building Facades -->
+        <div class="settings-section-header" data-localize="settings_section_facades">Building Facades</div>
+
+        <!-- One decision, not two toggles: both sources hang panels on the same
+             walls and write the same resource pack, so they were mutually
+             exclusive anyway and a single control cannot express an invalid
+             state. -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_source">Facade Source</span>
+            <span class="tooltip-icon" data-tooltip="Preset uses bundled photographs picked by building type, everywhere, with no account. Mapillary uses real street photos of the actual buildings, where they exist.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-source-group">
+              <button type="button" class="segment active" data-default data-facade-source="off" data-localize="facade_source_off">Off</button>
+              <button type="button" class="segment" data-facade-source="preset" data-localize="facade_source_preset">Preset</button>
+              <button type="button" class="segment" data-facade-source="mapillary" data-localize="facade_source_mapillary">Mapillary</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mapillary API token, the credential the facade download needs -->
+        <div class="settings-row">
+          <label for="mapillary-token">
+            <span data-localize="mapillary_token">Mapillary Token</span>
+            <span class="tooltip-icon" data-tooltip="Free from mapillary.com/developer. Kept on this machine and sent to nobody but Mapillary. Without it there is nothing to download.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="password" id="mapillary-token" name="mapillary-token" placeholder="MLY|...">
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_mode">Facade Mode</span>
+            <span class="tooltip-icon" data-tooltip="Photos hangs the photograph itself on the wall (Java 1.21.4+). Blocks builds colour-matched walls only, which works on every world format.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-mode-group">
+              <button type="button" class="segment" data-facade-mode="blocks" data-localize="facade_mode_blocks">Blocks</button>
+              <button type="button" class="segment active" data-default data-facade-mode="photos" data-localize="facade_mode_photos">Photos</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- How large an atlas the panels may fill, which is how sharp they are -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_detail">Facade Detail</span>
+            <span class="tooltip-icon" data-tooltip="Standard fits any graphics card the game runs on. High is sharper but needs a modern one on whatever machine opens the world.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-detail-group">
+              <button type="button" class="segment active" data-default data-facade-detail="standard" data-localize="facade_detail_standard">Standard</button>
+              <button type="button" class="segment" data-facade-detail="high" data-localize="facade_detail_high">High</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fills the facade cache for the selected area ahead of generating -->
+        <div class="settings-row">
+          <label for="precompute-facades-button">
+            <span data-localize="facade_precompute">Precompute Area</span>
+            <span class="tooltip-icon" data-tooltip="Fetches the imagery for the selected area and builds its facades into the cache, so generating there is instant and the 3D preview shows them. Up to 0.1 km²; a city block takes about twenty minutes. Check the area has street-level coverage on mapillary.com first.">?</span>
+          </label>
+          <div class="settings-control">
+            <button type="button" id="precompute-facades-button" class="clear-cache-button" data-localize="facade_precompute_button">Precompute</button>
+          </div>
+        </div>
+
+        <!-- What the precompute is doing, what it did, or why it cannot run -->
+        <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
+
+        <!-- Why the panel modes are greyed out on a non-Java world -->
+        <div id="facade-java-only-notice" class="settings-notice" style="display: none;" data-localize="facade_mode_java_only">
+          Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.
         </div>
 
         <!-- Section: Map & Input -->
@@ -412,7 +491,6 @@
           </div>
         </div>
 
-        <!-- Section: Application -->
         <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
         <!-- Java Save Path -->
@@ -501,10 +579,11 @@
         <!-- Tile Cache Cleaner -->
         <div class="settings-row">
           <label for="clear-cache-button">
-            <span data-localize="clear_tile_cache">Clear Tile Cache</span>
-            <span class="tooltip-icon" data-tooltip="Delete every cached elevation and land-cover tile. Frees disk space; next generation re-downloads from source.">?</span>
+            <span data-localize="clear_tile_cache">Clear Cache</span>
+            <span class="tooltip-icon" data-tooltip="Delete every cached tile and facade texture. Frees the disk space shown; the next generation downloads them again.">?</span>
           </label>
           <div class="settings-control">
+            <span id="cache-size" class="cache-size"></span>
             <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
           </div>
         </div>

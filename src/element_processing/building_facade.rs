@@ -35,6 +35,12 @@ pub struct ColumnFacade {
     pub wall_u: i32,
     pub party: bool,
     pub street: bool,
+    /// Within one block of where this wall run meets the next one.
+    ///
+    /// A glass tower with glass carried straight around its corners reads as a
+    /// box of panes; a real one almost always turns the corner on a pier. The
+    /// window patterns use this to put the wall block there instead.
+    pub corner: bool,
 }
 
 impl Default for ColumnFacade {
@@ -43,6 +49,7 @@ impl Default for ColumnFacade {
             wall_u: 0,
             party: false,
             street: true,
+            corner: false,
         }
     }
 }
