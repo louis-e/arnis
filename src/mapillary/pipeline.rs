@@ -998,6 +998,37 @@ fn no_view_product(wall: &Wall, vrec: &WallViews) -> WallProduct {
     }
 }
 
+/// A wall the cache has never heard of, as a blank product.
+///
+/// Not the same thing as [`no_view_product`], which is a verdict: that wall was
+/// looked at and nothing was found. This one was never looked at, and the flag
+/// says so, so a later run over the same area still builds it.
+fn uncached_product(wall: &Wall) -> WallProduct {
+    WallProduct {
+        wall_key: wall.key.clone(),
+        building_key: wall.building_key.clone(),
+        node_a: wall.node_a,
+        node_b: wall.node_b,
+        piece: wall.piece,
+        n_pieces: wall.n_pieces,
+        edges: wall.edges.clone(),
+        col0_m: 0.0,
+        cols: 0,
+        rows: 0,
+        rgb: Vec::new(),
+        cls: Vec::new(),
+        observed: Vec::new(),
+        bands: Vec::new(),
+        tex: None,
+        tier: Tier::D,
+        confidence: 0.0,
+        height_used_m: 0.0,
+        unknown_share: 1.0,
+        views: Vec::new(),
+        flags: confidence::reason_codes(&[], None, &[], None, &["NOT_PRECOMPUTED".to_string()]),
+    }
+}
+
 /// Per row, the colour the band pass painted its wall cells, which is what the
 /// consumer's colour-only mode reads.
 fn row_band_colours(st: &Structure) -> Vec<[u8; 3]> {
@@ -1912,7 +1943,7 @@ fn store_blank_verdicts<'a>(
     }
 }
 
-/// The whole run from the cache, or `None` when a single wall is missing.
+/// The whole run from the cache, or `None` when the cache cannot answer it.
 ///
 /// This is the path a second generation over an area already built takes: no
 /// imagery search, no downloads, no registration and no image decoding at all,
@@ -1929,7 +1960,14 @@ fn store_blank_verdicts<'a>(
 ///   verdict was proved against every photograph that could ever see the wall;
 ///   for the occluders outside it, it says only that nobody looked any harder.
 ///
-/// Anything else and the run does the work.
+/// Anything else and the run does the work, except for a caller that may not:
+/// one that has set [`PipelineConfig::cache_only`] takes what the cache holds
+/// and leaves the rest of the walls blank. A city is precomputed in pieces, so
+/// its cache is never quite complete: one building mapped since the last piece
+/// ran is one wall with no entry, and refusing the whole area over it would
+/// leave a generation with no facades at all rather than with the thousands it
+/// does hold. An area with nothing at all in the cache still refuses, since
+/// that one has genuinely not been precomputed.
 fn run_from_cache(cfg: &PipelineConfig, osm: &Value) -> Result<Option<PipelineResult>, String> {
     // Nothing has ever been built with these tunables, so there is no point
     // parsing the footprints twice to find that out one wall at a time.
@@ -1951,13 +1989,21 @@ fn run_from_cache(cfg: &PipelineConfig, osm: &Value) -> Result<Option<PipelineRe
             good.then_some(cached.product)
         })
         .collect();
-    if found.iter().any(Option::is_none) {
+    let missing = found.iter().filter(|p| p.is_none()).count();
+    if missing > 0 && (cfg.cache_only.is_none() || missing == found.len()) {
         return Ok(None);
+    }
+    if missing > 0 {
+        println!(
+            "  Mapillary facades: {missing} of {} walls are not in the cache and were left \
+             blank. Precompute this area again to fill them in.",
+            walls.len()
+        );
     }
 
     let mut products: Vec<WallProduct> = Vec::with_capacity(found.len());
     for (wall, product) in walls.iter_mut().zip(found) {
-        let mut product = product.expect("checked above");
+        let mut product = product.unwrap_or_else(|| uncached_product(wall));
         product.wall_key = wall.key.clone();
         product.building_key = wall.building_key.clone();
         wall.reachable = product.cols > 0;
@@ -1968,6 +2014,9 @@ fn run_from_cache(cfg: &PipelineConfig, osm: &Value) -> Result<Option<PipelineRe
         buildings: buildings.len(),
         walls: walls.len(),
         cache_hits: products.iter().filter(|p| p.cols > 0).count(),
+        // Nothing is built on this path, so the misses are the walls that were
+        // left blank rather than walls this run had to work for.
+        cache_misses: missing,
         ..RunStats::default()
     };
     stats.reachable = stats.cache_hits;
@@ -2734,6 +2783,60 @@ mod tests {
         assert_eq!(result.stats.walls, walls);
         assert_eq!(result.stats.cache_misses, 0, "nothing was built");
         assert!(result.export_dir.join("manifest.json").exists());
+    }
+
+    /// A building mapped since the precompute leaves its own walls blank and
+    /// does not cost the area every other wall it holds.
+    ///
+    /// One wall with no cache entry used to refuse the whole box, and a
+    /// generation over a city precomputed in pieces was then told to precompute
+    /// it in pieces, which the user had just done. A city's cache is never
+    /// complete: OpenStreetMap gains a building and that building has never been
+    /// looked at.
+    #[test]
+    fn a_wall_the_cache_never_heard_of_does_not_cost_the_area_its_other_walls() {
+        let tmp = tempfile::tempdir().unwrap();
+        let precompute = scratch_cfg(tmp.path(), munich_box());
+        let known = json!({"elements": osm_square(1, 11.5795, 48.1364, 20.0)});
+        let filed = file_verdicts(&precompute, &known);
+        assert!(filed > 0, "the fixture must have walls");
+
+        // The same area, plus a building nobody has ever precomputed.
+        let mut elements = osm_square(1, 11.5795, 48.1364, 20.0);
+        elements.extend(osm_square(2, 11.5799, 48.1364, 20.0));
+        let grown = json!({"elements": elements});
+
+        let mut generation = scratch_cfg(tmp.path(), munich_box());
+        generation.cache_only = Some("would have been refused".to_string());
+        let result = run_from_osm(&generation, grown.clone(), Instant::now())
+            .expect("the walls the cache does hold are still worth exporting");
+        assert!(result.stats.walls > filed, "the new building added walls");
+        assert_eq!(
+            result.stats.cache_misses,
+            result.stats.walls - filed,
+            "only the new building's walls are missing"
+        );
+        assert!(result.export_dir.join("manifest.json").exists());
+
+        // A run that may do the work still does it, so the new wall is built
+        // rather than left blank for good.
+        let cold = scratch_cfg(tmp.path(), munich_box());
+        assert!(
+            run_from_cache(&cold, &grown)
+                .expect("the cache path")
+                .is_none(),
+            "a run that may fetch must not settle for a blank wall"
+        );
+
+        // And an area with nothing at all on file is still refused, because
+        // that one really has not been precomputed.
+        let empty = tempfile::tempdir().unwrap();
+        let mut untouched = scratch_cfg(empty.path(), munich_box());
+        untouched.cache_only = Some("nothing here yet".to_string());
+        std::fs::create_dir_all(&untouched.facade_cache).unwrap();
+        let err = run_from_osm(&untouched, grown, Instant::now())
+            .expect_err("an unbuilt area cannot be served from the cache");
+        assert_eq!(err, "nothing here yet");
     }
 
     /// Two pieces precomputed side by side answer the box that covers both.
