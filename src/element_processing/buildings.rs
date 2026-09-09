@@ -3591,6 +3591,7 @@ fn build_wall_ring(
             );
 
             let mut kind = WallSegmentKind::default();
+            let seg_last = bresenham_points.len().saturating_sub(1);
             for (pt_idx, (bx, _, bz)) in bresenham_points.into_iter().enumerate() {
                 // Passages only apply to ground-level buildings; elevated
                 // building:part elements (min_level > 0) receive an empty bitmap
@@ -3642,6 +3643,10 @@ fn build_wall_ring(
                     wall_u: wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz),
                     party: facade.is_party(bx, bz),
                     street: !facade.has_any_street || facade.is_street(bx, bz),
+                    // Only for a run long enough to have a middle: on a two or
+                    // three block wall every column is an end, and calling them
+                    // all corners would leave it with no windows at all.
+                    corner: seg_last >= 4 && (pt_idx == 0 || pt_idx == seg_last),
                 };
                 // Resolved once per column rather than per block: it is a
                 // lookup in the facade store, and the whole column shares it.
@@ -4453,8 +4458,13 @@ fn determine_wall_block_at_position_pristine(
         }
     } else if config.category == BuildingCategory::GridSkyscraper {
         // Big glass panes separated by concrete mullions at floor lines and every 5th column.
-        let mullion =
-            !above_floor || floor_row == 0 || (col.wall_u + config.window_phase).rem_euclid(5) == 0;
+        // The corner turns on a pier: glass carried around a corner reads as a
+        // box of panes rather than a building, and a real curtain wall almost
+        // always meets the return on solid material.
+        let mullion = !above_floor
+            || floor_row == 0
+            || col.corner
+            || (col.wall_u + config.window_phase).rem_euclid(5) == 0;
         if mullion {
             config.wall_block
         } else {
@@ -4462,7 +4472,7 @@ fn determine_wall_block_at_position_pristine(
         }
     } else if config.is_tall_building && config.use_vertical_windows {
         // Tall building pattern, vertical window strips alternating with wall columns
-        if above_floor && (col.wall_u + config.window_phase).rem_euclid(2) == 0 {
+        if above_floor && !col.corner && (col.wall_u + config.window_phase).rem_euclid(2) == 0 {
             config.window_block
         } else {
             config.wall_block
