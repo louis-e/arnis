@@ -3,6 +3,7 @@ name: PR Benchmark
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 on:
   pull_request:
@@ -149,10 +150,45 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Comment build time on PR
-        uses: thollander/actions-comment-pull-request@v3
-        with:
-          message: ${{ steps.comment_body.outputs.summary }}
-          comment-tag: benchmark-report
+                - name: Comment build time on PR
+        uses: actions/github-script@v8
         env:
-          GITHUB_TOKEN: ${{ secrets.BENCHMARK_TOKEN }}
+          SUMMARY: ${{ steps.comment_body.outputs.summary }}
+        with:
+          github-token: ${{ secrets.BENCHMARK_TOKEN }}
+          script: |
+            const marker = '<!-- benchmark-report -->';
+            const body = `${marker}\n${process.env.SUMMARY}`;
+            const issueNumber =
+              context.payload.pull_request?.number ||
+              context.payload.issue?.number;
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                per_page: 100
+              }
+            );
+
+            const existingComment = comments.find(comment =>
+              comment.body?.includes(marker)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body
+              });
+            }
