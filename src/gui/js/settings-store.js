@@ -34,13 +34,16 @@ const SETTINGS = [
   { id: 'world-time-slider', kind: 'number', store: OWN },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
-  // The token keeps its own key, set up in initSettings(): it is a credential,
-  // not a world setting, so Reset to defaults must not wipe it.
   // The facade controls. Registered here like every other segmented control,
   // so the panel's Revert and Reset to defaults reach them: the store reads the
   // active segment and restores one by clicking it, which is also what keeps
   // each group's own stored key in step.
   { id: 'facade-source-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-source' },
+  // The token keeps its own key, set up in initSettings(). Its row gets the
+  // revert arrow like any other text field, but the panel's Reset leaves it
+  // alone: it is a credential the user had to go and create, not a world
+  // setting, and a clean slate should not cost them that.
+  { id: 'mapillary-token', kind: 'text', store: EXTERNAL, resettable: false },
   { id: 'facade-mode-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-mode' },
   { id: 'facade-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-detail' },
   { id: 'disable-height-limit-toggle', kind: 'checkbox', store: OWN },
@@ -236,7 +239,7 @@ function sanitize(entry, value) {
     case 'segmented': {
       if (typeof value !== 'string') return undefined;
       const known = el.querySelector(
-        `.segment[data-gamemode="${CSS.escape(value)}"]`
+        `.segment[${entry.valueAttr}="${CSS.escape(value)}"]`
       );
       return known ? value : undefined;
     }
@@ -356,7 +359,7 @@ function resetAll() {
   applying = true;
   try {
     for (const entry of SETTINGS) {
-      if (entry.revertable === false) continue;
+      if (entry.revertable === false || entry.resettable === false) continue;
       const def = defaultValue(entry);
       if (def === undefined) continue;
       writeValue(entry, def);

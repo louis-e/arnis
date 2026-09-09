@@ -1235,9 +1235,9 @@ function initSettings() {
     refreshFacadeRows();
   });
 
-  // The source control, and the detail beside it. Both persist their own key
-  // rather than going through settings-store.js, because the panel's Revert
-  // reads that store and the facade choice is not part of a world's settings.
+  // The source control, and the detail beside it. Each keeps its own key so
+  // the rest of main.js can read it without the store, and is registered in
+  // settings-store.js as well so the panel's Revert and Reset reach it.
   const segmented = (id, storageKey, dataAttr, after) => {
     const group = document.getElementById(id);
     if (!group) return;
@@ -1350,10 +1350,54 @@ function initSettings() {
       `</ul>`;
     licenseContent.insertAdjacentHTML("beforeend", facadeTextureBlock);
 
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const link = (url, text) =>
+      `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+
+    // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
+    // built from street photographs has to name the photographers. The source
+    // is named whether or not a run has used it yet, so the credit can be
+    // found before the first generation; the per-image list underneath, one
+    // line per photograph in the shape Mapillary's own guidance asks for,
+    // fills in after one.
+    let shots = [];
+    try {
+      const used = await invoke("gui_get_mapillary_attributions");
+      if (Array.isArray(used)) shots = used;
+    } catch (e) {
+      console.warn("Failed to load Mapillary attributions:", e);
+    }
+    let mapillaryList;
+    if (shots.length > 0) {
+      // A record that carries the image id but not the uploader name has no
+      // profile to link to, so the name is shown as plain text instead.
+      const lines = shots.map((s) => {
+        const by = s.profile_url ? link(s.profile_url, s.username) : esc(s.username);
+        return `<li>${link(s.image_url, s.title)} by ${by}, licensed under CC-BY-SA</li>`;
+      }).join("");
+      const unnamed = shots.filter((s) => !s.profile_url).length;
+      const note = unnamed > 0
+        ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
+        : "";
+      mapillaryList =
+        `<p style="font-size: 0.9em;">Photographs used by the last generation:${note}</p>` +
+        `<ul style="padding-left: 20px; font-size: 0.9em;">${lines}</ul>`;
+    } else {
+      mapillaryList =
+        `<p style="font-size: 0.9em;">The photographs a generation used are listed here once it has run.</p>`;
+    }
+    const mapillaryBlock =
+      `<p><b>Building Facades (Mapillary):</b></p>` +
+      `<p style="font-size: 0.9em;">The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
+      `${link("https://www.mapillary.com", "Mapillary")}, licensed ` +
+      `${link("https://creativecommons.org/licenses/by-sa/4.0/", "CC BY-SA 4.0")}. ` +
+      `Share-alike applies to anything you publish that carries them.</p>` +
+      mapillaryList;
+    licenseContent.insertAdjacentHTML("beforeend", mapillaryBlock);
+
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
       if (Array.isArray(rows) && rows.length > 0) {
-        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
         const items = rows.map(r => {
           const lic = r.license_url
             ? `<a href="${esc(r.license_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
@@ -1370,34 +1414,6 @@ function initSettings() {
       console.warn("Failed to load 3D model attributions:", e);
     }
 
-    // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
-    // built from street photographs has to name the photographers. One line per
-    // image, in the shape Mapillary's own guidance asks for.
-    try {
-      const shots = await invoke("gui_get_mapillary_attributions");
-      if (Array.isArray(shots) && shots.length > 0) {
-        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-        const link = (url, text) =>
-          `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
-        // A record that carries the image id but not the uploader name has no
-        // profile to link to, so the name is shown as plain text instead.
-        const items = shots.map((s) => {
-          const by = s.profile_url ? link(s.profile_url, s.username) : esc(s.username);
-          return `<li>${link(s.image_url, s.title)} by ${by}, licensed under CC-BY-SA</li>`;
-        }).join("");
-        const unnamed = shots.filter((s) => !s.profile_url).length;
-        const note = unnamed > 0
-          ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
-          : "";
-        const block =
-          `<p><b>Building facades (Mapillary):</b></p>` +
-          `<p style="font-size: 0.9em;">Facade textures and colours were measured from these street-level photographs, licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>. Share-alike applies to anything you publish that carries them.${note}</p>` +
-          `<ul style="padding-left: 20px; font-size: 0.9em;">${items}</ul>`;
-        licenseContent.insertAdjacentHTML("beforeend", block);
-      }
-    } catch (e) {
-      console.warn("Failed to load Mapillary attributions:", e);
-    }
   }
 
   function closeLicense() {
