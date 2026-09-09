@@ -8227,6 +8227,10 @@ fn generate_inset_tiers(
             if open_x || open_z {
                 let col = ColumnFacade {
                     wall_u: if open_x { z } else { x },
+                    // Both open is the corner cell, and the outline below
+                    // turns its corners on the wall block; a crown that kept
+                    // glass there would break the pier at the setback.
+                    corner: open_x && open_z,
                     ..ColumnFacade::default()
                 };
                 // Same wall and window logic as the facade, so bands continue upward.
