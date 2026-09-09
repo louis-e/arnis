@@ -3,6 +3,7 @@ name: PR Benchmark
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 on:
   pull_request:
@@ -150,7 +151,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Comment build time on PR
-        uses: thollander/actions-comment-pull-request@v3
+        uses: actions/github-script@v8
         with:
           message: ${{ steps.comment_body.outputs.summary }}
           comment-tag: benchmark-report
