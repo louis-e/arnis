@@ -909,6 +909,12 @@ $(document).ready(function () {
             map.fire('draw:deleted', { layers: removed });
         }
 
+        // The preview is an image overlay pinned to lat/lng bounds on the body
+        // it was generated for, so leaving it up would drape a stretch of Earth
+        // (or the previous body) over the new basemap at coordinates that mean
+        // something else entirely.
+        disableWorldPreview();
+
         applyBasemap();
 
         if (currentBody === 'earth') {

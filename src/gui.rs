@@ -369,7 +369,10 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
 /// name setting and typed a name; it is sanitized and de-duplicated by
 /// [`crate::world_utils::create_new_world_with_name`], which falls back to
 /// the default "Arnis World N" scheme when it is `None` or unusable.
-#[tauri::command]
+// `(async)` rather than a plain command: a bare `#[tauri::command]` runs on the
+// main thread, and this one copies a world template onto disk while the user is
+// looking at a button that has just gone grey.
+#[tauri::command(async)]
 fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<String, i32> {
     let trimmed = save_path.trim();
     if trimmed.is_empty() {
@@ -1284,7 +1287,12 @@ impl Drop for BusySlot {
     }
 }
 
-#[tauri::command]
+// Everything before the `spawn` below - the spawn point written into level.dat,
+// the tall-world datapack install - runs synchronously in this call, and a plain
+// `#[tauri::command]` would run all of it on the main thread with the window
+// stalled behind it. `(async)` puts it on the async runtime instead, so the GUI
+// stays live from the click until the first progress event.
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
 fn gui_start_generation(

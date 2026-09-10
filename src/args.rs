@@ -555,6 +555,11 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.interior = false;
     args.legacy_trees = false;
     args.aws_only_elevation = false;
+    // Terrain only means no walls, so neither facade source has anything to
+    // hang a photograph on. Cleared rather than left set so the run does not
+    // pay for a Mapillary fetch or a resource pack it cannot use.
+    args.building_facades = false;
+    args.mapillary_facades = Some(false);
     // Relief already fits vanilla height, so the pack would add only empty sky.
     args.disable_height_limit = false;
     // Airless bodies look right at night. Only a default: comparing against the

@@ -498,8 +498,12 @@ function getFacadeSource() {
 
 // Only the presets are Java only. Mapillary falls back to block facades on
 // Bedrock and Luanti, which is what the notice under the mode control says.
+// The Moon and Mars are terrain only, so there is no wall to hang anything on
+// and every source resolves to off there. As with the format gate, the stored
+// choice is left alone so coming back to Earth restores it.
 function getEffectiveFacadeSource() {
   const source = getFacadeSource();
+  if (selectedCelestialBody !== 'earth') return 'off';
   if (source === 'preset' && selectedWorldFormat !== 'java') return 'off';
   return source;
 }
@@ -522,10 +526,16 @@ function refreshFacadeSourceRows() {
   const group = document.getElementById('facade-source-group');
   if (!group) return;
   const java = selectedWorldFormat === 'java';
+  const earth = selectedCelestialBody === 'earth';
   const source = getEffectiveFacadeSource();
 
+  // Off Earth the whole section is dead, the source picker included, so it is
+  // greyed like the row it sits in rather than left looking live.
+  group.classList.toggle('segmented-disabled', !earth);
+  const sourceRow = group.closest('.settings-row');
+  if (sourceRow) sourceRow.classList.toggle('settings-row-unavailable', !earth);
   group.querySelectorAll('.segment').forEach((btn) => {
-    btn.disabled = !java && btn.dataset.facadeSource === 'preset';
+    btn.disabled = !earth || (!java && btn.dataset.facadeSource === 'preset');
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
@@ -559,13 +569,16 @@ function refreshFacadeRows() {
   if (!group) return;
 
   const java = selectedWorldFormat === 'java';
+  const earth = selectedCelestialBody === 'earth';
   const effective = getEffectiveFacadeMode();
   group.querySelectorAll('.segment').forEach((btn) => {
     const panels = btn.dataset.facadeMode !== 'blocks';
     btn.disabled = panels && !java;
     btn.classList.toggle('active', btn.dataset.facadeMode === effective);
   });
-  if (notice) notice.style.display = java ? 'none' : '';
+  // Off Earth nothing builds facades at all, so the format gate has nothing
+  // left to explain.
+  if (notice) notice.style.display = java || !earth ? 'none' : '';
   refreshFacadeSourceRows();
   refreshPrecomputeButton();
 }
@@ -622,15 +635,11 @@ function setCelestialBody(body) {
     markRow(group);
   });
 
-  // Also format-gated, so it cannot simply follow the earth-only loop.
+  // Gated on more than the body, so they cannot simply follow the earth-only
+  // loop: the height-limit pack is also format-gated and the facade rows read
+  // the world format and the stored source too.
   refreshHeightLimitRow();
-
-  const notice = document.getElementById('off-earth-notice');
-  if (notice) {
-    notice.style.display = off ? '' : 'none';
-    document.getElementById('off-earth-notice-body').textContent =
-      selectedCelestialBody === 'moon' ? 'Moon' : 'Mars';
-  }
+  refreshFacadeRows();
 
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
   const timeSlider = document.getElementById('world-time-slider');
@@ -638,6 +647,11 @@ function setCelestialBody(body) {
     timeSlider.value = off ? 0 : 720;
     timeSlider.dispatchEvent(new Event('input', { bubbles: true }));
   }
+
+  // The cached preview describes a world on the body we just left. The map
+  // clears its own overlay in changeBody; this drops the parent's copy so a
+  // later ready event cannot put a stale one back.
+  currentWorldMapData = null;
 
   // Warnings are per body, so the current selection may read differently now.
   refreshBboxSelectionInfo();
@@ -894,6 +908,31 @@ function updateEta(progress, streaming) {
   }
   etaReconcile();
   renderEta();
+}
+
+// What the status line says between the click and the backend's first real
+// progress event. Kept in a constant because the abort paths have to be able to
+// recognize it as still-unclaimed and take it back down.
+const STARTING_MESSAGE = "Starting...";
+
+// The bar and the status line only ever move on a `progress-update` event, and
+// the first one is a long way from the click: a world folder gets created, a
+// spawn point written into level.dat, a datapack possibly installed, disk space
+// probed and a session lock taken, all before the download that emits 1%. Until
+// then the previous run's green "Done!" and full bar sit there, which reads as
+// the button having done nothing. So claim both here, at the moment the click
+// is accepted, and let the first real update take over from 0%.
+function resetProgressUi(message) {
+  const bar = document.getElementById("progress-bar");
+  const info = document.getElementById("progress-info");
+  const detail = document.getElementById("progress-detail");
+  if (bar) bar.style.width = "0%";
+  if (detail) detail.textContent = "0%";
+  if (info) {
+    info.textContent = message;
+    info.style.color = "#ececec";
+  }
+  resetEta();
 }
 
 // Function to set up the progress bar listener
@@ -1752,6 +1791,9 @@ function setPrecomputeStatus(text, kind, detail) {
 // Why the button cannot be pressed, or "" when it can. The wording is what the
 // button's tooltip says, so a disabled button always explains itself.
 function precomputeBlockedReason() {
+  if (selectedCelestialBody !== 'earth') {
+    return "Facades are Earth only. Switch the world back in the map toolbar.";
+  }
   // The source control decides this, and it is the reason the row above greys
   // the button out; without it here the next refresh switches it back on.
   if (getEffectiveFacadeSource() !== 'mapillary') {
@@ -2683,6 +2725,9 @@ async function startGeneration() {
       return;
     }
 
+    // Past every synchronous refusal, so from here the click is a real start.
+    resetProgressUi(STARTING_MESSAGE);
+
     // Auto-create world for Java format
     if (selectedWorldFormat === 'java') {
       if (!savePath) {
@@ -2813,6 +2858,11 @@ async function startGeneration() {
     // Hand the guard back unless a run actually started; once it has, the Done!/Error!
     // progress message releases it instead.
     if (!started) {
+      // Some abort paths say why (handleWorldSelectionError writes here); the
+      // rest would leave our placeholder claiming a run that never began, so
+      // clear it only if nothing else has taken the line since.
+      const info = document.getElementById('progress-info');
+      if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
       setGenerationButtonEnabled(true);
       window.arnisPreview3D?.setGenerationRunning(false);
     }
