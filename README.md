@@ -55,31 +55,54 @@ If you are using Nix, you can run the program directly with `nix run github:loui
 
 ## 📦 Installation
 
-This guide will walk you through installing arnis.
+This guide will walk you through installing `arnis`.
 
-Fedora: Download arnis-linux from this link https://github.com/louis-e/arnis/releases
-then run "cd ~/Download
-schmod +x arnis-linux
-./arnis-linux"
+### Linux
 
-Ultramarine: go into the terminal and run "sudo dnf install arnis"
-
-Arch: Install arnis-linux from https://github.com/louis-e/arnis/releases
-run the terminal command 
-"cd ~/Downloads
+#### Fedora (and derivatives)
+Download arnis-linux from this link https://github.com/louis-e/arnis/releases
+then run:
+```sh
+cd ~/Downloads
 chmod +x arnis-linux
 ./arnis-linux
-"
+```
 
-Macos: Download arnis-mac-universal from https://github.com/louis-e/arnis/releases
+#### Ultramarine
+Run:
+```sh
+sudo dnf install arnis
+```
+Or, install from your DE's app store.
+
+#### Arch
+If you havent already installed an AUR helper then [paru](https://github.com/morganamilo/paru) is a good one.
+
+After you install an AUR helper run 
+```sh
+paru -S arnis # replace with your AUR helper if you do not use paru
+```
+
+#### Nix/NixOS
+Arnis is available in the nixpkg repository, add it however you add your other nix packages!
+
+### macOS:
+Download arnis-mac-universal from [https://github.com/louis-e/arnis/releases]
 then run 
-"cd ~/Downloads
+```sh
+cd ~/Downloads
 chmod +x arnis-mac-universal"
+```
 
-execute via "./arnis-mac-universal"
+execute via 
+```sh
+./arnis-mac-universal
+```
 
-Windows: install arnis-windows.exe from https://github.com/louis-e/arnis/releases
+### Windows:
+install [arnis-windows.exe](https://github.com/louis-e/arnis/releases) 
 
+Then execute the file to run!
 ## :star: Star History
 
 <a href="https://star-history.com/#louis-e/arnis&Date">
