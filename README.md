@@ -53,6 +53,56 @@ After your pull request is merged, I will take care of regularly creating update
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`
 
+## 📦 Installation
+
+This guide will walk you through installing `arnis`.
+
+### Linux
+
+#### Fedora (and derivatives)
+Download arnis-linux from this link https://github.com/louis-e/arnis/releases
+then run:
+```sh
+cd ~/Downloads
+chmod +x arnis-linux
+./arnis-linux
+```
+
+#### Ultramarine
+Run:
+```sh
+sudo dnf install arnis
+```
+Or, install from your DE's app store.
+
+#### Arch
+If you havent already installed an AUR helper then [paru](https://github.com/morganamilo/paru) is a good one.
+
+After you install an AUR helper run 
+```sh
+paru -S arnis # replace with your AUR helper if you do not use paru
+```
+
+#### Nix/NixOS
+Arnis is available in the nixpkg repository, add it however you add your other nix packages!
+
+### macOS:
+Download arnis-mac-universal from [https://github.com/louis-e/arnis/releases]
+then run 
+```sh
+cd ~/Downloads
+chmod +x arnis-mac-universal"
+```
+
+execute via 
+```sh
+./arnis-mac-universal
+```
+
+### Windows:
+install [arnis-windows.exe](https://github.com/louis-e/arnis/releases) 
+
+Then execute the file to run!
 ## :star: Star History
 
 <a href="https://star-history.com/#louis-e/arnis&Date">
