@@ -22,6 +22,10 @@ struct OreDef {
     avg_veins_per_chunk: u32,
 }
 
+/// Deepest ore-bearing column below local ground: the deepest band ends at 65, the rest is the
+/// vanilla column (383 blocks at most), so vanilla is unchanged and a sunk floor is not tracked.
+const MAX_ORE_DEPTH: i32 = 384;
+
 const ORES: &[OreDef] = &[
     OreDef {
         block: COAL_ORE,
@@ -111,10 +115,9 @@ pub fn generate_ores_region(
             let mut rng = coord_rng(chunk_x, chunk_z, 0xC0DE);
 
             for ore in ORES {
-                // Fill the stone column down to the terrain floor at the ore's usual density.
-                // The terrain floor, not the world floor: an extended floor would otherwise
-                // multiply `span` (and with it the vein count) roughly 33x.
-                let y_min = terrain_floor_y() + 1;
+                // Vein count scales with `span`, so a floor that sinks with the base would
+                // multiply it; the band is capped instead of following the floor down.
+                let y_min = (ground_y - MAX_ORE_DEPTH).max(terrain_floor_y() + 1);
                 let y_max = (ground_y - ore.depth_min).max(y_min);
                 if y_min > y_max {
                     continue;
@@ -162,5 +165,86 @@ fn place_vein(
             4 => cz += 1,
             _ => cz -= 1,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::world_editor::{
+        set_terrain_floor_y, set_world_bounds, DEFAULT_MAX_Y, DEFAULT_MIN_Y, FLOOR_TEST_LOCK,
+    };
+    use std::ops::RangeInclusive;
+    use std::path::PathBuf;
+
+    /// Ore blocks placed inside `band` for one chunk with its surface at `ground_y`. Only
+    /// `band` is stone, and veins overwrite nothing else, so anything else there is ore.
+    fn ores_in_band(ground_y: i32, band: RangeInclusive<i32>) -> usize {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+        editor.register_road_surface_y(8, 8, ground_y);
+        for y in band.clone() {
+            for x in 0..16 {
+                for z in 0..16 {
+                    editor.set_block_absolute(STONE, x, y, z, None, None);
+                }
+            }
+        }
+
+        generate_ores_region(&mut editor, 0, 15, 0, 15, false);
+
+        band.flat_map(|y| (0..16).flat_map(move |x| (0..16).map(move |z| (x, y, z))))
+            .filter(
+                |&(x, y, z)| matches!(editor.get_block_absolute(x, y, z), Some(b) if b != STONE),
+            )
+            .count()
+    }
+
+    #[test]
+    fn the_tallest_vanilla_column_still_mines_down_to_the_bedrock_plane() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        set_terrain_floor_y(DEFAULT_MIN_Y + 2);
+        assert_eq!(terrain_floor_y(), DEFAULT_MIN_Y);
+
+        let floor = terrain_floor_y() + 1;
+        let n = ores_in_band(DEFAULT_MAX_Y, floor..=floor + 39);
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        set_terrain_floor_y(DEFAULT_MIN_Y + 2);
+        assert!(n > 0, "the cap must not clip the 383 block vanilla column");
+    }
+
+    #[test]
+    fn a_sunk_floor_does_not_extend_the_ore_column_below_the_cap() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+        set_terrain_floor_y(-1888);
+        assert_eq!(terrain_floor_y(), -1952);
+
+        let ground_y = 2000;
+        let below = ores_in_band(ground_y, ground_y - 500..=ground_y - MAX_ORE_DEPTH - 1);
+        let within = ores_in_band(ground_y, ground_y - MAX_ORE_DEPTH..=ground_y - 300);
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        set_terrain_floor_y(DEFAULT_MIN_Y + 2);
+        assert_eq!(below, 0, "ore reached below the cap");
+        assert!(within > 0, "the capped band carries no ore at all");
+    }
+
+    #[test]
+    fn a_column_shallower_than_the_cap_still_reaches_the_terrain_floor() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+        set_terrain_floor_y(-1888);
+
+        let floor = terrain_floor_y() + 1;
+        let n = ores_in_band(-1888, floor..=floor + 50);
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        set_terrain_floor_y(DEFAULT_MIN_Y + 2);
+        assert!(n > 0, "a column within the cap must still reach bedrock");
     }
 }

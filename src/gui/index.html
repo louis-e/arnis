@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="./css/preview3d.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
+  <!-- Not deferred: the map iframe starts posting log messages as soon as it
+       parses, so the bridge has to be listening before that element exists. -->
+  <script src="./js/logging.js"></script>
   <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
@@ -34,10 +37,28 @@
             <!-- Combined Button Block -->
             <div class="button-block">
               <div class="button-block-row">
-                <button type="button" id="start-button" class="start-button" onclick="startGeneration()">
-                  <span data-localize="start_generation">Start Generation</span>
-                  <span id="world-name-label" class="world-name-label" data-placeholder="true">No world generated yet</span>
-                </button>
+                <div class="start-button-wrap">
+                  <button type="button" id="start-button" class="start-button" onclick="startGeneration()">
+                    <span data-localize="start_generation">Start Generation</span>
+                  </button>
+                  <!-- Lives outside #start-button (not nested inside it): the HTML spec
+                       forbids interactive content (inputs, buttons, or anything with a
+                       tabindex) inside a <button>. Clicking the label/background here
+                       still starts generation via its own onclick; the input and pencil
+                       button stop propagation so their own clicks don't also trigger it. -->
+                  <div class="world-name-row" onclick="startGeneration()">
+                    <span id="world-name-label" class="world-name-label" data-placeholder="true">No world generated yet</span>
+                    <!-- maxlength both stops further typing at the cap and mirrors
+                         MAX_CUSTOM_WORLD_NAME_CHARS in src/world_utils.rs, which caps by
+                         characters too - so nothing typed here is ever silently truncated
+                         on the way to disk. main.js reads the limit off this attribute to
+                         colour the field red once it's reached. -->
+                    <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="48" autocomplete="off" spellcheck="false">
+                    <button type="button" id="world-name-edit-button" class="world-name-edit-button" title="Set a custom world name" aria-label="Set a custom world name" style="display: none;">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75z"/></svg>
+                    </button>
+                  </div>
+                </div>
                 <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings">
                     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>
@@ -123,7 +144,7 @@
         <div class="settings-row">
           <label for="use-3d-toggle">
             <span data-localize="three_dmr">3D Models &amp; Props</span>
-            <span class="tooltip-icon" data-tooltip="Adds detailed 3D content: community-contributed models (from the OpenStreetMap 3D Model Repository and Wikimedia Commons) for famous landmarks such as the Eiffel Tower, plus bundled schematic props like cars, boats, cranes and wind turbines. Turn off to disable all of them.">?</span>
+            <span class="tooltip-icon" data-tooltip="Adds detailed 3D content: community-contributed models (from the OpenStreetMap 3D Model Repository and Wikimedia Commons) for famous landmarks such as the Eiffel Tower, plus bundled schematic props like cars, boats, cranes, aeroplanes and wind turbines. Turn off to disable all of them.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="use-3d-toggle" name="use-3d-toggle" checked>
@@ -234,6 +255,17 @@
           </div>
         </div>
 
+        <!-- Custom World Name Toggle -->
+        <div class="settings-row">
+          <label for="custom-world-name-toggle">
+            <span data-localize="custom_world_name">Custom World Name</span>
+            <span class="tooltip-icon" data-tooltip="Show a pencil icon on the Start button to name new worlds yourself instead of the auto-generated 'Arnis World N' (Java only)">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="custom-world-name-toggle" name="custom-world-name-toggle">
+          </div>
+        </div>
+
         <!-- Signage level -->
         <div class="settings-row">
           <label>
@@ -282,6 +314,17 @@
           </div>
         </div>
 
+        <!-- Voxy LOD Toggle -->
+        <div class="settings-row">
+          <label for="voxy-lod-toggle">
+            <span data-localize="voxy_lod">Pre-generate Voxy LOD</span>
+            <span class="tooltip-icon" data-tooltip="Write the Voxy mod's LOD cache with the world, so distant terrain renders on first join without running /voxy import. Java only; turns on baked lighting and takes longer.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="voxy-lod-toggle" name="voxy-lod-toggle">
+          </div>
+        </div>
+
         <!-- World Scale Slider -->
         <div class="settings-row">
           <label for="scale-value-slider">
@@ -309,15 +352,93 @@
           </div>
         </div>
 
-        <!-- Enable Luanti (experimental) -->
+        <!-- Enable Luanti -->
         <div class="settings-row">
           <label for="enable-luanti-toggle">
-            <span>Luanti (experimental)</span>
-            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format. Experimental: block mappings and lighting may be imperfect.">?</span>
+            <span data-localize="enable_luanti">Luanti</span>
+            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format alongside Java and Bedrock.">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="enable-luanti-toggle" name="enable-luanti-toggle">
           </div>
+        </div>
+
+        <!-- Section: Building Facades -->
+        <div class="settings-section-header" data-localize="settings_section_facades">Building Facades</div>
+
+        <!-- One decision, not two toggles: both sources hang panels on the same
+             walls and write the same resource pack, so they were mutually
+             exclusive anyway and a single control cannot express an invalid
+             state. -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_source">Facade Source</span>
+            <span class="tooltip-icon" data-tooltip="Preset uses bundled photographs picked by building type, everywhere, with no account. Mapillary uses real street photos of the actual buildings, where they exist.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-source-group">
+              <button type="button" class="segment active" data-default data-facade-source="off" data-localize="facade_source_off">Off</button>
+              <button type="button" class="segment" data-facade-source="preset" data-localize="facade_source_preset">Preset</button>
+              <button type="button" class="segment" data-facade-source="mapillary" data-localize="facade_source_mapillary">Mapillary</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mapillary API token, the credential the facade download needs -->
+        <div class="settings-row">
+          <label for="mapillary-token">
+            <span data-localize="mapillary_token">Mapillary Token</span>
+            <span class="tooltip-icon" data-tooltip="Free from mapillary.com/developer. Kept on this machine and sent to nobody but Mapillary. Without it there is nothing to download.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="password" id="mapillary-token" name="mapillary-token" placeholder="MLY|...">
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_mode">Facade Mode</span>
+            <span class="tooltip-icon" data-tooltip="Photos hangs the photograph itself on the wall (Java 1.21.4+). Blocks builds colour-matched walls only, which works on every world format.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-mode-group">
+              <button type="button" class="segment" data-facade-mode="blocks" data-localize="facade_mode_blocks">Blocks</button>
+              <button type="button" class="segment active" data-default data-facade-mode="photos" data-localize="facade_mode_photos">Photos</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- How large an atlas the panels may fill, which is how sharp they are -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="facade_detail">Facade Detail</span>
+            <span class="tooltip-icon" data-tooltip="Standard fits any graphics card the game runs on. High is sharper but needs a modern one on whatever machine opens the world.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="facade-detail-group">
+              <button type="button" class="segment active" data-default data-facade-detail="standard" data-localize="facade_detail_standard">Standard</button>
+              <button type="button" class="segment" data-facade-detail="high" data-localize="facade_detail_high">High</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fills the facade cache for the selected area ahead of generating -->
+        <div class="settings-row">
+          <label for="precompute-facades-button">
+            <span data-localize="facade_precompute">Precompute Area</span>
+            <span class="tooltip-icon" data-tooltip="Fetches the imagery for the selected area and builds its facades into the cache, so generating there is instant and the 3D preview shows them. Up to 0.1 km²; a city block takes about twenty minutes. Check the area has street-level coverage on mapillary.com first.">?</span>
+          </label>
+          <div class="settings-control">
+            <button type="button" id="precompute-facades-button" class="clear-cache-button" data-localize="facade_precompute_button">Precompute</button>
+          </div>
+        </div>
+
+        <!-- What the precompute is doing, what it did, or why it cannot run -->
+        <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
+
+        <!-- Why the panel modes are greyed out on a non-Java world -->
+        <div id="facade-java-only-notice" class="settings-notice" style="display: none;" data-localize="facade_mode_java_only">
+          Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.
         </div>
 
         <!-- Section: Map & Input -->
@@ -348,11 +469,22 @@
               <option value="stadia-bright">Smooth Bright</option>
               <option value="stadia-dark">Smooth Dark</option>
               <option value="openfreemap-liberty">Modern</option>
+              <option value="custom">Custom</option>
             </select>
           </div>
         </div>
 
-        <!-- Section: Application -->
+        <!-- Custom Map Source, shown only for the Custom theme -->
+        <div class="settings-row" id="custom-tile-row">
+          <label for="custom-tile-url">
+            <span data-localize="custom_map_source">Custom Map Source</span>
+            <span class="tooltip-icon" data-tooltip="Tile URL template containing {z}, {x} and {y}. Must be WGS-84; GCJ-02 sources (most Chinese ones) appear shifted.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="text" id="custom-tile-url" name="custom-tile-url" placeholder="https://example.com/{z}/{x}/{y}.png">
+          </div>
+        </div>
+
         <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
         <!-- Java Save Path -->
@@ -378,6 +510,20 @@
           <div class="settings-control save-path-control">
             <input type="text" id="bedrock-save-path-input" name="bedrock-save-path-input" class="save-path-input" placeholder="Bedrock .mcworld directory">
             <button type="button" id="bedrock-save-path-browse" class="save-path-browse" title="Browse...">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Luanti Save Path -->
+        <div class="settings-row">
+          <label for="luanti-save-path-input">
+            <span data-localize="luanti_save_path">Luanti Save Path</span>
+            <span class="tooltip-icon" data-tooltip="Directory where new Luanti/Minetest worlds are created">?</span>
+          </label>
+          <div class="settings-control save-path-control">
+            <input type="text" id="luanti-save-path-input" name="luanti-save-path-input" class="save-path-input" placeholder="Luanti worlds directory">
+            <button type="button" id="luanti-save-path-browse" class="save-path-browse" title="Browse...">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
             </button>
           </div>
@@ -427,10 +573,11 @@
         <!-- Tile Cache Cleaner -->
         <div class="settings-row">
           <label for="clear-cache-button">
-            <span data-localize="clear_tile_cache">Clear Tile Cache</span>
-            <span class="tooltip-icon" data-tooltip="Delete every cached elevation and land-cover tile. Frees disk space; next generation re-downloads from source.">?</span>
+            <span data-localize="clear_tile_cache">Clear Cache</span>
+            <span class="tooltip-icon" data-tooltip="Delete every cached tile and facade texture. Frees the disk space shown; the next generation downloads them again.">?</span>
           </label>
           <div class="settings-control">
+            <span id="cache-size" class="cache-size"></span>
             <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
           </div>
         </div>

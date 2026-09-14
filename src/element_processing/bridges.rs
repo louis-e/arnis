@@ -733,6 +733,10 @@ pub(crate) fn is_bridge_way(way: &ProcessedWay) -> bool {
     if way.tags.get("indoor").map(|s| s.as_str()) == Some("yes") {
         return false;
     }
+    // Jet bridges are stamped as a schematic, so a deck and piers under one would bury it.
+    if way.tags.get("aeroway").map(|s| s.as_str()) == Some("jet_bridge") {
+        return false;
+    }
     way.tags
         .get("bridge")
         .map(|v| v.as_str())

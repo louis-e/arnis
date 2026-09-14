@@ -327,6 +327,27 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "nether_bricks" => NETHER_BRICK,
         "black_terracotta" => BLACK_TERRACOTTA,
         "tinted_glass" => TINTED_GLASS,
+        // Aeroplane liveries differ only in the accent material, so no substitutions here.
+        "purpur_block" => PURPUR_BLOCK,
+        "purpur_slab" => PURPUR_SLAB,
+        "purpur_stairs" => PURPUR_STAIRS,
+        "crimson_planks" => CRIMSON_PLANKS,
+        "crimson_slab" => CRIMSON_SLAB,
+        "crimson_stairs" => CRIMSON_STAIRS,
+        "cherry_planks" => CHERRY_PLANKS,
+        "cherry_slab" => CHERRY_SLAB,
+        "cherry_stairs" => CHERRY_STAIRS,
+        "dark_prismarine" => DARK_PRISMARINE,
+        "dark_prismarine_slab" => DARK_PRISMARINE_SLAB,
+        "dark_prismarine_stairs" => DARK_PRISMARINE_STAIRS,
+        "waxed_exposed_cut_copper" => WAXED_EXPOSED_CUT_COPPER,
+        "waxed_exposed_cut_copper_slab" => WAXED_EXPOSED_CUT_COPPER_SLAB,
+        "waxed_exposed_cut_copper_stairs" => WAXED_EXPOSED_CUT_COPPER_STAIRS,
+        "pale_oak_trapdoor" => PALE_OAK_TRAPDOOR,
+        // Jetbridge blocks. Hanging signs stay dropped by the no-match arm.
+        "coal_block" => COAL_BLOCK,
+        "blackstone_slab" => BLACKSTONE_SLAB,
+        "iron_door" => IRON_DOOR,
         _ => return None,
     };
     Some(BlockWithProperties::new(block, parse_state(name)))
@@ -652,6 +673,186 @@ pub(crate) fn rotate_props(props: &Value, k: u8) -> Value {
     Value::Compound(out)
 }
 
+/// A schematic laid out for stamping at a free yaw, voxels sorted so each column is contiguous.
+/// For props that follow a real bearing instead of snapping to a quarter turn.
+pub struct ColumnSchematic {
+    pub width: i32,
+    pub length: i32,
+    palette: Vec<BlockWithProperties>,
+    /// (x, y, z, palette slot), sorted by (x, z, y); y floored so the lowest layer is 0.
+    voxels: Vec<(i16, i16, i16, u8)>,
+    /// (offset, len) into `voxels`, indexed by `z * width + x`.
+    columns: Vec<(u32, u32)>,
+}
+
+impl ColumnSchematic {
+    pub fn load(gz_bytes: &[u8]) -> Result<Self, String> {
+        let p = load_palettized(gz_bytes)?;
+        let mut voxels = p.voxels;
+        if voxels.is_empty() {
+            return Err("no mapped blocks".to_string());
+        }
+        voxels.sort_unstable_by_key(|v| (v.0, v.2, v.1));
+
+        let (w, l) = (p.width, p.length);
+        let mut columns = vec![(0u32, 0u32); (w * l) as usize];
+        let mut i = 0usize;
+        while i < voxels.len() {
+            let (x, _, z, _) = voxels[i];
+            let mut j = i + 1;
+            while j < voxels.len() && voxels[j].0 == x && voxels[j].2 == z {
+                j += 1;
+            }
+            columns[(i32::from(z) * w + i32::from(x)) as usize] = (i as u32, (j - i) as u32);
+            i = j;
+        }
+        Ok(Self {
+            width: w,
+            length: l,
+            palette: p.palette,
+            voxels,
+            columns,
+        })
+    }
+
+    fn column(&self, x: i32, z: i32) -> Option<&[(i16, i16, i16, u8)]> {
+        if x < 0 || z < 0 || x >= self.width || z >= self.length {
+            return None;
+        }
+        let (off, len) = self.columns[(z * self.width + x) as usize];
+        (len > 0).then(|| &self.voxels[off as usize..(off + len) as usize])
+    }
+
+    /// Highest occupied layer. Only the asset tests need it.
+    #[cfg(test)]
+    pub fn height(&self) -> i32 {
+        self.voxels
+            .iter()
+            .map(|v| i32::from(v.1))
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+}
+
+/// Per Z lift that tilts the model nose up. A shear, not a rotation, so each slice moves whole
+/// and no block is lost or resampled. Nose is -Z, so slices ahead of the centre rise.
+pub(crate) fn pitch_lift(length: i32, z: i32, pitch_degrees: f64) -> i32 {
+    if pitch_degrees == 0.0 {
+        return 0;
+    }
+    let centre = f64::from(length - 1) / 2.0;
+    ((centre - f64::from(z)) * pitch_degrees.to_radians().tan()).round() as i32
+}
+
+/// Sine and cosine of a yaw, exact on quarter turns. cos(90 deg) comes back as 6.1e-17, which is
+/// harmless in a rotation but under floor it tips boundary samples into the next cell.
+fn yaw_sin_cos(yaw_degrees: f64) -> (f64, f64) {
+    let quarters = yaw_degrees / 90.0;
+    if (quarters - quarters.round()).abs() < 1e-9 {
+        return match (quarters.round() as i64).rem_euclid(4) {
+            0 => (0.0, 1.0),
+            1 => (1.0, 0.0),
+            2 => (0.0, -1.0),
+            _ => (-1.0, 0.0),
+        };
+    }
+    yaw_degrees.to_radians().sin_cos()
+}
+
+/// Model cell sampled by the world cell `(dx, dz)` blocks from the anchor.
+/// Both sides use corner coordinates, so the offset stays an exact integer at a quarter turn.
+#[inline]
+fn sample_model_cell(w: i32, l: i32, dx: i32, dz: i32, sin_t: f64, cos_t: f64) -> (i32, i32) {
+    let (dx, dz) = (f64::from(dx), f64::from(dz));
+    (
+        (f64::from(w) / 2.0 + dx * cos_t + dz * sin_t).floor() as i32,
+        (f64::from(l) / 2.0 - dx * sin_t + dz * cos_t).floor() as i32,
+    )
+}
+
+/// Stamps `schem` centred on (base_x, base_z), lowest block at `base_y`, yawed so its -Z face
+/// points along `yaw_degrees` and tilted nose up by `pitch_degrees`.
+/// Samples the destination grid, which stays hole free at any angle, like landmarks does.
+/// Block states only rotate in quarter turns, so they snap to the nearest cardinal.
+pub fn place_structure_yaw(
+    editor: &mut WorldEditor,
+    schem: &ColumnSchematic,
+    base_x: i32,
+    base_z: i32,
+    base_y: i32,
+    yaw_degrees: f64,
+    pitch_degrees: f64,
+) {
+    let (w, l) = (schem.width, schem.length);
+    let (cx, cz) = (f64::from(w) / 2.0, f64::from(l) / 2.0);
+    let (sin_t, cos_t) = yaw_sin_cos(yaw_degrees);
+
+    // Rotate states once per palette entry rather than once per voxel.
+    let quarter = (yaw_degrees / 90.0).round().rem_euclid(4.0) as u8;
+    let palette: Vec<BlockWithProperties> = if quarter == 0 {
+        schem.palette.clone()
+    } else {
+        schem
+            .palette
+            .iter()
+            .map(|b| {
+                let props = b
+                    .properties
+                    .as_ref()
+                    .map(|p| Arc::new(rotate_props(p, quarter)));
+                BlockWithProperties::from_arc(b.block, props)
+            })
+            .collect()
+    };
+
+    // Re-floor on the sheared extent so base_y stays the lowest block whatever the pitch.
+    let lift_floor = schem
+        .voxels
+        .iter()
+        .map(|&(_, y, z, _)| i32::from(y) + pitch_lift(l, i32::from(z), pitch_degrees))
+        .min()
+        .unwrap_or(0);
+
+    // World AABB of the yawed footprint: transform its four corners.
+    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    for (mx, mz) in [
+        (0.0, 0.0),
+        (f64::from(w), 0.0),
+        (0.0, f64::from(l)),
+        (f64::from(w), f64::from(l)),
+    ] {
+        let (dx, dz) = (mx - cx, mz - cz);
+        let wx = f64::from(base_x) + dx * cos_t - dz * sin_t;
+        let wz = f64::from(base_z) + dx * sin_t + dz * cos_t;
+        min_x = min_x.min(wx.floor() as i32);
+        max_x = max_x.max(wx.ceil() as i32);
+        min_z = min_z.min(wz.floor() as i32);
+        max_z = max_z.max(wz.ceil() as i32);
+    }
+
+    for wz in min_z..=max_z {
+        for wx in min_x..=max_x {
+            let (mx, mz) = sample_model_cell(w, l, wx - base_x, wz - base_z, sin_t, cos_t);
+            let Some(column) = schem.column(mx, mz) else {
+                continue;
+            };
+            let lift = pitch_lift(l, mz, pitch_degrees) - lift_floor;
+            for &(_, vy, _, slot) in column {
+                // Empty blacklist forces overwrites so blocks land over water/terrain too.
+                editor.set_block_with_properties_absolute(
+                    palette[slot as usize].clone(),
+                    wx,
+                    base_y + i32::from(vy) + lift,
+                    wz,
+                    None,
+                    Some(&[]),
+                );
+            }
+        }
+    }
+}
+
 /// Stamp anchor at (base_x, base_z), lowest voxel at base_y, rotated by `rot`; `ground` fills under each column. Keep half-extent under TILE_EDITOR_HALO (64) or it clips at tile seams.
 pub fn place_structure(
     editor: &mut WorldEditor,
@@ -698,6 +899,66 @@ pub fn place_structure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quarter turn has to be an exact permutation. A half cell offset between the two
+    /// conventions used to stamp every other row twice and stretch the model.
+    #[test]
+    fn quarter_turns_sample_each_model_cell_exactly_once() {
+        let (w, l) = (45, 40);
+        for quarter in 0..4 {
+            let (sin_t, cos_t) = yaw_sin_cos(f64::from(quarter * 90));
+            let mut seen = vec![0u32; (w * l) as usize];
+            // Sweep a window comfortably larger than the yawed footprint.
+            let r = w + l;
+            for dz in -r..=r {
+                for dx in -r..=r {
+                    let (mx, mz) = sample_model_cell(w, l, dx, dz, sin_t, cos_t);
+                    if (0..w).contains(&mx) && (0..l).contains(&mz) {
+                        seen[(mz * w + mx) as usize] += 1;
+                    }
+                }
+            }
+            assert!(
+                seen.iter().all(|&n| n == 1),
+                "quarter turn {quarter}: {} cells missed, {} sampled twice or more",
+                seen.iter().filter(|&&n| n == 0).count(),
+                seen.iter().filter(|&&n| n > 1).count(),
+            );
+        }
+    }
+
+    /// Off axis yaws alias, which is fine on a hull, but the stamped area must still match the
+    /// model or it is being stretched rather than resampled.
+    #[test]
+    fn oblique_yaw_keeps_coverage_close_to_the_model_area() {
+        let (w, l) = (45, 40);
+        for yaw in [17.0_f64, 33.5, 45.0, 61.0, 128.0, 213.7, 301.0] {
+            let (sin_t, cos_t) = yaw_sin_cos(yaw);
+            let mut hit = vec![false; (w * l) as usize];
+            let r = w + l;
+            let mut stamped = 0usize;
+            for dz in -r..=r {
+                for dx in -r..=r {
+                    let (mx, mz) = sample_model_cell(w, l, dx, dz, sin_t, cos_t);
+                    if (0..w).contains(&mx) && (0..l).contains(&mz) {
+                        hit[(mz * w + mx) as usize] = true;
+                        stamped += 1;
+                    }
+                }
+            }
+            let area = (w * l) as usize;
+            let missed = hit.iter().filter(|&&h| !h).count();
+            // Worst case is 45 degrees, which skips about a sixth of the columns.
+            assert!(
+                missed * 4 < area,
+                "yaw {yaw}: {missed}/{area} model columns never sampled"
+            );
+            assert!(
+                stamped.abs_diff(area) * 20 < area,
+                "yaw {yaw}: stamped {stamped} cells for a {area}-cell model"
+            );
+        }
+    }
 
     #[test]
     fn varint_decode() {

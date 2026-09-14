@@ -140,6 +140,12 @@ fn cache_dir() -> PathBuf {
     }
 }
 
+/// Where the canopy strip tables are cached, for the settings panel's size
+/// readout.
+pub fn canopy_cache_dir() -> PathBuf {
+    cache_dir()
+}
+
 /// Clear the cached strip tables. Called from the GUI cache-clean command.
 pub fn clear_canopy_cache() -> crate::elevation::cache::CacheClearStats {
     crate::elevation::cache::clear_cache_dir(&cache_dir())

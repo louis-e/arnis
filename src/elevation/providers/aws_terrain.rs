@@ -1,6 +1,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use crate::elevation::providers::fixed_tile::MAX_TILES_PER_FETCH;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use rayon::prelude::*;
@@ -204,10 +205,6 @@ fn sample_tile_pixel(
         (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0) - TERRARIUM_OFFSET;
     Some(height)
 }
-
-/// Tile budget; as the outage fallback AWS can now serve arbitrarily
-/// large bboxes, and a 1x1 degree area at z15 would be ~8000 tiles.
-const MAX_TILES_PER_FETCH: usize = 2048;
 
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
     let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();

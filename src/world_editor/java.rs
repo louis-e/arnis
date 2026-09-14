@@ -4,7 +4,7 @@
 
 use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
-use crate::block_definitions::GRASS_BLOCK;
+use crate::block_definitions::Block;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
@@ -25,25 +25,29 @@ pub(crate) const DATA_VERSION: i32 = 3955;
 /// Cached base chunk sections (a grass plane at the terrain base).
 /// Keyed by that base: it sinks when the relief needs the extended floor, and a GUI process
 /// can generate several worlds in a row, so a plain OnceLock would go stale.
-static BASE_CHUNK_SECTIONS: Mutex<Option<(i32, Arc<Vec<Section>>)>> = Mutex::new(None);
+/// Cached filler-chunk sections, keyed by the base Y and block they came from.
+type BaseChunkCache = Option<(i32, Block, Arc<Vec<Section>>)>;
+
+static BASE_CHUNK_SECTIONS: Mutex<BaseChunkCache> = Mutex::new(None);
 
 /// Get or create the cached base chunk sections for the current terrain base.
 fn get_base_chunk_sections() -> Arc<Vec<Section>> {
     let base_y = crate::world_editor::base_chunk_y();
+    let block = crate::world_editor::base_chunk_block();
     let mut cache = BASE_CHUNK_SECTIONS.lock().unwrap();
-    if let Some((cached_y, ref sections)) = *cache {
-        if cached_y == base_y {
+    if let Some((cached_y, cached_block, ref sections)) = *cache {
+        if cached_y == base_y && cached_block == block {
             return Arc::clone(sections);
         }
     }
     let mut chunk = ChunkToModify::default();
     for x in 0..16 {
         for z in 0..16 {
-            chunk.set_block(x, base_y, z, GRASS_BLOCK);
+            chunk.set_block(x, base_y, z, block);
         }
     }
     let sections = Arc::new(chunk.sections().collect::<Vec<Section>>());
-    *cache = Some((base_y, Arc::clone(&sections)));
+    *cache = Some((base_y, block, Arc::clone(&sections)));
     sections
 }
 
@@ -51,34 +55,6 @@ fn get_base_chunk_sections() -> Arc<Vec<Section>> {
 use crate::telemetry::{send_log, LogLevel};
 
 impl<'a> WorldEditor<'a> {
-    /// Helper function to create a base chunk with grass blocks at Y -62
-    /// Uses cached sections for efficiency - only serialization happens per chunk
-    pub(super) fn create_base_chunk(
-        abs_chunk_x: i32,
-        abs_chunk_z: i32,
-        bake_lighting: bool,
-        biome_value: &Value,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        // Use cached sections (computed once on first call)
-        let sections = get_base_chunk_sections();
-
-        // Prepare chunk data with cloned sections
-        let chunk_data = Chunk {
-            sections: sections.to_vec(),
-            x_pos: abs_chunk_x,
-            z_pos: abs_chunk_z,
-            is_light_on: 0,
-            other: FnvHashMap::default(),
-        };
-
-        let chunk_nbt = create_chunk_nbt(&chunk_data, bake_lighting, biome_value);
-
-        let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-
-        Ok(ser_buffer)
-    }
-
     /// Saves the world in Java Edition Anvil format.
     ///
     /// Uses parallel processing with rayon for fast region saving.
@@ -201,6 +177,7 @@ impl<'a> WorldEditor<'a> {
             self.ground.as_deref(),
             self.bake_lighting,
             self.preview.as_deref(),
+            self.voxy.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -231,7 +208,13 @@ fn create_region_file(
 
 /// Serialize one region's chunks to its `.mca`. Shared by the synchronous save
 /// path and the background flush worker (hence free-standing, not `&self`).
-/// Every in-bbox region passes here exactly once, so the map preview is fed here.
+/// Every in-bbox region passes here exactly once, so the map preview and the
+/// voxy LOD cache are both fed here.
+///
+/// Chunks are visited in Morton (quadtree) order. The `.mca` does not care -
+/// it allocates sectors as chunks land - but the voxy builder does: it finishes
+/// a level-`n` LOD column every `4^n` chunk columns, which is what keeps its
+/// working set at a handful of megabytes instead of a whole region's worth.
 #[allow(clippy::too_many_arguments)]
 fn write_region_to_disk(
     world_dir: &std::path::Path,
@@ -239,6 +222,7 @@ fn write_region_to_disk(
     ground: Option<&crate::ground::Ground>,
     bake_lighting: bool,
     preview: Option<&crate::map_renderer::PreviewAccumulator>,
+    voxy: Option<&crate::voxy::VoxyWriter>,
     region_x: i32,
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
@@ -253,55 +237,172 @@ fn write_region_to_disk(
     // vs forest vs jungle) at chunk-build time. Cheap to recompute.
     let center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
 
-    // First pass: write all chunks that have content
-    for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
-        if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-            let abs_chunk_x = chunk_x + (region_x * 32);
-            let abs_chunk_z = chunk_z + (region_z * 32);
-            let chunk = Chunk {
-                sections: chunk_to_modify.sections().collect(),
-                x_pos: abs_chunk_x,
-                z_pos: abs_chunk_z,
-                is_light_on: 0,
-                other: strip_orphan_block_entities(chunk_to_modify),
-            };
+    // Filler chunks all share one set of sections, so they share their light too.
+    let base_sections = get_base_chunk_sections();
+    let (base_min_y, base_max_y) = chunk_section_span(&base_sections);
+    let base_lighting =
+        bake_lighting.then(|| compute_chunk_lighting(&base_sections, (base_min_y, base_max_y)));
 
-            let biome_value =
-                crate::biome::build_chunk_biome_nbt(abs_chunk_x, abs_chunk_z, ground, center_lat);
-            let chunk_nbt = create_chunk_nbt(&chunk, bake_lighting, &biome_value);
-            ser_buffer.clear();
-            fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-            region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+    let mut lod = voxy.map(|writer| {
+        let (min_y, max_y) = region_content_span(region_to_modify);
+        writer.region_lod(
+            min_y,
+            max_y,
+            live_lod_sections(region_to_modify, region_x, region_z),
+        )
+    });
+
+    for column in 0..256usize {
+        let (sx, sz) = morton_16(column);
+        for dz in 0..2 {
+            for dx in 0..2 {
+                let chunk_x = sx * 2 + dx;
+                let chunk_z = sz * 2 + dz;
+                let existing = region_to_modify.get_chunk(chunk_x, chunk_z);
+
+                // A chunk that is present but holds nothing is left unwritten,
+                // as it was before this loop was reordered.
+                if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
+                    continue;
+                }
+
+                let abs_chunk_x = chunk_x + (region_x * 32);
+                let abs_chunk_z = chunk_z + (region_z * 32);
+                let biome_names =
+                    crate::biome::chunk_biome_names(abs_chunk_x, abs_chunk_z, ground, center_lat);
+                let biome_value = crate::biome::biome_nbt_from_names(&biome_names);
+
+                let (sections, other, lighting, span) = match existing {
+                    Some(chunk_to_modify) => {
+                        let sections: Vec<Section> = chunk_to_modify.sections().collect();
+                        let span = chunk_section_span(&sections);
+                        let lighting =
+                            bake_lighting.then(|| compute_chunk_lighting(&sections, span));
+                        (
+                            sections,
+                            strip_orphan_block_entities(chunk_to_modify),
+                            lighting,
+                            span,
+                        )
+                    }
+                    None => (
+                        base_sections.to_vec(),
+                        FnvHashMap::default(),
+                        base_lighting.clone(),
+                        (base_min_y, base_max_y),
+                    ),
+                };
+
+                if let Some(lod) = lod.as_mut() {
+                    lod.ingest_chunk(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        &sections,
+                        (span.0 as i32, span.1 as i32),
+                        lighting.as_deref(),
+                        &biome_names,
+                    );
+                }
+
+                let chunk = Chunk {
+                    sections,
+                    x_pos: abs_chunk_x,
+                    z_pos: abs_chunk_z,
+                    is_light_on: 0,
+                    other,
+                };
+                let chunk_nbt = create_chunk_nbt_with_lighting(&chunk, lighting, &biome_value);
+                ser_buffer.clear();
+                fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
+                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+            }
+        }
+
+        if let Some(lod) = lod.as_mut() {
+            lod.end_column(column);
         }
     }
 
-    // Second pass: ensure all chunks exist (fill with base layer if not).
-    // Skip entirely when region already has all 1024 chunks (common after ground gen).
-    if region_to_modify.chunks.len() < 1024 {
-        for chunk_x in 0..32 {
-            for chunk_z in 0..32 {
-                if !region_to_modify.chunks.contains_key(&(chunk_x, chunk_z)) {
-                    let abs_chunk_x = chunk_x + (region_x * 32);
-                    let abs_chunk_z = chunk_z + (region_z * 32);
-                    let biome_value = crate::biome::build_chunk_biome_nbt(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        ground,
-                        center_lat,
-                    );
-                    let ser_buffer = WorldEditor::create_base_chunk(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        bake_lighting,
-                        &biome_value,
-                    )?;
-                    region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
-                }
-            }
-        }
+    if let Some(mut lod) = lod {
+        lod.finish();
     }
 
     Ok(())
+}
+
+/// Morton (Z-order) index into a 16x16 grid of 2x2-chunk columns.
+fn morton_16(index: usize) -> (i32, i32) {
+    let mut x = 0i32;
+    let mut z = 0i32;
+    for bit in 0..4 {
+        x |= (((index >> (2 * bit)) & 1) as i32) << bit;
+        z |= (((index >> (2 * bit + 1)) & 1) as i32) << bit;
+    }
+    (x, z)
+}
+
+/// Which LOD sections of this region can hold a block.
+///
+/// Derived from chunk section keys alone, so it costs nothing next to the voxel
+/// work it saves: above the roofline every column is air, and without this the
+/// builder would allocate and zero a 256 KB buffer for each of those sections
+/// only to drop it again at flush.
+///
+/// A section that turns out to be all air anyway is still listed - the keys say
+/// a chunk section exists there, not that it holds a block - which costs one
+/// buffer that the flush then discards.
+///
+/// Note this marks LOD *sections*, not chunk sections: the air one section
+/// above the tallest roof is never marked here, yet it still gets ingested,
+/// because the level-1..4 sections it falls into are live from the content
+/// below it. That is what `region_content_span`'s `+ 1` relies on.
+fn live_lod_sections(
+    region: &super::common::RegionToModify,
+    region_x: i32,
+    region_z: i32,
+) -> crate::voxy::LiveSections {
+    let base_section_y = crate::world_editor::base_chunk_y() >> 4;
+    let mut live: crate::voxy::LiveSections = Default::default();
+    for local_x in 0..32 {
+        for local_z in 0..32 {
+            let chunk_x = region_x * 32 + local_x;
+            let chunk_z = region_z * 32 + local_z;
+            match region.get_chunk(local_x, local_z) {
+                Some(chunk) => {
+                    for &section_y in chunk.sections.keys() {
+                        crate::voxy::mark_live(&mut live, chunk_x, section_y as i32, chunk_z);
+                    }
+                }
+                // Filler chunks are a flat plane at the terrain base.
+                None => crate::voxy::mark_live(&mut live, chunk_x, base_section_y, chunk_z),
+            }
+        }
+    }
+    live
+}
+
+/// The span of chunk sections the voxy builder has to walk for one region.
+///
+/// The upper bound is the highest section holding a block anywhere in the
+/// region: above it every column is air, so any LOD section up there would be
+/// dropped as empty. Sections that are present but all-air only widen the span,
+/// which costs a little work and never loses data.
+fn region_content_span(region: &super::common::RegionToModify) -> (i32, i32) {
+    let base_section_y = crate::world_editor::base_chunk_y() >> 4;
+    let mut min_y = base_section_y.min(-4);
+    let mut max_y = base_section_y;
+    for chunk in region.chunks.values() {
+        for &section_y in chunk.sections.keys() {
+            min_y = min_y.min(section_y as i32);
+            max_y = max_y.max(section_y as i32);
+        }
+    }
+    // One section past the top. Every solid voxel sits at or below `max_y`, so
+    // this is exactly enough for each of them to have its lit neighbour above
+    // ingested - at level 4 that neighbour is a whole chunk section away.
+    // Dropping the +1 leaves dark air over the tallest roofs in the coarse
+    // levels; going further only fills sections that nothing samples.
+    (min_y, max_y + 1)
 }
 
 /// Owned, `Send` context for writing regions off the main thread (background flush).
@@ -312,6 +413,7 @@ pub(crate) struct RegionWriteCtx {
     ground: Option<std::sync::Arc<crate::ground::Ground>>,
     bake_lighting: bool,
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
+    voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
 }
 
 impl RegionWriteCtx {
@@ -321,6 +423,7 @@ impl RegionWriteCtx {
         ground: Option<std::sync::Arc<crate::ground::Ground>>,
         bake_lighting: bool,
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
+        voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
     ) -> Self {
         Self {
             world_dir,
@@ -328,6 +431,7 @@ impl RegionWriteCtx {
             ground,
             bake_lighting,
             preview,
+            voxy,
         }
     }
 
@@ -343,6 +447,7 @@ impl RegionWriteCtx {
             self.ground.as_deref(),
             self.bake_lighting,
             self.preview.as_deref(),
+            self.voxy.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -352,10 +457,35 @@ impl RegionWriteCtx {
 
 /// Helper function to get entity coordinates
 /// Extracts a block entity or entity position for coordinate dedup. Hanging entities
-/// (item frames, paintings) add their `Facing`, so several decals can share one cell.
+/// (item frames) add their `Facing`, so several decals can share one cell.
+///
+/// An entity's UUID beats `Facing` where there is one. Every UUID this writer
+/// produces comes from `build_deterministic_uuid`, so the two copies a tile
+/// halo makes of one entity carry the same one and still collapse, while two
+/// entities that merely round into the same cell (two facade panels meeting at
+/// a building corner put their centres in one block) no longer take each
+/// other's place. Block entities have no UUID and keep the old key.
+///
+/// The whole UUID goes in the key, not a fold of it: `uuid[0] ^ uuid[3]` would
+/// put 128 bits into 32, and at a few thousand panels in one world the birthday
+/// odds of two colliding are percents, not nothing. A collision here is silent
+/// entity loss, which is the defect this key exists to fix.
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+enum EntityIdentity {
+    Uuid([i32; 4]),
+    /// Block entities carry no UUID; `Facing` separates the ones that share a
+    /// cell, and -1 stands for an entity that has neither.
+    Facing(i32),
+}
+
 #[inline]
-fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, i32)> {
-    let facing = entity.get("Facing").and_then(value_to_i32).unwrap_or(-1);
+fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, EntityIdentity)> {
+    let facing = match entity.get("UUID") {
+        Some(Value::IntArray(uuid)) if uuid.len() == 4 => {
+            EntityIdentity::Uuid([uuid[0], uuid[1], uuid[2], uuid[3]])
+        }
+        _ => EntityIdentity::Facing(entity.get("Facing").and_then(value_to_i32).unwrap_or(-1)),
+    };
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
             if let (Some(x), Some(y), Some(z)) = (
@@ -503,7 +633,7 @@ fn is_light_transparent(name: &str) -> bool {
 }
 
 // Light a block removes: 0 passes, 1 attenuates (water/leaves/ice), 15 blocks.
-fn light_opacity(name: &str) -> u8 {
+pub(crate) fn light_opacity(name: &str) -> u8 {
     let n = name.strip_prefix("minecraft:").unwrap_or(name);
     if n.ends_with("leaves")
         || matches!(
@@ -632,18 +762,26 @@ fn pack_light_nibble(arr: &mut [i8], index: usize, value: u8) {
     arr[byte] = new as i8;
 }
 
+/// Sky and block light for a run of sections, as 2048-byte nibble arrays per section.
+type SectionLight = Vec<(Vec<i8>, Vec<i8>)>;
+
 // Sky + block light per section as 2048-byte nibble arrays.
+//
+// `sky_above` is the skylight entering the top of the range: 15 under open sky, or the level
+// leaving the bottom of the range above. Also returns the level leaving this range's bottom,
+// or None when that plane is mixed and a caller stacking ranges cannot carry a single value.
 fn compute_lighting(
     sections: &[Section],
     min_section_y: i8,
     max_section_y: i8,
-) -> Vec<(Vec<i8>, Vec<i8>)> {
+    sky_above: u8,
+) -> (SectionLight, Option<u8>) {
     use std::collections::VecDeque;
 
     let num_sections = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
     let height = num_sections * 16;
     if height == 0 {
-        return Vec::new();
+        return (Vec::new(), Some(sky_above));
     }
     let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
 
@@ -678,11 +816,11 @@ fn compute_lighting(
     // SkyLight: open sky above the highest non-transparent block is 15; flood-fill the band below.
     let top = if any_solid { (htop + 2).min(height) } else { 0 };
     let mut sky = vec![0u8; height * 256];
-    sky[top * 256..].fill(15);
+    sky[top * 256..].fill(sky_above);
     let mut sq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
     for z in 0..16usize {
         for x in 0..16usize {
-            let mut level = 15u8;
+            let mut level = sky_above;
             for y in (0..top).rev() {
                 let g = idx(x, y, z);
                 if opacity[g] >= 15 {
@@ -729,6 +867,61 @@ fn compute_lighting(
         }
         out.push((sl, bl));
     }
+
+    let first = sky[0];
+    let sky_below = sky[..256].iter().all(|&v| v == first).then_some(first);
+    (out, sky_below)
+}
+
+/// Light for the sections a chunk actually writes, indexed by `y - span.0` so callers keep
+/// using span offsets. Computed one contiguous run at a time, top down: the working grids then
+/// cover a run's height instead of the whole span, which under the tall datapack is ~180
+/// sections of mostly air between the bedrock plane and the surface.
+///
+/// The skipped gaps are air, so the skylight leaving a run passes through unchanged and seeds
+/// the run below, and block light cannot cross their 16-plus blocks. A gap plane that is not
+/// uniform cannot be carried that way, so those chunks fall back to one full-span pass.
+fn compute_chunk_lighting(sections: &[Section], span: (i8, i8)) -> SectionLight {
+    let (min_section_y, max_section_y) = span;
+    let len = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
+    let mut out: SectionLight = vec![(Vec::new(), Vec::new()); len];
+
+    let ys = emitted_section_ys(sections, span);
+    let mut runs: Vec<(i8, i8)> = Vec::new();
+    for &y in &ys {
+        match runs.last_mut() {
+            Some(run) if run.1 as i32 + 1 == y as i32 => run.1 = y,
+            _ => runs.push((y, y)),
+        }
+    }
+
+    let mut sky_above = 15u8;
+    let mut gap_top: Option<i8> = None;
+    for &(lo, hi) in runs.iter().rev() {
+        // `compute_lighting` only reads sections inside the range it is given, so the full
+        // slice can be passed without copying the run out of it.
+        let (light, sky_below) = compute_lighting(sections, lo, hi, sky_above);
+        let base = (lo as i32 - min_section_y as i32) as usize;
+        for (k, section_light) in light.into_iter().enumerate() {
+            out[base + k] = section_light;
+        }
+        let Some(sky_below) = sky_below else {
+            return compute_lighting(sections, min_section_y, max_section_y, 15).0;
+        };
+        // A lit gap only happens in a chunk with no terrain over it, so paying for the two
+        // constant arrays there keeps the LOD exact without costing the common case anything.
+        if sky_above > 0 {
+            if let Some(top) = gap_top {
+                let packed = ((sky_above << 4) | sky_above) as i8;
+                for y in hi as i32 + 1..=top as i32 {
+                    let at = (y - min_section_y as i32) as usize;
+                    out[at] = (vec![packed; 2048], vec![0i8; 2048]);
+                }
+            }
+        }
+        sky_above = sky_below;
+        gap_top = Some(lo - 1);
+    }
     out
 }
 
@@ -759,15 +952,58 @@ fn get_structures_value() -> &'static Value {
     })
 }
 
-/// Creates modern chunk NBT data (post-1.18 format, no Level wrapper).
-///
-/// Writes all required fields for server compatibility:
-/// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
-/// Section range is determined dynamically: at minimum the vanilla range
-/// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
+/// Vanilla build range, in section coordinates (Y=-64 to Y=319).
+const VANILLA_MIN_SECTION_Y: i8 = -4;
+const VANILLA_MAX_SECTION_Y: i8 = 19;
+
+/// Section Ys a chunk writes: the vanilla span, plus any section outside it holding content.
+/// Lighting and the emitted NBT list both come from here so the two cannot drift apart.
+fn emitted_section_ys(sections: &[Section], span: (i8, i8)) -> Vec<i8> {
+    let content: std::collections::HashSet<i8> = sections.iter().map(|s| s.y).collect();
+    (span.0..=span.1)
+        .filter(|y| {
+            (VANILLA_MIN_SECTION_Y..=VANILLA_MAX_SECTION_Y).contains(y) || content.contains(y)
+        })
+        .collect()
+}
+
+/// Outer bounds of a chunk: the vanilla span, widened to reach any section with content.
+/// The sections actually written are a sparse subset of it, see `emitted_section_ys`.
+pub(crate) fn chunk_section_span(sections: &[Section]) -> (i8, i8) {
+    let mut min_section_y: i8 = VANILLA_MIN_SECTION_Y;
+    let mut max_section_y: i8 = VANILLA_MAX_SECTION_Y;
+    for section in sections {
+        if section.y < min_section_y {
+            min_section_y = section.y;
+        }
+        if section.y > max_section_y {
+            max_section_y = section.y;
+        }
+    }
+    (min_section_y, max_section_y)
+}
+
+/// Builds a chunk and its lighting in one call. The region writer computes the
+/// two separately so it can share the light with the LOD cache; this stays for
+/// callers that only want the NBT.
+#[cfg(test)]
 fn create_chunk_nbt(
     chunk: &Chunk,
     bake_lighting: bool,
+    biome_value: &Value,
+) -> HashMap<String, Value> {
+    let (min_section_y, max_section_y) = chunk_section_span(&chunk.sections);
+    let lighting = bake_lighting
+        .then(|| compute_chunk_lighting(&chunk.sections, (min_section_y, max_section_y)));
+    create_chunk_nbt_with_lighting(chunk, lighting, biome_value)
+}
+
+/// Builds one chunk's NBT from light arrays the caller already has. The voxy
+/// LOD writer needs the very same light the chunk is written with, so the
+/// region loop computes it once and hands it to both.
+fn create_chunk_nbt_with_lighting(
+    chunk: &Chunk,
+    lighting: Option<SectionLight>,
     biome_value: &Value,
 ) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
@@ -778,20 +1014,7 @@ fn create_chunk_nbt(
         .map(|(i, s)| (s.y, i))
         .collect();
 
-    // Emitted section range: the vanilla span, expanded to cover content. Deliberately NOT
-    // the whole dimension — under the tall datapack that would be 254 sections per chunk
-    // instead of ~24. Minecraft slots each section by its own `Y` and fills the gaps with air,
-    // so a sparse list is fine.
-    let mut min_section_y: i8 = -4; // vanilla min (Y=-64)
-    let mut max_section_y: i8 = 19; // vanilla max (Y=319)
-    for &y in section_map.keys() {
-        if y < min_section_y {
-            min_section_y = y;
-        }
-        if y > max_section_y {
-            max_section_y = y;
-        }
-    }
+    let (min_section_y, max_section_y) = chunk_section_span(&chunk.sections);
 
     // `yPos` and the heightmaps are dimension-relative and must NOT come from the emitted
     // range: Minecraft sizes the heightmap bit width from the dimension's height and offsets
@@ -802,17 +1025,17 @@ fn create_chunk_nbt(
     let (world_min_section, world_max_section) = crate::world_editor::world_section_range();
     let world_height = ((world_max_section as i32 + 1) - world_min_section as i32) * 16;
 
-    // Bake lighting only when requested; otherwise leave it for the engine to relight on load.
-    let mut lighting = if bake_lighting {
-        compute_lighting(&chunk.sections, min_section_y, max_section_y)
-    } else {
-        Vec::new()
-    };
+    // Lighting is baked only when requested; otherwise the engine relights on load.
+    let bake_lighting = lighting.is_some();
+    let mut lighting = lighting.unwrap_or_default();
 
-    // Build all sections in the determined range
-    let sections: Vec<Value> = (min_section_y..=max_section_y)
-        .enumerate()
-        .map(|(off, y)| {
+    // Sparse section list: the vanilla span plus whatever content sits outside it. Empty gaps
+    // beyond the vanilla span are left out entirely; Minecraft slots each section by its own
+    // `Y` and treats the missing ones as air. Under the tall datapack a chunk otherwise emits
+    // ~180 sections, nearly all of them synthesized air, instead of the usual 24.
+    let sections: Vec<Value> = emitted_section_ys(&chunk.sections, (min_section_y, max_section_y))
+        .into_iter()
+        .map(|y| {
             let mut section_nbt = if let Some(&idx) = section_map.get(&y) {
                 build_section_value(&chunk.sections[idx])
             } else {
@@ -824,6 +1047,8 @@ fn create_chunk_nbt(
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
             if bake_lighting {
+                // `lighting` covers the whole span, so index by Y, not by list position.
+                let off = (y as i32 - min_section_y as i32) as usize;
                 let (sky_light, block_light) = std::mem::take(&mut lighting[off]);
                 section_nbt.insert(
                     "SkyLight".to_string(),
@@ -921,7 +1146,7 @@ fn block_entity_owned_by_block(chunk: &ChunkToModify, be: &Value) -> bool {
 
 /// Deduplicates a compound list by entity coordinate, keeping the last occurrence.
 fn dedup_compound_list(values: &[Value]) -> Vec<Value> {
-    let mut coord_index: HashMap<(i32, i32, i32, i32), usize> = HashMap::new();
+    let mut coord_index: HashMap<(i32, i32, i32, EntityIdentity), usize> = HashMap::new();
     let mut deduped: Vec<Value> = Vec::with_capacity(values.len());
 
     for value in values {
@@ -1204,7 +1429,7 @@ mod tests {
     }
 
     fn plains_biome() -> Value {
-        crate::biome::build_chunk_biome_nbt(0, 0, None, 0.0)
+        crate::biome::biome_nbt_from_names(&crate::biome::chunk_biome_names(0, 0, None, 0.0))
     }
 
     #[test]
@@ -1325,6 +1550,54 @@ mod dimension_bounds_tests {
         }
     }
 
+    /// A chunk with a bedrock plane far below the surface, the shape a sunk terrain base makes.
+    fn chunk_with_plane_at(depths: &[i32]) -> Chunk {
+        let mut c = ChunkToModify::default();
+        for &y in depths {
+            for x in 0..16 {
+                for z in 0..16 {
+                    c.set_block(x, y, z, STONE);
+                }
+            }
+        }
+        Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        }
+    }
+
+    #[test]
+    fn run_by_run_light_matches_one_pass_over_the_whole_span() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+
+        // Terrain over a deep plane, a lone deep plane (nothing above it blocks the sky), a
+        // partly filled column, and the vanilla shape.
+        for depths in [
+            &[-2000, -62][..],
+            &[-2000][..],
+            &[-2000, -62, 500][..],
+            &[-62][..],
+        ] {
+            let chunk = chunk_with_plane_at(depths);
+            let span = chunk_section_span(&chunk.sections);
+            let runs = compute_chunk_lighting(&chunk.sections, span);
+            let whole = compute_lighting(&chunk.sections, span.0, span.1, 15).0;
+
+            for y in emitted_section_ys(&chunk.sections, span) {
+                let at = (y as i32 - span.0 as i32) as usize;
+                assert_eq!(runs[at], whole[at], "section {y} of {depths:?}");
+            }
+        }
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
     #[test]
     fn heightmaps_follow_the_dimension_not_the_chunk_content() {
         let _g = super::super::common::FLOOR_TEST_LOCK
@@ -1371,5 +1644,189 @@ mod dimension_bounds_tests {
             sections.len()
         );
         set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn deep_content_adds_its_own_section_without_filling_the_gap() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -2000, z, STONE);
+                c.set_block(x, -62, z, STONE);
+            }
+        }
+        let chunk = Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+
+        let nbt = create_chunk_nbt(&chunk, true, &Value::Compound(HashMap::new()));
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        // Vanilla span plus the one deep section, not the 145 the span covers.
+        assert_eq!(sections.len(), 25);
+
+        let ys: Vec<i8> = sections
+            .iter()
+            .map(|s| match s {
+                Value::Compound(m) => match m["Y"] {
+                    Value::Byte(y) => y,
+                    _ => panic!("Y is not a byte"),
+                },
+                _ => panic!("section is not a compound"),
+            })
+            .collect();
+        assert_eq!(ys[0], -125);
+        assert_eq!(&ys[1..], (-4..=19).collect::<Vec<i8>>());
+
+        // Light must follow the section's own Y, not its position in the list: everything
+        // above the -62 plane is open sky, everything under it is buried. Section -4 straddles
+        // the plane, so it is the one mixed section.
+        for (y, s) in ys.iter().zip(sections).filter(|(y, _)| **y != -4) {
+            let Value::Compound(m) = s else { panic!() };
+            let Value::ByteArray(sky) = &m["SkyLight"] else {
+                panic!("no SkyLight")
+            };
+            let expect: i8 = if *y > -4 { -1 } else { 0 };
+            assert!(
+                sky.iter().all(|&v| v == expect),
+                "section {y} has the wrong skylight"
+            );
+        }
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    fn section_ys(nbt: &HashMap<String, Value>) -> Vec<i8> {
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        sections
+            .iter()
+            .map(|s| match s {
+                Value::Compound(m) => match m["Y"] {
+                    Value::Byte(y) => y,
+                    _ => panic!("Y is not a byte"),
+                },
+                _ => panic!("section is not a compound"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn vanilla_chunks_emit_exactly_the_vanilla_section_span() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+
+        let nbt = create_chunk_nbt(&shallow_chunk(), true, &Value::Compound(HashMap::new()));
+        assert_eq!(section_ys(&nbt), (-4..=19).collect::<Vec<i8>>());
+
+        let Value::List(sections) = &nbt["sections"] else {
+            panic!("chunk has no sections")
+        };
+        for (y, s) in section_ys(&nbt).iter().zip(sections).skip(1) {
+            let Value::Compound(m) = s else { panic!() };
+            let Value::ByteArray(sky) = &m["SkyLight"] else {
+                panic!("no SkyLight")
+            };
+            assert!(
+                sky.iter().all(|&v| v == -1),
+                "section {y} above the surface should be fully skylit"
+            );
+        }
+    }
+
+    #[test]
+    fn content_above_the_vanilla_ceiling_is_emitted_without_the_gap() {
+        let _g = super::super::common::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_world_bounds(-2032, 2031);
+
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -62, z, STONE);
+                c.set_block(x, 500, z, STONE);
+            }
+        }
+        let chunk = Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+
+        let nbt = create_chunk_nbt(&chunk, true, &Value::Compound(HashMap::new()));
+        let mut expected: Vec<i8> = (-4..=19).collect();
+        expected.push(31);
+        assert_eq!(section_ys(&nbt), expected);
+
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+    }
+
+    #[test]
+    fn entity_dedup_keeps_two_entities_that_share_a_cell() {
+        use super::{dedup_compound_list, get_entity_coords, EntityIdentity};
+        use fastnbt::IntArray;
+
+        // Two facade panels meeting at a building corner: different sub-block
+        // positions inside one cell, no face byte, different UUIDs.
+        let display = |x: f64, z: f64, uuid: [i32; 4]| {
+            let mut e: HashMap<String, Value> = HashMap::new();
+            e.insert(
+                "id".to_string(),
+                Value::String("minecraft:item_display".to_string()),
+            );
+            e.insert(
+                "Pos".to_string(),
+                Value::List(vec![
+                    Value::Double(x),
+                    Value::Double(-52.0),
+                    Value::Double(z),
+                ]),
+            );
+            e.insert(
+                "UUID".to_string(),
+                Value::IntArray(IntArray::new(uuid.into())),
+            );
+            Value::Compound(e)
+        };
+        let a = display(33.1, 12.2, [1, 2, 3, 4]);
+        let b = display(33.8, 12.9, [5, 6, 7, 8]);
+        assert_eq!(
+            dedup_compound_list(&[a.clone(), b.clone()]).len(),
+            2,
+            "two panels rounding into one cell must both survive"
+        );
+
+        // The same panel seen twice by two tiles: identical UUID, one survives.
+        assert_eq!(dedup_compound_list(&[a.clone(), a.clone()]).len(), 1);
+
+        // Hanging entities still separate by cell, and a block entity, which
+        // carries no UUID, still keys on its own x/y/z.
+        let Value::Compound(am) = &a else { panic!() };
+        let Value::Compound(bm) = &b else { panic!() };
+        assert_ne!(get_entity_coords(am), get_entity_coords(bm));
+        let mut be: HashMap<String, Value> = HashMap::new();
+        be.insert("x".to_string(), Value::Int(7));
+        be.insert("y".to_string(), Value::Int(8));
+        be.insert("z".to_string(), Value::Int(9));
+        assert_eq!(
+            get_entity_coords(&be),
+            Some((7, 8, 9, EntityIdentity::Facing(-1)))
+        );
     }
 }

@@ -14,7 +14,7 @@ use crate::osm_parser::{
 };
 use crate::progress::{
     emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
-    emit_show_in_folder,
+    emit_show_in_folder, MESSAGE_ONLY,
 };
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -37,6 +37,11 @@ pub struct GenerationOptions {
     pub spawn_point: Option<(i32, i32)>,
     pub luanti_game: Option<crate::luanti_block_map::LuantiGame>,
     pub ground_level: i32,
+    /// The Mapillary facade pipeline, started by the caller as soon as it knew
+    /// the bbox so that its downloads overlap the OSM, Overture and elevation
+    /// fetches. Idle unless the feature is on. Joined below, before the
+    /// buildings go up.
+    pub facades: crate::mapillary::FacadeJob,
 }
 
 /// Shoelace area of a way's projected ring, in blocks squared.
@@ -262,6 +267,9 @@ fn process_element(
                 if signage {
                     signage::generate_building_signage(editor, way, anchor);
                 }
+            } else if crate::structures::jetbridge::claims(way) {
+                // Ahead of the highway branch, or the corridor tag paints asphalt on the apron.
+                crate::structures::jetbridge::generate_jet_bridge(editor, way, building_footprints);
             } else if way.tags.contains_key("highway") {
                 highways::generate_highways(
                     editor,
@@ -485,22 +493,25 @@ fn process_element(
 /// Whether to stream regions to disk (lower peak RAM) for `num_regions` regions. Auto-enabled
 /// when the estimated resident world would crowd available RAM; trades some time for RAM, output
 /// unchanged (3D models + subways preserved). `ARNIS_STREAM_TO_DISK=1/0` overrides; constants tunable.
-fn should_stream_to_disk(num_regions: usize) -> bool {
+fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool) -> bool {
     match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
         Some("1") => return true,
         Some("0") => return false,
         _ => {}
     }
-    // Calibrated on a dense full-feature run (terrain + land cover + Overture + 3D): ~26 MB/region.
     const BASE_MB: u64 = 500;
-    const PER_REGION_MB: u64 = 26;
-    let est_peak_mb = BASE_MB + PER_REGION_MB * num_regions as u64;
+    let est_peak_mb =
+        BASE_MB + crate::world_editor::per_region_estimate_mb(fillground) * num_regions as u64;
 
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    let available_mb = sys.available_memory() / (1024 * 1024);
     // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
+}
+
+/// Free RAM in MB.
+fn available_memory_mb() -> u64 {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    sys.available_memory() / (1024 * 1024)
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -543,12 +554,92 @@ pub fn generate_world_with_options(
             args.disable_height_limit,
         )
     };
-    editor.set_bake_lighting(args.bake_lighting);
+    // Voxy renders from stored per-voxel light, so an unlit LOD cache would be a
+    // black horizon. The toggle implies baked lighting rather than silently
+    // producing that.
+    let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
+    editor.set_bake_lighting(args.bake_lighting || wants_voxy);
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
+
+    // Facade textures: loaded and projected onto the buildings before any tile
+    // thread starts, so the wall builder only reads. A folder given on the
+    // command line is loaded as it always was, which is how the Python review
+    // loop works; otherwise the pipeline that was started as soon as the bbox
+    // was known is collected here, at the first point that cannot go on without
+    // it, and its export in the cache is what gets loaded.
+    let mapillary_start = args.benchmark.then(std::time::Instant::now);
+    let pipeline_export = options.facades.join();
+    if let Some(t) = mapillary_start {
+        eprintln!("[BENCHMARK] mapillary_join_ms={}", t.elapsed().as_millis());
+    }
+    // The photo panels are Java entities carried by a resource pack. The blocks
+    // are ordinary blocks and work on every format, so the feature stays on and
+    // says what it dropped rather than dropping it in silence. The CLI refuses
+    // the combination outright in `validate_args`; this catches the GUI, which
+    // builds `Args` directly.
+    if world_format != WorldFormat::JavaAnvil
+        && args.mapillary_facade_mode.places_displays()
+        && args.mapillary_facades_wanted()
+    {
+        let other = if world_format == WorldFormat::LuantiWorld {
+            "Luanti"
+        } else {
+            "Bedrock"
+        };
+        eprintln!(
+            "{} Facade photo panels need a Java world; building the {other} facade blocks only.",
+            "Warning:".yellow().bold()
+        );
+        emit_gui_progress_update(MESSAGE_ONLY, "Facades: photo panels need a Java world");
+    }
+    // A folder is the review loop's override, but an explicit "off" still means
+    // off: the GUI toggle sends Some(false), and a `--mapillary-facades-dir`
+    // given beside it used to build facades anyway. Some(None) from the CLI
+    // keeps working. The GUI has no folder of its own any more, so on that side
+    // this is always the pipeline's own export.
+    let folder = if args.mapillary_facades == Some(false) {
+        None
+    } else {
+        args.mapillary_facades_dir
+            .as_deref()
+            .or(pipeline_export.as_deref())
+    };
+    match folder {
+        Some(dir) => crate::mapillary::facades::install(dir, &elements, args, &xzbbox),
+        None => crate::mapillary::facades::clear(),
+    }
+    // Panel candidates collect in a process-wide registry while the buildings
+    // are built, are hung before the world is saved and become a pack after
+    // it; a run without them must not inherit the previous world's.
+    //
+    // Preset facades hang on the same display entities and write into the same
+    // resource pack, so the display registry is on when either source is. The
+    // Mapillary side still decides for itself whether to collect anything: its
+    // `collect` also asks the facade store, which is off unless the export
+    // asked for the photos mode.
+    let java = world_format == WorldFormat::JavaAnvil;
+    // The atlas the panels are budgeted against, before anything measures one.
+    // Both sources read it, so it is set whichever of them is running.
+    crate::mapillary::atlas::set_atlas_side(args.facade_detail.atlas_side());
+    crate::building_facades::reset(
+        args.building_facades && java,
+        args.building_facades_dir.as_deref(),
+        args.facade_px,
+        args.scale,
+    );
+    // A panel hangs in the cell in front of its wall, and nothing is written
+    // outside the world, so the outermost ring of blocks can carry none. Said
+    // after the reset, which clears it, and before any building is built: a
+    // wall that cannot be photographed must keep its windows.
+    crate::building_facades::set_world_extent(&xzbbox);
+    crate::mapillary::displays::reset(
+        crate::mapillary::facades::displays_enabled() || crate::building_facades::enabled(),
+        args.facade_px,
+    );
 
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
     // threads only read the registry. Java only; other formats keep banner fallbacks.
@@ -599,15 +690,36 @@ pub fn generate_world_with_options(
         editor.set_preview(Arc::clone(p));
     }
 
+    // Voxy LOD cache, fed alongside the region files as they are written.
+    if wants_voxy {
+        match crate::voxy::VoxyWriter::create(&output_path) {
+            Ok(Some(writer)) => editor.set_voxy(Arc::new(writer)),
+            Ok(None) => eprintln!(
+                "Skipping the Voxy LOD cache: could not read the world seed from level.dat."
+            ),
+            Err(e) => eprintln!("Skipping the Voxy LOD cache: {e}"),
+        }
+    }
+
     let ground = Arc::new(ground);
+    let mut bench = crate::bench::Bench::new(args.benchmark);
+    crate::world_editor::reset_section_counters(args.benchmark);
     // Materialize the lazy water-blend mask now, before world memory peaks.
     ground.warm_water_blend();
+    bench.mark("ground_warm");
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     // Uses the ground's real base, not args: the montane check measures blocks above it, and
-    // the base sinks when the relief needs the extended floor.
-    let tree_pack =
-        crate::trees::tree_pack::load(args, llbbox, args.scale, ground.base_level()).map(Arc::new);
-    let mut bench = crate::bench::Bench::new(args.benchmark);
+    // the base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
+    // blocks back into metres, which compression makes far smaller than args.scale.
+    let tree_pack = crate::trees::tree_pack::load(
+        args,
+        llbbox,
+        args.scale,
+        ground.base_level(),
+        ground.blocks_per_meter(),
+    )
+    .map(Arc::new);
+    bench.reset();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
@@ -649,7 +761,20 @@ pub fn generate_world_with_options(
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    let road_mask = highways::collect_road_surface_coords(&elements, &editor, &xzbbox, args.scale);
+    let road_mask = Arc::new(highways::collect_road_surface_coords(
+        &elements, &editor, &xzbbox, args.scale,
+    ));
+
+    // Roads plus every paved area footprint, resolved before anything is placed so
+    // vegetation passes can tell a man-made surface from natural ground. With no
+    // paved area in the bbox the road mask already is the answer, so it is shared
+    // instead of copied: one bitmap is a bit per world column and that adds up on
+    // a several-hundred-square-kilometre run.
+    let sealed_surface = match flood_fill_cache.collect_sealed_surfaces(&elements, &road_mask) {
+        Some(mask) => Arc::new(mask),
+        None => Arc::clone(&road_mask),
+    };
+    editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
@@ -701,6 +826,9 @@ pub fn generate_world_with_options(
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+
+    // Runway segments merge across ways, so planes prescan here and stamp after the merge.
+    let planes = crate::structures::plane::prescan(&elements, args);
 
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
@@ -773,8 +901,11 @@ pub fn generate_world_with_options(
         // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
         // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
         // are kept via region deferral.
-        eviction_active =
-            matches!(world_format, WorldFormat::JavaAnvil) && should_stream_to_disk(tiles.len());
+        // Read at the decision point: the precompute above allocates heavily, and an
+        // optimistic figure would skip streaming in exactly the runs that need it.
+        let available_mb = available_memory_mb();
+        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
+            && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
 
         // Regions any 3D placement may write to: kept resident (not evicted in-loop)
         // so the post-merge placement pass lands in RAM, then flushed at finalize.
@@ -784,13 +915,27 @@ pub fn generate_world_with_options(
                 .map(|p| p.deferred_region_keys(args.scale))
                 .unwrap_or_default();
             regions.extend(landmarks.deferred_region_keys(args.scale));
+            regions.extend(planes.deferred_region_keys());
             regions
         } else {
             HashSet::new()
         };
 
         if eviction_active {
-            flush_worker = Some(FlushWorker::spawn(editor.region_write_ctx(), 3));
+            let (flush_threads, flush_queue) = crate::world_editor::flush_pool_params(
+                tile_batch_size,
+                available_mb,
+                args.fillground,
+            );
+            if args.benchmark {
+                eprintln!("[BENCHMARK] flush_threads={flush_threads} flush_queue={flush_queue}");
+            }
+            flush_worker = Some(FlushWorker::spawn(
+                editor.region_write_ctx(),
+                flush_queue,
+                flush_threads,
+                args.benchmark,
+            ));
         }
 
         let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
@@ -872,6 +1017,7 @@ pub fn generate_world_with_options(
                     if let Some(ref tp) = tree_pack {
                         tile_editor.set_tree_pack(Arc::clone(tp));
                     }
+                    tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
                     if let Some(ctx) = &signage_ctx {
                         tile_editor.set_signage(Arc::clone(ctx));
                     }
@@ -1051,6 +1197,10 @@ pub fn generate_world_with_options(
                                         hash_acc = hash_acc
                                             .wrapping_add(editor.region_content_hash(d.0, d.1));
                                     }
+                                    // Facade panels check the region's final blocks
+                                    // and must be in before it leaves memory.
+                                    crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
+                                    crate::building_facades::flush_region(&mut editor, d.0, d.1);
                                     if let Some(w) = flush_worker.as_ref() {
                                         editor.flush_region_via(w, d.0, d.1)?;
                                     }
@@ -1254,6 +1404,11 @@ pub fn generate_world_with_options(
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
+    // The editor holds its own handle on the sealed-surface mask, and that mask is the
+    // road mask itself when nothing else was sealed, so releasing it here is what
+    // actually frees the bitmap.
+    editor.release_sealed_surface();
+    drop(sealed_surface);
     drop(road_mask);
     drop(tunnel_footprint);
     drop(rail_mask);
@@ -1278,6 +1433,7 @@ pub fn generate_world_with_options(
     if let Some(p) = models_3d_pipeline.as_ref() {
         p.place(&mut editor, args);
     }
+    crate::structures::plane::place_plane_models(&mut editor, &planes);
     // Last, because they clear their own footprint.
     let landmarks_start = args.benchmark.then(std::time::Instant::now);
     landmarks.place(&mut editor, args);
@@ -1289,6 +1445,7 @@ pub fn generate_world_with_options(
     if eviction_active {
         // Flush deferred (rail-tunnel-touched) regions now the global carve has run on them.
         // The spawn region stays resident so the map-item still lands on real ground.
+        let drain_start = args.benchmark.then(std::time::Instant::now);
         let mut leftover: Vec<(i32, i32)> = real_regions
             .difference(&evicted_regions)
             .copied()
@@ -1299,6 +1456,8 @@ pub fn generate_world_with_options(
             if hash_check {
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
+            crate::mapillary::displays::flush_region(&mut editor, rx, rz);
+            crate::building_facades::flush_region(&mut editor, rx, rz);
             if let Some(w) = flush_worker.as_ref() {
                 editor.flush_region_via(w, rx, rz)?;
             }
@@ -1310,9 +1469,16 @@ pub fn generate_world_with_options(
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
         }
+        if let Some(t) = drain_start {
+            bench.report("leftover_drain", t.elapsed());
+        }
         // Wait for all background writes to land (and surface any I/O error) before save.
+        let join_start = args.benchmark.then(std::time::Instant::now);
         if let Some(w) = flush_worker.take() {
             w.finish()?;
+        }
+        if let Some(t) = join_start {
+            bench.report("flush_join", t.elapsed());
         }
     }
 
@@ -1338,11 +1504,32 @@ pub fn generate_world_with_options(
         }
     }
 
+    // Facade panels: every candidate recorded while the walls went up is
+    // checked against the finished blocks and hung now, before the save. Under
+    // eviction most were settled as their regions were flushed; this hangs the
+    // rest and reports the outcome.
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(report) = crate::mapillary::displays::finalize(&mut editor) {
+            println!("{report}");
+        }
+        if let Some(report) = crate::building_facades::finalize(&mut editor) {
+            println!("{report}");
+        }
+    }
+
     // Save world
     if let Err(e) = editor.save() {
+        // The panels were waiting for the pack this save was going to make a
+        // world for; without one they are only memory.
+        crate::mapillary::displays::discard();
         return Err(e.to_string());
     }
     bench.mark("save");
+
+    if args.benchmark {
+        let (built, slow) = crate::world_editor::section_counters();
+        eprintln!("[BENCHMARK] sections_built={built} sections_slow_path={slow}");
+    }
 
     // Map item, signage tiles and world settings are often longer than the region
     // write, so they get their own band instead of a frozen bar at the end of save.
@@ -1371,6 +1558,20 @@ pub fn generate_world_with_options(
             eprintln!("[BENCHMARK] signage_maps_ms={}", t.elapsed().as_millis());
         }
         println!("{}", ctx.summary(args.debug));
+    }
+
+    // Facade panels: their textures and models are the world's resource pack,
+    // which wants the world folder to exist, and it does by now.
+    if world_format == WorldFormat::JavaAnvil {
+        match crate::mapillary::displays::write_packs(&output_path) {
+            Ok(Some(report)) => println!("{report}"),
+            Ok(None) => {}
+            Err(e) => eprintln!("Warning: Failed to write facade panels: {e}"),
+        }
+        // The Mapillary walls have no reader past this point, and in the GUI
+        // the process lives on with the next generation: every exported wall's
+        // image would otherwise stay resident until that one installs its own.
+        crate::mapillary::facades::clear();
     }
 
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.

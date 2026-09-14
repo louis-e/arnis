@@ -185,6 +185,14 @@ pub fn generate_ground_region(
     iter_max_z: i32,
     show_progress: bool,
 ) {
+    // `Some` only off Earth, where the body's palette replaces land cover and
+    // every Earth-only surface pass is off.
+    let planetary_body = (!args.body.is_earth()).then_some(args.body);
+    let planetary_lat = args
+        .bbox
+        .as_ref()
+        .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
+        .unwrap_or(0.0);
     let has_land_cover = ground.has_land_cover();
     let has_canopy = ground.has_canopy();
     let tree_spacing = editor.tree_slot_spacing();
@@ -471,7 +479,18 @@ pub fn generate_ground_region(
                             }
                         } else {
                             // Determine surface and sub-surface blocks based on available data
-                            let (surface_block, under_block) = if has_land_cover {
+                            let (surface_block, under_block) = if let Some(body) = planetary_body {
+                                // No land cover off Earth, so this replaces the
+                                // whole ESA cascade below.
+                                crate::celestial::surface_palette(
+                                    body,
+                                    slope,
+                                    planetary_lat,
+                                    ground_y,
+                                    x,
+                                    z,
+                                )
+                            } else if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
                                 let cover = ground.cover_class(coord);
 
@@ -671,7 +690,9 @@ pub fn generate_ground_region(
                             // Uses water_blend gradient for ESA water (scales with
                             // grid resolution) plus neighbor check for OSM water.
                             // Skip on steep terrain — canyon walls should stay rock.
-                            let (surface_block, under_block) = if surface_block != WATER
+                            // Nothing to blend into off Earth: no water, no beaches.
+                            let (surface_block, under_block) = if planetary_body.is_none()
+                                && surface_block != WATER
                                 && slope <= 3
                             {
                                 // Sand only at the immediate 1-cell ring around LC_WATER
@@ -861,22 +882,28 @@ pub fn generate_ground_region(
                             // Place vegetation from ESA land cover classification
                             // Only if nothing was already placed above ground by OSM processing
                             // and the ground block is a natural surface (not a road, building slab, etc.)
-                            let ground_is_natural = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z,
-                                Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
-                                None,
-                            );
-                            // Trees can also grow through stone surfaces (urban tree cover)
-                            let ground_allows_trees = ground_is_natural
-                                || editor.check_for_block_absolute(
+                            // A road or pitch owns its column whatever block it ended up
+                            // with, and surface=dirt or surface=grass make the block check
+                            // below say "natural" on both.
+                            let sealed = editor.surface_is_sealed(x, z);
+                            let ground_is_natural = !sealed
+                                && editor.check_for_block_absolute(
                                     x,
                                     ground_y,
                                     z,
-                                    Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
+                                    Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
                                     None,
                                 );
+                            // Trees can also grow through stone surfaces (urban tree cover)
+                            let ground_allows_trees = ground_is_natural
+                                || (!sealed
+                                    && editor.check_for_block_absolute(
+                                        x,
+                                        ground_y,
+                                        z,
+                                        Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
+                                        None,
+                                    ));
                             // Where the canopy map reaches, it decides which columns get
                             // trees on any class, and land cover keeps the surface and the
                             // undergrowth. Its roll uses its own hash, so turning the option
@@ -909,7 +936,10 @@ pub fn generate_ground_region(
                                     Some(bridge_surface),
                                 );
                             }
-                            if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
+                            if has_land_cover
+                                && !sealed
+                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                            {
                                 let cover = ground.cover_class(coord);
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 

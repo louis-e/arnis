@@ -7,7 +7,9 @@ mod biome;
 mod block_definitions;
 mod block_palette;
 mod bresenham;
+mod building_facades;
 mod canopy;
+mod celestial;
 mod climate;
 mod clipping;
 mod colors;
@@ -30,6 +32,7 @@ mod map_item_palette;
 mod map_preview;
 mod map_renderer;
 mod map_transformation;
+mod mapillary;
 mod models_3d;
 mod net;
 mod ore_generation;
@@ -49,6 +52,7 @@ mod test_utilities;
 mod tile;
 mod trees;
 mod version_check;
+mod voxy;
 mod water_depth;
 mod world_editor;
 mod world_utils;
@@ -57,6 +61,8 @@ use args::Args;
 use clap::Parser;
 use colored::*;
 use std::path::PathBuf;
+#[cfg(all(feature = "gui", target_os = "linux"))]
+use std::process::Command;
 use std::{env, fs, io::Write};
 
 // mimalloc scales far better than the system allocator under the concurrent
@@ -70,6 +76,9 @@ mod gui;
 // If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
 #[cfg(not(feature = "gui"))]
 mod progress {
+    /// Mirrors the real module's constant so callers outside the GUI feature
+    /// still compile; nothing here reads it, the emits below do nothing.
+    pub const MESSAGE_ONLY: f64 = -1.0;
     pub fn emit_gui_error(_message: &str) {}
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
     pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
@@ -81,6 +90,43 @@ mod progress {
 }
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+const EGL_ZINK_RETRY_MARKER: &str = "ARNIS_EGL_ZINK_RETRY";
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+fn has_user_rendering_override() -> bool {
+    [
+        "MESA_LOADER_DRIVER_OVERRIDE",
+        "LIBGL_ALWAYS_SOFTWARE",
+        "GALLIUM_DRIVER",
+    ]
+    .iter()
+    .any(|name| env::var_os(name).is_some())
+}
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+fn is_egl_startup_failure(error_message: &str) -> bool {
+    let lowered = error_message.to_ascii_lowercase();
+    lowered.contains("egl_not_initialized")
+        || lowered.contains("surfaceless egl")
+        || (lowered.contains("libegl") && lowered.contains("failed"))
+}
+
+#[cfg(all(feature = "gui", target_os = "linux"))]
+fn retry_gui_with_zink() -> Result<(), String> {
+    let executable = env::current_exe()
+        .map_err(|e| format!("Failed to locate current executable for EGL fallback retry: {e}"))?;
+    let status = Command::new(executable)
+        .env(EGL_ZINK_RETRY_MARKER, "1")
+        .env("MESA_LOADER_DRIVER_OVERRIDE", "zink")
+        .env("LIBGL_ALWAYS_SOFTWARE", "0")
+        .env("GALLIUM_DRIVER", "zink")
+        .status()
+        .map_err(|e| format!("Failed to relaunch with zink EGL workaround: {e}"))?;
+
+    std::process::exit(status.code().unwrap_or(1));
+}
 
 /// Reattach to the console this process was launched from, so terminal output
 /// works in both CLI and GUI runs.
@@ -129,7 +175,9 @@ fn run_cli() {
     version_check::check_for_updates_async();
 
     // Parse input arguments
-    let args: Args = Args::parse();
+    let mut args: Args = Args::parse();
+    args::apply_body_defaults(&mut args);
+    let args = args;
 
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
@@ -222,8 +270,11 @@ fn run_cli() {
     // requests load the public OpenStreetMap / elevation servers. Non-blocking.
     {
         const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
-        let area_km2 = effective_bbox.area_km2();
-        if area_km2 > MAX_RECOMMENDED_AREA_KM2 {
+        // area_km2 assumes Earth's radius, so a Moon bbox reads 13x too large.
+        let r = args.body.scale_ratio();
+        let area_km2 = effective_bbox.area_km2() * r * r;
+        // Earth only: the coarse fixed scale makes a large area the normal case.
+        if args.body.is_earth() && area_km2 > MAX_RECOMMENDED_AREA_KM2 {
             eprintln!(
                 "{} Large area selected (~{:.0} km²). Generation may take a long time and \
                  use many GB of memory, and places heavy load on public OpenStreetMap and \
@@ -244,7 +295,11 @@ fn run_cli() {
     };
 
     // Build the generation output path and level name
-    let (generation_path, level_name) = if args.bedrock {
+    let (generation_path, level_name) = if args.mapillary_probe {
+        // The probe reports coverage and exits, so it must not allocate (and
+        // leave behind) an empty world directory on the way there.
+        (PathBuf::new(), None)
+    } else if args.bedrock {
         // Bedrock: generate .mcworld file in user-specified path or Desktop
         let output_dir = args
             .path
@@ -324,6 +379,17 @@ fn run_cli() {
         );
     }
 
+    // The Mapillary facade pipeline needs only the bbox too, and its downloads
+    // are the longest thing in a run that uses it, so it starts here and is
+    // collected inside `generate_world_with_options`, just before the buildings.
+    let facade_job = mapillary::FacadeJob::start(&args, effective_bbox);
+    if facade_job.is_running() {
+        println!(
+            "{} Fetching Mapillary street-level imagery...",
+            "  [+]".bold()
+        );
+    }
+
     // OSM, Overture and elevation/land-cover fetches only need the bbox, so run them in parallel.
     if args.overture && !skip_objects {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
@@ -333,7 +399,12 @@ fn run_cli() {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
             let data = if args.overture && !skip_objects {
-                overture::fetch_overture_buildings(&effective_bbox, args.scale, args.debug)
+                overture::fetch_overture_buildings(
+                    &effective_bbox,
+                    args.scale,
+                    args.overture_source,
+                    args.debug,
+                )
             } else {
                 overture::OvertureData::default()
             };
@@ -540,6 +611,34 @@ fn run_cli() {
         None
     };
 
+    // Probe mode stops here: it exists to answer "is this area covered?" before
+    // anyone waits on a full generation.
+    if args.mapillary_probe {
+        let Some(token) = args.mapillary_token.as_deref().filter(|t| !t.is_empty()) else {
+            eprintln!(
+                "{} --mapillary-probe needs a token; pass --mapillary-token or set MAPILLARY_TOKEN.",
+                "Error:".red().bold()
+            );
+            std::process::exit(1);
+        };
+        let debug_dir = args.mapillary_debug_dir.clone();
+        match mapillary::sample_area(
+            &parsed_elements,
+            &args,
+            effective_bbox,
+            token,
+            debug_dir.is_some(),
+        )
+        .and_then(|report| mapillary::report(&report, debug_dir.as_deref()))
+        {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("{} Mapillary probe failed: {e}", "Error:".red().bold());
+                std::process::exit(1);
+            }
+        }
+    }
+
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
@@ -547,6 +646,7 @@ fn run_cli() {
         spawn_point,
         luanti_game,
         ground_level: args.ground_level,
+        facades: facade_job,
     };
 
     // Generate world
@@ -603,7 +703,29 @@ fn main() {
     {
         let gui_mode = std::env::args().len() == 1; // Just "arnis" with no args
         if gui_mode {
-            gui::run_gui();
+            #[cfg(target_os = "linux")]
+            let user_rendering_override = has_user_rendering_override();
+
+            if let Err(e) = gui::run_gui() {
+                #[cfg(target_os = "linux")]
+                {
+                    let already_retried = env::var_os(EGL_ZINK_RETRY_MARKER).is_some();
+                    if !already_retried && !user_rendering_override && is_egl_startup_failure(&e) {
+                        eprintln!(
+                            "{} Linux EGL initialization failed; retrying once with zink.",
+                            "Warning:".yellow().bold()
+                        );
+                        if let Err(retry_error) = retry_gui_with_zink() {
+                            eprintln!("{} {}", "Error:".red().bold(), retry_error);
+                        }
+                    }
+                }
+
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            }
+
+            return;
         }
     }
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-17T22:10:44Z",
+  "generated_at": "2026-09-04T15:38:41Z",
   "source": "https://query.wikidata.org/sparql (P4896 ∩ P625) + commons.wikimedia.org imageinfo",
   "license_policy": "permissive-only: CC0, Public Domain, CC BY (any version)",
   "models": {
@@ -113,10 +113,10 @@
     },
     "Q11965101": {
       "label": "Royal Cast Collection",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Poseidon%20eller%20Zeus%20fra%20Artemision%20-%20KAS2100.stl",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Apollo%20Belvedere%20-%20KAS353.stl",
       "license": "CC0",
       "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
-      "artist": "Unknown. Digitization: Statens Museum for Kunst."
+      "artist": "Leochares(?). Digitization: Statens Museum for Kunst."
     },
     "Q131013": {
       "label": "Acropolis of Athens",
@@ -417,7 +417,8 @@
       "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Gateway%20Arch.stl",
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft"
+      "artist": "Microsoft",
+      "height_m": 192.024378
     },
     "Q20640455": {
       "label": "Lion of Al-lāt",
@@ -454,7 +455,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "Microsoft",
-      "height_m": 52.0
+      "height_m": 16.0
     },
     "Q2550025": {
       "label": "Wachturm",
@@ -487,7 +488,7 @@
     },
     "Q3203228": {
       "label": "The Greek Slave",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Greek-slave-plaster-cast-master-geometry%20%28Smithsonian%20Institution%29.stl",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Greek-slave-plaster-cast-150k%20%28Smithsonian%20Institution%29.stl",
       "license": "CC0",
       "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
       "artist": "Smithsonian Institution Smithsonian American Art Museum, Museum purchase in memory of Ralph Cross Johnson"
@@ -704,7 +705,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.785
+      "height_m": 0.29
     },
     "Q80532728": {
       "label": "Kokuzō-jijin-tō (Shōkaku-ji)",
@@ -712,7 +713,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.5
+      "height_m": 0.1
     },
     "Q80534557": {
       "label": "Hachiōji-dō Dōhyō (Yarimizu, Hachiōji)",
@@ -812,7 +813,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.65
+      "height_m": 0.22
     },
     "Q84938244": {
       "label": "Ōyama-dō-dōhyō (Kashio-cho, Totsuka-ku, Yokohama)",
@@ -912,7 +913,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.52
+      "height_m": 0.22
     },
     "Q90858440": {
       "label": "Nenbutsu-Jizo (Kamishirane-cho, Asahi-ku, Yokohama)",
@@ -927,7 +928,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.64
+      "height_m": 0.2
     },
     "Q93165054": {
       "label": "Dewa-sanzan-tō (Sugeta Sugiyama-sha)",
@@ -950,7 +951,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.53
+      "height_m": 0.18
     },
     "Q93956602": {
       "label": "Steinbruch Lasbeck",
@@ -958,6 +959,12 @@
       "license": "CC0",
       "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
       "artist": "Morty"
+    },
+    "Q94999919": {
+      "label": "war memorial of Fontainebleau",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Fontainebleau%20-%20Monument%20aux%20morts.stl",
+      "license": "Public domain",
+      "artist": "KIRI Engine"
     },
     "Q96043190": {
       "label": "Ontake-tō (Tennō-sha)",
@@ -972,7 +979,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.65
+      "height_m": 0.19
     },
     "Q96095600": {
       "label": "Jijin-tō (Idokubo, Ondachō, Aoba-ku, Yokohama)",
@@ -987,6 +994,12 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆"
+    },
+    "Q96312764": {
+      "label": "monument to Gabriel-Alexandre Decamps",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Fontainebleau%20-%20Monument%20%C3%A0%20Alexandre-Gabriel%20Decamps.stl",
+      "license": "Public domain",
+      "artist": "KIRI Engine"
     },
     "Q96572839": {
       "label": "Koyama Nishi-hassaku Seki Hi",
@@ -1022,7 +1035,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.865
+      "height_m": 0.18
     },
     "Q98396978": {
       "label": "Q98396978",
@@ -1046,7 +1059,7 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆",
-      "height_m": 0.81
+      "height_m": 0.19
     },
     "Q98587935": {
       "label": "Einfriedung Poststraße 17 in Hof (Saale)",

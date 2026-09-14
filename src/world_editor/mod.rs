@@ -9,7 +9,7 @@
 //! - `java` - Java Edition Anvil format saving
 //! - `bedrock` - Bedrock Edition .mcworld format saving
 
-mod common;
+pub(crate) mod common;
 pub(crate) mod java;
 mod luanti;
 
@@ -19,10 +19,13 @@ pub(crate) use common::WorldToModify;
 #[cfg(test)]
 pub(crate) use common::FLOOR_TEST_LOCK;
 pub use common::{
-    base_chunk_y, min_y, set_base_chunk_y, set_terrain_floor_y, set_world_bounds, terrain_floor_y,
-    world_section_range, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
+    base_chunk_block, base_chunk_y, min_y, set_base_chunk_block, set_base_chunk_y,
+    set_terrain_floor_y, set_world_bounds, terrain_floor_y, world_max_y, world_section_range,
+    DEFAULT_MAX_Y, DEFAULT_MIN_Y,
 };
-pub(crate) use common::{BlockStorage, RegionToModify, SectionToModify, MAX_BLOCK_ID};
+pub(crate) use common::{
+    reset_section_counters, section_counters, BlockStorage, RegionToModify, SectionToModify,
+};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -180,6 +183,9 @@ pub struct WorldEditor<'a> {
     ground: Option<Arc<Ground>>,
     /// Loaded region tree pack (None = procedural); shared via Arc across main + tile editors.
     tree_pack: Option<Arc<crate::trees::region::RegionLibrary>>,
+    /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
+    /// parking); vegetation stays off them. Shared via Arc with the tile editors.
+    sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -218,6 +224,8 @@ pub struct WorldEditor<'a> {
     luanti_game: LuantiGame,
     /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
     bake_lighting: bool,
+    /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
+    voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
     /// Driven by the same toggle as external 3D models (`args.use_3d`).
     place_schematics: bool,
@@ -251,6 +259,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             tree_pack: None,
+            sealed_surface: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -268,6 +277,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            voxy: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -296,6 +306,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             tree_pack: None,
+            sealed_surface: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -313,6 +324,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            voxy: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -341,6 +353,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             tree_pack: None,
+            sealed_surface: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -358,6 +371,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            voxy: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -402,6 +416,26 @@ impl<'a> WorldEditor<'a> {
     /// The loaded region tree pack, if any (a cheap Arc clone so the editor borrow is freed).
     pub fn tree_pack(&self) -> Option<Arc<crate::trees::region::RegionLibrary>> {
         self.tree_pack.clone()
+    }
+
+    /// Sets the sealed-surface mask (shared across the main and tile editors).
+    pub fn set_sealed_surface(&mut self, mask: Arc<crate::floodfill_cache::SealedSurfaceBitmap>) {
+        self.sealed_surface = Some(mask);
+    }
+
+    /// Drops the sealed-surface mask once every vegetation pass is done, so the
+    /// bitmap is not carried into the save phase.
+    pub fn release_sealed_surface(&mut self) {
+        self.sealed_surface = None;
+    }
+
+    /// True if a man-made surface owns this column, so scattered vegetation
+    /// would land on a road, a pitch or a parking lot.
+    #[inline]
+    pub fn surface_is_sealed(&self, x: i32, z: i32) -> bool {
+        self.sealed_surface
+            .as_ref()
+            .is_some_and(|m| m.contains(x, z))
     }
 
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
@@ -554,6 +588,12 @@ impl<'a> WorldEditor<'a> {
         !self.frame_cells.is_empty() && self.frame_cells.contains(&(x, abs_y, z))
     }
 
+    /// Whether Java entities (item frame decals, facade panels) are written.
+    #[inline]
+    pub fn map_decals_enabled(&self) -> bool {
+        self.map_decals
+    }
+
     /// True if the cell holds nothing a sign could not sit in front of (air, plants, snow).
     fn cell_is_open(&self, x: i32, abs_y: i32, z: i32) -> bool {
         match self.world.get_block(x, abs_y, z) {
@@ -627,6 +667,64 @@ impl<'a> WorldEditor<'a> {
         self.add_entity(id, fx, rel_y, fz, Some(extra));
         self.frame_cells.insert((fx, fy, fz));
         true
+    }
+
+    /// One item display entity at an exact position, for the facade photo
+    /// panels. Not a hanging entity: it sits wherever `Pos` puts it, which is
+    /// a sub-block point off the wall plane, so the caller owns the whole
+    /// placement and this only writes it.
+    ///
+    /// `seed` separates two displays whose `Pos` falls in the same block, which
+    /// is all the UUID is built from; two panels meeting at a corner would
+    /// otherwise get the same UUID and the game would keep one of them.
+    /// `extra` carries the display's own tags. False outside the editor's area
+    /// or in a region already flushed to disk.
+    pub fn add_item_display(
+        &mut self,
+        x: f64,
+        abs_y: f64,
+        z: f64,
+        seed: i64,
+        mut extra: HashMap<String, Value>,
+    ) -> bool {
+        let (bx, bz) = (x.floor() as i32, z.floor() as i32);
+        if !self.xzbbox.contains(&XZPoint::new(bx, bz)) || self.is_region_flushed(bx, bz) {
+            return false;
+        }
+        // add_entity_seeded works in ground-relative Y and would centre Pos on
+        // the block; the exact position goes in as an override.
+        let rel_y = abs_y.floor() as i32 - self.get_absolute_y(bx, 0, bz);
+        extra.insert(
+            "Pos".to_string(),
+            Value::List(vec![
+                Value::Double(x),
+                Value::Double(abs_y),
+                Value::Double(z),
+            ]),
+        );
+        self.add_entity_seeded("minecraft:item_display", bx, rel_y, bz, seed, Some(extra));
+        true
+    }
+
+    /// Every item display currently in the world, as its raw NBT compound.
+    #[cfg(test)]
+    pub fn item_displays(&self) -> Vec<HashMap<String, Value>> {
+        let mut out = Vec::new();
+        for region in self.world.regions.values() {
+            for chunk in region.chunks.values() {
+                let Some(Value::List(entities)) = chunk.other.get("entities") else {
+                    continue;
+                };
+                for entity in entities {
+                    let Value::Compound(e) = entity else { continue };
+                    if matches!(e.get("id"), Some(Value::String(id)) if id == "minecraft:item_display")
+                    {
+                        out.push(e.clone());
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Places a registered decal on one face of a block. Multi-tile keys are laid out with
@@ -818,6 +916,12 @@ impl<'a> WorldEditor<'a> {
         self.preview = Some(preview);
     }
 
+    /// Attach a voxy LOD writer, fed alongside the region files and finalized
+    /// once every region has been written.
+    pub fn set_voxy(&mut self, voxy: Arc<crate::voxy::VoxyWriter>) {
+        self.voxy = Some(voxy);
+    }
+
     /// Owned, `Send` context for writing regions off the merge thread.
     pub(crate) fn region_write_ctx(&self) -> java::RegionWriteCtx {
         java::RegionWriteCtx::new(
@@ -826,6 +930,7 @@ impl<'a> WorldEditor<'a> {
             self.ground.clone(),
             self.bake_lighting,
             self.preview.clone(),
+            self.voxy.clone(),
         )
     }
 
@@ -1448,6 +1553,28 @@ impl<'a> WorldEditor<'a> {
         z: i32,
         extra_data: Option<HashMap<String, Value>>,
     ) {
+        // Two hanging entities can share a cell on opposite faces, so the face belongs in
+        // the UUID seed; without it they collide and the game keeps only one.
+        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
+            Some(Value::Byte(f)) => *f as i64,
+            _ => -1,
+        };
+        self.add_entity_seeded(id, x, y, z, face, extra_data);
+    }
+
+    /// `add_entity` with the UUID's extra seed given outright, for entities
+    /// that share a block cell without carrying a face byte. Entries in
+    /// `extra_data` are written last, so they can also override a base tag
+    /// (the item displays replace `Pos` with their exact sub-block position).
+    fn add_entity_seeded(
+        &mut self,
+        id: &str,
+        x: i32,
+        y: i32,
+        z: i32,
+        seed: i64,
+        extra_data: Option<HashMap<String, Value>>,
+    ) {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
@@ -1457,13 +1584,7 @@ impl<'a> WorldEditor<'a> {
         }
 
         let absolute_y = self.get_absolute_y(x, y, z);
-
-        // Two hanging entities can share a cell on opposite faces, so the face belongs in
-        // the UUID seed; without it they collide and the game keeps only one.
-        let face = match extra_data.as_ref().and_then(|e| e.get("Facing")) {
-            Some(Value::Byte(f)) => *f as i64,
-            _ => -1,
-        };
+        let face = seed;
         let mut entity = HashMap::new();
         entity.insert("id".to_string(), Value::String(id.to_string()));
         entity.insert(
@@ -1988,8 +2109,8 @@ impl<'a> WorldEditor<'a> {
             }
         );
 
-        // Compact sections before saving: collapses uniform Full(Vec) sections
-        // (e.g. all-STONE from --fillground) back to Uniform, freeing ~4 KiB each.
+        // Compact sections before saving: collapses uniform mixed sections back to
+        // Uniform and repacks any overflowed direct sections that fit a palette again.
         self.world.compact_sections();
 
         // Non-Java formats have no per-region write hook, so feed the preview here.
@@ -2019,6 +2140,7 @@ impl<'a> WorldEditor<'a> {
                     }
                     return Err(e);
                 }
+                self.finish_voxy();
             }
             WorldFormat::BedrockMcWorld => self.save_bedrock()?,
             WorldFormat::LuantiWorld => {
@@ -2047,6 +2169,28 @@ impl<'a> WorldEditor<'a> {
         }
 
         Ok(())
+    }
+
+    /// Seal the voxy LOD database. A failure here costs the user nothing but
+    /// distant terrain, so it is reported and swallowed rather than failing a
+    /// world that is already written.
+    fn finish_voxy(&mut self) {
+        let Some(voxy) = self.voxy.take() else {
+            return;
+        };
+        match voxy.finish() {
+            Ok((sections, bytes)) => println!(
+                "  Voxy LOD: {} sections, {:.1} MB",
+                sections,
+                bytes as f64 / (1024.0 * 1024.0)
+            ),
+            Err(e) => {
+                let msg = format!("Failed to write the Voxy LOD cache: {e}");
+                eprintln!("{msg}");
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &msg);
+            }
+        }
     }
 
     fn save_bedrock(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2160,46 +2304,181 @@ const _: () = {
     }
 };
 
-/// Background writer for stream-to-disk eviction. Regions taken off the merge
-/// thread are compacted + serialized + written on a separate thread, overlapping
-/// disk I/O with the next tile batch's compute. A bounded channel applies
-/// backpressure so at most `capacity` evicted regions sit in RAM awaiting write.
+/// Estimated resident MB of one queued region.
+///
+/// The flat figure is calibrated on a dense full-feature vanilla run (terrain + land cover +
+/// Overture + 3D). `--fillground` is the one mode whose column follows the dimension rather
+/// than the surface, so there it scales with the span the fill actually covers; a vanilla
+/// span reproduces the flat figure exactly.
+pub(crate) fn per_region_estimate_mb(fillground: bool) -> u64 {
+    const BASE_MB: u64 = 26;
+    const VANILLA_SPAN: i32 = DEFAULT_MAX_Y - DEFAULT_MIN_Y;
+    if !fillground {
+        return BASE_MB;
+    }
+    let span = (world_max_y() - terrain_floor_y()).max(VANILLA_SPAN) as u64;
+    BASE_MB * span / VANILLA_SPAN as u64
+}
+
+/// Thread count and queue depth for the flush pool. `threads` is throughput,
+/// `capacity` is RAM. One region is evicted per merged tile, so covering a whole
+/// batch without backpressure would need `capacity + threads >= tile_batch`. That is
+/// the target, not a guarantee: both are clamped and capped by the RAM budget below,
+/// so a wide batch still stalls the producer some. `flush_stall_ms` measures it.
+pub(crate) fn flush_pool_params(
+    tile_batch: usize,
+    available_mb: u64,
+    fillground: bool,
+) -> (usize, usize) {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    // `capacity + threads + 1` regions are alive at once, so budget the total rather
+    // than each knob. Shared with should_stream_to_disk; measured is ~7 on a vanilla run.
+    let per_region_mb = per_region_estimate_mb(fillground);
+    let budget = if available_mb > 0 {
+        // A tenth of free RAM, floored so the pool always beats the old single writer.
+        ((available_mb / 10 / per_region_mb) as usize).clamp(5, 15)
+    } else {
+        15
+    };
+
+    let mut threads = cores.div_ceil(4).clamp(2, 6);
+    threads = threads.min(budget.saturating_sub(2).max(1));
+    if let Some(n) = std::env::var("ARNIS_FLUSH_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        threads = n.clamp(1, 32);
+    }
+
+    // Evictions arrive one per merged tile, so a batch lands as a burst of that size.
+    let mut capacity = tile_batch.saturating_sub(threads).clamp(3, 8);
+    capacity = capacity.min(budget.saturating_sub(threads + 1).max(1));
+    if let Some(q) = std::env::var("ARNIS_FLUSH_QUEUE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        capacity = q.clamp(1, 64);
+    }
+    (threads, capacity)
+}
+
+/// Resident block-storage bytes of a region, as queued (before `compact()`).
+fn region_storage_bytes(region: &common::RegionToModify) -> u64 {
+    let mut bytes = 0u64;
+    for chunk in region.chunks.values() {
+        for section in chunk.sections.values() {
+            bytes += section.storage.resident_bytes();
+        }
+    }
+    bytes
+}
+
+/// Background writer pool for stream-to-disk eviction. Regions taken off the merge
+/// thread are compacted, serialized and written here, overlapping I/O with the next
+/// batch's compute. At most `capacity + threads + 1` regions are alive at once; the
+/// `+1` is the one the producer holds across `send`.
 pub(crate) struct FlushWorker {
     tx: Option<std::sync::mpsc::SyncSender<(i32, i32, common::RegionToModify)>>,
-    handle: Option<std::thread::JoinHandle<Result<(), String>>>,
+    handles: Vec<std::thread::JoinHandle<Result<(), String>>>,
     // Real write error from the worker, so a failed handoff surfaces the cause
     // (disk full, permissions, ...) instead of a generic "terminated early".
     error: Arc<Mutex<Option<String>>>,
+    // With a shared receiver the channel only closes when the LAST worker exits,
+    // so a dead worker has to be advertised explicitly or errors go unnoticed.
+    failed: Arc<std::sync::atomic::AtomicBool>,
+    stall_ns: std::sync::atomic::AtomicU64,
+    write_ns: Arc<std::sync::atomic::AtomicU64>,
+    regions: Arc<std::sync::atomic::AtomicUsize>,
+    bytes: std::sync::atomic::AtomicU64,
+    bench: bool,
 }
 
 impl FlushWorker {
-    pub(crate) fn spawn(ctx: java::RegionWriteCtx, capacity: usize) -> Self {
+    pub(crate) fn spawn(
+        ctx: java::RegionWriteCtx,
+        capacity: usize,
+        threads: usize,
+        bench: bool,
+    ) -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
+        let threads = threads.max(1);
         let (tx, rx) =
             std::sync::mpsc::sync_channel::<(i32, i32, common::RegionToModify)>(capacity.max(1));
+        let rx = Arc::new(Mutex::new(rx));
+        let ctx = Arc::new(ctx);
         let error = Arc::new(Mutex::new(None));
-        let error_w = Arc::clone(&error);
-        let handle = std::thread::spawn(move || -> Result<(), String> {
-            while let Ok((rxx, rzz, mut region)) = rx.recv() {
-                for chunk in region.chunks.values_mut() {
-                    for section in chunk.sections.values_mut() {
-                        section.compact();
+        let failed = Arc::new(AtomicBool::new(false));
+        let write_ns = Arc::new(AtomicU64::new(0));
+        let regions = Arc::new(AtomicUsize::new(0));
+
+        let handles = (0..threads)
+            .map(|_| {
+                let rx = Arc::clone(&rx);
+                let ctx = Arc::clone(&ctx);
+                let error_w = Arc::clone(&error);
+                let failed_w = Arc::clone(&failed);
+                let write_ns = Arc::clone(&write_ns);
+                let regions = Arc::clone(&regions);
+                std::thread::spawn(move || -> Result<(), String> {
+                    loop {
+                        // Lock spans recv() only, never a write.
+                        let item = {
+                            let guard = rx.lock().unwrap_or_else(|p| p.into_inner());
+                            guard.recv()
+                        };
+                        let Ok((rxx, rzz, mut region)) = item else {
+                            return Ok(());
+                        };
+                        let started = bench.then(std::time::Instant::now);
+                        for chunk in region.chunks.values_mut() {
+                            for section in chunk.sections.values_mut() {
+                                section.compact();
+                            }
+                        }
+                        let result = ctx.write(rxx, rzz, &region);
+                        if let Some(t) = started {
+                            write_ns.fetch_add(
+                                t.elapsed().as_nanos() as u64,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
+                            regions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        if let Err(e) = result {
+                            let msg = e.to_string();
+                            if let Ok(mut slot) = error_w.lock() {
+                                if slot.is_none() {
+                                    *slot = Some(msg.clone());
+                                }
+                            }
+                            failed_w.store(true, std::sync::atomic::Ordering::Release);
+                            return Err(msg);
+                        }
                     }
-                }
-                if let Err(e) = ctx.write(rxx, rzz, &region) {
-                    let msg = e.to_string();
-                    if let Ok(mut slot) = error_w.lock() {
-                        *slot = Some(msg.clone());
-                    }
-                    return Err(msg);
-                }
-            }
-            Ok(())
-        });
+                })
+            })
+            .collect();
+
         Self {
             tx: Some(tx),
-            handle: Some(handle),
+            handles,
             error,
+            failed,
+            stall_ns: AtomicU64::new(0),
+            write_ns,
+            regions,
+            bytes: AtomicU64::new(0),
+            bench,
         }
+    }
+
+    fn error_msg(&self) -> String {
+        self.error
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .unwrap_or_else(|| "flush worker terminated early".to_string())
     }
 
     /// Enqueue a region; blocks when the channel is full (backpressure). On
@@ -2211,29 +2490,82 @@ impl FlushWorker {
         rz: i32,
         region: common::RegionToModify,
     ) -> Result<(), (common::RegionToModify, String)> {
+        use std::sync::atomic::Ordering;
         let Some(tx) = self.tx.as_ref() else {
             return Err((region, "flush worker already finished".to_string()));
         };
-        match tx.send((rx, rz, region)) {
-            Ok(()) => Ok(()),
-            Err(std::sync::mpsc::SendError((_, _, region))) => {
-                let err = self
-                    .error
-                    .lock()
-                    .ok()
-                    .and_then(|slot| slot.clone())
-                    .unwrap_or_else(|| "flush worker terminated early".to_string());
-                Err((region, err))
+        if self.failed.load(Ordering::Acquire) {
+            return Err((region, self.error_msg()));
+        }
+        // Measured before the move, but only counted once the region is actually queued.
+        let bytes = if self.bench {
+            region_storage_bytes(&region)
+        } else {
+            0
+        };
+        let started = self.bench.then(std::time::Instant::now);
+        let sent = tx.send((rx, rz, region));
+        if let Some(t) = started {
+            self.stall_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        match sent {
+            Ok(()) => {
+                self.bytes.fetch_add(bytes, Ordering::Relaxed);
+                Ok(())
             }
+            Err(std::sync::mpsc::SendError((_, _, region))) => Err((region, self.error_msg())),
         }
     }
 
     /// Close the queue and wait for all pending writes; propagates the first error.
     pub(crate) fn finish(mut self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
         drop(self.tx.take());
-        match self.handle.take() {
-            Some(h) => h.join().map_err(|_| "flush worker panicked".to_string())?,
+        let mut first: Option<String> = None;
+        for handle in self.handles.drain(..) {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    first.get_or_insert(e);
+                }
+                Err(_) => {
+                    first.get_or_insert_with(|| "flush worker panicked".to_string());
+                }
+            }
+        }
+        if self.bench {
+            eprintln!(
+                "[BENCHMARK] flush_stall_ms={}",
+                self.stall_ns.load(Ordering::Relaxed) / 1_000_000
+            );
+            eprintln!(
+                "[BENCHMARK] flush_write_ms={}",
+                self.write_ns.load(Ordering::Relaxed) / 1_000_000
+            );
+            eprintln!(
+                "[BENCHMARK] flush_regions={}",
+                self.regions.load(Ordering::Relaxed)
+            );
+            eprintln!(
+                "[BENCHMARK] flush_bytes_mb={}",
+                self.bytes.load(Ordering::Relaxed) / (1024 * 1024)
+            );
+        }
+        match first {
+            Some(e) => Err(e),
             None => Ok(()),
+        }
+    }
+}
+
+impl Drop for FlushWorker {
+    /// The error paths drop the worker instead of calling `finish`, and the GUI
+    /// deletes the world directory right after; detached writers would race it.
+    fn drop(&mut self) {
+        drop(self.tx.take());
+        for handle in self.handles.drain(..) {
+            let _ = handle.join();
         }
     }
 }
@@ -2252,6 +2584,100 @@ mod eviction_guard_tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
+
+    fn flush_test_ctx(dir: &std::path::Path) -> java::RegionWriteCtx {
+        java::RegionWriteCtx::new(
+            dir.to_path_buf(),
+            LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
+            None,
+            false,
+            None,
+            None,
+        )
+    }
+
+    /// One region with a single non-AIR block, so the writer has real work to do.
+    fn flush_test_region() -> common::RegionToModify {
+        let mut region = common::RegionToModify::default();
+        let chunk = region.chunks.entry((0, 0)).or_default();
+        let section = chunk.sections.entry(0).or_default();
+        section.storage.set(0, SMOOTH_STONE);
+        region
+    }
+
+    #[test]
+    fn flush_pool_writes_every_region_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 4, 4, false);
+        for i in 0..32 {
+            assert!(worker.send(i, 0, flush_test_region()).is_ok());
+        }
+        worker.finish().unwrap();
+
+        for i in 0..32 {
+            let path = dir.path().join("region").join(format!("r.{i}.0.mca"));
+            let len = std::fs::metadata(&path)
+                .unwrap_or_else(|e| panic!("{path:?}: {e}"))
+                .len();
+            assert!(len > 0, "{path:?} is empty");
+        }
+    }
+
+    #[test]
+    fn flush_pool_reports_the_real_first_error() {
+        // A file where the region directory should go, so create_dir_all fails.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("region"), b"not a directory").unwrap();
+        let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 2, 3, false);
+        // Some sends may fail once a worker has died; the surfaced error must be the cause.
+        for i in 0..16 {
+            if let Err((_, msg)) = worker.send(i, 0, flush_test_region()) {
+                assert!(
+                    !msg.contains("terminated early"),
+                    "expected the real I/O cause, got {msg:?}"
+                );
+            }
+        }
+        let err = worker.finish().unwrap_err();
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn flush_pool_fails_fast_after_a_worker_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("region"), b"not a directory").unwrap();
+        let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 1, 2, false);
+        // Keep sending until the failure is observed; with a shared receiver this only
+        // works because `failed` is published explicitly.
+        let mut refused = false;
+        for i in 0..64 {
+            if worker.send(i, 0, flush_test_region()).is_err() {
+                refused = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(
+            refused,
+            "send kept accepting regions after every worker died"
+        );
+        let _ = worker.finish();
+    }
+
+    #[test]
+    fn dropping_a_flush_worker_joins_its_threads() {
+        // The error paths drop instead of calling finish, and the GUI deletes the world
+        // directory straight after; a detached writer would race that removal.
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let worker = FlushWorker::spawn(flush_test_ctx(dir.path()), 4, 3, false);
+            for i in 0..12 {
+                assert!(worker.send(i, 0, flush_test_region()).is_ok());
+            }
+        }
+        // Drop returned, so every write has landed and the directory is safe to remove.
+        std::fs::remove_dir_all(dir.path().join("region")).unwrap();
+    }
 
     // Writing an entity or chest to an already-evicted region must NOT resurrect it,
     // or the truncating final save wipes the region's real ground (the empty-spawn-chunk bug).

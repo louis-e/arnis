@@ -39,6 +39,14 @@ pub fn reset_progress_floor() {
     PROGRESS_FLOOR.store(0, Ordering::Relaxed);
 }
 
+/// The progress value that updates the status line and leaves the bar alone.
+///
+/// Zero is a real position and sends the bar back to the start, so anything
+/// that only has something to say has to pass this instead. It matters most to
+/// work that runs beside the numbered stages, such as the Mapillary facade
+/// pipeline, which reports from a thread of its own while the bar is moving.
+pub const MESSAGE_ONLY: f64 = -1.0;
+
 // Error emits (0.0) pass through untouched.
 fn clamp_progress(progress: f64) -> f64 {
     if progress <= 0.0 {

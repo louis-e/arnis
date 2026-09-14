@@ -139,23 +139,27 @@ pub fn generate_landuse(
             block_type
         };
 
-        // Don't overwrite roads or water with landuse ground blocks
-        let is_protected = editor.check_for_block(
-            x,
-            0,
-            z,
-            Some(&[
-                BLACK_CONCRETE,
-                GRAY_CONCRETE_POWDER,
-                CYAN_TERRACOTTA,
-                GRAY_CONCRETE,
-                LIGHT_GRAY_CONCRETE,
-                WHITE_CONCRETE,
-                DIRT_PATH,
-                SMOOTH_STONE,
-                WATER,
-            ]),
-        );
+        // Don't overwrite roads, paved areas or water with landuse ground blocks.
+        // The mask catches the surfaces the block list cannot, such as a gravel
+        // or dirt track that would otherwise be repainted as grass and then
+        // planted on.
+        let is_protected = editor.surface_is_sealed(x, z)
+            || editor.check_for_block(
+                x,
+                0,
+                z,
+                Some(&[
+                    BLACK_CONCRETE,
+                    GRAY_CONCRETE_POWDER,
+                    CYAN_TERRACOTTA,
+                    GRAY_CONCRETE,
+                    LIGHT_GRAY_CONCRETE,
+                    WHITE_CONCRETE,
+                    DIRT_PATH,
+                    SMOOTH_STONE,
+                    WATER,
+                ]),
+            );
 
         if landuse_tag == "traffic_island" {
             editor.set_block(actual_block, x, 1, z, None, None);
@@ -410,8 +414,12 @@ pub fn generate_landuse(
                         "clay" | "kaolinite" => CLAY,
                         _ => STONE,
                     };
-                    let random_choice: i32 =
-                        rng.random_range(0..100 + editor.get_absolute_y(x, 0, z)); // The deeper it is the more resources are there
+                    // The deeper it is the more resources there are. Clamp the span
+                    // to keep this valid even when the terrain floor goes below -100.
+                    let ore_roll_span = 100_i32
+                        .saturating_add(editor.get_absolute_y(x, 0, z))
+                        .max(1);
+                    let random_choice: i32 = rng.random_range(0..ore_roll_span);
                     if random_choice < 5 {
                         editor.set_block(ore_block, x, 0, z, Some(&[STONE]), None);
                     }
@@ -518,5 +526,115 @@ pub fn generate_place(
     // Place ground blocks
     for &(x, z) in floor_area.iter() {
         editor.set_block(block_type, x, 0, z, None, None);
+    }
+}
+
+#[cfg(test)]
+mod sealed_surface_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::element_processing::bridge_styles::BridgeOutlineIndex;
+    use crate::element_processing::bridges::{BridgeStructureMap, BridgeSurfaceMap};
+    use crate::element_processing::building_test_support::{rect_way, test_editor};
+    use crate::floodfill_cache::SealedSurfaceBitmap;
+    use clap::Parser as _;
+    use std::sync::Arc;
+
+    #[test]
+    fn a_forest_leaves_a_dirt_track_alone() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+
+        // Stand-in for a highway=track surface=dirt already rendered by the road pass.
+        let mut mask = SealedSurfaceBitmap::new(&xzbbox);
+        for z in 0..60 {
+            mask.set(30, z);
+            editor.set_block(DIRT, 30, 0, z, None, None);
+        }
+        editor.set_sealed_surface(Arc::new(mask));
+
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        let way = rect_way(1, 5, 5, 54, 54, &[("landuse", "forest")]);
+        let cache = FloodFillCache::new();
+        let footprints = BuildingFootprintBitmap::new_empty();
+        let roads = RoadMaskBitmap::new_empty();
+        generate_landuse(
+            &mut editor,
+            &way,
+            &args,
+            &cache,
+            &footprints,
+            &roads,
+            &surface,
+        );
+
+        for z in 10..50 {
+            assert!(
+                editor.check_for_block(30, 0, z, Some(&[DIRT])),
+                "the track keeps its dirt surface at z={z}"
+            );
+        }
+        assert!(
+            editor.check_for_block(20, 0, 20, Some(&[GRASS_BLOCK])),
+            "the forest still paints the ground beside it"
+        );
+    }
+
+    #[test]
+    fn quarry_ore_roll_handles_deep_terrain_without_panicking() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        editor.set_ground(Arc::new(crate::ground::Ground::new_flat(-250)));
+
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4", "--mode", "geo-only"]);
+        let way = rect_way(
+            2,
+            5,
+            5,
+            54,
+            54,
+            &[("landuse", "quarry"), ("resource", "coal")],
+        );
+        let cache = FloodFillCache::new();
+        let footprints = BuildingFootprintBitmap::new_empty();
+        let roads = RoadMaskBitmap::new_empty();
+        generate_landuse(
+            &mut editor,
+            &way,
+            &args,
+            &cache,
+            &footprints,
+            &roads,
+            &surface,
+        );
+
+        let mut ore_cells = 0usize;
+        for x in 10..50 {
+            for z in 10..50 {
+                if editor.check_for_block(x, 0, z, Some(&[COAL_ORE])) {
+                    ore_cells += 1;
+                }
+            }
+        }
+        assert!(
+            ore_cells > 0,
+            "deep quarries should still generate ore cells (found {ore_cells})"
+        );
     }
 }

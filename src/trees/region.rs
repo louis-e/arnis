@@ -117,6 +117,7 @@ pub struct RegionLibrary {
     vanilla_pack: Pack,
     scale: f64,
     ground_level: i32,
+    blocks_per_meter: f64,
     sizes: SizeFilter,
     total_realm: usize,
     total_vanilla: usize,
@@ -193,6 +194,7 @@ impl RegionLibrary {
         source: &TreePackSource,
         scale: f64,
         ground_level: i32,
+        blocks_per_meter: f64,
         sizes: SizeFilter,
         exclude_palms: bool,
     ) -> Result<RegionLibrary, String> {
@@ -232,6 +234,7 @@ impl RegionLibrary {
             vanilla_pack,
             scale,
             ground_level,
+            blocks_per_meter,
             sizes,
             total_realm,
             total_vanilla,
@@ -239,8 +242,14 @@ impl RegionLibrary {
     }
 
     fn is_montane(&self, elev_y: i32) -> bool {
-        let blocks_above = f64::from(elev_y - self.ground_level);
-        blocks_above / self.scale.max(0.001) > MONTANE_METRES
+        // Inverting the metre->Y affine needs the vertical blocks per metre, which compression
+        // pulls well below the horizontal scale; fall back to the scale only if it is missing.
+        let per_metre = if self.blocks_per_meter > 0.0 {
+            self.blocks_per_meter
+        } else {
+            self.scale
+        };
+        f64::from(elev_y - self.ground_level) / per_metre.max(0.001) > MONTANE_METRES
     }
 
     pub fn schem(&self, idx: usize) -> &Schematic {
@@ -547,10 +556,30 @@ mod tests {
     }
 
     #[test]
+    fn montane_starts_at_the_same_real_height_whatever_the_compression() {
+        let src = TreePackSource::embedded("eur");
+        let base = -62;
+        let lib = |bpm: f64| {
+            RegionLibrary::load(&src, 1.0, base, bpm, SizeFilter::default(), false)
+                .expect("load eur")
+        };
+
+        let uncompressed = lib(1.0);
+        assert!(!uncompressed.is_montane(base + 450));
+        assert!(uncompressed.is_montane(base + 451));
+
+        // Alps at scale 1 with the vanilla ceiling: 4441 m squeezed into 366 blocks,
+        // so 450 m above the base lands 37.1 blocks up.
+        let compressed = lib(366.0 / 4441.0);
+        assert!(!compressed.is_montane(base + 37));
+        assert!(compressed.is_montane(base + 38));
+    }
+
+    #[test]
     fn ena_palm_gate_removes_trees() {
         let src = TreePackSource::embedded("ena");
-        let incl = RegionLibrary::load(&src, 1.0, -62, SizeFilter::default(), false).unwrap();
-        let excl = RegionLibrary::load(&src, 1.0, -62, SizeFilter::default(), true).unwrap();
+        let incl = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false).unwrap();
+        let excl = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), true).unwrap();
         assert!(
             excl.total_realm < incl.total_realm,
             "palm gate should drop ena palm trees ({} vs {})",
@@ -562,8 +591,8 @@ mod tests {
     #[test]
     fn embedded_eur_loads_and_picks() {
         let src = TreePackSource::embedded("eur");
-        let lib =
-            RegionLibrary::load(&src, 1.0, -62, SizeFilter::default(), false).expect("load eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
+            .expect("load eur");
         assert!(lib.total_realm > 0);
         for k in 0..200 {
             if let Some((_, _, idx, _)) =
@@ -579,8 +608,8 @@ mod tests {
     #[test]
     fn canopy_size_hint_steers_the_pick() {
         let src = TreePackSource::embedded("eur");
-        let lib =
-            RegionLibrary::load(&src, 1.0, -62, SizeFilter::default(), false).expect("load eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
+            .expect("load eur");
         let tally = |hint: Option<TreeSize>| {
             let req = SlotRequest {
                 want_size: hint,
@@ -638,8 +667,15 @@ mod tests {
     #[test]
     fn max_tree_size_clamps_the_canopy_hint() {
         let src = TreePackSource::embedded("eur");
-        let lib = RegionLibrary::load(&src, 1.0, -62, SizeFilter::up_to(TreeSize::Small), false)
-            .expect("load eur");
+        let lib = RegionLibrary::load(
+            &src,
+            1.0,
+            -62,
+            1.0,
+            SizeFilter::up_to(TreeSize::Small),
+            false,
+        )
+        .expect("load eur");
         let tally = |want_size| {
             let req = SlotRequest {
                 want_size,

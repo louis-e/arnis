@@ -6,6 +6,27 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::osm_parser::ProcessedNode;
 use std::collections::HashMap;
 
+/// Where the ids invented for clipped corners live.
+///
+/// A vertex the clipper creates has no OSM node behind it and still needs an
+/// id, and the facade projection now identifies a wall by the ids of its two
+/// ends. `way_id * 10_000_000 + i` alone lands inside the real node id range
+/// for a low way id (OSM is around 1.3e10 today), so an invented corner could
+/// collide with a real node somewhere else in the world. Everything invented
+/// sits above this instead, which is four orders of magnitude clear of OSM and
+/// still inside the positive half of an i64 for anything that serialises ids.
+const INVENTED_NODE_BASE: u64 = 1 << 62;
+
+/// The id for the `i`th vertex the clipper invented on `way_id`.
+fn invented_node_id(way_id: u64, i: u64) -> u64 {
+    INVENTED_NODE_BASE | (way_id.wrapping_mul(10000000).wrapping_add(i) & (INVENTED_NODE_BASE - 1))
+}
+
+/// Whether `id` was invented by the clipper rather than read from OSM.
+pub fn is_invented_node_id(id: u64) -> bool {
+    id >= INVENTED_NODE_BASE
+}
+
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
 /// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
 pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
@@ -212,10 +233,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
                     find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
 
                 for intersection in intersections {
-                    let synthetic_id = nodes[0]
-                        .id
-                        .wrapping_mul(10000000)
-                        .wrapping_add(result.len() as u64);
+                    let synthetic_id = invented_node_id(nodes[0].id, result.len() as u64);
                     result.push(ProcessedNode {
                         id: synthetic_id,
                         x: intersection.0.round() as i32,
@@ -241,10 +259,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
                     });
 
                     for intersection in intersections {
-                        let synthetic_id = nodes[0]
-                            .id
-                            .wrapping_mul(10000000)
-                            .wrapping_add(result.len() as u64);
+                        let synthetic_id = invented_node_id(nodes[0].id, result.len() as u64);
                         result.push(ProcessedNode {
                             id: synthetic_id,
                             x: intersection.0.round() as i32,
@@ -547,7 +562,27 @@ fn matches_endpoint(coord: (f64, f64), endpoint: &ProcessedNode, tolerance: f64)
     dx * dx + dz * dz < tolerance * tolerance
 }
 
-/// Assigns node IDs to clipped coordinates, preserving original endpoint IDs.
+/// Assigns node IDs to clipped coordinates, keeping the ID of every original
+/// node that survived the clip and inventing one only for the vertices
+/// Sutherland-Hodgman actually created.
+///
+/// A vertex the clipper kept is the same OSM node it was, at the same block, so
+/// it keeps its ID: anything downstream that identifies an edge by its two node
+/// IDs (the facade projection does, and it is the only consumer that can tell)
+/// still finds the edges of a ring that only lost a corner. Inventing an ID for
+/// every vertex, as this used to, renamed a whole ring the moment one node fell
+/// outside the world.
+///
+/// It replaces a 50-block proximity rule that named the first and last clipped
+/// vertex after the way's own first and last node. With the exact match, a
+/// vertex that really is that node has already been named by it, so all the
+/// proximity rule could still reach was a corner the clipper invented, which is
+/// not that node and must not answer to its id: on the Munich test box it put
+/// one way's first node id on two corners 23 blocks away, leaving that id on
+/// three vertices at two different blocks. What the old rule bought is kept
+/// explicitly instead: the caller re-closes the ring by repeating its first
+/// vertex, so the repeat carries the first vertex's id and the `first == last`
+/// closure signal survives.
 fn assign_node_ids_preserving_endpoints(
     original_nodes: &[ProcessedNode],
     clipped_coords: Vec<(f64, f64)>,
@@ -557,49 +592,40 @@ fn assign_node_ids_preserving_endpoints(
         return Vec::new();
     }
 
-    let original_first = original_nodes.first();
-    let original_last = original_nodes.last();
-    let tolerance = 50.0;
-    let last_index = clipped_coords.len() - 1;
+    // First ID wins where two original nodes share a block, so the answer does
+    // not depend on iteration order.
+    let mut by_block: HashMap<(i32, i32), u64> = HashMap::with_capacity(original_nodes.len());
+    for n in original_nodes {
+        by_block.entry((n.x, n.z)).or_insert(n.id);
+    }
 
-    clipped_coords
+    let mut out: Vec<ProcessedNode> = clipped_coords
         .into_iter()
         .enumerate()
         .map(|(i, coord)| {
-            let is_first = i == 0;
-            let is_last = i == last_index;
-
-            if is_first || is_last {
-                if let Some(first) = original_first {
-                    if matches_endpoint(coord, first, tolerance) {
-                        return ProcessedNode {
-                            id: first.id,
-                            x: coord.0.round() as i32,
-                            z: coord.1.round() as i32,
-                            tags: HashMap::new(),
-                        };
-                    }
-                }
-                if let Some(last) = original_last {
-                    if matches_endpoint(coord, last, tolerance) {
-                        return ProcessedNode {
-                            id: last.id,
-                            x: coord.0.round() as i32,
-                            z: coord.1.round() as i32,
-                            tags: HashMap::new(),
-                        };
-                    }
-                }
-            }
-
+            let (x, z) = (coord.0.round() as i32, coord.1.round() as i32);
+            let id = match by_block.get(&(x, z)) {
+                Some(&id) => id,
+                None => invented_node_id(way_id, i as u64),
+            };
             ProcessedNode {
-                id: way_id.wrapping_mul(10000000).wrapping_add(i as u64),
-                x: coord.0.round() as i32,
-                z: coord.1.round() as i32,
+                id,
+                x,
+                z,
                 tags: HashMap::new(),
             }
         })
-        .collect()
+        .collect();
+
+    if out.len() >= 2 {
+        let first = &out[0];
+        let (fx, fz, fid) = (first.x, first.z, first.id);
+        let last = out.last_mut().expect("out has at least two nodes");
+        if last.x == fx && last.z == fz {
+            last.id = fid;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -614,6 +640,39 @@ mod tests {
             x,
             z,
         }
+    }
+
+    /// A clipped ring is still made of the same OSM nodes where it survived,
+    /// and only the corners the clipper cut are new. Renaming the whole ring,
+    /// as this used to, cost every building the world's edge touched all of
+    /// its facades, the walls nowhere near the edge included.
+    #[test]
+    fn a_clipped_ring_keeps_the_ids_of_the_nodes_that_survived() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 30, 30).unwrap();
+        let ring = vec![
+            node(1, 10, 10),
+            node(2, 40, 10),
+            node(3, 40, 25),
+            node(4, 10, 25),
+            node(1, 10, 10),
+        ];
+        let clipped = clip_way_to_bbox(&ring, &bbox);
+
+        let at = |x: i32, z: i32| clipped.iter().find(|n| n.x == x && n.z == z).map(|n| n.id);
+        assert_eq!(at(10, 10), Some(1), "a node inside the world is itself");
+        assert_eq!(at(10, 25), Some(4));
+        // The two corners the clip created stand where nodes 2 and 3 were cut
+        // off, on the world's edge, and are nobody: an id no OSM node has.
+        for (x, z) in [(30, 10), (30, 25)] {
+            let id = at(x, z).expect("the clip put a corner here");
+            assert!(
+                ![1, 2, 3, 4].contains(&id),
+                "the corner at ({x}, {z}) took the id {id} of a node it is not"
+            );
+        }
+        assert!(!clipped.iter().any(|n| n.id == 2 || n.id == 3));
+        // Still closed by id, which is the signal the ring assembly reads.
+        assert_eq!(clipped.first().map(|n| n.id), clipped.last().map(|n| n.id));
     }
 
     #[test]
@@ -650,5 +709,29 @@ mod tests {
             node(1, 4, 4),
         ];
         assert!(clip_water_ring_to_bbox(&ring, &bbox).is_some());
+    }
+
+    /// An id the clipper invents must never be one OSM could hand out. The old
+    /// scheme, `way_id * 10_000_000 + i`, put way 100's first corner at
+    /// 1_000_000_000, which is an ordinary node id.
+    #[test]
+    fn an_invented_node_id_cannot_collide_with_a_real_one() {
+        // Comfortably above OSM's highest node id today, about 1.3e10.
+        const HIGHEST_PLAUSIBLE_OSM_ID: u64 = 1_000_000_000_000;
+        for way_id in [1u64, 100, 12_345, 987_654_321, 1_234_567_890_123] {
+            for i in 0..64u64 {
+                let id = invented_node_id(way_id, i);
+                assert!(
+                    id > HIGHEST_PLAUSIBLE_OSM_ID,
+                    "way {way_id} corner {i} invented {id}, inside the OSM range"
+                );
+                assert!(is_invented_node_id(id));
+                assert!(id < u64::MAX / 2, "must stay positive as an i64");
+            }
+        }
+        assert!(!is_invented_node_id(1_000_000_000));
+        // Deterministic, and distinct per corner of a way.
+        assert_eq!(invented_node_id(42, 7), invented_node_id(42, 7));
+        assert_ne!(invented_node_id(42, 7), invented_node_id(42, 8));
     }
 }

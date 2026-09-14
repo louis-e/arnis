@@ -27,18 +27,29 @@ fn corner_min_seg_len(scale: f64) -> i32 {
     ((6.0 * scale) as i32).max(6)
 }
 
-/// Per-column facade context; the default reproduces legacy behavior.
+/// Per-column wall context.
 #[derive(Copy, Clone)]
 pub struct ColumnFacade {
+    /// Along-wall ordinate, so the window rhythm holds at any wall angle.
+    /// Segment walks must set this; the default only suits tests.
+    pub wall_u: i32,
     pub party: bool,
     pub street: bool,
+    /// Within one block of where this wall run meets the next one.
+    ///
+    /// A glass tower with glass carried straight around its corners reads as a
+    /// box of panes; a real one almost always turns the corner on a pier. The
+    /// window patterns use this to put the wall block there instead.
+    pub corner: bool,
 }
 
 impl Default for ColumnFacade {
     fn default() -> Self {
         Self {
+            wall_u: 0,
             party: false,
             street: true,
+            corner: false,
         }
     }
 }

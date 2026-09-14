@@ -61,6 +61,7 @@ fn empty_flood_fill_result() -> &'static FloodFillResult {
 /// this uses 1 bit per coordinate in the world bounds, reducing memory usage by ~200x.
 ///
 /// For a world of size W x H blocks, the bitmap uses only (W * H) / 8 bytes.
+#[derive(Clone)]
 pub struct CoordinateBitmap {
     /// The bitmap data, where each bit represents one (x, z) coordinate
     bits: Vec<u8>,
@@ -177,6 +178,13 @@ impl CoordinateBitmap {
             return (self.bits[byte_index] >> bit_offset) & 1 == 1;
         }
         false
+    }
+
+    /// Checks if a coordinate is inside the bitmap and not set yet.
+    #[inline]
+    fn is_unset_in_bounds(&self, x: i32, z: i32) -> bool {
+        self.coord_to_index(x, z)
+            .is_some_and(|i| (self.bits[i / 8] >> (i % 8)) & 1 == 0)
     }
 
     /// Returns true if no coordinates are marked.
@@ -299,6 +307,64 @@ pub type BuildingFootprintBitmap = CoordinateBitmap;
 /// block_range geometry as the renderer, so every placed road/path block coordinate
 /// is marked as 1 and everything else is 0.
 pub type RoadMaskBitmap = CoordinateBitmap;
+
+/// Type alias for the sealed-surface bitmap: every column owned by a man-made
+/// ground cover that vegetation must stay off (roads and paths plus sport
+/// pitches, courts, playgrounds and similar paved areas).
+///
+/// The block under a column is not enough to decide this on its own. OSM
+/// surface values map onto blocks that also occur as natural ground, so a
+/// `surface=dirt` track and a dirt field look identical to a block check, and
+/// an area painted before a smaller one on top of it has already lost its
+/// original block by the time the later element runs. The bitmap is resolved
+/// once from the element list instead, before anything is placed.
+pub type SealedSurfaceBitmap = CoordinateBitmap;
+
+/// Leisure areas rendered as a managed or paved surface. Trees, flowers and
+/// grass tufts on these read as a bug, so they join the sealed-surface mask.
+const SEALED_LEISURE: &[&str] = &[
+    "pitch",
+    "track",
+    "playground",
+    "recreation_ground",
+    "schoolyard",
+    "ice_rink",
+    "water_park",
+    "slipway",
+    "outdoor_seating",
+    "bathing_place",
+    "fitness_station",
+];
+
+/// Amenity areas that pave their footprint.
+const SEALED_AMENITY: &[&str] = &[
+    "parking",
+    "parking_space",
+    "bicycle_parking",
+    "motorcycle_parking",
+    "fuel",
+    "charging_station",
+    "car_wash",
+    "taxi",
+    "marketplace",
+];
+
+/// Whether a way paints a sealed surface over its whole footprint.
+fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
+    if let Some(v) = way.tags.get("leisure") {
+        if SEALED_LEISURE.contains(&v.as_str()) {
+            return true;
+        }
+    }
+    if let Some(v) = way.tags.get("amenity") {
+        if SEALED_AMENITY.contains(&v.as_str()) {
+            return true;
+        }
+    }
+    // Pedestrian plazas and other highway=* areas are flood-filled, not stamped
+    // along a centerline, so the road mask does not cover them.
+    way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes")
+}
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
@@ -494,6 +560,46 @@ impl FloodFillCache {
         footprints
     }
 
+    /// Builds the sealed-surface mask: the road mask plus every cached footprint
+    /// of a leisure, amenity or highway area that paves its ground.
+    ///
+    /// Returns `None` when no such area contributes a column the roads do not
+    /// already own, so the caller can share the road mask instead of paying for a
+    /// second full-world bitmap. Runs off the pre-computed cache, so no extra
+    /// flood fill is done here.
+    pub fn collect_sealed_surfaces(
+        &self,
+        elements: &[ProcessedElement],
+        roads: &RoadMaskBitmap,
+    ) -> Option<SealedSurfaceBitmap> {
+        let sealed_fills: Vec<&FloodFillResult> = elements
+            .iter()
+            .filter_map(|e| match e {
+                ProcessedElement::Way(w) if is_sealed_surface_way(w) => self.way_cache.get(&w.id),
+                _ => None,
+            })
+            .collect();
+
+        // A tagged area whose fill came back empty (degenerate ring, fill timeout) or that
+        // sits entirely on columns the roads already own would clone a full second bitmap
+        // for nothing, so bail out before allocating. Short-circuits on the first new cell.
+        if !sealed_fills
+            .iter()
+            .any(|f| f.iter().any(|&(x, z)| roads.is_unset_in_bounds(x, z)))
+        {
+            return None;
+        }
+
+        let mut mask = roads.clone();
+        for fill in sealed_fills {
+            for &(x, z) in fill.iter() {
+                mask.set(x, z);
+            }
+        }
+
+        Some(mask)
+    }
+
     /// Removes a way's cached flood fill result, freeing memory.
     ///
     /// Call this after processing an element to release its cached data.
@@ -646,5 +752,85 @@ mod tests {
             (0, 300),
             (0, 0)
         ])));
+    }
+
+    fn tagged_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedWay {
+        let mut w = way(points);
+        w.id = id;
+        w.tags = tags
+            .iter()
+            .map(|&(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        w
+    }
+
+    #[test]
+    fn sealed_surfaces_cover_pitches_and_keep_the_roads() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let pitch = tagged_way(
+            7,
+            &[(10, 10), (30, 10), (30, 25), (10, 25), (10, 10)],
+            &[("leisure", "pitch"), ("sport", "basketball")],
+        );
+        let meadow = tagged_way(
+            8,
+            &[(50, 50), (70, 50), (70, 70), (50, 70), (50, 50)],
+            &[("landuse", "meadow")],
+        );
+        let elements = vec![ProcessedElement::Way(pitch), ProcessedElement::Way(meadow)];
+
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        roads.set(80, 80);
+
+        let sealed = cache
+            .collect_sealed_surfaces(&elements, &roads)
+            .expect("a pitch is a sealed surface");
+
+        assert!(sealed.contains(80, 80), "road columns stay marked");
+        assert!(sealed.contains(20, 17), "the pitch interior is sealed");
+        assert!(!sealed.contains(60, 60), "a meadow is not a sealed surface");
+        assert!(!sealed.contains(5, 5), "untouched ground stays open");
+    }
+
+    #[test]
+    fn nothing_to_seal_shares_the_road_mask() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let elements = vec![ProcessedElement::Way(tagged_way(
+            9,
+            &[(10, 10), (30, 10), (30, 25), (10, 25), (10, 10)],
+            &[("landuse", "forest")],
+        ))];
+
+        let cache = FloodFillCache::precompute(&elements, None);
+        let roads = RoadMaskBitmap::new(&xzbbox);
+
+        assert!(
+            cache.collect_sealed_surfaces(&elements, &roads).is_none(),
+            "a second full-world bitmap must not be allocated for nothing"
+        );
+    }
+
+    #[test]
+    fn a_pitch_the_roads_already_own_shares_the_road_mask() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let elements = vec![ProcessedElement::Way(tagged_way(
+            11,
+            &[(10, 10), (30, 10), (30, 25), (10, 25), (10, 10)],
+            &[("leisure", "pitch")],
+        ))];
+
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        for x in 5..=35 {
+            for z in 5..=30 {
+                roads.set(x, z);
+            }
+        }
+
+        assert!(
+            cache.collect_sealed_surfaces(&elements, &roads).is_none(),
+            "the pitch adds no column, so the road mask is already the answer"
+        );
     }
 }

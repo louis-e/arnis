@@ -2,7 +2,7 @@
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases) [![Download here](https://img.shields.io/badge/Download-here-green)](https://github.com/louis-e/arnis/releases) [![Discord](https://img.shields.io/discord/1326192999738249267?label=Discord&color=%237289da)](https://discord.gg/mA2g69Fhxq)
 
-Arnis creates complex and accurate Minecraft Java Edition (1.17+) and Bedrock Edition worlds that reflect real-world geography, topography, and architecture.
+Arnis creates complex and accurate Minecraft Java Edition (1.17+), Bedrock Edition, and Luanti (Minetest) worlds that reflect real-world geography, topography, and architecture.
 
 This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
 Generate your hometown, big cities, and natural landscapes with ease!
@@ -79,7 +79,7 @@ Arnis has been recognized in various academic and press publications after gaini
 
 [XDA Developers: Hometown Minecraft Map: Arnis](https://www.xda-developers.com/hometown-minecraft-map-arnis/)
 
-Free to use press assets, including screenshots and logos, can be found [here](https://drive.google.com/file/d/1T1IsZSyT8oa6qAO_40hVF5KR8eEVCJjo/view?usp=sharing).
+Free to use press assets, including screenshots and logos, can be found [here](https://arnismc.com/presskit/).
 
 ## :copyright: License Information
 Copyright (c) 2022-2026 Louis Erbkamm (louis-e)

@@ -95,9 +95,12 @@ pub fn generate_leisure(
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Land-cover water is skipped because a park often spans its
-                // own lake, and the carve after this leaves plants floating.
+                // own lake, and the carve after this leaves plants floating. A pitch
+                // or path inside the park is drawn after it, so its columns still
+                // read as grass here and only the mask tells them apart.
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    && !editor.surface_is_sealed(x, z)
                     && !editor.is_lc_water(x, z)
                 {
                     let random_choice: i32 = rng.random_range(0..1000);

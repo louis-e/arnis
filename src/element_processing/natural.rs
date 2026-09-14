@@ -164,21 +164,23 @@ pub fn generate_natural(
                         bresenham_line(prev.0, 0, prev.1, x, 0, z);
                     for (bx, _, bz) in bresenham_points {
                         // Don't overwrite road blocks with natural ground
-                        if !editor.check_for_block(
-                            bx,
-                            0,
-                            bz,
-                            Some(&[
-                                BLACK_CONCRETE,
-                                GRAY_CONCRETE_POWDER,
-                                CYAN_TERRACOTTA,
-                                GRAY_CONCRETE,
-                                LIGHT_GRAY_CONCRETE,
-                                WHITE_CONCRETE,
-                                DIRT_PATH,
-                                SMOOTH_STONE,
-                            ]),
-                        ) {
+                        if !editor.surface_is_sealed(bx, bz)
+                            && !editor.check_for_block(
+                                bx,
+                                0,
+                                bz,
+                                Some(&[
+                                    BLACK_CONCRETE,
+                                    GRAY_CONCRETE_POWDER,
+                                    CYAN_TERRACOTTA,
+                                    GRAY_CONCRETE,
+                                    LIGHT_GRAY_CONCRETE,
+                                    WHITE_CONCRETE,
+                                    DIRT_PATH,
+                                    SMOOTH_STONE,
+                                ]),
+                            )
+                        {
                             let b = if rock_variation {
                                 vary_rock_block(block_type, bx, bz)
                             } else {
@@ -252,14 +254,19 @@ pub fn generate_natural(
                 let mut wetland_puddles: Vec<(i32, i32)> = Vec::new();
 
                 for &(x, z) in filled_area.iter() {
-                    // Don't overwrite road/path blocks with natural ground
-                    if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
+                    // Roads, paths and paved areas keep their own surface. Checked
+                    // by mask because a gravel or dirt road is not in the block list.
+                    let sealed = editor.surface_is_sealed(x, z);
+                    if !sealed && !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         let b = if rock_variation {
                             vary_rock_block(block_type, x, z)
                         } else {
                             block_type
                         };
                         editor.set_block(b, x, 0, z, None, None);
+                    }
+                    if sealed {
+                        continue;
                     }
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {

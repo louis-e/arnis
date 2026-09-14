@@ -10,12 +10,16 @@ use crate::colors::{oklab_distance, RGBTuple};
 pub const USE_MODEL: u8 = 1;
 pub const USE_WALL: u8 = 2;
 pub const USE_ROOF: u8 = 4;
+/// Facade textures only: blocks too garish for a procedural wall but right when
+/// the colour was measured from a photograph.
+pub const USE_FACADE: u8 = 8;
 
 // Shorthand for the flag column below.
 const M: u8 = USE_MODEL;
 const MW: u8 = USE_MODEL | USE_WALL;
 const MR: u8 = USE_MODEL | USE_ROOF;
 const MWR: u8 = USE_MODEL | USE_WALL | USE_ROOF;
+const F: u8 = USE_FACADE;
 
 #[rustfmt::skip]
 static PALETTE: &[(RGBTuple, Block, u8)] = &[
@@ -104,6 +108,11 @@ static PALETTE: &[(RGBTuple, Block, u8)] = &[
     ((45,  47,  143), BLUE_CONCRETE, MW),
     ((74,  60,  91),  BLUE_TERRACOTTA, MWR),
     ((53,  57,  157), BLUE_WOOL, M),
+    // Facade-only extras: colours the procedural palettes never pick. Kept few
+    // on purpose, because a photographed wall picks per cell and a chunk
+    // section that runs past MAX_SECTION_PALETTE falls back to direct storage.
+    ((77,  81,  85),  GRAY_CONCRETE_POWDER, F),
+    ((126, 85,  54),  BROWN_CONCRETE_POWDER, F),
     ((36,  137, 199), LIGHT_BLUE_CONCRETE, MWR),
     ((113, 109, 138), LIGHT_BLUE_TERRACOTTA, MWR),
     // Purples / magentas
@@ -161,9 +170,104 @@ fn pick_for_usage(color: RGBTuple, usage: u8, rng: &mut impl Rng) -> Block {
     scored[rng.random_range(0..scored.len())].1
 }
 
+/// Warm building stone: buff, sand and cream masonry.
+///
+/// A wall tagged a warm tan is a stone building, and this is what stone
+/// buildings are made of. Nearest-colour matching alone does not get there:
+/// Minecraft's sandstone is a pale cream and a tag like `#CDAA7D` is a darker
+/// orange-tan, so sandstone lands 3.5x further away than white terracotta and
+/// never enters the pool. Before the palette was unified the coarse sRGB table
+/// happened to list sandstone in the nearest bucket, which is why those
+/// buildings used to be sandstone and stopped being.
+const WARM_STONE: &[Block] = &[
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
+    END_STONE_BRICKS,
+    WHITE_TERRACOTTA,
+];
+
+/// Whether a tag colour reads as warm building stone rather than a painted or
+/// coloured wall.
+///
+/// In OkLab: yellow present, not green, not saturated, light enough to be
+/// stone rather than timber, and a hue of at least 60 degrees from the red
+/// axis. The hue floor is what separates stone from render: every buff, sand,
+/// khaki and cream tag measured in Manhattan and San Francisco sits at 65
+/// degrees or more, and every peach, salmon and rosy brown (`#E0AF94`,
+/// `#9B6950`, `#A17665`) at 52 or less, so a plain bound on `a` let those in
+/// while a hue floor admits the same stone family and refuses them.
+fn reads_as_warm_stone(color: RGBTuple) -> bool {
+    let (l, a, b) = crate::colors::oklab_components(&color);
+    let chroma = (a * a + b * b).sqrt();
+    // tan(60 degrees): on the warm side of the a axis, b has to lead a by that.
+    let yellow_enough = a <= 0.0 || b > 1.73 * a;
+    b > 0.030 && a > -0.05 && yellow_enough && b < 0.13 && l > 0.55 && chroma < 0.11
+}
+
 /// Wall block for a `building:colour`/`colour` tag value.
 pub fn wall_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
+    if reads_as_warm_stone(color) {
+        return pick_nearest_of(WARM_STONE, color, rng);
+    }
     pick_for_usage(color, USE_WALL, rng)
+}
+
+/// The three nearest of `list`, picked with the caller's rng.
+///
+/// No cutoff: the list is already one family, so its members are alternatives
+/// for each other by construction rather than by distance.
+fn pick_nearest_of(list: &[Block], color: RGBTuple, rng: &mut impl Rng) -> Block {
+    let mut scored: Vec<(f32, Block)> = PALETTE
+        .iter()
+        .filter(|(_, b, _)| list.contains(b))
+        .map(|(c, b, _)| (tag_match_distance(&color, c), *b))
+        .collect();
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+    scored.truncate(3);
+    scored[rng.random_range(0..scored.len())].1
+}
+
+/// Block for a facade texel whose colour was measured from a photograph.
+///
+/// Blocks whose texture reads as something other than a wall however close
+/// their average colour is: metal, hay, snow, soil, moss and copper. The
+/// procedural walls may use some of them; a photographed facade must not.
+const NOT_A_FACADE: &[Block] = &[
+    WAXED_COPPER_BLOCK,
+    WAXED_EXPOSED_COPPER,
+    WAXED_OXIDIZED_COPPER,
+    HAY_BALE,
+    SNOW_BLOCK,
+    IRON_BLOCK,
+    GOLD_BLOCK,
+    NETHERITE_BLOCK,
+    MOSS_BLOCK,
+    MOSSY_COBBLESTONE,
+    DIRT,
+    COARSE_DIRT,
+];
+
+/// Every remaining palette entry is eligible, including the wool and
+/// facade-only extras, and the match is the nearest colour in Oklab with
+/// chroma counted double: two beiges a shade apart must land on the same
+/// stone, not on pink terracotta versus stone bricks (the lab's preview uses
+/// the same weighting, see tools/facade_lab/bands.py). The texture already
+/// carries the variety, and the lab hands over one colour per floor band, so
+/// breaking near-ties at random (as this once did) only put noise back into a
+/// wall that was measured to be flat.
+pub fn facade_block_for_color(color: RGBTuple) -> Block {
+    let (tl, ta, tb) = crate::colors::oklab_components(&color);
+    PALETTE
+        .iter()
+        .filter(|(_, b, _)| !NOT_A_FACADE.contains(b))
+        .map(|(c, b, _)| {
+            let (l, a, bb) = crate::colors::oklab_components(c);
+            let d = (tl - l) * (tl - l) + 4.0 * ((ta - a) * (ta - a) + (tb - bb) * (tb - bb));
+            (d, *b)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b)| b)
+        .unwrap_or(WHITE_CONCRETE)
 }
 
 /// Roof block for a `roof:colour` tag value.
@@ -176,7 +280,7 @@ pub fn roof_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
 pub(crate) fn all_building_palette_blocks() -> Vec<Block> {
     PALETTE
         .iter()
-        .filter(|(_, _, f)| f & (USE_WALL | USE_ROOF) != 0)
+        .filter(|(_, _, f)| f & (USE_WALL | USE_ROOF | USE_FACADE) != 0)
         .map(|(_, b, _)| *b)
         .collect()
 }
@@ -435,6 +539,67 @@ mod tests {
                 wall_block_for_color((151, 98, 83), &mut a),
                 wall_block_for_color((151, 98, 83), &mut b)
             );
+        }
+    }
+
+    /// A wall tagged a warm tan is a stone building and must be able to come out
+    /// sandstone. Nearest-colour matching alone gives white terracotta every
+    /// time, because Minecraft's sandstone is a paler cream than any tan tag.
+    #[test]
+    fn a_warm_tan_tag_draws_from_the_warm_stone_family() {
+        use rand::SeedableRng;
+        // Two World Financial Center's own building:colour.
+        let tan = (205u8, 170u8, 125u8);
+        assert!(reads_as_warm_stone(tan));
+
+        let mut seen = std::collections::BTreeSet::new();
+        for seed in 0..64u64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            seen.insert(wall_block_for_color(tan, &mut rng));
+        }
+        assert!(
+            seen.contains(&SANDSTONE) || seen.contains(&SMOOTH_SANDSTONE),
+            "no sandstone in {seen:?}"
+        );
+        for b in &seen {
+            assert!(WARM_STONE.contains(b), "{b:?} is not warm stone");
+        }
+    }
+
+    /// The region has to refuse what is next to it, or every painted wall in the
+    /// world turns to sandstone.
+    #[test]
+    fn only_warm_tans_take_the_stone_route() {
+        for (name, c) in [
+            ("pale sand", (222u8, 205u8, 160u8)),
+            ("khaki", (195, 176, 145)),
+            ("cream", (240, 230, 205)),
+            // The darkest tans that are still stone: 65 and 70 degrees of hue.
+            ("dark buff #BB9066", (187, 144, 102)),
+            ("buff #B8946B", (184, 148, 107)),
+            ("greige #C4C4A2", (196, 196, 162)),
+        ] {
+            assert!(reads_as_warm_stone(c), "{name} should read as warm stone");
+        }
+        for (name, c) in [
+            ("brick red", (150u8, 60u8, 50u8)),
+            ("orange", (230, 120, 30)),
+            ("salmon", (240, 150, 130)),
+            ("green", (90, 150, 80)),
+            ("blue", (80, 110, 180)),
+            ("grey", (160, 160, 160)),
+            ("grey beige #9F9281", (159, 146, 129)),
+            ("white", (245, 245, 245)),
+            ("dark brown", (90, 60, 40)),
+            // Render and brick colours real tags carry, all under 56 degrees.
+            ("peach #E0AF94", (224, 175, 148)),
+            ("reddish brown #9B6950", (155, 105, 80)),
+            ("rosy brown #A17665", (161, 118, 101)),
+            ("rosy brown #987266", (152, 114, 102)),
+            ("rosy tan #B48C76", (180, 140, 118)),
+            ("taupe #876E5D", (135, 110, 93)),
+        ] {
+            assert!(!reads_as_warm_stone(c), "{name} must not");
         }
     }
 }

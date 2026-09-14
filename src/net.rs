@@ -26,6 +26,13 @@ impl Drop for RequestPermit {
     }
 }
 
+/// The in-flight counter is process wide, so a test that asserts an exact
+/// value of it cannot run beside a test that takes a permit of its own. Every
+/// test in the crate that does either holds this first; the tests below and the
+/// Mapillary fetch tests are the current users.
+#[cfg(test)]
+pub static PERMIT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Blocks until a slot is free. Hold it across a single request/response only:
 /// acquiring a second permit while holding one would deadlock.
 #[must_use]
@@ -44,8 +51,9 @@ pub fn request_permit() -> RequestPermit {
 mod tests {
     use super::*;
 
-    // The counter is process-global, so these cases cannot observe each other.
-    static SERIALIZE: Mutex<()> = Mutex::new(());
+    // The counter is process-global, so these cases cannot observe each other
+    // or anything else in the crate that takes a permit.
+    use super::PERMIT_TEST_LOCK as SERIALIZE;
 
     fn in_flight() -> usize {
         *IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner())

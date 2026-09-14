@@ -209,6 +209,9 @@ pub fn build_buildings_geojson(bbox_text: &str) -> Result<String, String> {
     let buildings = overture::collect_overture_buildings(
         &client,
         &bbox,
+        // The preview is a repeated fetch over a small area, which is exactly
+        // where the cached tile archive costs least.
+        crate::args::OvertureSource::Auto,
         true,
         BUILDINGS_MAX_FEATURES,
         // report_gaps: the feature cap here is a render budget, not missing data,

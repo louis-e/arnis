@@ -47,12 +47,15 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  initVoxyLightingCoupling();
+  refreshHeightLimitRow();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
   resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
+  initPrecomputeFacadesButton();
   initTooltips();
   handleBboxInput();
   const localization = await getLocalization();
@@ -134,10 +137,13 @@ async function applyLocalization(localization) {
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
     "span[data-localize='bake_lighting']": "bake_lighting",
+    "span[data-localize='voxy_lod']": "voxy_lod",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
+    "span[data-localize='custom_map_source']": "custom_map_source",
     "span[data-localize='java_save_path']": "java_save_path",
     "span[data-localize='bedrock_save_path']": "bedrock_save_path",
+    "span[data-localize='luanti_save_path']": "luanti_save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
     "span[data-localize='canopy_height']": "canopy_height",
     "span[data-localize='max_tree_size']": "max_tree_size",
@@ -152,14 +158,31 @@ async function applyLocalization(localization) {
     "button[data-localize='gamemode_spectator']": "gamemode_spectator",
     "span[data-localize='world_time']": "world_time",
     "span[data-localize='map_item']": "map_item",
+    "span[data-localize='custom_world_name']": "custom_world_name",
     "span[data-localize='signage']": "signage",
+    "span[data-localize='mapillary_token']": "mapillary_token",
+    "span[data-localize='facade_precompute']": "facade_precompute",
+    "span[data-localize='facade_mode']": "facade_mode",
+    "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
+    "button[data-localize='facade_mode_photos']": "facade_mode_photos",
+    "div[data-localize='facade_mode_java_only']": "facade_mode_java_only",
     "button[data-localize='signage_none']": "signage_none",
     "button[data-localize='signage_basic']": "signage_basic",
     "button[data-localize='signage_full']": "signage_full",
     "div[data-localize='settings_section_generation']": "settings_section_generation",
+    "div[data-localize='settings_section_facades']": "settings_section_facades",
+    "span[data-localize='facade_source']": "facade_source",
+    "span[data-localize='facade_detail']": "facade_detail",
+    "button[data-localize='facade_detail_standard']": "facade_detail_standard",
+    "button[data-localize='facade_detail_high']": "facade_detail_high",
+    "button[data-localize='facade_source_off']": "facade_source_off",
+    "button[data-localize='facade_source_preset']": "facade_source_preset",
+    "button[data-localize='facade_source_mapillary']": "facade_source_mapillary",
+    "span[data-localize='enable_luanti']": "enable_luanti",
     "div[data-localize='settings_section_world']": "settings_section_world",
     "div[data-localize='settings_section_map']": "settings_section_map",
     "div[data-localize='settings_section_application']": "settings_section_application",
+    "button[data-localize='facade_precompute_button']": "facade_precompute_button",
     "span[data-localize='clear_tile_cache']": "clear_tile_cache",
     "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
     // Row label only; settings-store.js owns the button text.
@@ -195,6 +218,20 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+  // The map hint lives in the map iframe, which cannot see this assignment.
+  document.querySelectorAll('iframe').forEach((frame) => {
+    try {
+      const w = frame.contentWindow;
+      if (w && typeof w.renderBboxHint === 'function') w.renderBboxHint();
+    } catch (_) {
+      // A frame that is not ours or not loaded yet; the hint renders itself
+      // once it is.
+    }
+  });
+
+  // The line above has just written the idle label over a button that may be
+  // saying Cancel, so put the running state back.
+  refreshPrecomputeButton();
 }
 
 // Function to initialize the footer with the current year and version
@@ -394,6 +431,232 @@ window.closeUpdateModal = closeUpdateModal;
 window.openUpdateInBrowser = openUpdateInBrowser;
 window.downloadLatestRelease = downloadLatestRelease;
 
+// Earth on every start, so a Moon or Mars world stays a deliberate pick.
+var selectedCelestialBody = 'earth';
+
+// Earth-only options. Disabled rather than hidden, so it does not look like
+// they were silently ignored.
+const EARTH_ONLY_SETTINGS = [
+  'generation-mode-select',
+  'overture-toggle',
+  'use-3d-toggle',
+  'interior-toggle',
+  'canopy-height-toggle',
+  'legacy-trees-toggle',
+  'scale-value-slider',
+  'aws-only-elevation-toggle',
+  'disable-height-limit-toggle',
+  // Off Earth the body's own imagery is the only basemap, so neither the
+  // Earth theme picker nor a custom Earth tile source has anything to act on.
+  'tile-theme-select',
+  'custom-tile-url'
+];
+const EARTH_ONLY_SEGMENTED = ['max-tree-size-group', 'signage-group'];
+
+// A tile URL template Leaflet can actually fill in. Deliberately permissive
+// about the host - the entire point is to reach something we do not know about -
+// but the placeholders have to be there or every tile 404s.
+function isValidTileTemplate(url) {
+  if (!/^https?:\/\//i.test(url)) return false;
+  return url.includes('{z}') && url.includes('{x}') && url.includes('{y}');
+}
+
+function getCustomTileUrl() {
+  return (localStorage.getItem('customTileUrl') || '').trim();
+}
+
+function getMapillaryToken() {
+  return (localStorage.getItem('mapillaryToken') || '').trim();
+}
+
+function getFacadeMode() {
+  const stored = localStorage.getItem('facadeMode');
+  if (stored === 'blocks') return 'blocks';
+  // Anything else means the photographs: 'photos' itself, the 'paintings' and
+  // 'paintings-v2' an earlier build saved for what are now the photo panels,
+  // and nothing at all, which takes the default the same way the backend does.
+  return 'photos';
+}
+
+// The photo panels are Java entities carried by a resource pack, so no other
+// world format can show them. The stored choice is left alone so that going
+// back to Java restores it; only what the backend is asked for changes.
+function getEffectiveFacadeMode() {
+  const mode = getFacadeMode();
+  if (mode !== 'blocks' && selectedWorldFormat !== 'java') return 'blocks';
+  return mode;
+}
+
+// One control decides where facades come from, so the two old switches are
+// gone: they were mutually exclusive anyway and could both be off in two
+// different ways. Java only, and the stored choice survives a trip through
+// Bedrock so coming back restores it.
+function getFacadeSource() {
+  const v = localStorage.getItem('facadeSource');
+  return v === 'preset' || v === 'mapillary' ? v : 'off';
+}
+
+// Only the presets are Java only. Mapillary falls back to block facades on
+// Bedrock and Luanti, which is what the notice under the mode control says.
+// The Moon and Mars are terrain only, so there is no wall to hang anything on
+// and every source resolves to off there. As with the format gate, the stored
+// choice is left alone so coming back to Earth restores it.
+function getEffectiveFacadeSource() {
+  const source = getFacadeSource();
+  if (selectedCelestialBody !== 'earth') return 'off';
+  if (source === 'preset' && selectedWorldFormat !== 'java') return 'off';
+  return source;
+}
+
+function getFacadesEnabled() {
+  return getEffectiveFacadeSource() === 'mapillary';
+}
+
+function getBuildingFacadesEnabled() {
+  return getEffectiveFacadeSource() === 'preset';
+}
+
+function getFacadeDetail() {
+  return localStorage.getItem('facadeDetail') === 'high' ? 'high' : 'standard';
+}
+
+// Every row under the source control only means something for one of the
+// sources, so each is greyed by the source rather than by a switch of its own.
+function refreshFacadeSourceRows() {
+  const group = document.getElementById('facade-source-group');
+  if (!group) return;
+  const java = selectedWorldFormat === 'java';
+  const earth = selectedCelestialBody === 'earth';
+  const source = getEffectiveFacadeSource();
+
+  // Off Earth the whole section is dead, the source picker included, so it is
+  // greyed like the row it sits in rather than left looking live.
+  group.classList.toggle('segmented-disabled', !earth);
+  const sourceRow = group.closest('.settings-row');
+  if (sourceRow) sourceRow.classList.toggle('settings-row-unavailable', !earth);
+  group.querySelectorAll('.segment').forEach((btn) => {
+    btn.disabled = !earth || (!java && btn.dataset.facadeSource === 'preset');
+    btn.classList.toggle('active', btn.dataset.facadeSource === source);
+  });
+
+  const grey = (id, live) => {
+    const el = document.getElementById(id);
+    const row = el && el.closest('.settings-row');
+    if (row) row.classList.toggle('settings-row-unavailable', !live);
+    if (el) {
+      el.querySelectorAll('.segment, input, button').forEach((c) => {
+        c.disabled = !live;
+      });
+      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON') el.disabled = !live;
+    }
+  };
+  grey('mapillary-token', source === 'mapillary');
+  grey('facade-mode-group', source === 'mapillary' && !!getMapillaryToken());
+  // Panel resolution, so it means nothing where no panels are hung.
+  grey('facade-detail-group', source !== 'off' && java);
+  grey('precompute-facades-button', source === 'mapillary' && !!getMapillaryToken());
+
+  const notice = document.getElementById('facade-java-only-notice');
+  if (notice) notice.style.display = java ? 'none' : '';
+}
+
+// The facade rows react to the world format (panels are Java only), the on/off
+// switch and the token. A row that cannot do anything is greyed out rather than
+// left looking live, and the Precompute button reads the same facts.
+function refreshFacadeRows() {
+  const group = document.getElementById('facade-mode-group');
+  const notice = document.getElementById('facade-java-only-notice');
+  if (!group) return;
+
+  const java = selectedWorldFormat === 'java';
+  const earth = selectedCelestialBody === 'earth';
+  const effective = getEffectiveFacadeMode();
+  group.querySelectorAll('.segment').forEach((btn) => {
+    const panels = btn.dataset.facadeMode !== 'blocks';
+    btn.disabled = panels && !java;
+    btn.classList.toggle('active', btn.dataset.facadeMode === effective);
+  });
+  // Off Earth nothing builds facades at all, so the format gate has nothing
+  // left to explain.
+  if (notice) notice.style.display = java || !earth ? 'none' : '';
+  refreshFacadeSourceRows();
+  refreshPrecomputeButton();
+}
+
+// The URL field is only meaningful for the Custom theme, so it is hidden
+// rather than disabled for every other one.
+function refreshCustomSourceRow() {
+  const select = document.getElementById('tile-theme-select');
+  const row = document.getElementById('custom-tile-row');
+  if (!select || !row) return;
+  row.style.display = select.value === 'custom' ? '' : 'none';
+}
+
+// The map iframe is addressed by class, never by its src attribute. Manual
+// bbox entry used to rewrite src to "maps.html#lat,lng,lat,lng", after which
+// every iframe[src="maps.html"] lookup silently matched nothing and the map
+// theme and celestial body messages were dropped for the rest of the session.
+function getMapFrame() {
+  return document.querySelector('.map-container');
+}
+
+// The map owns the toggle, but an iframe reload restarts it on Earth, so the
+// parent's value has to be pushed back.
+function pushBodyToMap() {
+  const mapIframe = getMapFrame();
+  if (mapIframe && mapIframe.contentWindow) {
+    mapIframe.contentWindow.postMessage(
+      { type: 'changeBody', body: selectedCelestialBody },
+      '*'
+    );
+  }
+}
+
+function setCelestialBody(body) {
+  selectedCelestialBody = (body === 'moon' || body === 'mars') ? body : 'earth';
+  const off = selectedCelestialBody !== 'earth';
+
+  const markRow = (el) => {
+    const row = el && el.closest('.settings-row');
+    if (row) row.classList.toggle('settings-row-unavailable', off);
+  };
+
+  EARTH_ONLY_SETTINGS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = off;
+    markRow(el);
+  });
+
+  EARTH_ONLY_SEGMENTED.forEach((id) => {
+    const group = document.getElementById(id);
+    if (!group) return;
+    group.classList.toggle('segmented-disabled', off);
+    markRow(group);
+  });
+
+  // Gated on more than the body, so they cannot simply follow the earth-only
+  // loop: the height-limit pack is also format-gated and the facade rows read
+  // the world format and the stored source too.
+  refreshHeightLimitRow();
+  refreshFacadeRows();
+
+  // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
+  const timeSlider = document.getElementById('world-time-slider');
+  if (timeSlider) {
+    timeSlider.value = off ? 0 : 720;
+    timeSlider.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // The cached preview describes a world on the body we just left. The map
+  // clears its own overlay in changeBody; this drops the parent's copy so a
+  // later ready event cannot put a stale one back.
+  currentWorldMapData = null;
+
+  // Warnings are per body, so the current selection may read differently now.
+  refreshBboxSelectionInfo();
+}
+
 // Function to register the event listener for bbox updates from iframe
 function registerMessageEvent() {
   window.addEventListener('message', function (event) {
@@ -404,6 +667,11 @@ function registerMessageEvent() {
     if (bboxText && !event.data.type) {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
+    }
+
+    // World toggled on the map toolbar
+    if (event.data && event.data.type === 'bodyChanged') {
+      setCelestialBody(event.data.body);
     }
 
     // Handle angle measurement from the map polyline tool
@@ -642,6 +910,31 @@ function updateEta(progress, streaming) {
   renderEta();
 }
 
+// What the status line says between the click and the backend's first real
+// progress event. Kept in a constant because the abort paths have to be able to
+// recognize it as still-unclaimed and take it back down.
+const STARTING_MESSAGE = "Starting...";
+
+// The bar and the status line only ever move on a `progress-update` event, and
+// the first one is a long way from the click: a world folder gets created, a
+// spawn point written into level.dat, a datapack possibly installed, disk space
+// probed and a session lock taken, all before the download that emits 1%. Until
+// then the previous run's green "Done!" and full bar sit there, which reads as
+// the button having done nothing. So claim both here, at the moment the click
+// is accepted, and let the first real update take over from 0%.
+function resetProgressUi(message) {
+  const bar = document.getElementById("progress-bar");
+  const info = document.getElementById("progress-info");
+  const detail = document.getElementById("progress-detail");
+  if (bar) bar.style.width = "0%";
+  if (detail) detail.textContent = "0%";
+  if (info) {
+    info.textContent = message;
+    info.style.color = "#ececec";
+  }
+  resetEta();
+}
+
 // Function to set up the progress bar listener
 function setupProgressListener() {
   const progressBar = document.getElementById("progress-bar");
@@ -662,18 +955,23 @@ function setupProgressListener() {
 
       if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
-        generationButtonEnabled = true;
+        setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
         setWorldNameLabel("");
         resetEta();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
-        generationButtonEnabled = true;
+        setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
         resetEta();
+        // A generation just built facades into the same cache, so the preview
+        // has something new to say.
+        window.arnisPreview3D?.refreshFacades();
       } else {
         progressInfo.style.color = "#ececec";
       }
+      // The facade pipeline reports its stages here whichever job is driving it.
+      notePrecomputeStage(message);
     }
   });
 
@@ -756,6 +1054,7 @@ function resolveDefaultSavePath() {
 
   resolve('gui_get_default_save_path', 'savePath');
   resolve('gui_get_default_bedrock_save_path', 'bedrockSavePath');
+  resolve('gui_get_default_luanti_save_path', 'luantiSavePath');
 }
 
 function initSettings() {
@@ -769,6 +1068,10 @@ function initSettings() {
     settingsModal.style.display = "flex";
     settingsModal.style.justifyContent = "center";
     settingsModal.style.alignItems = "center";
+    // The caches grow with every generation, so the number the panel shows
+    // has to be read when the panel opens; measuring it once at startup left
+    // it stale for the whole session.
+    refreshCacheSize();
   }
 
   // Close settings modal
@@ -841,6 +1144,10 @@ function initSettings() {
     });
   });
 
+  // A reloaded map comes back on Earth; restore whatever was picked.
+  const bodyMapFrame = getMapFrame();
+  if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
+
   // Max tree size segmented control
   const maxTreeSizeGroup = document.getElementById("max-tree-size-group");
   maxTreeSizeGroup.querySelectorAll(".segment").forEach((btn) => {
@@ -897,6 +1204,9 @@ function initSettings() {
   // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
 
+  // Custom world name editor (Java only), gated by its Settings toggle
+  initCustomWorldNameToggle();
+
   // Save path setting
   initSavePathSetting();
 
@@ -949,9 +1259,10 @@ function initSettings() {
 
     // Store the selected theme in localStorage for persistence
     localStorage.setItem('selectedTileTheme', selectedTheme);
+    refreshCustomSourceRow();
 
     // Send message to map iframe to change tile theme
-    const mapIframe = document.querySelector('iframe[src="maps.html"]');
+    const mapIframe = getMapFrame();
     if (mapIframe && mapIframe.contentWindow) {
       mapIframe.contentWindow.postMessage({
         type: 'changeTileTheme',
@@ -959,6 +1270,93 @@ function initSettings() {
       }, '*');
     }
   });
+
+  // Custom map source, the field behind the Custom theme. It exists because a
+  // network that blocks every built-in provider turns the fallback chain into a
+  // slower route to the same blank map (see issues #1222, #1298, #1299).
+  const customTileInput = document.getElementById("custom-tile-url");
+  customTileInput.value = getCustomTileUrl();
+
+  // Mapillary token. Kept in localStorage like the save paths so it survives a
+  // restart; it is a per-user API credential, so it is never written to a log
+  // or sent anywhere except the backend that fetches with it.
+  const mapillaryTokenInput = document.getElementById("mapillary-token");
+  mapillaryTokenInput.value = getMapillaryToken();
+  mapillaryTokenInput.addEventListener("change", () => {
+    const raw = mapillaryTokenInput.value.trim();
+    if (raw) {
+      localStorage.setItem('mapillaryToken', raw);
+    } else {
+      localStorage.removeItem('mapillaryToken');
+    }
+    refreshFacadeRows();
+  });
+
+  // The source control, and the detail beside it. Each keeps its own key so
+  // the rest of main.js can read it without the store, and is registered in
+  // settings-store.js as well so the panel's Revert and Reset reach it.
+  const segmented = (id, storageKey, dataAttr, after) => {
+    const group = document.getElementById(id);
+    if (!group) return;
+    group.querySelectorAll(".segment").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        // A disabled segment is still clicked by settings-store.js when it
+        // restores or reverts, and refusing that would lose a choice made on
+        // Java the moment the format changed.
+        localStorage.setItem(storageKey, btn.dataset[dataAttr]);
+        group.querySelectorAll(".segment").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        if (after) after();
+      });
+    });
+  };
+  segmented("facade-source-group", "facadeSource", "facadeSource", refreshFacadeRows);
+  segmented("facade-detail-group", "facadeDetail", "facadeDetail", null);
+  refreshFacadeRows();
+
+  // An older build kept a facade export folder here. The field is gone, the
+  // preview reads the cache and generation fetches into it, so the leftover
+  // key means nothing and is dropped rather than left to look meaningful.
+  localStorage.removeItem('facadeDir');
+
+  const facadeModeGroup = document.getElementById("facade-mode-group");
+  facadeModeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      localStorage.setItem('facadeMode', btn.dataset.facadeMode);
+      refreshFacadeRows();
+    });
+  });
+  refreshFacadeRows();
+
+  function applyCustomTileUrl() {
+    const raw = customTileInput.value.trim();
+
+    // An empty field is the normal way to go back to the themes. A non-empty
+    // one that is not a usable template is left in the box so the user can see
+    // and correct it, but is not handed to the map.
+    if (raw && !isValidTileTemplate(raw)) {
+      window.arnisLog('warn', 'Ignoring custom map source: expected an http(s) URL containing {z}, {x} and {y}.');
+      localStorage.removeItem('customTileUrl');
+    } else if (raw) {
+      localStorage.setItem('customTileUrl', raw);
+    } else {
+      localStorage.removeItem('customTileUrl');
+    }
+
+    const mapIframe = getMapFrame();
+    if (mapIframe && mapIframe.contentWindow) {
+      mapIframe.contentWindow.postMessage({
+        type: 'setCustomTileUrl',
+        url: getCustomTileUrl()
+      }, '*');
+    }
+  }
+
+  // On change, not on input: a half-typed URL is not a source, and remounting
+  // the basemap per keystroke would hammer whatever host they are aiming at.
+  customTileInput.addEventListener("change", applyCustomTileUrl);
+  refreshCustomSourceRow();
 
   // Telemetry consent toggle
   const telemetryToggle = document.getElementById("telemetry-toggle");
@@ -990,10 +1388,73 @@ function initSettings() {
       `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
     licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
 
+    // The premade facade set. All CC0, so attribution is a courtesy rather than
+    // a condition, but the sources are named because someone should be able to
+    // find them and because it says plainly that the pixels are free to ship.
+    const facadeTextureBlock =
+      `<p><b>Preset Building Facade Textures:</b></p>` +
+      `<p style="font-size: 0.9em;">The photographs hung on buildings by the Preset Facades setting, all released under ` +
+      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
+      `<ul style="padding-left: 20px; font-size: 0.9em;">` +
+      `<li>Urban building, apartment and shop front photographs by <b>Scouser</b>, from ` +
+      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" style="color: inherit;" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
+      `<li>Tiling facade materials from <b>TextureCan</b>: ` +
+      `<a href="https://www.texturecan.com/details/315/" style="color: inherit;" target="_blank" rel="noopener noreferrer">315</a>, ` +
+      `<a href="https://www.texturecan.com/details/316/" style="color: inherit;" target="_blank" rel="noopener noreferrer">316</a>, ` +
+      `<a href="https://www.texturecan.com/details/357/" style="color: inherit;" target="_blank" rel="noopener noreferrer">357</a>, ` +
+      `<a href="https://www.texturecan.com/details/360/" style="color: inherit;" target="_blank" rel="noopener noreferrer">360</a>, ` +
+      `<a href="https://www.texturecan.com/details/563/" style="color: inherit;" target="_blank" rel="noopener noreferrer">563</a></li>` +
+      `</ul>`;
+    licenseContent.insertAdjacentHTML("beforeend", facadeTextureBlock);
+
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const link = (url, text) =>
+      `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+
+    // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
+    // built from street photographs has to name the photographers. The source
+    // is named whether or not a run has used it yet, so the credit can be
+    // found before the first generation; the per-image list underneath, one
+    // line per photograph in the shape Mapillary's own guidance asks for,
+    // fills in after one.
+    let shots = [];
+    try {
+      const used = await invoke("gui_get_mapillary_attributions");
+      if (Array.isArray(used)) shots = used;
+    } catch (e) {
+      console.warn("Failed to load Mapillary attributions:", e);
+    }
+    let mapillaryList;
+    if (shots.length > 0) {
+      // A record that carries the image id but not the uploader name has no
+      // profile to link to, so the name is shown as plain text instead.
+      const lines = shots.map((s) => {
+        const by = s.profile_url ? link(s.profile_url, s.username) : esc(s.username);
+        return `<li>${link(s.image_url, s.title)} by ${by}, licensed under CC-BY-SA</li>`;
+      }).join("");
+      const unnamed = shots.filter((s) => !s.profile_url).length;
+      const note = unnamed > 0
+        ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
+        : "";
+      mapillaryList =
+        `<p style="font-size: 0.9em;">Photographs used by the last generation:${note}</p>` +
+        `<ul style="padding-left: 20px; font-size: 0.9em;">${lines}</ul>`;
+    } else {
+      mapillaryList =
+        `<p style="font-size: 0.9em;">The photographs a generation used are listed here once it has run.</p>`;
+    }
+    const mapillaryBlock =
+      `<p><b>Building Facades (Mapillary):</b></p>` +
+      `<p style="font-size: 0.9em;">The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
+      `${link("https://www.mapillary.com", "Mapillary")}, licensed ` +
+      `${link("https://creativecommons.org/licenses/by-sa/4.0/", "CC BY-SA 4.0")}. ` +
+      `Share-alike applies to anything you publish that carries them.</p>` +
+      mapillaryList;
+    licenseContent.insertAdjacentHTML("beforeend", mapillaryBlock);
+
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
       if (Array.isArray(rows) && rows.length > 0) {
-        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
         const items = rows.map(r => {
           const lic = r.license_url
             ? `<a href="${esc(r.license_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
@@ -1009,6 +1470,7 @@ function initSettings() {
     } catch (e) {
       console.warn("Failed to load 3D model attributions:", e);
     }
+
   }
 
   function closeLicense() {
@@ -1024,6 +1486,30 @@ function initSettings() {
 let selectedWorldFormat = 'java'; // Default to Java
 
 const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
+
+// Voxy renders distant terrain from the per-voxel light stored in its LOD
+// cache, so pre-generating one without baked lighting would give a black
+// horizon. Keep the two toggles consistent in the UI rather than quietly
+// overriding the user's choice at generation time.
+function initVoxyLightingCoupling() {
+  const voxy = document.getElementById('voxy-lod-toggle');
+  const bake = document.getElementById('bake-lighting-toggle');
+  if (!voxy || !bake) return;
+
+  // Dispatch so the settings store persists the knock-on change too.
+  const set = (el, value) => {
+    if (el.checked === value) return;
+    el.checked = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  voxy.addEventListener('change', () => {
+    if (voxy.checked) set(bake, true);
+  });
+  bake.addEventListener('change', () => {
+    if (!bake.checked) set(voxy, false);
+  });
+}
 
 function initWorldFormatToggle() {
   initLuantiExperimentalToggle();
@@ -1087,18 +1573,34 @@ function getEffectiveWorldFormat() {
   return selectedWorldFormat;
 }
 
+// The extended dimension is declared by the Java datapack and the Bedrock
+// behavior pack; Luanti ships neither, and off Earth the relief already fits
+// vanilla height, so the backend forces the flag off there.
+function heightLimitAvailable(format) {
+  return selectedCelestialBody === 'earth' && format !== 'luanti';
+}
+
+function refreshHeightLimitRow(format) {
+  const toggle = document.getElementById('disable-height-limit-toggle');
+  if (!toggle) return;
+
+  const available = heightLimitAvailable(format || selectedWorldFormat);
+  toggle.disabled = !available;
+
+  const row = toggle.closest('.settings-row');
+  if (row) {
+    // Cleared, not set to 1: an inline value would beat the class rule.
+    row.style.opacity = '';
+    row.classList.toggle('settings-row-unavailable', !available);
+  }
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
   const luantiBtn = document.getElementById('format-luanti');
 
-  const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
-
-  // Toggle now supported on both formats (Java datapack + Bedrock BP).
-  if (heightLimitToggle) {
-    heightLimitToggle.disabled = false;
-    heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
-  }
+  refreshHeightLimitRow(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -1114,6 +1616,14 @@ function updateFormatToggleUI(format) {
     if (luantiBtn) luantiBtn.classList.add('format-active');
     worldPath = "";
   }
+
+  // The facade panels are Java entities, so the mode control changes with the
+  // format. Called from here so a format picked before the settings modal is
+  // ever opened still leaves it consistent.
+  refreshFacadeRows();
+  // Custom names are Java-only; hide/show the pencil and re-derive the
+  // label preview whenever the active format changes.
+  refreshWorldNameEditUI();
 }
 
 // Expose to window for onclick handlers
@@ -1172,11 +1682,35 @@ function initTelemetryConsent() {
 // rows, no extra status label. The button stays disabled while the
 // call is in flight so repeated clicks can't fire multiple concurrent
 // wipes (Rust is idempotent, but the UI would look confused).
+// How much disk the caches hold, shown next to the Clear button so the user
+// can see whether clearing is worth doing. Asked for when the settings panel
+// opens and again after anything that changes the caches, never at startup and
+// never on a timer: the answer is a walk of every cached file, which is tenths
+// of a second once a facade run has filled the tile cache.
+async function refreshCacheSize() {
+  const label = document.getElementById('cache-size');
+  if (!label) {
+    return;
+  }
+  try {
+    label.textContent = await invoke('gui_get_cache_size');
+  } catch (error) {
+    console.warn('Cache size unavailable:', error);
+    label.textContent = '';
+  }
+}
+window.refreshCacheSize = refreshCacheSize;
+
 function initClearCacheButton() {
   const button = document.getElementById('clear-cache-button');
   if (!button) {
     return;
   }
+  // Deliberately not asking for the size here. This runs on DOMContentLoaded,
+  // where the number cannot be seen by anyone: the label lives inside the
+  // settings panel, and `openSettings` asks for it there. Reading it at startup
+  // only bought a value that was stale by the time the panel opened, and paid
+  // for it with a walk of every cached file while the window was going up.
 
   // How long the success/error flash stays applied before reverting to
   // the default outline. Long enough to register as confirmation, short
@@ -1207,6 +1741,7 @@ function initClearCacheButton() {
     try {
       await invoke('gui_clear_tile_caches');
       flash('is-success');
+      refreshCacheSize();
     } catch (error) {
       // The Rust side returns Err(String) for partial failures (files
       // still locked). The user sees the red flash; the full text goes
@@ -1215,6 +1750,160 @@ function initClearCacheButton() {
       flash('is-error');
     } finally {
       button.disabled = false;
+    }
+  });
+}
+
+/* Precompute: fills the Mapillary facade cache for the selected area, so the
+   generation that follows does no image work and the 3D preview can show the
+   walls. The backend refuses a second precompute and one started beside a
+   generation; the button state here is that same rule said early, so pressing
+   it is never the way to find out it cannot run. */
+
+let precomputeRunning = false;
+let precomputeStartedAt = 0;
+let precomputeTicker = null;
+// The pipeline reports its stages on the shared progress channel. Nothing else
+// is emitting while a precompute holds the process, so those lines are mirrored
+// into the settings row instead of being left in a status bar the user is not
+// looking at, under a progress bar that is not moving.
+let precomputeStage = "";
+
+// What the pipeline prefixes its stage lines with. Kept short because the same
+// lines go to the progress bar's status line, which is one line of a 320px
+// panel.
+const FACADE_STAGE_PREFIX = "Facades:";
+
+function setPrecomputeStatus(text, kind, detail) {
+  const el = document.getElementById('facade-precompute-status');
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.display = text ? "" : "none";
+  el.classList.toggle('is-success', kind === 'success');
+  el.classList.toggle('is-error', kind === 'error');
+  if (detail) {
+    el.title = detail;
+  } else {
+    el.removeAttribute('title');
+  }
+}
+
+// Why the button cannot be pressed, or "" when it can. The wording is what the
+// button's tooltip says, so a disabled button always explains itself.
+function precomputeBlockedReason() {
+  if (selectedCelestialBody !== 'earth') {
+    return "Facades are Earth only. Switch the world back in the map toolbar.";
+  }
+  // The source control decides this, and it is the reason the row above greys
+  // the button out; without it here the next refresh switches it back on.
+  if (getEffectiveFacadeSource() !== 'mapillary') {
+    return "Set Facade Source to Mapillary first.";
+  }
+  if (!getMapillaryToken()) return "Add a Mapillary token above first.";
+  if (!selectedBBox || selectedBBox === "0.000000 0.000000 0.000000 0.000000") {
+    return "Select an area on the map first.";
+  }
+  if (!generationButtonEnabled) return "A generation is running.";
+  return "";
+}
+
+function refreshPrecomputeButton() {
+  const button = document.getElementById('precompute-facades-button');
+  if (!button) return;
+
+  if (precomputeRunning) {
+    // Never disabled while running: this is the only way to stop it.
+    button.disabled = false;
+    button.textContent = "Cancel";
+    button.title = "Stops at the end of the stage it is in. Walls already built stay cached.";
+    return;
+  }
+
+  const localized = window.localization || {};
+  button.textContent = localized['facade_precompute_button'] || "Precompute";
+  const blocked = precomputeBlockedReason();
+  button.disabled = !!blocked;
+  button.title = blocked;
+}
+
+// mm:ss since the run started, for a job whose stages are minutes long.
+function precomputeElapsed() {
+  const seconds = Math.max(0, Math.round((Date.now() - precomputeStartedAt) / 1000));
+  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, '0');
+}
+
+function showPrecomputeProgress() {
+  if (!precomputeRunning) return;
+  setPrecomputeStatus((precomputeStage || "Working...") + " (" + precomputeElapsed() + ")");
+}
+
+// Called by the progress listener for every line the facade pipeline emits, so
+// the row says which stage is running rather than only that something is.
+function notePrecomputeStage(message) {
+  if (!precomputeRunning || !message.startsWith(FACADE_STAGE_PREFIX)) return;
+  precomputeStage = message.slice(FACADE_STAGE_PREFIX.length).trim();
+  showPrecomputeProgress();
+}
+
+function initPrecomputeFacadesButton() {
+  const button = document.getElementById('precompute-facades-button');
+  if (!button) return;
+  refreshPrecomputeButton();
+
+  button.addEventListener('click', async () => {
+    if (precomputeRunning) {
+      // The pipeline checks between stages, so this is a request, not a stop.
+      precomputeStage = "Cancelling after this stage";
+      showPrecomputeProgress();
+      try {
+        await invoke('gui_cancel_precompute');
+      } catch (error) {
+        console.warn('Cancel precompute failed:', error);
+      }
+      return;
+    }
+
+    const blocked = precomputeBlockedReason();
+    if (blocked) {
+      setPrecomputeStatus(blocked, 'error');
+      return;
+    }
+
+    precomputeRunning = true;
+    precomputeStartedAt = Date.now();
+    precomputeStage = "Starting";
+    refreshPrecomputeButton();
+    showPrecomputeProgress();
+    // One second, so a run that spends twenty minutes in one stage still shows
+    // something moving and cannot be mistaken for a hang.
+    precomputeTicker = setInterval(showPrecomputeProgress, 1000);
+
+    try {
+      const outcome = await invoke('gui_precompute_facades', {
+        bboxText: selectedBBox,
+        mapillaryToken: getMapillaryToken(),
+      });
+      // Green only when there are facades here now. A cancelled run and an
+      // area with nothing to find both come back plain: neither is a failure
+      // and neither left a wall behind.
+      setPrecomputeStatus(outcome.summary, outcome.built ? 'success' : '', outcome.detail);
+      if (outcome.built) window.arnisPreview3D?.refreshFacades();
+      refreshCacheSize();
+    } catch (error) {
+      // Every refusal from the backend is a sentence meant to be read. The
+      // longer ones are written as that sentence, a blank line, and the reason
+      // behind it: the row holds one line, so the reason becomes its tooltip.
+      const text = String(error);
+      const split = text.indexOf("\n\n");
+      const head = split < 0 ? text : text.slice(0, split).trim();
+      const rest = split < 0 ? "" : text.slice(split + 2).trim();
+      setPrecomputeStatus(head, 'error', rest || undefined);
+      refreshCacheSize();
+    } finally {
+      clearInterval(precomputeTicker);
+      precomputeTicker = null;
+      precomputeRunning = false;
+      refreshPrecomputeButton();
     }
   });
 }
@@ -1349,6 +2038,7 @@ function initTooltips() {
 /// Save path management, one path per world format
 let savePath = "";
 let bedrockSavePath = "";
+let luantiSavePath = "";
 
 const SAVE_PATHS = {
   java: {
@@ -1366,6 +2056,14 @@ const SAVE_PATHS = {
     browseId: 'bedrock-save-path-browse',
     get: () => bedrockSavePath,
     set: (value) => { bedrockSavePath = value; },
+  },
+  luanti: {
+    storageKey: 'arnis-luanti-save-path',
+    defaultCommand: 'gui_get_default_luanti_save_path',
+    inputId: 'luanti-save-path-input',
+    browseId: 'luanti-save-path-browse',
+    get: () => luantiSavePath,
+    set: (value) => { luantiSavePath = value; },
   },
 };
 
@@ -1474,8 +2172,8 @@ function handleBboxInput() {
         setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
       } else {
         // Restore map selection info display but don't update input field
-        const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
-        const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+        const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
+        const selectedSize = calculateBBoxSize(lat1, lng1, lat2, lng2);
         displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
       }
       return;
@@ -1504,10 +2202,19 @@ function handleBboxInput() {
         const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
         window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
-        // Show custom bbox on the map
-        let map_container = document.querySelector('.map-container');
-        map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
-        map_container.contentWindow.location.reload();
+        // Show the typed bbox on the map. Handed over by message rather than
+        // by reloading the frame: setting src and then calling reload() on the
+        // same frame raced - reload() runs against the pre-hash URL, so the
+        // selection could be dropped and the map came back empty. A reload also
+        // throws away every tile already fetched, which is the last thing a slow
+        // or filtered connection can afford.
+        const mapFrame = getMapFrame();
+        if (mapFrame && mapFrame.contentWindow) {
+          mapFrame.contentWindow.postMessage({
+            type: 'setBbox',
+            bounds: [lat1, lng1, lat2, lng2]
+          }, '*');
+        }
 
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
@@ -1540,22 +2247,29 @@ function handleBboxInput() {
       }
       setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
+    // The Precompute button next to this field turns on the selection, and the
+    // field is inside the same panel, so it has to follow every keystroke.
+    refreshPrecomputeButton();
   });
 }
 
 /**
  * Calculates the approximate area of a bounding box in square meters
  * Uses the Haversine formula for geodesic calculations
- * @param {number} lng1 - First longitude coordinate
- * @param {number} lat1 - First latitude coordinate
- * @param {number} lng2 - Second longitude coordinate
- * @param {number} lat2 - Second latitude coordinate
+ * @param {number} lat1 - South latitude
+ * @param {number} lng1 - West longitude
+ * @param {number} lat2 - North latitude
+ * @param {number} lng2 - East longitude
  * @returns {number} Area in square meters
  */
-function calculateBBoxSize(lng1, lat1, lng2, lat2) {
+// Radii used to turn a bbox into true ground area for the selected body.
+const BODY_RADIUS_M = { earth: 6371000, moon: 1737400, mars: 3396000 };
+
+function calculateBBoxSize(lat1, lng1, lat2, lng2) {
   // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
-  const R = 6371000; // Earth radius in meters
+  // Real ground, not an Earth-sized overestimate: a lunar box reads 13x too large.
+  const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
 
   const latDistance = toRad(lat2 - lat1);
   const lngDistance = toRad(lng2 - lng1);
@@ -1581,9 +2295,19 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
-const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
-const threshold3 = 500000000.00; // Extreme warning threshold (500 km²)
+// Selection-size warnings, in true square metres of ground. Measured timings and
+// world sizes, square selections:
+//   Earth 1km2 18s/19MB | 4km2 25s/70MB | 9km2 39s/154MB | 25km2 47s/415MB
+//   Moon  2deg 5s/4MB | 5deg 9s/16MB | 10deg 21s/36MB | 20deg 68s/144MB
+//   Mars  2deg 5s/4MB | 5deg 9s/16MB | 10deg 20s/36MB | 20deg 51s/100MB
+// Earth keeps its long-standing tiers, which guard memory more than the clock.
+// The Moon and Mars tiers land near one, three and nine minutes.
+const AREA_THRESHOLDS = {
+  earth: { extensive: 44e6, large: 85e6, extreme: 500e6 },
+  moon: { extensive: 3e11, large: 1e12, extreme: 3e12 },
+  mars: { extensive: 1.5e12, large: 5e12, extreme: 1.5e13 }
+};
+
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
@@ -1594,25 +2318,45 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  * @param {number} selectedSize - The calculated bbox area in square meters
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
-  if (selectedSize > threshold3) {
+  const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
+  if (selectedSize > t.extreme) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
-  } else if (selectedSize > threshold2) {
+  } else if (selectedSize > t.large) {
     setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
-  } else if (selectedSize > threshold1) {
+  } else if (selectedSize > t.extensive) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
   } else {
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   }
 }
 
+// Re-runs the size status, e.g. after a body switch changes which tiers apply.
+function refreshBboxSelectionInfo() {
+  if (!mapSelectedBBox) return;
+  const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
+  displayBboxSizeStatus(
+    document.getElementById("bbox-selection-info"),
+    calculateBBoxSize(lat1, lng1, lat2, lng2)
+  );
+}
+
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
-  let [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
+  // Two producers, two separators: the map posts formatBounds output, which is
+  // space separated, while manual coordinate entry synthesizes a comma
+  // separated string. Splitting on " " alone turned the manual one into a
+  // single NaN, which then got written back over the user's half-typed
+  // coordinates as "NaN,NaN,undefined,NaN" - the next keystroke failed the
+  // format check and the selection was gone.
+  // lat,lng,lat,lng throughout - what formatBounds emits, what the manual
+  // input accepts, and what LLBBox::from_str parses on the Rust side. Do not
+  // "fix" this to lng-first; the backend has a comment saying the same.
+  let [lat1, lng1, lat2, lng2] = bboxText.trim().split(/[,\s]+/).map(Number);
 
   // Normalize longitudes
-  lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
-  lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
-  mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+  lng1 = parseFloat(normalizeLongitude(lng1).toFixed(6));
+  lng2 = parseFloat(normalizeLongitude(lng2).toFixed(6));
+  mapSelectedBBox = `${lat1} ${lng1} ${lat2} ${lng2}`;
 
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
@@ -1627,7 +2371,7 @@ function displayBboxInfoText(bboxText) {
   const bboxCoordsInput = document.getElementById("bbox-coords");
 
   // Reset the info text if the bbox is 0,0,0,0
-  if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
+  if (lat1 === 0 && lng1 === 0 && lat2 === 0 && lng2 === 0) {
     setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
@@ -1635,19 +2379,36 @@ function displayBboxInfoText(bboxText) {
       selectedBBox = "";
     }
     window.arnisPreview3D?.onBboxCleared();
+    refreshPrecomputeButton();
     return;
   }
 
-  // Update the custom bbox input with the map selection (comma-separated format)
-  bboxCoordsInput.value = `${lng1},${lat1},${lng2},${lat2}`;
+  // Update the custom bbox input with the map selection (comma-separated
+  // format) - but never type over the user. This also runs as the echo of a
+  // bbox they are entering into this very field, and rewriting it mid-edit
+  // moves the caret so the next keystroke lands in the wrong place.
+  //
+  // The echo is caught by value, not by focus: focus can legitimately be
+  // elsewhere (the map takes it on interaction, and activeElement is
+  // unreliable while the window itself is unfocused) even though the field
+  // still holds what the user typed. The focus check then covers the other
+  // direction - a genuinely different, map-driven selection arriving while
+  // the caret is in the field.
+  const current = bboxCoordsInput.value.trim().split(/[,\s]+/).map(Number);
+  const echoesField = current.length === 4 && current[0] === lat1 &&
+    current[1] === lng1 && current[2] === lat2 && current[3] === lng2;
+  if (!echoesField && document.activeElement !== bboxCoordsInput) {
+    bboxCoordsInput.value = `${lat1},${lng1},${lat2},${lng2}`;
+  }
 
   // Calculate the size of the selected bbox
-  const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+  const selectedSize = calculateBBoxSize(lat1, lng1, lat2, lng2);
 
   displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
 
   // Hide any rendered mini 3D preview if the selection actually changed
   window.arnisPreview3D?.onBboxChanged(selectedBBox);
+  refreshPrecomputeButton();
 }
 
 let worldPath = "";
@@ -1667,6 +2428,235 @@ function setWorldNameLabel(text) {
 function basenameFromPath(p) {
   if (!p) return "";
   return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+}
+
+/* Custom world name (Java only, opt-in via Settings > Custom World Name) */
+
+// Holds the user's typed name across edits/generations. Only ever sent to
+// the backend while the setting is enabled; the backend sanitizes and
+// de-duplicates it, so this is just what the pencil editor shows/pre-fills.
+let customWorldName = "";
+
+// True from the moment the user commits an edit until the next world is
+// actually created. Lets the label preview the pending name even when
+// `worldPath` still points at a previously generated world (otherwise that
+// stale real name would keep showing instead of what was just typed).
+let worldNameEditedSinceLastCreate = false;
+
+function isCustomWorldNameFeatureEnabled() {
+  const toggle = document.getElementById('custom-world-name-toggle');
+  // Custom names are Java-only: creating a Bedrock/Luanti world never calls
+  // gui_create_world, so offering the feature there would silently do
+  // nothing.
+  return !!(toggle && toggle.checked) && selectedWorldFormat === 'java';
+}
+
+function canEditCustomWorldName() {
+  // While a generation or rename is in flight, the world directory may be
+  // actively written to on disk, so renaming/recreating it out from under
+  // that write would corrupt or orphan the in-progress world.
+  return isCustomWorldNameFeatureEnabled() && generationButtonEnabled;
+}
+
+// Shows the pending custom name (if any) unless a world already exists for
+// the current pending state, in which case its real (possibly
+// de-duplicated) name from the backend is authoritative.
+function updateWorldNamePreviewLabel() {
+  if (worldPath && !worldNameEditedSinceLastCreate) return;
+  if (!isCustomWorldNameFeatureEnabled()) {
+    // Feature off: fall back to showing whatever world actually exists
+    // rather than blanking a real name to "".
+    setWorldNameLabel(basenameFromPath(worldPath));
+    return;
+  }
+  // customWorldName can be "" right after committing a blank edit on an
+  // already-existing world; that must keep showing the real name, not the
+  // "no world generated yet" placeholder (setWorldNameLabel("") would).
+  setWorldNameLabel(customWorldName || basenameFromPath(worldPath));
+}
+
+// Cancels any in-progress edit and shows/hides the pencil to match the
+// current setting + world format. Safe to call anytime state that affects
+// availability changes (toggle flipped, format switched, language changed).
+function refreshWorldNameEditUI() {
+  endWorldNameEdit();
+  const editButton = document.getElementById('world-name-edit-button');
+  if (editButton) {
+    editButton.style.display = canEditCustomWorldName() ? '' : 'none';
+  }
+  updateWorldNamePreviewLabel();
+}
+
+// Marks the editor red once it is full. The input's own maxlength is what
+// actually refuses further characters; this only makes that visible. The
+// limit is read off that same attribute rather than duplicating the number
+// here, so the colour can never disagree with what the field accepts.
+function updateWorldNameLimitState() {
+  const input = document.getElementById('world-name-input');
+  if (!input) return;
+  const limit = input.maxLength;
+  if (limit > 0 && input.value.length >= limit) {
+    input.setAttribute('data-at-limit', 'true');
+  } else {
+    input.removeAttribute('data-at-limit');
+  }
+}
+
+function startWorldNameEdit(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (!canEditCustomWorldName()) return;
+
+  const label = document.getElementById('world-name-label');
+  const input = document.getElementById('world-name-input');
+  const editButton = document.getElementById('world-name-edit-button');
+  if (!label || !input) return;
+
+  // Prefer an in-progress edit; otherwise pre-fill with the currently shown
+  // real world name (if any) so re-opening the editor lets the user rename
+  // an already-created world instead of starting from blank. Falling back
+  // to the directory basename keeps the input useful even if the label was
+  // not yet refreshed from disk.
+  const visibleName = label.hasAttribute('data-placeholder') ? '' : label.textContent.trim();
+  input.value = customWorldName || visibleName || basenameFromPath(worldPath);
+  input.dataset.originalValue = input.value;
+  label.style.display = 'none';
+  if (editButton) editButton.style.display = 'none';
+  input.style.display = '';
+  updateWorldNameLimitState();
+  input.focus();
+  input.select();
+}
+
+// Commits the pencil editor. If no world has been created yet, this just
+// remembers the name for the next generation. If a world already exists,
+// this actually renames it on disk right away via gui_rename_world (moves
+// the directory + updates level.dat), rather than silently deferring to
+// "the next Start Generation click creates a new, separate world" - that
+// would leave the already-generated world's real name unchanged, which is
+// not what "rename" means to someone editing an existing world's name.
+async function commitWorldNameEdit() {
+  const input = document.getElementById('world-name-input');
+  if (!input) {
+    endWorldNameEdit();
+    return;
+  }
+  const newName = input.value.trim();
+
+  if (worldPath) {
+    const currentName = input.dataset.originalValue || basenameFromPath(worldPath);
+    endWorldNameEdit();
+    if (!newName || newName === currentName) return; // nothing to rename
+
+    // Block Start Generation (and re-opening the editor) for the brief
+    // window the rename is in flight, so nothing else can read/write
+    // worldPath while it's changing.
+    setGenerationButtonEnabled(false);
+    try {
+      const renamedPath = await invoke('gui_rename_world', { worldPath: worldPath, worldName: newName });
+      if (renamedPath) {
+        worldPath = renamedPath;
+        customWorldName = basenameFromPath(renamedPath);
+        setWorldNameLabel(customWorldName);
+      }
+    } catch (error) {
+      console.error("Failed to rename world:", error);
+      // Nothing changed on disk; make sure the label still reflects that,
+      // and say why. A rename fails for reasons the user can act on - the
+      // world is open in Minecraft holding a lock on the directory, or the
+      // name was left with nothing usable after sanitization - and silently
+      // snapping the old name back just reads as a dead pencil.
+      setWorldNameLabel(currentName);
+      const progressInfo = document.getElementById('progress-info');
+      if (progressInfo) {
+        localizeElement(window.localization, { element: progressInfo }, "failed_to_rename_world");
+        progressInfo.style.color = "#fa7878";
+      }
+    } finally {
+      setGenerationButtonEnabled(true);
+    }
+    return;
+  }
+
+  customWorldName = newName;
+  worldNameEditedSinceLastCreate = true;
+  endWorldNameEdit();
+}
+
+// Hiding the still-focused input fires a native blur (asynchronously, after
+// the handler that hid it has returned), which would otherwise re-enter the
+// blur handler below and re-run the edit we are already finishing: Escape
+// would re-commit what it just discarded, and Enter would fire a second
+// gui_rename_world against the path the first one is still renaming.
+// endWorldNameEdit() sets this whenever it hides a focused input.
+let suppressNextWorldNameBlur = false;
+
+// Shared teardown for both commit and cancel: hides the input, restores the
+// label (and the pencil, if the feature is still enabled), and refreshes
+// what the label shows.
+function endWorldNameEdit() {
+  const label = document.getElementById('world-name-label');
+  const input = document.getElementById('world-name-input');
+  const editButton = document.getElementById('world-name-edit-button');
+  if (!input || input.style.display === 'none') return;
+  // Only when the input still holds focus: a teardown reached *from* the blur
+  // handler must not arm this, or it would swallow the next real blur.
+  if (document.activeElement === input) suppressNextWorldNameBlur = true;
+  input.style.display = 'none';
+  if (label) label.style.display = '';
+  if (editButton && canEditCustomWorldName()) editButton.style.display = '';
+  updateWorldNamePreviewLabel();
+}
+
+function initCustomWorldNameToggle() {
+  const toggle = document.getElementById('custom-world-name-toggle');
+  const editButton = document.getElementById('world-name-edit-button');
+  const input = document.getElementById('world-name-input');
+  if (!toggle) return;
+
+  // Covers manual clicks and settings-store restoring/reverting the value
+  // (both dispatch a real "change" event), as long as this listener is
+  // attached before initSettingsStore() runs its restore().
+  toggle.addEventListener('change', refreshWorldNameEditUI);
+
+  if (editButton) {
+    editButton.addEventListener('click', startWorldNameEdit);
+    editButton.addEventListener('mousedown', (event) => event.stopPropagation());
+  }
+
+  if (input) {
+    // The input lives inside .world-name-row, a sibling of #start-button
+    // (not nested inside it) that has its own onclick="startGeneration()"
+    // for clicks on the label/background; without this, placing the caret
+    // would bubble up and trigger that too.
+    input.addEventListener('click', (event) => event.stopPropagation());
+    input.addEventListener('mousedown', (event) => event.stopPropagation());
+    // "input" rather than "keydown": it also covers pasting, cutting and
+    // undo, and fires after the value has actually changed.
+    input.addEventListener('input', updateWorldNameLimitState);
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commitWorldNameEdit();
+      } else if (event.key === 'Escape') {
+        // Discard: tear the editor down without committing.
+        event.preventDefault();
+        endWorldNameEdit();
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (suppressNextWorldNameBlur) {
+        suppressNextWorldNameBlur = false;
+        return;
+      }
+      commitWorldNameEdit();
+    });
+  }
+
+  refreshWorldNameEditUI();
 }
 
 /**
@@ -1692,6 +2682,16 @@ function handleWorldSelectionError(errorCode) {
 
 let generationButtonEnabled = true;
 
+// Central setter so every place that toggles generation state also
+// refreshes the world-name pencil (hidden/blocked while a generation, or a
+// rename, is in flight - see canEditCustomWorldName()).
+function setGenerationButtonEnabled(enabled) {
+  generationButtonEnabled = enabled;
+  refreshWorldNameEditUI();
+  // The two jobs exclude each other in the backend, so the other one greys out.
+  refreshPrecomputeButton();
+}
+
 /**
  * Initiates the world generation process
  * Validates required inputs and sends generation parameters to the backend
@@ -1701,10 +2701,21 @@ async function startGeneration() {
   if (generationButtonEnabled === false) {
     return;
   }
+  // The backend refuses this too, but only after gui_create_world has already
+  // made an empty world for a run that is not going to happen. Said here, the
+  // world is never created and the user is told where the machine has gone.
+  if (precomputeRunning) {
+    const info = document.getElementById('progress-info');
+    if (info) {
+      info.textContent = "Waiting for the Mapillary precompute. Cancel it in Settings, or let it finish.";
+      info.style.color = "#fecc44";
+    }
+    return;
+  }
   // Claim the guard before the first await. gui_create_world and gui_start_generation are
   // both awaited round-trips, so leaving the claim until after them lets a second click
   // through and starts a parallel run against the same process-global world floor.
-  generationButtonEnabled = false;
+  setGenerationButtonEnabled(false);
   let started = false;
 
   try {
@@ -1714,6 +2725,9 @@ async function startGeneration() {
       return;
     }
 
+    // Past every synchronous refusal, so from here the click is a real start.
+    resetProgressUi(STARTING_MESSAGE);
+
     // Auto-create world for Java format
     if (selectedWorldFormat === 'java') {
       if (!savePath) {
@@ -1721,10 +2735,16 @@ async function startGeneration() {
         return;
       }
       try {
-        const worldName = await invoke('gui_create_world', { savePath: savePath });
+        const requestedName = isCustomWorldNameFeatureEnabled() && customWorldName ? customWorldName : null;
+        const worldName = await invoke('gui_create_world', { savePath: savePath, worldName: requestedName });
         if (worldName) {
           worldPath = worldName;
-          setWorldNameLabel(basenameFromPath(worldName));
+          worldNameEditedSinceLastCreate = false;
+          const createdName = basenameFromPath(worldName);
+          setWorldNameLabel(createdName);
+          // Pre-fill the editor with the real (possibly de-duplicated) name,
+          // so editing again starts from what was actually created.
+          if (requestedName) customWorldName = createdName;
         }
       } catch (error) {
         handleWorldSelectionError(error);
@@ -1760,9 +2780,12 @@ async function startGeneration() {
     var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
     var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
-    var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
+    var heightLimitToggle = document.getElementById("disable-height-limit-toggle");
+    // Disabled means unsupported for this body or format, so never send a stale tick.
+    var disable_height_limit = !heightLimitToggle.disabled && heightLimitToggle.checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
+    var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -1791,6 +2814,7 @@ async function startGeneration() {
         bboxText: selectedBBox,
         selectedWorld: worldPath,
         bedrockSavePath: bedrockSavePath,
+        luantiSavePath: luantiSavePath,
         worldScale: scale,
         groundLevel: ground_level,
         terrainEnabled: terrain,
@@ -1805,6 +2829,7 @@ async function startGeneration() {
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
         bakeLightingEnabled: bake_lighting,
+        voxyLodEnabled: voxy_lod,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
@@ -1813,7 +2838,13 @@ async function startGeneration() {
         gamemode: gamemode,
         worldTime: worldTime,
         mapItem: mapItem,
-        signage: signage
+        signage: signage,
+        mapillaryToken: getMapillaryToken(),
+        facadesEnabled: getFacadesEnabled(),
+        facadeMode: getEffectiveFacadeMode(),
+        buildingFacadesEnabled: getBuildingFacadesEnabled(),
+        facadeDetail: getFacadeDetail(),
+        celestialBodyName: selectedCelestialBody
     });
 
     console.log("Generation process started.");
@@ -1827,9 +2858,15 @@ async function startGeneration() {
     // Hand the guard back unless a run actually started; once it has, the Done!/Error!
     // progress message releases it instead.
     if (!started) {
-      generationButtonEnabled = true;
+      // Some abort paths say why (handleWorldSelectionError writes here); the
+      // rest would leave our placeholder claiming a run that never began, so
+      // clear it only if nothing else has taken the line since.
+      const info = document.getElementById('progress-info');
+      if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
+      setGenerationButtonEnabled(true);
       window.arnisPreview3D?.setGenerationRunning(false);
     }
+    refreshPrecomputeButton();
   }
 }
 
