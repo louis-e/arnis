@@ -52,6 +52,7 @@ const SETTINGS = [
   { id: 'bake-lighting-toggle', kind: 'checkbox', store: OWN },
   { id: 'voxy-lod-toggle', kind: 'checkbox', store: OWN },
   { id: 'scale-value-slider', kind: 'number', store: OWN },
+  { id: 'ground-level', kind: 'number', store: OWN },
 
   // Not persisted: picking a bbox force-resets the angle to 0 anyway.
   { id: 'rotation-angle-input', kind: 'number', store: NONE },
