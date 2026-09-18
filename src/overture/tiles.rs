@@ -427,6 +427,11 @@ pub fn collect_from_tiles(
                             let Some(candidate) = feature_to_building(layer, feature, x, y) else {
                                 continue;
                             };
+                            // Before `best` and therefore before the cap, as on
+                            // the Parquet path.
+                            if super::is_skipped_footprint(&candidate.gers_id) {
+                                continue;
+                            }
                             if !ring_overlaps_bbox(&candidate.building.exterior_ring, bbox) {
                                 continue;
                             }

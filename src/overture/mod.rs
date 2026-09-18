@@ -109,6 +109,23 @@ const RELEASE_FALLBACK_SLOTS: usize = 2;
 /// Setting bit 63 guarantees no collision.
 const OVERTURE_ID_HIGH_BIT: u64 = 0x8000_0000_0000_0000;
 
+/// Overture footprints known to be false positives of the ML building
+/// extraction: temporary structures caught by one imagery pass that OSM
+/// never mapped, so the dedupe against OSM cannot catch them. Keyed on the
+/// GERS id, which Overture keeps stable across releases.
+const OVERTURE_SKIP_IDS: &[&str] = &[
+    // Königsplatz, Munich: a 17 x 25 m stage/tent footprint on the square in
+    // front of the Propyläen (Microsoft ML Buildings, imagery of 2019-07).
+    "f8c0757e-c059-49e4-9757-7e278751926f",
+];
+
+/// Whether a footprint is a known false positive. Both transports ask this,
+/// each before its own budget cap, so a skipped footprint never reaches the
+/// world and never costs a real building its slot.
+pub(super) fn is_skipped_footprint(id: &str) -> bool {
+    OVERTURE_SKIP_IDS.contains(&id)
+}
+
 /// Budget of Overture footprints, as a rate per km² of the requested area plus a
 /// floor and a ceiling. The cap exists so a large request cannot exhaust memory.
 ///
@@ -870,6 +887,9 @@ fn collect_from_parquet(
                             continue;
                         }
                     }
+                    if is_skipped_footprint(&building.id) {
+                        continue;
+                    }
                     all_buildings.push(building);
                 }
             }
@@ -942,6 +962,21 @@ fn fetch_overture_buildings_inner(
         .into_iter()
         .take(budget)
         .filter_map(|building| {
+            if debug {
+                // One line per footprint, so a stray one can be found and listed above.
+                let n = building.exterior_ring.len().max(1) as f64;
+                let (lng, lat) = building
+                    .exterior_ring
+                    .iter()
+                    .fold((0.0, 0.0), |(x, y), &(lng, lat)| (x + lng / n, y + lat / n));
+                println!(
+                    "Overture building {} {}/{} h={:?} at {lat:.6},{lng:.6}",
+                    building.id,
+                    building.subtype.as_deref().unwrap_or("-"),
+                    building.class.as_deref().unwrap_or("-"),
+                    building.height,
+                );
+            }
             let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
             let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
             if clipped.len() < 3 {
