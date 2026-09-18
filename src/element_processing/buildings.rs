@@ -3083,6 +3083,24 @@ fn generate_roof_only_structure(
                     RoofType::Pyramidal => {
                         generate_pyramidal_roof(editor, cached_floor_area, &config, nodes)
                     }
+                    // A canopy mapped round is a barrel vault like any other.
+                    RoofType::Round => {
+                        let ridge = ridge_frame(
+                            nodes,
+                            config.width(),
+                            config.length(),
+                            element.tags.get("roof:orientation").map(|s| s.as_str()),
+                            element.tags.get("roof:direction").map(|s| s.as_str()),
+                            None,
+                        );
+                        generate_gabled_roof(
+                            editor,
+                            cached_floor_area,
+                            &config,
+                            GableProfile::Round,
+                            &ridge,
+                        );
+                    }
                     _ => generate_dome_roof(editor, cached_floor_area, &config, nodes),
                 }
             }
@@ -11017,6 +11035,11 @@ fn generate_skillion_roof(
     );
 }
 
+/// How far a ray may run outside the footprint and still count as having
+/// grazed it rather than crossed open ground. Rasterised curves and clipped
+/// vertices stay far under one cell; a real notch is several.
+const MAX_GRAZE_GAP: f64 = 1.0;
+
 /// Even-odd point-in-polygon test on the polygon's own coordinates.
 fn polygon_contains(pts: &[(f64, f64)], x: f64, z: f64) -> bool {
     let mut inside = false;
@@ -11042,8 +11065,13 @@ fn polygon_contains(pts: &[(f64, f64)], x: f64, z: f64) -> bool {
 /// eave on every wall. The bounding box the fallbacks use only manages that
 /// for axis-aligned rectangles.
 ///
-/// None when the centroid falls outside the polygon (crescents, L-shapes),
-/// where no single ray fan covers every cell.
+/// None unless the footprint is star-shaped about that centroid, i.e. every
+/// cell is reached by a ray that stays inside it. A courtyard block whose
+/// centroid sits in its thick base still hides the inner faces of its wings
+/// behind open ground, and a ray that crosses that ground measures the cell
+/// against the far side of the wing, so the roof there rides too high and
+/// never comes down to the wing's own wall. Those footprints keep the
+/// bounding-box profile instead.
 fn footprint_radial_fractions(
     nodes: &[ProcessedNode],
     cells: &[(i32, i32)],
@@ -11108,6 +11136,8 @@ fn footprint_radial_fractions(
     }
 
     let mut out: HashMap<(i32, i32), f64> = HashMap::with_capacity(cells.len());
+    // Scratch for the crossings short of the current cell, reused per cell.
+    let mut before: Vec<f64> = Vec::new();
     for &(x, z) in cells {
         let (px, pz) = (x as f64 - cx, z as f64 - cz);
         let dist = (px * px + pz * pz).sqrt();
@@ -11121,6 +11151,7 @@ fn footprint_radial_fractions(
         // it lean on the half-cell slack and land on 1.
         let mut t_hit: Option<f64> = None;
         let mut t_far = 0.0f64;
+        before.clear();
         for &i in &buckets[bucket_of(pz.atan2(px)).min(BUCKETS - 1)] {
             let (ax, az) = pts[i];
             let (bx, bz) = pts[(i + 1) % n];
@@ -11138,7 +11169,21 @@ fn footprint_radial_fractions(
             t_far = t_far.max(t);
             if t + 0.5 >= dist {
                 t_hit = Some(t_hit.map_or(t, |h: f64| h.min(t)));
+            } else {
+                before.push(t);
             }
+        }
+        // Crossings short of the cell come in pairs: the ray leaves the
+        // footprint and comes back. A pair that close together is the ray
+        // clipping a vertex or a rasterised bump, which costs nothing; a pair
+        // a whole cell apart is real open ground, and this footprint is not
+        // one the centroid can measure.
+        before.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        if before
+            .chunks_exact(2)
+            .any(|pair| pair[1] - pair[0] > MAX_GRAZE_GAP)
+        {
+            return None;
         }
         let t = t_hit.unwrap_or(t_far);
         let r = if t > 0.0 { (dist / t).min(1.0) } else { 1.0 };
@@ -13229,6 +13274,42 @@ mod facade_integration_tests {
         generate_buildings(editor, way, args, None, None, &ctx, way.id);
     }
 
+    // A roof-only canopy mapped `roof:shape=round` is a barrel vault: level
+    // along the ridge, curved across it. A dome falls away in both directions.
+    #[test]
+    fn a_round_canopy_vaults_instead_of_doming() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = CoordinateBitmap::new(&xz);
+        let footprints = CoordinateBitmap::new(&xz);
+        let way = rect_way(
+            77,
+            10,
+            20,
+            39,
+            31,
+            &[("building", "roof"), ("roof:shape", "round")],
+        );
+        let mut editor = test_editor(&xz);
+        run_building(&mut editor, &way, &road, &footprints);
+
+        let top = |e: &WorldEditor, x: i32, z: i32| e.highest_block_between(x, z, 0, 200);
+        let crown_mid = top(&editor, 25, 25).expect("a vault over the middle");
+        // Level along the ridge (the 30-cell axis).
+        for x in [15, 20, 30, 35] {
+            assert_eq!(
+                top(&editor, x, 25),
+                Some(crown_mid),
+                "the ridge is level at x={x}"
+            );
+        }
+        // Curved across it: the flank sits below the crown.
+        let flank = top(&editor, 25, 21).expect("a vault over the flank");
+        assert!(
+            flank < crown_mid,
+            "flank {flank} should sit below crown {crown_mid}"
+        );
+    }
+
     #[test]
     fn synthetic_door_lands_on_the_street_wall() {
         let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
@@ -14353,6 +14434,74 @@ mod roof_geometry_tests {
             worst <= 4,
             "eave cells rise {worst} blocks above the wall top"
         );
+    }
+
+    #[test]
+    fn radial_fractions_bail_out_on_a_footprint_the_centroid_cannot_see() {
+        // A courtyard block: a thick base with two wings. The area centroid
+        // lands in the base, inside the footprint, but the inner face of each
+        // wing sits behind the open courtyard, so no single ray fan measures
+        // the wings against their own walls.
+        let nodes = ring(&[
+            (0, 0),
+            (30, 0),
+            (30, 30),
+            (18, 30),
+            (18, 20),
+            (12, 20),
+            (12, 30),
+            (0, 30),
+        ]);
+        let cells = fill(&nodes);
+        let pts: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
+        assert!(polygon_contains(&pts, 15.0, 14.0), "the centroid is inside");
+        assert!(footprint_radial_fractions(&nodes, &cells).is_none());
+    }
+
+    // A plus is concave but every cell is still visible from its centre, so it
+    // keeps the radial profile rather than falling back to the bounding box.
+    #[test]
+    fn radial_fractions_keep_a_concave_but_visible_footprint() {
+        let nodes = ring(&[
+            (10, 0),
+            (20, 0),
+            (20, 10),
+            (30, 10),
+            (30, 20),
+            (20, 20),
+            (20, 30),
+            (10, 30),
+            (10, 20),
+            (0, 20),
+            (0, 10),
+            (10, 10),
+        ]);
+        let cells = fill(&nodes);
+        let radial =
+            footprint_radial_fractions(&nodes, &cells).expect("a plus is star-shaped from centre");
+        assert!(radial[&(15, 15)] < 0.2, "the middle reads as the apex");
+        assert!(radial[&(15, 29)] > 0.9, "an arm tip reads as the eave");
+    }
+
+    #[test]
+    fn radial_fractions_survive_a_convex_footprint() {
+        // A rotated octagon: concave nowhere, so every cell stays visible.
+        let nodes = ring(&[
+            (10, 0),
+            (20, 4),
+            (24, 14),
+            (20, 24),
+            (10, 28),
+            (0, 24),
+            (-4, 14),
+            (0, 4),
+        ]);
+        let cells = fill(&nodes);
+        let radial = footprint_radial_fractions(&nodes, &cells).expect("convex ring keeps its fan");
+        assert_eq!(radial.len(), cells.len());
+        // The rim reads as the eave, the middle as the apex.
+        assert!(radial[&(10, 0)] > 0.9);
+        assert!(radial[&(10, 14)] < 0.2);
     }
 
     #[test]

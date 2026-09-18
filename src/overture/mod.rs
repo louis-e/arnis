@@ -119,6 +119,13 @@ const OVERTURE_SKIP_IDS: &[&str] = &[
     "f8c0757e-c059-49e4-9757-7e278751926f",
 ];
 
+/// Whether a footprint is a known false positive. Both transports ask this,
+/// each before its own budget cap, so a skipped footprint never reaches the
+/// world and never costs a real building its slot.
+pub(super) fn is_skipped_footprint(id: &str) -> bool {
+    OVERTURE_SKIP_IDS.contains(&id)
+}
+
 /// Budget of Overture footprints, as a rate per km² of the requested area plus a
 /// floor and a ceiling. The cap exists so a large request cannot exhaust memory.
 ///
@@ -880,9 +887,7 @@ fn collect_from_parquet(
                             continue;
                         }
                     }
-                    // Dropped before the cap counts it, so it never costs a real
-                    // footprint its slot.
-                    if OVERTURE_SKIP_IDS.contains(&building.id.as_str()) {
+                    if is_skipped_footprint(&building.id) {
                         continue;
                     }
                     all_buildings.push(building);
