@@ -11180,7 +11180,9 @@ fn footprint_radial_fractions(
         // one the centroid can measure.
         before.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         if before
-            .as_chunks::<2>().0.iter()
+            .as_chunks::<2>()
+            .0
+            .iter()
             .any(|pair| pair[1] - pair[0] > MAX_GRAZE_GAP)
         {
             return None;
