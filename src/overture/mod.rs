@@ -880,6 +880,11 @@ fn collect_from_parquet(
                             continue;
                         }
                     }
+                    // Dropped before the cap counts it, so it never costs a real
+                    // footprint its slot.
+                    if OVERTURE_SKIP_IDS.contains(&building.id.as_str()) {
+                        continue;
+                    }
                     all_buildings.push(building);
                 }
             }
@@ -951,7 +956,6 @@ fn fetch_overture_buildings_inner(
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
         .take(budget)
-        .filter(|building| !OVERTURE_SKIP_IDS.contains(&building.id.as_str()))
         .filter_map(|building| {
             if debug {
                 // One line per footprint, so a stray one can be found and listed above.

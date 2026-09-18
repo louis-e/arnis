@@ -73,7 +73,9 @@ pub(crate) enum RoofType {
     Gambrel,
     /// Gable whose ends are hipped only above half height.
     HalfHipped,
-    Gabled,    // Two sloping sides meeting at a ridge
+    Gabled, // Two sloping sides meeting at a ridge
+    /// Barrel vault: a rounded section across the ridge.
+    Round,
     Hipped, // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
     Skillion, // Single sloping surface
     Pyramidal, // All sides come to a point at the top
@@ -1587,6 +1589,13 @@ impl BuildingConfig {
             % self.floor_cycle
     }
 
+    /// Rows an entrance column keeps clear of dressing: the door itself and
+    /// its canopy row. Bands, headers and sills above carry on across it.
+    #[inline]
+    fn entrance_row(&self, h: i32) -> bool {
+        h <= self.start_y_offset + 3
+    }
+
     /// Highest wall row that still belongs to the ground floor (the ground floor
     /// is one row taller than upper floors thanks to the +2 grammar offset).
     #[inline]
@@ -1981,6 +1990,47 @@ fn determine_wall_block(
 
     // Otherwise, select from category-specific palette
     get_wall_block_for_category(category, era, climate, rng)
+}
+
+/// Whether the wall depth style stands a pier on column 3 of every bay, the
+/// same roll `generate_wall_depth_features` makes; shutters and flank posts
+/// would sit on that column otherwise.
+fn wall_depth_piers_active(element: &ProcessedWay, config: &BuildingConfig) -> bool {
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    if bounds.width() < 4 || bounds.length() < 4 {
+        return false;
+    }
+    if config.building_height < config.floor_cycle + 2
+        && config.wall_depth_style != WallDepthStyle::HistoricOrnate
+    {
+        return false;
+    }
+    let depth_roll: u32 = element_rng(config.style_seed.wrapping_add(7919)).random_range(0..100);
+    match config.wall_depth_style {
+        WallDepthStyle::SubtlePilasters => depth_roll < 60,
+        WallDepthStyle::ModernPillars
+        | WallDepthStyle::InstitutionalBands
+        | WallDepthStyle::HistoricOrnate
+        | WallDepthStyle::SkyscraperFins => true,
+        _ => false,
+    }
+}
+
+/// Blocks a protruding feature must run down from the wall base to reach the
+/// ground under both the wall column and its own cell.
+fn feature_descent(
+    editor: &WorldEditor,
+    config: &BuildingConfig,
+    wall_x: i32,
+    wall_z: i32,
+    out_x: i32,
+    out_z: i32,
+) -> i32 {
+    let ground = [(wall_x, wall_z), (out_x, out_z)]
+        .iter()
+        .filter_map(|&(x, z)| editor.terrain_level(x, z))
+        .min();
+    ground.map_or(0, |g| (config.start_y_offset - g).max(0))
 }
 
 /// Wall blocks that fit a building era; None for Unknown.
@@ -2665,6 +2715,10 @@ fn calculate_building_height(
             } else {
                 height
             };
+            // Parts can be thin slabs (a plinth, a cornice), elevated or not:
+            // they skip the 3-block interior minimum, under a roof as well
+            let is_part = element.tags.contains_key("building:part");
+            let wall_floor: f64 = if is_part { 1.0 } else { 3.0 };
             let effective = match (
                 element.tags.get("roof:height"),
                 element.tags.get("roof:shape"),
@@ -2676,14 +2730,11 @@ fn calculate_building_height(
                         .trim()
                         .parse::<f64>()
                         .unwrap_or(0.0);
-                    (effective - rh.max(0.0)).max(3.0f64.min(effective))
+                    (effective - rh.max(0.0)).max(wall_floor.min(effective))
                 }
                 _ => effective,
             };
             building_height = (effective * scale_factor) as i32;
-            // Parts can be thin slabs (a plinth, a cornice), elevated or not:
-            // skip the 3-block interior minimum for them
-            let is_part = element.tags.contains_key("building:part");
             building_height = building_height.max(if is_elevated_part || is_part { 1 } else { 3 });
             if height > 28.0 {
                 is_tall_building = true;
@@ -2981,7 +3032,8 @@ fn generate_roof_only_structure(
         | RoofType::Hipped
         | RoofType::Pyramidal
         | RoofType::Cone
-        | RoofType::Onion => {
+        | RoofType::Onion
+        | RoofType::Round => {
             if !cached_floor_area.is_empty() {
                 let (min_x, max_x, min_z, max_z) = cached_floor_area.iter().fold(
                     (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
@@ -3101,8 +3153,6 @@ fn generate_roof_only_structure(
 // Building Component Generators
 // ============================================================================
 
-/// Builds a wall ring (outer shell or inner courtyard) for a set of nodes.
-#[allow(clippy::too_many_arguments)]
 /// Footprints this small are pillars: no windows, no doors.
 const THIN_RING_MAX_CELLS: usize = 4;
 
@@ -3395,12 +3445,25 @@ fn plan_mapped_entrances(
             None
         };
         let seg = match (before, after) {
-            (Some(a), Some(b)) => Some(if a.len >= b.len { a } else { b }),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
+            (Some(a), Some(b)) => Some(if a.len >= b.len {
+                (a, true)
+            } else {
+                (b, false)
+            }),
+            (Some(a), None) => Some((a, true)),
+            (None, Some(b)) => Some((b, false)),
             (None, None) => None,
         };
-        let Some(seg) = seg else { continue };
+        let Some((seg, ends_here)) = seg else {
+            continue;
+        };
+        // The second leaf steps along the wall, so on a segment that ends at
+        // this node it steps back into it, not past the corner.
+        let tangent = if ends_here {
+            (-seg.tangent.0, -seg.tangent.1)
+        } else {
+            seg.tangent
+        };
         let double = entrance.map(String::as_str) == Some("main")
             && matches!(
                 config.category,
@@ -3412,7 +3475,7 @@ fn plan_mapped_entrances(
             x: node.x,
             z: node.z,
             normal: seg.normal,
-            tangent: seg.tangent,
+            tangent,
             double,
             style,
             canopy: false,
@@ -3578,18 +3641,30 @@ fn render_entrance(
             );
         }
     }
+    // Lantern: hung from a small bracket over the door, never standing on air.
     if plan.lantern {
-        editor.set_block_absolute(
-            LANTERN,
-            plan.x + nx,
+        let (lx, lz) = (plan.x + nx, plan.z + nz);
+        editor.set_block_with_properties_absolute(
+            make_closed_trapdoor(plan.style.trapdoor_block(), facing, "top"),
+            lx,
+            config.start_y_offset + 4 + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+        editor.set_block_with_properties_absolute(
+            make_prop_block(LANTERN, &[("hanging", "true")]),
+            lx,
             config.start_y_offset + 3 + config.abs_terrain_offset,
-            plan.z + nz,
+            lz,
             Some(&[AIR]),
             None,
         );
     }
 }
 
+/// Builds a wall ring (outer shell or inner courtyard) for a set of nodes.
+#[allow(clippy::too_many_arguments)]
 fn build_wall_ring(
     editor: &mut WorldEditor,
     nodes: &[ProcessedNode],
@@ -4711,18 +4786,6 @@ fn make_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
     cached_prop_block(base, props)
 }
 
-/// Computes the centroid (average position) of the building outline nodes.
-/// Returns `None` if the node list is empty.
-pub(crate) fn compute_building_centroid(nodes: &[ProcessedNode]) -> Option<(i32, i32)> {
-    if nodes.is_empty() {
-        return None;
-    }
-    let n = nodes.len() as i64;
-    let sx: i64 = nodes.iter().map(|nd| nd.x as i64).sum();
-    let sz: i64 = nodes.iter().map(|nd| nd.z as i64).sum();
-    Some(((sx / n) as i32, (sz / n) as i32))
-}
-
 /// Computes how axis-aligned a building polygon is.
 /// Returns ratio of polygon area to bounding box area.
 /// - 1.0 = perfectly axis-aligned rectangle
@@ -4780,15 +4843,46 @@ fn dominant_axis_angle(nodes: &[ProcessedNode]) -> f64 {
     sum_s.atan2(sum_c) / 4.0
 }
 
-/// Near-rectangular footprints rotated 1 to 12 deg get an axis-aligned tent.
-fn gable_axis_snap(nodes: &[ProcessedNode]) -> bool {
+/// The rotated frame of a near-rectangular footprint turned off the grid:
+/// `u` runs along its dominant axis (within 45 degrees of world X), `v`
+/// across it. A two-slope roof laid in this frame has planar faces that
+/// meet the walls, where a scan along the world axes warps them.
+#[derive(Clone, Copy, Debug)]
+struct TentFrame {
+    /// Rotation of the dominant axis off world X, radians, in (-45, 45] deg.
+    angle: f64,
+    u_min: f64,
+    u_max: f64,
+    v_min: f64,
+    v_max: f64,
+}
+
+impl TentFrame {
+    fn uv(&self, x: i32, z: i32) -> (f64, f64) {
+        let (c, sn) = (self.angle.cos(), self.angle.sin());
+        let (x, z) = (x as f64, z as f64);
+        (x * c + z * sn, -x * sn + z * c)
+    }
+
+    fn u_axis(&self) -> (f64, f64) {
+        (self.angle.cos(), self.angle.sin())
+    }
+
+    fn v_axis(&self) -> (f64, f64) {
+        (-self.angle.sin(), self.angle.cos())
+    }
+}
+
+/// Near-rectangular footprints rotated 1 to 45 degrees get a planar tent in
+/// their own frame; aligned ones, and wings, keep the polygon scan.
+fn tent_frame(nodes: &[ProcessedNode]) -> Option<TentFrame> {
     if nodes.len() < 3 {
-        return false;
+        return None;
     }
     let ang = dominant_axis_angle(nodes);
     let dev = ang.to_degrees().abs();
-    if !(1.0..=12.0).contains(&dev) {
-        return false;
+    if !(1.0..=45.0).contains(&dev) {
+        return None;
     }
     let mut area = 0i64;
     for i in 0..nodes.len() {
@@ -4809,7 +4903,89 @@ fn gable_axis_snap(nodes: &[ProcessedNode]) -> bool {
         v_max = v_max.max(v);
     }
     let rect_area = (u_max - u_min) * (v_max - v_min);
-    rect_area > 0.0 && polygon_area / rect_area >= 0.78
+    (rect_area > 0.0 && polygon_area / rect_area >= 0.78).then_some(TentFrame {
+        angle: ang,
+        u_min,
+        u_max,
+        v_min,
+        v_max,
+    })
+}
+
+/// Which way the ridge of a two-slope roof runs, and the frame it runs in.
+#[derive(Clone, Copy, Debug)]
+struct RidgeFrame {
+    /// Ridge runs along world X (else Z); in a tent, along the axis nearest X.
+    along_x: bool,
+    /// Rotated frame of a turned footprint; None keeps the world grid.
+    tent: Option<TentFrame>,
+}
+
+impl RidgeFrame {
+    #[cfg(test)]
+    fn grid(along_x: bool) -> Self {
+        Self {
+            along_x,
+            tent: None,
+        }
+    }
+
+    /// Unit vector across the ridge, toward the "plus" eave.
+    fn across(&self) -> (f64, f64) {
+        match self.tent {
+            Some(t) if self.along_x => t.v_axis(),
+            Some(t) => t.u_axis(),
+            None if self.along_x => (0.0, 1.0),
+            None => (1.0, 0.0),
+        }
+    }
+
+    /// Cells the slope crosses from eave to eave, for a bounding box of
+    /// `width` by `length` (extents, one less than the cell counts).
+    fn span_cells(&self, width: i32, length: i32) -> f64 {
+        match self.tent {
+            Some(t) if self.along_x => t.v_max - t.v_min + 1.0,
+            Some(t) => t.u_max - t.u_min + 1.0,
+            None if self.along_x => length as f64 + 1.0,
+            None => width as f64 + 1.0,
+        }
+    }
+}
+
+/// Ridge of a two-slope roof: across a mapped `roof:direction` (the way the
+/// slope faces), else per `roof:orientation`, else along the longer side.
+fn ridge_frame(
+    nodes: &[ProcessedNode],
+    width: i32,
+    length: i32,
+    roof_orientation: Option<&str>,
+    roof_direction: Option<&str>,
+    preferred_ridge_along_x: Option<bool>,
+) -> RidgeFrame {
+    let tent = tent_frame(nodes);
+    let (u_len, v_len) = match tent {
+        Some(t) => (t.u_max - t.u_min, t.v_max - t.v_min),
+        None => (width as f64, length as f64),
+    };
+    let u_is_longer = u_len >= v_len;
+    let (ux, uz) = tent.map_or((1.0, 0.0), |t| t.u_axis());
+    let (vx, vz) = tent.map_or((0.0, 1.0), |t| t.v_axis());
+    let along_x = if let Some(deg) = roof_direction.and_then(parse_roof_direction_degrees) {
+        let (dx, dz) = bearing_unit_vector(deg);
+        (dx * vx + dz * vz).abs() >= (dx * ux + dz * uz).abs()
+    } else {
+        match roof_orientation {
+            Some(o) if o.eq_ignore_ascii_case("along") => u_is_longer,
+            Some(o) if o.eq_ignore_ascii_case("across") => !u_is_longer,
+            _ => preferred_ridge_along_x.unwrap_or(u_is_longer),
+        }
+    };
+    RidgeFrame { along_x, tent }
+}
+
+/// The cardinal a world-space vector points closest to.
+fn cardinal_for_vector(dx: f64, dz: f64) -> StairFacing {
+    cardinal_for_bearing(dx.atan2(-dz).to_degrees())
 }
 
 /// Whether a wall segment steps along X, matching bresenham_line's driving axis.
@@ -4867,26 +5043,13 @@ pub(crate) fn compute_outward_normal(
     z1: i32,
     x2: i32,
     z2: i32,
-    cx: i32,
-    cz: i32,
+    outward: i32,
 ) -> (i32, i32) {
     let seg_dx = x2 - x1;
     let seg_dz = z2 - z1;
 
-    // Candidate outward normal (perpendicular to segment direction)
-    let (na_x, na_z) = (-seg_dz, seg_dx);
-
-    // Mid-point of the segment
-    let mid_x = (x1 + x2) / 2;
-    let mid_z = (z1 + z2) / 2;
-
-    // Pick the normal that points AWAY from the centroid.
-    let dot = (mid_x - cx) as i64 * na_x as i64 + (mid_z - cz) as i64 * na_z as i64;
-    let (raw_nx, raw_nz) = if dot >= 0 {
-        (na_x, na_z)
-    } else {
-        (-na_x, -na_z)
-    };
+    // Left-hand normal of the segment, turned outward by the ring's winding.
+    let (raw_nx, raw_nz) = (-seg_dz * outward, seg_dx * outward);
 
     // Snap to the dominant axis so the normal is always one of
     // (±1, 0) or (0, ±1).
@@ -4895,6 +5058,47 @@ pub(crate) fn compute_outward_normal(
     } else {
         (0, raw_nz.signum())
     }
+}
+
+/// Which side of its edges a ring's outside lies on: the factor that turns
+/// the left-hand normal (-dz, dx) of every edge outward. Taken from the
+/// signed area, which every edge of the ring shares, so the re-entrant walls
+/// of an L or U get the same answer as the rest; a test against the centroid
+/// flips them, and every balcony, door and pilaster on them ends up indoors.
+pub(crate) fn outward_side(nodes: &[ProcessedNode]) -> i32 {
+    let mut area2 = 0i64;
+    for i in 0..nodes.len() {
+        let j = (i + 1) % nodes.len();
+        area2 += nodes[i].x as i64 * nodes[j].z as i64 - nodes[j].x as i64 * nodes[i].z as i64;
+    }
+    if area2 > 0 {
+        -1
+    } else {
+        1
+    }
+}
+
+/// Whether vertex `c` between `p` and `q` is a convex corner of a ring whose
+/// outside is on `outward` (see `outward_side`). Collinear and re-entrant
+/// vertices are not corners.
+fn corner_is_convex(p: (i32, i32), c: (i32, i32), q: (i32, i32), outward: i32) -> bool {
+    let cross = (c.0 - p.0) as i64 * (q.1 - c.1) as i64 - (c.1 - p.1) as i64 * (q.0 - c.0) as i64;
+    cross != 0 && cross.signum() as i32 == -outward
+}
+
+/// Distinct vertices of a closed ring in order, the closing node dropped.
+fn ring_vertices(nodes: &[ProcessedNode]) -> Vec<(i32, i32)> {
+    let mut corners: Vec<(i32, i32)> = Vec::new();
+    for node in nodes {
+        let pos = (node.x, node.z);
+        if corners.last() != Some(&pos) {
+            corners.push(pos);
+        }
+    }
+    if corners.len() > 1 && corners.first() == corners.last() {
+        corners.pop();
+    }
+    corners
 }
 
 /// Returns the facing string for the wall's outward normal.
@@ -4938,10 +5142,10 @@ fn generate_residential_window_decorations(
 
     // We need the building centroid so we can figure out which side of
     // each wall segment is "outside".
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
+
+    // Piers on column 3 leave no room for shutters.
+    let piers_here = wall_depth_piers_active(element, config);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut seg_idx = 0usize;
@@ -4956,7 +5160,7 @@ fn generate_residential_window_decorations(
                 .and_then(|s| s.as_ref())
                 .is_some_and(|s| s.class == FacadeClass::Rear);
             seg_idx += 1;
-            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, outward);
 
             // Skip degenerate normals (zero-length segment)
             if out_nx == 0 && out_nz == 0 {
@@ -4979,6 +5183,18 @@ fn generate_residential_window_decorations(
             // Walk the bresenham points of this wall segment
             let points =
                 bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+            let seg_columns: HashSet<(i32, i32)> = points.iter().map(|&(x, _, z)| (x, z)).collect();
+            // A balcony spans five columns of this wall: all of them must be
+            // on it, so it never wraps a corner, stands before a party wall or
+            // hangs over a passage.
+            let balcony_fits = |bx: i32, bz: i32| -> bool {
+                (-2i32..=2).all(|t| {
+                    let c = (bx + tan_x * t, bz + tan_z * t);
+                    seg_columns.contains(&c)
+                        && !facade.is_party(c.0, c.1)
+                        && !building_passages.contains(c.0, c.1)
+                })
+            };
 
             for (pt_idx, (bx, _, bz)) in points.iter().enumerate() {
                 let bx = *bx;
@@ -4987,11 +5203,11 @@ fn generate_residential_window_decorations(
                 // Skip decorations at passage openings
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
-                    || facade.is_door(bx, bz)
                     || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
+                let door_column = facade.is_door(bx, bz);
 
                 let wu = wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz);
                 let mod6 = config.window_col(wu); // always 0..5
@@ -5005,6 +5221,7 @@ fn generate_residential_window_decorations(
                 // window there; a wide band glazes col 3 itself).
                 if (mod6 == 3 || mod6 == 5)
                     && config.window_frame.is_none()
+                    && !piers_here
                     && matches!(
                         config.window_archetype,
                         WindowArchetype::Standard3
@@ -5025,7 +5242,10 @@ fn generate_residential_window_decorations(
                             ..=(config.start_y_offset + config.building_height)
                         {
                             let above_floor = h > config.start_y_offset + 1;
-                            if above_floor && config.floor_row(h) != 0 {
+                            if above_floor
+                                && config.floor_row(h) != 0
+                                && !(door_column && config.entrance_row(h))
+                            {
                                 editor.set_block_with_properties_absolute(
                                     trapdoor_bwp.clone(),
                                     bx + out_nx,
@@ -5081,6 +5301,7 @@ fn generate_residential_window_decorations(
                                 || h >= config.start_y_offset + 2 + config.floor_cycle;
                             let wants_balcony = mod6 == 1
                                 && above_ground
+                                && balcony_fits(bx, bz)
                                 && match config.balcony_band {
                                     BalconyBand::Scattered => {
                                         (15..balcony_roll_max).contains(&decoration_roll)
@@ -5353,15 +5574,21 @@ fn generate_corner_quoins(
         return;
     }
 
-    // Collect unique corner positions from polygon vertices
-    // (skip duplicate closing node if first == last)
-    let mut corners: Vec<(i32, i32)> = Vec::new();
-    for node in &element.nodes {
-        let pos = (node.x, node.z);
-        if corners.last() != Some(&pos) {
-            corners.push(pos);
-        }
-    }
+    // Corners are where the wall turns: a mid-wall node shared with a
+    // neighbour or carrying an entrance gets no column.
+    let vertices = ring_vertices(&element.nodes);
+    let n = vertices.len();
+    let corners: Vec<(i32, i32)> = (0..n)
+        .filter(|&i| {
+            let p = vertices[(i + n - 1) % n];
+            let c = vertices[i];
+            let q = vertices[(i + 1) % n];
+            let cross =
+                (c.0 - p.0) as i64 * (q.1 - c.1) as i64 - (c.1 - p.1) as i64 * (q.0 - c.0) as i64;
+            n < 3 || cross != 0
+        })
+        .map(|i| vertices[i])
+        .collect();
 
     let quoin_block = config.accent_block;
     let top_h = config.start_y_offset + config.building_height;
@@ -5438,10 +5665,7 @@ fn generate_wall_depth_features(
         return;
     }
 
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
 
     // Per-building deterministic roll for probability-gated styles. Seeded on
     // the shared style seed (== element id for standalone buildings) so
@@ -5473,7 +5697,7 @@ fn generate_wall_depth_features(
     for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
-            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, outward);
 
             if out_nx == 0 && out_nz == 0 {
                 previous_node = Some((x2, z2));
@@ -5516,11 +5740,11 @@ fn generate_wall_depth_features(
                 }
 
                 // The wall carries a foundation down to the local terrain, so on
-                // sloping ground the vertical details have to follow it down.
+                // sloping ground the vertical details have to follow it down: to
+                // the ground under the protrusion itself, which one cell out
+                // from the wall can be a block lower still.
                 let descent = if config.is_ground_level {
-                    editor
-                        .terrain_level(bx, bz)
-                        .map_or(0, |g| (config.start_y_offset - g).max(0))
+                    feature_descent(editor, config, bx, bz, bx + out_nx, bz + out_nz)
                 } else {
                     0
                 };
@@ -5666,14 +5890,13 @@ fn generate_window_frames(
     if config.use_horizontal_windows || config.category == BuildingCategory::Tower {
         return;
     }
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
 
     let top_h = config.start_y_offset + config.building_height;
     let post_block = style.post_block();
     let shutter_block = style.shutter_block();
+    // A pier on column 3 leaves no room for flank posts.
+    let piers_here = wall_depth_piers_active(element, config);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut seg_idx = 0usize;
@@ -5687,7 +5910,7 @@ fn generate_window_frames(
                 .and_then(|s| s.as_ref())
                 .is_some_and(|s| s.class == FacadeClass::Rear);
             seg_idx += 1;
-            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, outward);
             if out_nx == 0 && out_nz == 0 {
                 previous_node = Some((x2, z2));
                 continue;
@@ -5706,11 +5929,11 @@ fn generate_window_frames(
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
-                    || facade.is_door(bx, bz)
                     || config.is_flat_column(bx, bz)
                 {
                     continue;
                 }
+                let door_column = facade.is_door(bx, bz);
                 let wu = wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz);
                 let col = config.window_col(wu);
                 let lx = bx + out_nx;
@@ -5858,10 +6081,10 @@ fn generate_window_frames(
                             }
                         }
                     }
-                } else if col == 3 || col == 5 {
+                } else if (col == 3 || col == 5) && !piers_here {
                     // Flank treatment on window rows: posts or shutters.
                     for h in (config.start_y_offset + 2)..=(top_h - 1) {
-                        if config.floor_row(h) == 0 {
+                        if config.floor_row(h) == 0 || (door_column && config.entrance_row(h)) {
                             continue;
                         }
                         let abs_y = h + config.abs_terrain_offset;
@@ -5914,10 +6137,7 @@ fn generate_facade_cornices(
     if bounds.width() < 4 || bounds.length() < 4 {
         return;
     }
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
 
     // 55% string courses, 40% window header trim, 5% plain.
     let roll: u32 = element_rng(config.element_id ^ 0xC0A2_11CE_0000_77AB).random_range(0..100);
@@ -5928,12 +6148,14 @@ fn generate_facade_cornices(
     }
 
     let top_h = config.start_y_offset + config.building_height;
+    let mut band_whitelist: Vec<Block> = vec![AIR];
+    band_whitelist.extend_from_slice(&SILL_SLAB_OPTIONS);
 
     let mut previous_node: Option<(i32, i32)> = None;
     for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
-            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, outward);
             if out_nx == 0 && out_nz == 0 {
                 previous_node = Some((x2, z2));
                 continue;
@@ -5949,7 +6171,6 @@ fn generate_facade_cornices(
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
-                    || facade.is_door(bx, bz)
                     || config.is_flat_column(bx, bz)
                 {
                     continue;
@@ -5960,19 +6181,25 @@ fn generate_facade_cornices(
                 {
                     continue;
                 }
+                let door_column = facade.is_door(bx, bz);
                 let lx = bx + out_nx;
                 let lz = bz + out_nz;
                 for h in config.ground_floor_top()..=top_h {
+                    if door_column && config.entrance_row(h) {
+                        continue;
+                    }
                     // Band rows double as window headers and sills of the floor above.
                     let is_band = config.floor_row(h) == 0 && h < top_h - 1;
                     let is_crown = string_courses && !has_sloped_roof && h == top_h;
                     if is_band || is_crown {
+                        // A band runs over the sills placed before it rather
+                        // than breaking around them.
                         editor.set_block_with_properties_absolute(
                             cornice_stair.clone(),
                             lx,
                             h + config.abs_terrain_offset,
                             lz,
-                            Some(&[AIR]),
+                            Some(&band_whitelist),
                             None,
                         );
                     }
@@ -5999,17 +6226,14 @@ fn generate_archetype_window_headers(
     {
         return;
     }
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
     let top_h = config.start_y_offset + config.building_height;
 
     let mut previous_node: Option<(i32, i32)> = None;
     for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
-            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, outward);
             if out_nx == 0 && out_nz == 0 {
                 previous_node = Some((x2, z2));
                 continue;
@@ -6025,7 +6249,6 @@ fn generate_archetype_window_headers(
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
-                    || facade.is_door(bx, bz)
                     || config.is_flat_column(bx, bz)
                 {
                     continue;
@@ -6036,9 +6259,18 @@ fn generate_archetype_window_headers(
                 if mod6 != 0 && mod6 != 2 {
                     continue;
                 }
+                let door_column = facade.is_door(bx, bz);
+                // The storefront awning takes the ground-floor header row.
+                let awning_row = config.has_storefront && facade.is_street(bx, bz);
                 let lx = bx + out_nx;
                 let lz = bz + out_nz;
                 for h in (config.start_y_offset + 2)..=top_h {
+                    if door_column && config.entrance_row(h) {
+                        continue;
+                    }
+                    if awning_row && h == config.ground_floor_top() {
+                        continue;
+                    }
                     if config.floor_row(h) == config.floor_cycle - 1 {
                         editor.set_block_with_properties_absolute(
                             header_stair.clone(),
@@ -6067,10 +6299,7 @@ fn generate_storefront_awnings(
     if !config.has_storefront || config.condition != BuildingCondition::Normal {
         return;
     }
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
     const AWNING_OPTIONS: [Block; 5] = [
         WARPED_TRAPDOOR,
         SPRUCE_TRAPDOOR,
@@ -6086,7 +6315,7 @@ fn generate_storefront_awnings(
     for (node_idx, node) in element.nodes.iter().enumerate() {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
-            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, outward);
             if out_nx == 0 && out_nz == 0 {
                 previous_node = Some((x2, z2));
                 continue;
@@ -6100,7 +6329,6 @@ fn generate_storefront_awnings(
                 let (bx, bz) = (*bx, *bz);
                 if building_passages.contains(bx, bz)
                     || facade.is_party(bx, bz)
-                    || facade.is_door(bx, bz)
                     || config.is_flat_column(bx, bz)
                     || !facade.is_street(bx, bz)
                     || config.window_col(wall_ordinate(pt_idx, start_axis_x, seg_axis_x, bx, bz))
@@ -6128,6 +6356,7 @@ fn generate_corner_downpipes(
     element: &ProcessedWay,
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
 ) {
     if config.building_height < 10
         || config.condition != BuildingCondition::Normal
@@ -6149,42 +6378,50 @@ fn generate_corner_downpipes(
     if !rng.random_bool(0.35) {
         return;
     }
-    let (cx, cz) = match compute_building_centroid(&element.nodes) {
-        Some(c) => c,
-        None => return,
-    };
+    let outward = outward_side(&element.nodes);
 
-    let mut corners: Vec<(i32, i32)> = Vec::new();
-    for node in &element.nodes {
-        let pos = (node.x, node.z);
-        if corners.last() != Some(&pos) && corners.first() != Some(&pos) {
-            corners.push(pos);
-        }
+    // Convex corners of two perpendicular walls, with the pipe cell on the
+    // diagonal both walls' outward normals point to. Re-entrant corners
+    // would put it indoors and mid-wall nodes are not corners at all.
+    let vertices = ring_vertices(&element.nodes);
+    let n = vertices.len();
+    if n < 3 {
+        return;
     }
-    if corners.len() < 2 {
+    let corners: Vec<((i32, i32), (i32, i32))> = (0..n)
+        .filter_map(|i| {
+            let p = vertices[(i + n - 1) % n];
+            let c = vertices[i];
+            let q = vertices[(i + 1) % n];
+            if !corner_is_convex(p, c, q, outward) {
+                return None;
+            }
+            let (ax, az) = compute_outward_normal(p.0, p.1, c.0, c.1, outward);
+            let (bx, bz) = compute_outward_normal(c.0, c.1, q.0, q.1, outward);
+            let (dx, dz) = (ax + bx, az + bz);
+            (dx != 0 && dz != 0).then_some((c, (dx, dz)))
+        })
+        .collect();
+    if corners.is_empty() {
         return;
     }
 
     let pipe = get_wall_piece_for_material(config.wall_block);
     let start_idx = rng.random_range(0..corners.len());
     for k in 0..2usize {
-        let (px, pz) = corners[(start_idx + k * corners.len() / 2) % corners.len()];
-        // Diagonal outward offset so the pipe hugs the corner edge.
-        let dx = (px - cx).signum();
-        let dz = (pz - cz).signum();
-        // A pipe off a photographed corner stands in front of the photograph.
-        if (dx == 0 && dz == 0)
-            || building_passages.contains(px, pz)
+        let ((px, pz), (dx, dz)) = corners[(start_idx + k * corners.len() / 2) % corners.len()];
+        // A pipe off a photographed corner stands in front of the photograph;
+        // one off a party-wall corner stands in front of the neighbour.
+        if building_passages.contains(px, pz)
             || config.is_flat_column(px, pz)
+            || facade.is_party(px, pz)
         {
             continue;
         }
         let (ox, oz) = (px + dx, pz + dz);
         // Follow the wall foundation down where the ground drops away.
         let descent = if config.is_ground_level {
-            editor
-                .terrain_level(px, pz)
-                .map_or(0, |g| (config.start_y_offset - g).max(0))
+            feature_descent(editor, config, px, pz, ox, oz)
         } else {
             0
         };
@@ -6283,14 +6520,16 @@ fn place_modern_pillars(
     }
 
     // Foundation course at ground level
-    editor.set_block_absolute(
-        config.accent_block,
-        lx,
-        config.start_y_offset + 1 + config.abs_terrain_offset,
-        lz,
-        Some(&[AIR]),
-        None,
-    );
+    for h in (config.start_y_offset + 1 - descent)..=(config.start_y_offset + 1) {
+        editor.set_block_absolute(
+            config.accent_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
 
     // Floor-level slab bands (skip the window center at mod6==1 for cleaner look)
     for h in (config.start_y_offset + 2)..=top_h {
@@ -6342,14 +6581,16 @@ fn place_institutional_bands(
     }
 
     // Foundation course
-    editor.set_block_absolute(
-        config.accent_block,
-        lx,
-        config.start_y_offset + 1 + config.abs_terrain_offset,
-        lz,
-        Some(&[AIR]),
-        None,
-    );
+    for h in (config.start_y_offset + 1 - descent)..=(config.start_y_offset + 1) {
+        editor.set_block_absolute(
+            config.accent_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
 
     // Stair ledges at floor-separation rows (non-window positions only)
     if mod6 >= 3 {
@@ -6448,14 +6689,16 @@ fn place_historic_ornate(
     }
 
     // Foundation course for all positions
-    editor.set_block_absolute(
-        config.accent_block,
-        lx,
-        config.start_y_offset + 1 + config.abs_terrain_offset,
-        lz,
-        Some(&[AIR]),
-        None,
-    );
+    for h in (config.start_y_offset + 1 - descent)..=(config.start_y_offset + 1) {
+        editor.set_block_absolute(
+            config.accent_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
 
     // Arched window headers at window-top rows for window-edge positions
     if mod6 == 0 || mod6 == 2 {
@@ -6578,14 +6821,16 @@ fn place_skyscraper_fins(
     let top_h = config.start_y_offset + config.building_height - height_reduction;
 
     // Foundation course at ground level (all positions)
-    editor.set_block_absolute(
-        config.accent_block,
-        lx,
-        config.start_y_offset + 1 + config.abs_terrain_offset,
-        lz,
-        Some(&[AIR]),
-        None,
-    );
+    for h in (config.start_y_offset + 1 - descent)..=(config.start_y_offset + 1) {
+        editor.set_block_absolute(
+            config.accent_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
 
     if mod6 == 3 {
         // Vertical fin column (existing behavior)
@@ -6938,7 +7183,8 @@ fn parse_roof_type(roof_shape: &str) -> RoofType {
     match roof_shape {
         "gabled" | "gable" | "pitched" | "saltbox" | "double_saltbox" | "quadruple_saltbox"
         | "gabled_row" => RoofType::Gabled,
-        "hipped" | "hip" | "round" | "side_hipped" => RoofType::Hipped,
+        "hipped" | "hip" | "side_hipped" => RoofType::Hipped,
+        "round" | "barrel" | "vault" | "vaulted" => RoofType::Round,
         "mansard" => RoofType::Mansard,
         "gambrel" => RoofType::Gambrel,
         "half-hipped" | "half_hipped" | "side_half-hipped" => RoofType::HalfHipped,
@@ -7116,7 +7362,11 @@ pub fn generate_buildings(
     // A ring too thin to enclose a lattice cell, such as a column or a beam
     // mapped as a building:part, stands on its outline cells instead of
     // vanishing.
-    if cached_floor_area.is_empty() && hole_polygons.is_none_or(|h| h.is_empty()) {
+    // An oversized ring is empty because the fill refused it, not because it is thin.
+    if cached_floor_area.is_empty()
+        && hole_polygons.is_none_or(|h| h.is_empty())
+        && !crate::floodfill_cache::is_oversized_ring(element)
+    {
         cached_floor_area = thin_ring_cells(&element.nodes);
     }
 
@@ -7324,10 +7574,11 @@ pub fn generate_buildings(
     );
 
     let mut wall_block = style.wall_block;
-    // A column has no room for a window.
-    let mut has_windows = style.has_windows && cached_footprint_size > THIN_RING_MAX_CELLS;
-    let mut has_garage_door = style.has_garage_door;
-    let mut has_single_door = style.has_single_door;
+    // A column has no room for a window or a door.
+    let is_thin_ring = cached_footprint_size <= THIN_RING_MAX_CELLS;
+    let mut has_windows = style.has_windows && !is_thin_ring;
+    let mut has_garage_door = style.has_garage_door && !is_thin_ring;
+    let mut has_single_door = style.has_single_door && !is_thin_ring;
     let mut effective_building_height = building_height;
     match condition {
         BuildingCondition::Construction => {
@@ -7646,8 +7897,9 @@ pub fn generate_buildings(
     generate_residential_window_decorations(editor, element, &config, effective_passages, &facade);
 
     // Add wall depth features (pilasters, columns, ledges, cornices, buttresses).
-    // building:part sub-sections get them too, with a sibling-cell probe so
-    // protrusions stay clear of adjoining parts.
+    // building:part sub-sections get them too, with a footprint probe so
+    // protrusions stay out of other buildings' cells (sibling parts count
+    // as this building's own).
     let is_part = element.tags.contains_key("building:part");
     let part_own_cells: FnvHashSet<(i32, i32)> = if is_part {
         cached_floor_area
@@ -7680,7 +7932,7 @@ pub fn generate_buildings(
             effective_passages,
             &facade,
         );
-        generate_corner_downpipes(editor, element, &config, effective_passages);
+        generate_corner_downpipes(editor, element, &config, effective_passages, &facade);
         generate_archetype_window_headers(editor, element, &config, effective_passages, &facade);
         generate_storefront_awnings(editor, element, &config, effective_passages, &facade);
     }
@@ -8046,14 +8298,19 @@ fn generate_building_roof(
         scale_factor,
     );
 
-    // Add parapet on flat-roofed buildings
-    if config.has_parapet && style.roof_type == RoofType::Flat {
+    // Add parapet on flat-roofed buildings. A roof another part stands on
+    // is a floor, and gets no parapet in the part above's facade.
+    if config.has_parapet && style.roof_type == RoofType::Flat && !covered_by_sibling_part {
         generate_parapet(editor, element, config);
     }
 
     // Add decorative roofline variation on flat-roofed residential/generic buildings
     // (those that don't already have a parapet or non-flat roof)
-    if !config.has_parapet && style.roof_type == RoofType::Flat && !modeled_part_roof {
+    if !config.has_parapet
+        && style.roof_type == RoofType::Flat
+        && !modeled_part_roof
+        && !covered_by_sibling_part
+    {
         generate_flat_roof_edge_variation(editor, element, config);
     }
 
@@ -8596,6 +8853,18 @@ fn generate_chimney(
     } else {
         candidate_points
     };
+    // A dormer already stands on the low band of the slope: its glass sits
+    // in the rows the shaft would take.
+    let final_candidates: Vec<(i32, i32)> = final_candidates
+        .into_iter()
+        .filter(|&(x, z)| {
+            !(roof_base + 1..=roof_base + 3).any(|y| {
+                editor
+                    .get_block_absolute(x, y + abs_terrain_offset, z)
+                    .is_some_and(is_glass_wall)
+            })
+        })
+        .collect();
 
     if final_candidates.is_empty() {
         return;
@@ -8856,21 +9125,13 @@ fn generate_residential_antenna(
         .min_by_key(|&&(x, z)| (x - cx).pow(2) + (z - cz).pow(2))
         .unwrap();
 
-    // Match the slope formula used by gabled/hipped/pyramidal plus the +1 lift.
-    let min_x = roof_area.iter().map(|p| p.0).min().unwrap();
-    let max_x = roof_area.iter().map(|p| p.0).max().unwrap();
-    let min_z = roof_area.iter().map(|p| p.1).min().unwrap();
-    let max_z = roof_area.iter().map(|p| p.1).max().unwrap();
-    let narrow_half = (max_x - min_x).min(max_z - min_z) / 2;
-    let local_boost = ((narrow_half as f64) * 0.85).round().max(1.0) as i32;
-    let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
-    let estimated_rise = local_boost.min(wall_cap) + 1;
-    let anchor_y = config.start_y_offset
-        + config.building_height
-        + estimated_rise
-        + 2
-        + config.abs_terrain_offset;
-    editor.set_block_absolute(LIGHTNING_ROD, best_x, anchor_y, best_z, None, None);
+    // The rod stands on the ridge as built, whatever rise the roof got.
+    let wall_top = config.start_y_offset + config.building_height + config.abs_terrain_offset;
+    let Some(ridge_y) = editor.highest_block_between(best_x, best_z, wall_top, wall_top + 96)
+    else {
+        return;
+    };
+    editor.set_block_absolute(LIGHTNING_ROD, best_x, ridge_y + 1, best_z, None, None);
 }
 
 fn should_generate_rooftop_equipment(
@@ -9617,26 +9878,25 @@ enum GableProfile {
     Gambrel,
     /// Gable with hipped ends above half height.
     HalfHipped,
+    /// Barrel vault: semi-elliptical section across the ridge.
+    Round,
 }
+
+/// Feather sentinel for cells whose slope needs no scan clamp.
+const NO_FEATHER: i32 = 10_000;
 
 fn generate_gabled_roof(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
     config: &RoofConfig,
-    roof_orientation: Option<&str>,
     profile: GableProfile,
-    preferred_ridge_along_x: Option<bool>,
-    axis_snap: bool,
+    ridge: &RidgeFrame,
 ) {
     // Create a HashSet for O(1) footprint lookups, this is the actual building shape
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
-    let width_is_longer = config.width() >= config.length();
-    let ridge_runs_along_x = match roof_orientation {
-        Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
-        Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
-        _ => preferred_ridge_along_x.unwrap_or(width_is_longer),
-    };
+    let ridge_runs_along_x = ridge.along_x;
+    let tent = ridge.tent;
 
     // For each footprint position, scan all 4 cardinal directions to
     // find the distance to the nearest polygon edge.  This replaces an
@@ -9697,16 +9957,21 @@ fn generate_gabled_roof(
         let sp_z = scan_dir(x, z, 0, 1);
         let sm_x = scan_dir(x, z, -1, 0);
         let sp_x = scan_dir(x, z, 1, 0);
-        // snap mode: bbox distances drive the slope, scans keep the rim honest
-        let (dm_z, dp_z, dm_x, dp_x) = if axis_snap {
-            (
-                z - config.min_z,
-                config.max_z - z,
-                x - config.min_x,
-                config.max_x - x,
-            )
-        } else {
-            (sm_z, sp_z, sm_x, sp_x)
+        // Tent frame: distances to the turned rectangle's sides, v standing
+        // in for z and u for x; the scans still bound the hip ends and trim.
+        let (dm_z, dp_z, dm_x, dp_x) = match tent {
+            Some(t) => {
+                // Whole cells in from each side: the outline cells sit up to
+                // half a cell inside the ideal edge and must stay the eave.
+                let (u, v) = t.uv(x, z);
+                (
+                    (v - t.v_min).floor().max(0.0) as i32,
+                    (t.v_max - v).floor().max(0.0) as i32,
+                    (u - t.u_min).floor().max(0.0) as i32,
+                    (t.u_max - u).floor().max(0.0) as i32,
+                )
+            }
+            None => (sm_z, sp_z, sm_x, sp_x),
         };
 
         let (dm_perp, dp_perp) = if ridge_runs_along_x {
@@ -9720,7 +9985,10 @@ fn generate_gabled_roof(
         } else {
             (sm_z, sp_z)
         };
-        let scan_perp_min = if ridge_runs_along_x {
+        // The planar tent meets its rectangle's sides on its own.
+        let scan_perp_min = if tent.is_some() {
+            NO_FEATHER
+        } else if ridge_runs_along_x {
             sm_z.min(sp_z)
         } else {
             sm_x.min(sp_x)
@@ -9753,7 +10021,7 @@ fn generate_gabled_roof(
     // Half-pitch when the capped flat ridge would be >= 4 blocks wide. Skipped under
     // an explicit cap, which it climbs too slowly to reach.
     let use_half_pitch = config.peak_cap.is_none()
-        && profile != GableProfile::Gambrel
+        && !matches!(profile, GableProfile::Gambrel | GableProfile::Round)
         && max_perp_half - wall_cap >= 4;
 
     // A stated rise sets the pitch: the ridge reaches it at the middle of the
@@ -9763,7 +10031,17 @@ fn generate_gabled_roof(
 
     for &(x, z) in floor_area {
         let pd = &pos_data[&(x, z)];
-        let (boost, capped_boost, feather) = if let Some(cap) = stated_pitch {
+        let (boost, capped_boost, feather) = if profile == GableProfile::Round {
+            // Barrel vault: a semi-elliptical section, vertical at the eaves and
+            // level at the crown, rising to the mapped roof:height or the cap.
+            let cap = config.peak_cap.unwrap_or_else(|| {
+                wall_cap.min(((pd.local_half as f64) * 0.85).round().max(1.0) as i32)
+            });
+            let reach = pd.perp_reach.max(1) as f64;
+            let t = (1.0 - pd.dist_to_edge as f64 / reach).clamp(0.0, 1.0);
+            let boost = (cap as f64 * (1.0 - t * t).sqrt()).round() as i32;
+            (boost, cap.max(1), NO_FEATHER)
+        } else if let Some(cap) = stated_pitch {
             let pitch = cap as f64 / pd.perp_reach.max(1) as f64;
             let boost = (pd.dist_to_edge as f64 * pitch).round() as i32;
             // Narrow wings climb at the same pitch and top out lower.
@@ -9798,15 +10076,18 @@ fn generate_gabled_roof(
         roof_heights.insert((x, z), roof_height);
     }
 
-    // median along the ridge evens rasterization wobble, identity when aligned
+    // median along the ridge evens rasterization wobble, identity when aligned.
+    // A tent turned well off the grid has no wobble, only the true staircase
+    // of its plane, which a median along a cardinal would erode.
     let smooth_along: (i32, i32) = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
+    let smooth = tent.is_none_or(|t| t.angle.to_degrees().abs() <= 12.0);
     let roof_heights: HashMap<(i32, i32), i32> = roof_heights
         .iter()
         .map(|(&(x, z), &h)| {
             let l = roof_heights.get(&(x - smooth_along.0, z - smooth_along.1));
             let r = roof_heights.get(&(x + smooth_along.0, z + smooth_along.1));
             let h = match (l, r) {
-                (Some(&a), Some(&b)) => {
+                (Some(&a), Some(&b)) if smooth => {
                     let mut t = [a, h, b];
                     t.sort_unstable();
                     t[1]
@@ -9820,70 +10101,39 @@ fn generate_gabled_roof(
     let stair_block_material = get_stair_block_for_material(config.roof_block);
     let replace_any: &[Block] = &[];
 
-    // Helper to determine stair facing for outer edges (faces away from building center)
-    let get_outer_edge_stair = |x: i32, z: i32| -> BlockWithProperties {
-        if ridge_runs_along_x {
-            if !footprint.contains(&(x, z - 1)) {
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::Straight,
-                )
-            } else {
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::Straight,
-                )
-            }
-        } else if !footprint.contains(&(x - 1, z)) {
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::East,
-                StairShape::Straight,
-            )
-        } else {
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::West,
-                StairShape::Straight,
-            )
-        }
-    };
-
-    // Helper to determine stair facing for slope (faces toward lower side)
-    // Uses the polygon-edge scanning to pick the correct slope direction
-    // even for diagonal buildings where the center coordinate is misleading.
+    // Stairs on a slope face the ridge: a cell nearer the minus eave looks
+    // toward the plus side. Eave cells are the same case with distance zero.
+    // The perpendicular is taken in the ridge frame, so a turned tent's
+    // stairs still face the nearest cardinal toward its own ridge.
+    let (across_x, across_z) = ridge.across();
+    let toward_plus = cardinal_for_vector(across_x, across_z);
+    let toward_minus = cardinal_for_vector(-across_x, -across_z);
     let get_slope_stair = |x: i32, z: i32| -> BlockWithProperties {
         let closer_to_minus = edge_scans.get(&(x, z)).is_some_and(|&(dm, dp)| dm <= dp);
-        if ridge_runs_along_x {
-            if closer_to_minus {
-                // Closer to north (-Z) edge → on north slope → faces south
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::Straight,
-                )
-            } else {
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::Straight,
-                )
-            }
-        } else if closer_to_minus {
-            // Closer to west (-X) edge → on west slope → faces east
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::East,
-                StairShape::Straight,
-            )
+        let facing = if closer_to_minus {
+            toward_plus
         } else {
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::West,
-                StairShape::Straight,
-            )
+            toward_minus
+        };
+        create_stair_with_properties(stair_block_material, facing, StairShape::Straight)
+    };
+    let get_outer_edge_stair = get_slope_stair;
+
+    // Eave cells: on the grid, a cell missing its neighbour across the ridge;
+    // in a tent, a cell on the turned rectangle's long sides, which is the
+    // same test once the gable ends are told apart from the eaves.
+    let is_eave_cell = |x: i32, z: i32| -> bool {
+        match tent {
+            Some(_) => {
+                pos_data[&(x, z)].dist_to_edge == 0
+                    && [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+                        .iter()
+                        .any(|n| !footprint.contains(n))
+            }
+            None if ridge_runs_along_x => {
+                !footprint.contains(&(x, z - 1)) || !footprint.contains(&(x, z + 1))
+            }
+            None => !footprint.contains(&(x - 1, z)) || !footprint.contains(&(x + 1, z)),
         }
     };
 
@@ -9927,14 +10177,7 @@ fn generate_gabled_roof(
     for &(x, z) in floor_area {
         let roof_height = roof_heights[&(x, z)];
 
-        // Check if position is at outer edge (neighbor perpendicular to ridge is missing)
-        let is_outer_edge = if ridge_runs_along_x {
-            !footprint.contains(&(x, z - 1)) || !footprint.contains(&(x, z + 1))
-        } else {
-            !footprint.contains(&(x - 1, z)) || !footprint.contains(&(x + 1, z))
-        };
-
-        if is_outer_edge {
+        if is_eave_cell(x, z) {
             // Roof_block at base, stair at base+1.
             editor.set_block_absolute(
                 config.roof_block,
@@ -9995,12 +10238,7 @@ fn generate_gabled_roof(
         let along: (i32, i32) = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
         for &(x, z) in floor_area {
             let pd = &pos_data[&(x, z)];
-            let is_perp_edge = if ridge_runs_along_x {
-                !footprint.contains(&(x, z - 1)) || !footprint.contains(&(x, z + 1))
-            } else {
-                !footprint.contains(&(x - 1, z)) || !footprint.contains(&(x + 1, z))
-            };
-            if is_perp_edge {
+            if is_eave_cell(x, z) {
                 continue;
             }
             let h = roof_heights[&(x, z)];
@@ -10033,19 +10271,33 @@ fn generate_gabled_roof(
         }
     }
 
-    let parallel_to_ridge = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
-    place_dormer_windows(
-        editor,
-        floor_area,
-        &roof_heights,
-        &edge_scans,
-        config,
-        parallel_to_ridge,
-        &footprint,
-        None,
-    );
+    // Dormers step along the grid; past a slight turn they no longer sit
+    // on the slope, and a vault has no slope to sit on.
+    let dormers_fit =
+        profile != GableProfile::Round && tent.is_none_or(|t| t.angle.to_degrees().abs() <= 12.0);
+    if dormers_fit {
+        let parallel_to_ridge = if ridge_runs_along_x { (1, 0) } else { (0, 1) };
+        place_dormer_windows(
+            editor,
+            floor_area,
+            &roof_heights,
+            &edge_scans,
+            config,
+            parallel_to_ridge,
+            &footprint,
+            None,
+        );
+    }
 
     // 2-block eave overhang on the slope sides (perpendicular to the ridge).
+    // A turned tent hangs it from its long sides only, not the gable ends.
+    let eave_cells: Option<HashSet<(i32, i32)>> = tent.map(|_| {
+        floor_area
+            .iter()
+            .copied()
+            .filter(|&(x, z)| is_eave_cell(x, z))
+            .collect()
+    });
     place_eave_overhang(
         editor,
         floor_area,
@@ -10053,6 +10305,7 @@ fn generate_gabled_roof(
         config,
         stair_block_material,
         ridge_runs_along_x,
+        eave_cells.as_ref(),
     );
 }
 
@@ -10064,6 +10317,7 @@ fn place_eave_overhang(
     config: &RoofConfig,
     stair_block_material: Block,
     ridge_runs_along_x: bool,
+    eave_cells: Option<&HashSet<(i32, i32)>>,
 ) {
     place_eave_overhang_inner(
         editor,
@@ -10072,6 +10326,7 @@ fn place_eave_overhang(
         config,
         stair_block_material,
         Some(ridge_runs_along_x),
+        eave_cells,
     );
 }
 
@@ -10089,6 +10344,7 @@ fn place_eave_overhang_all_sides(
         config,
         stair_block_material,
         None,
+        None,
     );
 }
 
@@ -10099,6 +10355,8 @@ fn place_eave_overhang_inner(
     config: &RoofConfig,
     stair_block_material: Block,
     ridge_runs_along_x: Option<bool>,
+    // Only these cells seed an overhang; None means every edge cell does.
+    eave_cells: Option<&HashSet<(i32, i32)>>,
 ) {
     let abs = config.abs_terrain_offset;
     let y_inner = config.base_height + abs;
@@ -10119,6 +10377,9 @@ fn place_eave_overhang_inner(
     let mut outer_cells: HashMap<(i32, i32), StairFacing> = HashMap::new();
 
     for &(x, z) in floor_area {
+        if eave_cells.is_some_and(|cells| !cells.contains(&(x, z))) {
+            continue;
+        }
         for &(dx, dz, facing) in dirs {
             let n1 = (x + dx, z + dz);
             let n2 = (x + 2 * dx, z + 2 * dz);
@@ -10630,8 +10891,7 @@ fn roof_peak_cap(
     tags: &HashMap<String, String>,
     roof_type: RoofType,
     config: &RoofConfig,
-    roof_orientation: Option<&str>,
-    preferred_ridge_along_x: Option<bool>,
+    ridge: &RidgeFrame,
     scale_factor: f64,
 ) -> Option<i32> {
     if let Some(m) = tags
@@ -10672,16 +10932,8 @@ fn roof_peak_cap(
         },
         // These slope over the shorter half-span in every direction.
         RoofType::Hipped | RoofType::Mansard | RoofType::Pyramidal => w.min(l) as f64 / 2.0,
-        // Slopes perpendicular to the ridge, so this must match generate_gabled_roof.
-        _ => {
-            let width_is_longer = config.width() >= config.length();
-            let ridge_along_x = match roof_orientation {
-                Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
-                Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
-                _ => preferred_ridge_along_x.unwrap_or(width_is_longer),
-            };
-            (if ridge_along_x { l } else { w }) as f64 / 2.0
-        }
+        // Slopes across the ridge, in the frame generate_gabled_roof uses.
+        _ => ridge.span_cells(config.width(), config.length()) / 2.0,
     };
 
     let rise = (deg.to_radians().tan() * run).round().max(1.0) as i32;
@@ -10824,6 +11076,37 @@ fn footprint_radial_fractions(
         return None;
     }
 
+    // Edges bucketed by the bearings they cover from the centroid, so a cell
+    // tests the few edges its ray can cross rather than the whole outline.
+    const BUCKETS: usize = 512;
+    let bucket_of = |ang: f64| -> usize {
+        (((ang + std::f64::consts::PI) / std::f64::consts::TAU) * BUCKETS as f64) as usize
+    };
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); BUCKETS];
+    for i in 0..n {
+        let (ax, az) = pts[i];
+        let (bx, bz) = pts[(i + 1) % n];
+        let a0 = (az - cz).atan2(ax - cx);
+        let a1 = (bz - cz).atan2(bx - cx);
+        let (lo, hi) = (a0.min(a1), a0.max(a1));
+        // One bucket of slack each side covers rays on a bucket boundary.
+        let wraps = hi - lo > std::f64::consts::PI;
+        let ranges: Vec<(usize, usize)> = if wraps {
+            // The edge crosses the +-180 seam: cover both ends of the circle.
+            vec![
+                (0, bucket_of(lo) + 1),
+                (bucket_of(hi).saturating_sub(1), BUCKETS - 1),
+            ]
+        } else {
+            vec![(bucket_of(lo).saturating_sub(1), bucket_of(hi) + 1)]
+        };
+        for (from, to) in ranges {
+            for bucket in buckets.iter_mut().take(to.min(BUCKETS - 1) + 1).skip(from) {
+                bucket.push(i);
+            }
+        }
+    }
+
     let mut out: HashMap<(i32, i32), f64> = HashMap::with_capacity(cells.len());
     for &(x, z) in cells {
         let (px, pz) = (x as f64 - cx, z as f64 - cz);
@@ -10838,7 +11121,7 @@ fn footprint_radial_fractions(
         // it lean on the half-cell slack and land on 1.
         let mut t_hit: Option<f64> = None;
         let mut t_far = 0.0f64;
-        for i in 0..n {
+        for &i in &buckets[bucket_of(pz.atan2(px)).min(BUCKETS - 1)] {
             let (ax, az) = pts[i];
             let (bx, bz) = pts[(i + 1) % n];
             let (ex, ez) = (bx - ax, bz - az);
@@ -11031,6 +11314,7 @@ fn generate_dome_roof(
     let radial = footprint_radial_fractions(nodes, floor_area);
     // Use empty blacklist to allow overwriting wall/ceiling blocks
     let replace_any: &[Block] = &[];
+    let mut surface: HashMap<(i32, i32), i32> = HashMap::with_capacity(floor_area.len());
 
     for &(x, z) in floor_area {
         let normalized_distance = radial.as_ref().map_or_else(
@@ -11043,9 +11327,31 @@ fn generate_dome_roof(
         );
 
         let height_factor = (1.0 - normalized_distance * normalized_distance).sqrt();
-        let surface_height = config.base_height + (height_factor * rise) as i32;
+        surface.insert((x, z), config.base_height + (height_factor * rise) as i32);
+    }
+    fill_roof_shell(editor, floor_area, &surface, config, replace_any);
+}
 
-        for y in config.base_height..=surface_height {
+/// Places a rounded roof as a shell over its surface heights: every column
+/// runs from one below its lowest neighbour's surface up to its own, so the
+/// shell is watertight and two blocks thick at the crown, and the space
+/// beneath a dome or cone stays a hall instead of a solid mass.
+fn fill_roof_shell(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    surface: &HashMap<(i32, i32), i32>,
+    config: &RoofConfig,
+    replace_any: &[Block],
+) {
+    for &(x, z) in floor_area {
+        let top = surface[&(x, z)];
+        let lowest_neighbour = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+            .iter()
+            .map(|n| surface.get(n).copied().unwrap_or(config.base_height))
+            .min()
+            .unwrap_or(config.base_height);
+        let bottom = (lowest_neighbour - 1).max(config.base_height);
+        for y in bottom..=top {
             editor.set_block_absolute(
                 config.roof_block,
                 x,
@@ -11079,6 +11385,7 @@ fn generate_cone_roof(
         |p| p.max(1),
     );
     let radial = footprint_radial_fractions(nodes, floor_area);
+    let mut surface: HashMap<(i32, i32), i32> = HashMap::with_capacity(floor_area.len());
 
     for &(x, z) in floor_area {
         let normalized = radial.as_ref().map_or_else(
@@ -11092,19 +11399,12 @@ fn generate_cone_roof(
             |m| m[&(x, z)],
         );
 
-        let surface_height = config.base_height + ((1.0 - normalized) * peak_height as f64) as i32;
-
-        for y in config.base_height..=surface_height {
-            editor.set_block_absolute(
-                config.roof_block,
-                x,
-                y + config.abs_terrain_offset,
-                z,
-                None,
-                Some(replace_any),
-            );
-        }
+        surface.insert(
+            (x, z),
+            config.base_height + ((1.0 - normalized) * peak_height as f64) as i32,
+        );
     }
+    fill_roof_shell(editor, floor_area, &surface, config, replace_any);
 }
 
 /// Onion roof: bulbous Russian-Orthodox / Bavarian profile.
@@ -11120,7 +11420,7 @@ fn generate_onion_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], conf
                 .max(6)
                 .min(config.building_height * 2)
         },
-        |p| p.max(4),
+        |p| p.max(1),
     );
 
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
@@ -11266,20 +11566,18 @@ fn generate_roof(
     config.add_dormers = add_dormers;
 
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
-    // A mapped roof:height, else a roof:angle pitch, overrides the heuristic caps.
-    let peak_cap = roof_peak_cap(
-        &element.tags,
-        roof_type,
-        &config,
+    let roof_direction = element.tags.get("roof:direction").map(|s| s.as_str());
+    let ridge = ridge_frame(
+        &element.nodes,
+        config.width(),
+        config.length(),
         roof_orientation,
+        roof_direction,
         preferred_ridge_along_x,
-        scale_factor,
     );
+    // A mapped roof:height, else a roof:angle pitch, overrides the heuristic caps.
+    let peak_cap = roof_peak_cap(&element.tags, roof_type, &config, &ridge, scale_factor);
     config.peak_cap = peak_cap;
-    let axis_snap = matches!(
-        roof_type,
-        RoofType::Gabled | RoofType::Gambrel | RoofType::HalfHipped
-    ) && gable_axis_snap(&element.nodes);
 
     // For flat roofs: OSM tags override > preset override > floor block default.
     let flat_roof_block = osm_roof_block
@@ -11303,39 +11601,19 @@ fn generate_roof(
             } else {
                 GableProfile::Standard
             };
-            generate_gabled_roof(
-                editor,
-                roof_area,
-                &config,
-                roof_orientation,
-                profile,
-                preferred_ridge_along_x,
-                axis_snap,
-            );
+            generate_gabled_roof(editor, roof_area, &config, profile, &ridge);
         }
 
         RoofType::Gambrel => {
-            generate_gabled_roof(
-                editor,
-                roof_area,
-                &config,
-                roof_orientation,
-                GableProfile::Gambrel,
-                preferred_ridge_along_x,
-                axis_snap,
-            );
+            generate_gabled_roof(editor, roof_area, &config, GableProfile::Gambrel, &ridge);
         }
 
         RoofType::HalfHipped => {
-            generate_gabled_roof(
-                editor,
-                roof_area,
-                &config,
-                roof_orientation,
-                GableProfile::HalfHipped,
-                preferred_ridge_along_x,
-                axis_snap,
-            );
+            generate_gabled_roof(editor, roof_area, &config, GableProfile::HalfHipped, &ridge);
+        }
+
+        RoofType::Round => {
+            generate_gabled_roof(editor, roof_area, &config, GableProfile::Round, &ridge);
         }
 
         RoofType::Hipped => {
@@ -11354,7 +11632,6 @@ fn generate_roof(
         }
 
         RoofType::Skillion => {
-            let roof_direction = element.tags.get("roof:direction").map(|s| s.as_str());
             generate_skillion_roof(editor, roof_area, &config, roof_direction);
         }
 
@@ -11704,16 +11981,24 @@ mod height_tests {
     }
 
     #[test]
-    fn axis_snap_catches_slight_rotation() {
-        assert!(gable_axis_snap(&rotated_rect(12.0, 30.0, 8.0)));
-        assert!(gable_axis_snap(&rotated_rect(10.0, 24.0, 4.0)));
+    fn tent_frame_catches_any_rotation_of_a_rectangle() {
+        for deg in [4.0, 8.0, 20.0, 44.0] {
+            let frame = tent_frame(&rotated_rect(12.0, 30.0, deg))
+                .unwrap_or_else(|| panic!("{deg} deg rectangle should get a tent"));
+            assert!(
+                (frame.angle.to_degrees() - deg).abs() < 3.0,
+                "{deg} deg: frame angle {}",
+                frame.angle.to_degrees()
+            );
+            // The frame's long axis is the rectangle's 30 side.
+            assert!((frame.u_max - frame.u_min - 30.0).abs() < 2.5);
+            assert!((frame.v_max - frame.v_min - 12.0).abs() < 2.5);
+        }
     }
 
     #[test]
-    fn axis_snap_leaves_aligned_and_steep_alone() {
-        assert!(!gable_axis_snap(&rotated_rect(12.0, 30.0, 0.0)));
-        assert!(!gable_axis_snap(&rotated_rect(12.0, 30.0, 20.0)));
-        assert!(!gable_axis_snap(&rotated_rect(12.0, 30.0, 44.0)));
+    fn tent_frame_leaves_aligned_rectangles_alone() {
+        assert!(tent_frame(&rotated_rect(12.0, 30.0, 0.0)).is_none());
     }
 
     #[test]
@@ -11736,7 +12021,7 @@ mod height_tests {
             )
         })
         .collect();
-        assert!(!gable_axis_snap(&ring(&pts)));
+        assert!(tent_frame(&ring(&pts)).is_none());
     }
 
     fn way_with_tags(tags: &[(&str, &str)]) -> ProcessedWay {
@@ -12371,7 +12656,18 @@ mod style_tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        roof_peak_cap(&tags, rt, &peak_cap_config(w, l), orient, None, 1.0)
+        let nodes: Vec<ProcessedNode> = [(0, 0), (w - 1, 0), (w - 1, l - 1), (0, l - 1), (0, 0)]
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| ProcessedNode {
+                id: i as u64,
+                tags: HashMap::new(),
+                x,
+                z,
+            })
+            .collect();
+        let ridge = ridge_frame(&nodes, w - 1, l - 1, orient, None, None);
+        roof_peak_cap(&tags, rt, &peak_cap_config(w, l), &ridge, 1.0)
     }
 
     // roof:angle is a stated pitch, previously read by nothing at all.
@@ -12538,7 +12834,7 @@ mod style_tests {
         assert_eq!(parse_roof_type("gambrel"), RoofType::Gambrel);
         assert_eq!(parse_roof_type("half-hipped"), RoofType::HalfHipped);
         assert_eq!(parse_roof_type("hipped"), RoofType::Hipped);
-        assert_eq!(parse_roof_type("round"), RoofType::Hipped);
+        assert_eq!(parse_roof_type("round"), RoofType::Round);
         assert_eq!(parse_roof_type("gabled"), RoofType::Gabled);
     }
 
@@ -13961,7 +14257,13 @@ mod roof_geometry_tests {
         let cells = rect_cells(20, 20);
         let config = roof_config(&cells);
         // The bbox spans 20 cells each way, so the diagonal run is 20 * sqrt 2.
-        let cap = roof_peak_cap(&tags, RoofType::Skillion, &config, None, None, 1.0);
+        let cap = roof_peak_cap(
+            &tags,
+            RoofType::Skillion,
+            &config,
+            &RidgeFrame::grid(true),
+            1.0,
+        );
         assert_eq!(cap, Some(28));
     }
 
@@ -14074,10 +14376,8 @@ mod roof_geometry_tests {
             &mut editor,
             &cells,
             &config,
-            None,
             GableProfile::Standard,
-            None,
-            false,
+            &RidgeFrame::grid(true),
         );
         let eave = top(&editor, 15, 0);
         let ridge = top(&editor, 15, 5);
@@ -14100,10 +14400,8 @@ mod roof_geometry_tests {
             &mut editor,
             &cells,
             &config,
-            None,
             GableProfile::Standard,
-            None,
-            false,
+            &RidgeFrame::grid(true),
         );
         // Previously capped at 85% of the half-span (5).
         assert_eq!(top(&editor, 15, 5) - top(&editor, 15, 0), 10);
@@ -14125,6 +14423,158 @@ mod roof_geometry_tests {
             mid > eave && mid < ridge,
             "eave {eave} mid {mid} ridge {ridge}"
         );
+    }
+
+    #[test]
+    fn roof_direction_turns_the_ridge_across_the_slope() {
+        // 30 x 12: the ridge would run along X. A slope facing east means the
+        // ridge runs along Z instead, so heights vary with X and not with Z.
+        let nodes = ring(&[(0, 0), (29, 0), (29, 11), (0, 11)]);
+        let ridge = ridge_frame(&nodes, 29, 11, None, Some("90"), None);
+        assert!(!ridge.along_x);
+        let ridge = ridge_frame(&nodes, 29, 11, None, Some("north"), None);
+        assert!(ridge.along_x);
+        // roof:direction wins over the longer side, roof:orientation still
+        // applies when it is absent.
+        let ridge = ridge_frame(&nodes, 29, 11, Some("across"), None, None);
+        assert!(!ridge.along_x);
+    }
+
+    #[test]
+    fn turned_rectangle_gets_a_planar_tent_on_its_own_axis() {
+        // A 30 x 12 rectangle turned 30 degrees.
+        let (c, sn) = (30.0f64.to_radians().cos(), 30.0f64.to_radians().sin());
+        let pts: Vec<(i32, i32)> = [(0.0, 0.0), (30.0, 0.0), (30.0, 12.0), (0.0, 12.0)]
+            .iter()
+            .map(|&(u, v): &(f64, f64)| {
+                (
+                    (20.0 + u * c - v * sn).round() as i32,
+                    (5.0 + u * sn + v * c).round() as i32,
+                )
+            })
+            .collect();
+        let nodes = ring(&pts);
+        let cells = fill(&nodes);
+        let xz = XZBBox::rect_from_xz_lengths(70.0, 70.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let mut config = roof_config(&cells);
+        config.peak_cap = Some(5);
+        let ridge = ridge_frame(&nodes, config.width(), config.length(), None, None, None);
+        let tent = ridge.tent.expect("turned rectangle gets a tent");
+        assert!(ridge.along_x, "ridge follows the 30 side, nearest X");
+        generate_gabled_roof(&mut editor, &cells, &config, GableProfile::Standard, &ridge);
+        // Two cells on the ridge line (v at mid-span), a third of the way in
+        // and two thirds of the way in, share the crown height; a cell near
+        // the long side sits at the eave.
+        let at = |u: f64, v: f64| -> (i32, i32) {
+            (
+                (20.0 + u * c - v * sn).round() as i32,
+                (5.0 + u * sn + v * c).round() as i32,
+            )
+        };
+        let (rx, rz) = at(10.0, 6.0);
+        let (sx, sz) = at(20.0, 6.0);
+        let (ex, ez) = at(15.0, 0.0);
+        assert!(tent.angle.to_degrees() > 25.0 && tent.angle.to_degrees() < 35.0);
+
+        assert_eq!(top(&editor, rx, rz), top(&editor, sx, sz));
+        assert_eq!(top(&editor, rx, rz) - top(&editor, ex, ez), 5);
+        // A cell on the gable end is not treated as an eave.
+        let (gx, gz) = at(0.5, 6.0);
+        assert!(top(&editor, gx, gz) >= top(&editor, ex, ez) + 3);
+    }
+
+    #[test]
+    fn round_roof_is_a_barrel_vault() {
+        assert_eq!(parse_roof_type("round"), RoofType::Round);
+        let cells = rect_cells(30, 12);
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let mut config = roof_config(&cells);
+        config.peak_cap = Some(5);
+        generate_gabled_roof(
+            &mut editor,
+            &cells,
+            &config,
+            GableProfile::Round,
+            &RidgeFrame::grid(true),
+        );
+        let eave = top(&editor, 15, 0);
+        let crown = top(&editor, 15, 5);
+        assert_eq!(crown - eave, 5);
+        // Convex section: a quarter of the way in it is already above the
+        // straight line from eave to crown (which would be 2 there, 3 at half).
+        assert!(top(&editor, 15, 2) - eave >= 3);
+        assert_eq!(top(&editor, 15, 3), top(&editor, 15, 4));
+    }
+
+    #[test]
+    fn domes_are_shells_over_a_hall() {
+        let nodes = ring(&[(0, 0), (30, 0), (30, 30), (0, 30)]);
+        let cells = fill(&nodes);
+        let xz = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let mut config = roof_config(&cells);
+        config.peak_cap = Some(12);
+        generate_dome_roof(&mut editor, &cells, &config, &nodes);
+        let crown = top(&editor, 15, 15);
+        assert_eq!(crown, BASE + 12);
+        assert_eq!(editor.get_block_absolute(15, crown - 1, 15), Some(BRICK));
+        // The hall under the crown is open.
+        assert_eq!(editor.get_block_absolute(15, BASE + 4, 15), None);
+        // The rim runs down to the wall top.
+        assert_eq!(editor.get_block_absolute(15, BASE, 0), Some(BRICK));
+    }
+
+    #[test]
+    fn parts_keep_thin_walls_under_a_pitched_roof() {
+        let part = ProcessedWay {
+            id: 1,
+            nodes: vec![],
+            tags: tag_map(&[
+                ("building:part", "yes"),
+                ("height", "4"),
+                ("roof:height", "3"),
+                ("roof:shape", "gabled"),
+            ]),
+        };
+        let (h, _) = calculate_building_height(&part, "yes", 0, 1.0, None, 4, 100, 1);
+        assert_eq!(h, 1);
+    }
+
+    #[test]
+    fn outward_normals_point_out_of_every_wall_of_an_l_shape() {
+        // Bar 0..20 x 0..4 plus a leg 0..4 x 0..20. The centroid of the
+        // vertices lies in the notch, which used to flip the two inner walls.
+        let nodes = ring(&[(0, 0), (20, 0), (20, 4), (4, 4), (4, 20), (0, 20)]);
+        let pts: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
+        let outward = outward_side(&nodes);
+        for pair in nodes.windows(2) {
+            let (x1, z1, x2, z2) = (pair[0].x, pair[0].z, pair[1].x, pair[1].z);
+            let (nx, nz) = compute_outward_normal(x1, z1, x2, z2, outward);
+            let (mx, mz) = ((x1 + x2) as f64 / 2.0, (z1 + z2) as f64 / 2.0);
+            assert!(
+                !polygon_contains(&pts, mx + nx as f64 * 0.5, mz + nz as f64 * 0.5),
+                "wall ({x1},{z1})-({x2},{z2}) normal ({nx},{nz}) points inside"
+            );
+        }
+        // The other winding gives the same answer.
+        let reversed: Vec<ProcessedNode> = nodes.iter().rev().cloned().collect();
+        let outward = outward_side(&reversed);
+        let (nx, nz) = compute_outward_normal(4, 4, 20, 4, outward);
+        assert_eq!((nx, nz), (0, 1));
+    }
+
+    #[test]
+    fn corners_are_convex_turns_only() {
+        let nodes = ring(&[(0, 0), (10, 0), (20, 0), (20, 4), (4, 4), (4, 20), (0, 20)]);
+        let outward = outward_side(&nodes);
+        assert!(corner_is_convex((0, 0), (20, 0), (20, 4), outward));
+        // Mid-wall node.
+        assert!(!corner_is_convex((0, 0), (10, 0), (20, 0), outward));
+        // Re-entrant corner of the L.
+        assert!(!corner_is_convex((20, 4), (4, 4), (4, 20), outward));
+        assert_eq!(ring_vertices(&nodes).len(), 7);
     }
 
     #[test]
