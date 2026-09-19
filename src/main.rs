@@ -37,6 +37,7 @@ mod models_3d;
 mod net;
 mod ore_generation;
 mod osm_parser;
+mod osm_tiles;
 mod overture;
 #[cfg(feature = "gui")]
 mod preview_3d;
@@ -424,6 +425,26 @@ fn run_cli() {
             osm_parser::OsmData::empty()
         } else if let Some(data) = preloaded_osm.take() {
             data
+        } else if !args.no_tile_archive && !args.osm_tiles_url.is_empty() {
+            // The archive is static files, so a miss here is a gap in coverage or a network
+            // problem - either way Overpass still has the data, and a run that can finish
+            // beats one that stops to explain itself.
+            match osm_tiles::fetch_data_from_tiles(effective_bbox, &args.osm_tiles_url) {
+                Ok(data) => data,
+                Err(e) => {
+                    eprintln!(
+                        "{} Tile archive unavailable ({e}); falling back to Overpass.",
+                        "Warning:".yellow().bold()
+                    );
+                    retrieve_data::fetch_data_from_overpass(
+                        effective_bbox,
+                        args.debug,
+                        args.downloader.as_str(),
+                        args.save_json_file.as_deref(),
+                    )
+                    .expect("Failed to fetch data")
+                }
+            }
         } else {
             retrieve_data::fetch_data_from_overpass(
                 effective_bbox,

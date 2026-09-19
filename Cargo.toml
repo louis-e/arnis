@@ -48,7 +48,7 @@ once_cell = "1.21.3"
 rand = { version = "0.9.3", features = ["std", "std_rng"] }
 rand_chacha = "0.9"
 rayon = "1.10.0"
-reqwest = { version = "0.13.1", features = ["blocking", "json", "query"] }
+reqwest = { version = "0.13.1", features = ["blocking", "json", "query", "gzip"] }
 rfd = { version = "0.17.2", optional = true }
 semver = "1.0.27"
 parquet = { version = "59", default-features = false, features = ["snap", "zstd"] }

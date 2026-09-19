@@ -27,7 +27,7 @@
 
 mod cache;
 mod mvt;
-mod pmtiles;
+pub(crate) mod pmtiles;
 mod tiles;
 
 pub use cache::{cache_root, clear_overture_cache};

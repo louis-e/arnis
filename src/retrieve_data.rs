@@ -5,7 +5,6 @@ use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use rand::prelude::SliceRandom;
-use rand::Rng;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
@@ -44,6 +43,8 @@ fn download_with_reqwest(
     query: &str,
     timeout_secs: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // Accept-Encoding is set (and the body decoded) by reqwest's `gzip` feature. Setting the
+    // header here instead would turn that off and hand us an undecoded body.
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(timeout_secs))
         .user_agent(OSM_USER_AGENT)
@@ -93,12 +94,7 @@ fn download_with_reqwest(
 
 /// Function to download data using `curl`
 fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
-    let output: std::process::Output = Command::new("curl")
-        .arg("-s") // Add silent mode to suppress output
-        .arg("-A")
-        .arg(OSM_USER_AGENT)
-        .arg(format!("{url}?data={query}"))
-        .output()?;
+    let output: std::process::Output = Command::new("curl").args(curl_args(url, query)).output()?;
 
     if !output.status.success() {
         Err(io::Error::other("Curl command failed"))
@@ -107,19 +103,48 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
+fn curl_args(url: &str, query: &str) -> Vec<String> {
+    vec![
+        "-s".to_string(), // Add silent mode to suppress output
+        // Announce gzip and decode it; Overpass sends ~7x less over the wire, and its
+        // primary server rejects requests that advertise no encoding at all.
+        "--compressed".to_string(),
+        "-A".to_string(),
+        OSM_USER_AGENT.to_string(),
+        format!("{url}?data={query}"),
+    ]
+}
+
 /// Function to download data using `wget`
+///
+/// `--compression=auto` needs wget >= 1.19.2 built with zlib, so a failure is retried
+/// uncompressed rather than taken as the download having failed.
 fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
-    let output: std::process::Output = Command::new("wget")
-        .arg("-qO-") // Use `-qO-` to output the result directly to stdout
-        .arg(format!("--user-agent={OSM_USER_AGENT}"))
-        .arg(format!("{url}?data={query}"))
+    let mut output: std::process::Output = Command::new("wget")
+        .args(wget_args(url, query, true))
         .output()?;
+
+    if !output.status.success() {
+        output = Command::new("wget")
+            .args(wget_args(url, query, false))
+            .output()?;
+    }
 
     if !output.status.success() {
         Err(io::Error::other("Wget command failed"))
     } else {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+}
+
+fn wget_args(url: &str, query: &str, compressed: bool) -> Vec<String> {
+    let mut args = vec!["-qO-".to_string()]; // Use `-qO-` to output the result directly to stdout
+    if compressed {
+        args.push("--compression=auto".to_string());
+    }
+    args.push(format!("--user-agent={OSM_USER_AGENT}"));
+    args.push(format!("{url}?data={query}"));
+    args
 }
 
 /// Whether an Overpass `remark` means the result is cut short.
@@ -223,17 +248,16 @@ pub fn fetch_data_from_overpass(
     println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
 
-    // List of Overpass API servers
+    // Arnis's own instance, and only that one.
+    //
+    // OSM data comes from the tile archive now (see `osm_tiles`); Overpass is what answers when
+    // a tile is missing. The public instances that used to be in this list are deliberately
+    // gone: arnis was blocked from overpass-api.de for using more than its share (issue #1347),
+    // and maps.mail.ru and private.coffee are small volunteer instances that failing over to
+    // would only move the problem onto someone else.
     let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";
-    let api_servers: Vec<&str> = vec![
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-    ];
-    let fallback_api_servers: Vec<&str> = vec![
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-    ];
+    let api_servers: Vec<&str> = vec![];
+    let fallback_api_servers: Vec<&str> = vec![];
 
     // Generate Overpass API query for bounding box.
     // Ocean/coastal elements are excluded because ESA WorldCover satellite data
@@ -301,14 +325,7 @@ pub fn fetch_data_from_overpass(
 
         let mut rng = rand::rng();
         let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
-        let mut probed_server: Option<&str> = None;
-
-        if rng.random_bool(0.5) {
-            let probe_idx = rng.random_range(0..api_servers.len());
-            let probe_server = api_servers[probe_idx];
-            request_plan.push((probe_server, ServerKind::Primary));
-            probed_server = Some(probe_server);
-        }
+        let probed_server: Option<&str> = None;
 
         request_plan.push((arnis_api_server, ServerKind::Primary));
 
@@ -548,6 +565,34 @@ mod user_agent_tests {
         // Only ASCII, and short enough that no server's header limit is in play.
         assert!(OSM_USER_AGENT.is_ascii());
         assert!(OSM_USER_AGENT.len() < 200);
+    }
+}
+
+#[cfg(test)]
+mod compression_tests {
+    use super::*;
+
+    #[test]
+    fn curl_asks_for_a_compressed_body() {
+        let args = curl_args("https://example.org/api", "[out:json];");
+        assert!(args.contains(&"--compressed".to_string()));
+        assert!(args
+            .last()
+            .unwrap()
+            .starts_with("https://example.org/api?data="));
+    }
+
+    // The retry exists because the flag is not universally available; both shapes must stay
+    // valid downloads, differing only in that one flag.
+    #[test]
+    fn wget_drops_only_the_compression_flag_on_retry() {
+        let with = wget_args("https://example.org/api", "[out:json];", true);
+        let without = wget_args("https://example.org/api", "[out:json];", false);
+        assert!(with.contains(&"--compression=auto".to_string()));
+        assert!(!without.contains(&"--compression=auto".to_string()));
+        assert_eq!(with.len(), without.len() + 1);
+        assert_eq!(with[0], "-qO-");
+        assert_eq!(with.last(), without.last());
     }
 }
 

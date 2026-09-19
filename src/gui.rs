@@ -1649,6 +1649,8 @@ fn gui_start_generation(
                 // Parquet reader drops entirely - but both differences are far
                 // below a block, so the choice is not worth a GUI setting.
                 overture_source: crate::args::OvertureSource::Auto,
+                osm_tiles_url: crate::osm_tiles::DEFAULT_OSM_TILES_URL.to_string(),
+                no_tile_archive: false,
                 use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
