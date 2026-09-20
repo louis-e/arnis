@@ -20,10 +20,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Where the published archive lives. Point DNS at the R2 bucket, or override per run with
-/// `--osm-tiles-url`. The version prefix is part of it: a re-bake is published beside the old
-/// one and switched to here, so a run in flight never sees half of each.
-pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnismc.com/v1";
+/// Where the published archive lives. Override per run with `--osm-tiles-url`. The version
+/// prefix is part of it: a re-bake is published beside the old one and switched to here, so a
+/// run in flight never sees half of each.
+///
+/// This is the bucket's own r2.dev hostname, which Cloudflare rate-limits on purpose. Swap it
+/// for `https://tiles.arnismc.com/v1` once that custom domain is connected - that is also what
+/// buys edge caching and rate-limiting rules.
+pub const DEFAULT_OSM_TILES_URL: &str =
+    "https://pub-95eb0758eca945818437b8df81fc40a3.r2.dev/v1";
 
 /// Archive zoom. Must match `arnis-tiles`; a mismatch means every lookup misses.
 const ZOOM: u8 = 13;
