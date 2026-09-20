@@ -66,6 +66,17 @@ fn cache_root() -> Option<PathBuf> {
     dirs::cache_dir().map(|d| d.join("arnis").join("osm-tiles"))
 }
 
+/// Cache dir for one archive base URL. Cached ranges are byte offsets into one specific file, so
+/// a different host or version prefix must not reuse them.
+fn cache_root_for(base_url: &str) -> Option<PathBuf> {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in base_url.trim_end_matches('/').as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    cache_root().map(|d| d.join(format!("{h:016x}")))
+}
+
 fn client() -> Result<Client> {
     Client::builder()
         .timeout(Duration::from_secs(120))
@@ -77,7 +88,7 @@ fn client() -> Result<Client> {
 /// The archive directory, refreshed daily. A stale copy still names archives that exist.
 fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
     let url = format!("{}/archives.json", base_url.trim_end_matches('/'));
-    let cached = cache_root().map(|d| d.join("archives.json"));
+    let cached = cache_root_for(base_url).map(|d| d.join("archives.json"));
     if let Some(p) = &cached {
         if let Ok(md) = std::fs::metadata(p) {
             let fresh = md
@@ -155,7 +166,7 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
 
     for entry in manifest.archives.iter().filter(|a| a.overlaps(&bbox)) {
         let url = format!("{}/{}", base_url.trim_end_matches('/'), entry.file);
-        let cache = cache_root().map(|d| d.join(&entry.name));
+        let cache = cache_root_for(base_url).map(|d| d.join(&entry.name));
         let mut archive = Archive::open_allowing(&client, &url, cache, &[TILE_TYPE_UNKNOWN])?;
 
         let mut located = Vec::new();
@@ -174,6 +185,8 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
                     return Ok((0, Vec::new()));
                 }
                 let on_wire = raw.len() as u64;
+                // Archives are written with tile_compression=none, so `tile` returns the stored
+                // bytes as-is and the zstd frame the baker wrote is still around them.
                 let plain = zstd::stream::decode_all(&raw[..])
                     .map_err(|e| format!("tile {ZOOM}/{x}/{y} is not readable: {e}"))?;
                 if plain.len() as u64 > MAX_TILE_BYTES {
@@ -460,6 +473,15 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_dirs_differ_per_base_url() {
+        let a = cache_root_for("https://tiles.arnisproject.com/v1");
+        let b = cache_root_for("https://tiles.arnisproject.com/v2");
+        let c = cache_root_for("https://tiles.arnisproject.com/v1/");
+        assert_ne!(a, b);
+        assert_eq!(a, c);
+    }
 
     // The baker and the client must agree on the grid or every lookup misses. This is the
     // tile arnis-tiles computes for Andorra la Vella at z13.
