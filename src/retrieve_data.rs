@@ -238,6 +238,37 @@ pub fn fetch_data_from_file(
     }
 }
 
+/// The OSM source for a run: the tile archive when one is configured, Overpass when it is not
+/// or when the archive cannot answer.
+///
+/// Both front-ends go through here. They used to each decide for themselves, and the GUI went
+/// on querying Overpass for every world after the CLI had moved to the archive - the kind of
+/// drift that only surfaces when someone watches the log.
+pub fn fetch_osm_data(
+    bbox: LLBBox,
+    debug: bool,
+    download_method: &str,
+    save_file: Option<&str>,
+    tiles_url: &str,
+    use_tile_archive: bool,
+) -> Result<OsmData, Box<dyn std::error::Error>> {
+    if use_tile_archive && !tiles_url.is_empty() {
+        // The archive is static files, so a miss here is a gap in coverage or a network
+        // problem - either way Overpass still has the data, and a run that can finish beats
+        // one that stops to explain itself.
+        match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url) {
+            Ok(data) => return Ok(data),
+            Err(e) => eprintln!(
+                "{}",
+                format!("Warning: Tile archive unavailable ({e}); falling back to Overpass.")
+                    .yellow()
+                    .bold()
+            ),
+        }
+    }
+    fetch_data_from_overpass(bbox, debug, download_method, save_file)
+}
+
 /// Main function to fetch data
 pub fn fetch_data_from_overpass(
     bbox: LLBBox,

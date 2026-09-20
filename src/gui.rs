@@ -1783,8 +1783,14 @@ fn gui_start_generation(
                     }
                 });
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
-                let fetch_result =
-                    retrieve_data::fetch_data_from_overpass(bbox, args.debug, "requests", None);
+                let fetch_result = retrieve_data::fetch_osm_data(
+                    bbox,
+                    args.debug,
+                    "requests",
+                    None,
+                    &args.osm_tiles_url,
+                    !args.no_tile_archive,
+                );
                 // A panicked worker already reported itself through the panic hook.
                 // Overture is supplementary, so drop it and keep going; terrain is
                 // not, so hand the failure back instead of taking the app down.
