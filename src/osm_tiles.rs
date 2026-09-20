@@ -1,31 +1,22 @@
 //! Reads OSM data from the Arnis tile archive instead of Overpass.
 //!
-//! The archive is a set of PMTiles files on static hosting, one per continent, baked from the
-//! OpenStreetMap planet by the `arnis-tiles` tool. A run fetches only the z13 tiles its bbox
-//! covers - a few hundred KB for a city - over HTTP range requests, and keeps them on disk, so
-//! regenerating the same area costs nothing and no OSM server is involved at all.
-//!
-//! Way vertices carry no OSM ids in the archive; ids are minted here, keyed by coordinate, so
-//! a point shared by two ways keeps one id and a closed ring still starts and ends on the same
-//! node - both of which the downstream parser reads.
+//! One PMTiles file per continent on static hosting, baked by the `arnis-tiles` tool. A run
+//! range-fetches only the z13 tiles its bbox covers and caches them on disk.
 
 use crate::coordinate_system::geographic::LLBBox;
 use crate::osm_parser::{OsmData, OsmElement, OsmMember};
 use crate::overture::pmtiles::{self, Archive, TILE_TYPE_UNKNOWN};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
+use rayon::prelude::*;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Where the published archive lives. Override per run with `--osm-tiles-url`.
-///
-/// The version prefix is part of it: a re-bake is published beside the old one and switched to
-/// here, so a run in flight never sees half of each. The host is a Cloudflare custom domain
-/// rather than the bucket's own r2.dev name, which buys edge caching and rate limiting and is
-/// not rate-limited by Cloudflare the way r2.dev deliberately is.
+/// Override per run with `--osm-tiles-url`. The version prefix is part of it: a re-bake is
+/// published beside the old one, so a run in flight never sees half of each.
 pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnisproject.com/v1";
 
 /// Archive zoom. Must match `arnis-tiles`; a mismatch means every lookup misses.
@@ -34,8 +25,8 @@ const ZOOM: u8 = 13;
 /// Degrees per stored coordinate unit in the tile payload. Must match arnis-tiles.
 const COORD_SCALE: f64 = 1e6;
 
-/// Synthetic ids for way vertices start here. Real OSM node ids are far below it, so a minted
-/// id can never be mistaken for one the archive actually carries.
+/// Way vertices carry no OSM id, so one is minted per coordinate from here. Real node ids are
+/// far below this.
 const SYNTHETIC_ID_BASE: u64 = 1 << 62;
 
 /// Refuse a tile that decompresses to more than this.
@@ -83,8 +74,7 @@ fn client() -> Result<Client> {
         .map_err(|e| e.to_string())
 }
 
-/// The archive directory, refreshed daily. A stale copy beats no copy: the archives it lists
-/// are still there, and a bake only ever adds to them.
+/// The archive directory, refreshed daily. A stale copy still names archives that exist.
 fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
     let url = format!("{}/archives.json", base_url.trim_end_matches('/'));
     let cached = cache_root().map(|d| d.join("archives.json"));
@@ -121,7 +111,7 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
     Ok(parsed)
 }
 
-/// Everything decoded out of the archive for one bbox, before it becomes [`OsmData`].
+/// Decoded tiles for one bbox, before they become [`OsmData`].
 type Tags = Vec<(String, String)>;
 type NodeBody = (i32, i32, Tags);
 type WayBody = (bool, Tags, Vec<(i32, i32)>);
@@ -174,17 +164,31 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
                 located.push((*x, *y, loc));
             }
         }
-        for (x, y, loc) in located {
-            let raw = archive.tile(&client, ZOOM, x, y, loc)?;
-            if raw.is_empty() {
+        // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
+        // that is dominated by round trips (72 tiles took 94s, most of it waiting).
+        let fetched: Vec<Result<(u64, Vec<u8>)>> = located
+            .par_iter()
+            .map(|(x, y, loc)| {
+                let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
+                if raw.is_empty() {
+                    return Ok((0, Vec::new()));
+                }
+                let on_wire = raw.len() as u64;
+                let plain = zstd::stream::decode_all(&raw[..])
+                    .map_err(|e| format!("tile {ZOOM}/{x}/{y} is not readable: {e}"))?;
+                if plain.len() as u64 > MAX_TILE_BYTES {
+                    return Err(format!("tile {ZOOM}/{x}/{y} expands past the size cap"));
+                }
+                Ok((on_wire, plain))
+            })
+            .collect();
+
+        for entry in fetched {
+            let (on_wire, plain) = entry?;
+            if plain.is_empty() {
                 continue;
             }
-            bytes += raw.len() as u64;
-            let plain = zstd::stream::decode_all(&raw[..])
-                .map_err(|e| format!("tile {ZOOM}/{x}/{y} is not readable: {e}"))?;
-            if plain.len() as u64 > MAX_TILE_BYTES {
-                return Err(format!("tile {ZOOM}/{x}/{y} expands past the size cap"));
-            }
+            bytes += on_wire;
             absorb(&plain, &mut collected)?;
             tiles_read += 1;
         }
@@ -216,12 +220,10 @@ fn absorb(payload: &[u8], out: &mut Collected) -> Result<()> {
     Ok(())
 }
 
-/// Turns the decoded tiles into the element list the Overpass path produces, so every stage
-/// after this one is identical whichever source the data came from.
+/// Builds the element list the Overpass path produces, so every later stage is unchanged.
 fn assemble(c: Collected) -> OsmData {
     let mut elements: Vec<OsmElement> = Vec::new();
-    // One id per distinct coordinate: two ways meeting at a point share a node, and a ring's
-    // first and last vertex land on the same id, which is how a closed way is recognised.
+    // One id per distinct coordinate, so junctions share a node and a ring closes on itself.
     let mut coord_ids: HashMap<(i32, i32), u64> = HashMap::new();
     let mut next_synthetic = SYNTHETIC_ID_BASE;
     let mut emitted: Vec<(u64, i32, i32)> = Vec::new();
@@ -316,8 +318,7 @@ fn assemble(c: Collected) -> OsmData {
 }
 
 // ── the AOT1 payload ──────────────────────────────────────────────────────────
-// Mirror of arnis-tiles/src/format.rs. Kept as a straight decoder: the archive is produced
-// once by that tool, and anything it cannot read must be reported rather than half-decoded.
+// Mirror of arnis-tiles/src/format.rs.
 
 type DecNode = (u64, i32, i32, Tags);
 type DecWay = (u64, bool, Tags, Vec<(i32, i32)>);

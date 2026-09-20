@@ -614,14 +614,9 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
         };
 
         let status = response.status();
-        // A 200 means the server ignored the range and is about to send the whole archive.
-        // Refusing is the only safe answer at 180 GB - the body is dropped unread.
-        //
-        // It is worth retrying rather than giving up, though: a CDN asked to cache an object
-        // answers the first request at each edge by fetching the whole thing, range header and
-        // all, and serves the range normally once it has decided. Cloudflare does this to every
-        // archive on its first request per location, so treating it as fatal sent one run in
-        // every few back to Overpass for no reason.
+        // A 200 means the range was ignored and the whole archive is coming; the body is
+        // dropped unread. Retried rather than fatal: a CDN filling its cache answers the first
+        // request per edge this way, then serves ranges normally.
         if status.as_u16() != 206 {
             last_error = format!("HTTP {status} fetching range from {url} (expected 206)");
             let worth_retrying =

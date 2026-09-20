@@ -43,8 +43,7 @@ fn download_with_reqwest(
     query: &str,
     timeout_secs: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Accept-Encoding is set (and the body decoded) by reqwest's `gzip` feature. Setting the
-    // header here instead would turn that off and hand us an undecoded body.
+    // reqwest's `gzip` feature sets Accept-Encoding and decodes; setting it here disables that.
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(timeout_secs))
         .user_agent(OSM_USER_AGENT)
@@ -106,8 +105,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
 fn curl_args(url: &str, query: &str) -> Vec<String> {
     vec![
         "-s".to_string(), // Add silent mode to suppress output
-        // Announce gzip and decode it; Overpass sends ~7x less over the wire, and its
-        // primary server rejects requests that advertise no encoding at all.
+        // Overpass sends ~7x less over the wire, and rejects requests advertising no encoding.
         "--compressed".to_string(),
         "-A".to_string(),
         OSM_USER_AGENT.to_string(),
@@ -238,12 +236,10 @@ pub fn fetch_data_from_file(
     }
 }
 
-/// The OSM source for a run: the tile archive when one is configured, Overpass when it is not
-/// or when the archive cannot answer.
+/// The OSM source for a run: the tile archive, falling back to Overpass.
 ///
-/// Both front-ends go through here. They used to each decide for themselves, and the GUI went
-/// on querying Overpass for every world after the CLI had moved to the archive - the kind of
-/// drift that only surfaces when someone watches the log.
+/// Both front-ends go through here; deciding separately is how the GUI kept querying Overpass
+/// after the CLI had moved to the archive.
 pub fn fetch_osm_data(
     bbox: LLBBox,
     debug: bool,
@@ -253,9 +249,7 @@ pub fn fetch_osm_data(
     use_tile_archive: bool,
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     if use_tile_archive && !tiles_url.is_empty() {
-        // The archive is static files, so a miss here is a gap in coverage or a network
-        // problem - either way Overpass still has the data, and a run that can finish beats
-        // one that stops to explain itself.
+        // A miss is a coverage gap or a network problem, and Overpass still has the data.
         match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url) {
             Ok(data) => return Ok(data),
             Err(e) => eprintln!(
@@ -279,13 +273,10 @@ pub fn fetch_data_from_overpass(
     println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
 
-    // Arnis's own instance, and only that one.
-    //
-    // OSM data comes from the tile archive now (see `osm_tiles`); Overpass is what answers when
-    // a tile is missing. The public instances that used to be in this list are deliberately
-    // gone: arnis was blocked from overpass-api.de for using more than its share (issue #1347),
-    // and maps.mail.ru and private.coffee are small volunteer instances that failing over to
-    // would only move the problem onto someone else.
+    // Arnis's own instance, and only that one. Data comes from the tile archive now; this is
+    // the fallback. The public instances are deliberately gone: arnis was blocked from
+    // overpass-api.de for using more than its share (#1347), and failing over to the small
+    // volunteer instances would only move the problem onto someone else.
     let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";
     let api_servers: Vec<&str> = vec![];
     let fallback_api_servers: Vec<&str> = vec![];
