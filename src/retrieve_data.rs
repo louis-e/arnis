@@ -240,6 +240,31 @@ pub fn fetch_data_from_file(
 ///
 /// Both front-ends go through here; deciding separately is how the GUI kept querying Overpass
 /// after the CLI had moved to the archive.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+/// Coarse bucket for an archive miss. Only the category is reported: the error text can name a
+/// tile, which locates the user to a few kilometres.
+fn fallback_reason(e: &str) -> &'static str {
+    const BUCKETS: [(&str, &str); 12] = [
+        ("has no data for this area", "no_data_for_area"),
+        ("that area needs", "area_too_large"),
+        ("index unreachable", "index_unreachable"),
+        ("bad archive index", "bad_index"),
+        ("unusable name", "bad_index"),
+        ("archive is zoom", "zoom_mismatch"),
+        ("expected 206", "range_http"),
+        ("range request to", "network"),
+        ("could not be read", "network"),
+        ("not an Arnis tile payload", "tile_decode"),
+        ("truncated tile", "tile_decode"),
+        ("implausible", "tile_decode"),
+    ];
+    BUCKETS
+        .iter()
+        .find(|(needle, _)| e.contains(needle))
+        .map(|(_, bucket)| *bucket)
+        .unwrap_or("other")
+}
+
 pub fn fetch_osm_data(
     bbox: LLBBox,
     debug: bool,
@@ -252,12 +277,19 @@ pub fn fetch_osm_data(
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
         match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url) {
             Ok(data) => return Ok(data),
-            Err(e) => eprintln!(
-                "{}",
-                format!("Warning: Tile archive unavailable ({e}); falling back to Overpass.")
-                    .yellow()
-                    .bold()
-            ),
+            Err(e) => {
+                eprintln!(
+                    "{}",
+                    format!("Warning: Tile archive unavailable ({e}); falling back to Overpass.")
+                        .yellow()
+                        .bold()
+                );
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    &format!("tile_archive_fallback: {}", fallback_reason(&e)),
+                );
+            }
         }
     }
     fetch_data_from_overpass(bbox, debug, download_method, save_file)
@@ -768,5 +800,48 @@ mod fetch_from_file_tests {
             fetch_data_from_file(path.to_str().unwrap()).expect("JSON dump should load");
         assert!(bounds.is_none());
         assert!(!data.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_reasons_bucket_real_errors() {
+        for (err, want) in [
+            (
+                "the tile archive has no data for this area",
+                "no_data_for_area",
+            ),
+            (
+                "that area needs 9001 tiles, past the 4096 cap",
+                "area_too_large",
+            ),
+            (
+                "tile archive index unreachable: connection refused",
+                "index_unreachable",
+            ),
+            ("bad archive index: expected value", "bad_index"),
+            (
+                "archive is zoom 12 but this build reads zoom 13",
+                "zoom_mismatch",
+            ),
+            (
+                "HTTP 403 fetching range from https://x/y (expected 206)",
+                "range_http",
+            ),
+            ("tile 13/1/2 is not readable: truncated tile", "tile_decode"),
+            ("something nobody predicted", "other"),
+        ] {
+            assert_eq!(fallback_reason(err), want, "for {err:?}");
+        }
+    }
+
+    // A bucket must never carry the tile coordinates the error text holds.
+    #[test]
+    fn fallback_reasons_are_coordinate_free() {
+        let e = "tile 13/4359/2842 expands past the size cap";
+        assert!(!fallback_reason(e).contains("4359"));
     }
 }

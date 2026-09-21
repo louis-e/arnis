@@ -48,7 +48,6 @@ struct Manifest {
 
 #[derive(Debug, Deserialize)]
 struct ArchiveEntry {
-    name: String,
     file: String,
     min_lat: f64,
     min_lon: f64,
@@ -57,14 +56,15 @@ struct ArchiveEntry {
 }
 
 impl ArchiveEntry {
-    /// `name` becomes a cache directory, so it must be one harmless path component.
-    fn name_is_safe(&self) -> bool {
-        !self.name.is_empty()
-            && self.name.len() <= 64
+    /// `file` becomes a cache directory and a URL suffix, so it must be one harmless component.
+    fn file_is_safe(&self) -> bool {
+        !self.file.is_empty()
+            && self.file.len() <= 96
+            && !self.file.contains("..")
             && self
-                .name
+                .file
                 .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
     }
 
     fn overlaps(&self, bbox: &LLBBox) -> bool {
@@ -75,8 +75,16 @@ impl ArchiveEntry {
     }
 }
 
-fn cache_root() -> Option<PathBuf> {
+pub fn cache_root() -> Option<PathBuf> {
     dirs::cache_dir().map(|d| d.join("arnis").join("osm-tiles"))
+}
+
+/// Frees the whole archive cache, including dirs left by older cache layouts.
+pub fn clear_osm_tiles_cache() -> crate::elevation::cache::CacheClearStats {
+    match cache_root() {
+        Some(d) => crate::elevation::cache::clear_cache_dir(&d),
+        None => Default::default(),
+    }
 }
 
 /// Cached ranges are offsets into one specific file, so each base URL gets its own dir.
@@ -177,14 +185,14 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     let mut bytes = 0u64;
 
     for entry in manifest.archives.iter().filter(|a| a.overlaps(&bbox)) {
-        if !entry.name_is_safe() {
+        if !entry.file_is_safe() {
             return Err(format!(
                 "archive index has an unusable name: {:?}",
-                entry.name
+                entry.file
             ));
         }
         let url = format!("{}/{}", base_url.trim_end_matches('/'), entry.file);
-        let cache = cache_root_for(base_url).map(|d| d.join(&entry.name));
+        let cache = cache_root_for(base_url).map(|d| d.join(&entry.file));
         let mut archive = Archive::open_allowing(&client, &url, cache, &[TILE_TYPE_UNKNOWN])?;
 
         let mut located = Vec::new();
@@ -500,10 +508,9 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
 mod tests {
     use super::*;
 
-    fn entry_named(name: &str) -> ArchiveEntry {
+    fn entry_named(file: &str) -> ArchiveEntry {
         ArchiveEntry {
-            name: name.to_string(),
-            file: "x.pmtiles".into(),
+            file: file.to_string(),
             min_lat: 0.0,
             min_lon: 0.0,
             max_lat: 1.0,
@@ -513,20 +520,20 @@ mod tests {
 
     #[test]
     fn manifest_names_cannot_escape_the_cache_root() {
-        for good in ["europe", "australia-oceania", "north_america"] {
-            assert!(entry_named(good).name_is_safe(), "{good} should be allowed");
+        for good in ["europe-20260921.pmtiles", "north_america-20260921.pmtiles"] {
+            assert!(entry_named(good).file_is_safe(), "{good} should be allowed");
         }
         for bad in [
             "",
             "..",
-            "../etc",
+            "../etc.pmtiles",
             "/etc/passwd",
-            "a/b",
-            "a\\b",
-            &"x".repeat(65),
+            "a/b.pmtiles",
+            "a\\b.pmtiles",
+            &"x".repeat(97),
         ] {
             assert!(
-                !entry_named(bad).name_is_safe(),
+                !entry_named(bad).file_is_safe(),
                 "{bad:?} should be refused"
             );
         }
