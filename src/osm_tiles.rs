@@ -40,6 +40,9 @@ const MAX_TILES: usize = 4096;
 /// archives to read one.
 const CELL_ZOOM: u8 = 6;
 
+const MAX_LAT_E6: i64 = 90_000_000;
+const MAX_LON_E6: i64 = 180_000_000;
+
 /// Per-kind record cap. Far above a real tile; stops a corrupt one from outgrowing its payload.
 const MAX_RECORDS: u64 = 1 << 24;
 
@@ -194,21 +197,31 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
 
     let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), ZOOM);
     let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), ZOOM);
-    let wanted: Vec<(u32, u32)> = (min_x.min(max_x)..=min_x.max(max_x))
-        .flat_map(|x| (min_y.min(max_y)..=min_y.max(max_y)).map(move |y| (x, y)))
-        .collect();
-    if wanted.len() > MAX_TILES {
+    let (xs, xe) = (min_x.min(max_x), min_x.max(max_x));
+    let (ys, ye) = (min_y.min(max_y), min_y.max(max_y));
+    // Counted before collecting: a planet-sized bbox is 67M tiles, and the vector would be
+    // hundreds of megabytes before the cap ever ran.
+    let needed = ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1);
+    if needed > MAX_TILES {
         return Err(format!(
-            "that area needs {} tiles, past the {MAX_TILES} cap",
-            wanted.len()
+            "that area needs {needed} tiles, past the {MAX_TILES} cap"
         ));
     }
+    let wanted: Vec<(u32, u32)> = (xs..=xe)
+        .flat_map(|x| (ys..=ye).map(move |y| (x, y)))
+        .collect();
 
     let mut collected = Collected::default();
     let mut tiles_read = 0usize;
     let mut bytes = 0u64;
 
-    let shift = ZOOM.saturating_sub(manifest.cell_zoom);
+    if manifest.cell_zoom > ZOOM {
+        return Err(format!(
+            "archive index has cell zoom {} above zoom {ZOOM}",
+            manifest.cell_zoom
+        ));
+    }
+    let shift = ZOOM - manifest.cell_zoom;
     let side = 1u32 << manifest.cell_zoom;
     let cells: std::collections::HashSet<u32> = wanted
         .iter()
@@ -435,6 +448,32 @@ impl Reader<'_> {
     }
 }
 
+/// Accumulates one delta, refusing the wrap a corrupt tile would otherwise get.
+fn step(acc: &mut i64, r: &mut Reader<'_>) -> Result<i64> {
+    *acc = acc
+        .checked_add(r.svarint()?)
+        .ok_or("tile delta overflows")?;
+    Ok(*acc)
+}
+
+/// Stored coordinates are degrees x 1e6. Out-of-globe values reach `LLPoint::new` downstream,
+/// which panics rather than returning, so they are rejected here.
+fn coord(v: i64, limit: i64) -> Result<i32> {
+    if !(-limit..=limit).contains(&v) {
+        return Err("tile coordinate out of range".into());
+    }
+    Ok(v as i32)
+}
+
+/// Real OSM ids only. Anything at or above the synthetic base would collide with the ids
+/// `assemble` mints for way vertices.
+fn oid(v: i64) -> Result<u64> {
+    match u64::try_from(v) {
+        Ok(id) if id < SYNTHETIC_ID_BASE => Ok(id),
+        _ => Err("tile id out of range".into()),
+    }
+}
+
 fn decode(buf: &[u8]) -> Result<DecodedTile> {
     if buf.len() < 4 || &buf[..4] != b"AOT1" {
         return Err("not an Arnis tile payload".into());
@@ -480,11 +519,11 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     }
     let (mut id, mut lat, mut lon) = (0i64, 0i64, 0i64);
     for _ in 0..n_nodes {
-        id += r.svarint()?;
-        lat += r.svarint()?;
-        lon += r.svarint()?;
+        let nid = oid(step(&mut id, &mut r)?)?;
+        let y = coord(step(&mut lat, &mut r)?, MAX_LAT_E6)?;
+        let x = coord(step(&mut lon, &mut r)?, MAX_LON_E6)?;
         let tags = read_tags(&mut r)?;
-        tile.nodes.push((id as u64, lat as i32, lon as i32, tags));
+        tile.nodes.push((nid, y, x, tags));
     }
 
     let n_ways = r.uvarint()?;
@@ -493,7 +532,7 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     }
     let mut id = 0i64;
     for _ in 0..n_ways {
-        id += r.svarint()?;
+        let wid = oid(step(&mut id, &mut r)?)?;
         let closed = r.byte()? != 0;
         let tags = read_tags(&mut r)?;
         let n_pts = r.uvarint()?;
@@ -503,11 +542,11 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
         let mut pts = Vec::with_capacity(n_pts as usize);
         let (mut a, mut o) = (0i64, 0i64);
         for _ in 0..n_pts {
-            a += r.svarint()?;
-            o += r.svarint()?;
-            pts.push((a as i32, o as i32));
+            let y = coord(step(&mut a, &mut r)?, MAX_LAT_E6)?;
+            let x = coord(step(&mut o, &mut r)?, MAX_LON_E6)?;
+            pts.push((y, x));
         }
-        tile.ways.push((id as u64, closed, tags, pts));
+        tile.ways.push((wid, closed, tags, pts));
     }
 
     let n_rels = r.uvarint()?;
@@ -516,7 +555,7 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     }
     let mut id = 0i64;
     for _ in 0..n_rels {
-        id += r.svarint()?;
+        let rid = oid(step(&mut id, &mut r)?)?;
         let tags = read_tags(&mut r)?;
         let n_mem = r.uvarint()?;
         if n_mem > 1 << 20 {
@@ -525,11 +564,11 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
         let mut members = Vec::with_capacity(n_mem as usize);
         let mut pm = 0i64;
         for _ in 0..n_mem {
-            pm += r.svarint()?;
+            let mid = oid(step(&mut pm, &mut r)?)?;
             let role = r.uvarint()?;
-            members.push((pm as u64, at(role)?));
+            members.push((mid, at(role)?));
         }
-        tile.relations.push((id as u64, tags, members));
+        tile.relations.push((rid, tags, members));
     }
 
     Ok(tile)
@@ -582,6 +621,65 @@ mod tests {
             Ok(_) => panic!("absurd node count was accepted"),
         };
         assert!(err.contains("node count"), "unexpected error: {err}");
+    }
+
+    fn uvar(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let b = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return;
+            }
+            out.push(b | 0x80);
+        }
+    }
+
+    fn svar(v: i64, out: &mut Vec<u8>) {
+        uvar(((v << 1) ^ (v >> 63)) as u64, out);
+    }
+
+    fn node_tile(deltas: &[(i64, i64, i64)]) -> Vec<u8> {
+        let mut buf = b"AOT1".to_vec();
+        buf.push(0);
+        uvar(deltas.len() as u64, &mut buf);
+        for (id, lat, lon) in deltas {
+            svar(*id, &mut buf);
+            svar(*lat, &mut buf);
+            svar(*lon, &mut buf);
+            buf.push(0);
+        }
+        buf.push(0); // no ways
+        buf.push(0); // no relations
+        buf
+    }
+
+    fn decode_err(buf: &[u8]) -> String {
+        match decode(buf) {
+            Err(e) => e,
+            Ok(_) => panic!("corrupt tile was accepted"),
+        }
+    }
+
+    // Out-of-globe coordinates reach LLPoint::new downstream, which panics instead of
+    // returning, so the decoder has to be the thing that says no.
+    #[test]
+    fn out_of_range_coordinates_are_refused() {
+        let err = decode_err(&node_tile(&[(1, 200_000_000, 0)]));
+        assert!(err.contains("out of range"), "{err}");
+    }
+
+    #[test]
+    fn delta_overflow_is_refused() {
+        let err = decode_err(&node_tile(&[(1, MAX_LAT_E6, 0), (1, i64::MAX, 0)]));
+        assert!(err.contains("overflow"), "{err}");
+    }
+
+    #[test]
+    fn ids_colliding_with_synthetic_ones_are_refused() {
+        let err = decode_err(&node_tile(&[(SYNTHETIC_ID_BASE as i64, 0, 0)]));
+        assert!(err.contains("id out of range"), "{err}");
+        assert!(decode(&node_tile(&[(1, 0, 0)])).is_ok());
     }
 
     #[test]
