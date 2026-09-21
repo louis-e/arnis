@@ -35,6 +35,11 @@ const MAX_TILE_BYTES: u64 = 256 * 1024 * 1024;
 /// Guards against a bbox that would ask for the whole planet tile by tile.
 const MAX_TILES: usize = 4096;
 
+/// Zoom of the index's coverage cells. Continent bboxes overlap enormously - north-america,
+/// russia and antarctica all span every longitude - so a bbox test alone opens up to six
+/// archives to read one.
+const CELL_ZOOM: u8 = 6;
+
 /// Per-kind record cap. Far above a real tile; stops a corrupt one from outgrowing its payload.
 const MAX_RECORDS: u64 = 1 << 24;
 
@@ -43,12 +48,22 @@ type Result<T> = std::result::Result<T, String>;
 #[derive(Debug, Deserialize)]
 struct Manifest {
     zoom: u8,
+    #[serde(default = "default_cell_zoom")]
+    cell_zoom: u8,
     archives: Vec<ArchiveEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+fn default_cell_zoom() -> u8 {
+    CELL_ZOOM
+}
+
+#[derive(Debug, Deserialize, Clone)]
 struct ArchiveEntry {
     file: String,
+    /// Coarse cells the archive really holds. Absent in indexes baked before this existed, and
+    /// then only the bbox is available.
+    #[serde(default)]
+    cells: Vec<u32>,
     min_lat: f64,
     min_lon: f64,
     max_lat: f64,
@@ -65,6 +80,15 @@ impl ArchiveEntry {
                 .file
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+    }
+
+    /// Whether the archive holds any of `wanted`. Falls back to the bbox when the index carries
+    /// no cells.
+    fn covers(&self, wanted: &std::collections::HashSet<u32>, bbox: &LLBBox) -> bool {
+        if self.cells.is_empty() {
+            return self.overlaps(bbox);
+        }
+        self.cells.iter().any(|c| wanted.contains(c))
     }
 
     fn overlaps(&self, bbox: &LLBBox) -> bool {
@@ -184,7 +208,14 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     let mut tiles_read = 0usize;
     let mut bytes = 0u64;
 
-    for entry in manifest.archives.iter().filter(|a| a.overlaps(&bbox)) {
+    let shift = ZOOM.saturating_sub(manifest.cell_zoom);
+    let side = 1u32 << manifest.cell_zoom;
+    let cells: std::collections::HashSet<u32> = wanted
+        .iter()
+        .map(|(x, y)| (y >> shift) * side + (x >> shift))
+        .collect();
+
+    for entry in manifest.archives.iter().filter(|a| a.covers(&cells, &bbox)) {
         if !entry.file_is_safe() {
             return Err(format!(
                 "archive index has an unusable name: {:?}",
@@ -511,6 +542,7 @@ mod tests {
     fn entry_named(file: &str) -> ArchiveEntry {
         ArchiveEntry {
             file: file.to_string(),
+            cells: Vec::new(),
             min_lat: 0.0,
             min_lon: 0.0,
             max_lat: 1.0,
@@ -550,6 +582,31 @@ mod tests {
             Ok(_) => panic!("absurd node count was accepted"),
         };
         assert!(err.contains("node count"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn cells_pick_one_archive_where_bboxes_overlap() {
+        let wanted: std::collections::HashSet<u32> = [1442].into_iter().collect();
+        let munich = LLBBox::new(48.135, 11.571, 48.139, 11.578).unwrap();
+
+        // north-america's bbox spans every longitude, so the bbox test alone lets it through.
+        let mut wide = entry_named("north-america.pmtiles");
+        wide.min_lat = -46.71;
+        wide.max_lat = 83.88;
+        wide.min_lon = -180.0;
+        wide.max_lon = 180.0;
+        assert!(wide.overlaps(&munich));
+        wide.cells = vec![10, 11, 12];
+        assert!(!wide.covers(&wanted, &munich));
+
+        let mut europe = wide.clone();
+        europe.cells = vec![1441, 1442, 1443];
+        assert!(europe.covers(&wanted, &munich));
+
+        // An index without cells must keep working on the bbox alone.
+        let mut legacy = wide.clone();
+        legacy.cells = Vec::new();
+        assert!(legacy.covers(&wanted, &munich));
     }
 
     #[test]
