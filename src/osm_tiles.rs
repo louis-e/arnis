@@ -35,6 +35,10 @@ const MAX_TILE_BYTES: u64 = 256 * 1024 * 1024;
 /// Guards against a bbox that would ask for the whole planet tile by tile.
 const MAX_TILES: usize = 4096;
 
+/// Per-kind record cap in one tile. A dense z13 tile holds a few hundred thousand nodes, so this
+/// only stops a corrupt payload from growing the output far past its own size.
+const MAX_RECORDS: u64 = 1 << 24;
+
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +58,16 @@ struct ArchiveEntry {
 }
 
 impl ArchiveEntry {
+    /// `name` becomes a cache directory, so it has to be one harmless path component.
+    fn name_is_safe(&self) -> bool {
+        !self.name.is_empty()
+            && self.name.len() <= 64
+            && self
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    }
+
     fn overlaps(&self, bbox: &LLBBox) -> bool {
         !(self.max_lat < bbox.min().lat()
             || self.min_lat > bbox.max().lat()
@@ -165,6 +179,12 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     let mut bytes = 0u64;
 
     for entry in manifest.archives.iter().filter(|a| a.overlaps(&bbox)) {
+        if !entry.name_is_safe() {
+            return Err(format!(
+                "archive index has an unusable name: {:?}",
+                entry.name
+            ));
+        }
         let url = format!("{}/{}", base_url.trim_end_matches('/'), entry.file);
         let cache = cache_root_for(base_url).map(|d| d.join(&entry.name));
         let mut archive = Archive::open_allowing(&client, &url, cache, &[TILE_TYPE_UNKNOWN])?;
@@ -419,6 +439,9 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     let mut tile = DecodedTile::default();
 
     let n_nodes = r.uvarint()?;
+    if n_nodes > MAX_RECORDS {
+        return Err("implausible node count".into());
+    }
     let (mut id, mut lat, mut lon) = (0i64, 0i64, 0i64);
     for _ in 0..n_nodes {
         id += r.svarint()?;
@@ -429,6 +452,9 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     }
 
     let n_ways = r.uvarint()?;
+    if n_ways > MAX_RECORDS {
+        return Err("implausible way count".into());
+    }
     let mut id = 0i64;
     for _ in 0..n_ways {
         id += r.svarint()?;
@@ -449,6 +475,9 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     }
 
     let n_rels = r.uvarint()?;
+    if n_rels > MAX_RECORDS {
+        return Err("implausible relation count".into());
+    }
     let mut id = 0i64;
     for _ in 0..n_rels {
         id += r.svarint()?;
@@ -473,6 +502,52 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry_named(name: &str) -> ArchiveEntry {
+        ArchiveEntry {
+            name: name.to_string(),
+            file: "x.pmtiles".into(),
+            min_lat: 0.0,
+            min_lon: 0.0,
+            max_lat: 1.0,
+            max_lon: 1.0,
+        }
+    }
+
+    #[test]
+    fn manifest_names_cannot_escape_the_cache_root() {
+        for good in ["europe", "australia-oceania", "north_america"] {
+            assert!(entry_named(good).name_is_safe(), "{good} should be allowed");
+        }
+        for bad in [
+            "",
+            "..",
+            "../etc",
+            "/etc/passwd",
+            "a/b",
+            "a\\b",
+            &"x".repeat(65),
+        ] {
+            assert!(
+                !entry_named(bad).name_is_safe(),
+                "{bad:?} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn absurd_record_counts_are_refused() {
+        let mut buf = b"AOT1".to_vec();
+        buf.push(0); // empty string table
+                     // uvarint for u64::MAX, a node count no payload could ever back
+        buf.extend_from_slice(&[0xff; 9]);
+        buf.push(0x01);
+        let err = match decode(&buf) {
+            Err(e) => e,
+            Ok(_) => panic!("absurd node count was accepted"),
+        };
+        assert!(err.contains("node count"), "unexpected error: {err}");
+    }
 
     #[test]
     fn cache_dirs_differ_per_base_url() {
