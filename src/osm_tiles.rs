@@ -35,8 +35,7 @@ const MAX_TILE_BYTES: u64 = 256 * 1024 * 1024;
 /// Guards against a bbox that would ask for the whole planet tile by tile.
 const MAX_TILES: usize = 4096;
 
-/// Per-kind record cap in one tile. A dense z13 tile holds a few hundred thousand nodes, so this
-/// only stops a corrupt payload from growing the output far past its own size.
+/// Per-kind record cap. Far above a real tile; stops a corrupt one from outgrowing its payload.
 const MAX_RECORDS: u64 = 1 << 24;
 
 type Result<T> = std::result::Result<T, String>;
@@ -58,7 +57,7 @@ struct ArchiveEntry {
 }
 
 impl ArchiveEntry {
-    /// `name` becomes a cache directory, so it has to be one harmless path component.
+    /// `name` becomes a cache directory, so it must be one harmless path component.
     fn name_is_safe(&self) -> bool {
         !self.name.is_empty()
             && self.name.len() <= 64
@@ -80,8 +79,7 @@ fn cache_root() -> Option<PathBuf> {
     dirs::cache_dir().map(|d| d.join("arnis").join("osm-tiles"))
 }
 
-/// Cache dir for one archive base URL. Cached ranges are byte offsets into one specific file, so
-/// a different host or version prefix must not reuse them.
+/// Cached ranges are offsets into one specific file, so each base URL gets its own dir.
 fn cache_root_for(base_url: &str) -> Option<PathBuf> {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in base_url.trim_end_matches('/').as_bytes() {
@@ -205,8 +203,7 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
                     return Ok((0, Vec::new()));
                 }
                 let on_wire = raw.len() as u64;
-                // Archives are written with tile_compression=none, so `tile` returns the stored
-                // bytes as-is and the zstd frame the baker wrote is still around them.
+                // Archives set tile_compression=none, so the baker's zstd frame is still here.
                 let plain = zstd::stream::decode_all(&raw[..])
                     .map_err(|e| format!("tile {ZOOM}/{x}/{y} is not readable: {e}"))?;
                 if plain.len() as u64 > MAX_TILE_BYTES {
@@ -539,8 +536,7 @@ mod tests {
     fn absurd_record_counts_are_refused() {
         let mut buf = b"AOT1".to_vec();
         buf.push(0); // empty string table
-                     // uvarint for u64::MAX, a node count no payload could ever back
-        buf.extend_from_slice(&[0xff; 9]);
+        buf.extend_from_slice(&[0xff; 9]); // u64::MAX nodes
         buf.push(0x01);
         let err = match decode(&buf) {
             Err(e) => e,
