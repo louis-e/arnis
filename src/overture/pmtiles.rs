@@ -60,6 +60,9 @@ const COMPRESSION_ZSTD: u8 = 4;
 
 /// Tile type identifier for Mapbox Vector Tiles.
 const TILE_TYPE_MVT: u8 = 1;
+/// PMTiles' "the archive does not say". What the Arnis OSM tile archive is written as: its
+/// tiles are not vector tiles, and the spec has no code for a private payload.
+pub const TILE_TYPE_UNKNOWN: u8 = 0;
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -100,7 +103,7 @@ fn parse_u64(buf: &[u8], at: usize) -> u64 {
 }
 
 impl Header {
-    fn parse(buf: &[u8]) -> Result<Header> {
+    fn parse_allowing(buf: &[u8], allowed: &[u8]) -> Result<Header> {
         if buf.len() < HEADER_LEN {
             return Err(format!(
                 "PMTiles header is {} bytes, expected {HEADER_LEN}",
@@ -123,9 +126,9 @@ impl Header {
             min_zoom: buf[100],
             max_zoom: buf[101],
         };
-        if buf[99] != TILE_TYPE_MVT {
+        if !allowed.contains(&buf[99]) {
             return Err(format!(
-                "archive holds tile type {}, expected Mapbox Vector Tiles",
+                "archive holds tile type {}, expected one of {allowed:?}",
                 buf[99]
             ));
         }
@@ -377,6 +380,17 @@ impl Archive {
     /// directory. Only an archive with an unusually large root costs a second
     /// request, and only on the run that first opens it.
     pub fn open(client: &Client, url: &str, cache_dir: Option<PathBuf>) -> Result<Archive> {
+        Archive::open_allowing(client, url, cache_dir, &[TILE_TYPE_MVT])
+    }
+
+    /// Same, for an archive whose tiles are not MVT - the Arnis OSM tile archive declares
+    /// tile type 0, since PMTiles has no code for a payload only this program reads.
+    pub fn open_allowing(
+        client: &Client,
+        url: &str,
+        cache_dir: Option<PathBuf>,
+        allowed: &[u8],
+    ) -> Result<Archive> {
         let header_path = cache_dir.as_ref().map(|d| d.join("header.bin"));
         let root_path = cache_dir.as_ref().map(|d| d.join("root.bin"));
 
@@ -392,7 +406,7 @@ impl Archive {
             }
             None => {
                 let probe = fetch_range(client, url, 0, HEADER_PROBE_LEN)?;
-                let header = Header::parse(&probe)?;
+                let header = Header::parse_allowing(&probe, allowed)?;
                 let root_end = header
                     .root_offset
                     .checked_add(header.root_length)
@@ -413,7 +427,7 @@ impl Archive {
             }
         };
 
-        let header = Header::parse(&header_bytes)?;
+        let header = Header::parse_allowing(&header_bytes, allowed)?;
         let root = decode_directory(&decompress(
             header.internal_compression,
             root_bytes,
@@ -600,11 +614,14 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
         };
 
         let status = response.status();
-        // A 200 means the server ignored the range and is about to send the
-        // whole archive. Refusing is the only safe answer at 180 GB.
+        // A 200 means the range was ignored and the whole archive is coming; the body is
+        // dropped unread. Retried rather than fatal: a CDN filling its cache answers the first
+        // request per edge this way, then serves ranges normally.
         if status.as_u16() != 206 {
             last_error = format!("HTTP {status} fetching range from {url} (expected 206)");
-            if !(status.is_server_error() || status.as_u16() == 429) {
+            let worth_retrying =
+                status.is_server_error() || status.as_u16() == 429 || status.as_u16() == 200;
+            if !worth_retrying {
                 break;
             }
             continue;
@@ -820,25 +837,25 @@ mod tests {
         buf[7] = 3;
         buf[99] = TILE_TYPE_MVT;
         buf[16..24].copy_from_slice(&1024u64.to_le_bytes()); // root length
-        assert!(Header::parse(&buf).is_ok());
+        assert!(Header::parse_allowing(&buf, &[TILE_TYPE_MVT]).is_ok());
 
         let mut bad_magic = buf.clone();
         bad_magic[0] = b'X';
-        assert!(Header::parse(&bad_magic).is_err());
+        assert!(Header::parse_allowing(&bad_magic, &[TILE_TYPE_MVT]).is_err());
 
         let mut bad_version = buf.clone();
         bad_version[7] = 2;
-        assert!(Header::parse(&bad_version).is_err());
+        assert!(Header::parse_allowing(&bad_version, &[TILE_TYPE_MVT]).is_err());
 
         let mut bad_type = buf.clone();
         bad_type[99] = 2; // PNG
-        assert!(Header::parse(&bad_type).is_err());
+        assert!(Header::parse_allowing(&bad_type, &[TILE_TYPE_MVT]).is_err());
 
         let mut huge_root = buf.clone();
         huge_root[16..24].copy_from_slice(&u64::MAX.to_le_bytes());
-        assert!(Header::parse(&huge_root).is_err());
+        assert!(Header::parse_allowing(&huge_root, &[TILE_TYPE_MVT]).is_err());
 
-        assert!(Header::parse(&buf[..HEADER_LEN - 1]).is_err());
+        assert!(Header::parse_allowing(&buf[..HEADER_LEN - 1], &[TILE_TYPE_MVT]).is_err());
     }
 
     #[test]

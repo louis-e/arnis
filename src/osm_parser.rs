@@ -80,14 +80,14 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
 // Raw data from OSM
 
 #[derive(Debug, Deserialize)]
-struct OsmMember {
-    r#type: String,
-    r#ref: u64,
-    r#role: String,
+pub struct OsmMember {
+    pub r#type: String,
+    pub r#ref: u64,
+    pub r#role: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct OsmElement {
+pub struct OsmElement {
     pub r#type: String,
     pub id: u64,
     pub lat: Option<f64>,
@@ -109,6 +109,20 @@ impl OsmData {
     /// Returns true if there are no elements in the OSM data
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
+    }
+
+    /// Dataset assembled outside the Overpass path (the tile archive), bypassing serde.
+    pub fn from_elements(elements: Vec<OsmElement>) -> Self {
+        OsmData {
+            elements,
+            remark: None,
+        }
+    }
+
+    /// Raw elements, for tests that build a dataset outside the Overpass path.
+    #[cfg(test)]
+    pub fn elements_for_test(&self) -> &[OsmElement] {
+        &self.elements
     }
 
     /// Object-free dataset, used by terrain-only runs that never query Overpass.

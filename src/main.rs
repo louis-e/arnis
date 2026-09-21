@@ -37,6 +37,7 @@ mod models_3d;
 mod net;
 mod ore_generation;
 mod osm_parser;
+mod osm_tiles;
 mod overture;
 #[cfg(feature = "gui")]
 mod preview_3d;
@@ -425,11 +426,13 @@ fn run_cli() {
         } else if let Some(data) = preloaded_osm.take() {
             data
         } else {
-            retrieve_data::fetch_data_from_overpass(
+            retrieve_data::fetch_osm_data(
                 effective_bbox,
                 args.debug,
                 args.downloader.as_str(),
                 args.save_json_file.as_deref(),
+                &args.osm_tiles_url,
+                !args.no_tile_archive,
             )
             .expect("Failed to fetch data")
         };

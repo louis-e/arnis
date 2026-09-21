@@ -5,7 +5,6 @@ use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use rand::prelude::SliceRandom;
-use rand::Rng;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
@@ -44,6 +43,7 @@ fn download_with_reqwest(
     query: &str,
     timeout_secs: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // reqwest's `gzip` feature sets Accept-Encoding and decodes; setting it here disables that.
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(timeout_secs))
         .user_agent(OSM_USER_AGENT)
@@ -93,12 +93,7 @@ fn download_with_reqwest(
 
 /// Function to download data using `curl`
 fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
-    let output: std::process::Output = Command::new("curl")
-        .arg("-s") // Add silent mode to suppress output
-        .arg("-A")
-        .arg(OSM_USER_AGENT)
-        .arg(format!("{url}?data={query}"))
-        .output()?;
+    let output: std::process::Output = Command::new("curl").args(curl_args(url, query)).output()?;
 
     if !output.status.success() {
         Err(io::Error::other("Curl command failed"))
@@ -107,19 +102,47 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
+fn curl_args(url: &str, query: &str) -> Vec<String> {
+    vec![
+        "-s".to_string(), // Add silent mode to suppress output
+        // Overpass sends ~7x less over the wire, and rejects requests advertising no encoding.
+        "--compressed".to_string(),
+        "-A".to_string(),
+        OSM_USER_AGENT.to_string(),
+        format!("{url}?data={query}"),
+    ]
+}
+
 /// Function to download data using `wget`
+///
+/// `--compression=auto` needs wget >= 1.19.2 built with zlib, so a failure is retried
+/// uncompressed rather than taken as the download having failed.
 fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
-    let output: std::process::Output = Command::new("wget")
-        .arg("-qO-") // Use `-qO-` to output the result directly to stdout
-        .arg(format!("--user-agent={OSM_USER_AGENT}"))
-        .arg(format!("{url}?data={query}"))
+    let mut output: std::process::Output = Command::new("wget")
+        .args(wget_args(url, query, true))
         .output()?;
+
+    if !output.status.success() {
+        output = Command::new("wget")
+            .args(wget_args(url, query, false))
+            .output()?;
+    }
 
     if !output.status.success() {
         Err(io::Error::other("Wget command failed"))
     } else {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+}
+
+fn wget_args(url: &str, query: &str, compressed: bool) -> Vec<String> {
+    let mut args = vec!["-qO-".to_string()]; // Use `-qO-` to output the result directly to stdout
+    if compressed {
+        args.push("--compression=auto".to_string());
+    }
+    args.push(format!("--user-agent={OSM_USER_AGENT}"));
+    args.push(format!("{url}?data={query}"));
+    args
 }
 
 /// Whether an Overpass `remark` means the result is cut short.
@@ -213,6 +236,65 @@ pub fn fetch_data_from_file(
     }
 }
 
+/// The OSM source for a run: the tile archive, falling back to Overpass.
+///
+/// Both front-ends go through here; deciding separately is how the GUI kept querying Overpass
+/// after the CLI had moved to the archive.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+/// Coarse bucket for an archive miss. Only the category is reported: the error text can name a
+/// tile, which locates the user to a few kilometres.
+fn fallback_reason(e: &str) -> &'static str {
+    const BUCKETS: [(&str, &str); 12] = [
+        ("has no data for this area", "no_data_for_area"),
+        ("that area needs", "area_too_large"),
+        ("index unreachable", "index_unreachable"),
+        ("bad archive index", "bad_index"),
+        ("unusable name", "bad_index"),
+        ("archive is zoom", "zoom_mismatch"),
+        ("expected 206", "range_http"),
+        ("range request to", "network"),
+        ("could not be read", "network"),
+        ("not an Arnis tile payload", "tile_decode"),
+        ("truncated tile", "tile_decode"),
+        ("implausible", "tile_decode"),
+    ];
+    BUCKETS
+        .iter()
+        .find(|(needle, _)| e.contains(needle))
+        .map(|(_, bucket)| *bucket)
+        .unwrap_or("other")
+}
+
+pub fn fetch_osm_data(
+    bbox: LLBBox,
+    debug: bool,
+    download_method: &str,
+    save_file: Option<&str>,
+    tiles_url: &str,
+    use_tile_archive: bool,
+) -> Result<OsmData, Box<dyn std::error::Error>> {
+    if use_tile_archive && !tiles_url.is_empty() {
+        // A miss is a coverage gap or a network problem, and Overpass still has the data.
+        match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url) {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                eprintln!(
+                    "{}",
+                    format!("Warning: Tile archive unavailable ({e}); falling back to Overpass.")
+                        .yellow()
+                        .bold()
+                );
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    &format!("tile_archive_fallback: {}", fallback_reason(&e)),
+                );
+            }
+        }
+    }
+    fetch_data_from_overpass(bbox, debug, download_method, save_file)
+}
+
 /// Main function to fetch data
 pub fn fetch_data_from_overpass(
     bbox: LLBBox,
@@ -223,17 +305,13 @@ pub fn fetch_data_from_overpass(
     println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
 
-    // List of Overpass API servers
+    // Arnis's own instance, and only that one. Data comes from the tile archive now; this is
+    // the fallback. The public instances are deliberately gone: arnis was blocked from
+    // overpass-api.de for using more than its share (#1347), and failing over to the small
+    // volunteer instances would only move the problem onto someone else.
     let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";
-    let api_servers: Vec<&str> = vec![
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-    ];
-    let fallback_api_servers: Vec<&str> = vec![
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-    ];
+    let api_servers: Vec<&str> = vec![];
+    let fallback_api_servers: Vec<&str> = vec![];
 
     // Generate Overpass API query for bounding box.
     // Ocean/coastal elements are excluded because ESA WorldCover satellite data
@@ -301,14 +379,7 @@ pub fn fetch_data_from_overpass(
 
         let mut rng = rand::rng();
         let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
-        let mut probed_server: Option<&str> = None;
-
-        if rng.random_bool(0.5) {
-            let probe_idx = rng.random_range(0..api_servers.len());
-            let probe_server = api_servers[probe_idx];
-            request_plan.push((probe_server, ServerKind::Primary));
-            probed_server = Some(probe_server);
-        }
+        let probed_server: Option<&str> = None;
 
         request_plan.push((arnis_api_server, ServerKind::Primary));
 
@@ -552,6 +623,34 @@ mod user_agent_tests {
 }
 
 #[cfg(test)]
+mod compression_tests {
+    use super::*;
+
+    #[test]
+    fn curl_asks_for_a_compressed_body() {
+        let args = curl_args("https://example.org/api", "[out:json];");
+        assert!(args.contains(&"--compressed".to_string()));
+        assert!(args
+            .last()
+            .unwrap()
+            .starts_with("https://example.org/api?data="));
+    }
+
+    // The retry exists because the flag is not universally available; both shapes must stay
+    // valid downloads, differing only in that one flag.
+    #[test]
+    fn wget_drops_only_the_compression_flag_on_retry() {
+        let with = wget_args("https://example.org/api", "[out:json];", true);
+        let without = wget_args("https://example.org/api", "[out:json];", false);
+        assert!(with.contains(&"--compression=auto".to_string()));
+        assert!(!without.contains(&"--compression=auto".to_string()));
+        assert_eq!(with.len(), without.len() + 1);
+        assert_eq!(with[0], "-qO-");
+        assert_eq!(with.last(), without.last());
+    }
+}
+
+#[cfg(test)]
 mod partial_response_tests {
     use super::*;
 
@@ -701,5 +800,48 @@ mod fetch_from_file_tests {
             fetch_data_from_file(path.to_str().unwrap()).expect("JSON dump should load");
         assert!(bounds.is_none());
         assert!(!data.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_reasons_bucket_real_errors() {
+        for (err, want) in [
+            (
+                "the tile archive has no data for this area",
+                "no_data_for_area",
+            ),
+            (
+                "that area needs 9001 tiles, past the 4096 cap",
+                "area_too_large",
+            ),
+            (
+                "tile archive index unreachable: connection refused",
+                "index_unreachable",
+            ),
+            ("bad archive index: expected value", "bad_index"),
+            (
+                "archive is zoom 12 but this build reads zoom 13",
+                "zoom_mismatch",
+            ),
+            (
+                "HTTP 403 fetching range from https://x/y (expected 206)",
+                "range_http",
+            ),
+            ("tile 13/1/2 is not readable: truncated tile", "tile_decode"),
+            ("something nobody predicted", "other"),
+        ] {
+            assert_eq!(fallback_reason(err), want, "for {err:?}");
+        }
+    }
+
+    // A bucket must never carry the tile coordinates the error text holds.
+    #[test]
+    fn fallback_reasons_are_coordinate_free() {
+        let e = "tile 13/4359/2842 expands past the size cap";
+        assert!(!fallback_reason(e).contains("4359"));
     }
 }

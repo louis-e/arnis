@@ -871,6 +871,9 @@ fn cache_size_string() -> String {
     total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
     // Its own root beside the tile cache, and Clear Cache deletes it.
     total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
+    if let Some(d) = crate::osm_tiles::cache_root() {
+        total = total.saturating_add(dir_size_bytes(&d));
+    }
     for root in crate::models_3d::model_cache_roots() {
         total = total.saturating_add(dir_size_bytes(&root));
     }
@@ -944,6 +947,7 @@ fn clear_tile_caches_now() -> Result<String, String> {
         .combined(clear_land_cover_cache())
         .combined(crate::canopy::clear_canopy_cache())
         .combined(crate::overture::clear_overture_cache())
+        .combined(crate::osm_tiles::clear_osm_tiles_cache())
         .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
@@ -1649,6 +1653,8 @@ fn gui_start_generation(
                 // Parquet reader drops entirely - but both differences are far
                 // below a block, so the choice is not worth a GUI setting.
                 overture_source: crate::args::OvertureSource::Auto,
+                osm_tiles_url: crate::osm_tiles::DEFAULT_OSM_TILES_URL.to_string(),
+                no_tile_archive: false,
                 use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
@@ -1781,8 +1787,14 @@ fn gui_start_generation(
                     }
                 });
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
-                let fetch_result =
-                    retrieve_data::fetch_data_from_overpass(bbox, args.debug, "requests", None);
+                let fetch_result = retrieve_data::fetch_osm_data(
+                    bbox,
+                    args.debug,
+                    "requests",
+                    None,
+                    &args.osm_tiles_url,
+                    !args.no_tile_archive,
+                );
                 // A panicked worker already reported itself through the panic hook.
                 // Overture is supplementary, so drop it and keep going; terrain is
                 // not, so hand the failure back instead of taking the app down.

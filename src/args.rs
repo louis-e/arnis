@@ -118,6 +118,14 @@ pub struct Args {
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
 
+    /// Base URL of the Arnis OSM tile archive, read instead of Overpass.
+    #[arg(long = "osm-tiles-url", default_value = crate::osm_tiles::DEFAULT_OSM_TILES_URL)]
+    pub osm_tiles_url: String,
+
+    /// Query Overpass directly and skip the tile archive.
+    #[arg(long, default_value_t = false)]
+    pub no_tile_archive: bool,
+
     /// Spawn point latitude (optional, must be within bbox)
     #[arg(long, allow_hyphen_values = true)]
     pub spawn_lat: Option<f64>,
