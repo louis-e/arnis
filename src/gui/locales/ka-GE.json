@@ -111,5 +111,17 @@
   "facade_mode_java_only": "ფოტოპანელები Java-ს ერთეულებია, ამიტომ ბლოკის ფასადები მხოლოდ Bedrock-სა და Luanti-ზე აიგება.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "ერთი სამყარო",
+  "one_world_will_create": "შეიქმნება ერთი სამყარო „{name}“",
+  "one_world_areas": "ერთი სამყარო „{name}“ · ტერიტორიები: {count}",
+  "one_world_locked": "გახსნილია Minecraft-ში",
+  "one_world_foreign": "საქაღალდე „{name}“ არსებობს, მაგრამ ერთი სამყარო არ არის",
+  "one_world_needs_terrain": "ეს სამყარო რელიეფს იყენებს",
+  "one_world_needs_flat": "ეს სამყარო ბრტყელია (მხოლოდ ობიექტები)",
+  "one_world_no_save_path": "ჯერ პარამეტრებში მიუთითეთ Minecraft-ის შენახვის საქაღალდე",
+  "one_world_confirm_title": "ჩანაცვლდეს არსებული ჩანკები?",
+  "one_world_confirm_text": "ამ ტერიტორიის {count} ჩანკი უკვე არსებობს სამყაროში. ისინი თავიდან შეიქმნება, და ყველაფერი, რაც Minecraft-ში იქ აშენდა, ჩანაცვლდება.",
+  "one_world_confirm_cancel": "გაუქმება",
+  "one_world_confirm_ok": "გენერირება"
 }

@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Los paneles fotográficos son entidades de Java, así que en Bedrock y Luanti solo se construyen las fachadas de bloques.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Un solo mundo",
+  "one_world_will_create": "Se creará el mundo único “{name}”",
+  "one_world_areas": "Mundo único “{name}” · Áreas: {count}",
+  "one_world_locked": "abierto en Minecraft",
+  "one_world_foreign": "La carpeta “{name}” existe pero no es un mundo único",
+  "one_world_needs_terrain": "este mundo usa terreno",
+  "one_world_needs_flat": "este mundo es plano (solo objetos)",
+  "one_world_no_save_path": "Primero indica la carpeta de mundos de Minecraft en Ajustes",
+  "one_world_confirm_title": "¿Reemplazar chunks existentes?",
+  "one_world_confirm_text": "{count} chunks de esta área ya existen en el mundo. Se generan de nuevo y se reemplaza todo lo construido allí en Minecraft.",
+  "one_world_confirm_cancel": "Cancelar",
+  "one_world_confirm_ok": "Generar"
 }

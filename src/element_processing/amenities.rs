@@ -52,7 +52,8 @@ pub fn generate_amenities(
                 }
 
                 if let Some(pt) = first_node {
-                    let mut rng = rand::rng();
+                    let mut rng =
+                        crate::deterministic_rng::element_rng_salted(element.id(), 0x5EC1);
                     let loot_pool = build_recycling_loot_pool(element.tags());
                     let items = build_recycling_items(&loot_pool, &mut rng);
 
@@ -674,7 +675,7 @@ fn place_item_frame_on_random_side(
     z: i32,
     item: HashMap<String, Value>,
 ) {
-    let mut rng = rand::rng();
+    let mut rng = crate::deterministic_rng::coord_rng(x, z, 0xF7A3E);
     let mut directions = [
         ((0, 0, -1), 2), // North
         ((0, 0, 1), 3),  // South

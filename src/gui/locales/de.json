@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Fotopaneele sind Java-Entities, daher werden auf Bedrock und Luanti nur die Blockfassaden gebaut.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Eine Welt",
+  "one_world_will_create": "Eine Welt „{name}“ wird erstellt",
+  "one_world_areas": "Eine Welt „{name}“ · Gebiete: {count}",
+  "one_world_locked": "in Minecraft geöffnet",
+  "one_world_foreign": "Ordner „{name}“ existiert, ist aber keine Eine-Welt",
+  "one_world_needs_terrain": "diese Welt nutzt Gelände",
+  "one_world_needs_flat": "diese Welt ist flach (nur Objekte)",
+  "one_world_no_save_path": "Lege zuerst in den Einstellungen den Minecraft-Speicherordner fest",
+  "one_world_confirm_title": "Vorhandene Chunks ersetzen?",
+  "one_world_confirm_text": "{count} Chunks dieses Gebiets gibt es in der Welt schon. Sie werden neu generiert, und alles, was dort in Minecraft gebaut wurde, wird ersetzt.",
+  "one_world_confirm_cancel": "Abbrechen",
+  "one_world_confirm_ok": "Generieren"
 }

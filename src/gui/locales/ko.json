@@ -111,5 +111,17 @@
   "facade_mode_java_only": "사진 패널은 Java 엔티티이므로 Bedrock과 Luanti에서는 블록 외벽만 생성됩니다.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "하나의 월드",
+  "one_world_will_create": "하나의 월드 “{name}”이(가) 생성됩니다",
+  "one_world_areas": "하나의 월드 “{name}” · 영역: {count}",
+  "one_world_locked": "Minecraft에서 열려 있음",
+  "one_world_foreign": "폴더 “{name}”이(가) 있지만 하나의 월드가 아닙니다",
+  "one_world_needs_terrain": "이 월드는 지형을 사용합니다",
+  "one_world_needs_flat": "이 월드는 평평합니다 (객체만)",
+  "one_world_no_save_path": "먼저 설정에서 Minecraft 저장 폴더를 지정하세요",
+  "one_world_confirm_title": "기존 청크를 바꿀까요?",
+  "one_world_confirm_text": "이 영역의 청크 {count}개가 이미 월드에 있습니다. 다시 생성되며 Minecraft에서 그곳에 지은 것은 모두 바뀝니다.",
+  "one_world_confirm_cancel": "취소",
+  "one_world_confirm_ok": "생성"
 }

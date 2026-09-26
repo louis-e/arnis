@@ -58,6 +58,19 @@ impl CanopyData {
         }
     }
 
+    pub fn remap_rows_to_mercator(&mut self, lat_top: f64, lat_bottom: f64) {
+        let rows = self.height;
+        crate::grid_ops::remap_flat_rows_nearest(&mut self.grid, self.width, |gz| {
+            crate::grid_ops::mercator_source_row(lat_top, lat_bottom, rows, gz)
+        });
+    }
+
+    pub fn crop(&mut self, x0: usize, z0: usize, width: usize, height: usize) {
+        crate::grid_ops::crop_flat(&mut self.grid, self.width, x0, z0, width, height);
+        self.width = width;
+        self.height = height;
+    }
+
     #[inline(always)]
     pub fn at(&self, gx: usize, gz: usize) -> u8 {
         if gx >= self.width || gz >= self.height {

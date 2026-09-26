@@ -52,6 +52,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  // The store's restore fired the toggle's change event before the save path
+  // and the world name were known; read the world once more with both in hand.
+  refreshOneWorldState();
   resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
@@ -121,6 +124,10 @@ async function applyLocalization(localization) {
     "span[data-localize='world_scale']": "world_scale",
     "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
+    "span[data-localize='one_world']": "one_world",
+    "h2[data-localize='one_world_confirm_title']": "one_world_confirm_title",
+    "button[data-localize='one_world_confirm_cancel']": "one_world_confirm_cancel",
+    "button[data-localize='one_world_confirm_ok']": "one_world_confirm_ok",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "span[data-localize='language']": "language",
@@ -218,6 +225,7 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+  renderOneWorldStatus();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
@@ -640,6 +648,7 @@ function setCelestialBody(body) {
   // the world format and the stored source too.
   refreshHeightLimitRow();
   refreshFacadeRows();
+  refreshOneWorldState();
 
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
   const timeSlider = document.getElementById('world-time-slider');
@@ -676,6 +685,9 @@ function registerMessageEvent() {
 
     // Handle angle measurement from the map polyline tool
     if (event.data && event.data.type === 'angleMeasured') {
+      // A One World is aligned to real coordinates; the tool is disabled on
+      // the map too, this only covers a measurement already in flight.
+      if (isOneWorldEnabled()) return;
       var angle = event.data.angle;
       var rotationInput = document.getElementById("rotation-angle-input");
       if (rotationInput) {
@@ -957,13 +969,24 @@ function setupProgressListener() {
         progressInfo.style.color = "#fa7878";
         setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
-        setWorldNameLabel("");
+        if (lastRunOneWorld) {
+          // The world keeps its name; the status line carries the reason.
+          setWorldNameLabel(oneWorldDisplayName());
+          if (isOneWorldEnabled()) setOneWorldStatus(message.replace(/^Error!\s*/, ''), 'error');
+        } else {
+          setWorldNameLabel("");
+        }
         resetEta();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
         resetEta();
+        // The world just grew by one area: reload its status and overlays.
+        if (lastRunOneWorld) {
+          oneWorldOverlayKey = null;
+          refreshOneWorldState();
+        }
         // A generation just built facades into the same cache, so the preview
         // has something new to say.
         window.arnisPreview3D?.refreshFacades();
@@ -1206,6 +1229,9 @@ function initSettings() {
 
   // Custom world name editor (Java only), gated by its Settings toggle
   initCustomWorldNameToggle();
+
+  // One World: a persistent world every area extends (Java only)
+  initOneWorld();
 
   // Save path setting
   initSavePathSetting();
@@ -1559,7 +1585,7 @@ function initLuantiExperimentalToggle() {
 
 function setWorldFormat(format) {
   if (!VALID_FORMATS.includes(format)) return;
-  if (format === 'luanti' && !isLuantiEnabled()) return;
+  if (format === 'luanti' && (!isLuantiEnabled() || isOneWorldToggleOn())) return;
 
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
@@ -1624,6 +1650,8 @@ function updateFormatToggleUI(format) {
   // Custom names are Java-only; hide/show the pencil and re-derive the
   // label preview whenever the active format changes.
   refreshWorldNameEditUI();
+  // One World is Java-only too: its status and pins follow the format.
+  refreshOneWorldState();
 }
 
 // Expose to window for onclick handlers
@@ -2047,7 +2075,12 @@ const SAVE_PATHS = {
     inputId: 'save-path-input',
     browseId: 'save-path-browse',
     get: () => savePath,
-    set: (value) => { savePath = value; },
+    set: (value) => {
+      const changed = savePath !== value;
+      savePath = value;
+      // The One World lives under the saves path, so a new path is a new world.
+      if (changed && typeof refreshOneWorldState === 'function') refreshOneWorldState();
+    },
   },
   bedrock: {
     storageKey: 'arnis-bedrock-save-path',
@@ -2462,6 +2495,10 @@ function canEditCustomWorldName() {
 // the current pending state, in which case its real (possibly
 // de-duplicated) name from the backend is authoritative.
 function updateWorldNamePreviewLabel() {
+  if (isOneWorldEnabled()) {
+    setWorldNameLabel(oneWorldDisplayName());
+    return;
+  }
   if (worldPath && !worldNameEditedSinceLastCreate) return;
   if (!isCustomWorldNameFeatureEnabled()) {
     // Feature off: fall back to showing whatever world actually exists
@@ -2483,6 +2520,9 @@ function refreshWorldNameEditUI() {
   const editButton = document.getElementById('world-name-edit-button');
   if (editButton) {
     editButton.style.display = canEditCustomWorldName() ? '' : 'none';
+    const title = isOneWorldEnabled() ? 'Choose the One World to extend or create' : 'Set a custom world name';
+    editButton.title = title;
+    editButton.setAttribute('aria-label', title);
   }
   updateWorldNamePreviewLabel();
 }
@@ -2520,7 +2560,9 @@ function startWorldNameEdit(event) {
   // to the directory basename keeps the input useful even if the label was
   // not yet refreshed from disk.
   const visibleName = label.hasAttribute('data-placeholder') ? '' : label.textContent.trim();
-  input.value = customWorldName || visibleName || basenameFromPath(worldPath);
+  input.value = isOneWorldEnabled()
+    ? oneWorldFolderName()
+    : customWorldName || visibleName || basenameFromPath(worldPath);
   input.dataset.originalValue = input.value;
   label.style.display = 'none';
   if (editButton) editButton.style.display = 'none';
@@ -2544,6 +2586,14 @@ async function commitWorldNameEdit() {
     return;
   }
   const newName = input.value.trim();
+
+  // One World: the name picks the world to extend or create. Nothing is renamed.
+  if (isOneWorldEnabled()) {
+    setOneWorldName(newName === ONE_WORLD_DEFAULT_NAME ? '' : newName);
+    endWorldNameEdit();
+    refreshOneWorldState();
+    return;
+  }
 
   if (worldPath) {
     const currentName = input.dataset.originalValue || basenameFromPath(worldPath);
@@ -2659,6 +2709,388 @@ function initCustomWorldNameToggle() {
   refreshWorldNameEditUI();
 }
 
+/* One World (Java only, opt-in via Settings > One World) */
+
+const ONE_WORLD_DEFAULT_NAME = "Arnis One World";
+const ONE_WORLD_NAME_KEY = 'arnis-one-world-name';
+// The user's own values of the settings a One World pins, put back when the
+// mode goes off.
+const ONE_WORLD_RESTORE_KEY = 'arnis-one-world-restore';
+// Last answer from gui_one_world_info, null while the mode is off.
+let oneWorldInfo = null;
+let oneWorldPinned = false;
+// Key the map overlays were last sent for.
+let oneWorldOverlayKey = null;
+// Whether the running (or last) generation was a One World run.
+let lastRunOneWorld = false;
+let oneWorldName = localStorage.getItem(ONE_WORLD_NAME_KEY) || '';
+
+function isOneWorldAvailable() {
+  return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
+}
+
+function isOneWorldToggleOn() {
+  const toggle = document.getElementById('one-world-toggle');
+  return !!(toggle && toggle.checked);
+}
+
+// Luanti cannot hold a One World, so it is off while the toggle is.
+function refreshLuantiAvailability() {
+  const on = isOneWorldToggleOn();
+  const luantiBtn = document.getElementById('format-luanti');
+  if (luantiBtn) {
+    luantiBtn.disabled = on;
+    luantiBtn.title = on ? 'Luanti is not available in One World mode' : '';
+  }
+  setSettingsRowAvailable('enable-luanti-toggle', !on);
+  if (on && selectedWorldFormat === 'luanti') setWorldFormat('java');
+}
+
+function isOneWorldEnabled() {
+  const toggle = document.getElementById('one-world-toggle');
+  return !!(toggle && toggle.checked) && isOneWorldAvailable();
+}
+
+// The name picks the world; it never renames one on disk.
+function oneWorldFolderName() {
+  if (isCustomWorldNameFeatureEnabled() && oneWorldName) return oneWorldName;
+  return ONE_WORLD_DEFAULT_NAME;
+}
+
+function oneWorldDisplayName() {
+  if (oneWorldInfo && oneWorldInfo.world_path) return basenameFromPath(oneWorldInfo.world_path);
+  return oneWorldFolderName();
+}
+
+function setOneWorldName(name) {
+  oneWorldName = name;
+  if (name) localStorage.setItem(ONE_WORLD_NAME_KEY, name);
+  else localStorage.removeItem(ONE_WORLD_NAME_KEY);
+}
+
+function oneWorldText(key, fallback, vars) {
+  let text = (window.localization && window.localization[key]) || fallback;
+  for (const k in (vars || {})) text = text.split('{' + k + '}').join(vars[k]);
+  return text;
+}
+
+function setOneWorldStatus(text, tone) {
+  const el = document.getElementById('one-world-status');
+  if (!el) return;
+  el.style.display = text ? '' : 'none';
+  el.textContent = text || '';
+  el.classList.toggle('is-warn', tone === 'warn');
+  el.classList.toggle('is-error', tone === 'error');
+}
+
+function renderOneWorldStatus() {
+  const info = oneWorldInfo;
+  if (!isOneWorldEnabled() || !info) return;
+  const name = oneWorldDisplayName();
+  if (!savePath) {
+    setOneWorldStatus(oneWorldText('one_world_no_save_path', 'Set the Minecraft saves folder in Settings first'), 'error');
+    return;
+  }
+  if (info.foreign) {
+    setOneWorldStatus(oneWorldText('one_world_foreign', 'Folder "{name}" exists but is not a One World', { name }), 'error');
+    return;
+  }
+  if (!info.exists) {
+    setOneWorldStatus(oneWorldText('one_world_will_create', 'One World "{name}" will be created', { name }));
+    return;
+  }
+  let text = oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}', { name, count: info.area_count });
+  let tone = '';
+  if (info.locked) {
+    text += ' \u00b7 ' + oneWorldText('one_world_locked', 'open in Minecraft');
+    tone = 'warn';
+  }
+  const mode = document.getElementById('generation-mode-select');
+  const wantsTerrain = mode ? mode.value !== 'geo-only' : true;
+  if (typeof info.terrain === 'boolean' && info.terrain !== wantsTerrain) {
+    text += ' \u00b7 ' + oneWorldText(info.terrain ? 'one_world_needs_terrain' : 'one_world_needs_flat',
+      info.terrain ? 'this world uses terrain' : 'this world is flat');
+    tone = 'warn';
+  }
+  setOneWorldStatus(text, tone);
+}
+
+function setSettingsRowAvailable(inputId, available) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.disabled = !available;
+  const row = input.closest('.settings-row');
+  if (row) {
+    row.classList.toggle('settings-row-unavailable', !available);
+    row.toggleAttribute('inert', !available);
+  }
+}
+
+function readOneWorldRestore() {
+  try {
+    return JSON.parse(localStorage.getItem(ONE_WORLD_RESTORE_KEY) || '{}') || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function writeOneWorldRestore(record) {
+  if (Object.keys(record).length) localStorage.setItem(ONE_WORLD_RESTORE_KEY, JSON.stringify(record));
+  else localStorage.removeItem(ONE_WORLD_RESTORE_KEY);
+}
+
+function controlValue(el) {
+  return el.type === 'checkbox' ? el.checked : parseFloat(el.value);
+}
+
+function writeControl(el, value) {
+  if (controlValue(el) === value) return;
+  if (el.type === 'checkbox') el.checked = !!value;
+  else el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// Pins a control to the world's value, remembering the user's own once.
+// `null` puts the user's value back.
+function pinControl(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const record = readOneWorldRestore();
+  if (value === null) {
+    if (id in record) {
+      writeControl(el, record[id]);
+      delete record[id];
+      writeOneWorldRestore(record);
+    }
+    return;
+  }
+  if (!(id in record)) {
+    record[id] = controlValue(el);
+    writeOneWorldRestore(record);
+  }
+  writeControl(el, value);
+}
+
+function restoreNaturalRows() {
+  setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('voxy-lod-toggle', true);
+  refreshHeightLimitRow();
+}
+
+// Rotation stays 0 and the Voxy cache off while the mode is on; scale,
+// build height and elevation source follow the world once it exists.
+function applyOneWorldPins(info) {
+  oneWorldPinned = true;
+  const rotationInput = document.getElementById('rotation-angle-input');
+  if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
+  setSettingsRowAvailable('rotation-angle-input', false);
+  setSettingsRowAvailable('voxy-lod-toggle', false);
+  postToMap({ type: 'setRotationLocked', locked: true });
+
+  const exists = !!(info && info.exists);
+  pinControl('scale-value-slider', exists && typeof info.scale === 'number' ? info.scale : null);
+  pinControl('disable-height-limit-toggle',
+    exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : null);
+  restoreNaturalRows();
+  setSettingsRowAvailable('voxy-lod-toggle', false);
+  if (exists) {
+    setSettingsRowAvailable('scale-value-slider', false);
+    setSettingsRowAvailable('disable-height-limit-toggle', false);
+    setSettingsRowAvailable('aws-only-elevation-toggle', false);
+  }
+}
+
+function releaseOneWorldPins() {
+  if (!oneWorldPinned) return;
+  oneWorldPinned = false;
+  pinControl('scale-value-slider', null);
+  pinControl('disable-height-limit-toggle', null);
+  setSettingsRowAvailable('rotation-angle-input', true);
+  restoreNaturalRows();
+  postToMap({ type: 'setRotationLocked', locked: false });
+}
+
+function clearOneWorldOverlays() {
+  if (oneWorldOverlayKey === null) return;
+  oneWorldOverlayKey = null;
+  postToMap({ type: 'oneWorldOverlays', areas: [] });
+}
+
+function isWorldNameEditing() {
+  const input = document.getElementById('world-name-input');
+  return !!(input && input.style.display !== 'none');
+}
+
+async function fetchOneWorldInfo() {
+  return invoke('gui_one_world_info', { savePath: savePath, worldName: oneWorldFolderName() });
+}
+
+// Re-reads the world the next area joins. Call whenever something that picks
+// the world changes: toggle, name, save path, format, body, window focus.
+let oneWorldRefreshSeq = 0;
+async function refreshOneWorldState() {
+  const seq = ++oneWorldRefreshSeq;
+  refreshLuantiAvailability();
+  setSettingsRowAvailable('one-world-toggle', isOneWorldAvailable());
+  if (!isOneWorldEnabled()) {
+    const wasOn = oneWorldInfo !== null;
+    oneWorldInfo = null;
+    releaseOneWorldPins();
+    setOneWorldStatus('');
+    clearOneWorldOverlays();
+    if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
+    if (!isWorldNameEditing()) refreshWorldNameEditUI();
+    return;
+  }
+  if (!savePath) {
+    oneWorldInfo = { exists: false, foreign: false };
+    applyOneWorldPins(oneWorldInfo);
+    renderOneWorldStatus();
+    return;
+  }
+  let info;
+  try {
+    info = await fetchOneWorldInfo();
+  } catch (error) {
+    if (seq !== oneWorldRefreshSeq) return;
+    console.error('Failed to read the One World:', error);
+    oneWorldInfo = null;
+    setOneWorldStatus(String(error), 'error');
+    clearOneWorldOverlays();
+    return;
+  }
+  if (seq !== oneWorldRefreshSeq) return;
+  oneWorldInfo = info;
+  applyOneWorldPins(info);
+  if (!isWorldNameEditing()) refreshWorldNameEditUI();
+  renderOneWorldStatus();
+
+  if (!info.exists || info.foreign) {
+    clearOneWorldOverlays();
+    return;
+  }
+  const key = info.world_path + '|' + info.revision + '|' + info.area_count;
+  if (key === oneWorldOverlayKey) return;
+  try {
+    const overlays = await invoke('gui_get_one_world_overlays', { worldPath: info.world_path });
+    if (seq !== oneWorldRefreshSeq) return;
+    oneWorldOverlayKey = key;
+    postToMap({
+      type: 'oneWorldOverlays',
+      world_path: info.world_path,
+      areas: (overlays && overlays.areas) || [],
+      origin_lat: overlays ? overlays.origin_lat : 0,
+      origin_lon: overlays ? overlays.origin_lon : 0,
+      scale: overlays ? overlays.scale : 1
+    });
+  } catch (error) {
+    console.error('Failed to load the One World overlays:', error);
+  }
+}
+
+// Resolves when the user answers the overlap question.
+function confirmOneWorldOverlap(count) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('one-world-confirm-modal');
+    const text = document.getElementById('one-world-confirm-text');
+    const ok = document.getElementById('one-world-confirm-ok');
+    const cancel = document.getElementById('one-world-confirm-cancel');
+    const close = document.getElementById('one-world-confirm-close');
+    if (!modal || !text || !ok || !cancel) {
+      resolve(true);
+      return;
+    }
+    text.textContent = oneWorldText('one_world_confirm_text',
+      '{count} chunks of this area already exist in the world. They are generated again, and anything built there in Minecraft is replaced.',
+      { count });
+    const finish = (answer) => {
+      modal.style.display = 'none';
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
+      if (close) close.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(answer);
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (event) => { if (event.key === 'Escape') finish(false); };
+    ok.addEventListener('click', onOk);
+    cancel.addEventListener('click', onCancel);
+    if (close) close.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    modal.style.display = 'flex';
+    ok.focus();
+  });
+}
+
+// Checks the world right before a run. Returns false when the run must not start.
+async function prepareOneWorldRun() {
+  if (!savePath) {
+    renderOneWorldStatus();
+    return false;
+  }
+  let info;
+  try {
+    info = await fetchOneWorldInfo();
+  } catch (error) {
+    setOneWorldStatus(String(error), 'error');
+    return false;
+  }
+  oneWorldInfo = info;
+  applyOneWorldPins(info);
+  renderOneWorldStatus();
+  if (info.foreign) return false;
+  if (info.locked) {
+    setOneWorldStatus(oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}',
+      { name: oneWorldDisplayName(), count: info.area_count }) + ' \u00b7 ' +
+      oneWorldText('one_world_locked', 'open in Minecraft'), 'error');
+    return false;
+  }
+  if (!info.exists) return true;
+  let overlap = 0;
+  try {
+    overlap = await invoke('gui_one_world_overlap', {
+      savePath: savePath, worldName: oneWorldFolderName(), bboxText: selectedBBox
+    });
+  } catch (error) {
+    setOneWorldStatus(String(error), 'error');
+    return false;
+  }
+  return overlap > 0 ? confirmOneWorldOverlap(overlap) : true;
+}
+
+function postToMap(message) {
+  const mapFrame = document.querySelector('.map-container');
+  if (mapFrame && mapFrame.contentWindow) {
+    mapFrame.contentWindow.postMessage(message, '*');
+  }
+}
+
+function initOneWorld() {
+  const toggle = document.getElementById('one-world-toggle');
+  if (!toggle) return;
+  // Also fires when the settings store restores the value.
+  toggle.addEventListener('change', refreshOneWorldState);
+  const mode = document.getElementById('generation-mode-select');
+  if (mode) mode.addEventListener('change', renderOneWorldStatus);
+  const nameToggle = document.getElementById('custom-world-name-toggle');
+  if (nameToggle) nameToggle.addEventListener('change', () => { if (isOneWorldEnabled()) refreshOneWorldState(); });
+  // Minecraft may have opened or closed the world meanwhile.
+  window.addEventListener('focus', () => {
+    if (isOneWorldEnabled() && generationButtonEnabled) refreshOneWorldState();
+  });
+  // A reloaded map iframe comes back without overlays.
+  const mapFrame = getMapFrame();
+  if (mapFrame) {
+    mapFrame.addEventListener('load', () => {
+      oneWorldOverlayKey = null;
+      if (isOneWorldEnabled()) refreshOneWorldState();
+    });
+  }
+}
+
 /**
  * Handles world selection errors and displays appropriate messages
  * @param {number} errorCode - Error code from the backend
@@ -2728,8 +3160,16 @@ async function startGeneration() {
     // Past every synchronous refusal, so from here the click is a real start.
     resetProgressUi(STARTING_MESSAGE);
 
-    // Auto-create world for Java format
-    if (selectedWorldFormat === 'java') {
+    const oneWorld = isOneWorldEnabled();
+    if (oneWorld && !(await prepareOneWorldRun())) {
+      const info = document.getElementById('progress-info');
+      if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
+      return;
+    }
+    lastRunOneWorld = oneWorld;
+
+    // Auto-create world for Java format (a One World is resolved by the backend)
+    if (selectedWorldFormat === 'java' && !oneWorld) {
       if (!savePath) {
         console.warn("Cannot create world: save path not set");
         return;
@@ -2752,8 +3192,10 @@ async function startGeneration() {
       }
     }
 
-    // Clear any existing world preview since we're generating a new one
-    notifyWorldChanged();
+    // Clear any existing world preview since we're generating a new one.
+    // A One World keeps its areas on the map; the new one joins them at the end.
+    if (!oneWorld) notifyWorldChanged();
+    if (oneWorld) setWorldNameLabel(oneWorldFolderName());
 
     // Get the map iframe reference
     const mapFrame = document.querySelector('.map-container');
@@ -2787,6 +3229,10 @@ async function startGeneration() {
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
+      if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
+      if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
+    }
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
     var ground_level = -62;
@@ -2798,7 +3244,7 @@ async function startGeneration() {
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
 
     // Get rotation angle
-    var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value) || 0;
+    var rotationAngle = oneWorld ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
 
     var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
     var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
@@ -2812,7 +3258,7 @@ async function startGeneration() {
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
-        selectedWorld: worldPath,
+        selectedWorld: oneWorld ? savePath : worldPath,
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
         worldScale: scale,
@@ -2844,7 +3290,9 @@ async function startGeneration() {
         facadeMode: getEffectiveFacadeMode(),
         buildingFacadesEnabled: getBuildingFacadesEnabled(),
         facadeDetail: getFacadeDetail(),
-        celestialBodyName: selectedCelestialBody
+        celestialBodyName: selectedCelestialBody,
+        oneWorld: oneWorld,
+        oneWorldName: oneWorld ? oneWorldFolderName() : ""
     });
 
     console.log("Generation process started.");
@@ -2879,6 +3327,8 @@ let currentWorldMapData = null;
  * Called when the backend emits the map-preview-ready event
  */
 async function showWorldPreviewButton() {
+  // A One World shows every area at once, reloaded when the run reports Done.
+  if (lastRunOneWorld) return;
   // Try to load the world map data
   await loadWorldMapData();
 

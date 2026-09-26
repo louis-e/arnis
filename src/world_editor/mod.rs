@@ -244,6 +244,9 @@ pub struct WorldEditor<'a> {
     strict_bounds: Option<(i32, i32, i32, i32)>,
     /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
     frame_cells: FnvHashSet<(i32, i32, i32)>,
+    merge_into_existing: bool,
+    climate_anchor: Option<(f64, f64)>,
+    metadata_extent: Option<(XZBBox, LLBBox)>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -285,6 +288,9 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            merge_into_existing: false,
+            climate_anchor: None,
+            metadata_extent: None,
         }
     }
 
@@ -332,6 +338,9 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            merge_into_existing: false,
+            climate_anchor: None,
+            metadata_extent: None,
         }
     }
 
@@ -379,6 +388,38 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            merge_into_existing: false,
+            climate_anchor: None,
+            metadata_extent: None,
+        }
+    }
+
+    pub fn set_merge_into_existing(&mut self, merge: bool) {
+        self.merge_into_existing = merge;
+    }
+
+    pub fn set_climate_anchor(&mut self, lat: f64, lon: f64) {
+        self.climate_anchor = Some((lat, lon));
+    }
+
+    pub fn set_metadata_extent(&mut self, xzbbox: XZBBox, llbbox: LLBBox) {
+        self.metadata_extent = Some((xzbbox, llbbox));
+    }
+
+    pub(crate) fn climate_lat(&self) -> Option<f64> {
+        self.climate_anchor.map(|(lat, _)| lat)
+    }
+
+    pub(crate) fn region_write_mode(&self) -> java::RegionWriteMode {
+        if self.merge_into_existing {
+            java::RegionWriteMode::Merge {
+                min_x: self.xzbbox.min_x(),
+                min_z: self.xzbbox.min_z(),
+                max_x: self.xzbbox.max_x(),
+                max_z: self.xzbbox.max_z(),
+            }
+        } else {
+            java::RegionWriteMode::Fresh
         }
     }
 
@@ -931,6 +972,9 @@ impl<'a> WorldEditor<'a> {
             self.bake_lighting,
             self.preview.clone(),
             self.voxy.clone(),
+            self.region_write_mode(),
+            self.climate_lat(),
+            (self.ground_origin_x, self.ground_origin_z),
         )
     }
 
@@ -986,7 +1030,10 @@ impl<'a> WorldEditor<'a> {
 
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
-        crate::climate::Climate::classify(&self.llbbox)
+        match self.climate_anchor {
+            Some((lat, lon)) => crate::climate::Climate::classify_at(lat, lon),
+            None => crate::climate::Climate::classify(&self.llbbox),
+        }
     }
 
     /// Get the effective ground level at a world coordinate.
@@ -2247,16 +2294,20 @@ impl<'a> WorldEditor<'a> {
             )
         })?;
 
+        let (xzbbox, llbbox) = match &self.metadata_extent {
+            Some((xz, ll)) => (xz.clone(), *ll),
+            None => (self.xzbbox.clone(), self.llbbox),
+        };
         let metadata = WorldMetadata {
-            min_mc_x: self.xzbbox.min_x(),
-            max_mc_x: self.xzbbox.max_x(),
-            min_mc_z: self.xzbbox.min_z(),
-            max_mc_z: self.xzbbox.max_z(),
+            min_mc_x: xzbbox.min_x(),
+            max_mc_x: xzbbox.max_x(),
+            min_mc_z: xzbbox.min_z(),
+            max_mc_z: xzbbox.max_z(),
 
-            min_geo_lat: self.llbbox.min().lat(),
-            max_geo_lat: self.llbbox.max().lat(),
-            min_geo_lon: self.llbbox.min().lng(),
-            max_geo_lon: self.llbbox.max().lng(),
+            min_geo_lat: llbbox.min().lat(),
+            max_geo_lat: llbbox.max().lat(),
+            min_geo_lon: llbbox.min().lng(),
+            max_geo_lon: llbbox.max().lng(),
 
             projection: self.projection.clone(),
             scale: self.scale,
@@ -2593,6 +2644,9 @@ mod eviction_guard_tests {
             false,
             None,
             None,
+            java::RegionWriteMode::Fresh,
+            None,
+            (0, 0),
         )
     }
 

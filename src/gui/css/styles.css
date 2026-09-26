@@ -126,6 +126,27 @@ a:hover {
   flex-direction: column;
 }
 
+.format-toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* One World: which persistent world the next area joins, under the format toggle. */
+.one-world-status {
+  font-size: 0.78em;
+  color: #c9c9c9;
+  text-align: center;
+  margin-top: 6px;
+  line-height: 1.3em;
+  overflow-wrap: anywhere;
+}
+.one-world-status.is-warn {
+  color: #fecc44;
+}
+.one-world-status.is-error {
+  color: #fa7878;
+}
+
 .bbox-selection-text {
   font-size: 0.9em;
   color: #ffffff;

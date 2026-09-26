@@ -111,5 +111,17 @@
   "facade_mode_java_only": "لوحات الصور كيانات خاصة بـ Java، لذا لا تُبنى سوى واجهات الكتل في Bedrock وLuanti.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "عالم واحد",
+  "one_world_will_create": "سيتم إنشاء العالم الواحد “{name}”",
+  "one_world_areas": "العالم الواحد “{name}” · المناطق: {count}",
+  "one_world_locked": "مفتوح في Minecraft",
+  "one_world_foreign": "المجلد “{name}” موجود لكنه ليس عالمًا واحدًا",
+  "one_world_needs_terrain": "هذا العالم يستخدم التضاريس",
+  "one_world_needs_flat": "هذا العالم مسطح (العناصر فقط)",
+  "one_world_no_save_path": "حدّد أولًا مجلد عوالم Minecraft في الإعدادات",
+  "one_world_confirm_title": "استبدال القطع الموجودة؟",
+  "one_world_confirm_text": "يوجد {count} من قطع هذه المنطقة في العالم بالفعل. ستُنشأ من جديد، وسيُستبدل كل ما بُني هناك في Minecraft.",
+  "one_world_confirm_cancel": "إلغاء",
+  "one_world_confirm_ok": "إنشاء"
 }

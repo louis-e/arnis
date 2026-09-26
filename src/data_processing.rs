@@ -529,6 +529,11 @@ pub fn generate_world_with_options(
     let output_path = options.path.clone();
     let world_format = options.format;
     let generation_start = args.benchmark.then(std::time::Instant::now);
+    // World-wide extras (map item, branding, world settings) belong to the
+    // first area of a One World.
+    let one_world = args.one_world_run.as_ref();
+    let extending = one_world.is_some_and(|run| run.extending);
+    let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
@@ -564,6 +569,26 @@ pub fn generate_world_with_options(
     editor.set_start_with_map(args.map_item);
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
+    if let Some(run) = one_world {
+        editor.set_merge_into_existing(true);
+        editor.set_climate_anchor(run.origin_lat, run.origin_lon);
+        // metadata.json describes the whole world, not this area alone.
+        if let Ok(Some(manifest)) = crate::one_world::Manifest::load(&run.world_dir) {
+            let union = match manifest.extent() {
+                Some(ext) => XZBBox::rect_from_min_max(
+                    ext.min_x().min(xzbbox.min_x()),
+                    ext.min_z().min(xzbbox.min_z()),
+                    ext.max_x().max(xzbbox.max_x()),
+                    ext.max_z().max(xzbbox.max_z()),
+                )
+                .unwrap_or_else(|_| xzbbox.clone()),
+                None => xzbbox.clone(),
+            };
+            if let Ok(ll) = crate::projection::llbbox_for_rect(&manifest.projection(), &union) {
+                editor.set_metadata_extent(union, ll);
+            }
+        }
+    }
 
     // Facade textures: loaded and projected onto the buildings before any tile
     // thread starts, so the wall builder only reads. A folder given on the
@@ -644,9 +669,24 @@ pub fn generate_world_with_options(
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
     // threads only read the registry. Java only; other formats keep banner fallbacks.
     let signage_start = args.benchmark.then(std::time::Instant::now);
+    // A One World continues after its last map id.
+    let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
+    let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
+    let first_decal_id = if one_world.is_some() {
+        let next = crate::map_item::next_map_id(&output_path.join("data"));
+        next + if wants_map_item {
+            2
+        } else if place_branding {
+            1
+        } else {
+            0
+        }
+    } else {
+        crate::decals::registry::DecalRegistry::FIRST_ID
+    };
     let signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
         == WorldFormat::JavaAnvil)
-        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox))
+        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox, first_decal_id))
         .flatten()
         .map(Arc::new);
     if let (Some(t), Some(_)) = (signage_start, signage_ctx.as_ref()) {
@@ -672,12 +712,12 @@ pub fn generate_world_with_options(
     // The map item consumes the same accumulator, so either feature enables it.
     // Without the PNG the map item only needs 128px, so a small frame suffices
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
-    let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil;
-    // Branding map ships on every Java world.
-    let place_branding = world_format == WorldFormat::JavaAnvil;
     let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
-        Arc::new(if wants_png {
+        Arc::new(if wants_png && one_world.is_some() {
+            // Every area of a One World is sent to the map overlay at once.
+            PreviewAccumulator::new_capped(&xzbbox, 2048)
+        } else if wants_png {
             PreviewAccumulator::new(&xzbbox)
         } else if wants_local_maps {
             // "You are here" boards crop this, so give them a little more resolution.
@@ -699,6 +739,16 @@ pub fn generate_world_with_options(
             ),
             Err(e) => eprintln!("Skipping the Voxy LOD cache: {e}"),
         }
+    }
+
+    if let (Some(run), Some(affine)) = (one_world, ground.elevation_affine()) {
+        crate::one_world::remember_elevation(run, affine)?;
+    }
+    if let Some(run) = one_world.filter(|run| run.replaced_chunks > 0) {
+        emit_gui_progress_update(
+            MESSAGE_ONLY,
+            &format!("Replacing {} existing chunks", run.replaced_chunks),
+        );
     }
 
     let ground = Arc::new(ground);
@@ -1013,7 +1063,7 @@ pub fn generate_world_with_options(
                     // Ground generation runs on tile editors, so they need the real scale.
                     tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
                     tile_editor.set_place_schematics(args.use_3d);
-                    tile_editor.set_map_decals(place_branding);
+                    tile_editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
                     if let Some(ref tp) = tree_pack {
                         tile_editor.set_tree_pack(Arc::clone(tp));
                     }
@@ -1054,7 +1104,7 @@ pub fn generate_world_with_options(
                             // World bbox (not tile) for relation/area ring clipping: clipping to
                             // the tile can drop a relation whose ring fails to close. The tile
                             // editor still bounds the actual writes.
-                            &xzbbox,
+                            &clip_bbox,
                             &big_water_field,
                             &bridge_structures,
                             &bridge_surface,
@@ -1340,7 +1390,7 @@ pub fn generate_world_with_options(
                 &road_mask,
                 &rail_mask,
                 &tunnel_footprint,
-                &xzbbox,
+                &clip_bbox,
                 &big_water_field,
                 &bridge_structures,
                 &bridge_surface,
@@ -1575,8 +1625,15 @@ pub fn generate_world_with_options(
     }
 
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.
+    // A One World records the area only after its PNG is written.
     if let Some(p) = preview.filter(|_| args.map_preview) {
-        let png_path = map_preview::preview_output_path(&output_path, world_format);
+        let png_path = match one_world {
+            Some(run) => run.preview_path(),
+            None => map_preview::preview_output_path(&output_path, world_format),
+        };
+        if let Some(parent) = png_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let result = map_preview::PreviewResult {
             png_path: png_path.clone(),
             min_lat: llbbox.min().lat(),
@@ -1603,13 +1660,30 @@ pub fn generate_world_with_options(
                 Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
             }
         };
-        if crate::progress::is_running_with_gui() {
+        if crate::progress::is_running_with_gui() && one_world.is_none() {
             std::thread::spawn(finalize);
         } else {
             finalize();
         }
     }
     bench.mark("map_preview");
+
+    if let Some(run) = one_world {
+        let png = run.preview_path();
+        let preview_path = png.is_file().then_some(png.as_path());
+        crate::one_world::record_area(
+            run,
+            &llbbox,
+            &xzbbox,
+            ground.elevation_affine(),
+            preview_path,
+        )
+        .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
+        println!("One World: area #{} recorded.", run.area_id);
+        if let Err(e) = crate::world_utils::touch_last_played(&run.world_dir) {
+            eprintln!("Warning: Failed to update LastPlayed: {e}");
+        }
+    }
 
     if let Some(start) = generation_start {
         let gen_ms = start.elapsed().as_millis();
@@ -1618,7 +1692,7 @@ pub fn generate_world_with_options(
 
     emit_gui_progress_update(99.5, "Finalizing world...");
 
-    if world_format == WorldFormat::JavaAnvil {
+    if world_format == WorldFormat::JavaAnvil && !extending {
         if let Err(e) = crate::world_utils::apply_java_world_settings(
             &output_path,
             args.gamemode,
@@ -1628,9 +1702,26 @@ pub fn generate_world_with_options(
         }
     }
 
+    // An extended One World moves the spawn only to a marker inside this area.
+    if extending {
+        if let Some((sx, sz)) = options.spawn_point.filter(|&(x, z)| {
+            xzbbox.contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
+        }) {
+            let rel = crate::coordinate_system::cartesian::XZPoint::new(
+                sx - xzbbox.min_x(),
+                sz - xzbbox.min_z(),
+            );
+            let sy = ground.level(rel) + 3;
+            match crate::world_utils::set_spawn_in_level_dat(&output_path, sx, sy, sz) {
+                Ok(()) => println!("Spawn point moved to {sx}, {sy}, {sz}."),
+                Err(e) => eprintln!("Warning: Failed to move the spawn point: {e}"),
+            }
+        }
+    }
+
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]
-    if world_format == WorldFormat::JavaAnvil {
+    if world_format == WorldFormat::JavaAnvil && !extending {
         use crate::gui::update_player_spawn_y_after_generation;
 
         // Always update spawn Y since we now always set a spawn point (user-selected or default).

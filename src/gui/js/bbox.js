@@ -935,12 +935,78 @@ $(document).ready(function () {
 
     applyBasemap();
 
-    // World overlay state
+    // World overlay state. For a One World the data carries `areas` and the
+    // overlay is a layer group.
     var worldOverlay = null;
     var worldOverlayData = null;
     var worldOverlayEnabled = false;
     var worldPreviewAvailable = false;
     var sliderControl = null;
+    // One World: the user hid the areas, and the world they were hidden for.
+    var oneWorldOverlayHidden = false;
+    // Slider positions: a One World shows its areas opaque unless told otherwise.
+    var overlayOpacity = { world: 50, oneWorld: 100 };
+    var oneWorldFittedPath = null;
+
+    function setWorldOverlayOpacity(value) {
+        if (!worldOverlay) return;
+        if (typeof worldOverlay.setOpacity === 'function') {
+            worldOverlay.setOpacity(value);
+            return;
+        }
+        worldOverlay.eachLayer(function (layer) {
+            if (typeof layer.setOpacity === 'function') {
+                layer.setOpacity(value);
+            } else if (typeof layer.setStyle === 'function') {
+                layer.setStyle({
+                    opacity: Math.min(1, value + 0.3),
+                    fillOpacity: layer.options.arnisFill ? value * 0.15 : 0
+                });
+            }
+        });
+    }
+
+    function buildWorldOverlay(data, opacityValue) {
+        if (!data.areas) {
+            var bounds = L.latLngBounds([data.min_lat, data.min_lon], [data.max_lat, data.max_lon]);
+            return L.imageOverlay(data.image_base64, bounds, {
+                opacity: opacityValue,
+                interactive: false,
+                zIndex: 500
+            });
+        }
+        var group = L.layerGroup();
+        data.areas.forEach(function (area, index) {
+            var b = L.latLngBounds([area.min_lat, area.min_lon], [area.max_lat, area.max_lon]);
+            if (area.image_base64) {
+                group.addLayer(L.imageOverlay(area.image_base64, b, {
+                    opacity: opacityValue,
+                    interactive: false,
+                    zIndex: 500 + index
+                }));
+            }
+            // Filled only where there is no image to show.
+            group.addLayer(L.rectangle(b, {
+                color: '#fecc44',
+                weight: 1,
+                opacity: Math.min(1, opacityValue + 0.3),
+                fillColor: '#fecc44',
+                fillOpacity: area.image_base64 ? 0 : opacityValue * 0.15,
+                arnisFill: !area.image_base64,
+                interactive: false
+            }));
+        });
+        return group;
+    }
+
+    function oneWorldBounds(areas) {
+        var bounds = null;
+        areas.forEach(function (area) {
+            var b = L.latLngBounds([area.min_lat, area.min_lon], [area.max_lat, area.max_lon]);
+            bounds = bounds ? bounds.extend(b) : b;
+        });
+        return bounds;
+    }
 
     // Create the opacity slider as a proper Leaflet control
     var SliderControl = L.Control.extend({
@@ -959,9 +1025,9 @@ $(document).ready(function () {
             slider.title = 'Overlay Opacity';
 
             L.DomEvent.on(slider, 'input', function(e) {
-                if (worldOverlay) {
-                    worldOverlay.setOpacity(e.target.value / 100);
-                }
+                var kind = worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
+                overlayOpacity[kind] = Number(e.target.value);
+                setWorldOverlayOpacity(e.target.value / 100);
             });
 
             // Prevent all map interactions
@@ -1001,6 +1067,7 @@ $(document).ready(function () {
                 e.stopPropagation();
                 if (worldPreviewAvailable) {
                     toggleWorldOverlay();
+                    oneWorldOverlayHidden = !worldOverlayEnabled;
                 }
             });
 
@@ -1023,10 +1090,6 @@ $(document).ready(function () {
         if (worldOverlayEnabled) {
             // Show overlay
             var data = worldOverlayData;
-            var bounds = L.latLngBounds(
-                [data.min_lat, data.min_lon],
-                [data.max_lat, data.max_lon]
-            );
 
             if (worldOverlay) {
                 map.removeLayer(worldOverlay);
@@ -1035,11 +1098,7 @@ $(document).ready(function () {
             var opacity = document.getElementById('world-preview-opacity');
             var opacityValue = opacity ? opacity.value / 100 : 0.5;
 
-            worldOverlay = L.imageOverlay(data.image_base64, bounds, {
-                opacity: opacityValue,
-                interactive: false,
-                zIndex: 500
-            });
+            worldOverlay = buildWorldOverlay(data, opacityValue);
             worldOverlay.addTo(map);
 
             if (btn) {
@@ -1075,6 +1134,8 @@ $(document).ready(function () {
         }
         worldOverlayData = data;
         worldPreviewAvailable = true;
+        var slider = document.getElementById('world-preview-opacity');
+        if (slider) slider.value = String(overlayOpacity[data.areas ? 'oneWorld' : 'world']);
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('disabled');
@@ -1185,6 +1246,19 @@ $(document).ready(function () {
 
         var data = worldOverlayData;
 
+        // One World: same projection as src/projection/web_mercator.rs.
+        if (data.areas) {
+            var R = 6371000.0;
+            var rad = Math.PI / 180;
+            var k = data.scale * Math.cos(data.origin_lat * rad);
+            var mercY = function (latDeg) {
+                return R * Math.log(Math.tan(Math.PI / 4 + latDeg * rad / 2));
+            };
+            var x = R * (lng - data.origin_lon) * rad * k;
+            var z = -(mercY(lat) - mercY(data.origin_lat)) * k;
+            return { x: Math.floor(x), y: 100, z: Math.floor(z) };
+        }
+
         // Check if Minecraft coordinate bounds are available (not all zeros)
         if (data.min_mc_x === 0 && data.max_mc_x === 0 && 
             data.min_mc_z === 0 && data.max_mc_z === 0) {
@@ -1271,8 +1345,10 @@ $(document).ready(function () {
             var lat = e.latlng.lat;
             var lng = e.latlng.lng;
 
-            if (lat >= data.min_lat && lat <= data.max_lat &&
-                lng >= data.min_lon && lng <= data.max_lon) {
+            var inside = function (b) {
+                return lat >= b.min_lat && lat <= b.max_lat && lng >= b.min_lon && lng <= b.max_lon;
+            };
+            if (data.areas ? data.areas.some(inside) : inside(data)) {
                 showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng);
             }
         }
@@ -1375,6 +1451,35 @@ $(document).ready(function () {
         // Handle world changed (disable preview)
         if (event.data && event.data.type === 'worldChanged') {
             disableWorldPreview();
+        }
+
+        // One World: every generated area. An empty list clears them.
+        if (event.data && event.data.type === 'oneWorldOverlays') {
+            var areas = event.data.areas || [];
+            var worldPath = event.data.world_path || null;
+            if (worldPath !== oneWorldFittedPath) oneWorldOverlayHidden = false;
+            disableWorldPreview();
+            if (areas.length > 0) {
+                enableWorldPreview({
+                    areas: areas,
+                    origin_lat: event.data.origin_lat,
+                    origin_lon: event.data.origin_lon,
+                    scale: event.data.scale
+                });
+                if (worldPreviewAvailable && !oneWorldOverlayHidden) {
+                    toggleWorldOverlay();
+                }
+                if (worldPath !== oneWorldFittedPath) {
+                    var bounds = oneWorldBounds(areas);
+                    if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
+                }
+            }
+            oneWorldFittedPath = areas.length > 0 ? worldPath : null;
+        }
+
+        // One World keeps rotation at 0.
+        if (event.data && event.data.type === 'setRotationLocked') {
+            setRotationLocked(!!event.data.locked);
         }
 
         // Handle rotation preview angle update (store it for preview-skip logic)
@@ -1608,6 +1713,24 @@ $(document).ready(function () {
         }
     }
 
+    var _rotationLocked = false;
+    var _angleToolButton = null;
+
+    function setRotationLocked(locked) {
+        _rotationLocked = locked;
+        if (locked && _angleToolActive) stopAngleTool();
+        if (_angleToolButton) {
+            if (locked) {
+                L.DomUtil.addClass(_angleToolButton, 'leaflet-disabled');
+                _angleToolButton.title = 'Rotation is off in One World mode';
+            } else {
+                L.DomUtil.removeClass(_angleToolButton, 'leaflet-disabled');
+                _angleToolButton.title = 'Set rotation angle';
+            }
+            _angleToolButton.setAttribute('aria-disabled', locked ? 'true' : 'false');
+        }
+    }
+
     // Inject the angle tool button into the top draw toolbar (alongside rectangle & marker)
     (function addAngleToolButton() {
         var drawToolbar = document.querySelector('.leaflet-draw-toolbar.leaflet-draw-toolbar-top');
@@ -1616,6 +1739,7 @@ $(document).ready(function () {
         var btn = L.DomUtil.create('a', 'leaflet-draw-draw-polyline');
         btn.href = '#';
         btn.title = 'Set rotation angle';
+        _angleToolButton = btn;
 
         L.DomEvent
             .on(btn, 'click', L.DomEvent.stopPropagation)
@@ -1623,6 +1747,7 @@ $(document).ready(function () {
             .on(btn, 'dblclick', L.DomEvent.stopPropagation)
             .on(btn, 'click', L.DomEvent.preventDefault)
             .on(btn, 'click', function() {
+                if (_rotationLocked) return;
                 if (_angleToolActive) {
                     stopAngleTool();
                 } else {

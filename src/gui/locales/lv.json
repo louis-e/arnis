@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Fotopaneļi ir Java entītājas, tāpēc Bedrock un Luanti tiek veidotas tikai bloku fasādes.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Viena pasaule",
+  "one_world_will_create": "Tiks izveidota viena pasaule “{name}”",
+  "one_world_areas": "Viena pasaule “{name}” · Apgabali: {count}",
+  "one_world_locked": "atvērta Minecraft",
+  "one_world_foreign": "Mape “{name}” pastāv, bet nav viena pasaule",
+  "one_world_needs_terrain": "šī pasaule izmanto reljefu",
+  "one_world_needs_flat": "šī pasaule ir līdzena (tikai objekti)",
+  "one_world_no_save_path": "Vispirms iestatījumos norādiet Minecraft saglabājumu mapi",
+  "one_world_confirm_title": "Aizstāt esošos chunkus?",
+  "one_world_confirm_text": "{count} šī apgabala chunki pasaulē jau ir. Tie tiek ģenerēti no jauna, un viss, kas tur uzbūvēts Minecraft, tiek aizstāts.",
+  "one_world_confirm_cancel": "Atcelt",
+  "one_world_confirm_ok": "Ģenerēt"
 }

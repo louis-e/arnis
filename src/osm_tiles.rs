@@ -310,7 +310,10 @@ fn assemble(c: Collected) -> OsmData {
     let mut next_synthetic = SYNTHETIC_ID_BASE;
     let mut emitted: Vec<(u64, i32, i32)> = Vec::new();
 
-    for (id, (lat, lon, tags)) in c.nodes {
+    // Sorted like the ways and relations below: HashMap order changes per run.
+    let mut nodes: Vec<(u64, NodeBody)> = c.nodes.into_iter().collect();
+    nodes.sort_unstable_by_key(|n| n.0);
+    for (id, (lat, lon, tags)) in nodes {
         coord_ids.entry((lat, lon)).or_insert(id);
         elements.push(OsmElement {
             r#type: "node".into(),

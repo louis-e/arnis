@@ -111,5 +111,17 @@
   "facade_mode_java_only": "A fotópanelek Java-entitások, ezért Bedrockon és Luantin csak a blokkhomlokzatok épülnek meg.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Egy világ",
+  "one_world_will_create": "Az „{name}” egy-világ létrejön",
+  "one_world_areas": "Egy világ „{name}” · Területek: {count}",
+  "one_world_locked": "megnyitva a Minecraftban",
+  "one_world_foreign": "A(z) „{name}” mappa létezik, de nem egy-világ",
+  "one_world_needs_terrain": "ez a világ domborzatot használ",
+  "one_world_needs_flat": "ez a világ lapos (csak objektumok)",
+  "one_world_no_save_path": "Előbb add meg a Minecraft mentési mappát a beállításokban",
+  "one_world_confirm_title": "Lecseréled a meglévő chunkokat?",
+  "one_world_confirm_text": "A terület {count} chunkja már létezik a világban. Újra létrejönnek, és minden, amit ott a Minecraftban építettek, lecserélődik.",
+  "one_world_confirm_cancel": "Mégse",
+  "one_world_confirm_ok": "Generálás"
 }

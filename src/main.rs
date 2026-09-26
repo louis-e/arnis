@@ -22,6 +22,7 @@ mod elevation;
 mod elevation_data;
 mod floodfill;
 mod floodfill_cache;
+mod grid_ops;
 mod ground;
 mod ground_generation;
 mod land_cover;
@@ -35,6 +36,7 @@ mod map_transformation;
 mod mapillary;
 mod models_3d;
 mod net;
+mod one_world;
 mod ore_generation;
 mod osm_parser;
 mod osm_tiles;
@@ -144,6 +146,34 @@ fn attach_parent_console() {
     }
 }
 
+/// The One World a CLI run holds, and the folder if the run created it.
+struct OneWorldRun {
+    lock: world_utils::SessionLock,
+    created: Option<PathBuf>,
+}
+
+static ONE_WORLD_RUN: std::sync::Mutex<Option<OneWorldRun>> = std::sync::Mutex::new(None);
+
+/// Releases the One World lock. On failure a world this run created is removed.
+fn release_one_world(failed: bool) {
+    let run = ONE_WORLD_RUN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some(OneWorldRun { lock, created }) = run {
+        drop(lock);
+        if let (true, Some(dir)) = (failed, created) {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// `process::exit` skips destructors, so failures go through here.
+fn exit_failed() -> ! {
+    release_one_world(true);
+    std::process::exit(1);
+}
+
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -178,7 +208,6 @@ fn run_cli() {
     // Parse input arguments
     let mut args: Args = Args::parse();
     args::apply_body_defaults(&mut args);
-    let args = args;
 
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
@@ -218,7 +247,7 @@ fn run_cli() {
     // world-name / area-size steps below. The parsed data is kept in `preloaded_osm` so the file
     // isn't read twice. The Overpass and terrain-only paths already know the bbox from --bbox.
     let skip_objects = args.skip_objects();
-    let (mut preloaded_osm, effective_bbox) = match (skip_objects, args.file.as_deref()) {
+    let (mut preloaded_osm, mut effective_bbox) = match (skip_objects, args.file.as_deref()) {
         (false, Some(file)) => {
             let (data, file_bounds) = match retrieve_data::fetch_data_from_file(file) {
                 Ok(loaded) => loaded,
@@ -266,6 +295,46 @@ fn run_cli() {
             (None, bbox)
         }
     };
+
+    // One World: snaps the bbox to the world's chunk grid and holds its lock.
+    let mut one_world_paths: Option<PathBuf> = None;
+    if args.one_world {
+        let base_dir = args.path.clone().unwrap_or_else(|| {
+            eprintln!(
+                "{} --one-world needs --output-dir (the saves folder).",
+                "Error:".red().bold()
+            );
+            std::process::exit(1);
+        });
+        let name = args
+            .world_name
+            .as_deref()
+            .and_then(world_utils::world_folder_name)
+            .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string());
+        let world_dir = base_dir.join(name);
+        let session =
+            one_world::prepare(&world_dir, &effective_bbox, &mut args).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            });
+        effective_bbox = session.llbbox;
+        *ONE_WORLD_RUN.lock().unwrap_or_else(|e| e.into_inner()) = Some(OneWorldRun {
+            lock: session.lock,
+            created: session.created.then(|| world_dir.clone()),
+        });
+        if args.disable_height_limit && session.created {
+            if let Err(e) = world_utils::install_tall_datapack(&world_dir) {
+                eprintln!(
+                    "{} Failed to install tall-world datapack: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                exit_failed();
+            }
+        }
+        one_world_paths = Some(world_dir);
+    }
+    let args = args;
 
     // Heads-up for very large areas: generation is long and memory-heavy, and big
     // requests load the public OpenStreetMap / elevation servers. Non-blocking.
@@ -329,6 +398,8 @@ fn run_cli() {
             world_path.display().to_string().bright_white().bold()
         );
         (world_path, Some(world_name))
+    } else if let Some(world_dir) = one_world_paths.clone() {
+        (world_dir, None)
     } else {
         // Java: create a new world in the provided output directory
         let base_dir = args.path.clone().unwrap();
@@ -402,7 +473,7 @@ fn run_cli() {
             let data = if args.overture && !skip_objects {
                 overture::fetch_overture_buildings(
                     &effective_bbox,
-                    args.scale,
+                    &projection::ProjectionSpec::from_args(&args),
                     args.overture_source,
                     args.debug,
                 )
@@ -434,7 +505,10 @@ fn run_cli() {
                 &args.osm_tiles_url,
                 !args.no_tile_archive,
             )
-            .expect("Failed to fetch data")
+            .unwrap_or_else(|e| {
+                eprintln!("{} Failed to fetch data: {e}", "Error:".red().bold());
+                exit_failed();
+            })
         };
         bench.report("osm_fetch", t.elapsed());
 
@@ -450,7 +524,7 @@ fn run_cli() {
         bench.report("overture_fetch", overture_dur);
         let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {
             eprintln!("{} Terrain fetch failed.", "Error:".red().bold());
-            std::process::exit(1);
+            exit_failed();
         });
         bench.report("terrain_total", ground_dur);
 
@@ -464,9 +538,8 @@ fn run_cli() {
         osm_parser::parse_osm_data(
             raw_data,
             effective_bbox,
-            args.scale,
             args.debug,
-            args.projection,
+            &projection::ProjectionSpec::from_args(&args),
         );
     bench.mark("parse_osm");
 
@@ -554,35 +627,22 @@ fn run_cli() {
     let spawn_point: Option<(i32, i32)> = match (args.spawn_lat, args.spawn_lng) {
         (Some(lat), Some(lng)) => {
             use coordinate_system::geographic::LLPoint;
-            use coordinate_system::transformation::CoordTransformer;
 
             let llpoint = LLPoint::new(lat, lng).unwrap_or_else(|e| {
                 eprintln!("{} Invalid spawn coordinates: {}", "Error:".red().bold(), e);
                 std::process::exit(1);
             });
 
-            let (transformer, pre_rot_bbox) = match args.projection {
-                projection::ProjectionKind::WebMercator => {
-                    let origin_lat =
-                        (effective_bbox.min().lat() + effective_bbox.max().lat()) / 2.0;
-                    let origin_lon =
-                        (effective_bbox.min().lng() + effective_bbox.max().lng()) / 2.0;
-                    let proj =
-                        projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
-                    CoordTransformer::with_projection(&effective_bbox, args.scale, &proj)
-                }
-                projection::ProjectionKind::Local => {
-                    CoordTransformer::llbbox_to_xzbbox(&effective_bbox, args.scale)
-                }
-            }
-            .unwrap_or_else(|e| {
-                eprintln!(
-                    "{} Failed to convert spawn point: {}",
-                    "Error:".red().bold(),
-                    e
-                );
-                std::process::exit(1);
-            });
+            let (transformer, pre_rot_bbox) = projection::ProjectionSpec::from_args(&args)
+                .transformer(&effective_bbox)
+                .unwrap_or_else(|e| {
+                    eprintln!(
+                        "{} Failed to convert spawn point: {}",
+                        "Error:".red().bold(),
+                        e
+                    );
+                    std::process::exit(1);
+                });
 
             let xzpoint = transformer.transform_point(llpoint);
             let (sx, sz) = map_transformation::rotate::rotate_xz_point(
@@ -673,7 +733,8 @@ fn run_cli() {
             }
 
             // For Java Edition, update spawn point in level.dat if provided
-            if !args.bedrock {
+            let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
+            if !args.bedrock && !extending {
                 if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (spawn_point, spawn_y_for_java) {
                     if let Err(e) = world_utils::set_spawn_in_level_dat(
                         &generation_path,
@@ -692,9 +753,10 @@ fn run_cli() {
         }
         Err(e) => {
             eprintln!("{} {}", "Error:".red().bold(), e);
-            std::process::exit(1);
+            exit_failed();
         }
     }
+    release_one_world(false);
 }
 
 fn main() {

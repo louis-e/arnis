@@ -540,3 +540,9 @@ body,
   background-size: 16px 16px !important;
   background-repeat: no-repeat !important;
 }
+
+/* The angle tool is off while One World keeps the world aligned to real coordinates. */
+.leaflet-draw-toolbar a.leaflet-draw-draw-polyline.leaflet-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
