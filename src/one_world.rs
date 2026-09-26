@@ -319,7 +319,8 @@ pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<
     let lock = SessionLock::acquire(world_dir).map_err(|_| open_in_minecraft(world_dir))?;
     let resolved = resolve(world_dir, requested, args, lock);
     if resolved.is_err() && fresh_dir {
-        let _ = std::fs::remove_dir_all(world_dir);
+        // Only while still empty, so nothing another process put there is lost.
+        let _ = std::fs::remove_dir(world_dir);
     }
     resolved
 }
@@ -351,6 +352,18 @@ fn resolve(
             (manifest, false)
         }
         None => {
+            // Checked again under the lock: the folder may have filled up since.
+            let foreign = std::fs::read_dir(world_dir)
+                .map_err(|e| format!("Failed to read {}: {e}", world_dir.display()))?
+                .filter_map(Result::ok)
+                .any(|entry| entry.file_name() != "session.lock");
+            if foreign {
+                return Err(format!(
+                    "{} exists but is not a One World (no {}). Choose another world name or delete the folder.",
+                    world_dir.display(),
+                    MANIFEST_FILE
+                ));
+            }
             let origin_lat = (requested.min().lat() + requested.max().lat()) / 2.0;
             let origin_lon = (requested.min().lng() + requested.max().lng()) / 2.0;
             (Manifest::new(args, origin_lat, origin_lon), true)
@@ -680,6 +693,23 @@ mod tests {
         assert!(prepare(&world, &req, &mut args_for(MUNICH, &[])).is_err());
         drop(held);
         assert!(prepare(&world, &req, &mut args_for(MUNICH, &[])).is_ok());
+    }
+
+    #[test]
+    fn a_refused_first_run_leaves_no_folder_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        // Wider than the world border at scale 4, refused after the lock is taken.
+        let huge = "-10.0,-179.0,10.0,179.0";
+        let err = prepare(
+            &world,
+            &LLBBox::from_str(huge).unwrap(),
+            &mut args_for(huge, &["--scale", "4"]),
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("world border"), "{err}");
+        assert!(!world.exists());
     }
 
     #[test]

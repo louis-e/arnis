@@ -370,11 +370,14 @@ impl SessionLock {
             return Err("Failed to acquire lock on session.lock file: already held".to_string());
         }
 
-        let file = fs::File::create(&session_lock_path)
+        // Not truncated before the lock is ours: the holder's file stays intact.
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&session_lock_path)
             .map_err(|e| format!("Failed to create session.lock file: {e}"))?;
-        (&file)
-            .write_all("\u{2603}".as_bytes())
-            .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
 
         // Java locks with fcntl. On Unix only that lock is taken: flock does not
         // see it on Linux, and on macOS the two would block each other.
@@ -384,6 +387,10 @@ impl SessionLock {
         #[cfg(not(unix))]
         fs2::FileExt::try_lock_exclusive(&file)
             .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
+
+        file.set_len(0)
+            .and_then(|_| (&file).write_all("\u{2603}".as_bytes()))
+            .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
 
         HELD_LOCKS
             .lock()
@@ -431,7 +438,9 @@ fn posix_lock_held_elsewhere(file: &fs::File) -> bool {
     fl.l_type = libc::F_WRLCK as _;
     fl.l_whence = libc::SEEK_SET as _;
     let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut fl) };
-    r == 0 && fl.l_type != libc::F_UNLCK as _
+    // F_UNLCK is an i32 on Linux and an i16 on macOS; l_type is always c_short.
+    let unlocked: libc::c_short = libc::F_UNLCK as _;
+    r == 0 && fl.l_type != unlocked
 }
 
 /// Whether another process holds the world's `session.lock`.
@@ -1531,6 +1540,24 @@ mod lock_tests {
         assert_eq!(world_folder_name("a/b:c").as_deref(), Some("a_b_c"));
         assert_eq!(world_folder_name(".."), None);
         assert_eq!(world_folder_name("   "), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_held_lock_file_is_left_as_it_was() {
+        use fs2::FileExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.lock");
+        fs::write(&path, "held").unwrap();
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        holder.try_lock_exclusive().unwrap();
+        assert!(SessionLock::acquire(dir.path()).is_err());
+        holder.unlock().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "held");
     }
 
     #[test]
