@@ -316,6 +316,8 @@ pub fn write_world_skeleton(
 
 /// Holds Minecraft's `session.lock` while Arnis writes a world.
 pub struct SessionLock {
+    // On Unix it is only held: closing it releases the fcntl lock.
+    #[cfg_attr(unix, allow(dead_code))]
     file: fs::File,
     path: PathBuf,
 }
