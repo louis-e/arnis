@@ -526,11 +526,11 @@ pub struct OvertureData {
 /// conflated heights survive in `hints`.
 pub fn fetch_overture_buildings(
     bbox: &LLBBox,
-    scale: f64,
+    projection: &crate::projection::ProjectionSpec,
     source: OvertureSource,
     debug: bool,
 ) -> OvertureData {
-    match fetch_overture_buildings_inner(bbox, scale, source, debug) {
+    match fetch_overture_buildings_inner(bbox, projection, source, debug) {
         Ok(data) => data,
         Err(e) => {
             eprintln!(
@@ -933,7 +933,7 @@ fn collect_from_parquet(
 
 fn fetch_overture_buildings_inner(
     bbox: &LLBBox,
-    scale: f64,
+    projection: &crate::projection::ProjectionSpec,
     source: OvertureSource,
     debug: bool,
 ) -> Result<OvertureData, Box<dyn std::error::Error>> {
@@ -956,7 +956,8 @@ fn fetch_overture_buildings_inner(
     }
 
     // Convert to ProcessedElements and clip to xzbbox (matching OSM clipping)
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(bbox, scale)?;
+    let (coord_transformer, xzbbox) = projection.transformer(bbox)?;
+    let clip_bbox = projection.clip_bbox(&xzbbox);
 
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
@@ -978,9 +979,22 @@ fn fetch_overture_buildings_inner(
                 );
             }
             let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
-            let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
+            let clipped = clip_way_to_bbox(&way.nodes, &clip_bbox);
             if clipped.len() < 3 {
                 return None;
+            }
+            if projection.clip_pad > 0 {
+                let min_x = clipped.iter().map(|n| n.x).min().unwrap_or(0);
+                let max_x = clipped.iter().map(|n| n.x).max().unwrap_or(0);
+                let min_z = clipped.iter().map(|n| n.z).min().unwrap_or(0);
+                let max_z = clipped.iter().map(|n| n.z).max().unwrap_or(0);
+                if max_x < xzbbox.min_x()
+                    || min_x > xzbbox.max_x()
+                    || max_z < xzbbox.min_z()
+                    || min_z > xzbbox.max_z()
+                {
+                    return None;
+                }
             }
             way.nodes = clipped;
             Some(ProcessedElement::Way(way))

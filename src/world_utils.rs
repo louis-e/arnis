@@ -148,6 +148,10 @@ fn sanitize_chars_and_trim_capped(name: &str, max_bytes: usize) -> String {
     sanitized
 }
 
+pub fn world_folder_name(raw: &str) -> Option<String> {
+    Some(sanitize_custom_world_name(raw)).filter(|n| !n.is_empty())
+}
+
 /// Sanitizes an area name for safe use in filesystem paths.
 /// Replaces characters that are invalid on Windows/macOS/Linux, trims whitespace,
 /// and limits length to prevent excessively long filenames.
@@ -199,16 +203,30 @@ pub fn create_new_world_with_name(
     };
 
     let new_world_path: PathBuf = base_path.join(&unique_name);
+    write_world_skeleton(&new_world_path, &unique_name, true)?;
+    Ok(new_world_path.display().to_string())
+}
+
+/// Writes `level.dat`, the icon and `region/` for a new Java world. One World
+/// skips the region template, whose placeholder chunks it would not overwrite.
+pub fn write_world_skeleton(
+    new_world_path: &Path,
+    level_name: &str,
+    with_template_region: bool,
+) -> Result<(), String> {
+    let unique_name = level_name.to_string();
 
     // Create the new world directory structure
     fs::create_dir_all(new_world_path.join("region"))
         .map_err(|e| format!("Failed to create world directory: {e}"))?;
 
     // Copy the region template file
-    const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
-    let region_path = new_world_path.join("region").join("r.0.0.mca");
-    fs::write(&region_path, REGION_TEMPLATE)
-        .map_err(|e| format!("Failed to create region file: {e}"))?;
+    if with_template_region {
+        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
+        let region_path = new_world_path.join("region").join("r.0.0.mca");
+        fs::write(&region_path, REGION_TEMPLATE)
+            .map_err(|e| format!("Failed to create region file: {e}"))?;
+    }
 
     // Add the level.dat file
     const LEVEL_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/level.dat");
@@ -293,7 +311,159 @@ pub fn create_new_world_with_name(
     fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
         .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
 
-    Ok(new_world_path.display().to_string())
+    Ok(())
+}
+
+/// Holds Minecraft's `session.lock` while Arnis writes a world.
+pub struct SessionLock {
+    file: fs::File,
+    path: PathBuf,
+}
+
+/// Locks this process holds. Probing one would close a handle to it, and on
+/// Unix closing any handle drops the process's lock.
+static HELD_LOCKS: std::sync::Mutex<Vec<LockId>> = std::sync::Mutex::new(Vec::new());
+
+#[derive(Clone, PartialEq)]
+struct LockId {
+    path: PathBuf,
+    #[cfg(unix)]
+    inode: (u64, u64),
+}
+
+impl LockId {
+    fn of(path: &Path) -> Self {
+        LockId {
+            path: path.to_path_buf(),
+            #[cfg(unix)]
+            inode: unix_inode(path).unwrap_or_default(),
+        }
+    }
+
+    fn is_held(path: &Path) -> bool {
+        #[cfg(unix)]
+        let inode = unix_inode(path);
+        HELD_LOCKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|h| {
+                #[cfg(unix)]
+                if inode.is_some() && inode == Some(h.inode) {
+                    return true;
+                }
+                h.path == path
+            })
+    }
+}
+
+#[cfg(unix)]
+fn unix_inode(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+impl SessionLock {
+    pub fn acquire(world_path: &Path) -> Result<Self, String> {
+        let session_lock_path = world_path.join("session.lock");
+        if LockId::is_held(&session_lock_path) {
+            return Err("Failed to acquire lock on session.lock file: already held".to_string());
+        }
+
+        let file = fs::File::create(&session_lock_path)
+            .map_err(|e| format!("Failed to create session.lock file: {e}"))?;
+        (&file)
+            .write_all("\u{2603}".as_bytes())
+            .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
+
+        // Java locks with fcntl. On Unix only that lock is taken: flock does not
+        // see it on Linux, and on macOS the two would block each other.
+        #[cfg(unix)]
+        posix_lock(&file)
+            .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
+        #[cfg(not(unix))]
+        fs2::FileExt::try_lock_exclusive(&file)
+            .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
+
+        HELD_LOCKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(LockId::of(&session_lock_path));
+        Ok(SessionLock {
+            file,
+            path: session_lock_path,
+        })
+    }
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+        #[cfg(not(unix))]
+        let _ = fs2::FileExt::unlock(&self.file);
+        HELD_LOCKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|h| h.path != self.path);
+    }
+}
+
+#[cfg(unix)]
+fn posix_lock(file: &fs::File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: flock is plain data; zeroed is a valid whole-file request.
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK as _;
+    fl.l_whence = libc::SEEK_SET as _;
+    // SAFETY: the descriptor is open for the lifetime of `file`.
+    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &fl) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn posix_lock_held_elsewhere(file: &fs::File) -> bool {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: as in `posix_lock`; F_GETLK only writes into `fl`.
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK as _;
+    fl.l_whence = libc::SEEK_SET as _;
+    let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut fl) };
+    r == 0 && fl.l_type != libc::F_UNLCK as _
+}
+
+/// Whether another process holds the world's `session.lock`.
+pub fn world_is_locked(world_path: &Path) -> bool {
+    let path = world_path.join("session.lock");
+    if !path.exists() || LockId::is_held(&path) {
+        return false;
+    }
+    let file = match fs::OpenOptions::new().read(true).write(true).open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            return e.kind() == std::io::ErrorKind::PermissionDenied || is_sharing_violation(&e)
+        }
+    };
+    #[cfg(unix)]
+    {
+        posix_lock_held_elsewhere(&file)
+    }
+    #[cfg(not(unix))]
+    {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => {
+                let _ = fs2::FileExt::unlock(&file);
+                false
+            }
+            Err(_) => true,
+        }
+    }
+}
+
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(33))
 }
 
 /// Generates a unique "Arnis World N" name.
@@ -786,6 +956,13 @@ pub fn set_spawn_in_level_dat(
 
     // Update player position if Player compound exists
     if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+        // The spawn is in the overworld, wherever the player logged out.
+        if player.contains_key("Dimension") {
+            player.insert(
+                "Dimension".to_string(),
+                Value::String("minecraft:overworld".to_string()),
+            );
+        }
         if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
             if pos.len() >= 3 {
                 if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
@@ -1311,5 +1488,73 @@ mod tests {
             assert_eq!(dim["height"], 4064, "format {format}");
             assert_eq!(dim["logical_height"], 4064, "format {format}");
         }
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn a_world_without_a_lock_file_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    #[test]
+    fn a_session_lock_excludes_a_second_one_and_goes_away_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = SessionLock::acquire(dir.path()).unwrap();
+        assert!(dir.path().join("session.lock").is_file());
+        assert!(!world_is_locked(dir.path()));
+        assert!(SessionLock::acquire(dir.path()).is_err());
+        drop(lock);
+        assert!(!dir.path().join("session.lock").exists());
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_lock_held_through_another_handle_is_seen() {
+        use fs2::FileExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = fs::File::create(dir.path().join("session.lock")).unwrap();
+        file.try_lock_exclusive().unwrap();
+        assert!(world_is_locked(dir.path()));
+        file.unlock().unwrap();
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    #[test]
+    fn world_folder_names_are_sanitized() {
+        assert_eq!(world_folder_name("  My City  ").as_deref(), Some("My City"));
+        assert_eq!(world_folder_name("a/b:c").as_deref(), Some("a_b_c"));
+        assert_eq!(world_folder_name(".."), None);
+        assert_eq!(world_folder_name("   "), None);
+    }
+
+    #[test]
+    fn a_stale_lock_file_nobody_holds_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("session.lock"), "\u{2603}").unwrap();
+        assert!(!world_is_locked(dir.path()));
+        let lock = SessionLock::acquire(dir.path()).unwrap();
+        drop(lock);
+    }
+
+    #[test]
+    fn the_skeleton_is_a_complete_world() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("Named World");
+        write_world_skeleton(&world, "Named World", true).unwrap();
+        assert!(world.join("level.dat").is_file());
+        assert!(world.join("icon.png").is_file());
+        assert!(world.join("region").join("r.0.0.mca").is_file());
+
+        let bare = dir.path().join("One");
+        write_world_skeleton(&bare, "One", false).unwrap();
+        assert!(bare.join("level.dat").is_file());
+        assert!(bare.join("region").is_dir());
+        assert!(!bare.join("region").join("r.0.0.mca").exists());
     }
 }

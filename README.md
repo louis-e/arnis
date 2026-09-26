@@ -49,6 +49,14 @@ GUI Build: ```cargo run --release```<br>
 | `geo-only` | OSM objects on flat ground |
 | `terrain-only` | Real elevation terrain, no objects at all (skips the OpenStreetMap query and the Overture fetch entirely, so `--overture` has no effect) |
 
+`--one-world` generates into one persistent Java world that every later run extends (see [docs/one_world.md](docs/one_world.md)); `--output-dir` is then the saves folder and `--world-name` picks the world in it:
+
+```
+cargo run --release --no-default-features -- --one-world --output-dir="C:/YOUR_PATH/.minecraft/saves" --world-name="My City" --bbox="min_lat,min_lng,max_lat,max_lng"
+```
+
+Every area is placed in the same Web Mercator frame, so neighbouring areas join seamlessly; the first run fixes scale, terrain mode and build height, and rotation is off. In the GUI the same mode is the *One World* toggle under Settings > World.
+
 After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`

@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Фотопанелі є сутностями Java, тому в Bedrock і Luanti будуються лише блокові фасади.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Єдиний світ",
+  "one_world_will_create": "Буде створено єдиний світ «{name}»",
+  "one_world_areas": "Єдиний світ «{name}» · областей: {count}",
+  "one_world_locked": "відкрито в Minecraft",
+  "one_world_foreign": "Тека «{name}» існує, але це не єдиний світ",
+  "one_world_needs_terrain": "цей світ використовує рельєф",
+  "one_world_needs_flat": "цей світ плоский (лише об’єкти)",
+  "one_world_no_save_path": "Спочатку вкажіть теку збережень Minecraft у налаштуваннях",
+  "one_world_confirm_title": "Замінити наявні чанки?",
+  "one_world_confirm_text": "Чанків цієї області вже є у світі: {count}. Вони будуть створені знову, і все побудоване там у Minecraft буде замінено.",
+  "one_world_confirm_cancel": "Скасувати",
+  "one_world_confirm_ok": "Створити"
 }

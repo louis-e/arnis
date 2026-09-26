@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Nuotraukų plokštės yra Java objektai, todėl Bedrock ir Luanti kuriami tik blokų fasadai.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Vienas pasaulis",
+  "one_world_will_create": "Bus sukurtas vienas pasaulis „{name}“",
+  "one_world_areas": "Vienas pasaulis „{name}“ · Sritys: {count}",
+  "one_world_locked": "atidarytas Minecraft",
+  "one_world_foreign": "Aplankas „{name}“ egzistuoja, bet tai ne vienas pasaulis",
+  "one_world_needs_terrain": "šis pasaulis naudoja reljefą",
+  "one_world_needs_flat": "šis pasaulis plokščias (tik objektai)",
+  "one_world_no_save_path": "Pirmiausia nustatymuose nurodykite Minecraft pasaulių aplanką",
+  "one_world_confirm_title": "Pakeisti esamus chunkus?",
+  "one_world_confirm_text": "{count} šios srities chunkų pasaulyje jau yra. Jie sukuriami iš naujo, o viskas, kas ten pastatyta Minecraft, pakeičiama.",
+  "one_world_confirm_cancel": "Atšaukti",
+  "one_world_confirm_ok": "Generuoti"
 }

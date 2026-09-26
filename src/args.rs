@@ -49,9 +49,24 @@ pub struct Args {
     pub body: crate::celestial::CelestialBody,
 
     /// Projection mode for coordinate mapping.
-    /// local: each generation starts at Minecraft (0,0). The only supported mode.
+    /// local: each generation starts at Minecraft (0,0) (default).
+    /// web_mercator: Web Mercator centred on the bbox.
     #[arg(long, default_value = "local")]
     pub projection: crate::projection::ProjectionKind,
+
+    /// Generate into one persistent Java world that every later run extends.
+    /// --output-dir is then the saves folder. The first run fixes scale, ground
+    /// level, terrain mode and build height; rotation must be 0.
+    #[arg(long, default_value_t = false)]
+    pub one_world: bool,
+
+    /// Name of the world folder for --one-world (default "Arnis One World").
+    #[arg(long)]
+    pub world_name: Option<String>,
+
+    /// Set by `one_world::prepare`.
+    #[arg(skip)]
+    pub one_world_run: Option<crate::one_world::RunContext>,
 
     /// Ground level to use in the Minecraft world
     #[arg(long, default_value_t = -62, allow_hyphen_values = true)]
@@ -606,13 +621,28 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
     }
 
-    // Never shipped working: X gets a cos(lat) factor and Z does not, so the world comes out
-    // stretched north-south by 1/cos(lat) against both the elevation grid and its own
-    // east-west scale. Still parsed so an old command line gets this instead of a parse error.
-    if args.projection == crate::projection::ProjectionKind::WebMercator {
-        return Err(
-            "--projection web_mercator was experimental and never worked: it stretches the world north-south by 1/cos(latitude) (about 1.5x at 47 degrees), so objects come out elongated and misaligned with the terrain. Use --projection local."
-                .to_string(),
+    if args.one_world {
+        if args.bedrock || args.luanti {
+            return Err("--one-world is available for Java Edition worlds only.".to_string());
+        }
+        if !args.body.is_earth() {
+            return Err("--one-world is available for Earth only.".to_string());
+        }
+        if args.rotation.abs() > f64::EPSILON {
+            return Err(
+                "--one-world keeps the world aligned to real-world coordinates; --rotation must be 0."
+                    .to_string(),
+            );
+        }
+        if args.mapillary_probe {
+            return Err("--one-world and --mapillary-probe do not combine.".to_string());
+        }
+    } else if args.world_name.is_some() {
+        return Err("--world-name only applies to --one-world.".to_string());
+    }
+    if args.projection == crate::projection::ProjectionKind::WebMercator && !args.one_world {
+        println!(
+            "Note: --projection web_mercator centres the world on the bbox; scale is exact at the centre latitude only."
         );
     }
 
@@ -865,7 +895,7 @@ mod tests {
     }
 
     #[test]
-    fn web_mercator_projection_is_rejected() {
+    fn web_mercator_projection_is_accepted() {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
         let parse = |extra: &[&str]| {
@@ -875,12 +905,27 @@ mod tests {
         };
 
         assert!(validate_args(&parse(&["--projection", "local"])).is_ok());
-        let err = validate_args(&parse(&["--projection", "web_mercator"])).unwrap_err();
-        assert!(err.contains("--projection local"), "unhelpful error: {err}");
-        // Not just the terrain path: geo-only is distorted too.
-        assert!(
-            validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_err()
-        );
+        assert!(validate_args(&parse(&["--projection", "web_mercator"])).is_ok());
+        assert!(validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_ok());
+    }
+
+    #[test]
+    fn one_world_is_java_earth_and_unrotated() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+
+        assert!(validate_args(&parse(&["--one-world"])).is_ok());
+        assert!(validate_args(&parse(&["--one-world", "--world-name", "Home"])).is_ok());
+        assert!(validate_args(&parse(&["--one-world", "--bedrock"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--luanti"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--rotation", "15"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--body", "moon"])).is_err());
+        assert!(validate_args(&parse(&["--world-name", "Home"])).is_err());
     }
 
     #[test]

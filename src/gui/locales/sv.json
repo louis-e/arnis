@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Fotopaneler är Java-entiteter, så på Bedrock och Luanti byggs bara blockfasaderna.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "En värld",
+  "one_world_will_create": "En värld ”{name}” skapas",
+  "one_world_areas": "En värld ”{name}” · Områden: {count}",
+  "one_world_locked": "öppen i Minecraft",
+  "one_world_foreign": "Mappen ”{name}” finns men är inte en En värld",
+  "one_world_needs_terrain": "den här världen använder terräng",
+  "one_world_needs_flat": "den här världen är platt (endast objekt)",
+  "one_world_no_save_path": "Ange först Minecrafts sparmapp i inställningarna",
+  "one_world_confirm_title": "Ersätta befintliga chunks?",
+  "one_world_confirm_text": "{count} chunks i det här området finns redan i världen. De genereras på nytt och allt som byggts där i Minecraft ersätts.",
+  "one_world_confirm_cancel": "Avbryt",
+  "one_world_confirm_ok": "Generera"
 }

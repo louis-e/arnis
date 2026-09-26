@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "One World",
+  "one_world_will_create": "One World \"{name}\" will be created",
+  "one_world_areas": "One World \"{name}\" · Areas: {count}",
+  "one_world_locked": "open in Minecraft",
+  "one_world_foreign": "Folder \"{name}\" exists but is not a One World",
+  "one_world_needs_terrain": "this world uses terrain",
+  "one_world_needs_flat": "this world is flat (Objects only)",
+  "one_world_no_save_path": "Set the Minecraft saves folder in Settings first",
+  "one_world_confirm_title": "Replace existing chunks?",
+  "one_world_confirm_text": "{count} chunks of this area already exist in the world. They are generated again, and anything built there in Minecraft is replaced.",
+  "one_world_confirm_cancel": "Cancel",
+  "one_world_confirm_ok": "Generate"
 }

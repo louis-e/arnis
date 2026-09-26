@@ -111,5 +111,17 @@
   "facade_mode_java_only": "写真パネルは Java 版のエンティティのため、Bedrock と Luanti ではブロックのファサードのみを生成します。",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "ワンワールド",
+  "one_world_will_create": "ワンワールド「{name}」を作成します",
+  "one_world_areas": "ワンワールド「{name}」· エリア数: {count}",
+  "one_world_locked": "Minecraft で開かれています",
+  "one_world_foreign": "フォルダ「{name}」は存在しますがワンワールドではありません",
+  "one_world_needs_terrain": "このワールドは地形を使用します",
+  "one_world_needs_flat": "このワールドは平坦です（オブジェクトのみ）",
+  "one_world_no_save_path": "先に設定で Minecraft のセーブフォルダーを指定してください",
+  "one_world_confirm_title": "既存のチャンクを置き換えますか？",
+  "one_world_confirm_text": "このエリアの {count} チャンクは既にワールドにあります。再生成され、Minecraft でそこに建てたものは置き換えられます。",
+  "one_world_confirm_cancel": "キャンセル",
+  "one_world_confirm_ok": "生成"
 }

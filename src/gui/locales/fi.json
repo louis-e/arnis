@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Valokuvapaneelit ovat Javan entiteettejä, joten Bedrockissa ja Luantissa rakennetaan vain lohkojulkisivut.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Yksi maailma",
+  "one_world_will_create": "Yksi maailma ”{name}” luodaan",
+  "one_world_areas": "Yksi maailma ”{name}” · Alueita: {count}",
+  "one_world_locked": "avoinna Minecraftissa",
+  "one_world_foreign": "Kansio ”{name}” on olemassa, mutta se ei ole yksi maailma",
+  "one_world_needs_terrain": "tämä maailma käyttää maastoa",
+  "one_world_needs_flat": "tämä maailma on tasainen (vain objektit)",
+  "one_world_no_save_path": "Määritä ensin Minecraftin tallennuskansio asetuksissa",
+  "one_world_confirm_title": "Korvataanko olemassa olevat chunkit?",
+  "one_world_confirm_text": "Tämän alueen {count} chunkia on jo maailmassa. Ne luodaan uudelleen, ja kaikki mitä niihin on Minecraftissa rakennettu korvataan.",
+  "one_world_confirm_cancel": "Peruuta",
+  "one_world_confirm_ok": "Luo"
 }

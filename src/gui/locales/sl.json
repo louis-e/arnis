@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Fotografske plošče so entitete različice Java, zato se v Bedrock in Luanti zgradijo samo fasade iz blokov.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "En svet",
+  "one_world_will_create": "Ustvarjen bo en svet „{name}“",
+  "one_world_areas": "En svet „{name}“ · Območja: {count}",
+  "one_world_locked": "odprt v Minecraftu",
+  "one_world_foreign": "Mapa „{name}“ obstaja, a ni en svet",
+  "one_world_needs_terrain": "ta svet uporablja relief",
+  "one_world_needs_flat": "ta svet je raven (samo objekti)",
+  "one_world_no_save_path": "Najprej v nastavitvah določite mapo s shranjenimi svetovi Minecrafta",
+  "one_world_confirm_title": "Zamenjam obstoječe chunke?",
+  "one_world_confirm_text": "{count} chunkov tega območja v svetu že obstaja. Ustvarjeni bodo znova, vse, kar je bilo tam zgrajeno v Minecraftu, pa bo zamenjano.",
+  "one_world_confirm_cancel": "Prekliči",
+  "one_world_confirm_ok": "Ustvari"
 }

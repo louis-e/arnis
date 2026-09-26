@@ -111,5 +111,17 @@
   "facade_mode_java_only": "照片面板是 Java 版实体，因此在 Bedrock 和 Luanti 中只会生成方块外墙。",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "单一世界",
+  "one_world_will_create": "将创建单一世界“{name}”",
+  "one_world_areas": "单一世界“{name}”· 区域数：{count}",
+  "one_world_locked": "已在 Minecraft 中打开",
+  "one_world_foreign": "文件夹“{name}”已存在，但不是单一世界",
+  "one_world_needs_terrain": "此世界使用地形",
+  "one_world_needs_flat": "此世界为平地（仅对象）",
+  "one_world_no_save_path": "请先在设置中指定 Minecraft 存档文件夹",
+  "one_world_confirm_title": "替换已有区块？",
+  "one_world_confirm_text": "此区域的 {count} 个区块已存在于世界中。它们将重新生成，在 Minecraft 中建造的内容都会被替换。",
+  "one_world_confirm_cancel": "取消",
+  "one_world_confirm_ok": "生成"
 }

@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Panele ze zdjęciami to encje Javy, więc na Bedrock i Luanti powstają tylko fasady z bloków.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Jeden świat",
+  "one_world_will_create": "Jeden świat „{name}” zostanie utworzony",
+  "one_world_areas": "Jeden świat „{name}” · obszary: {count}",
+  "one_world_locked": "otwarty w Minecrafcie",
+  "one_world_foreign": "Folder „{name}” istnieje, ale nie jest jednym światem",
+  "one_world_needs_terrain": "ten świat używa terenu",
+  "one_world_needs_flat": "ten świat jest płaski (tylko obiekty)",
+  "one_world_no_save_path": "Najpierw ustaw folder zapisów Minecrafta w ustawieniach",
+  "one_world_confirm_title": "Zastąpić istniejące chunki?",
+  "one_world_confirm_text": "{count} chunków tego obszaru już istnieje w świecie. Zostaną wygenerowane ponownie, a wszystko, co tam zbudowano w Minecrafcie, zostanie zastąpione.",
+  "one_world_confirm_cancel": "Anuluj",
+  "one_world_confirm_ok": "Generuj"
 }

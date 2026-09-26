@@ -181,7 +181,151 @@ impl<'a> WorldEditor<'a> {
             region_x,
             region_z,
             region_to_modify,
+            &self.region_write_mode(),
+            self.climate_lat(),
+            (self.ground_origin_x, self.ground_origin_z),
         )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum RegionWriteMode {
+    /// New region file, every chunk written (content or filler).
+    Fresh,
+    /// Only the chunks inside the inclusive block bounds, written into the
+    /// existing region file. Every other chunk stays as it was.
+    Merge {
+        min_x: i32,
+        min_z: i32,
+        max_x: i32,
+        max_z: i32,
+    },
+}
+
+impl RegionWriteMode {
+    fn writes_chunk(&self, abs_chunk_x: i32, abs_chunk_z: i32) -> bool {
+        match *self {
+            RegionWriteMode::Fresh => true,
+            RegionWriteMode::Merge {
+                min_x,
+                min_z,
+                max_x,
+                max_z,
+            } => {
+                let bx0 = abs_chunk_x * 16;
+                let bz0 = abs_chunk_z * 16;
+                bx0 + 15 >= min_x && bx0 <= max_x && bz0 + 15 >= min_z && bz0 <= max_z
+            }
+        }
+    }
+}
+
+/// Opens `r.X.Z.mca` for a merge, or creates it empty. Never from the
+/// template: its placeholder chunks carry another region's positions, and
+/// Minecraft refuses to load the ones a merge leaves standing.
+fn open_region_file_for_merge(
+    world_dir: &std::path::Path,
+    region_x: i32,
+    region_z: i32,
+) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
+    let region_dir = world_dir.join("region");
+    let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+    if out_path.is_file() {
+        let file = File::options().read(true).write(true).open(&out_path)?;
+        // Refused rather than replaced: the file holds chunks of other areas.
+        return Region::from_stream(file).map_err(|e| {
+            format!("{} is not a readable region file: {e}", out_path.display()).into()
+        });
+    }
+    std::fs::create_dir_all(&region_dir)?;
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&out_path)?;
+    Ok(Region::create(file)?)
+}
+
+/// Removes chunks whose stored position does not match their slot, as left
+/// by the first One World build. Returns how many.
+pub(crate) fn drop_misplaced_chunks(world_dir: &std::path::Path) -> std::io::Result<usize> {
+    let region_dir = world_dir.join("region");
+    if !region_dir.is_dir() {
+        return Ok(0);
+    }
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(&region_dir)? {
+        let path = entry?.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let mut parts = name.strip_suffix(".mca").unwrap_or("").split('.');
+        let (Some("r"), Some(rx), Some(rz)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        let (Ok(rx), Ok(rz)) = (rx.parse::<i32>(), rz.parse::<i32>()) else {
+            continue;
+        };
+        let (Some(bx), Some(bz)) = (rx.checked_mul(32), rz.checked_mul(32)) else {
+            continue;
+        };
+        let file = File::options().read(true).write(true).open(&path)?;
+        let Ok(mut region) = Region::from_stream(file) else {
+            continue;
+        };
+        for cz in 0..32usize {
+            for cx in 0..32usize {
+                let Ok(Some(data)) = region.read_chunk(cx, cz) else {
+                    continue;
+                };
+                let Ok(Value::Compound(root)) = fastnbt::from_bytes::<Value>(&data) else {
+                    continue;
+                };
+                let (Some(Value::Int(x)), Some(Value::Int(z))) =
+                    (root.get("xPos"), root.get("zPos"))
+                else {
+                    continue;
+                };
+                if (*x, *z) != (bx + cx as i32, bz + cz as i32) {
+                    region
+                        .remove_chunk(cx, cz)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?;
+                    removed += 1;
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// Minecraft moves a chunk's entities into `entities/` on first load. Drop
+/// them for rewritten chunks so they do not linger over the new blocks.
+fn strip_stale_side_chunks(
+    world_dir: &std::path::Path,
+    region_x: i32,
+    region_z: i32,
+    chunks: &[(i32, i32)],
+) {
+    for folder in ["entities", "poi"] {
+        let path = world_dir
+            .join(folder)
+            .join(format!("r.{}.{}.mca", region_x, region_z));
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(file) = File::options().read(true).write(true).open(&path) else {
+            continue;
+        };
+        let Ok(mut region) = Region::from_stream(file) else {
+            continue;
+        };
+        for &(cx, cz) in chunks {
+            if let Err(e) = region.remove_chunk(cx as usize, cz as usize) {
+                eprintln!(
+                    "Warning: could not drop chunk ({cx}, {cz}) from {}: {e}",
+                    path.display()
+                );
+            }
+        }
     }
 }
 
@@ -226,16 +370,25 @@ fn write_region_to_disk(
     region_x: i32,
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
+    mode: &RegionWriteMode,
+    climate_lat: Option<f64>,
+    ground_origin: (i32, i32),
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(preview) = preview {
         preview.ingest_region(region_x, region_z, region_to_modify);
     }
-    let mut region = create_region_file(world_dir, region_x, region_z)?;
+    let merge = matches!(mode, RegionWriteMode::Merge { .. });
+    let mut region = if merge {
+        open_region_file_for_merge(world_dir, region_x, region_z)?
+    } else {
+        create_region_file(world_dir, region_x, region_z)?
+    };
     let mut ser_buffer = Vec::with_capacity(8192);
+    let mut written_chunks: Vec<(i32, i32)> = Vec::new();
 
     // World-center latitude drives temperature-based biome variants (taiga
     // vs forest vs jungle) at chunk-build time. Cheap to recompute.
-    let center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
+    let center_lat = climate_lat.unwrap_or((llbbox.min().lat() + llbbox.max().lat()) * 0.5);
 
     // Filler chunks all share one set of sections, so they share their light too.
     let base_sections = get_base_chunk_sections();
@@ -258,18 +411,30 @@ fn write_region_to_disk(
             for dx in 0..2 {
                 let chunk_x = sx * 2 + dx;
                 let chunk_z = sz * 2 + dz;
-                let existing = region_to_modify.get_chunk(chunk_x, chunk_z);
-
-                // A chunk that is present but holds nothing is left unwritten,
-                // as it was before this loop was reordered.
-                if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
-                    continue;
-                }
-
                 let abs_chunk_x = chunk_x + (region_x * 32);
                 let abs_chunk_z = chunk_z + (region_z * 32);
-                let biome_names =
-                    crate::biome::chunk_biome_names(abs_chunk_x, abs_chunk_z, ground, center_lat);
+                if !mode.writes_chunk(abs_chunk_x, abs_chunk_z) {
+                    continue;
+                }
+                let mut existing = region_to_modify.get_chunk(chunk_x, chunk_z);
+
+                // A chunk that is present but holds nothing is left unwritten,
+                // as it was before this loop was reordered. A merge fills it.
+                if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
+                    if merge {
+                        existing = None;
+                    } else {
+                        continue;
+                    }
+                }
+
+                let biome_names = crate::biome::chunk_biome_names(
+                    abs_chunk_x,
+                    abs_chunk_z,
+                    ground,
+                    center_lat,
+                    ground_origin,
+                );
                 let biome_value = crate::biome::biome_nbt_from_names(&biome_names);
 
                 let (sections, other, lighting, span) = match existing {
@@ -315,6 +480,9 @@ fn write_region_to_disk(
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
                 region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+                if merge {
+                    written_chunks.push((chunk_x, chunk_z));
+                }
             }
         }
 
@@ -325,6 +493,11 @@ fn write_region_to_disk(
 
     if let Some(mut lod) = lod {
         lod.finish();
+    }
+
+    if merge && !written_chunks.is_empty() {
+        drop(region);
+        strip_stale_side_chunks(world_dir, region_x, region_z, &written_chunks);
     }
 
     Ok(())
@@ -414,9 +587,13 @@ pub(crate) struct RegionWriteCtx {
     bake_lighting: bool,
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
     voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
+    mode: RegionWriteMode,
+    climate_lat: Option<f64>,
+    ground_origin: (i32, i32),
 }
 
 impl RegionWriteCtx {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         world_dir: std::path::PathBuf,
         llbbox: crate::coordinate_system::geographic::LLBBox,
@@ -424,6 +601,9 @@ impl RegionWriteCtx {
         bake_lighting: bool,
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
         voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
+        mode: RegionWriteMode,
+        climate_lat: Option<f64>,
+        ground_origin: (i32, i32),
     ) -> Self {
         Self {
             world_dir,
@@ -432,6 +612,9 @@ impl RegionWriteCtx {
             bake_lighting,
             preview,
             voxy,
+            mode,
+            climate_lat,
+            ground_origin,
         }
     }
 
@@ -451,6 +634,9 @@ impl RegionWriteCtx {
             region_x,
             region_z,
             region_to_modify,
+            &self.mode,
+            self.climate_lat,
+            self.ground_origin,
         )
     }
 }
@@ -1429,7 +1615,13 @@ mod tests {
     }
 
     fn plains_biome() -> Value {
-        crate::biome::biome_nbt_from_names(&crate::biome::chunk_biome_names(0, 0, None, 0.0))
+        crate::biome::biome_nbt_from_names(&crate::biome::chunk_biome_names(
+            0,
+            0,
+            None,
+            0.0,
+            (0, 0),
+        ))
     }
 
     #[test]
@@ -1828,5 +2020,281 @@ mod dimension_bounds_tests {
             get_entity_coords(&be),
             Some((7, 8, 9, EntityIdentity::Facing(-1)))
         );
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+    use crate::block_definitions::{SMOOTH_STONE, STONE};
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::world_editor::common::RegionToModify;
+
+    fn llbbox() -> LLBBox {
+        LLBBox::new(48.0, 11.0, 48.1, 11.1).unwrap()
+    }
+
+    /// One region with `block` at the base of chunk `(cx, cz)`.
+    fn region_with(
+        chunks: &[(i32, i32)],
+        block: crate::block_definitions::Block,
+    ) -> RegionToModify {
+        let mut region = RegionToModify::default();
+        for &(cx, cz) in chunks {
+            let chunk = region.chunks.entry((cx, cz)).or_default();
+            let section = chunk.sections.entry(0).or_default();
+            section.storage.set(0, block);
+        }
+        region
+    }
+
+    fn write(dir: &std::path::Path, region: &RegionToModify, mode: RegionWriteMode) {
+        write_region_to_disk(
+            dir,
+            &llbbox(),
+            None,
+            false,
+            None,
+            None,
+            0,
+            0,
+            region,
+            &mode,
+            None,
+            (0, 0),
+        )
+        .unwrap();
+    }
+
+    fn present_chunks(dir: &std::path::Path) -> Vec<(usize, usize)> {
+        let file = File::open(dir.join("region").join("r.0.0.mca")).unwrap();
+        let mut region = Region::from_stream(file).unwrap();
+        let mut out = Vec::new();
+        for cz in 0..32 {
+            for cx in 0..32 {
+                if region.read_chunk(cx, cz).unwrap().is_some() {
+                    out.push((cx, cz));
+                }
+            }
+        }
+        out
+    }
+
+    /// The block at (0, 0, 0) of chunk (cx, cz), read back through the palette.
+    fn base_block_name(dir: &std::path::Path, cx: usize, cz: usize) -> Option<String> {
+        let file = File::open(dir.join("region").join("r.0.0.mca")).unwrap();
+        let mut region = Region::from_stream(file).unwrap();
+        let data = region.read_chunk(cx, cz).unwrap()?;
+        let nbt: Value = fastnbt::from_bytes(&data).unwrap();
+        let Value::Compound(root) = nbt else {
+            return None;
+        };
+        let Some(Value::List(sections)) = root.get("sections") else {
+            return None;
+        };
+        for section in sections {
+            let Value::Compound(section) = section else {
+                continue;
+            };
+            if section.get("Y") != Some(&Value::Byte(0)) {
+                continue;
+            }
+            let Some(Value::Compound(states)) = section.get("block_states") else {
+                continue;
+            };
+            let Some(Value::List(palette)) = states.get("palette") else {
+                continue;
+            };
+            let first = match states.get("data") {
+                Some(Value::LongArray(longs)) => {
+                    let bits = ((palette.len() as f64).log2().ceil() as u32).max(4);
+                    (longs[0] as u64 & ((1u64 << bits) - 1)) as usize
+                }
+                _ => 0,
+            };
+            if let Some(Value::Compound(entry)) = palette.get(first) {
+                if let Some(Value::String(name)) = entry.get("Name") {
+                    return Some(name.clone());
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_merge_keeps_the_chunks_of_an_earlier_run_and_writes_no_filler() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &region_with(&[(0, 0), (1, 1)], SMOOTH_STONE),
+            RegionWriteMode::Merge {
+                min_x: 0,
+                min_z: 0,
+                max_x: 31,
+                max_z: 31,
+            },
+        );
+        let after_first = present_chunks(dir.path());
+        assert_eq!(after_first, vec![(0, 0), (1, 0), (0, 1), (1, 1)]);
+        assert_eq!(
+            base_block_name(dir.path(), 0, 0).as_deref(),
+            Some("minecraft:smooth_stone")
+        );
+
+        write(
+            dir.path(),
+            &region_with(&[(2, 0), (3, 1)], STONE),
+            RegionWriteMode::Merge {
+                min_x: 32,
+                min_z: 0,
+                max_x: 63,
+                max_z: 31,
+            },
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 0, 0).as_deref(),
+            Some("minecraft:smooth_stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 1, 1).as_deref(),
+            Some("minecraft:smooth_stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 2, 0).as_deref(),
+            Some("minecraft:stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 3, 1).as_deref(),
+            Some("minecraft:stone")
+        );
+
+        write(
+            dir.path(),
+            &region_with(&[(0, 0)], STONE),
+            RegionWriteMode::Merge {
+                min_x: 0,
+                min_z: 0,
+                max_x: 15,
+                max_z: 15,
+            },
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 0, 0).as_deref(),
+            Some("minecraft:stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 1, 1).as_deref(),
+            Some("minecraft:smooth_stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 2, 0).as_deref(),
+            Some("minecraft:stone")
+        );
+    }
+
+    #[test]
+    fn misplaced_template_chunks_are_dropped_and_real_ones_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &region_with(&[(3, 4)], STONE),
+            RegionWriteMode::Fresh,
+        );
+        let region_path = dir.path().join("region").join("r.0.0.mca");
+        {
+            let file = File::options()
+                .read(true)
+                .write(true)
+                .open(&region_path)
+                .unwrap();
+            let mut region = Region::from_stream(file).unwrap();
+            let bogus = fastnbt::to_bytes(&Value::Compound(HashMap::from([
+                ("xPos".to_string(), Value::Int(500)),
+                ("zPos".to_string(), Value::Int(500)),
+            ])))
+            .unwrap();
+            region.write_chunk(7, 7, &bogus).unwrap();
+        }
+        let removed = drop_misplaced_chunks(dir.path()).unwrap();
+        assert_eq!(removed, 1);
+        let present = present_chunks(dir.path());
+        assert!(present.contains(&(3, 4)));
+        assert!(!present.contains(&(7, 7)));
+        assert_eq!(present.len(), 1023);
+    }
+
+    #[test]
+    fn a_fresh_write_fills_the_whole_region() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &region_with(&[(5, 5)], STONE),
+            RegionWriteMode::Fresh,
+        );
+        assert_eq!(present_chunks(dir.path()).len(), 1024);
+        assert_eq!(
+            base_block_name(dir.path(), 5, 5).as_deref(),
+            Some("minecraft:stone")
+        );
+    }
+
+    #[test]
+    fn a_merge_drops_rewritten_chunks_from_the_entity_regions() {
+        let dir = tempfile::tempdir().unwrap();
+        let entities = dir.path().join("entities");
+        std::fs::create_dir_all(&entities).unwrap();
+        {
+            let file = File::options()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(entities.join("r.0.0.mca"))
+                .unwrap();
+            let mut region = Region::create(file).unwrap();
+            let payload = fastnbt::to_bytes(&Value::Compound(HashMap::from([(
+                "Entities".to_string(),
+                Value::List(vec![]),
+            )])))
+            .unwrap();
+            region.write_chunk(0, 0, &payload).unwrap();
+            region.write_chunk(5, 5, &payload).unwrap();
+        }
+        write(
+            dir.path(),
+            &region_with(&[(0, 0)], STONE),
+            RegionWriteMode::Merge {
+                min_x: 0,
+                min_z: 0,
+                max_x: 15,
+                max_z: 15,
+            },
+        );
+        let file = File::open(entities.join("r.0.0.mca")).unwrap();
+        let mut region = Region::from_stream(file).unwrap();
+        assert!(
+            region.read_chunk(0, 0).unwrap().is_none(),
+            "rewritten chunk keeps stale entities"
+        );
+        assert!(
+            region.read_chunk(5, 5).unwrap().is_some(),
+            "untouched chunk lost its entities"
+        );
+    }
+
+    #[test]
+    fn merge_bounds_are_inclusive_block_coordinates() {
+        let m = RegionWriteMode::Merge {
+            min_x: -32,
+            min_z: 0,
+            max_x: 31,
+            max_z: 15,
+        };
+        assert!(m.writes_chunk(-2, 0));
+        assert!(m.writes_chunk(1, 0));
+        assert!(!m.writes_chunk(2, 0));
+        assert!(!m.writes_chunk(-3, 0));
+        assert!(!m.writes_chunk(0, 1));
+        assert!(RegionWriteMode::Fresh.writes_chunk(1000, -1000));
     }
 }

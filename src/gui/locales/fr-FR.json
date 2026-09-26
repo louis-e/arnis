@@ -111,5 +111,17 @@
   "facade_mode_java_only": "Les panneaux photo sont des entités Java ; sur Bedrock et Luanti, seules les façades en blocs sont construites.",
   "facade_detail": "Facade Detail",
   "facade_detail_standard": "Standard",
-  "facade_detail_high": "High"
+  "facade_detail_high": "High",
+  "one_world": "Monde unique",
+  "one_world_will_create": "Le monde unique « {name} » sera créé",
+  "one_world_areas": "Monde unique « {name} » · Zones : {count}",
+  "one_world_locked": "ouvert dans Minecraft",
+  "one_world_foreign": "Le dossier « {name} » existe mais n’est pas un monde unique",
+  "one_world_needs_terrain": "ce monde utilise le relief",
+  "one_world_needs_flat": "ce monde est plat (objets seulement)",
+  "one_world_no_save_path": "Définissez d’abord le dossier des mondes Minecraft dans les paramètres",
+  "one_world_confirm_title": "Remplacer les chunks existants ?",
+  "one_world_confirm_text": "{count} chunks de cette zone existent déjà dans le monde. Ils sont générés à nouveau et tout ce qui y a été construit dans Minecraft est remplacé.",
+  "one_world_confirm_cancel": "Annuler",
+  "one_world_confirm_ok": "Générer"
 }

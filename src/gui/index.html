@@ -74,6 +74,8 @@
                   Luanti
                 </button>
               </div>
+              <!-- One World: which persistent world the next area joins (hidden unless the mode is on) -->
+              <div id="one-world-status" class="one-world-status" style="display: none;" aria-live="polite"></div>
             </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
 
@@ -263,6 +265,17 @@
           </label>
           <div class="settings-control">
             <input type="checkbox" id="custom-world-name-toggle" name="custom-world-name-toggle">
+          </div>
+        </div>
+
+        <!-- One World Toggle -->
+        <div class="settings-row">
+          <label for="one-world-toggle">
+            <span data-localize="one_world">One World</span>
+            <span class="tooltip-icon" data-tooltip="Generate every area into one persistent world that grows with each generation (Java, Earth). Areas share one map frame and join seamlessly. The first area fixes scale, terrain, build height and elevation source; rotation, the Voxy LOD cache and facade photo panels are off. With Custom World Name on, the pencil picks the world, otherwise it is 'Arnis One World'.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="one-world-toggle" name="one-world-toggle">
           </div>
         </div>
 
@@ -666,6 +679,21 @@
         <div class="modal-actions" style="margin-top:14px;">
           <button type="button" class="btn-secondary" onclick="rejectTelemetry()">No thanks</button>
           <button type="button" class="btn-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- One World overlap confirmation -->
+    <div id="one-world-confirm-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="settings-header">
+          <h2 data-localize="one_world_confirm_title">Replace existing chunks?</h2>
+          <span class="close-button" id="one-world-confirm-close">&times;</span>
+        </div>
+        <p id="one-world-confirm-text" style="text-align:left; margin-top:12px; margin-bottom: -5px; color:#ececec;"></p>
+        <div class="modal-actions" style="margin-top:14px;">
+          <button type="button" class="btn-secondary" id="one-world-confirm-cancel" data-localize="one_world_confirm_cancel">Cancel</button>
+          <button type="button" class="btn-primary" id="one-world-confirm-ok" data-localize="one_world_confirm_ok">Generate</button>
         </div>
       </div>
     </div>
