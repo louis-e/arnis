@@ -146,6 +146,34 @@ fn attach_parent_console() {
     }
 }
 
+/// The One World a CLI run holds, and the folder if the run created it.
+struct OneWorldRun {
+    lock: world_utils::SessionLock,
+    created: Option<PathBuf>,
+}
+
+static ONE_WORLD_RUN: std::sync::Mutex<Option<OneWorldRun>> = std::sync::Mutex::new(None);
+
+/// Releases the One World lock. On failure a world this run created is removed.
+fn release_one_world(failed: bool) {
+    let run = ONE_WORLD_RUN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some(OneWorldRun { lock, created }) = run {
+        drop(lock);
+        if let (true, Some(dir)) = (failed, created) {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// `process::exit` skips destructors, so failures go through here.
+fn exit_failed() -> ! {
+    release_one_world(true);
+    std::process::exit(1);
+}
+
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -270,7 +298,6 @@ fn run_cli() {
 
     // One World: snaps the bbox to the world's chunk grid and holds its lock.
     let mut one_world_paths: Option<PathBuf> = None;
-    let mut _one_world_lock: Option<world_utils::SessionLock> = None;
     if args.one_world {
         let base_dir = args.path.clone().unwrap_or_else(|| {
             eprintln!(
@@ -291,7 +318,10 @@ fn run_cli() {
                 std::process::exit(1);
             });
         effective_bbox = session.llbbox;
-        _one_world_lock = Some(session.lock);
+        *ONE_WORLD_RUN.lock().unwrap_or_else(|e| e.into_inner()) = Some(OneWorldRun {
+            lock: session.lock,
+            created: session.created.then(|| world_dir.clone()),
+        });
         if args.disable_height_limit && session.created {
             if let Err(e) = world_utils::install_tall_datapack(&world_dir) {
                 eprintln!(
@@ -299,7 +329,7 @@ fn run_cli() {
                     "Error:".red().bold(),
                     e
                 );
-                std::process::exit(1);
+                exit_failed();
             }
         }
         one_world_paths = Some(world_dir);
@@ -475,7 +505,10 @@ fn run_cli() {
                 &args.osm_tiles_url,
                 !args.no_tile_archive,
             )
-            .expect("Failed to fetch data")
+            .unwrap_or_else(|e| {
+                eprintln!("{} Failed to fetch data: {e}", "Error:".red().bold());
+                exit_failed();
+            })
         };
         bench.report("osm_fetch", t.elapsed());
 
@@ -491,7 +524,7 @@ fn run_cli() {
         bench.report("overture_fetch", overture_dur);
         let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {
             eprintln!("{} Terrain fetch failed.", "Error:".red().bold());
-            std::process::exit(1);
+            exit_failed();
         });
         bench.report("terrain_total", ground_dur);
 
@@ -720,9 +753,10 @@ fn run_cli() {
         }
         Err(e) => {
             eprintln!("{} {}", "Error:".red().bold(), e);
-            std::process::exit(1);
+            exit_failed();
         }
     }
+    release_one_world(false);
 }
 
 fn main() {

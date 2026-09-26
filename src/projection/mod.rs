@@ -186,6 +186,12 @@ pub fn snap_bbox_to_chunks(
     let max_x_excl = cx1 * CHUNK_BLOCKS;
     let min_z = cz0 * CHUNK_BLOCKS;
     let max_z_excl = cz1 * CHUNK_BLOCKS;
+    check_projected_edges([
+        min_x as f64,
+        max_x_excl as f64,
+        min_z as f64,
+        max_z_excl as f64,
+    ])?;
 
     let xzbbox = XZBBox::rect_from_min_max(min_x, min_z, max_x_excl - 1, max_z_excl - 1)?;
     let effective = LLBBox::new(
@@ -309,6 +315,27 @@ mod tests {
         let (rect, _) = snap_bbox_to_chunks(&proj, &req).unwrap();
         assert_eq!(rect.max_x() - rect.min_x() + 1, 16);
         assert_eq!(rect.max_z() - rect.min_z() + 1, 16);
+    }
+
+    #[test]
+    fn snapped_areas_stay_inside_the_world_border() {
+        // At scale 4 the border is about 67 degrees east of the origin.
+        let proj = WebMercatorProjection::new(0.0, 0.0, 4.0);
+        let request = |east: f64| {
+            LLBBox::new(
+                0.0,
+                proj.lon_for_x(east - 100.0),
+                0.001,
+                proj.lon_for_x(east),
+            )
+            .unwrap()
+        };
+        // The border is a chunk edge, so a request just inside snaps onto it.
+        assert_eq!(WORLD_BORDER_BLOCKS as i32 % CHUNK_BLOCKS, 0);
+        let (rect, _) = snap_bbox_to_chunks(&proj, &request(WORLD_BORDER_BLOCKS - 5.0)).unwrap();
+        assert_eq!(rect.max_x() + 1, WORLD_BORDER_BLOCKS as i32);
+        let err = snap_bbox_to_chunks(&proj, &request(WORLD_BORDER_BLOCKS + 5.0)).unwrap_err();
+        assert!(err.contains("world border"), "{err}");
     }
 
     #[test]
