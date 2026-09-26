@@ -117,7 +117,7 @@ with their previews.
 Refused with a message naming the mismatch: world scale, ground level, terrain
 on/off, extended build height. Taken from the manifest: the elevation source.
 Forced: rotation 0, Web Mercator, no Voxy LOD cache, Mapillary facades as
-blocks, no preset facades, map preview on. The GUI greys and pins these rows and
+blocks, no preset facades, map preview on, no Luanti. The GUI greys and pins these rows and
 puts the user's own values back when One World is turned off. Everything else
 may differ per area.
 
@@ -143,13 +143,16 @@ is skipped, because closing any handle to the file would drop a POSIX lock.
 
 ### Failure handling
 
-A world created by a run that fails before writing is removed again. A failed
-run reports the error in the GUI instead of "Done!". The area is recorded only
+A world created by a run that fails is removed again, by the GUI and the CLI.
+A failed run reports the error in the GUI instead of "Done!". The area is recorded only
 after its regions and preview are written; the elevation mapping is stored
 earlier, so a rerun of a failed first area stays on the same mapping.
 
 Moving the spawn with a marker also moves the player into the overworld, in case
 they logged out in another dimension.
+
+Every run moves `LastPlayed` in `level.dat` to now, so the world is listed first
+in Minecraft's world list.
 
 ### Manifest (`arnis_one_world.json`)
 

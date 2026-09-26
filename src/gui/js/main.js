@@ -1585,7 +1585,7 @@ function initLuantiExperimentalToggle() {
 
 function setWorldFormat(format) {
   if (!VALID_FORMATS.includes(format)) return;
-  if (format === 'luanti' && !isLuantiEnabled()) return;
+  if (format === 'luanti' && (!isLuantiEnabled() || isOneWorldToggleOn())) return;
 
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
@@ -2729,6 +2729,23 @@ function isOneWorldAvailable() {
   return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
 }
 
+function isOneWorldToggleOn() {
+  const toggle = document.getElementById('one-world-toggle');
+  return !!(toggle && toggle.checked);
+}
+
+// Luanti cannot hold a One World, so it is off while the toggle is.
+function refreshLuantiAvailability() {
+  const on = isOneWorldToggleOn();
+  const luantiBtn = document.getElementById('format-luanti');
+  if (luantiBtn) {
+    luantiBtn.disabled = on;
+    luantiBtn.title = on ? 'Luanti is not available in One World mode' : '';
+  }
+  setSettingsRowAvailable('enable-luanti-toggle', !on);
+  if (on && selectedWorldFormat === 'luanti') setWorldFormat('java');
+}
+
 function isOneWorldEnabled() {
   const toggle = document.getElementById('one-world-toggle');
   return !!(toggle && toggle.checked) && isOneWorldAvailable();
@@ -2915,6 +2932,7 @@ async function fetchOneWorldInfo() {
 let oneWorldRefreshSeq = 0;
 async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
+  refreshLuantiAvailability();
   setSettingsRowAvailable('one-world-toggle', isOneWorldAvailable());
   if (!isOneWorldEnabled()) {
     const wasOn = oneWorldInfo !== null;

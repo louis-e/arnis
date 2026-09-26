@@ -1680,6 +1680,9 @@ pub fn generate_world_with_options(
         )
         .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
         println!("One World: area #{} recorded.", run.area_id);
+        if let Err(e) = crate::world_utils::touch_last_played(&run.world_dir) {
+            eprintln!("Warning: Failed to update LastPlayed: {e}");
+        }
     }
 
     if let Some(start) = generation_start {
