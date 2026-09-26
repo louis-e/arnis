@@ -317,20 +317,28 @@ pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<
     std::fs::create_dir_all(world_dir)
         .map_err(|e| format!("Failed to create {}: {e}", world_dir.display()))?;
     let lock = SessionLock::acquire(world_dir).map_err(|_| open_in_minecraft(world_dir))?;
-    let resolved = resolve(world_dir, requested, args, lock);
+    let mut owned = false;
+    let resolved = resolve(world_dir, requested, args, lock, &mut owned);
     if resolved.is_err() && fresh_dir {
-        // Only while still empty, so nothing another process put there is lost.
-        let _ = std::fs::remove_dir(world_dir);
+        // Everything in it is ours once the check under the lock passed.
+        // Before that only an empty folder is removed.
+        let _ = if owned {
+            std::fs::remove_dir_all(world_dir)
+        } else {
+            std::fs::remove_dir(world_dir)
+        };
     }
     resolved
 }
 
 /// The part of `prepare` that runs under the world's lock.
+/// `owned` is set once the folder is known to hold nothing but this run's files.
 fn resolve(
     world_dir: &Path,
     requested: &LLBBox,
     args: &mut Args,
     lock: SessionLock,
+    owned: &mut bool,
 ) -> Result<Session, String> {
     let (mut manifest, created) = match Manifest::load(world_dir)? {
         Some(manifest) => {
@@ -364,6 +372,7 @@ fn resolve(
                     MANIFEST_FILE
                 ));
             }
+            *owned = true;
             let origin_lat = (requested.min().lat() + requested.max().lat()) / 2.0;
             let origin_lon = (requested.min().lng() + requested.max().lng()) / 2.0;
             (Manifest::new(args, origin_lat, origin_lon), true)

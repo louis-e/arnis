@@ -948,6 +948,8 @@ $(document).ready(function () {
     var sliderControl = null;
     // One World: the user hid the areas, and the world they were hidden for.
     var oneWorldOverlayHidden = false;
+    // Slider positions: a One World shows its areas opaque unless told otherwise.
+    var overlayOpacity = { world: 50, oneWorld: 100 };
     var oneWorldFittedPath = null;
 
     function setWorldOverlayOpacity(value) {
@@ -960,7 +962,10 @@ $(document).ready(function () {
             if (typeof layer.setOpacity === 'function') {
                 layer.setOpacity(value);
             } else if (typeof layer.setStyle === 'function') {
-                layer.setStyle({ opacity: Math.min(1, value + 0.3), fillOpacity: value * 0.15 });
+                layer.setStyle({
+                    opacity: Math.min(1, value + 0.3),
+                    fillOpacity: layer.options.arnisFill ? value * 0.15 : 0
+                });
             }
         });
     }
@@ -984,12 +989,14 @@ $(document).ready(function () {
                     zIndex: 500 + index
                 }));
             }
+            // Filled only where there is no image to show.
             group.addLayer(L.rectangle(b, {
                 color: '#fecc44',
                 weight: 1,
                 opacity: Math.min(1, opacityValue + 0.3),
                 fillColor: '#fecc44',
-                fillOpacity: opacityValue * 0.15,
+                fillOpacity: area.image_base64 ? 0 : opacityValue * 0.15,
+                arnisFill: !area.image_base64,
                 interactive: false
             }));
         });
@@ -1022,6 +1029,8 @@ $(document).ready(function () {
             slider.title = 'Overlay Opacity';
 
             L.DomEvent.on(slider, 'input', function(e) {
+                var kind = worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
+                overlayOpacity[kind] = Number(e.target.value);
                 setWorldOverlayOpacity(e.target.value / 100);
             });
 
@@ -1129,6 +1138,8 @@ $(document).ready(function () {
         }
         worldOverlayData = data;
         worldPreviewAvailable = true;
+        var slider = document.getElementById('world-preview-opacity');
+        if (slider) slider.value = String(overlayOpacity[data.areas ? 'oneWorld' : 'world']);
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('disabled');

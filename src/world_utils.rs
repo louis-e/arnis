@@ -854,6 +854,40 @@ fn raise_superflat_floor(root: &mut Value, base_y: i32, min_y: i32) {
 }
 
 // Writes GameType, DayTime and the player's game mode into an existing level.dat.
+/// Sets `LastPlayed` to now, which lists the world first in Minecraft.
+pub fn touch_last_played(world_path: &Path) -> Result<(), String> {
+    let level_path = world_path.join("level.dat");
+    let raw = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
+    let mut decompressed = Vec::new();
+    GzDecoder::new(raw.as_slice())
+        .read_to_end(&mut decompressed)
+        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
+    let mut root: Value = fastnbt::from_bytes(&decompressed)
+        .map_err(|e| format!("Failed to parse level.dat NBT: {e}"))?;
+    let Value::Compound(ref mut top) = root else {
+        return Err("level.dat root is not a compound".to_string());
+    };
+    let Some(Value::Compound(data)) = top.get_mut("Data") else {
+        return Err("level.dat missing Data compound".to_string());
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Failed to read the clock: {e}"))?
+        .as_millis() as i64;
+    data.insert("LastPlayed".to_string(), Value::Long(now_ms));
+
+    let serialized =
+        fastnbt::to_bytes(&root).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized)
+        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
+    replace_file_atomically(&level_path, &compressed)
+}
+
 pub fn apply_java_world_settings(
     world_path: &Path,
     game_mode: crate::args::GameMode,
@@ -1536,6 +1570,59 @@ mod lock_tests {
         assert!(!world_is_locked(dir.path()));
     }
 
+    /// Another process holds the lock, the way Minecraft does. The test binary
+    /// runs itself as that process.
+    #[test]
+    fn a_lock_held_by_another_process_is_seen_and_kept() {
+        const HOLD: &str = "ARNIS_TEST_HOLD_SESSION_LOCK";
+        const TEST: &str =
+            "world_utils::lock_tests::a_lock_held_by_another_process_is_seen_and_kept";
+        if let Ok(dir) = std::env::var(HOLD) {
+            let dir = PathBuf::from(dir);
+            let _lock = SessionLock::acquire(&dir).unwrap();
+            fs::write(dir.join("ready"), b"").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while !dir.join("done").exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([TEST, "--exact", "--test-threads=1"])
+            .env(HOLD, dir.path())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !dir.path().join("ready").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the holder never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let seen = world_is_locked(dir.path());
+        let taken = SessionLock::acquire(dir.path()).is_ok();
+        // Windows also blocks reads of a locked range; the in-process test covers it there.
+        #[cfg(unix)]
+        let content = fs::read(dir.path().join("session.lock")).unwrap_or_default();
+        fs::write(dir.path().join("done"), b"").unwrap();
+        assert!(child.wait().unwrap().success());
+
+        assert!(seen, "a lock held by another process must be reported");
+        assert!(!taken, "a lock held by another process must not be taken");
+        #[cfg(unix)]
+        assert_eq!(
+            content,
+            "\u{2603}".as_bytes(),
+            "the holder's file must stay as it was"
+        );
+        assert!(!world_is_locked(dir.path()));
+    }
+
     #[test]
     fn world_folder_names_are_sanitized() {
         assert_eq!(world_folder_name("  My City  ").as_deref(), Some("My City"));
@@ -1569,6 +1656,33 @@ mod lock_tests {
         assert!(!world_is_locked(dir.path()));
         let lock = SessionLock::acquire(dir.path()).unwrap();
         drop(lock);
+    }
+
+    #[test]
+    fn last_played_is_moved_to_now() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let read = || {
+            let raw = fs::read(world.join("level.dat")).unwrap();
+            let mut plain = Vec::new();
+            GzDecoder::new(raw.as_slice())
+                .read_to_end(&mut plain)
+                .unwrap();
+            let Value::Compound(root) = fastnbt::from_bytes::<Value>(&plain).unwrap() else {
+                panic!("root not a compound");
+            };
+            let Some(Value::Compound(data)) = root.get("Data") else {
+                panic!("no Data");
+            };
+            match data.get("LastPlayed") {
+                Some(Value::Long(t)) => *t,
+                other => panic!("LastPlayed is {other:?}"),
+            }
+        };
+        let before = read();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        touch_last_played(&world).unwrap();
+        assert!(read() > before);
     }
 
     #[test]
