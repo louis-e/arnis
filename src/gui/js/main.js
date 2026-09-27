@@ -9,6 +9,7 @@ import {
   cancelSettingsResetConfirm,
   flushSettingsStore,
 } from './settings-store.js';
+import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -47,6 +48,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  // Before the store restores values, so the cards follow the restored ones.
+  initSettingsLayout();
   initVoxyLightingCoupling();
   initCavesFillCoupling();
   refreshHeightLimitRow();
@@ -118,81 +121,10 @@ async function applyLocalization(localization) {
   const localizationElements = {
     "#start-button > span[data-localize='start_generation']": "start_generation",
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
-    "h2[data-localize='customization_settings']": "customization_settings",
-    "span[data-localize='world_scale']": "world_scale",
-    "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
-    "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
-    "span[data-localize='language']": "language",
-    "span[data-localize='generation_mode']": "generation_mode",
-    "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
-    "option[data-localize='mode_geo_only']": "mode_geo_only",
-    "option[data-localize='mode_terrain_only']": "mode_terrain_only",
-    "span[data-localize='terrain']": "terrain",
-    "span[data-localize='interior']": "interior",
-    "span[data-localize='fillground']": "fillground",
-    "span[data-localize='caves']": "caves",
-    "span[data-localize='legacy_trees']": "legacy_trees",
-    "span[data-localize='overture']": "overture",
-    "span[data-localize='three_dmr']": "three_dmr",
-    "span[data-localize='disable_height_limit']": "disable_height_limit",
-    "span[data-localize='aws_only_elevation']": "aws_only_elevation",
-    "span[data-localize='bake_lighting']": "bake_lighting",
-    "span[data-localize='voxy_lod']": "voxy_lod",
-    "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
-    "span[data-localize='map_theme']": "map_theme",
-    "span[data-localize='custom_map_source']": "custom_map_source",
-    "span[data-localize='java_save_path']": "java_save_path",
-    "span[data-localize='bedrock_save_path']": "bedrock_save_path",
-    "span[data-localize='luanti_save_path']": "luanti_save_path",
-    "span[data-localize='rotation_angle']": "rotation_angle",
-    "span[data-localize='canopy_height']": "canopy_height",
-    "span[data-localize='max_tree_size']": "max_tree_size",
-    "button[data-localize='tree_size_small']": "tree_size_small",
-    "button[data-localize='tree_size_medium']": "tree_size_medium",
-    "button[data-localize='tree_size_big']": "tree_size_big",
-    "button[data-localize='tree_size_tall']": "tree_size_tall",
-    "button[data-localize='tree_size_giant']": "tree_size_giant",
-    "span[data-localize='gamemode']": "gamemode",
-    "button[data-localize='gamemode_survival']": "gamemode_survival",
-    "button[data-localize='gamemode_creative']": "gamemode_creative",
-    "button[data-localize='gamemode_spectator']": "gamemode_spectator",
-    "span[data-localize='world_time']": "world_time",
-    "span[data-localize='map_item']": "map_item",
-    "span[data-localize='custom_world_name']": "custom_world_name",
-    "span[data-localize='signage']": "signage",
-    "span[data-localize='mapillary_token']": "mapillary_token",
-    "span[data-localize='facade_precompute']": "facade_precompute",
-    "span[data-localize='facade_mode']": "facade_mode",
-    "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
-    "button[data-localize='facade_mode_photos']": "facade_mode_photos",
-    "div[data-localize='facade_mode_java_only']": "facade_mode_java_only",
-    "button[data-localize='signage_none']": "signage_none",
-    "button[data-localize='signage_basic']": "signage_basic",
-    "button[data-localize='signage_full']": "signage_full",
-    "div[data-localize='settings_section_generation']": "settings_section_generation",
-    "div[data-localize='settings_section_facades']": "settings_section_facades",
-    "span[data-localize='facade_source']": "facade_source",
-    "span[data-localize='facade_detail']": "facade_detail",
-    "button[data-localize='facade_detail_standard']": "facade_detail_standard",
-    "button[data-localize='facade_detail_high']": "facade_detail_high",
-    "button[data-localize='facade_source_off']": "facade_source_off",
-    "button[data-localize='facade_source_preset']": "facade_source_preset",
-    "button[data-localize='facade_source_mapillary']": "facade_source_mapillary",
-    "span[data-localize='enable_luanti']": "enable_luanti",
-    "div[data-localize='settings_section_world']": "settings_section_world",
-    "div[data-localize='settings_section_map']": "settings_section_map",
-    "div[data-localize='settings_section_application']": "settings_section_application",
-    "button[data-localize='facade_precompute_button']": "facade_precompute_button",
-    "span[data-localize='clear_tile_cache']": "clear_tile_cache",
-    "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
-    // Row label only; settings-store.js owns the button text.
-    "span[data-localize='reset_all_settings']": "reset_all_settings",
     ".footer-link": "footer_text",
-    "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
-    "button[data-localize='version_info']": "version_info",
     "h2[data-localize='update_modal_title']": "update_modal_title",
     "div[data-localize='update_modal_download_note']": "update_modal_download_note",
     "button[data-localize='update_view_on_github']": "update_view_on_github",
@@ -207,6 +139,13 @@ async function applyLocalization(localization) {
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
+
+  // Every text on the settings page carries its key, and several appear more
+  // than once (a section name is in the sidebar and on the section itself), so
+  // the page is localized in one pass rather than selector by selector.
+  document.querySelectorAll("#settings-modal [data-localize]").forEach((element) => {
+    localizeElement(localization, { element }, element.dataset.localize);
+  });
 
   // settings-store.js creates these buttons and owns their text.
   localizeSettingsStore(localization);
@@ -261,6 +200,10 @@ async function initFooter() {
     footerElement.textContent = footerText
       .replace("{year}", currentYear)
       .replace("{version}", version);
+
+    // The About section of the settings page repeats the same line.
+    const aboutVersion = document.getElementById("about-version");
+    if (aboutVersion) aboutVersion.textContent = footerElement.textContent;
   }
 }
 
@@ -541,10 +484,18 @@ function refreshFacadeSourceRows() {
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
-  const grey = (id, live) => {
+  // A row that belongs to another source is hidden: it has nothing to say
+  // until that source is picked, and the whole Mapillary block greyed out
+  // under Off only buried the rest of the page. A row that belongs to this
+  // source but cannot act yet (no token, wrong format) is greyed instead, so
+  // it is still there to explain itself.
+  const grey = (id, shown, live) => {
     const el = document.getElementById(id);
     const row = el && el.closest('.settings-row');
-    if (row) row.classList.toggle('settings-row-unavailable', !live);
+    if (row) {
+      row.style.display = shown ? '' : 'none';
+      row.classList.toggle('settings-row-unavailable', !live);
+    }
     if (el) {
       el.querySelectorAll('.segment, input, button').forEach((c) => {
         c.disabled = !live;
@@ -552,11 +503,13 @@ function refreshFacadeSourceRows() {
       if (el.tagName === 'INPUT' || el.tagName === 'BUTTON') el.disabled = !live;
     }
   };
-  grey('mapillary-token', source === 'mapillary');
-  grey('facade-mode-group', source === 'mapillary' && !!getMapillaryToken());
+  const mapillary = source === 'mapillary';
+  const token = !!getMapillaryToken();
+  grey('mapillary-token', mapillary, mapillary);
+  grey('facade-mode-group', mapillary, mapillary && token);
   // Panel resolution, so it means nothing where no panels are hung.
-  grey('facade-detail-group', source !== 'off' && java);
-  grey('precompute-facades-button', source === 'mapillary' && !!getMapillaryToken());
+  grey('facade-detail-group', source !== 'off', source !== 'off' && java);
+  grey('precompute-facades-button', mapillary, mapillary && token);
 
   const notice = document.getElementById('facade-java-only-notice');
   if (notice) notice.style.display = java ? 'none' : '';
@@ -1065,41 +1018,49 @@ function initSettings() {
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
 
-  // Open settings modal
+  // Where focus goes back to once the page closes.
+  let focusBeforeSettings = null;
+
+  // Open the settings page
   function openSettings() {
+    focusBeforeSettings = document.activeElement;
     settingsModal.style.display = "flex";
-    settingsModal.style.justifyContent = "center";
-    settingsModal.style.alignItems = "center";
+    syncSettingsLayout();
+    // Focus moves onto the page, so Tab and the arrow keys act on it rather
+    // than on the map behind it.
+    settingsModal.focus({ preventScroll: true });
     // The caches grow with every generation, so the number the panel shows
     // has to be read when the panel opens; measuring it once at startup left
     // it stale for the whole session.
     refreshCacheSize();
   }
 
-  // Close settings modal
+  // Close the settings page
   function closeSettings() {
     settingsModal.style.display = "none";
     // Webview teardown events are not guaranteed, so commit here.
     flushSettingsStore();
     cancelSettingsResetConfirm();
+    if (focusBeforeSettings && typeof focusBeforeSettings.focus === "function") {
+      focusBeforeSettings.focus({ preventScroll: true });
+    }
+    focusBeforeSettings = null;
   }
 
-  // Close settings and license modals on escape key
+  // Escape closes the topmost dialog only. License and version info open on
+  // top of the settings page, so closing them returns to it.
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      if (settingsModal.style.display === "flex") {
-        closeSettings();
-      }
-      
-      const licenseModal = document.getElementById("license-modal");
-      if (licenseModal && licenseModal.style.display === "flex") {
-        closeLicense();
-      }
+    if (event.key !== "Escape") return;
 
-      const updateModal = document.getElementById("update-modal");
-      if (updateModal && updateModal.style.display === "flex") {
-        closeUpdateModal();
-      }
+    const licenseModal = document.getElementById("license-modal");
+    const updateModal = document.getElementById("update-modal");
+    const licenseOpen = licenseModal && licenseModal.style.display === "flex";
+    const updateOpen = updateModal && updateModal.style.display === "flex";
+
+    if (licenseOpen) closeLicense();
+    if (updateOpen) closeUpdateModal();
+    if (!licenseOpen && !updateOpen && settingsModal.style.display === "flex") {
+      closeSettings();
     }
   });
 
@@ -1559,12 +1520,16 @@ function initLuantiExperimentalToggle() {
   const bedrockBtn = document.getElementById('format-bedrock');
   if (!toggle || !luantiBtn) return;
 
+  const luantiPathRow = document.getElementById('luanti-save-path-row');
+
   const applyRightmost = (enabled) => {
     luantiBtn.style.display = enabled ? '' : 'none';
     luantiBtn.classList.toggle('format-toggle-btn--rightmost', enabled);
     if (bedrockBtn) {
       bedrockBtn.classList.toggle('format-toggle-btn--rightmost', !enabled);
     }
+    // A save path for a format nobody can pick is only noise.
+    if (luantiPathRow) luantiPathRow.style.display = enabled ? '' : 'none';
   };
 
   const enabled = isLuantiEnabled();
@@ -2033,6 +1998,9 @@ function initTooltips() {
     }
     icon.addEventListener('mouseenter', () => show(icon));
     icon.addEventListener('mouseleave', hide);
+    // The icon sits inside the setting's <label>, whose click would otherwise
+    // flip the switch it belongs to.
+    icon.addEventListener('click', (e) => e.preventDefault());
     icon.addEventListener('focus', () => show(icon));
     icon.addEventListener('blur', hide);
     // Escape closes the tooltip while it's focused.
