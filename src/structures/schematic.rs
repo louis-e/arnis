@@ -800,7 +800,7 @@ pub fn place_structure_yaw(
                 let props = b
                     .properties
                     .as_ref()
-                    .map(|p| Arc::new(rotate_props(p, quarter)));
+                    .map(|p| intern_props(rotate_props(p, quarter)));
                 BlockWithProperties::from_arc(b.block, props)
             })
             .collect()
@@ -875,6 +875,8 @@ pub fn place_structure(
         return;
     }
     let (ax, az) = rotate_xz(schem.anchor_x, schem.anchor_z, w, l, k);
+    // Voxels share their states, so each distinct one is rotated once per placement.
+    let mut rotated: Vec<(*const Value, Arc<Value>)> = Vec::new();
     for (vx, vy, vz, bwp) in &schem.voxels {
         let (rx, rz) = rotate_xz(*vx, *vz, w, l, k);
         let wx = base_x + rx - ax;
@@ -882,10 +884,19 @@ pub fn place_structure(
         let placed = if k == 0 {
             bwp.clone()
         } else {
-            let props = bwp
-                .properties
-                .as_ref()
-                .map(|p| Arc::new(rotate_props(p, k)));
+            let props = bwp.properties.as_ref().map(|p| {
+                match rotated
+                    .iter()
+                    .find(|(src, _)| std::ptr::eq(*src, Arc::as_ptr(p)))
+                {
+                    Some((_, r)) => Arc::clone(r),
+                    None => {
+                        let r = intern_props(rotate_props(p, k));
+                        rotated.push((Arc::as_ptr(p), Arc::clone(&r)));
+                        r
+                    }
+                }
+            });
             BlockWithProperties::from_arc(bwp.block, props)
         };
         // Empty blacklist forces overwrites so blocks land over water/terrain too.

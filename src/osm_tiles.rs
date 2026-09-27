@@ -11,7 +11,7 @@ use colored::Colorize;
 use rayon::prelude::*;
 use reqwest::blocking::Client;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -87,7 +87,7 @@ impl ArchiveEntry {
 
     /// Whether the archive holds any of `wanted`. Falls back to the bbox when the index carries
     /// no cells.
-    fn covers(&self, wanted: &std::collections::HashSet<u32>, bbox: &LLBBox) -> bool {
+    fn covers(&self, wanted: &HashSet<u32>, bbox: &LLBBox) -> bool {
         if self.cells.is_empty() {
             return self.overlaps(bbox);
         }
@@ -223,7 +223,7 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     }
     let shift = ZOOM - manifest.cell_zoom;
     let side = 1u32 << manifest.cell_zoom;
-    let cells: std::collections::HashSet<u32> = wanted
+    let cells: HashSet<u32> = wanted
         .iter()
         .map(|(x, y)| (y >> shift) * side + (x >> shift))
         .collect();
@@ -285,7 +285,7 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     if tiles_read == 0 {
         return Err("the tile archive has no data for this area".into());
     }
-    Ok(assemble(collected))
+    Ok(assemble(collected, &bbox))
 }
 
 fn absorb(payload: &[u8], out: &mut Collected) -> Result<()> {
@@ -302,16 +302,222 @@ fn absorb(payload: &[u8], out: &mut Collected) -> Result<()> {
     Ok(())
 }
 
+/// Degrees x 1e6 past the bbox that still count as inside it: enough for an element the
+/// projection rounds onto the edge row, and far less than a tile. The parser clips to the
+/// bbox itself, so this only decides what it gets to see.
+const EDGE_MARGIN_E6: i64 = 1_000;
+
+/// Lat/lon extent in the payload's degrees x 1e6.
+#[derive(Clone, Copy)]
+struct Extent {
+    min_lat: i32,
+    min_lon: i32,
+    max_lat: i32,
+    max_lon: i32,
+}
+
+impl Extent {
+    fn of(points: &[(i32, i32)]) -> Option<Self> {
+        let (&(lat, lon), rest) = points.split_first()?;
+        let mut e = Extent {
+            min_lat: lat,
+            min_lon: lon,
+            max_lat: lat,
+            max_lon: lon,
+        };
+        for &(lat, lon) in rest {
+            e.min_lat = e.min_lat.min(lat);
+            e.max_lat = e.max_lat.max(lat);
+            e.min_lon = e.min_lon.min(lon);
+            e.max_lon = e.max_lon.max(lon);
+        }
+        Some(e)
+    }
+
+    /// The bbox plus the edge margin.
+    fn around(bbox: &LLBBox) -> Self {
+        let e6 = |v: f64, round: fn(f64) -> f64| round(v * COORD_SCALE) as i64;
+        let lat_lo = e6(bbox.min().lat(), f64::floor) - EDGE_MARGIN_E6;
+        let lat_hi = e6(bbox.max().lat(), f64::ceil) + EDGE_MARGIN_E6;
+        let lon_lo = e6(bbox.min().lng(), f64::floor) - EDGE_MARGIN_E6;
+        let lon_hi = e6(bbox.max().lng(), f64::ceil) + EDGE_MARGIN_E6;
+        Extent {
+            min_lat: lat_lo.max(-MAX_LAT_E6) as i32,
+            min_lon: lon_lo.max(-MAX_LON_E6) as i32,
+            max_lat: lat_hi.min(MAX_LAT_E6) as i32,
+            max_lon: lon_hi.min(MAX_LON_E6) as i32,
+        }
+    }
+
+    fn union(self, o: Self) -> Self {
+        Extent {
+            min_lat: self.min_lat.min(o.min_lat),
+            min_lon: self.min_lon.min(o.min_lon),
+            max_lat: self.max_lat.max(o.max_lat),
+            max_lon: self.max_lon.max(o.max_lon),
+        }
+    }
+
+    fn intersects(&self, o: &Self) -> bool {
+        self.min_lat <= o.max_lat
+            && o.min_lat <= self.max_lat
+            && self.min_lon <= o.max_lon
+            && o.min_lon <= self.max_lon
+    }
+
+    fn contains(&self, lat: i32, lon: i32) -> bool {
+        (self.min_lat..=self.max_lat).contains(&lat) && (self.min_lon..=self.max_lon).contains(&lon)
+    }
+}
+
+fn is_building(tags: &Tags) -> bool {
+    tags.iter()
+        .any(|(k, v)| k == "building" || k == "building:part" || (k == "type" && v == "building"))
+}
+
+/// Ways and relations of `c` that the bbox can use. A z13 tile is several kilometres
+/// across, so a city block's bbox pulls in two to three times its own area; everything
+/// the parser would clip away entirely is left out here instead of being parsed first.
+///
+/// Kept: every way whose extent meets the bbox, every relation whose members' combined
+/// extent does (a lake enclosing the whole bbox included) along with all its members, and
+/// the building parts lying inside any kept building. Those parts can reach past the bbox,
+/// and the outline suppression weighs all of them against the outline.
+fn select_for_bbox(c: &Collected, bbox: &LLBBox) -> (HashSet<u64>, HashSet<u64>) {
+    let area = Extent::around(bbox);
+    let way_extent: HashMap<u64, Extent> = c
+        .ways
+        .iter()
+        .filter_map(|(&id, (_, _, pts))| Extent::of(pts).map(|e| (id, e)))
+        .collect();
+    let relation_extent = |members: &[(u64, String)]| {
+        members
+            .iter()
+            .filter_map(|(m, _)| way_extent.get(m).copied())
+            .reduce(Extent::union)
+    };
+
+    let mut ways: HashSet<u64> = way_extent
+        .iter()
+        .filter(|(_, e)| e.intersects(&area))
+        .map(|(&id, _)| id)
+        .collect();
+    let mut relations: HashSet<u64> = HashSet::new();
+    let mut buildings = area;
+    for (&id, (tags, members)) in &c.relations {
+        let Some(e) = relation_extent(members) else {
+            continue;
+        };
+        if e.intersects(&area) {
+            relations.insert(id);
+            ways.extend(members.iter().map(|(m, _)| *m));
+            if is_building(tags) {
+                buildings = buildings.union(e);
+            }
+        }
+    }
+    for id in &ways {
+        if let (Some((_, tags, _)), Some(e)) = (c.ways.get(id), way_extent.get(id)) {
+            if is_building(tags) {
+                buildings = buildings.union(*e);
+            }
+        }
+    }
+
+    // Parts inside a building that straddles the edge.
+    for (&id, (_, tags, _)) in &c.ways {
+        if !ways.contains(&id)
+            && is_building(tags)
+            && way_extent
+                .get(&id)
+                .is_some_and(|e| e.intersects(&buildings))
+        {
+            ways.insert(id);
+        }
+    }
+    for (&id, (tags, members)) in &c.relations {
+        if !relations.contains(&id)
+            && is_building(tags)
+            && relation_extent(members).is_some_and(|e| e.intersects(&buildings))
+        {
+            relations.insert(id);
+            ways.extend(members.iter().map(|(m, _)| *m));
+        }
+    }
+    (ways, relations)
+}
+
 /// Builds the element list the Overpass path produces, so every later stage is unchanged.
-fn assemble(c: Collected) -> OsmData {
-    let mut elements: Vec<OsmElement> = Vec::new();
+/// Everything is emitted in id order: the parser keeps the first of two nodes on one
+/// coordinate and processes elements in list order, so a hash-map order here would make
+/// two runs over the same data build different worlds.
+fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
+    let (keep_ways, keep_relations) = select_for_bbox(&c, bbox);
+    let area = Extent::around(bbox);
+    let Collected {
+        nodes,
+        ways,
+        relations,
+    } = c;
+
+    let mut nodes: Vec<(u64, NodeBody)> = nodes.into_iter().collect();
+    nodes.sort_unstable_by_key(|n| n.0);
     // One id per distinct coordinate, so junctions share a node and a ring closes on itself.
     let mut coord_ids: HashMap<(i32, i32), u64> = HashMap::new();
+    for (id, (lat, lon, _)) in &nodes {
+        coord_ids.entry((*lat, *lon)).or_insert(*id);
+    }
+
+    let mut ways: Vec<DecWay> = ways
+        .into_iter()
+        .filter(|(id, _)| keep_ways.contains(id))
+        .map(|(id, (closed, tags, pts))| (id, closed, tags, pts))
+        .collect();
+    ways.sort_unstable_by_key(|w| w.0);
+
     let mut next_synthetic = SYNTHETIC_ID_BASE;
     let mut emitted: Vec<(u64, i32, i32)> = Vec::new();
+    let mut vertex_nodes: HashSet<u64> = HashSet::new();
+    let mut way_elements: Vec<OsmElement> = Vec::with_capacity(ways.len());
+    for (id, closed, tags, points) in ways {
+        let mut refs: Vec<u64> = Vec::with_capacity(points.len() + 1);
+        for p in &points {
+            let nid = *coord_ids.entry(*p).or_insert_with(|| {
+                let id = next_synthetic;
+                next_synthetic += 1;
+                emitted.push((id, p.0, p.1));
+                id
+            });
+            if nid < SYNTHETIC_ID_BASE {
+                vertex_nodes.insert(nid);
+            }
+            refs.push(nid);
+        }
+        if closed {
+            if let (Some(first), Some(last)) = (refs.first().copied(), refs.last().copied()) {
+                if first != last {
+                    refs.push(first);
+                }
+            }
+        }
+        way_elements.push(OsmElement {
+            r#type: "way".into(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: Some(refs),
+            tags: Some(tags.into_iter().collect()),
+            members: Vec::new(),
+        });
+    }
 
-    for (id, (lat, lon, tags)) in c.nodes {
-        coord_ids.entry((lat, lon)).or_insert(id);
+    // A tagged node outside the bbox still matters when a kept way runs through it: the
+    // way's vertex carries its tags.
+    let mut elements: Vec<OsmElement> = Vec::new();
+    for (id, (lat, lon, tags)) in nodes {
+        if !area.contains(lat, lon) && !vertex_nodes.contains(&id) {
+            continue;
+        }
         elements.push(OsmElement {
             r#type: "node".into(),
             id,
@@ -322,42 +528,7 @@ fn assemble(c: Collected) -> OsmData {
             members: Vec::new(),
         });
     }
-
-    let mut ways: Vec<DecWay> = c
-        .ways
-        .into_iter()
-        .map(|(id, (closed, tags, pts))| (id, closed, tags, pts))
-        .collect();
-    ways.sort_by_key(|w| w.0);
-
-    for (id, closed, tags, points) in ways {
-        let mut refs: Vec<u64> = Vec::with_capacity(points.len() + 1);
-        for p in &points {
-            let nid = *coord_ids.entry(*p).or_insert_with(|| {
-                let id = next_synthetic;
-                next_synthetic += 1;
-                emitted.push((id, p.0, p.1));
-                id
-            });
-            refs.push(nid);
-        }
-        if closed {
-            if let (Some(first), Some(last)) = (refs.first().copied(), refs.last().copied()) {
-                if first != last {
-                    refs.push(first);
-                }
-            }
-        }
-        elements.push(OsmElement {
-            r#type: "way".into(),
-            id,
-            lat: None,
-            lon: None,
-            nodes: Some(refs),
-            tags: Some(tags.into_iter().collect()),
-            members: Vec::new(),
-        });
-    }
+    elements.extend(way_elements);
 
     for (id, lat, lon) in emitted {
         elements.push(OsmElement {
@@ -371,12 +542,12 @@ fn assemble(c: Collected) -> OsmData {
         });
     }
 
-    let mut rels: Vec<DecRelation> = c
-        .relations
+    let mut rels: Vec<DecRelation> = relations
         .into_iter()
+        .filter(|(id, _)| keep_relations.contains(id))
         .map(|(id, (tags, members))| (id, tags, members))
         .collect();
-    rels.sort_by_key(|r| r.0);
+    rels.sort_unstable_by_key(|r| r.0);
     for (id, tags, members) in rels {
         elements.push(OsmElement {
             r#type: "relation".into(),
@@ -729,6 +900,160 @@ mod tests {
         assert!(decode(b"NOPE0000").is_err());
     }
 
+    /// Covers the coordinates the tests below use (degrees x 1e6 in the tens).
+    fn test_bbox() -> LLBBox {
+        LLBBox::new(0.0, 0.0, 0.001, 0.001).unwrap()
+    }
+
+    fn ids_of(data: &OsmData, kind: &str) -> Vec<u64> {
+        data.elements_for_test()
+            .iter()
+            .filter(|e| e.r#type == kind)
+            .map(|e| e.id)
+            .collect()
+    }
+
+    fn way_at(c: &mut Collected, id: u64, tags: &[(&str, &str)], pts: &[(i32, i32)]) {
+        let tags = tags
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        c.ways.insert(id, (false, tags, pts.to_vec()));
+    }
+
+    // Far past the bbox (a degree away) is dropped; crossing it without a vertex inside is not.
+    #[test]
+    fn ways_outside_the_bbox_are_left_out() {
+        let mut c = Collected::default();
+        way_at(
+            &mut c,
+            1,
+            &[("highway", "primary")],
+            &[(500, 500), (600, 600)],
+        );
+        way_at(
+            &mut c,
+            2,
+            &[("highway", "primary")],
+            &[(1_000_000, 0), (1_000_100, 0)],
+        );
+        way_at(
+            &mut c,
+            3,
+            &[("highway", "primary")],
+            &[(-50_000, 500), (50_000, 500)],
+        );
+        let data = assemble(c, &test_bbox());
+        assert_eq!(ids_of(&data, "way"), vec![1, 3]);
+    }
+
+    // A lake enclosing the whole bbox has no member inside it, and must still come through
+    // with every member.
+    #[test]
+    fn a_relation_around_the_bbox_is_kept_whole() {
+        let mut c = Collected::default();
+        way_at(&mut c, 10, &[], &[(-90_000, -90_000), (-90_000, 90_000)]);
+        way_at(&mut c, 11, &[], &[(-90_000, 90_000), (90_000, 90_000)]);
+        way_at(&mut c, 12, &[], &[(90_000, 90_000), (90_000, -90_000)]);
+        way_at(&mut c, 13, &[], &[(90_000, -90_000), (-90_000, -90_000)]);
+        c.relations.insert(
+            20,
+            (
+                vec![
+                    ("type".into(), "multipolygon".into()),
+                    ("natural".into(), "water".into()),
+                ],
+                (10..14).map(|m| (m, "outer".to_string())).collect(),
+            ),
+        );
+        c.relations.insert(
+            21,
+            (
+                vec![("type".into(), "multipolygon".into())],
+                vec![(99, "outer".to_string())],
+            ),
+        );
+        let data = assemble(c, &test_bbox());
+        assert_eq!(ids_of(&data, "relation"), vec![20]);
+        assert_eq!(ids_of(&data, "way"), vec![10, 11, 12, 13]);
+    }
+
+    // The outline suppression compares an outline against all of its parts, including the
+    // ones past the bbox edge.
+    #[test]
+    fn parts_of_a_building_across_the_edge_are_kept() {
+        let mut c = Collected::default();
+        let outline = [
+            (500, 500),
+            (500, 9_000),
+            (3_000, 9_000),
+            (3_000, 500),
+            (500, 500),
+        ];
+        way_at(&mut c, 1, &[("building", "yes")], &outline);
+        way_at(
+            &mut c,
+            2,
+            &[("building:part", "yes")],
+            &[(600, 7_000), (900, 8_000)],
+        );
+        way_at(
+            &mut c,
+            3,
+            &[("building:part", "yes")],
+            &[(600, 70_000), (900, 80_000)],
+        );
+        let data = assemble(c, &test_bbox());
+        assert_eq!(ids_of(&data, "way"), vec![1, 2]);
+    }
+
+    // Outside the bbox a tagged node is only kept as a vertex of a kept way, which carries
+    // its tags.
+    #[test]
+    fn tagged_nodes_outside_the_bbox_survive_only_as_vertices() {
+        let mut c = Collected::default();
+        let tag = || vec![("highway".to_string(), "traffic_signals".to_string())];
+        c.nodes.insert(5, (500, 500, tag()));
+        c.nodes.insert(6, (-50_000, 500, tag()));
+        c.nodes.insert(7, (-60_000, 500, tag()));
+        way_at(
+            &mut c,
+            1,
+            &[("highway", "primary")],
+            &[(-50_000, 500), (500, 500)],
+        );
+        let data = assemble(c, &test_bbox());
+        let tagged: Vec<u64> = data
+            .elements_for_test()
+            .iter()
+            .filter(|e| e.r#type == "node" && e.tags.is_some())
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(tagged, vec![5, 6]);
+    }
+
+    // Two nodes on one coordinate: the way must pick the same one on every run, which a
+    // hash-map walk did not.
+    #[test]
+    fn a_shared_coordinate_resolves_to_the_lowest_id() {
+        for _ in 0..8 {
+            let mut c = Collected::default();
+            for id in [40, 30, 50] {
+                c.nodes
+                    .insert(id, (500, 500, vec![("entrance".into(), "yes".into())]));
+            }
+            way_at(&mut c, 1, &[("building", "yes")], &[(500, 500), (600, 600)]);
+            let data = assemble(c, &test_bbox());
+            assert_eq!(ids_of(&data, "node")[..3], [30, 40, 50]);
+            let way = data
+                .elements_for_test()
+                .iter()
+                .find(|e| e.r#type == "way")
+                .unwrap();
+            assert_eq!(way.nodes.as_ref().unwrap()[0], 30);
+        }
+    }
+
     // A ring's first and last vertex must come back as one node, or every building outline
     // reads as an open way downstream.
     #[test]
@@ -742,7 +1067,7 @@ mod tests {
                 vec![(10, 10), (10, 20), (20, 20)],
             ),
         );
-        let data = assemble(c);
+        let data = assemble(c, &test_bbox());
         let els = data.elements_for_test();
         let way = els.iter().find(|e| e.r#type == "way").expect("way missing");
         let refs = way.nodes.as_ref().expect("way has no refs");
@@ -771,7 +1096,7 @@ mod tests {
                 vec![(5, 5), (9, 9)],
             ),
         );
-        let data = assemble(c);
+        let data = assemble(c, &test_bbox());
         let mut refs: Vec<(u64, Vec<u64>)> = data
             .elements_for_test()
             .iter()

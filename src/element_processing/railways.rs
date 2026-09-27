@@ -983,8 +983,27 @@ fn generate_rail_tunnel_shell(
 /// Phase 2 of underground railway generation: carve the 3x3 air interior and place
 /// ceiling lights.  Called AFTER ground generation so that the carved
 /// air blocks are not overwritten by the underground stone fill.
+///
+/// Every tile a tunnel crosses records the whole centerline, so the merged list holds each
+/// point once per tile. A point is carved only the first time: carving just turns
+/// whitelisted blocks to air, and a lantern is never on the whitelist, so a second carve
+/// changes nothing. The lanterns still follow their positions in the full list.
 pub fn carve_rail_tunnel_interior(editor: &mut WorldEditor, rail_tunnel_points: &[(i32, i32)]) {
+    // Whitelist: allow overwriting shell blocks and ground-fill STONE
+    // so the tunnel is actually hollow.
+    let carve_whitelist: &[Block] = &[
+        STONE_BRICKS,
+        CRACKED_STONE_BRICKS,
+        MOSSY_STONE_BRICKS,
+        STONE,
+    ];
+    let mut carved: HashSet<(i32, i32)> = HashSet::with_capacity(rail_tunnel_points.len());
     for (idx, &(bx, bz)) in rail_tunnel_points.iter().enumerate() {
+        let first = carved.insert((bx, bz));
+        let lantern = idx % LIGHT_INTERVAL == 0;
+        if !first && !lantern {
+            continue;
+        }
         let ground_y = editor.get_ground_level(bx, bz);
         let ceil_y = ground_y - RAIL_TUNNEL_DEPTH;
         let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
@@ -993,35 +1012,29 @@ pub fn carve_rail_tunnel_interior(editor: &mut WorldEditor, rail_tunnel_points: 
             continue;
         }
 
-        // Whitelist: allow overwriting shell blocks and ground-fill STONE
-        // so the tunnel is actually hollow.
-        let carve_whitelist: &[Block] = &[
-            STONE_BRICKS,
-            CRACKED_STONE_BRICKS,
-            MOSSY_STONE_BRICKS,
-            STONE,
-        ];
-        for dx in -AIR_RADIUS..=AIR_RADIUS {
-            for dz in -AIR_RADIUS..=AIR_RADIUS {
-                for y in (floor_y + 1)..ceil_y {
-                    // Skip the center rail block.
-                    if dx == 0 && dz == 0 && y == floor_y + 1 {
-                        continue;
+        if first {
+            for dx in -AIR_RADIUS..=AIR_RADIUS {
+                for dz in -AIR_RADIUS..=AIR_RADIUS {
+                    for y in (floor_y + 1)..ceil_y {
+                        // Skip the center rail block.
+                        if dx == 0 && dz == 0 && y == floor_y + 1 {
+                            continue;
+                        }
+                        editor.set_block_absolute(
+                            AIR,
+                            bx + dx,
+                            y,
+                            bz + dz,
+                            Some(carve_whitelist),
+                            None,
+                        );
                     }
-                    editor.set_block_absolute(
-                        AIR,
-                        bx + dx,
-                        y,
-                        bz + dz,
-                        Some(carve_whitelist),
-                        None,
-                    );
                 }
             }
         }
 
         // Periodic ceiling lighting.
-        if idx % LIGHT_INTERVAL == 0 {
+        if lantern {
             editor.set_block_absolute(SEA_LANTERN, bx, ceil_y - 1, bz, None, None);
         }
     }
@@ -1037,6 +1050,76 @@ mod tests {
     fn test_editor(xzbbox: &XZBBox) -> WorldEditor<'_> {
         let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
         WorldEditor::new(PathBuf::from("/dev/null/unused"), xzbbox, llbbox)
+    }
+
+    // The same carve as before deduplication: every listed point, in order.
+    fn carve_every_point(editor: &mut WorldEditor, points: &[(i32, i32)]) {
+        let wl: &[Block] = &[
+            STONE_BRICKS,
+            CRACKED_STONE_BRICKS,
+            MOSSY_STONE_BRICKS,
+            STONE,
+        ];
+        for (idx, &(bx, bz)) in points.iter().enumerate() {
+            let ceil_y = editor.get_ground_level(bx, bz) - RAIL_TUNNEL_DEPTH;
+            let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
+            for dx in -AIR_RADIUS..=AIR_RADIUS {
+                for dz in -AIR_RADIUS..=AIR_RADIUS {
+                    for y in (floor_y + 1)..ceil_y {
+                        if !(dx == 0 && dz == 0 && y == floor_y + 1) {
+                            editor.set_block_absolute(AIR, bx + dx, y, bz + dz, Some(wl), None);
+                        }
+                    }
+                }
+            }
+            if idx % LIGHT_INTERVAL == 0 {
+                editor.set_block_absolute(SEA_LANTERN, bx, ceil_y - 1, bz, None, None);
+            }
+        }
+    }
+
+    // Tiles list a tunnel once each; carving each point once must build the same bore,
+    // lanterns included.
+    #[test]
+    fn repeated_tunnel_points_carve_the_same_bore() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 80, 80).unwrap();
+        let line: Vec<(i32, i32)> = (20..=50)
+            .map(|x| (x, 40))
+            .chain((41..=60).map(|z| (50, z)))
+            .collect();
+        // Two tiles' copies, the second starting mid-way, plus a stray repeat.
+        let mut points = line.clone();
+        points.extend_from_slice(&line[7..]);
+        points.extend_from_slice(&line);
+        points.push((33, 40));
+
+        let build = |carve: &dyn Fn(&mut WorldEditor)| {
+            let mut editor = test_editor(&xzbbox);
+            for x in 10..=70 {
+                for z in 30..=70 {
+                    let ground = editor.get_ground_level(x, z);
+                    for y in ground - 12..ground {
+                        let block = if (x + z) % 5 == 0 { RAIL } else { STONE };
+                        editor.set_block_absolute(block, x, y, z, None, None);
+                    }
+                }
+            }
+            carve(&mut editor);
+            let mut cells = Vec::new();
+            for x in 10..=70 {
+                for z in 30..=70 {
+                    let ground = editor.get_ground_level(x, z);
+                    for y in ground - 12..ground {
+                        cells.push(editor.get_block_absolute(x, y, z).map(|b| b.id()));
+                    }
+                }
+            }
+            cells
+        };
+        let want = build(&|e| carve_every_point(e, &points));
+        let got = build(&|e| carve_rail_tunnel_interior(e, &points));
+        assert_eq!(got, want);
+        assert!(got.contains(&Some(SEA_LANTERN.id())));
     }
 
     // A straight east-west rail from x=20 to x=60 at z=50 (so cell index == x - 20).

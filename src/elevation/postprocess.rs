@@ -90,6 +90,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
                         }
 
                         neighbors.clear();
+                        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                         for dy in -RADIUS..=RADIUS {
                             for dx in -RADIUS..=RADIUS {
                                 if dy == 0 && dx == 0 {
@@ -99,10 +100,18 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
                                     [(x as i32 + dx) as usize];
                                 if v.is_finite() {
                                     neighbors.push(v);
+                                    lo = lo.min(v);
+                                    hi = hi.max(v);
                                 }
                             }
                         }
                         if neighbors.len() < 8 {
+                            continue;
+                        }
+                        // The median lies within the neighbours' range, so a centre within
+                        // the threshold of both ends cannot deviate past it. Most terrain is
+                        // that smooth, and this skips both selects there.
+                        if center - lo <= abs_threshold && hi - center <= abs_threshold {
                             continue;
                         }
 
@@ -1527,8 +1536,14 @@ pub(crate) fn gaussian_blur_mask_to_f32_reported(
             .map(|row| {
                 let len = row.len().min(width);
                 let row_len = len as i32;
+                let hits = prefix_counts(&row[..len], |&c| c == target);
                 (0..len)
                     .map(|i| {
+                        match window_hits(&hits, i, half, len) {
+                            (0, _) => return 0.0,
+                            (n, window) if n == window => return 1.0,
+                            _ => {}
+                        }
                         let mut sum = 0.0;
                         let mut wsum = 0.0;
                         for (j, &k) in kernel.iter().enumerate() {
@@ -1567,8 +1582,18 @@ pub(crate) fn gaussian_blur_mask_to_f32_reported(
             .map(|x| {
                 let column: Vec<f64> = after_h.iter().map(|row| row[x]).collect();
                 let col_len = column.len() as i32;
+                let ones = prefix_counts(&column, |&v| v == 1.0);
+                let zeros = prefix_counts(&column, |&v| v == 0.0);
                 let col: Vec<f32> = (0..column.len())
                     .map(|y| {
+                        let (n, window) = window_hits(&ones, y, half, column.len());
+                        if n == window {
+                            return 1.0;
+                        }
+                        let (n, window) = window_hits(&zeros, y, half, column.len());
+                        if n == window {
+                            return 0.0;
+                        }
                         let mut sum = 0.0;
                         let mut wsum = 0.0;
                         for (j, &k) in kernel.iter().enumerate() {
@@ -1600,6 +1625,31 @@ pub(crate) fn gaussian_blur_mask_to_f32_reported(
         report(0.5 + 0.5 * (x0 as f64 / w as f64));
     }
     out
+}
+
+/// `out[i]` = how many of `values[..i]` satisfy `hit`.
+fn prefix_counts<T>(values: &[T], hit: impl Fn(&T) -> bool) -> Vec<u32> {
+    let mut out = Vec::with_capacity(values.len() + 1);
+    let mut n = 0u32;
+    out.push(n);
+    for v in values {
+        n += u32::from(hit(v));
+        out.push(n);
+    }
+    out
+}
+
+/// Hits among the kernel window around `i`, and the window's length, from `prefix_counts`.
+///
+/// A mask blur whose window is all 0 or all 1 has an exact answer: with every sample 0 the
+/// sum stays 0, and with every sample 1 it adds the same weights in the same order as the
+/// weight sum it is divided by. Uniform windows are most of a land-cover mask, and each
+/// would otherwise cost the full kernel.
+#[inline]
+fn window_hits(hits: &[u32], i: usize, half: i32, len: usize) -> (usize, usize) {
+    let lo = i.saturating_sub(half as usize);
+    let hi = (i + half as usize + 1).min(len);
+    ((hits[hi] - hits[lo]) as usize, hi - lo)
 }
 
 fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
@@ -1926,6 +1976,31 @@ mod mask_blur_tests {
     fn mask_blur_clamps_oversized_grids_like_the_take_did() {
         // Both dimensions larger than the requested extent.
         check(&grid(50, 40, 3), 37, 29, 3.0);
+    }
+
+    /// Large solid blobs, so most windows are all-0 or all-1 and take the shortcut.
+    fn blobs(w: usize, h: usize) -> Vec<Vec<u8>> {
+        (0..h)
+            .map(|y| {
+                (0..w)
+                    .map(|x| {
+                        let (dx, dy) = (x as f64 - w as f64 * 0.4, y as f64 - h as f64 * 0.5);
+                        let disc = dx * dx + dy * dy < (w as f64 * 0.25).powi(2);
+                        let band = (x + 2 * y) % 97 < 30;
+                        u8::from(disc || band)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn uniform_windows_match_the_full_kernel() {
+        check(&blobs(120, 90), 120, 90, 3.0);
+        check(&blobs(200, 60), 200, 60, 12.0);
+        // Everything one class, and nothing of it.
+        check(&vec![vec![1u8; 40]; 30], 40, 30, 3.0);
+        check(&vec![vec![0u8; 40]; 30], 40, 30, 3.0);
     }
 }
 
@@ -2448,6 +2523,79 @@ mod tests {
         let mut repaired = spike(12.0);
         repair_terrain_anomalies(&mut repaired, 40.0);
         assert_eq!(repaired[10][10], 100.0);
+    }
+
+    /// The repair without its range shortcut: every cell takes both selects.
+    fn repair_by_medians(heights: &mut [Vec<f64>], m_per_cell: f64) {
+        let (h, w) = (heights.len(), heights[0].len());
+        let thr = 6.0f64.max(0.25 * m_per_cell);
+        let passes = if m_per_cell > 4.0 { 2 } else { 10 };
+        for _ in 0..passes {
+            let snap = heights.to_vec();
+            let mut repaired = 0;
+            for y in 2..h - 2 {
+                for x in 2..w - 2 {
+                    let center = snap[y][x];
+                    if !center.is_finite() {
+                        continue;
+                    }
+                    let mut nb: Vec<f64> = (-2i32..=2)
+                        .flat_map(|dy| (-2i32..=2).map(move |dx| (dy, dx)))
+                        .filter(|&d| d != (0, 0))
+                        .map(|(dy, dx)| snap[(y as i32 + dy) as usize][(x as i32 + dx) as usize])
+                        .filter(|v| v.is_finite())
+                        .collect();
+                    if nb.len() < 8 {
+                        continue;
+                    }
+                    let mid = nb.len() / 2;
+                    nb.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                    let median = nb[mid];
+                    let mut dev: Vec<f64> = nb.iter().map(|v| (v - median).abs()).collect();
+                    let dmid = dev.len() / 2;
+                    dev.select_nth_unstable_by(dmid, |a, b| a.partial_cmp(b).unwrap());
+                    let d = (center - median).abs();
+                    if d > thr && d > 3.0 * dev[dmid].max(1.0) {
+                        heights[y][x] = median;
+                        repaired += 1;
+                    }
+                }
+            }
+            if repaired == 0 {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn the_range_shortcut_repairs_exactly_what_the_medians_do() {
+        // Gentle wobble with spikes, pits, a NaN hole and a real cliff.
+        let mut base = wobbly(60, 50);
+        for (y, row) in base.iter_mut().enumerate() {
+            for (x, v) in row.iter_mut().enumerate() {
+                *v = *v * 0.004 + 100.0 + if x > 40 { 30.0 } else { 0.0 };
+                if (x * 7 + y * 13) % 53 == 0 {
+                    *v += if x % 2 == 0 { 25.0 } else { -18.0 };
+                }
+                if (20..23).contains(&x) && (10..12).contains(&y) {
+                    *v = f64::NAN;
+                }
+            }
+        }
+        for m_per_cell in [1.0, 40.0] {
+            let mut got = base.clone();
+            let mut want = base.clone();
+            repair_terrain_anomalies(&mut got, m_per_cell);
+            repair_by_medians(&mut want, m_per_cell);
+            assert_bits_eq(&got, &want);
+            let changed = got
+                .iter()
+                .flatten()
+                .zip(base.iter().flatten())
+                .filter(|(a, b)| a.to_bits() != b.to_bits())
+                .count();
+            assert!(changed > 0, "the fixture has spikes to repair");
+        }
     }
 
     #[test]

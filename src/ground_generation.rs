@@ -107,6 +107,59 @@ impl ChunkGroundCache {
     }
 }
 
+/// Water answers for one chunk and the ring of columns around it.
+///
+/// Every column asks about itself and its eight neighbours, so each answer was worked
+/// out up to nine times, three block lookups apiece. The ground pass only writes water
+/// into the column it is on (trees keep water on their blacklist), so an answer holds
+/// until that column is processed, and is forgotten then.
+struct WaterColumnMemo {
+    base_x: i32,
+    base_z: i32,
+    /// Row-major over the 18x18 window: 0 not asked yet, 1 dry, 2 water.
+    state: [u8; 18 * 18],
+}
+
+impl WaterColumnMemo {
+    fn new(chunk_x: i32, chunk_z: i32) -> Self {
+        Self {
+            base_x: (chunk_x << 4) - 1,
+            base_z: (chunk_z << 4) - 1,
+            state: [0; 18 * 18],
+        }
+    }
+
+    #[inline]
+    fn slot(&self, x: i32, z: i32) -> Option<usize> {
+        let (dx, dz) = (x - self.base_x, z - self.base_z);
+        ((0..18).contains(&dx) && (0..18).contains(&dz)).then_some((dz * 18 + dx) as usize)
+    }
+
+    #[inline]
+    fn get(&mut self, x: i32, z: i32, probe: impl FnOnce() -> bool) -> bool {
+        let Some(i) = self.slot(x, z) else {
+            return probe();
+        };
+        match self.state[i] {
+            1 => false,
+            2 => true,
+            _ => {
+                let water = probe();
+                self.state[i] = 1 + u8::from(water);
+                water
+            }
+        }
+    }
+
+    /// Called once the column has been processed, which may have put water in it.
+    #[inline]
+    fn forget(&mut self, x: i32, z: i32) {
+        if let Some(i) = self.slot(x, z) {
+            self.state[i] = 0;
+        }
+    }
+}
+
 /// Whether the canopy map covers this column's lattice cell, and whether it
 /// wants a trunk rooted here. Decided once per cell, at the cell's own trunk
 /// slot, since every column in a cell snaps to that slot anyway. An unmeasured
@@ -267,6 +320,8 @@ pub fn generate_ground_region(
                 )
             });
 
+            let mut water_memo = WaterColumnMemo::new(chunk_x, chunk_z);
+
             // --fillground fast path: bulk-fill fully-buried sections to
             // Uniform(STONE) so the per-column loop only walks the boundary
             // section. Gated on full bbox coverage so out-of-bbox columns
@@ -420,18 +475,21 @@ pub fn generate_ground_region(
                             }
                             false
                         };
-                        let placed_water = has_water_in_column(x, z);
+                        let mut water_at = |wx: i32, wz: i32| {
+                            water_memo.get(wx, wz, || has_water_in_column(wx, wz))
+                        };
+                        let placed_water = water_at(x, z);
                         let osm_gap = if placed_water {
                             false
                         } else {
-                            let water_n = has_water_in_column(x, z - 1);
-                            let water_s = has_water_in_column(x, z + 1);
-                            let water_w = has_water_in_column(x - 1, z);
-                            let water_e = has_water_in_column(x + 1, z);
-                            let water_ne = has_water_in_column(x + 1, z - 1);
-                            let water_nw = has_water_in_column(x - 1, z - 1);
-                            let water_se = has_water_in_column(x + 1, z + 1);
-                            let water_sw = has_water_in_column(x - 1, z + 1);
+                            let water_n = water_at(x, z - 1);
+                            let water_s = water_at(x, z + 1);
+                            let water_w = water_at(x - 1, z);
+                            let water_e = water_at(x + 1, z);
+                            let water_ne = water_at(x + 1, z - 1);
+                            let water_nw = water_at(x - 1, z - 1);
+                            let water_se = water_at(x + 1, z + 1);
+                            let water_sw = water_at(x - 1, z + 1);
 
                             // Fill single-cell gaps when water spans opposite neighbors.
                             (water_n && water_s)
@@ -1338,6 +1396,7 @@ pub fn generate_ground_region(
                         Some(&[BEDROCK]),
                     );
 
+                    water_memo.forget(x, z);
                     block_counter += 1;
                     #[allow(clippy::manual_is_multiple_of)]
                     if block_counter % batch_size == 0 {

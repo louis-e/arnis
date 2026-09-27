@@ -4,7 +4,7 @@ use fastnbt::Value;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 // Enums for stair properties
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -65,7 +65,7 @@ impl BlockWithProperties {
     pub fn new(block: Block, properties: Option<Value>) -> Self {
         Self {
             block,
-            properties: properties.map(Arc::new),
+            properties: properties.map(intern_props),
         }
     }
 
@@ -934,14 +934,75 @@ pub fn create_stair_with_properties(
 }
 // Add half=top to make it upside-down.
 pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
-    if let Some(props) = stair.properties.as_ref() {
-        if let Value::Compound(map) = props.as_ref() {
-            let mut new_map = map.clone();
-            new_map.insert("half".to_string(), Value::String("top".to_string()));
-            stair.properties = Some(Arc::new(Value::Compound(new_map)));
-        }
+    if let Some(Value::Compound(map)) = stair.properties.as_deref() {
+        let mut new_map = map.clone();
+        new_map.insert("half".to_string(), Value::String("top".to_string()));
+        stair.properties = Some(intern_props(Value::Compound(new_map)));
     }
     stair
+}
+
+/// One shared allocation per distinct block state.
+///
+/// A placed block keeps its state compound for as long as its section is resident, and
+/// the same few hundred states (a flipped stair, a slab half, a log axis) were built
+/// afresh for every block that used them: 345k compounds on a 13 km² city, around a
+/// hundred megabytes at the memory peak. Compounds of plain strings are shared through
+/// here; anything else is wrapped as it is.
+///
+/// The table only holds weak references, so a state lives exactly as long as some block
+/// holds it, and a finished world does not keep its states behind in a long GUI session.
+pub fn intern_props(value: Value) -> Arc<Value> {
+    const SHARDS: usize = 16;
+    static STATES: Lazy<[Mutex<StateShard>; SHARDS]> =
+        Lazy::new(|| std::array::from_fn(|_| Mutex::default()));
+
+    let Value::Compound(map) = &value else {
+        return Arc::new(value);
+    };
+    if !map.values().all(|v| matches!(v, Value::String(_))) {
+        return Arc::new(value);
+    }
+    let mut state: Vec<(&str, &str)> = map
+        .iter()
+        .filter_map(|(k, v)| match v {
+            Value::String(s) => Some((k.as_str(), s.as_str())),
+            _ => None,
+        })
+        .collect();
+    state.sort_unstable();
+    let key: String = state.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]).collect();
+    let shard = key
+        .bytes()
+        .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
+    let mut shard = STATES[shard % SHARDS]
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(live) = shard.states.get(&key).and_then(Weak::upgrade) {
+        return live;
+    }
+    shard.sweep_if_due();
+    let state = Arc::new(value);
+    shard.states.insert(key, Arc::downgrade(&state));
+    state
+}
+
+/// One slice of the `intern_props` table.
+#[derive(Default)]
+struct StateShard {
+    states: fnv::FnvHashMap<String, Weak<Value>>,
+    /// Size at which entries whose state is gone are next dropped. Doubles with the live
+    /// count, so the sweep costs O(1) per insert over time.
+    sweep_at: usize,
+}
+
+impl StateShard {
+    fn sweep_if_due(&mut self) {
+        if self.states.len() >= self.sweep_at {
+            self.states.retain(|_, state| state.strong_count() > 0);
+            self.sweep_at = (self.states.len() * 2).max(64);
+        }
+    }
 }
 
 // Lazy static blocks
@@ -1868,6 +1929,44 @@ mod material_tests {
 
     fn rng() -> ChaCha8Rng {
         ChaCha8Rng::seed_from_u64(1)
+    }
+
+    // Equal states share one compound, and the table does not keep it alive on its own.
+    #[test]
+    fn interned_states_are_shared_and_then_released() {
+        // A key no other test uses, so nothing else holds this state meanwhile.
+        let state = || fastnbt::nbt!({ "facing": "north", "interner_test": "released" });
+        let a = intern_props(state());
+        let b = intern_props(state());
+        assert!(Arc::ptr_eq(&a, &b));
+        let gone = Arc::downgrade(&a);
+        drop((a, b));
+        assert!(gone.upgrade().is_none(), "the table must not own the state");
+        // Asking again builds it afresh rather than handing back a dead entry.
+        let again = intern_props(state());
+        assert_eq!(again.as_ref(), &state());
+    }
+
+    // Every flip of one stair state shares a compound, and the flip still reads half=top.
+    #[test]
+    fn top_stairs_share_one_compound_per_state() {
+        let flip = |facing, shape| {
+            top_stair(create_stair_with_properties(OAK_STAIRS, facing, shape))
+                .properties
+                .unwrap()
+        };
+        let a = flip(StairFacing::North, StairShape::Straight);
+        let b = flip(StairFacing::North, StairShape::Straight);
+        assert!(Arc::ptr_eq(&a, &b));
+        let Value::Compound(map) = a.as_ref() else {
+            panic!("not a compound");
+        };
+        assert_eq!(map.get("half"), Some(&Value::String("top".into())));
+        assert_eq!(map.get("facing"), Some(&Value::String("north".into())));
+
+        let c = flip(StairFacing::North, StairShape::OuterLeft);
+        let d = flip(StairFacing::South, StairShape::Straight);
+        assert!(!Arc::ptr_eq(&a, &c) && !Arc::ptr_eq(&a, &d));
     }
 
     #[test]

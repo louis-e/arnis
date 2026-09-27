@@ -442,7 +442,7 @@ fn rot_props(props: &[(String, String)], k: u8) -> Option<Arc<Value>> {
         };
         m.insert(nk, Value::String(nv));
     }
-    Some(Arc::new(Value::Compound(m)))
+    Some(crate::block_definitions::intern_props(Value::Compound(m)))
 }
 
 /// Stamp cave formations across the tile. Runs AFTER all carving + fluids (so clearance tests see
