@@ -149,23 +149,16 @@ a:hover {
   padding: 0;
   overflow: hidden;
   background: #575757;
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
-/* The right column is one panel in the settings page's greys: the start
-   button, the world format, the selected area, and the progress at the
-   bottom. Yellow is kept for the start button and the chosen format. */
 .controls-box {
   width: 32%;
-  box-sizing: border-box;
-  padding: 14px;
-  border: 1px solid var(--ui-card-border);
-  border-radius: 10px;
-  background: var(--ui-card);
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   box-shadow: none;
-  color: var(--ui-text);
-  text-align: left;
 }
 
 .controls-content {
@@ -175,53 +168,23 @@ a:hover {
   justify-content: space-between;
 }
 
+.controls-box .progress-section {
+  margin-top: 0;
+}
+
 .controls-top {
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
-/* The selected area. Empty, it is the prompt; with a selection, the size on
-   the ground and in blocks, then what that size means for the generation. */
-.area-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.area-size {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.area-size[hidden] {
-  display: none;
-}
-
-.area-size-ground {
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.3;
-  font-variant-numeric: tabular-nums;
-}
-
-.area-size-blocks {
-  font-size: 12.5px;
-  color: var(--ui-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The prompt is muted; main.js colours the size verdicts inline (green,
-   yellow, red), which wins over this. */
 .bbox-selection-text {
+  font-size: 0.9em;
+  color: #ffffff;
   display: block;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--ui-muted);
+  font-weight: bold;
+  min-height: 2.5em;
+  line-height: 1.25em;
+  margin-top: 8px;
 }
 
 .secret-parrot {
@@ -231,13 +194,13 @@ a:hover {
 }
 
 .progress-info-text {
-  display: block;
-  min-height: 1.35em;
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: 0.9em;
   color: #ececec;
+  display: block;
+  font-weight: bold;
+  min-height: 1.5em;
+  line-height: 1.25em;
+  margin-bottom: 5px;
 }
 
 /* Time-remaining centered on the bar. White to match the percentage label; a
@@ -264,9 +227,12 @@ a:hover {
 }
 
 /* Bottom strip of the start button. Deliberately paints no background of its
-   own: .start-button-wrap owns the button's fill, and this row is transparent
-   on top of it, so the row and #start-button read as one button. The
-   horizontal padding mirrors .start-button's. */
+   own: .start-button-wrap owns the button's fill for both colour schemes, and
+   this row is transparent on top of it, so the row and #start-button read as
+   one button. The horizontal padding mirrors .start-button's, and the 3px/11px
+   vertical split reproduces the label spacing from back when the row was still
+   nested inside the button (3px below the button text, 11px to its bottom
+   edge). */
 .world-name-row {
   display: flex;
   align-items: center;
@@ -277,13 +243,13 @@ a:hover {
      (content-box is the default here) and push the row out past the settings
      button. */
   min-width: 0;
-  padding: 2px 16px 10px;
+  padding: 3px 20px 11px;
   cursor: pointer;
 }
 
 .world-name-label {
-  font-size: 12px;
-  color: rgba(28, 28, 28, 0.72);
+  font-size: 0.8em;
+  color: #fecc44;
   line-height: 1;
   min-height: 1em;
   overflow: hidden;
@@ -301,12 +267,12 @@ a:hover {
   flex: 1 1 auto;
   min-width: 0;
   max-width: 200px;
-  font-size: 12px;
+  font-size: 0.8em;
   font-family: inherit;
   line-height: 1.3;
-  color: #1c1c1c;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(28, 28, 28, 0.45);
+  color: #fecc44;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #fecc44;
   border-radius: 3px;
   padding: 1px 5px;
   margin: 0;
@@ -319,11 +285,11 @@ a:hover {
 
 /* At the character cap the field's own maxlength silently refuses anything
    further, which on its own just feels like the keyboard stopped working.
-   Turning the editor red is the signal that the name is being held back
-   rather than dropped. Dark red, to read on the yellow button. */
+   Flipping the editor's gold accent to the red used for errors elsewhere is
+   the signal that the name is being held back rather than dropped. */
 .world-name-input[data-at-limit] {
-  color: #a3171a;
-  border-color: #a3171a;
+  color: #fa7878;
+  border-color: #fa7878;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -332,8 +298,10 @@ a:hover {
   }
 }
 
-/* Pencil icon toggled on via Settings > Custom World Name, drawn in the
-   button's own dark text colour. A real <button> (valid here since it's
+/* Pencil icon toggled on via Settings > Custom World Name. Mirrors
+   .setting-revert's colors (the settings modal's per-row "Reset to
+   default" icon button) so it reads as the same family of small,
+   golden-accented icon actions. A real <button> (valid here since it's
    nested in .world-name-row, a <div>, not in #start-button), so the
    generic `button` rule's chrome must be reset first. The selector is
    descendant-qualified so `width` outranks `.controls-box button`'s
@@ -359,19 +327,19 @@ a:hover {
 
 .world-name-edit-button:hover,
 .world-name-edit-button:focus-visible {
-  background: rgba(28, 28, 28, 0.14);
+  background: rgba(254, 204, 68, 0.3);
   border-color: transparent;
 }
 
 .world-name-edit-button:focus-visible {
-  outline: 1px solid #1c1c1c;
+  outline: 1px solid #fecc44;
   outline-offset: 1px;
 }
 
 .world-name-edit-button svg {
   width: 12px;
   height: 12px;
-  fill: rgba(28, 28, 28, 0.6);
+  fill: rgba(254, 204, 68, 0.75);
   display: block;
   transition: fill 0.15s ease;
   pointer-events: none;
@@ -379,7 +347,7 @@ a:hover {
 
 .world-name-edit-button:hover svg,
 .world-name-edit-button:focus-visible svg {
-  fill: #1c1c1c;
+  fill: #fecc44;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -393,7 +361,7 @@ a:hover {
 
 .map-container {
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   flex-grow: 1;
   width: 100%;
   height: 100%;
@@ -433,9 +401,7 @@ button:hover {
 }
 
 .progress-section {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: auto;
 }
 
 .progress-row {
@@ -446,21 +412,18 @@ button:hover {
 
 .progress-bar-container {
   flex: 1;
-  height: 18px;
-  box-sizing: border-box;
-  background-color: var(--ui-field);
-  border: 1px solid var(--ui-tile-border);
-  border-radius: 9px;
+  height: 20px;
+  background-color: #e0e0e0;
+  border-radius: 10px;
   overflow: hidden;
   position: relative;
 }
 
 #progress-detail {
-  min-width: 38px;
+  min-width: 40px;
   text-align: right;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ui-muted);
+  font-size: 0.9em;
+  color: #fff;
 }
 
 .progress-bar {
@@ -544,56 +507,60 @@ button:hover {
   width: 100%;
 }
 
+/* Connected Button Block */
 .button-block {
   display: flex;
   flex-direction: column;
   width: 100%;
-}
-
-/* World format, the segmented control of the settings page. The chosen one
-   is marked in yellow on its text and edge rather than filled, so it does not
-   compete with the start button right above it. */
-.format-toggle {
-  display: flex;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid var(--ui-field-border);
+  gap: 0;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
   border-radius: 8px;
-  background: var(--ui-field);
 }
 
-.controls-box .format-toggle-btn {
+
+.format-toggle-btn {
   flex: 1;
-  width: auto;
-  margin: 0;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ui-text);
-  font-size: 13.5px;
+  padding: 12px 8px;
+  font-size: 0.9em;
   font-weight: 500;
-  box-shadow: none;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: all 0.25s ease;
+  margin-top: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background-clip: padding-box;
 }
 
-.controls-box .format-toggle-btn:hover,
-.controls-box .format-toggle-btn:active {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: transparent;
+.format-toggle-btn:first-child {
+  border-radius: 0 0 0 8px;
 }
 
-.controls-box .format-toggle-btn.format-active {
-  border-color: rgba(254, 204, 68, 0.55);
-  background: rgba(254, 204, 68, 0.1);
-  color: var(--ui-accent);
-  font-weight: 700;
+.format-toggle-btn.format-toggle-btn--rightmost {
+  border-radius: 0 0 8px 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
 }
 
-.controls-box .format-toggle-btn:focus-visible {
-  outline: 2px solid var(--ui-accent);
-  outline-offset: 1px;
+.format-toggle-btn:not(.format-active) {
+  background-color: #3A3A3A;
+  color: #ffffff;
+}
+
+.format-toggle-btn:not(.format-active):hover {
+  background-color: #4A4A4A;
+  color: #ffffff;
+}
+
+.format-toggle-btn.format-active {
+  background-color: var(--primary-accent);
+  color: #0f0f0f;
+  font-weight: 600;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.format-toggle-btn.format-active:hover {
+  background-color: var(--primary-accent-dark);
 }
 
 /* Backdrop behind every dialog; the dialogs themselves are in dialogs.css. */
@@ -703,43 +670,34 @@ input[type="range"] {
   display: flex;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 0;
   width: 100%;
 }
 
 /* #start-button and .world-name-row are two elements (the world-name editor
    can't be nested inside a <button>) that have to look like one. The wrapper
-   paints the fill, corner and hover for both of them, so there is no seam
-   between them. Yellow: it is the one thing on this screen that makes a world. */
+   paints the fill, corner and hover for both of them; giving each its own
+   background instead would mean re-deriving the generic `button` colours per
+   colour scheme in two places and risking a visible seam between them. */
 .start-button-wrap {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   flex: 1;
-  min-width: 0;
-  background-color: var(--primary-accent);
-  border-radius: 8px;
+  background-color: #ffffff;
+  border-radius: 8px 0 0 0;
   cursor: pointer;
-  transition: background-color 0.2s ease, opacity 0.2s ease;
+  transition: background-color 0.3s;
+}
+
+@media (prefers-color-scheme: dark) {
+  .start-button-wrap {
+    background-color: #0f0f0f98;
+  }
 }
 
 .start-button-wrap:hover {
-  background-color: var(--primary-accent-dark);
-}
-
-/* While a generation runs a click does nothing, so the button says so. */
-.start-button-wrap.is-busy {
-  opacity: 0.55;
-  cursor: progress;
-}
-
-.start-button-wrap.is-busy:hover {
-  background-color: var(--primary-accent);
-}
-
-.start-button-wrap.is-busy .start-button,
-.start-button-wrap.is-busy .world-name-row {
-  cursor: progress;
+  background-color: #4caf50;
 }
 
 /* The :active variant is not cosmetic: dark mode's `button:active` rule is
@@ -751,54 +709,35 @@ input[type="range"] {
 }
 
 .start-button {
-  padding: 12px 16px 0;
+  padding: 14px 20px 0;
   border: none;
-  border-radius: 8px 8px 0 0;
-  color: #1c1c1c;
+  border-radius: 0;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 500;
   cursor: pointer;
   margin-top: 0;
   box-shadow: none;
 }
 
-.start-button:focus-visible {
-  outline: 2px solid #1c1c1c;
-  outline-offset: -4px;
-}
-
 .settings-button {
-  width: 52px !important;
-  min-width: 52px;
+  width: 44px !important;
+  min-width: 44px;
   height: auto;
   align-self: stretch;
-  border: 1px solid var(--ui-field-border);
-  border-radius: 8px;
-  background-color: var(--ui-field);
+  border-radius: 0 8px 0 0;
   display: flex;
   justify-content: center;
   align-items: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.3s, border-color 0.3s;
   margin-top: 0;
-  padding: 0;
   box-shadow: none;
   flex-shrink: 0;
-}
-
-.settings-button:hover,
-.settings-button:active {
-  border-color: #707070;
-  background-color: #333333;
-}
-
-.settings-button:focus-visible {
-  outline: 2px solid var(--ui-accent);
-  outline-offset: 1px;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .settings-button svg {
-  stroke: var(--ui-text);
+  stroke: white;
   width: 22px;
   height: 22px;
   min-width: 22px;

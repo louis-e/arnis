@@ -89,12 +89,11 @@
         <iframe src="maps.html" width="100%" height="100%" class="map-container" title="Map Picker"></iframe>
       </section>
 
-      <!-- Right Box: start button, world format, the selected area, and the
-           progress of a running generation -->
+      <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
       <section class="section controls-box">
         <div class="controls-content">
           <div class="controls-top">
-            <!-- Start button, with the settings button beside it -->
+            <!-- Combined Button Block -->
             <div class="button-block">
               <div class="button-block-row">
                 <div class="start-button-wrap">
@@ -123,25 +122,19 @@
                     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>
               </div>
-            </div>
-
-            <!-- World format -->
-            <div class="format-toggle" role="group" aria-label="World format">
-              <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">Java</button>
-              <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">Bedrock</button>
-              <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">Luanti</button>
-            </div>
-
-            <!-- The selected area: how big it is on the ground and in blocks once
-                 there is one (main.js, refreshAreaSize), and under that the
-                 prompt or what the size means for the generation. -->
-            <div class="area-info">
-              <div id="area-size" class="area-size" hidden>
-                <span id="area-size-ground" class="area-size-ground"></span>
-                <span id="area-size-blocks" class="area-size-blocks"></span>
+              <div class="button-block-row">
+                <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
+                  Java
+                </button>
+                <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
+                  Bedrock
+                </button>
+                <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">
+                  Luanti
+                </button>
               </div>
-              <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
             </div>
+            <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
 
             <!-- Mini 3D terrain preview (rendered via the map's terrain button, click to expand) -->
             <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview">

@@ -450,6 +450,17 @@ function validateStringAsBounds(bounds) {
             parseFloat(splitBounds[1]) < parseFloat(splitBounds[3])))
 }
 
+// Interface text for the map. This page is an iframe of index.html (same
+// origin) and the locale is loaded by the top document, so the strings are
+// read through the parent; the English covers the moment before they arrive.
+function mapText(key, fallback) {
+    var loc = window.localization
+        || (window.parent && window.parent !== window && window.parent.localization)
+        || null;
+    return (loc && typeof loc[key] === 'string' && loc[key]) || fallback;
+}
+window.mapText = mapText;
+
 $(document).ready(function () {
     /* 
     **
@@ -875,23 +886,16 @@ $(document).ready(function () {
     var selectedEarthTheme = savedTheme;
 
     var BODY_CYCLE = ['earth', 'moon', 'mars'];
-    var BODY_LABELS = {
-        earth: 'Earth',
-        moon: 'Moon (NASA terrain only, 1 block = 200 m)',
-        mars: 'Mars (NASA terrain only, 1 block = 500 m)'
-    };
     var _bodyToggleBtn = null;
 
-    // Icon and tooltip carry the whole state: which world is selected and which
-    // one the next click brings.
+    // Icon and tooltip carry the whole state: which world is selected, and
+    // (in the tooltip) its block size off Earth.
     function syncBodyToggleButton() {
         if (!_bodyToggleBtn) return;
-        var next = BODY_CYCLE[(BODY_CYCLE.indexOf(currentBody) + 1) % BODY_CYCLE.length];
         BODY_CYCLE.forEach(function (b) {
             _bodyToggleBtn.classList.toggle('body-' + b, b === currentBody);
         });
-        _bodyToggleBtn.title = 'World: ' + BODY_LABELS[currentBody] +
-            '\nClick to switch to ' + next.charAt(0).toUpperCase() + next.slice(1);
+        refreshToolLabel(_bodyToggleBtn);
     }
 
     // Driven by the world toggle in the map toolbar. Earth is restored on every
@@ -993,7 +997,6 @@ $(document).ready(function () {
             var toggleBtn = document.createElement('a');
             toggleBtn.className = 'leaflet-draw-edit-preview disabled';
             toggleBtn.href = '#';
-            toggleBtn.title = 'Show World Preview (not available yet)';
             toggleBtn.id = 'world-preview-btn';
 
             toggleBtn.addEventListener('click', function(e) {
@@ -1005,6 +1008,7 @@ $(document).ready(function () {
             });
 
             editToolbar.appendChild(toggleBtn);
+            refreshToolLabel(toggleBtn);
 
             // Add the slider control to the map
             sliderControl = new SliderControl();
@@ -1044,7 +1048,7 @@ $(document).ready(function () {
 
             if (btn) {
                 btn.classList.add('active');
-                btn.title = 'Hide World Preview';
+                refreshToolLabel(btn);
             }
             if (sliderContainer) {
                 sliderContainer.style.display = 'block';
@@ -1057,7 +1061,7 @@ $(document).ready(function () {
             }
             if (btn) {
                 btn.classList.remove('active');
-                btn.title = 'Show World Preview';
+                refreshToolLabel(btn);
             }
             if (sliderContainer) {
                 sliderContainer.style.display = 'none';
@@ -1078,7 +1082,7 @@ $(document).ready(function () {
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('disabled');
-            btn.title = 'Show World Preview';
+            refreshToolLabel(btn);
         }
     }
 
@@ -1098,7 +1102,7 @@ $(document).ready(function () {
         if (btn) {
             btn.classList.add('disabled');
             btn.classList.remove('active');
-            btn.title = 'Show World Preview (not available yet)';
+            refreshToolLabel(btn);
         }
         if (sliderContainer) {
             sliderContainer.style.display = 'none';
@@ -1504,6 +1508,174 @@ $(document).ready(function () {
     });
     map.addControl(drawControl);
 
+    // ========== Toolbar labels and tooltips ==========
+    // Every button says what it is and what it does, and the ones that depend
+    // on the selection say why they cannot be used yet. The text is shown in
+    // the map's own tooltip beside the button: the browser's title bubble is
+    // slow, plain and was English only. The state lives in this file, so each
+    // button is described from it rather than from a string set elsewhere.
+    var BODY_METRES_PER_BLOCK = { moon: 200, mars: 500 };
+    var toolTip = document.createElement('div');
+    toolTip.className = 'map-tool-tip';
+    toolTip.setAttribute('role', 'tooltip');
+    map.getContainer().appendChild(toolTip);
+    var toolTipFor = null;
+
+    function describeTool(btn) {
+        var c = btn.classList;
+        if (c.contains('leaflet-draw-draw-rectangle')) {
+            return {
+                name: mapText('map_tool_area', 'Select area'),
+                desc: mapText('map_tool_area_desc', 'Drag over the map to choose what gets generated.')
+            };
+        }
+        if (c.contains('leaflet-draw-draw-polyline')) {
+            return {
+                name: mapText('map_tool_rotation', 'Rotation angle'),
+                desc: mapText('map_tool_rotation_desc', 'Draw a line along a street to line the world up with it.')
+            };
+        }
+        if (c.contains('leaflet-draw-draw-marker')) {
+            return {
+                name: mapText('map_tool_spawn', 'Spawn point'),
+                desc: mapText('map_tool_spawn_desc', 'Click where players start in the world.')
+            };
+        }
+        if (c.contains('leaflet-draw-edit-remove')) {
+            return {
+                name: mapText('map_tool_clear', 'Clear selection'),
+                desc: mapText('map_tool_clear_desc', 'Removes the selected area and the spawn point.'),
+                note: drawnItems.getLayers().length ? '' : mapText('map_tool_clear_empty', 'Nothing is selected yet.')
+            };
+        }
+        if (btn.id === 'world-preview-btn') {
+            return {
+                name: mapText('map_tool_world_preview', 'World preview'),
+                desc: mapText('map_tool_world_preview_desc', 'Lays the generated world over the map.'),
+                note: worldPreviewAvailable ? '' : mapText('map_tool_world_preview_unavailable', 'Available after generating a world.')
+            };
+        }
+        if (btn.id === 'terrain-preview-btn') {
+            var terrainNote = '';
+            if (c.contains('disabled')) {
+                terrainNote = currentBody !== 'earth'
+                    ? mapText('map_tool_terrain_earth_only', 'Only available on Earth.')
+                    : mapText('map_tool_terrain_select', 'Select an area of up to 500 km² first.');
+            }
+            return {
+                name: mapText('map_tool_terrain', '3D terrain preview'),
+                desc: mapText('map_tool_terrain_desc', "Shows the selected area's terrain in 3D."),
+                note: terrainNote
+            };
+        }
+        if (btn.id === 'body-toggle-btn') {
+            var bodyName = mapText('body_' + currentBody,
+                currentBody.charAt(0).toUpperCase() + currentBody.slice(1));
+            var metres = BODY_METRES_PER_BLOCK[currentBody];
+            return {
+                name: mapText('celestial_body', 'World') + ': ' + bodyName,
+                desc: mapText('map_tool_body_desc', 'Click to switch between Earth, the Moon and Mars.'),
+                note: metres
+                    ? mapText('map_tool_body_scale', 'NASA terrain only, 1 block = {m} m.').replace('{m}', metres)
+                    : ''
+            };
+        }
+        return null;
+    }
+
+    function showToolTip(btn) {
+        var d = describeTool(btn);
+        if (!d) {
+            hideToolTip();
+            return;
+        }
+        toolTip.textContent = '';
+        var name = document.createElement('strong');
+        name.textContent = d.name;
+        var desc = document.createElement('span');
+        desc.textContent = d.desc;
+        toolTip.appendChild(name);
+        toolTip.appendChild(desc);
+        if (d.note) {
+            var note = document.createElement('span');
+            note.className = 'map-tool-tip-note';
+            note.textContent = d.note;
+            toolTip.appendChild(note);
+        }
+        var mapRect = map.getContainer().getBoundingClientRect();
+        var r = btn.getBoundingClientRect();
+        // Centred on the button, but kept inside the map: the top button sits
+        // close to its edge, and the map clips what hangs over.
+        var half = toolTip.offsetHeight / 2;
+        var centre = r.top - mapRect.top + r.height / 2;
+        centre = Math.max(half + 6, Math.min(centre, mapRect.height - half - 6));
+        toolTip.style.left = (r.right - mapRect.left + 10) + 'px';
+        toolTip.style.top = centre + 'px';
+        toolTip.classList.add('is-visible');
+        toolTipFor = btn;
+    }
+
+    function hideToolTip() {
+        toolTip.classList.remove('is-visible');
+        toolTipFor = null;
+    }
+
+    // The accessible name follows the same description, and an open tooltip
+    // follows a state change under the pointer (e.g. the selection cleared).
+    function refreshToolLabel(btn) {
+        if (!btn) return;
+        btn.removeAttribute('title');
+        var d = describeTool(btn);
+        if (d) btn.setAttribute('aria-label', d.note ? d.name + '. ' + d.note : d.name);
+        if (btn === toolTipFor) showToolTip(btn);
+    }
+    window.refreshMapToolLabel = refreshToolLabel;
+
+    // While there is no area yet, the tool that draws one is outlined.
+    function refreshAreaToolAttention() {
+        var areaBtn = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-rectangle');
+        if (!areaBtn) return;
+        var hasArea = false;
+        drawnItems.eachLayer(function (l) {
+            if (l instanceof L.Rectangle) hasArea = true;
+        });
+        areaBtn.classList.toggle('map-tool-attention', !hasArea);
+    }
+    drawnItems.on('layeradd layerremove', refreshAreaToolAttention);
+
+    // Every label again, for a language change. Also the search placeholder,
+    // the other piece of text on the map that is always visible.
+    function refreshMapToolLabels() {
+        document.querySelectorAll('.leaflet-draw-toolbar a').forEach(refreshToolLabel);
+        var search = document.getElementById('city-search');
+        if (search) search.placeholder = mapText('map_search_placeholder', 'Search for a city...');
+    }
+    window.refreshMapToolLabels = refreshMapToolLabels;
+
+    (function bindToolTips() {
+        var drawRoot = document.querySelector('.leaflet-draw');
+        if (!drawRoot) return;
+        var buttonOf = function (target) {
+            return target && target.closest ? target.closest('.leaflet-draw-toolbar a') : null;
+        };
+        drawRoot.addEventListener('mouseover', function (e) {
+            var btn = buttonOf(e.target);
+            if (btn && btn !== toolTipFor) showToolTip(btn);
+        });
+        drawRoot.addEventListener('mouseout', function (e) {
+            var btn = buttonOf(e.target);
+            if (btn && !(e.relatedTarget && btn.contains(e.relatedTarget))) hideToolTip();
+        });
+        drawRoot.addEventListener('focusin', function (e) {
+            var btn = buttonOf(e.target);
+            if (btn) showToolTip(btn);
+        });
+        drawRoot.addEventListener('focusout', hideToolTip);
+        // Out of the way once a tool is picked, so it does not cover the map
+        // about to be drawn on.
+        drawRoot.addEventListener('mousedown', hideToolTip);
+    })();
+
     // ========== Custom Angle Line Tool ==========
     // A simple 2-click tool: click start point, click end point, done.
     // Uses a transparent overlay to capture clicks even on top of drawn layers.
@@ -1615,7 +1787,6 @@ $(document).ready(function () {
 
         var btn = L.DomUtil.create('a', 'leaflet-draw-draw-polyline');
         btn.href = '#';
-        btn.title = 'Set rotation angle';
 
         L.DomEvent
             .on(btn, 'click', L.DomEvent.stopPropagation)
@@ -1676,7 +1847,7 @@ $(document).ready(function () {
         function syncState() {
             var has = drawnItems.getLayers().length > 0;
             btn.classList.toggle('leaflet-disabled', !has);
-            btn.title = has ? 'Delete selection' : 'No selection to delete';
+            refreshToolLabel(btn);
         }
         drawnItems.on('layeradd layerremove', syncState);
         syncState();
@@ -1751,6 +1922,11 @@ $(document).ready(function () {
         _bodyToggleBtn = btn;
         syncBodyToggleButton();
     })();
+
+    // Leaflet.draw's own buttons came with English titles; every button is
+    // labelled from its description now.
+    refreshMapToolLabels();
+    refreshAreaToolAttention();
     /*
     **
     **  create bounds layer
@@ -2125,11 +2301,8 @@ function updateTerrainPreviewButton() {
         ok = area > 0 && area <= TERRAIN_PREVIEW_MAX_AREA_M2;
     }
     btn.classList.toggle('disabled', !ok);
-    btn.title = ok
-        ? 'Render 3D terrain preview'
-        : (window._currentBody !== 'earth'
-            ? 'The 3D terrain preview is only available for Earth'
-            : 'Select an area (up to 500 km²) to enable the 3D terrain preview');
+    // The tooltip explains the disabled state; see describeTool.
+    if (typeof window.refreshMapToolLabel === 'function') window.refreshMapToolLabel(btn);
 }
 
 // Expose marker coordinates to the parent window

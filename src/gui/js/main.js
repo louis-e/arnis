@@ -24,7 +24,7 @@ const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 
 // Track current bbox selection info localization key for language changes
 let currentBboxSelectionKey = "select_area_prompt";
-let currentBboxSelectionColor = "";
+let currentBboxSelectionColor = "#ffffff";
 
 // Helper function to set bbox selection info text and track it for language changes
 async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color) {
@@ -147,9 +147,6 @@ async function applyLocalization(localization) {
   // settings-store.js creates these buttons and owns their text.
   localizeSettingsStore(localization);
 
-  // The area size line carries a localized unit.
-  refreshAreaSize();
-
   // Re-apply current bbox selection info text with new language
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
   if (bboxSelectionInfo && currentBboxSelectionKey) {
@@ -164,6 +161,8 @@ async function applyLocalization(localization) {
     try {
       const w = frame.contentWindow;
       if (w && typeof w.renderBboxHint === 'function') w.renderBboxHint();
+      // The toolbar's labels and the search placeholder, same reason.
+      if (w && typeof w.refreshMapToolLabels === 'function') w.refreshMapToolLabels();
     } catch (_) {
       // A frame that is not ours or not loaded yet; the hint renders itself
       // once it is.
@@ -711,8 +710,6 @@ function setCelestialBody(body) {
 
   // Warnings are per body, so the current selection may read differently now.
   refreshBboxSelectionInfo();
-  // So is its size in blocks.
-  refreshAreaSize();
 }
 
 // Function to register the event listener for bbox updates from iframe
@@ -1180,8 +1177,6 @@ function initSettings() {
     if (scaleObjectsNote) {
       scaleObjectsNote.style.display = value < OBJECT_SKIP_SCALE ? "" : "none";
     }
-    // The world's size in blocks follows the scale.
-    refreshAreaSize();
   }
 
   slider.addEventListener("input", refreshScaleDisplay);
@@ -2270,7 +2265,7 @@ function handleBboxInput() {
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
-        setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "");
+        setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
       } else {
         // Restore map selection info display but don't update input field
         const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
@@ -2351,7 +2346,6 @@ function handleBboxInput() {
     // The Precompute button next to this field turns on the selection, and the
     // field is inside the same panel, so it has to follow every keystroke.
     refreshPrecomputeButton();
-    refreshAreaSize();
   });
 }
 
@@ -2432,68 +2426,6 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   }
 }
 
-// Metres per block off Earth, mirroring Body::meters_per_block in
-// src/celestial.rs. On Earth a block is a metre at world scale 1.
-const METERS_PER_BLOCK = { moon: 200, mars: 500 };
-
-// The selected area's width and height on the ground and in blocks, under the
-// start button. Hidden while there is no selection. Rotation is left out, so
-// the block count is marked as approximate.
-function refreshAreaSize() {
-  const box = document.getElementById("area-size");
-  const groundEl = document.getElementById("area-size-ground");
-  const blocksEl = document.getElementById("area-size-blocks");
-  if (!box || !groundEl || !blocksEl) return;
-
-  const coords = String(selectedBBox || "").trim().split(/[,\s]+/).map(Number);
-  if (coords.length !== 4 || coords.some((n) => !Number.isFinite(n)) ||
-      coords.every((n) => n === 0)) {
-    box.hidden = true;
-    return;
-  }
-
-  const [lat1, lng1, lat2, lng2] = coords;
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
-  const heightM = R * Math.abs(toRad(lat2 - lat1));
-  const widthM = R * Math.abs(toRad(lng2 - lng1)) * Math.cos(toRad((lat1 + lat2) / 2));
-
-  let blocksPerMetre;
-  if (selectedCelestialBody === "earth") {
-    const slider = document.getElementById("scale-value-slider");
-    blocksPerMetre = (slider && parseFloat(slider.value)) || 1;
-  } else {
-    blocksPerMetre = 1 / (METERS_PER_BLOCK[selectedCelestialBody] || 1);
-  }
-
-  const locale = interfaceLocale();
-  const number = (value, digits) => {
-    try {
-      return new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value);
-    } catch (_) {
-      return value.toFixed(digits);
-    }
-  };
-
-  // Metres below a kilometre, then kilometres with one decimal while that
-  // decimal still matters.
-  const longest = Math.max(widthM, heightM);
-  if (longest < 1000) {
-    groundEl.textContent = `${number(widthM, 0)} × ${number(heightM, 0)} m`;
-  } else {
-    const digits = longest < 100000 ? 1 : 0;
-    groundEl.textContent = `${number(widthM / 1000, digits)} × ${number(heightM / 1000, digits)} km`;
-  }
-
-  const template =
-    (window.localization && window.localization.area_size_blocks) || "≈ {w} × {h} blocks";
-  blocksEl.textContent = template
-    .replace("{w}", number(Math.round(widthM * blocksPerMetre), 0))
-    .replace("{h}", number(Math.round(heightM * blocksPerMetre), 0));
-
-  box.hidden = false;
-}
-
 // Re-runs the size status, e.g. after a body switch changes which tiers apply.
 function refreshBboxSelectionInfo() {
   if (!mapSelectedBBox) return;
@@ -2536,7 +2468,7 @@ function displayBboxInfoText(bboxText) {
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lat1 === 0 && lng1 === 0 && lat2 === 0 && lng2 === 0) {
-    setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "");
+    setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
     if (!customBBoxValid) {
@@ -2544,7 +2476,6 @@ function displayBboxInfoText(bboxText) {
     }
     window.arnisPreview3D?.onBboxCleared();
     refreshPrecomputeButton();
-    refreshAreaSize();
     return;
   }
 
@@ -2574,7 +2505,6 @@ function displayBboxInfoText(bboxText) {
   // Hide any rendered mini 3D preview if the selection actually changed
   window.arnisPreview3D?.onBboxChanged(selectedBBox);
   refreshPrecomputeButton();
-  refreshAreaSize();
 }
 
 let worldPath = "";
@@ -2859,10 +2789,6 @@ let generationButtonEnabled = true;
 // rename, is in flight - see canEditCustomWorldName()).
 function setGenerationButtonEnabled(enabled) {
   generationButtonEnabled = enabled;
-  const startWrap = document.querySelector(".start-button-wrap");
-  if (startWrap) startWrap.classList.toggle("is-busy", !enabled);
-  const startButton = document.getElementById("start-button");
-  if (startButton) startButton.setAttribute("aria-disabled", enabled ? "false" : "true");
   refreshWorldNameEditUI();
   // The two jobs exclude each other in the backend, so the other one greys out.
   refreshPrecomputeButton();
