@@ -24,7 +24,7 @@ const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 
 // Track current bbox selection info localization key for language changes
 let currentBboxSelectionKey = "select_area_prompt";
-let currentBboxSelectionColor = "#ffffff";
+let currentBboxSelectionColor = "";
 
 // Helper function to set bbox selection info text and track it for language changes
 async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color) {
@@ -50,6 +50,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initSettings();
   // Before the store restores values, so the cards follow the restored ones.
   initSettingsLayout();
+  initDialogs();
   initVoxyLightingCoupling();
   initCavesFillCoupling();
   refreshHeightLimitRow();
@@ -124,11 +125,6 @@ async function applyLocalization(localization) {
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     ".footer-link": "footer_text",
-    "h2[data-localize='license_and_credits']": "license_and_credits",
-    "h2[data-localize='update_modal_title']": "update_modal_title",
-    "div[data-localize='update_modal_download_note']": "update_modal_download_note",
-    "button[data-localize='update_view_on_github']": "update_view_on_github",
-    "button[data-localize='update_download']": "update_download",
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
@@ -140,15 +136,19 @@ async function applyLocalization(localization) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
 
-  // Every text on the settings page carries its key, and several appear more
-  // than once (a section name is in the sidebar and on the section itself), so
-  // the page is localized in one pass rather than selector by selector.
-  document.querySelectorAll("#settings-modal [data-localize]").forEach((element) => {
+  // Every text on the settings page and in the dialogs carries its key, and
+  // several appear more than once (a section name is in the sidebar and on the
+  // section itself), so they are localized in one pass rather than selector by
+  // selector.
+  document.querySelectorAll("#settings-modal [data-localize], .dialog [data-localize]").forEach((element) => {
     localizeElement(localization, { element }, element.dataset.localize);
   });
 
   // settings-store.js creates these buttons and owns their text.
   localizeSettingsStore(localization);
+
+  // The area size line carries a localized unit.
+  refreshAreaSize();
 
   // Re-apply current bbox selection info text with new language
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
@@ -274,7 +274,11 @@ async function checkForUpdates() {
 }
 
 function openUpdateModal(opts = {}) {
-  const showDownload = opts.showDownload !== false;
+  const info = latestReleaseInfo;
+  // Version info opened from Settings only reads, unless the release it shows
+  // is newer than this build: then the download is offered there as well.
+  const showDownload =
+    opts.showDownload !== false || !!(info && info.release && info.isNewer);
   const modal = document.getElementById("update-modal");
   if (!modal) return;
   const titleEl = document.getElementById("update-modal-title");
@@ -286,8 +290,12 @@ function openUpdateModal(opts = {}) {
   if (downloadBtn) downloadBtn.style.display = showDownload ? "" : "none";
   if (downloadNote) downloadNote.style.display = showDownload ? "" : "none";
 
-  const info = latestReleaseInfo;
+  const metaEl = document.getElementById("update-modal-meta");
+
   if (!info || !info.release) {
+    titleEl.textContent =
+      (window.localization && window.localization.update_modal_title) || "What's new in Arnis";
+    if (metaEl) metaEl.replaceChildren();
     const fallbackMsg =
       (window.localization && window.localization.update_fetch_failed) ||
       "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly.";
@@ -299,7 +307,9 @@ function openUpdateModal(opts = {}) {
   const rel = info.release;
 
   titleEl.textContent = (rel.name && rel.name.trim()) || rel.tag_name || "Latest release";
+  renderReleaseMeta(metaEl, info, rel);
   bodyEl.innerHTML = renderMarkdown(rel.body || "");
+  bodyEl.scrollTop = 0;
   bodyEl.querySelectorAll("a[href]").forEach((a) => {
     const href = a.getAttribute("href");
     if (!href) return;
@@ -312,7 +322,9 @@ function openUpdateModal(opts = {}) {
   if (downloadBtn && showDownload) {
     const asset = pickAssetForPlatform(rel.assets || [], currentPlatform);
     downloadBtn.disabled = false;
-    downloadBtn.textContent =
+    // Only the label: the button also holds its icon.
+    const label = downloadBtn.querySelector(".dialog-button-label") || downloadBtn;
+    label.textContent =
       (window.localization && window.localization.update_download) || "Download";
     downloadBtn.dataset.downloadUrl = asset ? asset.browser_download_url : rel.html_url;
   }
@@ -336,15 +348,104 @@ async function openVersionInfoModal() {
   openUpdateModal({ showDownload: false });
 }
 
-function closeUpdateModal() {
-  const modal = document.getElementById("update-modal");
-  if (modal) modal.style.display = "none";
+// The line under the release title: its date, then the version, or
+// "3.2.0 → 3.3.0" when it is newer than this build. A localized date and
+// numbers only, so nothing here needs a translation.
+function renderReleaseMeta(metaEl, info, rel) {
+  if (!metaEl) return;
+  metaEl.replaceChildren();
+  const parts = [];
+  const date = formatReleaseDate(rel.published_at);
+  if (date) parts.push(document.createTextNode(date));
+
+  const plain = (v) => String(v || "").replace(/^v/i, "");
+  const remote = plain(info.remoteVersion || rel.tag_name);
+  if (info.isNewer && info.localVersion && remote) {
+    const version = document.createElement("span");
+    const newer = document.createElement("span");
+    newer.className = "is-new";
+    newer.textContent = remote;
+    version.append(`${plain(info.localVersion)} → `, newer);
+    parts.push(version);
+  } else if (remote) {
+    parts.push(document.createTextNode(remote));
+  }
+
+  parts.forEach((part, i) => {
+    if (i > 0) metaEl.append(" · ");
+    metaEl.append(part);
+  });
 }
 
+// The interface language as a locale for dates and numbers, rather than the
+// system one.
+function interfaceLocale() {
+  const lang = localStorage.getItem("arnis-language") || navigator.language;
+  // Arnis files Ukrainian under "ua"; the language tag is "uk".
+  return lang === "ua" ? "uk" : lang;
+}
+
+function formatReleaseDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat(interfaceLocale(), { dateStyle: "long" }).format(date);
+  } catch (_) {
+    return date.toDateString();
+  }
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById("update-modal");
+  if (modal) hideModal(modal);
+}
+
+// Where focus returns to once a dialog closes.
+const modalReturnFocus = new WeakMap();
+
+// Shows a dialog's backdrop and moves focus onto the dialog, so the keyboard
+// acts on it rather than on whatever is behind.
 function showModal(modal) {
+  if (modal.style.display !== "flex") {
+    modalReturnFocus.set(modal, document.activeElement);
+  }
   modal.style.display = "flex";
   modal.style.justifyContent = "center";
   modal.style.alignItems = "center";
+  const dialog = modal.querySelector(".dialog");
+  if (dialog) dialog.focus({ preventScroll: true });
+}
+
+function hideModal(modal) {
+  modal.style.display = "none";
+  const back = modalReturnFocus.get(modal);
+  modalReturnFocus.delete(modal);
+  if (back && document.contains(back) && typeof back.focus === "function") {
+    back.focus({ preventScroll: true });
+  }
+}
+
+// A click on the backdrop closes the dialog, but only when the press started
+// there too: selecting text inside and letting go outside must not close it.
+function closeOnBackdrop(modal, close) {
+  let pressedOnBackdrop = false;
+  modal.addEventListener("pointerdown", (event) => {
+    pressedOnBackdrop = event.target === modal;
+  });
+  modal.addEventListener("click", (event) => {
+    if (pressedOnBackdrop && event.target === modal) close();
+    pressedOnBackdrop = false;
+  });
+}
+
+// License and version info are read-only, so a click beside them may close
+// them. The consent dialog is left alone: it wants an answer.
+function initDialogs() {
+  const license = document.getElementById("license-modal");
+  const update = document.getElementById("update-modal");
+  if (license) closeOnBackdrop(license, () => window.closeLicense());
+  if (update) closeOnBackdrop(update, closeUpdateModal);
 }
 
 function openUpdateInBrowser() {
@@ -610,6 +711,8 @@ function setCelestialBody(body) {
 
   // Warnings are per body, so the current selection may read differently now.
   refreshBboxSelectionInfo();
+  // So is its size in blocks.
+  refreshAreaSize();
 }
 
 // Function to register the event listener for bbox updates from iframe
@@ -1077,6 +1180,8 @@ function initSettings() {
     if (scaleObjectsNote) {
       scaleObjectsNote.style.display = value < OBJECT_SKIP_SCALE ? "" : "none";
     }
+    // The world's size in blocks follows the scale.
+    refreshAreaSize();
   }
 
   slider.addEventListener("input", refreshScaleDisplay);
@@ -1342,37 +1447,44 @@ function initSettings() {
     const licenseContent = document.getElementById("license-content");
 
     licenseContent.innerHTML = licenseText;
-    licenseModal.style.display = "flex";
-    licenseModal.style.justifyContent = "center";
-    licenseModal.style.alignItems = "center";
+    licenseContent.scrollTop = 0;
+    showModal(licenseModal);
 
-    const threeDmrBlock =
-      `<p><b>3D Model Repository (3DMR):</b></p>` +
-      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
-    licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
+    // The credits only known at runtime go into their own spot in the
+    // "Models, Textures and Fonts" list. Held by reference, so a slow answer
+    // from an earlier opening lands in that opening's detached copy rather
+    // than doubling up in this one.
+    const runtime = licenseContent.querySelector("#license-runtime-credits") || licenseContent;
+    const credit = (title, body) =>
+      `<div class="credit"><h4>${title}</h4>${body}</div>`;
+
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "3D Model Repository (3DMR)",
+      `<p>Landmark models from <a href="https://3dmr.eu" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`
+    ));
 
     // The premade facade set. All CC0, so attribution is a courtesy rather than
     // a condition, but the sources are named because someone should be able to
     // find them and because it says plainly that the pixels are free to ship.
-    const facadeTextureBlock =
-      `<p><b>Preset Building Facade Textures:</b></p>` +
-      `<p style="font-size: 0.9em;">The photographs hung on buildings by the Preset Facades setting, all released under ` +
-      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
-      `<ul style="padding-left: 20px; font-size: 0.9em;">` +
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "Preset Building Facade Textures",
+      `<p>The photographs hung on buildings by the Preset Facades setting, all released under ` +
+      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
+      `<ul>` +
       `<li>Urban building, apartment and shop front photographs by <b>Scouser</b>, from ` +
-      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" style="color: inherit;" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
+      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
       `<li>Tiling facade materials from <b>TextureCan</b>: ` +
-      `<a href="https://www.texturecan.com/details/315/" style="color: inherit;" target="_blank" rel="noopener noreferrer">315</a>, ` +
-      `<a href="https://www.texturecan.com/details/316/" style="color: inherit;" target="_blank" rel="noopener noreferrer">316</a>, ` +
-      `<a href="https://www.texturecan.com/details/357/" style="color: inherit;" target="_blank" rel="noopener noreferrer">357</a>, ` +
-      `<a href="https://www.texturecan.com/details/360/" style="color: inherit;" target="_blank" rel="noopener noreferrer">360</a>, ` +
-      `<a href="https://www.texturecan.com/details/563/" style="color: inherit;" target="_blank" rel="noopener noreferrer">563</a></li>` +
-      `</ul>`;
-    licenseContent.insertAdjacentHTML("beforeend", facadeTextureBlock);
+      `<a href="https://www.texturecan.com/details/315/" target="_blank" rel="noopener noreferrer">315</a>, ` +
+      `<a href="https://www.texturecan.com/details/316/" target="_blank" rel="noopener noreferrer">316</a>, ` +
+      `<a href="https://www.texturecan.com/details/357/" target="_blank" rel="noopener noreferrer">357</a>, ` +
+      `<a href="https://www.texturecan.com/details/360/" target="_blank" rel="noopener noreferrer">360</a>, ` +
+      `<a href="https://www.texturecan.com/details/563/" target="_blank" rel="noopener noreferrer">563</a></li>` +
+      `</ul>`
+    ));
 
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
     const link = (url, text) =>
-      `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+      `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
 
     // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
     // built from street photographs has to name the photographers. The source
@@ -1400,45 +1512,44 @@ function initSettings() {
         ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
         : "";
       mapillaryList =
-        `<p style="font-size: 0.9em;">Photographs used by the last generation:${note}</p>` +
-        `<ul style="padding-left: 20px; font-size: 0.9em;">${lines}</ul>`;
+        `<p>Photographs used by the last generation:${note}</p>` +
+        `<ul>${lines}</ul>`;
     } else {
       mapillaryList =
-        `<p style="font-size: 0.9em;">The photographs a generation used are listed here once it has run.</p>`;
+        `<p>The photographs a generation used are listed here once it has run.</p>`;
     }
-    const mapillaryBlock =
-      `<p><b>Building Facades (Mapillary):</b></p>` +
-      `<p style="font-size: 0.9em;">The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "Building Facades (Mapillary)",
+      `<p>The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
       `${link("https://www.mapillary.com", "Mapillary")}, licensed ` +
       `${link("https://creativecommons.org/licenses/by-sa/4.0/", "CC BY-SA 4.0")}. ` +
       `Share-alike applies to anything you publish that carries them.</p>` +
-      mapillaryList;
-    licenseContent.insertAdjacentHTML("beforeend", mapillaryBlock);
+      mapillaryList
+    ));
 
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
       if (Array.isArray(rows) && rows.length > 0) {
         const items = rows.map(r => {
           const lic = r.license_url
-            ? `<a href="${esc(r.license_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
+            ? `<a href="${esc(r.license_url)}" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
             : esc(r.license);
-          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
+          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
         }).join("");
-        const block =
-          `<p><b>Bundled 3D Models (Wikimedia Commons via Wikidata P4896):</b></p>` +
-          `<p style="font-size: 0.9em;">Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
-          `<ul style="padding-left: 20px;">${items}</ul>`;
-        licenseContent.insertAdjacentHTML("beforeend", block);
+        runtime.insertAdjacentHTML("beforeend", credit(
+          "Bundled 3D Models (Wikimedia Commons via Wikidata P4896)",
+          `<p>Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
+          `<ul>${items}</ul>`
+        ));
       }
     } catch (e) {
       console.warn("Failed to load 3D model attributions:", e);
     }
-
   }
 
   function closeLicense() {
     const licenseModal = document.getElementById("license-modal");
-    licenseModal.style.display = "none";
+    hideModal(licenseModal);
   }
 
   window.openLicense = openLicense;
@@ -1628,15 +1739,13 @@ function initTelemetryConsent() {
 
   if (existing === null) {
     // First run: ask for consent
-    modal.style.display = 'flex';
-    modal.style.justifyContent = 'center';
-    modal.style.alignItems = 'center';
+    showModal(modal);
   }
 
   // Expose handlers
   window.acceptTelemetry = () => {
     localStorage.setItem(key, 'true');
-    modal.style.display = 'none';
+    hideModal(modal);
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -1648,7 +1757,7 @@ function initTelemetryConsent() {
 
   window.rejectTelemetry = () => {
     localStorage.setItem(key, 'false');
-    modal.style.display = 'none';
+    hideModal(modal);
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -2161,7 +2270,7 @@ function handleBboxInput() {
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
-        setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
+        setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "");
       } else {
         // Restore map selection info display but don't update input field
         const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
@@ -2242,6 +2351,7 @@ function handleBboxInput() {
     // The Precompute button next to this field turns on the selection, and the
     // field is inside the same panel, so it has to follow every keystroke.
     refreshPrecomputeButton();
+    refreshAreaSize();
   });
 }
 
@@ -2322,6 +2432,68 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   }
 }
 
+// Metres per block off Earth, mirroring Body::meters_per_block in
+// src/celestial.rs. On Earth a block is a metre at world scale 1.
+const METERS_PER_BLOCK = { moon: 200, mars: 500 };
+
+// The selected area's width and height on the ground and in blocks, under the
+// start button. Hidden while there is no selection. Rotation is left out, so
+// the block count is marked as approximate.
+function refreshAreaSize() {
+  const box = document.getElementById("area-size");
+  const groundEl = document.getElementById("area-size-ground");
+  const blocksEl = document.getElementById("area-size-blocks");
+  if (!box || !groundEl || !blocksEl) return;
+
+  const coords = String(selectedBBox || "").trim().split(/[,\s]+/).map(Number);
+  if (coords.length !== 4 || coords.some((n) => !Number.isFinite(n)) ||
+      coords.every((n) => n === 0)) {
+    box.hidden = true;
+    return;
+  }
+
+  const [lat1, lng1, lat2, lng2] = coords;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
+  const heightM = R * Math.abs(toRad(lat2 - lat1));
+  const widthM = R * Math.abs(toRad(lng2 - lng1)) * Math.cos(toRad((lat1 + lat2) / 2));
+
+  let blocksPerMetre;
+  if (selectedCelestialBody === "earth") {
+    const slider = document.getElementById("scale-value-slider");
+    blocksPerMetre = (slider && parseFloat(slider.value)) || 1;
+  } else {
+    blocksPerMetre = 1 / (METERS_PER_BLOCK[selectedCelestialBody] || 1);
+  }
+
+  const locale = interfaceLocale();
+  const number = (value, digits) => {
+    try {
+      return new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value);
+    } catch (_) {
+      return value.toFixed(digits);
+    }
+  };
+
+  // Metres below a kilometre, then kilometres with one decimal while that
+  // decimal still matters.
+  const longest = Math.max(widthM, heightM);
+  if (longest < 1000) {
+    groundEl.textContent = `${number(widthM, 0)} × ${number(heightM, 0)} m`;
+  } else {
+    const digits = longest < 100000 ? 1 : 0;
+    groundEl.textContent = `${number(widthM / 1000, digits)} × ${number(heightM / 1000, digits)} km`;
+  }
+
+  const template =
+    (window.localization && window.localization.area_size_blocks) || "≈ {w} × {h} blocks";
+  blocksEl.textContent = template
+    .replace("{w}", number(Math.round(widthM * blocksPerMetre), 0))
+    .replace("{h}", number(Math.round(heightM * blocksPerMetre), 0));
+
+  box.hidden = false;
+}
+
 // Re-runs the size status, e.g. after a body switch changes which tiers apply.
 function refreshBboxSelectionInfo() {
   if (!mapSelectedBBox) return;
@@ -2364,7 +2536,7 @@ function displayBboxInfoText(bboxText) {
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lat1 === 0 && lng1 === 0 && lat2 === 0 && lng2 === 0) {
-    setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
+    setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
     if (!customBBoxValid) {
@@ -2372,6 +2544,7 @@ function displayBboxInfoText(bboxText) {
     }
     window.arnisPreview3D?.onBboxCleared();
     refreshPrecomputeButton();
+    refreshAreaSize();
     return;
   }
 
@@ -2401,6 +2574,7 @@ function displayBboxInfoText(bboxText) {
   // Hide any rendered mini 3D preview if the selection actually changed
   window.arnisPreview3D?.onBboxChanged(selectedBBox);
   refreshPrecomputeButton();
+  refreshAreaSize();
 }
 
 let worldPath = "";
@@ -2413,7 +2587,13 @@ function setWorldNameLabel(text) {
     label.textContent = text;
   } else {
     label.setAttribute('data-placeholder', 'true');
-    localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+    // Before the first localization pass there is nothing to look the text up
+    // in, and that pass fills the placeholder itself. Looking it up here
+    // instead fetched English, which arrived after the translation and
+    // overwrote it.
+    if (window.localization) {
+      localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+    }
   }
 }
 
@@ -2679,6 +2859,10 @@ let generationButtonEnabled = true;
 // rename, is in flight - see canEditCustomWorldName()).
 function setGenerationButtonEnabled(enabled) {
   generationButtonEnabled = enabled;
+  const startWrap = document.querySelector(".start-button-wrap");
+  if (startWrap) startWrap.classList.toggle("is-busy", !enabled);
+  const startButton = document.getElementById("start-button");
+  if (startButton) startButton.setAttribute("aria-disabled", enabled ? "false" : "true");
   refreshWorldNameEditUI();
   // The two jobs exclude each other in the backend, so the other one greys out.
   refreshPrecomputeButton();

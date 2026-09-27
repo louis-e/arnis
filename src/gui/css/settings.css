@@ -1,10 +1,10 @@
 /* Settings page: a full-window view with a section sidebar on the left and
    one scrolling column of section cards on the right.
 
-   Neutral greys only, in the same family as the main window (#333 body), so
-   the page reads as part of Arnis rather than a themed overlay. Yellow means
-   "selected" or "on": the active section, the chosen card, a switch that is
-   on, the active segment. Everything else stays grey.
+   Neutral greys only (the --ui-* tokens in styles.css, shared with the
+   dialogs), so the page reads as part of Arnis rather than a themed overlay.
+   Yellow means "selected" or "on": the active section, the chosen card, a
+   switch that is on, the active segment. Everything else stays grey.
 
    Every rule is scoped under .settings-page. That keeps it clear of the other
    modals, and it is also needed for specificity: the generic dark-mode
@@ -12,30 +12,13 @@
    otherwise beat a single class. */
 
 .settings-page {
-  --set-bg: #333333;
-  --set-sidebar: #2a2a2a;
-  --set-card: #3a3a3a;
-  --set-card-border: #444444;
-  --set-tile: #424242;
-  --set-tile-hover: #484848;
-  --set-tile-border: #4d4d4d;
-  --set-field: #2c2c2c;
-  --set-field-border: #5a5a5a;
-  --set-text: #f2f2f2;
-  --set-muted: #b8b8b8;
-  --set-faint: #8f8f8f;
-  --set-accent: var(--primary-accent);
-  --set-accent-soft: rgba(254, 204, 68, 0.12);
-  --set-on-accent: #1c1c1c;
-  --set-danger: #cf6679;
-
   position: fixed;
   inset: 0;
   z-index: 20001;
   /* openSettings() switches this to flex */
   display: flex;
-  background: var(--set-bg);
-  color: var(--set-text);
+  background: var(--ui-bg);
+  color: var(--ui-text);
   text-align: left;
   line-height: 1.4;
   animation: settings-enter 0.16s ease-out;
@@ -62,37 +45,6 @@
   }
 }
 
-/* One stroke icon, sized by its context */
-.icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.icon-sprite {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
-
-.visually-hidden {
-  position: absolute !important;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 /* Resets the generic `button` rule (margin, shadow, radius, dark fill) for
    every button on the page; each component then styles its own. */
 .settings-page button {
@@ -102,7 +54,7 @@
 }
 
 .settings-page :focus-visible {
-  outline: 2px solid var(--set-accent);
+  outline: 2px solid var(--ui-accent);
   outline-offset: 2px;
 }
 
@@ -117,7 +69,7 @@
   min-height: 0;
   padding: 18px 12px 14px;
   box-sizing: border-box;
-  background: var(--set-sidebar);
+  background: var(--ui-sidebar);
   border-right: 1px solid rgba(0, 0, 0, 0.25);
 }
 
@@ -150,7 +102,7 @@
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--set-text);
+  color: var(--ui-text);
   text-align: left;
   cursor: pointer;
   position: relative;
@@ -163,7 +115,7 @@
 }
 
 .settings-nav-item .icon {
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 .settings-nav-text {
@@ -186,12 +138,12 @@
   overflow: hidden;
   font-size: 11.5px;
   line-height: 1.3;
-  color: var(--set-faint);
+  color: var(--ui-faint);
 }
 
 .settings-page .settings-nav-item.active {
-  background: var(--set-accent);
-  color: var(--set-on-accent);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
 }
 
 .settings-nav-item.active .icon,
@@ -208,7 +160,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--set-accent);
+  background: var(--ui-accent);
   visibility: hidden;
 }
 
@@ -217,7 +169,7 @@
 }
 
 .settings-nav-item.active .settings-nav-dot {
-  background: var(--set-on-accent);
+  background: var(--ui-on-accent);
 }
 
 /* Reset all settings. Text and disabled state belong to settings-store.js. */
@@ -232,7 +184,7 @@
   border: 1px solid #4a4a4a;
   border-radius: 8px;
   background: transparent;
-  color: var(--set-text);
+  color: var(--ui-text);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -258,7 +210,7 @@
 /* Waiting for the second click */
 .settings-page .settings-reset-button.is-confirming {
   background: rgba(207, 102, 121, 0.85);
-  border-color: var(--set-danger);
+  border-color: var(--ui-danger);
   color: #ffffff;
 }
 
@@ -287,8 +239,8 @@
   height: 42px;
   flex-shrink: 0;
   border-radius: 10px;
-  background: var(--set-accent-soft);
-  color: var(--set-accent);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
 }
 
 .settings-topbar-icon .icon {
@@ -310,7 +262,7 @@
 .settings-topbar p {
   margin: 2px 0 0;
   font-size: 13px;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 .settings-page .settings-close {
@@ -324,7 +276,7 @@
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--set-muted);
+  color: var(--ui-muted);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
@@ -332,7 +284,7 @@
 .settings-page .settings-close:hover,
 .settings-page .settings-close:active {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--set-text);
+  color: var(--ui-text);
 }
 
 .settings-close .icon {
@@ -360,7 +312,7 @@
 
 .settings-page .settings-scrollable::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.14);
-  border: 2px solid var(--set-bg);
+  border: 2px solid var(--ui-bg);
   border-radius: 10px;
 }
 
@@ -381,9 +333,9 @@
 
 .settings-section {
   padding: 18px;
-  border: 1px solid var(--set-card-border);
+  border: 1px solid var(--ui-card-border);
   border-radius: 12px;
-  background: var(--set-card);
+  background: var(--ui-card);
 }
 
 .settings-section-head {
@@ -401,7 +353,7 @@
   flex-shrink: 0;
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.06);
-  color: var(--set-text);
+  color: var(--ui-text);
 }
 
 .settings-section-head h3 {
@@ -415,7 +367,7 @@
   margin: 1px 0 0;
   font-size: 12.5px;
   line-height: 1.35;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 /* Settings: tiles in a two-column grid, wide rows across both */
@@ -438,14 +390,14 @@
   min-height: 64px;
   box-sizing: border-box;
   padding: 11px 14px;
-  border: 1px solid var(--set-tile-border);
+  border: 1px solid var(--ui-tile-border);
   border-radius: 10px;
-  background: var(--set-tile);
+  background: var(--ui-tile);
   transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.2s ease;
 }
 
 .settings-page .setting-tile:hover {
-  background: var(--set-tile-hover);
+  background: var(--ui-tile-hover);
 }
 
 .setting-label {
@@ -463,7 +415,7 @@ label[for].setting-label {
 .setting-icon {
   width: 22px;
   height: 22px;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 .setting-text {
@@ -486,7 +438,7 @@ label[for].setting-label {
 .setting-desc {
   font-size: 12px;
   line-height: 1.35;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 .settings-page .settings-control {
@@ -529,11 +481,11 @@ label[for].setting-label {
 .settings-page .settings-notice {
   margin: 0;
   padding: 8px 12px;
-  border-left: 3px solid var(--set-accent);
+  border-left: 3px solid var(--ui-accent);
   border-radius: 4px 8px 8px 4px;
   background: rgba(254, 204, 68, 0.06);
   font-size: 12.5px;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 /* A notice that reports an outcome rather than warning about one. Same green
@@ -544,7 +496,7 @@ label[for].setting-label {
 }
 
 .settings-page .settings-notice.is-error {
-  border-left-color: var(--set-danger);
+  border-left-color: var(--ui-danger);
   background: rgba(207, 102, 121, 0.08);
 }
 
@@ -558,7 +510,7 @@ label[for].setting-label {
   flex-shrink: 0;
   border-radius: 50%;
   background-color: rgba(255, 255, 255, 0.1);
-  color: var(--set-muted, #c0c0c0);
+  color: var(--ui-muted, #c0c0c0);
   font-size: 10.5px;
   font-weight: 700;
   cursor: help;
@@ -644,7 +596,7 @@ label[for].setting-label {
 }
 
 .settings-page input.switch:checked {
-  background: var(--set-accent);
+  background: var(--ui-accent);
 }
 
 .settings-page input.switch:checked::before {
@@ -661,9 +613,9 @@ label[for].setting-label {
   display: inline-flex;
   gap: 2px;
   padding: 3px;
-  border: 1px solid var(--set-field-border);
+  border: 1px solid var(--ui-field-border);
   border-radius: 9px;
-  background: var(--set-field);
+  background: var(--ui-field);
 }
 
 .settings-page .segmented-control .segment {
@@ -671,7 +623,7 @@ label[for].setting-label {
   box-sizing: border-box;
   padding: 6px 12px;
   border-radius: 6px;
-  color: var(--set-text);
+  color: var(--ui-text);
   font-size: 13px;
   line-height: 1.2;
   white-space: nowrap;
@@ -684,13 +636,13 @@ label[for].setting-label {
 }
 
 .settings-page .segmented-control .segment:focus-visible {
-  outline: 2px solid var(--set-accent);
+  outline: 2px solid var(--ui-accent);
   outline-offset: 1px;
 }
 
 .settings-page .segmented-control .segment.active {
-  background: var(--set-accent);
-  color: var(--set-on-accent);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
   font-weight: 600;
 }
 
@@ -722,22 +674,22 @@ label[for].setting-label {
   align-items: flex-start;
   gap: 3px;
   padding: 14px 40px 13px 14px;
-  border: 1px solid var(--set-tile-border);
+  border: 1px solid var(--ui-tile-border);
   border-radius: 10px;
-  background: var(--set-tile);
+  background: var(--ui-tile);
   white-space: normal;
   transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .settings-page .choice-cards .segment:hover {
-  background: var(--set-tile-hover);
+  background: var(--ui-tile-hover);
 }
 
 .choice-cards .segment .icon {
   width: 24px;
   height: 24px;
   margin-bottom: 5px;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 .choice-title {
@@ -749,7 +701,7 @@ label[for].setting-label {
 .choice-desc {
   font-size: 12px;
   line-height: 1.35;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 /* Radio mark in the corner */
@@ -766,21 +718,21 @@ label[for].setting-label {
 }
 
 .settings-page .choice-cards .segment.active {
-  border-color: var(--set-accent);
+  border-color: var(--ui-accent);
   background: rgba(254, 204, 68, 0.07);
-  box-shadow: inset 0 0 0 1px var(--set-accent);
-  color: var(--set-text);
+  box-shadow: inset 0 0 0 1px var(--ui-accent);
+  color: var(--ui-text);
   font-weight: inherit;
 }
 
 .choice-cards .segment.active .icon,
 .choice-cards .segment.active .choice-title {
-  color: var(--set-accent);
+  color: var(--ui-accent);
 }
 
 .choice-cards .segment.active::after {
-  border-color: var(--set-accent);
-  background: radial-gradient(circle, var(--set-accent) 0 3.5px, transparent 4px);
+  border-color: var(--ui-accent);
+  background: radial-gradient(circle, var(--ui-accent) 0 3.5px, transparent 4px);
 }
 
 /* Fields */
@@ -792,10 +744,10 @@ label[for].setting-label {
   width: 300px;
   height: 34px;
   padding: 0 10px;
-  border: 1px solid var(--set-field-border);
+  border: 1px solid var(--ui-field-border);
   border-radius: 8px;
-  background-color: var(--set-field);
-  color: var(--set-text);
+  background-color: var(--ui-field);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 13px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -806,12 +758,12 @@ label[for].setting-label {
 .settings-page input[type="number"]:focus,
 .settings-page .settings-select:focus {
   outline: none;
-  border-color: var(--set-accent);
+  border-color: var(--ui-accent);
   box-shadow: 0 0 0 3px rgba(254, 204, 68, 0.18);
 }
 
 .settings-page input::placeholder {
-  color: var(--set-faint);
+  color: var(--ui-faint);
 }
 
 .settings-page .settings-select {
@@ -833,7 +785,7 @@ label[for].setting-label {
 .settings-page input[type="range"] {
   width: 240px;
   margin: 0;
-  accent-color: var(--set-accent);
+  accent-color: var(--ui-accent);
   cursor: pointer;
 }
 
@@ -850,7 +802,7 @@ label[for].setting-label {
 
 .rotation-unit {
   font-weight: 700;
-  color: var(--set-muted);
+  color: var(--ui-muted);
 }
 
 /* Save path: field and browse button joined into one control */
@@ -870,11 +822,11 @@ label[for].setting-label {
   width: 38px;
   height: 34px;
   padding: 0;
-  border: 1px solid var(--set-field-border);
+  border: 1px solid var(--ui-field-border);
   border-left: none;
   border-radius: 0 8px 8px 0;
-  background: var(--set-field);
-  color: var(--set-accent);
+  background: var(--ui-field);
+  color: var(--ui-accent);
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
@@ -893,7 +845,7 @@ label[for].setting-label {
    reads as information about the button rather than a second control. */
 .cache-size {
   font-size: 12.5px;
-  color: var(--set-muted);
+  color: var(--ui-muted);
   white-space: nowrap;
 }
 
@@ -904,10 +856,10 @@ label[for].setting-label {
   min-width: 84px;
   height: 32px;
   padding: 0 14px;
-  border: 1px solid var(--set-accent);
+  border: 1px solid var(--ui-accent);
   border-radius: 8px;
   background: transparent;
-  color: var(--set-accent);
+  color: var(--ui-accent);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -933,7 +885,7 @@ label[for].setting-label {
 
 .settings-page .clear-cache-button.is-error {
   background: rgba(207, 102, 121, 0.85);
-  border-color: var(--set-danger);
+  border-color: var(--ui-danger);
   color: #ffffff;
 }
 
@@ -944,9 +896,9 @@ label[for].setting-label {
   flex-wrap: wrap;
   gap: 14px 24px;
   padding: 16px;
-  border: 1px solid var(--set-tile-border);
+  border: 1px solid var(--ui-tile-border);
   border-radius: 10px;
-  background: var(--set-tile);
+  background: var(--ui-tile);
 }
 
 .settings-about-version {
@@ -975,10 +927,10 @@ label[for].setting-label {
   gap: 8px;
   height: 38px;
   padding: 0 16px;
-  border: 1px solid var(--set-field-border);
+  border: 1px solid var(--ui-field-border);
   border-radius: 8px;
-  background: var(--set-field);
-  color: var(--set-text);
+  background: var(--ui-field);
+  color: var(--ui-text);
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
@@ -987,14 +939,14 @@ label[for].setting-label {
 
 .settings-page .settings-action-button:hover,
 .settings-page .settings-action-button:active {
-  border-color: var(--set-accent);
+  border-color: var(--ui-accent);
   background: rgba(254, 204, 68, 0.1);
 }
 
 .settings-action-button .icon {
   width: 17px;
   height: 17px;
-  color: var(--set-accent);
+  color: var(--ui-accent);
 }
 
 .github-link,

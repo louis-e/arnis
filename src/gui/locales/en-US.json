@@ -172,5 +172,6 @@
   "aws_only_elevation_desc": "Older, coarser elevation source for when the default fails.",
   "bake_lighting_desc": "Precomputed light for LOD mods like Voxy. Slower.",
   "voxy_lod_desc": "Distant terrain renders on first join. Java only.",
-  "enable_luanti_desc": "Adds Luanti (Mineclonia) as an output format. Experimental."
+  "enable_luanti_desc": "Adds Luanti (Mineclonia) as an output format. Experimental.",
+  "area_size_blocks": "≈ {w} × {h} blocks"
 }

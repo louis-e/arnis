@@ -7,17 +7,18 @@
      up to 420px when maximized. MapLibre auto-resizes with its container. */
   height: clamp(165px, calc(100vh - 485px), 420px);
   flex-shrink: 0;
-  margin-top: 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--ui-tile-border);
   border-radius: 8px;
   overflow: hidden;
-  background: #575757;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  background: var(--ui-tile);
+  box-shadow: none;
   opacity: 0;
-  transition: opacity 0.25s ease, box-shadow 0.15s ease;
+  transition: opacity 0.25s ease, border-color 0.15s ease;
 }
 
 .preview3d-mini:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  border-color: #6a6a6a;
 }
 
 .preview3d-mini-visible {
@@ -39,7 +40,7 @@
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: #575757;
+  background: var(--ui-tile);
   color: #ececec;
   font-size: 0.85em;
   pointer-events: none;

@@ -1,0 +1,531 @@
+/* Dialogs: License and Credits, Version Info / release notes, and the
+   first-run crash report consent. One plain shell in the settings page's
+   greys (the --ui-* tokens in styles.css): a title bar, a scrolling body and
+   an optional footer with the actions.
+
+   The content is typeset rather than boxed: text on the dialog surface,
+   hairlines between entries, and the small uppercase section labels Arnis
+   has always used. Yellow is kept for the primary action.
+
+   Scoped under .dialog for the same reason the settings page is scoped under
+   .settings-page: the generic dark-mode `button` rules in styles.css would
+   otherwise beat a single class. */
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: var(--ui-card);
+  color: var(--ui-text);
+  text-align: left;
+  line-height: 1.5;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  animation: dialog-enter 0.14s ease-out;
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.dialog--wide {
+  width: min(820px, calc(100vw - 48px));
+}
+
+/* The credits always fill the height, so the window does not jump in size
+   while the runtime credits load in. */
+.dialog--tall {
+  height: min(820px, calc(100vh - 48px));
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog {
+    animation: none;
+  }
+}
+
+.dialog button {
+  margin: 0;
+  box-shadow: none;
+  font-family: inherit;
+}
+
+.dialog :focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+/* Title bar */
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 16px 16px 14px 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dialog-heading {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.dialog-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/* Release date and versions under a release title */
+.dialog-meta {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--ui-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-meta:empty {
+  display: none;
+}
+
+.dialog-meta .is-new {
+  color: var(--ui-accent);
+  font-weight: 600;
+}
+
+.dialog .dialog-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ui-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dialog .dialog-close:hover,
+.dialog .dialog-close:active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ui-text);
+}
+
+.dialog-close .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Body */
+
+.dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 18px 22px 22px;
+  font-size: 13.5px;
+}
+
+.dialog-body > p:first-child {
+  margin-top: 0;
+}
+
+.dialog-body > p:last-child {
+  margin-bottom: 0;
+}
+
+.dialog-body p {
+  color: #d4d4d4;
+}
+
+.dialog-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.dialog-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dialog-body::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 2px solid var(--ui-card);
+  border-radius: 10px;
+}
+
+.dialog-body::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.26);
+}
+
+/* Links read as text with an underline, and only turn yellow under the
+   pointer: in a page of attributions, a yellow word every few lines is noise. */
+.dialog-body a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.3);
+  text-underline-offset: 2px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.dialog-body a:hover {
+  color: var(--ui-accent);
+  text-decoration-color: currentColor;
+}
+
+/* Footer */
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 12px 16px 12px 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dialog-footer-note {
+  margin-right: auto;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ui-faint);
+}
+
+.dialog .dialog-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ui-text);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.dialog .dialog-button:hover,
+.dialog .dialog-button:active {
+  border-color: #707070;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dialog .dialog-button.is-primary {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  font-weight: 600;
+}
+
+.dialog .dialog-button.is-primary:hover,
+.dialog .dialog-button.is-primary:active {
+  background: var(--primary-accent-dark);
+  border-color: var(--primary-accent-dark);
+}
+
+.dialog .dialog-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dialog-button .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* License and Credits */
+
+.credits {
+  font-size: 13px;
+}
+
+.credits p {
+  margin: 0;
+}
+
+.credits code {
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+/* Logo and author, set like an About box */
+.credits-about {
+  padding: 6px 0 20px;
+  text-align: center;
+}
+
+.credits-logo {
+  display: block;
+  width: 190px;
+  height: auto;
+  margin: 0 auto 12px;
+}
+
+.credits .credits-made {
+  margin-bottom: 2px;
+  color: var(--ui-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.credits-about p {
+  color: var(--ui-muted);
+}
+
+/* Unofficial download sites: the one paragraph here that protects people.
+   The same red it has always had. */
+.credits .credits-warning {
+  margin: 0 0 6px;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #ff8686;
+}
+
+.credits-section {
+  margin-top: 26px;
+}
+
+/* The section label style of the original settings panel */
+.credits-section h3 {
+  margin: 0 0 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ui-muted);
+}
+
+.credits .credits-intro {
+  margin: 8px 0 4px;
+  color: var(--ui-muted);
+}
+
+.credits .credits-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--ui-faint);
+}
+
+/* One row per entry: the name, then what is credited */
+.credit {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  column-gap: 20px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.credit:last-child {
+  border-bottom: none;
+}
+
+.credit h4 {
+  grid-column: 1;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.credit > :not(h4) {
+  grid-column: 2;
+}
+
+.credit p,
+.credit ul {
+  font-size: 13px;
+  color: var(--ui-muted);
+}
+
+.credit p + p,
+.credit p + ul {
+  margin-top: 6px;
+}
+
+.credit ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* The runtime credits join the list as if they were written there. */
+.credits-runtime {
+  display: contents;
+}
+
+.credits-runtime > .credit:last-child {
+  border-bottom: none;
+}
+
+/* The full license, folded away until asked for */
+.credits-license summary {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--ui-text);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.credits-license summary::-webkit-details-marker {
+  display: none;
+}
+
+.credits-license summary:hover {
+  color: var(--ui-accent);
+  text-decoration-color: currentColor;
+}
+
+.credits-license[open] summary {
+  margin-bottom: 4px;
+}
+
+.license-text {
+  max-width: 68ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.license-text p {
+  margin: 10px 0 0;
+  color: var(--ui-muted);
+}
+
+.license-text .license-title {
+  color: var(--ui-text);
+}
+
+.credits .credits-disclaimer {
+  margin-top: 28px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-align: center;
+  color: var(--ui-faint);
+}
+
+/* Release notes, rendered from the GitHub release body */
+
+.release-notes {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.release-notes > :first-child {
+  margin-top: 0;
+}
+
+.release-notes h1,
+.release-notes h2,
+.release-notes h3 {
+  margin: 20px 0 6px;
+  line-height: 1.3;
+  color: var(--ui-text);
+}
+
+.release-notes h1 { font-size: 17px; }
+.release-notes h2 { font-size: 15px; }
+.release-notes h3 { font-size: 14px; }
+
+.release-notes p {
+  margin: 8px 0;
+}
+
+.release-notes ul,
+.release-notes ol {
+  margin: 6px 0;
+  padding-left: 20px;
+  color: #d4d4d4;
+}
+
+.release-notes li {
+  margin: 3px 0;
+}
+
+.release-notes li::marker {
+  color: var(--ui-faint);
+}
+
+.release-notes strong {
+  color: var(--ui-text);
+}
+
+.release-notes img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 12px auto;
+  border-radius: 6px;
+}
+
+.release-notes code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.release-notes pre {
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.release-notes pre code {
+  padding: 0;
+  background: none;
+}
+
+.release-notes hr {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.release-notes blockquote {
+  margin: 10px 0;
+  padding: 2px 12px;
+  border-left: 3px solid #5a5a5a;
+  color: var(--ui-muted);
+}
+
+@media (max-width: 760px) {
+  .credit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .credit > :not(h4) {
+    grid-column: 1;
+  }
+}

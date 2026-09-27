@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="./css/styles.css" />
   <link rel="stylesheet" href="./css/settings.css" />
+  <link rel="stylesheet" href="./css/dialogs.css" />
   <link rel="stylesheet" href="./css/preview3d.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
@@ -18,9 +19,10 @@
 </head>
 
 <body>
-  <!-- Icon sprite for the settings page, drawn in the same 24px stroke style as
-       the gear and map toolbar icons. Referenced with <svg class="icon"><use
-       href="#i-..."></use></svg>; stroke and colour come from the .icon rule. -->
+  <!-- Icon sprite for the settings page and the dialogs, drawn in the same
+       24px stroke style as the gear and map toolbar icons. Referenced with
+       <svg class="icon"><use href="#i-..."></use></svg>; stroke and colour
+       come from the .icon rule. -->
   <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
@@ -71,6 +73,7 @@
     <symbol id="i-flask" viewBox="0 0 24 24"><path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></symbol>
     <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
     <symbol id="i-tag" viewBox="0 0 24 24"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
   </svg>
 
   <main class="container">
@@ -86,11 +89,12 @@
         <iframe src="maps.html" width="100%" height="100%" class="map-container" title="Map Picker"></iframe>
       </section>
 
-      <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
+      <!-- Right Box: start button, world format, the selected area, and the
+           progress of a running generation -->
       <section class="section controls-box">
         <div class="controls-content">
           <div class="controls-top">
-            <!-- Combined Button Block -->
+            <!-- Start button, with the settings button beside it -->
             <div class="button-block">
               <div class="button-block-row">
                 <div class="start-button-wrap">
@@ -119,19 +123,25 @@
                     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>
               </div>
-              <div class="button-block-row">
-                <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
-                  Java
-                </button>
-                <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
-                  Bedrock
-                </button>
-                <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">
-                  Luanti
-                </button>
-              </div>
             </div>
-            <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
+
+            <!-- World format -->
+            <div class="format-toggle" role="group" aria-label="World format">
+              <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">Java</button>
+              <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">Bedrock</button>
+              <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">Luanti</button>
+            </div>
+
+            <!-- The selected area: how big it is on the ground and in blocks once
+                 there is one (main.js, refreshAreaSize), and under that the
+                 prompt or what the size means for the generation. -->
+            <div class="area-info">
+              <div id="area-size" class="area-size" hidden>
+                <span id="area-size-ground" class="area-size-ground"></span>
+                <span id="area-size-blocks" class="area-size-blocks"></span>
+              </div>
+              <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
+            </div>
 
             <!-- Mini 3D terrain preview (rendered via the map's terrain button, click to expand) -->
             <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview">
@@ -1064,54 +1074,78 @@
       </div>
     </div>
 
+    <!-- Dialogs share one shell (css/dialogs.css): .modal is the backdrop,
+         .dialog the window with a title bar, a scrolling body and a footer. -->
+
     <!-- Telemetry Consent Modal (first run) -->
     <div id="telemetry-modal" class="modal" style="display: none;">
-      <div class="modal-content">
-        <div class="settings-header">
-          <h2>Help improve Arnis</h2>
-          <span class="close-button" onclick="rejectTelemetry()">&times;</span>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="telemetry-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="telemetry-title">Help improve Arnis</h2>
+          </div>
+          <button type="button" class="dialog-close" onclick="rejectTelemetry()" aria-label="Close">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="dialog-body">
+          <p>
+            We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
+            <a href="https://arnismc.com/privacypolicy.html" target="_blank" rel="noopener noreferrer">No personal data or world contents are collected.</a>
+          </p>
         </div>
-        <p style="text-align:left; margin-top:12px; margin-bottom: -5px;color:#ececec;">
-          We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
-          <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank" rel="noopener noreferrer">No personal data or world contents are collected.</a>
-        </p>
-        <div class="modal-actions" style="margin-top:14px;">
-          <button type="button" class="btn-secondary" onclick="rejectTelemetry()">No thanks</button>
-          <button type="button" class="btn-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
-        </div>
+        <footer class="dialog-footer">
+          <button type="button" class="dialog-button" onclick="rejectTelemetry()">No thanks</button>
+          <button type="button" class="dialog-button is-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
+        </footer>
       </div>
     </div>
 
-    <!-- License Modal -->
+    <!-- License Modal. The content is js/license.js plus the runtime credits
+         main.js adds when it opens. -->
     <div id="license-modal" class="modal" style="display: none;">
-      <div class="modal-content">
-        <div class="settings-header">
-          <h2 data-localize="license_and_credits">License and Credits</h2>
-          <span class="close-button" onclick="closeLicense()">&times;</span>
-        </div>
-        <div id="license-content" class="license-scrollable" style="font-size: 0.85em; line-height: 1.3; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
-          Loading...
-        </div>
-      </div>
-    </div>
-
-    <!-- Update / Release Notes Modal -->
-    <div id="update-modal" class="modal" style="display: none;">
-      <div class="modal-content update-modal-content">
-        <div class="settings-header">
-          <h2 id="update-modal-title" data-localize="update_modal_title">What's new in Arnis</h2>
-          <span class="close-button" onclick="closeUpdateModal()">&times;</span>
-        </div>
-        <div id="update-modal-body" class="update-modal-body license-scrollable">
+      <div class="dialog dialog--wide dialog--tall" role="dialog" aria-modal="true" aria-labelledby="license-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="license-title" data-localize="license_and_credits">License and Credits</h2>
+          </div>
+          <button type="button" class="dialog-close" onclick="closeLicense()" aria-label="Close" title="Close (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div id="license-content" class="dialog-body credits">
           <span data-localize="loading">Loading...</span>
         </div>
-        <div id="update-modal-download-note" class="update-modal-download-note" data-localize="update_modal_download_note">
-          Download opens in your browser. Close Arnis before running the new version.
+      </div>
+    </div>
+
+    <!-- Update / Release Notes Modal. main.js fills the title, the release
+         date and versions, and the notes. -->
+    <div id="update-modal" class="modal" style="display: none;">
+      <div class="dialog dialog--wide" role="dialog" aria-modal="true" aria-labelledby="update-modal-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="update-modal-title" data-localize="update_modal_title">What's new in Arnis</h2>
+            <div id="update-modal-meta" class="dialog-meta"></div>
+          </div>
+          <button type="button" class="dialog-close" onclick="closeUpdateModal()" aria-label="Close" title="Close (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div id="update-modal-body" class="dialog-body release-notes">
+          <span data-localize="loading">Loading...</span>
         </div>
-        <div class="modal-actions update-modal-actions">
-          <button type="button" id="update-download-button" class="btn-primary" onclick="downloadLatestRelease()" data-localize="update_download">Download</button>
-          <button type="button" class="btn-secondary" onclick="openUpdateInBrowser()" data-localize="update_view_on_github">View on GitHub</button>
-        </div>
+        <footer class="dialog-footer">
+          <span id="update-modal-download-note" class="dialog-footer-note" data-localize="update_modal_download_note">Download opens in your browser. Close Arnis before running the new version.</span>
+          <button type="button" class="dialog-button" onclick="openUpdateInBrowser()">
+            <svg class="icon" aria-hidden="true"><use href="#i-external"></use></svg>
+            <span data-localize="update_view_on_github">View on GitHub</span>
+          </button>
+          <button type="button" id="update-download-button" class="dialog-button is-primary" onclick="downloadLatestRelease()">
+            <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+            <span class="dialog-button-label" data-localize="update_download">Download</span>
+          </button>
+        </footer>
       </div>
     </div>
 
