@@ -34,6 +34,14 @@ fn style(z: Zone) -> Option<(Rgba<u8>, &'static str)> {
 const CORAL_COLOR: Rgba<u8> = Rgba([255, 126, 168, 160]);
 const MAX_SIDE: u32 = 1536;
 
+/// Center of the `i`th `step`-wide sample square, measured over the part of it inside the bbox:
+/// the last square is usually cut short, and its full-size center can lie outside the bbox.
+fn square_center(min: i32, max: i32, i: u32, step: i32) -> i32 {
+    let start = min + i as i32 * step;
+    let len = (start + step - 1).min(max) - start + 1;
+    start + len / 2
+}
+
 pub fn render(args: &Args) -> Result<(), String> {
     let prefix = args
         .cave_zone_map
@@ -71,9 +79,9 @@ pub fn render(args: &Args) -> Result<(), String> {
         let mut counts: std::collections::HashMap<&'static str, u64> = Default::default();
         let mut total: u64 = 0;
         for pz in 0..h {
-            let bz = min_z + (pz as i32) * step + step / 2; // sample the square's center
+            let bz = square_center(min_z, max_z, pz, step);
             for px in 0..w {
-                let bx = min_x + (px as i32) * step + step / 2;
+                let bx = square_center(min_x, max_x, px, step);
                 total += 1;
                 // a high surface keeps the mountains-only ice gate open for VISIBILITY (see header)
                 let zone = decor.zone(bx, y, bz, super::vy(200));
@@ -114,4 +122,23 @@ pub fn render(args: &Args) -> Result<(), String> {
     );
     println!("ZONEMAP {}", serde_json::Value::Object(out));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::square_center;
+
+    #[test]
+    fn samples_stay_inside_the_bbox() {
+        // A one-block bbox with a 512-block step samples that block, not one 256 blocks away.
+        assert_eq!(square_center(10, 10, 0, 512), 10);
+        // Full squares keep their center; the cut-short last one uses what is left of it.
+        assert_eq!(square_center(0, 99, 0, 64), 32);
+        assert_eq!(square_center(0, 99, 1, 64), 82);
+        // 46 blocks at step 16 is three squares, the last one 14 wide.
+        for i in 0..3 {
+            let c = square_center(-5, 40, i, 16);
+            assert!((-5..=40).contains(&c), "square {i} sampled at {c}");
+        }
+    }
 }

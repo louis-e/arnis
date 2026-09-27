@@ -174,28 +174,42 @@ fn as_compound(v: &Value) -> Option<&HashMap<String, Value>> {
         _ => None,
     }
 }
-fn short_field(c: &HashMap<String, Value>, k: &str) -> Result<i32, String> {
-    match c.get(k) {
-        Some(Value::Short(s)) => Ok(i32::from(*s)),
-        Some(Value::Int(i)) => Ok(*i),
-        _ => Err(format!("missing field {k}")),
+/// A schematic dimension: Sponge stores them as unsigned shorts, and every one must be positive.
+fn dimension(c: &HashMap<String, Value>, k: &str) -> Result<i32, String> {
+    let v = match c.get(k) {
+        Some(Value::Short(s)) => i32::from(*s as u16),
+        Some(Value::Int(i)) => *i,
+        _ => return Err(format!("missing field {k}")),
+    };
+    if v <= 0 {
+        return Err(format!("{k} must be positive, got {v}"));
     }
+    Ok(v)
 }
-fn decode_varints(bytes: &[u8]) -> Vec<i32> {
+
+/// Decode Sponge's varint block data. A value can take at most five bytes (an i32); a longer
+/// one would overflow the shift.
+fn decode_varints(bytes: &[u8]) -> Result<Vec<i32>, String> {
     let mut out = Vec::new();
-    let mut cur: i32 = 0;
+    let mut cur: u32 = 0;
     let mut shift = 0;
     for &b in bytes {
-        cur |= ((b & 0x7F) as i32) << shift;
+        if shift > 28 {
+            return Err("BlockData holds a varint longer than 5 bytes".into());
+        }
+        cur |= u32::from(b & 0x7F) << shift;
         if b & 0x80 == 0 {
-            out.push(cur);
+            out.push(cur as i32);
             cur = 0;
             shift = 0;
         } else {
             shift += 7;
         }
     }
-    out
+    if shift != 0 {
+        return Err("BlockData ends inside a varint".into());
+    }
+    Ok(out)
 }
 
 /// Map a palette base name (no `minecraft:`, no states) to our Block. `None` = voxel dropped
@@ -250,31 +264,31 @@ fn load_cave_schem(gz_bytes: &[u8]) -> Result<CaveSchem, String> {
         .and_then(as_compound)
         .unwrap_or(root_c);
 
-    let w = short_field(scm, "Width")?;
-    let nominal_h = short_field(scm, "Height")?; // recomputed from non-air voxels after normalize
-    let l = short_field(scm, "Length")?;
+    let w = dimension(scm, "Width")?;
+    let nominal_h = dimension(scm, "Height")?; // recomputed from non-air voxels after normalize
+    let l = dimension(scm, "Length")?;
     let (palette_v, data_v) = match scm.get("Blocks").and_then(as_compound) {
         Some(blocks) => (blocks.get("Palette"), blocks.get("Data")),
         None => (scm.get("Palette"), scm.get("BlockData")),
     };
     let palette_c = palette_v.and_then(as_compound).ok_or("missing Palette")?;
 
-    // palette: schem index -> our entry index (usize::MAX = dropped)
-    let max_idx = palette_c
-        .values()
-        .filter_map(|v| {
-            if let Value::Int(i) = v {
-                Some(*i)
-            } else {
-                None
-            }
-        })
-        .max()
-        .unwrap_or(0);
-    let mut remap = vec![usize::MAX; (max_idx + 1) as usize];
+    // palette: schem index -> our entry index (usize::MAX = dropped). Sponge numbers the entries
+    // 0..len, so anything outside that is a corrupt file, refused before it can index anything.
+    let entries = palette_c.len();
+    if entries > usize::from(u16::MAX) {
+        return Err(format!(
+            "palette has {entries} entries, more than supported"
+        ));
+    }
+    let mut remap = vec![usize::MAX; entries];
     let mut palette: Vec<PalEntry> = Vec::new();
     for (name, v) in palette_c {
         let Value::Int(i) = v else { continue };
+        let slot = usize::try_from(*i)
+            .ok()
+            .filter(|&slot| slot < entries)
+            .ok_or_else(|| format!("palette index {i} is outside 0..{entries}"))?;
         let (base, props) = match name.split_once('[') {
             Some((b, rest)) => {
                 let rest = rest.trim_end_matches(']');
@@ -297,7 +311,7 @@ fn load_cave_schem(gz_bytes: &[u8]) -> Result<CaveSchem, String> {
         };
         if let Some((block, is_air)) = cave_map(base, &props) {
             let is_fluid = block == WATER || block == LAVA;
-            remap[*i as usize] = palette.len();
+            remap[slot] = palette.len();
             palette.push(PalEntry {
                 block,
                 props,
@@ -311,7 +325,7 @@ fn load_cave_schem(gz_bytes: &[u8]) -> Result<CaveSchem, String> {
         Some(Value::ByteArray(b)) => b.iter().map(|&x| x as u8).collect(),
         _ => return Err("missing BlockData".into()),
     };
-    let indices = decode_varints(&data_bytes);
+    let indices = decode_varints(&data_bytes)?;
 
     // Sponge requires exactly Width*Height*Length entries. This loader reads a user-droppable
     // cave-pack directory, so it is the one that actually faces untrusted files: a stream that
@@ -363,6 +377,24 @@ fn load_cave_schem(gz_bytes: &[u8]) -> Result<CaveSchem, String> {
         .max()
         .unwrap_or(0)
         + 1;
+    // Water and lava may never touch. Placement checks the fluids around a formation, but one
+    // that brings both, side by side, would break that wherever it lands, so it is refused here.
+    let fluids: FnvHashMap<(i32, i32, i32), Block> = voxels
+        .iter()
+        .filter(|&&(_, _, _, pi)| palette[pi as usize].is_fluid)
+        .map(|&(x, y, z, pi)| ((x, y, z), palette[pi as usize].block))
+        .collect();
+    let lava_beside = |x: i32, y: i32, z: i32| {
+        super::neighbours(x, y, z)
+            .iter()
+            .any(|n| fluids.get(n) == Some(&LAVA))
+    };
+    if fluids
+        .iter()
+        .any(|(&(x, y, z), &b)| b == WATER && lava_beside(x, y, z))
+    {
+        return Err("water touches lava".into());
+    }
     Ok(CaveSchem {
         w,
         h,
@@ -796,4 +828,86 @@ fn place_schem(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// A gzipped Sponge v2 schematic with the given dimensions, palette and raw BlockData bytes.
+    fn schem(dims: (i16, i16, i16), palette: &[(&str, i32)], data: &[u8]) -> Vec<u8> {
+        let mut root = HashMap::new();
+        root.insert("Version".to_string(), Value::Int(2));
+        root.insert("Width".to_string(), Value::Short(dims.0));
+        root.insert("Height".to_string(), Value::Short(dims.1));
+        root.insert("Length".to_string(), Value::Short(dims.2));
+        let pal = palette
+            .iter()
+            .map(|&(name, i)| (name.to_string(), Value::Int(i)))
+            .collect();
+        root.insert("Palette".to_string(), Value::Compound(pal));
+        root.insert(
+            "BlockData".to_string(),
+            Value::ByteArray(fastnbt::ByteArray::new(
+                data.iter().map(|&b| b as i8).collect(),
+            )),
+        );
+        let raw = fastnbt::to_bytes(&Value::Compound(root)).unwrap();
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&raw).unwrap();
+        gz.finish().unwrap()
+    }
+
+    const ICE_COLUMN: &[(&str, i32)] = &[("minecraft:ice", 0), ("minecraft:air", 1)];
+
+    #[test]
+    fn a_valid_formation_loads() {
+        let s = load_cave_schem(&schem((1, 3, 1), ICE_COLUMN, &[0, 0, 1])).unwrap();
+        assert_eq!((s.w, s.h, s.l, s.solid_count), (1, 2, 1, 2));
+    }
+
+    /// Pack files are user-supplied, so a corrupt one must be refused, never panic or allocate
+    /// for an index it names.
+    #[test]
+    fn corrupt_formations_are_refused() {
+        let cases: [(&str, Vec<u8>); 6] = [
+            (
+                "negative palette index",
+                schem((1, 1, 1), &[("minecraft:ice", -1)], &[0]),
+            ),
+            (
+                "palette index past the palette",
+                schem((1, 1, 1), &[("minecraft:ice", i32::MAX)], &[0]),
+            ),
+            ("zero width", schem((0, 1, 1), ICE_COLUMN, &[])),
+            ("varint too long", schem((1, 1, 1), ICE_COLUMN, &[0xFF; 6])),
+            ("varint cut short", schem((1, 1, 1), ICE_COLUMN, &[0x80])),
+            ("data too short", schem((2, 2, 2), ICE_COLUMN, &[0, 0])),
+        ];
+        for (what, bytes) in cases {
+            assert!(load_cave_schem(&bytes).is_err(), "{what} was accepted");
+        }
+    }
+
+    /// Water beside lava inside one formation would break the zero-contact rule wherever it is
+    /// stamped; a gap between them is fine.
+    #[test]
+    fn water_touching_lava_is_refused() {
+        let fluids = &[
+            ("minecraft:water", 0),
+            ("minecraft:lava", 1),
+            ("minecraft:ice", 2),
+        ];
+        assert!(load_cave_schem(&schem((2, 1, 1), fluids, &[0, 1])).is_err());
+        assert!(load_cave_schem(&schem((3, 1, 1), fluids, &[0, 2, 1])).is_ok());
+    }
+
+    /// Sponge dimensions are unsigned: a 40000-wide formation is not negative.
+    #[test]
+    fn dimensions_read_as_unsigned() {
+        let mut c = HashMap::new();
+        c.insert("Width".to_string(), Value::Short(40000u16 as i16));
+        assert_eq!(dimension(&c, "Width"), Ok(40000));
+    }
 }
