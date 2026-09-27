@@ -33,6 +33,11 @@
 //!      world], coral [in water pools]) with buffer strips of plain rock between them, plus glow
 //!      lichen and rare amethyst geodes everywhere.
 //!
+//! Pools, rivers and geodes reach past their origin chunk, so near a tile edge both tiles see
+//! them. They are planned against `shape.rs` — the carve as a pure function of position, readable
+//! past the region — over every origin that can reach the region, and each tile writes only its
+//! own part. No pass writes outside the region: a tile's halo merges into its neighbour's caves.
+//!
 //! Every depth band is vanilla's, measured from vanilla's -64 floor and translated onto this
 //! world's bedrock plane (`vy`). With the default ground level that plane IS -64, so the layout
 //! is vanilla's exactly; a raised `--ground-level` raises the plane and the caves with it.
@@ -51,6 +56,7 @@ mod noise;
 mod ores;
 mod rng;
 mod schems;
+mod shape;
 mod water;
 pub mod zone_map;
 
@@ -61,6 +67,7 @@ use crate::world_editor::{terrain_floor_y, WorldEditor};
 use decoration::{BiomeAmounts, Decor};
 use density::CaveGen;
 use rayon::prelude::*;
+use shape::{CaveShape, Rect};
 // FnvHashSet, not std HashSet: std seeds its hasher randomly PER PROCESS, so
 // iterating one yields a different order every run. These sets are iterated to apply
 // world edits (despeckle, prune, decoration), and where those edits interact the write
@@ -81,6 +88,9 @@ const TOP_GATE: i32 = 6;
 /// are a cliff (−0.013 → −52% volume AND shatters connectivity 62%→15%). Room-size reduction is done
 /// via density::CHEESE_SHRINK instead (shrinks the broad cheese rooms while keeping them as hubs).
 const CARVE_THRESHOLD: f64 = 0.0;
+/// Noise cells are 4×8×4 blocks, on global boundaries, like vanilla's.
+const CELL_W: i32 = 4;
+const CELL_H: i32 = 8;
 /// Rock the carve is allowed to replace (never bedrock, water, buildings, ores, plants).
 const CAVE_HOST: &[Block] = &[
     STONE,
@@ -124,6 +134,7 @@ pub fn carve(editor: &mut WorldEditor, args: &Args, xzbbox: &XZBBox) {
     carve_region(
         editor,
         args,
+        xzbbox,
         xzbbox.min_x(),
         xzbbox.max_x(),
         xzbbox.min_z(),
@@ -131,11 +142,14 @@ pub fn carve(editor: &mut WorldEditor, args: &Args, xzbbox: &XZBBox) {
     );
 }
 
-/// Carve over an explicit block-coordinate rect (per-tile callers pass strict tile bounds). Noise is
-/// a pure position-fn, so per-tile carving is seamless (same coords → same density).
+/// Carve over an explicit block-coordinate rect (per-tile callers pass strict tile bounds) of the
+/// world `world`. Noise is a pure position-fn, so per-tile carving is seamless (same coords → same
+/// density), and the features that cross tile edges are planned against the pure [`CaveShape`].
+/// Nothing is written outside the rect: a tile editor's halo merges into its neighbour's caves.
 pub fn carve_region(
     editor: &mut WorldEditor,
     args: &Args,
+    world: &XZBBox,
     min_x: i32,
     max_x: i32,
     min_z: i32,
@@ -151,107 +165,34 @@ pub fn carve_region(
     // resolve + load the cave asset pack once (explicit flag dir, else exe-adjacent `cave-pack/`).
     schems::init_pack(args.cave_asset_pack.as_deref());
 
-    // 1) surface heightmap (sequential — get_ground_level borrows &editor).
+    let region = Rect {
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+    };
+    let world = Rect {
+        min_x: world.min_x(),
+        max_x: world.max_x(),
+        min_z: world.min_z(),
+        max_z: world.max_z(),
+    };
+    let shape = CaveShape::new(&gen, seed, world, region, |x, z| {
+        editor.get_ground_level(x, z)
+    });
+
+    // 1) surface heightmap, X-major.
     let h = (max_z - min_z + 1) as usize;
-    let w = (max_x - min_x + 1) as usize;
-    let mut surf = vec![0i32; w * h];
-    let mut max_surf = floor;
-    for (ix, sx) in (min_x..=max_x).enumerate() {
-        for (iz, sz) in (min_z..=max_z).enumerate() {
-            let s = editor.get_ground_level(sx, sz);
-            surf[ix * h + iz] = s;
-            max_surf = max_surf.max(s);
+    let mut surf = Vec::with_capacity((max_x - min_x + 1) as usize * h);
+    for x in min_x..=max_x {
+        for z in min_z..=max_z {
+            surf.push(shape.surf(x, z));
         }
     }
     let surf = &surf;
 
-    // 2) cave mask via vanilla CELL INTERPOLATION (4×8×4 cells: sample the combined cheese/spaghetti/
-    //    entrances/pillars density at 8 cell corners, trilerp per block — gives vanilla-sized smooth
-    //    rooms instead of per-block-fat blobs). noodle is min'd in per-block at full res. Cells are on
-    //    GLOBAL boundaries so tiles/regions stay seamless. ~16× fewer density evals than per-block.
-    //    The floor sits on a section boundary, so cells line up with vanilla's after translation.
-    const CW: i32 = 4;
-    const CH: i32 = 8;
-    let cx0 = min_x.div_euclid(CW);
-    let cx1 = max_x.div_euclid(CW);
-    let cz0 = min_z.div_euclid(CW);
-    let cz1 = max_z.div_euclid(CW);
-    let cy_lo = (floor + 1).div_euclid(CH);
-    let cy_hi = (max_surf - TOP_GATE).div_euclid(CH);
-
-    let cell_cols: Vec<(i32, i32)> = (cx0..=cx1)
-        .flat_map(|cx| (cz0..=cz1).map(move |cz| (cx, cz)))
-        .collect();
-
-    let carved: Vec<(i32, i32, i32)> = cell_cols
-        .par_iter()
-        .flat_map_iter(|&(cx, cz)| {
-            let mut out: Vec<(i32, i32, i32)> = Vec::new();
-            let (wx0, wx1) = (cx * CW, cx * CW + CW);
-            let (wz0, wz1) = (cz * CW, cz * CW + CW);
-            // A cell's TOP corner plane is the next cell's BOTTOM plane: same four
-            // coordinates, so the same four values. Carrying it up the column halves the
-            // density evaluations - the dominant cost of cave generation - and cannot
-            // change a result, because it reuses values instead of recomputing them.
-            let mut b00 = gen.combined_density(wx0, cy_lo * CH, wz0);
-            let mut b10 = gen.combined_density(wx1, cy_lo * CH, wz0);
-            let mut b01 = gen.combined_density(wx0, cy_lo * CH, wz1);
-            let mut b11 = gen.combined_density(wx1, cy_lo * CH, wz1);
-            for cy in cy_lo..=cy_hi {
-                let (wy0, wy1) = (cy * CH, cy * CH + CH);
-                // 8 corners of the combined density (cheese/spaghetti/entrances/pillars + slides+squeeze).
-                // The wy0 plane was computed as the previous cell's wy1 plane.
-                let (n000, n100, n001, n101) = (b00, b10, b01, b11);
-                let n010 = gen.combined_density(wx0, wy1, wz0);
-                let n110 = gen.combined_density(wx1, wy1, wz0);
-                let n011 = gen.combined_density(wx0, wy1, wz1);
-                let n111 = gen.combined_density(wx1, wy1, wz1);
-                b00 = n010;
-                b10 = n110;
-                b01 = n011;
-                b11 = n111;
-                let by_lo = wy0.max(floor + 1);
-                let by_hi = (wy1 - 1).min(max_surf - TOP_GATE);
-                for by in by_lo..=by_hi {
-                    let fy = (by - wy0) as f64 / CH as f64;
-                    let xz00 = lerp(fy, n000, n010);
-                    let xz10 = lerp(fy, n100, n110);
-                    let xz01 = lerp(fy, n001, n011);
-                    let xz11 = lerp(fy, n101, n111);
-                    for bx in wx0.max(min_x)..wx1.min(max_x + 1) {
-                        let fx = (bx - wx0) as f64 / CW as f64;
-                        let z0v = lerp(fx, xz00, xz10);
-                        let z1v = lerp(fx, xz01, xz11);
-                        let ix = (bx - min_x) as usize;
-                        for bz in wz0.max(min_z)..wz1.min(max_z + 1) {
-                            let top = surf[ix * h + (bz - min_z) as usize] - TOP_GATE;
-                            if by > top {
-                                continue;
-                            }
-                            let fz = (bz - wz0) as f64 / CW as f64;
-                            let combined = lerp(fz, z0v, z1v);
-                            // Do NOT add per-block jitter to this threshold: the `squeeze`
-                            // clusters density so tightly near 0 that even a mean-zero ±0.005
-                            // perturbation flips a huge number of cells randomly, producing grainy
-                            // salt-and-pepper walls everywhere. Terracing on big caverns is a
-                            // separate problem needing a coherent isosurface warp, not noise here.
-                            // Carve iff min(combined, noodle) <= 0; noodle is only evaluated when
-                            // combined stays solid. Noodle keeps its 0 gate — the thin worms are the
-                            // CONNECTORS between cave systems, and trimming them fragments the
-                            // network (connectivity collapses to ~29%). Cave size is cut via the
-                            // cheese/carver-room shrinks instead, which preserve connectivity.
-                            let carve = combined <= CARVE_THRESHOLD
-                                || gen.noodle_density(bx, by, bz) <= 0.0;
-                            if carve {
-                                out.push((bx, by, bz));
-                            }
-                        }
-                    }
-                }
-            }
-            out
-        })
-        .collect();
+    // 2) the noise caves.
+    let carved = noise_cells(&gen, region, surf, floor);
 
     // 3) apply caves (noise + carvers) into rock, tracking every cave-air cell for the despeckle.
     let mut air: HashSet<i64> = HashSet::default();
@@ -352,9 +293,8 @@ pub fn carve_region(
     //    geodes/decoration treat them consistently with the rest of the cave network. `water_cells`
     //    is PURE water (no lava) — used below to tell a genuine water/lava boundary apart from lava
     //    simply touching more lava (which must NOT trigger the barrier).
-    let (feat_carved, water_cells) = water::carve_water_features(
-        editor, &air, &decor, seed, min_x, max_x, min_z, max_z, surf, h, CAVE_HOST, TOP_GATE,
-    );
+    let plan = water::plan(&shape, &decor, seed, region);
+    let (feat_carved, water_cells) = water::apply(editor, &plan, region, CAVE_HOST);
     air.extend(feat_carved);
     // union of every placed fluid cell (water + lava) — for the later passes' "don't place near
     // fluid" exclusions only; NOT used for the water/lava barrier check (that needs the type
@@ -435,7 +375,7 @@ pub fn carve_region(
             let (x, y, z) = unpack(a);
             for (nx, ny, nz) in neighbours(x, y, z) {
                 let np = pack(nx, ny, nz);
-                if supported.contains(&np) || air.contains(&np) {
+                if !region.contains(nx, nz) || supported.contains(&np) || air.contains(&np) {
                     continue;
                 }
                 let hv = (np as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40;
@@ -485,11 +425,108 @@ pub fn carve_region(
         &air,
         &basin_fluid,
         &water_cells,
+        &shape,
+        &plan,
+        region,
+    );
+}
+
+/// The noise caves over a region, via vanilla CELL INTERPOLATION (4×8×4 cells: sample the combined
+/// cheese/spaghetti/entrances/pillars density at 8 cell corners, trilerp per block — gives
+/// vanilla-sized smooth rooms instead of per-block-fat blobs). noodle is min'd in per-block at full
+/// res. Cells are on GLOBAL boundaries so tiles/regions stay seamless. ~16× fewer density evals than
+/// per-block. The floor sits on a section boundary, so cells line up with vanilla's after
+/// translation. `surf` is the region's surface, X-major. [`CaveShape`] answers the same question for
+/// one block at a time, with the same arithmetic.
+fn noise_cells(gen: &CaveGen, region: Rect, surf: &[i32], floor: i32) -> Vec<(i32, i32, i32)> {
+    let Rect {
         min_x,
         max_x,
         min_z,
         max_z,
-    );
+    } = region;
+    let h = (max_z - min_z + 1) as usize;
+    let max_surf = surf.iter().copied().fold(floor, i32::max);
+    let cx0 = min_x.div_euclid(CELL_W);
+    let cx1 = max_x.div_euclid(CELL_W);
+    let cz0 = min_z.div_euclid(CELL_W);
+    let cz1 = max_z.div_euclid(CELL_W);
+    let cy_lo = (floor + 1).div_euclid(CELL_H);
+    let cy_hi = (max_surf - TOP_GATE).div_euclid(CELL_H);
+
+    let cell_cols: Vec<(i32, i32)> = (cx0..=cx1)
+        .flat_map(|cx| (cz0..=cz1).map(move |cz| (cx, cz)))
+        .collect();
+
+    cell_cols
+        .par_iter()
+        .flat_map_iter(|&(cx, cz)| {
+            let mut out: Vec<(i32, i32, i32)> = Vec::new();
+            let (wx0, wx1) = (cx * CELL_W, cx * CELL_W + CELL_W);
+            let (wz0, wz1) = (cz * CELL_W, cz * CELL_W + CELL_W);
+            // A cell's TOP corner plane is the next cell's BOTTOM plane: same four
+            // coordinates, so the same four values. Carrying it up the column halves the
+            // density evaluations - the dominant cost of cave generation - and cannot
+            // change a result, because it reuses values instead of recomputing them.
+            let mut b00 = gen.combined_density(wx0, cy_lo * CELL_H, wz0);
+            let mut b10 = gen.combined_density(wx1, cy_lo * CELL_H, wz0);
+            let mut b01 = gen.combined_density(wx0, cy_lo * CELL_H, wz1);
+            let mut b11 = gen.combined_density(wx1, cy_lo * CELL_H, wz1);
+            for cy in cy_lo..=cy_hi {
+                let (wy0, wy1) = (cy * CELL_H, cy * CELL_H + CELL_H);
+                // 8 corners of the combined density (cheese/spaghetti/entrances/pillars + slides+squeeze).
+                // The wy0 plane was computed as the previous cell's wy1 plane.
+                let (n000, n100, n001, n101) = (b00, b10, b01, b11);
+                let n010 = gen.combined_density(wx0, wy1, wz0);
+                let n110 = gen.combined_density(wx1, wy1, wz0);
+                let n011 = gen.combined_density(wx0, wy1, wz1);
+                let n111 = gen.combined_density(wx1, wy1, wz1);
+                b00 = n010;
+                b10 = n110;
+                b01 = n011;
+                b11 = n111;
+                let by_lo = wy0.max(floor + 1);
+                let by_hi = (wy1 - 1).min(max_surf - TOP_GATE);
+                for by in by_lo..=by_hi {
+                    let fy = (by - wy0) as f64 / CELL_H as f64;
+                    let xz00 = lerp(fy, n000, n010);
+                    let xz10 = lerp(fy, n100, n110);
+                    let xz01 = lerp(fy, n001, n011);
+                    let xz11 = lerp(fy, n101, n111);
+                    for bx in wx0.max(min_x)..wx1.min(max_x + 1) {
+                        let fx = (bx - wx0) as f64 / CELL_W as f64;
+                        let z0v = lerp(fx, xz00, xz10);
+                        let z1v = lerp(fx, xz01, xz11);
+                        let ix = (bx - min_x) as usize;
+                        for bz in wz0.max(min_z)..wz1.min(max_z + 1) {
+                            let top = surf[ix * h + (bz - min_z) as usize] - TOP_GATE;
+                            if by > top {
+                                continue;
+                            }
+                            let fz = (bz - wz0) as f64 / CELL_W as f64;
+                            let combined = lerp(fz, z0v, z1v);
+                            // Do NOT add per-block jitter to this threshold: the `squeeze`
+                            // clusters density so tightly near 0 that even a mean-zero ±0.005
+                            // perturbation flips a huge number of cells randomly, producing grainy
+                            // salt-and-pepper walls everywhere. Terracing on big caverns is a
+                            // separate problem needing a coherent isosurface warp, not noise here.
+                            // Carve iff min(combined, noodle) <= 0; noodle is only evaluated when
+                            // combined stays solid. Noodle keeps its 0 gate — the thin worms are the
+                            // CONNECTORS between cave systems, and trimming them fragments the
+                            // network (connectivity collapses to ~29%). Cave size is cut via the
+                            // cheese/carver-room shrinks instead, which preserve connectivity.
+                            let carve = combined <= CARVE_THRESHOLD
+                                || gen.noodle_density(bx, by, bz) <= 0.0;
+                            if carve {
+                                out.push((bx, by, bz));
+                            }
+                        }
+                    }
+                }
+            }
+            out
+        })
+        .collect()
 }
 
 /// Seal floating water/lava: a fluid block with cave air directly below has no support and looks like
@@ -681,6 +718,164 @@ mod tests {
         }
     }
 
+    /// Uneven synthetic terrain for the pure planning tests.
+    fn rolling_surface(x: i32, z: i32) -> i32 {
+        60 + (x * 7 + z * 13).rem_euclid(31)
+    }
+
+    fn vanilla_bounds() {
+        use crate::world_editor::{
+            set_terrain_floor_y, set_world_bounds, DEFAULT_MAX_Y, DEFAULT_MIN_Y,
+        };
+        set_world_bounds(DEFAULT_MIN_Y, DEFAULT_MAX_Y);
+        set_terrain_floor_y(DEFAULT_MIN_Y + 2);
+    }
+
+    /// `CaveShape` must answer exactly what the carve does (noise caves plus carvers), or features
+    /// planned against it would not line up with the caves they meet.
+    #[test]
+    fn the_shape_is_the_carve() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        vanilla_bounds();
+        let region = Rect {
+            min_x: -12,
+            max_x: 11,
+            min_z: 3,
+            max_z: 26,
+        };
+        let gen = CaveGen::new(SEED);
+        let shape = CaveShape::new(&gen, SEED, region.grow(300), region, rolling_surface);
+        let floor = terrain_floor_y();
+        let mut surf = Vec::new();
+        for x in region.min_x..=region.max_x {
+            for z in region.min_z..=region.max_z {
+                surf.push(rolling_surface(x, z));
+            }
+        }
+        let mut carve: std::collections::HashSet<(i32, i32, i32)> =
+            noise_cells(&gen, region, &surf, floor)
+                .into_iter()
+                .collect();
+        for (x, y, z) in
+            carver::carve_positions(SEED, region.min_x, region.max_x, region.min_z, region.max_z)
+        {
+            if y > floor && y <= rolling_surface(x, z) - TOP_GATE {
+                carve.insert((x, y, z));
+            }
+        }
+        assert!(!carve.is_empty());
+        for x in region.min_x..=region.max_x {
+            for z in region.min_z..=region.max_z {
+                for y in floor..=rolling_surface(x, z) {
+                    assert_eq!(
+                        shape.is_cave(x, y, z),
+                        carve.contains(&(x, y, z)),
+                        "({x}, {y}, {z})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A pool, river or geode near a tile edge is planned by both tiles. Each must plan exactly
+    /// what one pass over the whole world plans for its side, or tiled worlds cut these features
+    /// at every seam.
+    #[test]
+    fn features_do_not_depend_on_the_tile_split() {
+        use decoration::GeodeWrite;
+        use std::collections::BTreeSet;
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        vanilla_bounds();
+        let world = Rect {
+            min_x: 0,
+            max_x: 511,
+            min_z: 0,
+            max_z: 383,
+        };
+        let gen = CaveGen::new(SEED);
+        let decor = Decor::new(SEED, BiomeAmounts::default());
+        let plan_for = |region: Rect| {
+            let shape = CaveShape::new(&gen, SEED, world, region, rolling_surface);
+            let water = water::plan(&shape, &decor, SEED, region);
+            let geodes = decoration::plan_geodes(decor.seed, &shape, &water, region);
+            (water, geodes)
+        };
+        let within = |cells: &HashSet<i64>, part: Rect| -> BTreeSet<i64> {
+            cells
+                .iter()
+                .copied()
+                .filter(|&p| {
+                    let (x, _, z) = unpack(p);
+                    part.contains(x, z)
+                })
+                .collect()
+        };
+        let geode_writes = |writes: &[GeodeWrite], part: Rect| -> Vec<GeodeWrite> {
+            writes
+                .iter()
+                .copied()
+                .filter(|w| match *w {
+                    GeodeWrite::Block((x, _, z), _) => part.contains(x, z),
+                    GeodeWrite::Cluster {
+                        budding: (x, _, z), ..
+                    } => part.contains(x, z),
+                })
+                .collect()
+        };
+
+        let (whole_water, whole_geodes) = plan_for(world);
+        // Split through a geode and through a pool or river, so the seams really cut something.
+        let geode_x = whole_geodes
+            .iter()
+            .find_map(|w| match *w {
+                GeodeWrite::Block((x, _, _), AIR) => Some(x),
+                _ => None,
+            })
+            .expect("the test world holds no geode");
+        let mut water_xs: Vec<i32> = whole_water.water.iter().map(|&p| unpack(p).0).collect();
+        water_xs.sort_unstable();
+        let water_x = *water_xs
+            .get(water_xs.len() / 2)
+            .expect("the test world holds no water");
+
+        let geode_xs: BTreeSet<i32> = whole_geodes
+            .iter()
+            .filter_map(|w| match *w {
+                GeodeWrite::Block((x, _, _), _) => Some(x),
+                _ => None,
+            })
+            .collect();
+        assert!(geode_xs.contains(&(geode_x - 1)) && geode_xs.contains(&geode_x));
+        assert!(water_xs.contains(&(water_x - 1)) && water_xs.contains(&water_x));
+
+        for split in [geode_x, water_x] {
+            let left = Rect {
+                max_x: split - 1,
+                ..world
+            };
+            let right = Rect {
+                min_x: split,
+                ..world
+            };
+            for part in [left, right] {
+                let (water, geodes) = plan_for(part);
+                assert_eq!(
+                    within(&water.carved, part),
+                    within(&whole_water.carved, part)
+                );
+                assert_eq!(within(&water.water, part), within(&whole_water.water, part));
+                assert_eq!(
+                    geode_writes(&geodes, part),
+                    geode_writes(&whole_geodes, part)
+                );
+            }
+        }
+    }
+
     const SIDE: i32 = 32;
 
     fn surface(x: i32, z: i32) -> i32 {
@@ -704,7 +899,7 @@ mod tests {
             }
         }
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4", "--caves"]);
-        carve_region(&mut editor, &args, 0, SIDE - 1, 0, SIDE - 1);
+        carve_region(&mut editor, &args, xzbbox, 0, SIDE - 1, 0, SIDE - 1);
         editor
     }
 

@@ -1096,6 +1096,7 @@ pub fn generate_world_with_options(
                         crate::caves::carve_region(
                             &mut tile_editor,
                             args,
+                            &xzbbox,
                             g_min_x,
                             g_max_x,
                             g_min_z,

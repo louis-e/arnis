@@ -6,13 +6,15 @@
 
 use super::noise::NormalNoise;
 use super::rng::XoroRandom;
+use super::shape::{CaveShape, Rect};
+use super::water::WaterPlan;
 use crate::block_definitions::*;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 // FnvHashSet: std seeds its hasher randomly per process, so iterating one to
 // apply world edits gives a different write order -- and a different world --
 // every run. FNV is deterministic. See the note in caves/mod.rs.
-use fnv::FnvHashSet as HashSet;
+use fnv::{FnvHashMap, FnvHashSet as HashSet};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -267,9 +269,10 @@ impl Decor {
     }
 }
 
-/// Decorate all cave-air cells in the tile. `air` is the carved-air set (packed via super::pack).
+/// Decorate all cave-air cells in the region. `air` is the carved-air set (packed via super::pack).
 /// `water_cells` is the PURE pool/river water set — coral reef decoration converts pool floors that
-/// land inside a coral blotch.
+/// land inside a coral blotch. Nothing is written outside `region`: a block placed in a tile's halo
+/// would land in the neighbouring tile's caves when the tiles merge.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn decorate(
     ed: &mut WorldEditor,
@@ -277,10 +280,9 @@ pub(super) fn decorate(
     air: &HashSet<i64>,
     basin_fluid: &HashSet<i64>,
     water_cells: &HashSet<i64>,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
+    shape: &CaveShape,
+    plan: &WaterPlan,
+    region: Rect,
 ) {
     let seed = d.seed;
 
@@ -288,7 +290,7 @@ pub(super) fn decorate(
     let cells: Vec<(i32, i32, i32)> = air
         .iter()
         .map(|&p| super::unpack(p))
-        .filter(|&(x, _, z)| x >= min_x && x <= max_x && z >= min_z && z <= max_z)
+        .filter(|&(x, _, z)| region.contains(x, z))
         .collect();
 
     for (x, y, z) in cells {
@@ -438,7 +440,7 @@ pub(super) fn decorate(
                         }
                     }
                     if rare_chance(x, y, z, seed ^ 0x54AF, 240) {
-                        build_giant_mushroom(ed, air, x, y, z, seed);
+                        build_giant_mushroom(ed, air, region, x, y, z, seed);
                     }
                 } else if above && chance(x, y, z, seed ^ 0x54B0, 35) {
                     // sparse hanging vines give the fungal grotto some drape
@@ -610,7 +612,7 @@ pub(super) fn decorate(
     // seagrass. Writes into WATER cells only (whitelist), so dry caves are never touched.
     for &p in water_cells {
         let (x, y, z) = super::unpack(p);
-        if x < min_x || x > max_x || z < min_z || z > max_z {
+        if !region.contains(x, z) {
             continue;
         }
         if !d.coral_zone(x, z) {
@@ -684,7 +686,7 @@ pub(super) fn decorate(
     }
 
     // amethyst geodes — rare, per ~chunk, embedded in rock (independent of caves).
-    place_geodes(ed, seed, air, min_x, max_x, min_z, max_z);
+    place_geodes(ed, seed, shape, plan, region);
 
     // NO springs/drips of any kind: water exists ONLY as rivers and pool caves. Isolated
     // single-source trickles invariably read as bugs — do not reintroduce them.
@@ -759,11 +761,18 @@ fn place_clay_pool(ed: &mut WorldEditor, air: &HashSet<i64>, x: i32, y: i32, z: 
 fn build_giant_mushroom(
     ed: &mut WorldEditor,
     air: &HashSet<i64>,
+    region: Rect,
     x: i32,
     y: i32,
     z: i32,
     seed: u64,
 ) {
+    // The cap reaches two blocks out, past the region's edge near a tile seam.
+    let cap = |ed: &mut WorldEditor, b: Block, bx: i32, by: i32, bz: i32| {
+        if region.contains(bx, bz) {
+            put(ed, b, bx, by, bz, None);
+        }
+    };
     let stem_h = 3 + (hash(x, y, z, seed ^ 0x9145) % 4) as i32; // 3..6
                                                                 // need at least stem + 1 cap row of air or it looks squashed
     for i in 0..=stem_h {
@@ -780,14 +789,14 @@ fn build_giant_mushroom(
         // dome: 3x3 crown on top, 5x5 ring (minus corners) one below the crown top
         for dx in -1..=1 {
             for dz in -1..=1 {
-                put(ed, RED_MUSHROOM_BLOCK, x + dx, cap_y, z + dz, None);
+                cap(ed, RED_MUSHROOM_BLOCK, x + dx, cap_y, z + dz);
             }
         }
         for dx in -2i32..=2 {
             for dz in -2i32..=2 {
                 let rim = dx.abs() == 2 || dz.abs() == 2;
                 if rim && !(dx.abs() == 2 && dz.abs() == 2) {
-                    put(ed, RED_MUSHROOM_BLOCK, x + dx, cap_y - 1, z + dz, None);
+                    cap(ed, RED_MUSHROOM_BLOCK, x + dx, cap_y - 1, z + dz);
                 }
             }
         }
@@ -798,7 +807,7 @@ fn build_giant_mushroom(
                 if dx.abs() == 2 && dz.abs() == 2 {
                     continue;
                 }
-                put(ed, BROWN_MUSHROOM_BLOCK, x + dx, cap_y, z + dz, None);
+                cap(ed, BROWN_MUSHROOM_BLOCK, x + dx, cap_y, z + dz);
             }
         }
         if hash(x, cap_y, z, seed ^ 0x9147).is_multiple_of(4) {
@@ -853,29 +862,75 @@ fn grow_dripstone(
 
 /// amethyst geode: layered sphere — smooth_basalt outer shell, calcite, amethyst_block inner shell
 /// (with budding_amethyst), hollow center lined with amethyst_cluster crystals pointing inward.
-/// Rare (~1/110 chunks) and ONLY placed fully buried in solid rock (never floating/exposed; clears
+/// Rare (~1/80 chunks) and ONLY placed with its center in solid rock (never floating/exposed; clears
 /// any ore in its volume so nothing shows inside). Where a PRE-EXISTING cave passage crosses the
 /// shell, that cell is left as cave air instead of being walled off — so a tunnel that grazes a
 /// geode shows a real cut cross-section into it, rather than sealing the passage shut.
+///
+/// Planned against [`CaveShape`] and the water plan, for every geode that can reach the region, so a
+/// geode on a tile seam comes out whole: each tile writes its own part of the same sphere.
 fn place_geodes(
     ed: &mut WorldEditor,
     seed: u64,
-    air: &HashSet<i64>,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
+    shape: &CaveShape,
+    plan: &WaterPlan,
+    region: Rect,
 ) {
-    let cx0 = min_x.div_euclid(16);
-    let cx1 = max_x.div_euclid(16);
-    let cz0 = min_z.div_euclid(16);
-    let cz1 = max_z.div_euclid(16);
+    for write in plan_geodes(seed, shape, plan, region) {
+        match write {
+            GeodeWrite::Block((x, y, z), block) => geode_set(ed, block, x, y, z),
+            GeodeWrite::Cluster { budding, center } => {
+                grow_cluster(ed, region, center, budding, seed)
+            }
+        }
+    }
+}
+
+/// One step of laying out the geodes, in the order they apply.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum GeodeWrite {
+    /// Set a block inside the region, whatever was there (bedrock aside).
+    Block((i32, i32, i32), Block),
+    /// Try to grow a crystal off a budding block toward its geode's center.
+    Cluster {
+        budding: (i32, i32, i32),
+        center: (i32, i32, i32),
+    },
+}
+
+/// The geodes that reach `region`, as the writes that lay them out there.
+pub(super) fn plan_geodes(
+    seed: u64,
+    shape: &CaveShape,
+    plan: &WaterPlan,
+    region: Rect,
+) -> Vec<GeodeWrite> {
+    let mut writes: Vec<GeodeWrite> = Vec::new();
     let r_inner = 4.2_f64;
     let r_amethyst = 5.0_f64;
     let r_calcite = 6.0_f64;
     let r_basalt = 6.7_f64;
     let ri = r_basalt.ceil() as i32;
+    let world = shape.world();
+    // What earlier geodes of this pass left at a block: true for shell, false for air.
+    let mut overlay: FnvHashMap<i64, bool> = FnvHashMap::default();
+    // A block the carve or a water feature opened (fluids included) — the geode leaves it open.
+    let opened = |overlay: &FnvHashMap<i64, bool>, x: i32, y: i32, z: i32| match overlay
+        .get(&super::pack(x, y, z))
+    {
+        Some(&shell) => !shell,
+        None => shape.is_cave(x, y, z) || plan.carved.contains(&super::pack(x, y, z)),
+    };
+    // A block standing there, rock or fluid.
+    let standing = |overlay: &FnvHashMap<i64, bool>, x: i32, y: i32, z: i32| match overlay
+        .get(&super::pack(x, y, z))
+    {
+        Some(&shell) => shell,
+        None => plan.solid(shape, x, y, z),
+    };
 
+    // A geode reaches `ri` blocks from its center, and its support sweep looks one further.
+    let (cx0, cx1, cz0, cz1) = region.grow(ri + 1).clip(world).chunks();
     for cx in cx0..=cx1 {
         for cz in cz0..=cz1 {
             if !hash(cx, 0, cz, seed ^ 0x006E_0DE5).is_multiple_of(80) {
@@ -884,26 +939,25 @@ fn place_geodes(
             let gx = cx * 16 + (hash(cx, 1, cz, seed) % 16) as i32;
             let gz = cz * 16 + (hash(cx, 2, cz, seed) % 16) as i32;
             let gy = super::vy(-54) + (hash(cx, 3, cz, seed) % 36) as i32; // vanilla y ~ -54..-18
-            if gx < min_x || gx > max_x || gz < min_z || gz > max_z {
+            if !world.contains(gx, gz) {
                 continue;
             }
             // must be FULLY BELOW the surface (so it never floats in the sky / pokes out of the ground)
             // and its center must sit in solid rock (not mid-cave). Intersecting a cave is fine —
-            // vanilla geodes do too.
-            if gy + ri + 2 >= ed.get_ground_level(gx, gz) {
+            // vanilla geodes do too. The center test ignores other geodes, so whether a geode exists
+            // never depends on one a tile may not have planned.
+            if gy + ri + 2 >= shape.surf(gx, gz) || !plan.solid(shape, gx, gy, gz) {
                 continue;
             }
-            if !ed.block_exists_absolute(gx, gy, gz) {
-                continue; // center in open air → skip
-            }
 
-            // pass 1: build the layered sphere (overwrite rock/ore/fluid — protect only bedrock);
+            // pass 1: lay out the layered sphere (overwrite rock/ore/fluid — protect only bedrock);
             //         hollow center carved to air. SHELL cells (outside r_inner) that were ALREADY
-            //         cave air are left untouched (skipped) so a pre-existing passage stays open —
-            //         tracked in `written_shell` so pass 1.5 can clean up any resulting floating nub.
+            //         open are left untouched (skipped) so a pre-existing passage stays open.
             //         Collect budding cells for the crystal pass.
-            let mut buddings: Vec<(i32, i32, i32)> = Vec::new();
+            let mut hollow: HashSet<(i32, i32, i32)> = HashSet::default();
+            let mut shell: Vec<((i32, i32, i32), Block)> = Vec::new();
             let mut written_shell: HashSet<(i32, i32, i32)> = HashSet::default();
+            let mut buddings: Vec<(i32, i32, i32)> = Vec::new();
             for dx in -ri..=ri {
                 for dy in -ri..=ri {
                     for dz in -ri..=ri {
@@ -912,61 +966,77 @@ fn place_geodes(
                             continue;
                         }
                         let (px, py, pz) = (gx + dx, gy + dy, gz + dz);
-                        if dist <= r_inner {
-                            geode_set(ed, AIR, px, py, pz); // hollow (clears ore/rock)
-                        } else if is_air(air, ed, px, py, pz) {
+                        let block = if dist <= r_inner {
+                            hollow.insert((px, py, pz));
+                            continue;
+                        } else if opened(&overlay, px, py, pz) {
                             continue; // pre-existing cave passage crossing the shell — leave it open
                         } else if dist <= r_amethyst {
                             let facing_hollow = dist <= r_inner + 1.0;
                             if facing_hollow && hash(px, py, pz, seed ^ 0xB0DD) % 100 < 30 {
-                                geode_set(ed, BUDDING_AMETHYST, px, py, pz);
                                 buddings.push((px, py, pz));
+                                BUDDING_AMETHYST
                             } else {
-                                geode_set(ed, AMETHYST_BLOCK, px, py, pz);
+                                AMETHYST_BLOCK
                             }
-                            written_shell.insert((px, py, pz));
                         } else if dist <= r_calcite {
-                            geode_set(ed, CALCITE, px, py, pz);
-                            written_shell.insert((px, py, pz));
+                            CALCITE
                         } else {
-                            geode_set(ed, SMOOTH_BASALT, px, py, pz);
-                            written_shell.insert((px, py, pz));
-                        }
+                            SMOOTH_BASALT
+                        };
+                        shell.push(((px, py, pz), block));
+                        written_shell.insert((px, py, pz));
                     }
                 }
             }
             // pass 1.5: SUPPORT SWEEP — a tunnel grazing the shell at a shallow angle only clips PART
             // of a thin shell ring (basalt/calcite/amethyst are ~0.7-1.0 block thick radially, thinner
             // than a typical 2-4-block tunnel), which can leave 1-2-block floating fragments where the
-            // skip above removed their only neighbors. Revert any written_shell cell with ZERO real
-            // 6-connected support (neither original host rock outside the geode nor another surviving
-            // written_shell cell) back to air — same technique as the despeckle pass in mod.rs.
-            let mut reverted: HashSet<(i32, i32, i32)> = HashSet::default();
-            for &(px, py, pz) in &written_shell {
-                let supported = [
-                    (px + 1, py, pz),
-                    (px - 1, py, pz),
-                    (px, py + 1, pz),
-                    (px, py - 1, pz),
-                    (px, py, pz + 1),
-                    (px, py, pz - 1),
-                ]
+            // skip above removed their only neighbors. Revert any shell cell with ZERO real
+            // 6-connected support (neither standing host rock outside the geode nor another shell
+            // cell) back to air — same technique as the despeckle pass in mod.rs.
+            let reverted: HashSet<(i32, i32, i32)> = written_shell
                 .iter()
-                .any(|n| written_shell.contains(n) || ed.block_exists_absolute(n.0, n.1, n.2));
-                if !supported {
-                    geode_set(ed, AIR, px, py, pz);
-                    reverted.insert((px, py, pz));
+                .copied()
+                .filter(|&(px, py, pz)| {
+                    !super::neighbours(px, py, pz).iter().any(|&n| {
+                        written_shell.contains(&n)
+                            || (!hollow.contains(&n) && standing(&overlay, n.0, n.1, n.2))
+                    })
+                })
+                .collect();
+
+            // The hollow is sorted so the writes do not depend on the set's iteration order.
+            let mut hollow: Vec<(i32, i32, i32)> = hollow.into_iter().collect();
+            hollow.sort_unstable();
+            for &(px, py, pz) in &hollow {
+                overlay.insert(super::pack(px, py, pz), false);
+                if region.contains(px, pz) {
+                    writes.push(GeodeWrite::Block((px, py, pz), AIR)); // hollow (clears ore/rock)
+                }
+            }
+            for &((px, py, pz), block) in &shell {
+                let kept = !reverted.contains(&(px, py, pz));
+                overlay.insert(super::pack(px, py, pz), kept);
+                if region.contains(px, pz) {
+                    writes.push(GeodeWrite::Block(
+                        (px, py, pz),
+                        if kept { block } else { AIR },
+                    ));
                 }
             }
             // pass 2: grow amethyst clusters off the SURVIVING budding blocks into the hollow.
-            for (bx, by, bz) in buddings {
-                if reverted.contains(&(bx, by, bz)) {
-                    continue;
+            for budding in buddings {
+                if !reverted.contains(&budding) {
+                    writes.push(GeodeWrite::Cluster {
+                        budding,
+                        center: (gx, gy, gz),
+                    });
                 }
-                grow_cluster(ed, gx, gy, gz, bx, by, bz, seed);
             }
         }
     }
+    writes
 }
 
 /// overwrite any block (except bedrock) — used for the geode shells/hollow so they carve into solid
@@ -984,15 +1054,11 @@ fn rare_chance(x: i32, y: i32, z: i32, seed: u64, denom: u64) -> bool {
 
 /// place an amethyst_cluster in the hollow cell adjacent to a budding block, facing toward the geode
 /// center (so it grows off the wall into the hollow, like vanilla).
-#[allow(clippy::too_many_arguments)]
 fn grow_cluster(
     ed: &mut WorldEditor,
-    gx: i32,
-    gy: i32,
-    gz: i32,
-    bx: i32,
-    by: i32,
-    bz: i32,
+    region: Rect,
+    (gx, gy, gz): (i32, i32, i32),
+    (bx, by, bz): (i32, i32, i32),
     seed: u64,
 ) {
     if hash(bx, by, bz, seed ^ 0xC1A5) % 100 >= 70 {
@@ -1017,6 +1083,9 @@ fn grow_cluster(
             bz + dz.signum(),
         )
     };
+    if !region.contains(nx, nz) {
+        return;
+    }
     put(
         ed,
         AMETHYST_CLUSTER,

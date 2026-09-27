@@ -4,15 +4,16 @@
 //!
 //! Terrain-decoupled + vanilla-LOOK (not seed-exact): each origin chunk gets a deterministic,
 //! seam-stable RNG (same (cx,cz) → same result across tiles), and we reproduce vanilla's exact DRAW
-//! ORDER + geometry. Carve positions are produced as pure geometry (parallel) in vanilla
-//! coordinates, translated onto this world's floor, then applied by the caller against the real
-//! world (rock-only, below the surface seal).
+//! ORDER + geometry. The walks produce ellipsoids in vanilla coordinates, pure geometry built in
+//! parallel; `carve_positions` turns them into cells translated onto this world's floor, which the
+//! caller applies against the real world (rock-only, below the surface seal).
 
 use super::rng::XoroRandom;
 use rayon::prelude::*;
 use std::f64::consts::PI;
 
-const CAVE_RANGE_CHUNKS: i32 = 8; // origin-chunk margin (vanilla reach = getRange*2-1 = 7)
+/// Origin-chunk margin around a region (vanilla reach = getRange*2-1 = 7).
+pub(super) const CAVE_RANGE_CHUNKS: i32 = 8;
 const BRANCH_BUDGET: i32 = 112; // SectionPos.sectionToBlockCoord(range*2-1)
 const MIN_Y_CARVE: i32 = super::VANILLA_FLOOR;
 
@@ -22,6 +23,135 @@ struct Cfg {
     probability: f32,
     y_min: i32,
     y_max: i32,
+}
+
+const CAVES: [Cfg; 2] = [
+    Cfg {
+        salt: 0x0CA5_0CA5,
+        probability: 0.075,
+        y_min: -56,
+        y_max: 180,
+    }, // cave
+    Cfg {
+        salt: 0xE547_E547,
+        probability: 0.025,
+        y_min: -56,
+        y_max: 47,
+    }, // cave_extra_underground
+];
+
+/// One carve step: an ellipsoid of air, in vanilla coordinates.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Ellipsoid {
+    x: f64,
+    y: f64,
+    z: f64,
+    horiz_radius: f64,
+    vert_radius: f64,
+    floor_level: f64,
+}
+
+impl Ellipsoid {
+    /// Inclusive block span on X.
+    pub(super) fn x_span(&self) -> (i32, i32) {
+        (
+            (self.x - self.horiz_radius).floor() as i32,
+            (self.x + self.horiz_radius).floor() as i32,
+        )
+    }
+
+    /// Inclusive block span on Z.
+    pub(super) fn z_span(&self) -> (i32, i32) {
+        (
+            (self.z - self.horiz_radius).floor() as i32,
+            (self.z + self.horiz_radius).floor() as i32,
+        )
+    }
+
+    /// Carved rows as `(exclusive bottom, inclusive top)`.
+    fn y_span(&self) -> (i32, i32) {
+        (
+            ((self.y - self.vert_radius).floor() as i32 - 1).max(MIN_Y_CARVE + 1),
+            (self.y + self.vert_radius).floor() as i32 + 1,
+        )
+    }
+
+    /// Push every block the ellipsoid carves inside the X/Z rect.
+    fn cells(
+        &self,
+        min_x: i32,
+        max_x: i32,
+        min_z: i32,
+        max_z: i32,
+        out: &mut Vec<(i32, i32, i32)>,
+    ) {
+        let (min_bx, max_bx) = self.x_span();
+        let (min_bz, max_bz) = self.z_span();
+        let (min_by, max_by) = self.y_span();
+        for bx in min_bx.max(min_x)..=max_bx.min(max_x) {
+            let ndx = (bx as f64 + 0.5 - self.x) / self.horiz_radius;
+            if ndx * ndx >= 1.0 {
+                continue;
+            }
+            for bz in min_bz.max(min_z)..=max_bz.min(max_z) {
+                let ndz = (bz as f64 + 0.5 - self.z) / self.horiz_radius;
+                if ndx * ndx + ndz * ndz >= 1.0 {
+                    continue;
+                }
+                let mut by = max_by;
+                while by > min_by {
+                    let ndy = (by as f64 - 0.5 - self.y) / self.vert_radius;
+                    // Do not add per-block jitter to this boundary either (see the matching note on
+                    // the noise-carve threshold in mod.rs): it reads as grainy noise on every tunnel
+                    // wall. Keep carver walls as clean ellipsoid sweeps.
+                    if ndy > self.floor_level && ndx * ndx + ndy * ndy + ndz * ndz < 1.0 {
+                        out.push((bx, by, bz));
+                    }
+                    by -= 1;
+                }
+            }
+        }
+    }
+
+    /// Whether the ellipsoid carves one block (`by` in vanilla coordinates). The same arithmetic
+    /// as `cells`, so the two always agree.
+    pub(super) fn contains(&self, bx: i32, by: i32, bz: i32) -> bool {
+        let (min_bx, max_bx) = self.x_span();
+        let (min_bz, max_bz) = self.z_span();
+        let (min_by, max_by) = self.y_span();
+        if bx < min_bx || bx > max_bx || bz < min_bz || bz > max_bz || by <= min_by || by > max_by {
+            return false;
+        }
+        let ndx = (bx as f64 + 0.5 - self.x) / self.horiz_radius;
+        if ndx * ndx >= 1.0 {
+            return false;
+        }
+        let ndz = (bz as f64 + 0.5 - self.z) / self.horiz_radius;
+        if ndx * ndx + ndz * ndz >= 1.0 {
+            return false;
+        }
+        let ndy = (by as f64 - 0.5 - self.y) / self.vert_radius;
+        ndy > self.floor_level && ndx * ndx + ndy * ndy + ndz * ndz < 1.0
+    }
+}
+
+/// Every ellipsoid carved from the origin chunks `cx0..=cx1` × `cz0..=cz1`. Pure (no world
+/// access), so it runs in parallel; the order is fixed by the chunk order.
+pub(super) fn ellipsoids(seed: i64, cx0: i32, cx1: i32, cz0: i32, cz1: i32) -> Vec<Ellipsoid> {
+    let chunks: Vec<(i32, i32)> = (cx0..=cx1)
+        .flat_map(|cx| (cz0..=cz1).map(move |cz| (cx, cz)))
+        .collect();
+    chunks
+        .par_iter()
+        .flat_map_iter(|&(cx, cz)| {
+            let mut out: Vec<Ellipsoid> = Vec::new();
+            for cfg in &CAVES {
+                cave_chunk(seed, cfg, cx, cz, &mut out);
+            }
+            canyon_chunk(seed, cx, cz, &mut out);
+            out
+        })
+        .collect()
 }
 
 /// Produce all carver AIR positions over the block rect, deduped. Pure (no world access) so it runs
@@ -34,37 +164,18 @@ pub fn carve_positions(
     min_z: i32,
     max_z: i32,
 ) -> Vec<(i32, i32, i32)> {
-    let caves = [
-        Cfg {
-            salt: 0x0CA5_0CA5,
-            probability: 0.075,
-            y_min: -56,
-            y_max: 180,
-        }, // cave
-        Cfg {
-            salt: 0xE547_E547,
-            probability: 0.025,
-            y_min: -56,
-            y_max: 47,
-        }, // cave_extra_underground
-    ];
-    let cx0 = min_x.div_euclid(16) - CAVE_RANGE_CHUNKS;
-    let cx1 = max_x.div_euclid(16) + CAVE_RANGE_CHUNKS;
-    let cz0 = min_z.div_euclid(16) - CAVE_RANGE_CHUNKS;
-    let cz1 = max_z.div_euclid(16) + CAVE_RANGE_CHUNKS;
-
-    let chunks: Vec<(i32, i32)> = (cx0..=cx1)
-        .flat_map(|cx| (cz0..=cz1).map(move |cz| (cx, cz)))
-        .collect();
-
-    let mut out: Vec<(i32, i32, i32)> = chunks
+    let ells = ellipsoids(
+        seed,
+        min_x.div_euclid(16) - CAVE_RANGE_CHUNKS,
+        max_x.div_euclid(16) + CAVE_RANGE_CHUNKS,
+        min_z.div_euclid(16) - CAVE_RANGE_CHUNKS,
+        max_z.div_euclid(16) + CAVE_RANGE_CHUNKS,
+    );
+    let mut out: Vec<(i32, i32, i32)> = ells
         .par_iter()
-        .flat_map_iter(|&(cx, cz)| {
+        .flat_map_iter(|e| {
             let mut pts: Vec<(i32, i32, i32)> = Vec::new();
-            for cfg in &caves {
-                cave_chunk(seed, cfg, cx, cz, min_x, max_x, min_z, max_z, &mut pts);
-            }
-            canyon_chunk(seed, cx, cz, min_x, max_x, min_z, max_z, &mut pts);
+            e.cells(min_x, max_x, min_z, max_z, &mut pts);
             pts
         })
         .collect();
@@ -88,18 +199,7 @@ fn chunk_rng(seed: i64, cx: i32, cz: i32, salt: i64) -> XoroRandom {
 }
 
 // ---- cave + cave_extra (round tunnels) ----
-#[allow(clippy::too_many_arguments)]
-fn cave_chunk(
-    seed: i64,
-    cfg: &Cfg,
-    cx: i32,
-    cz: i32,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    out: &mut Vec<(i32, i32, i32)>,
-) {
+fn cave_chunk(seed: i64, cfg: &Cfg, cx: i32, cz: i32, out: &mut Vec<Ellipsoid>) {
     let mut r = chunk_rng(seed, cx, cz, cfg.salt);
     if r.next_float() > cfg.probability {
         return;
@@ -123,21 +223,14 @@ fn cave_chunk(
             let y_scale = 0.1 + r.next_float() as f64 * 0.8;
             let f = 1.0 + r.next_float() as f64 * 2.0; // room radius 1..3 (vanilla rolls 1..7; capped to keep rooms moderate)
             let d = 1.5 + f;
-            carve_ellipsoid(
-                ox as f64 + 1.0,
-                oy as f64,
-                oz as f64,
-                d,
-                d * y_scale,
+            out.push(Ellipsoid {
+                x: ox as f64 + 1.0,
+                y: oy as f64,
+                z: oz as f64,
+                horiz_radius: d,
+                vert_radius: d * y_scale,
                 floor_level,
-                cx,
-                cz,
-                min_x,
-                max_x,
-                min_z,
-                max_z,
-                out,
-            );
+            });
             tunnels += r.next_int(4);
         }
         for _ in 0..tunnels {
@@ -162,10 +255,6 @@ fn cave_chunk(
                 floor_level,
                 cx,
                 cz,
-                min_x,
-                max_x,
-                min_z,
-                max_z,
                 out,
             );
         }
@@ -200,11 +289,7 @@ fn create_tunnel(
     floor_level: f64,
     cx: i32,
     cz: i32,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    out: &mut Vec<(i32, i32, i32)>,
+    out: &mut Vec<Ellipsoid>,
 ) {
     let mut r = XoroRandom::from_seed(tseed);
     let branch_point = r.next_int(branch_count / 2) + branch_count / 4;
@@ -249,10 +334,6 @@ fn create_tunnel(
                 floor_level,
                 cx,
                 cz,
-                min_x,
-                max_x,
-                min_z,
-                max_z,
                 out,
             );
             create_tunnel(
@@ -271,10 +352,6 @@ fn create_tunnel(
                 floor_level,
                 cx,
                 cz,
-                min_x,
-                max_x,
-                min_z,
-                max_z,
                 out,
             );
             return;
@@ -283,21 +360,14 @@ fn create_tunnel(
             if !can_reach(cx, cz, x, z, step, branch_count, thickness) {
                 return;
             }
-            carve_ellipsoid(
+            out.push(Ellipsoid {
                 x,
                 y,
                 z,
-                d * h_mult,
-                d1 * v_mult,
+                horiz_radius: d * h_mult,
+                vert_radius: d1 * v_mult,
                 floor_level,
-                cx,
-                cz,
-                min_x,
-                max_x,
-                min_z,
-                max_z,
-                out,
-            );
+            });
         }
     }
 }
@@ -320,71 +390,8 @@ fn can_reach(
     dx * dx + dz * dz - remaining * remaining <= reach * reach
 }
 
-#[allow(clippy::too_many_arguments)]
-fn carve_ellipsoid(
-    x: f64,
-    y: f64,
-    z: f64,
-    horiz_radius: f64,
-    vert_radius: f64,
-    floor_level: f64,
-    _cx: i32,
-    _cz: i32,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    out: &mut Vec<(i32, i32, i32)>,
-) {
-    let min_bx = (x - horiz_radius).floor() as i32;
-    let max_bx = (x + horiz_radius).floor() as i32;
-    let min_by = ((y - vert_radius).floor() as i32 - 1).max(MIN_Y_CARVE + 1);
-    let max_by = (y + vert_radius).floor() as i32 + 1;
-    let min_bz = (z - horiz_radius).floor() as i32;
-    let max_bz = (z + horiz_radius).floor() as i32;
-    for bx in min_bx..=max_bx {
-        if bx < min_x || bx > max_x {
-            continue;
-        }
-        let ndx = (bx as f64 + 0.5 - x) / horiz_radius;
-        if ndx * ndx >= 1.0 {
-            continue;
-        }
-        for bz in min_bz..=max_bz {
-            if bz < min_z || bz > max_z {
-                continue;
-            }
-            let ndz = (bz as f64 + 0.5 - z) / horiz_radius;
-            if ndx * ndx + ndz * ndz >= 1.0 {
-                continue;
-            }
-            let mut by = max_by;
-            while by > min_by {
-                let ndy = (by as f64 - 0.5 - y) / vert_radius;
-                // Do not add per-block jitter to this boundary either (see the matching note on the
-                // noise-carve threshold in mod.rs): it reads as grainy noise on every tunnel wall.
-                // Keep carver walls as clean ellipsoid sweeps.
-                if ndy > floor_level && ndx * ndx + ndy * ndy + ndz * ndz < 1.0 {
-                    out.push((bx, by, bz));
-                }
-                by -= 1;
-            }
-        }
-    }
-}
-
 // ---- canyon (ravine) ----
-#[allow(clippy::too_many_arguments)]
-fn canyon_chunk(
-    seed: i64,
-    cx: i32,
-    cz: i32,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    out: &mut Vec<(i32, i32, i32)>,
-) {
+fn canyon_chunk(seed: i64, cx: i32, cz: i32, out: &mut Vec<Ellipsoid>) {
     let mut r = chunk_rng(seed, cx, cz, 0x4A1E_4A1E);
     if r.next_float() > 0.008 {
         return; // ravines are rare (probability 0.01)
@@ -448,21 +455,42 @@ fn canyon_chunk(
             // stretch reduced from vanilla's 3.0: keeps the tall-ravine identity (~2x taller than
             // wide) without 70-block-tall smooth ovals (max height ~30 at the rarest roll).
             let wfac = widths[step as usize];
-            carve_ellipsoid(
+            out.push(Ellipsoid {
                 x,
                 y,
                 z,
-                hr * wfac.sqrt(),
-                vr * 2.2,
+                horiz_radius: hr * wfac.sqrt(),
+                vert_radius: vr * 2.2,
                 floor_level,
-                cx,
-                cz,
-                min_x,
-                max_x,
-                min_z,
-                max_z,
-                out,
-            );
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `contains` must answer exactly what `cells` emits, or a feature planned against the pure
+    /// shape would disagree with the carve it lands in.
+    #[test]
+    fn contains_agrees_with_cells() {
+        let ells = ellipsoids(0xCA7E_CA7E, -6, 6, -6, 6);
+        assert!(!ells.is_empty());
+        for e in ells.iter().take(400) {
+            let (x0, x1) = e.x_span();
+            let (z0, z1) = e.z_span();
+            let mut cells = Vec::new();
+            e.cells(x0, x1, z0, z1, &mut cells);
+            let set: std::collections::HashSet<_> = cells.into_iter().collect();
+            let (y0, y1) = e.y_span();
+            for x in x0 - 1..=x1 + 1 {
+                for z in z0 - 1..=z1 + 1 {
+                    for y in y0 - 1..=y1 + 1 {
+                        assert_eq!(e.contains(x, y, z), set.contains(&(x, y, z)), "{e:?}");
+                    }
+                }
+            }
         }
     }
 }

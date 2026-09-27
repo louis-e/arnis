@@ -13,9 +13,14 @@
 //!                opens the lip and the ticked water pours down into the cave; while running level
 //!                (or the contact is beside/above it) it stays SEALED — the walk stops without
 //!                opening the wall, so caves never get holes punched sideways/up into their ceilings.
+//!
+//! Both are PLANNED against [`CaveShape`] rather than the tile's cave-air set, over every origin
+//! that can reach the region, and stop only at the world's bbox. A pool or river crossing a tile
+//! edge therefore comes out the same from both tiles, and [`apply`] writes each tile's own part.
 use super::decoration::Decor;
 use super::rng::XoroRandom;
-use super::vy;
+use super::shape::{CaveShape, Rect, FEATURE_REACH};
+use super::{pack, unpack, vy};
 use crate::block_definitions::*;
 use crate::world_editor::WorldEditor;
 // Fnv, not std: std seeds its hasher randomly per process, so iterating one to
@@ -25,64 +30,49 @@ use fnv::FnvHashMap as HashMap;
 use fnv::FnvHashSet as HashSet;
 use std::f64::consts::PI;
 
-/// Carve pool caves + rivers for one tile. `air` is the existing DRY cave-air set (read-only — pools
-/// check it to reject on intersection; rivers check it for the directional breach/seal rule). Returns
-/// every cell carved to AIR (merge into the caller's cave-air set) and every cell filled with WATER
-/// (the caller's `basin_fluid`, for ores/geodes/springs to avoid overlapping).
-#[allow(clippy::too_many_arguments)]
-pub fn carve_water_features(
-    editor: &mut WorldEditor,
-    air: &HashSet<i64>,
-    decor: &Decor,
-    seed: i64,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    surf: &[i32],
-    h: usize,
-    cave_host: &[Block],
-    top_gate: i32,
-) -> (HashSet<i64>, HashSet<i64>) {
-    let mut carved: HashSet<i64> = HashSet::default();
-    let mut water: HashSet<i64> = HashSet::default();
+/// Every block the pools and rivers carve, and the ones left holding water.
+#[derive(Default)]
+pub(super) struct WaterPlan {
+    pub carved: HashSet<i64>,
+    pub water: HashSet<i64>,
+}
 
-    let cx0 = min_x.div_euclid(16);
-    let cx1 = max_x.div_euclid(16);
-    let cz0 = min_z.div_euclid(16);
-    let cz1 = max_z.div_euclid(16);
+impl WaterPlan {
+    /// Whether a block stands at the cell once the plan is applied: rock the carve left alone
+    /// (bedrock included, the void below it not), or planned water.
+    pub(super) fn solid(&self, shape: &CaveShape, x: i32, y: i32, z: i32) -> bool {
+        let p = pack(x, y, z);
+        if self.water.contains(&p) {
+            return true;
+        }
+        y >= shape.floor()
+            && y <= shape.surf(x, z)
+            && !shape.is_cave(x, y, z)
+            && !self.carved.contains(&p)
+    }
+}
+
+/// Plan the pools and rivers of every origin chunk that can reach `region`. Features are
+/// planned in global chunk order, so any two tiles agree on every feature they share.
+pub(super) fn plan(shape: &CaveShape, decor: &Decor, seed: i64, region: Rect) -> WaterPlan {
+    let mut plan = WaterPlan::default();
+    let world = shape.world();
+    let (cx0, cx1, cz0, cz1) = region.grow(FEATURE_REACH).clip(world).chunks();
 
     for cx in cx0..=cx1 {
         for cz in cz0..=cz1 {
             // POOL CAVE: rare, one roll per chunk.
             let mut rp = chunk_rng(seed, cx, cz, 0xA044_A044);
             if rp.next_int(30) == 0 {
-                carve_pool(
-                    editor,
-                    air,
-                    decor,
-                    &mut rp,
-                    cx,
-                    cz,
-                    min_x,
-                    max_x,
-                    min_z,
-                    max_z,
-                    surf,
-                    h,
-                    cave_host,
-                    top_gate,
-                    &mut carved,
-                    &mut water,
-                );
+                plan_pool(shape, decor, &mut rp, cx, cz, &mut plan);
             }
             // RIVER: independent roll.
             let mut rr = chunk_rng(seed, cx, cz, 0xA045_A045);
             if rr.next_int(18) == 0 {
                 let ox = cx * 16 + rr.next_int(16);
                 let oz = cz * 16 + rr.next_int(16);
-                if ox >= min_x && ox <= max_x && oz >= min_z && oz <= max_z {
-                    let top = surf[(ox - min_x) as usize * h + (oz - min_z) as usize] - top_gate;
+                if world.contains(ox, oz) {
+                    let top = shape.top(ox, oz);
                     // start HIGH in the band so the long descent has room — a river is "from
                     // somewhere up, going down".
                     let lo = vy(-20);
@@ -90,33 +80,16 @@ pub fn carve_water_features(
                     if hi > lo
                         // never START inside the existing cave network — a source that spawns in an
                         // open cavern would read as a hole in its ceiling; stay sealed instead.
-                        && !air.contains(&super::pack(ox, lo + (hi - lo) / 2, oz))
+                        && !shape.is_cave(ox, lo + (hi - lo) / 2, oz)
                     {
                         let oy = lo + rr.next_int(hi - lo + 1);
-                        if !air.contains(&super::pack(ox, oy, oz)) {
+                        if !shape.is_cave(ox, oy, oz) {
                             let yaw = rr.next_float() as f64 * 2.0 * PI;
                             let steps = 26 + rr.next_int(27); // 26..52 — long
                             let river_seed = rr.next_long();
                             walk_river(
-                                editor,
-                                air,
-                                river_seed,
-                                ox as f64,
-                                oy as f64,
-                                oz as f64,
-                                yaw,
-                                steps,
-                                2,
-                                min_x,
-                                max_x,
-                                min_z,
-                                max_z,
-                                surf,
-                                h,
-                                cave_host,
-                                top_gate,
-                                &mut carved,
-                                &mut water,
+                                shape, &mut plan, river_seed, ox as f64, oy as f64, oz as f64, yaw,
+                                steps, 2,
                             );
                         }
                     }
@@ -124,23 +97,49 @@ pub fn carve_water_features(
             }
         }
     }
-    // UNDERCUT CLEANUP: a river carved later can tunnel UNDER water another river/pool already
+    // UNDERCUT CLEANUP: a river planned later can tunnel UNDER water another river/pool already
     // placed, leaving a source hanging over air (reads as un-updated/floating water and forces the
-    // sealer to jam a rock plug under it). Remove any placed source whose support was carved away —
-    // its on-rock neighbors keep the stream alive at runtime.
-    let undercut: Vec<i64> = water
+    // sealer to jam a rock plug under it). Remove any source whose support was carved away — its
+    // on-rock neighbors keep the stream alive at runtime.
+    let undercut: Vec<i64> = plan
+        .water
         .iter()
         .copied()
         .filter(|&p| {
-            let (x, y, z) = super::unpack(p);
-            !editor.block_exists_absolute(x, y - 1, z) && !water.contains(&super::pack(x, y - 1, z))
+            let (x, y, z) = unpack(p);
+            !plan.solid(shape, x, y - 1, z)
         })
         .collect();
     for p in undercut {
-        let (x, y, z) = super::unpack(p);
-        editor.set_block_absolute(AIR, x, y, z, Some(&[WATER]), None);
-        water.remove(&p);
-        carved.insert(p);
+        plan.water.remove(&p);
+    }
+    plan
+}
+
+/// Write the part of the plan inside `region`. Returns the cells carved to AIR there (merge into
+/// the caller's cave-air set) and the cells filled with WATER (for the later passes to avoid).
+pub(super) fn apply(
+    editor: &mut WorldEditor,
+    plan: &WaterPlan,
+    region: Rect,
+    cave_host: &[Block],
+) -> (HashSet<i64>, HashSet<i64>) {
+    let mut carved: HashSet<i64> = HashSet::default();
+    let mut water: HashSet<i64> = HashSet::default();
+    for &p in &plan.carved {
+        let (x, y, z) = unpack(p);
+        if region.contains(x, z) {
+            editor.set_block_absolute(AIR, x, y, z, Some(cave_host), None);
+            carved.insert(p);
+        }
+    }
+    for &p in &plan.water {
+        let (x, y, z) = unpack(p);
+        if region.contains(x, z) {
+            editor.set_block_absolute(WATER, x, y, z, Some(&[AIR]), None);
+            editor.schedule_fluid_tick(WATER, x, y, z);
+            water.insert(p);
+        }
     }
     (carved, water)
 }
@@ -158,31 +157,21 @@ fn chunk_rng(seed: i64, cx: i32, cz: i32, salt: i64) -> XoroRandom {
 /// with water, top half stays air. REJECTED (no-op) if its footprint would touch the existing dry
 /// cave network — kept strictly standalone so the half-fill level never looks stranded inside a
 /// bigger open void.
-#[allow(clippy::too_many_arguments)]
-fn carve_pool(
-    editor: &mut WorldEditor,
-    air: &HashSet<i64>,
+fn plan_pool(
+    shape: &CaveShape,
     decor: &Decor,
     r: &mut XoroRandom,
     cx: i32,
     cz: i32,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    surf: &[i32],
-    h: usize,
-    cave_host: &[Block],
-    top_gate: i32,
-    carved: &mut HashSet<i64>,
-    water: &mut HashSet<i64>,
+    plan: &mut WaterPlan,
 ) {
+    let world = shape.world();
     let gx = cx * 16 + r.next_int(16);
     let gz = cz * 16 + r.next_int(16);
-    if gx < min_x || gx > max_x || gz < min_z || gz > max_z {
+    if !world.contains(gx, gz) {
         return;
     }
-    let top = surf[(gx - min_x) as usize * h + (gz - min_z) as usize] - top_gate;
+    let top = shape.top(gx, gz);
     // mid-depth band: clear of both the near-surface roof and the deep-lava floor (vanilla y<-54).
     let lo = vy(-48);
     let hi = (top - 10).min(vy(30));
@@ -252,10 +241,10 @@ fn carve_pool(
     for dx in -ri_h..=ri_h {
         for dz in -ri_h..=ri_h {
             let (px, pz) = (gx + dx, gz + dz);
-            if px < min_x || px > max_x || pz < min_z || pz > max_z {
+            if !world.contains(px, pz) {
                 continue;
             }
-            let ptop = surf[(px - min_x) as usize * h + (pz - min_z) as usize] - top_gate;
+            let ptop = shape.top(px, pz);
             for dy in -ri_v..=ri_v {
                 let py = gy + dy;
                 if py > ptop {
@@ -278,16 +267,12 @@ fn carve_pool(
     }
     // REJECT entirely if this footprint would touch the existing dry cave network — a pool must
     // stand fully alone so its "bottom half water" level never looks stranded in a bigger void.
-    if cells
-        .iter()
-        .any(|&(x, y, z)| air.contains(&super::pack(x, y, z)))
-    {
+    if cells.iter().any(|&(x, y, z)| shape.is_cave(x, y, z)) {
         return;
     }
 
     for &(px, py, pz) in &cells {
-        editor.set_block_absolute(AIR, px, py, pz, Some(cave_host), None);
-        carved.insert(super::pack(px, py, pz));
+        plan.carved.insert(pack(px, py, pz));
     }
     // "half water": bottom half of whatever actually got carved (not the nominal radius — a room
     // clipped by the roof/bbox still reads as half-and-half of its real extent). Coral rooms flood
@@ -308,15 +293,10 @@ fn carve_pool(
         .filter(|&(_, y, _)| y <= mid)
         .collect();
     fill.sort_unstable_by_key(|&(_, y, _)| y);
-    let mut placed: HashSet<(i32, i32, i32)> = HashSet::default();
     for &(px, py, pz) in &fill {
-        if !(editor.block_exists_absolute(px, py - 1, pz) || placed.contains(&(px, py - 1, pz))) {
-            continue;
+        if plan.solid(shape, px, py - 1, pz) {
+            plan.water.insert(pack(px, py, pz));
         }
-        editor.set_block_absolute(WATER, px, py, pz, Some(&[AIR]), None);
-        editor.schedule_fluid_tick(WATER, px, py, pz);
-        water.insert(super::pack(px, py, pz));
-        placed.insert((px, py, pz));
     }
 }
 
@@ -332,8 +312,8 @@ fn carve_pool(
 /// = max 3 streams total from one source).
 #[allow(clippy::too_many_arguments)]
 fn walk_river(
-    editor: &mut WorldEditor,
-    air: &HashSet<i64>,
+    shape: &CaveShape,
+    plan: &mut WaterPlan,
     seed: i64,
     ox: f64,
     oy: f64,
@@ -341,17 +321,8 @@ fn walk_river(
     start_yaw: f64,
     steps: i32,
     splits_left: i32,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    surf: &[i32],
-    h: usize,
-    cave_host: &[Block],
-    top_gate: i32,
-    carved: &mut HashSet<i64>,
-    water: &mut HashSet<i64>,
 ) {
+    let world = shape.world();
     let mut r = XoroRandom::from_seed(seed);
     let mut yaw = start_yaw;
     let (mut x, mut y, mut z) = (ox, oy, oz);
@@ -379,19 +350,18 @@ fn walk_river(
         }
 
         let (cxp, cyp, czp) = (x.round() as i32, y.round() as i32, z.round() as i32);
-        if cxp < min_x || cxp > max_x || czp < min_z || czp > max_z {
+        if !world.contains(cxp, czp) {
             break;
         }
         // DIRECTIONAL contact rule with the existing dry cave network.
-        let contact_here = air.contains(&super::pack(cxp, cyp, czp));
-        let contact_below = air.contains(&super::pack(cxp, cyp - 1, czp))
-            || air.contains(&super::pack(cxp, cyp - 2, czp));
+        let contact_here = shape.is_cave(cxp, cyp, czp);
+        let contact_below = shape.is_cave(cxp, cyp - 1, czp) || shape.is_cave(cxp, cyp - 2, czp);
         if contact_here && !(descended || contact_below) {
             break; // SEALED: level/upward contact — stop without opening the wall.
         }
         let breach = contact_here || contact_below;
 
-        let ptop = surf[(cxp - min_x) as usize * h + (czp - min_z) as usize] - top_gate;
+        let ptop = shape.top(cxp, czp);
         let ri = thickness.ceil() as i32;
         for dx in -ri..=ri {
             for dz in -ri..=ri {
@@ -399,7 +369,7 @@ fn walk_river(
                     continue;
                 }
                 let (px, pz) = (cxp + dx, czp + dz);
-                if px < min_x || px > max_x || pz < min_z || pz > max_z {
+                if !world.contains(px, pz) {
                     continue;
                 }
                 for dy in 0..=1 {
@@ -407,11 +377,10 @@ fn walk_river(
                     if py > ptop {
                         continue;
                     }
-                    if air.contains(&super::pack(px, py, pz)) {
+                    if shape.is_cave(px, py, pz) {
                         continue; // never carve the existing cave's own cells
                     }
-                    editor.set_block_absolute(AIR, px, py, pz, Some(cave_host), None);
-                    carved.insert(super::pack(px, py, pz));
+                    plan.carved.insert(pack(px, py, pz));
                     by_col
                         .entry((px, pz))
                         .and_modify(|e| {
@@ -438,8 +407,8 @@ fn walk_river(
                 let child_splits = if i == 0 { splits_left - 1 } else { 0 };
                 let fork_seed = r.next_long();
                 walk_river(
-                    editor,
-                    air,
+                    shape,
+                    plan,
                     fork_seed,
                     x,
                     y,
@@ -447,16 +416,6 @@ fn walk_river(
                     fork_yaw,
                     remaining,
                     child_splits,
-                    min_x,
-                    max_x,
-                    min_z,
-                    max_z,
-                    surf,
-                    h,
-                    cave_host,
-                    top_gate,
-                    carved,
-                    water,
                 );
             }
             break; // the parent walk hands off to its forks and stops
@@ -469,11 +428,8 @@ fn walk_river(
         // never place a source over air (a breach lip over a cave/pool): the neighboring on-rock
         // source flows over the edge at runtime — a real waterfall — and the floating-fluid sealer
         // has nothing to plug under the river mouth.
-        if !editor.block_exists_absolute(px, py - 1, pz) {
-            continue;
+        if plan.solid(shape, px, py - 1, pz) {
+            plan.water.insert(pack(px, py, pz));
         }
-        editor.set_block_absolute(WATER, px, py, pz, Some(&[AIR]), None);
-        editor.schedule_fluid_tick(WATER, px, py, pz);
-        water.insert(super::pack(px, py, pz));
     }
 }
