@@ -1090,7 +1090,18 @@ pub fn generate_world_with_options(
                         g_max_z,
                         false,
                     );
-                    if args.fillground {
+                    // Caves bring their own vanilla ore table, placed after the carve so no
+                    // vein hangs in a cave; the plain veins only fill caveless ground.
+                    if args.caves {
+                        crate::caves::carve_region(
+                            &mut tile_editor,
+                            args,
+                            g_min_x,
+                            g_max_x,
+                            g_min_z,
+                            g_max_z,
+                        );
+                    } else if args.fillground {
                         crate::ore_generation::generate_ores_region(
                             &mut tile_editor,
                             g_min_x,
@@ -1123,6 +1134,18 @@ pub fn generate_world_with_options(
                         highways::carve_highway_tunnel_interior(
                             &mut tile_editor,
                             &tile_tunnel_cells,
+                        );
+                    }
+                    // Seal floating water/lava last: the water-depth carve and the tunnel carves
+                    // above can each undercut a water body over a cave. Under eviction this tile
+                    // flushes soon, so it happens here; otherwise once after the merge.
+                    if args.caves && eviction_active {
+                        crate::caves::seal_floating_fluid_region(
+                            &mut tile_editor,
+                            g_min_x,
+                            g_max_x,
+                            g_min_z,
+                            g_max_z,
                         );
                     }
 
@@ -1389,7 +1412,11 @@ pub fn generate_world_with_options(
     bench.mark("ground_gen");
 
     if ground_on_merged {
-        if args.fillground {
+        if args.caves {
+            println!("{} Carving caves...", "[6b/7]".bold());
+            emit_gui_progress_update(89.0, "Carving caves...");
+            crate::caves::carve(&mut editor, args, &xzbbox);
+        } else if args.fillground {
             crate::ore_generation::generate_ores(&mut editor, &xzbbox);
         }
         // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
@@ -1427,6 +1454,16 @@ pub fn generate_world_with_options(
     }
     if !eviction_active && !tunnel_cells.is_empty() {
         highways::carve_highway_tunnel_interior(&mut editor, &tunnel_cells);
+    }
+    // Seal floating water/lava as the final underground pass; eviction tiles did it in-tile.
+    if args.caves && !eviction_active {
+        crate::caves::seal_floating_fluid_region(
+            &mut editor,
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
     }
 
     // Run after ground generation so anchor Y reflects the final terrain.

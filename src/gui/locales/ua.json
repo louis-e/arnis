@@ -47,6 +47,7 @@
   "mode_terrain_only": "Тільки рельєф",
   "interior": "Генерація інтер'єру",
   "fillground": "Заповнити землю",
+  "caves": "Печери",
   "legacy_trees": "Класичні дерева",
   "canopy_height": "Реальний деревний покрив",
   "max_tree_size": "Макс. розмір дерева",

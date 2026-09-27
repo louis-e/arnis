@@ -47,6 +47,7 @@
   "mode_terrain_only": "Samo teren",
   "interior": "Generiranje notranjosti",
   "fillground": "Zapolni tla",
+  "caves": "Jame",
   "legacy_trees": "Klasična drevesa",
   "canopy_height": "Dejanska drevesna odeja",
   "max_tree_size": "Največja velikost dreves",

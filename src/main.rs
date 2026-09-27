@@ -9,6 +9,7 @@ mod block_palette;
 mod bresenham;
 mod building_facades;
 mod canopy;
+mod caves;
 mod celestial;
 mod climate;
 mod clipping;
@@ -178,12 +179,26 @@ fn run_cli() {
     // Parse input arguments
     let mut args: Args = Args::parse();
     args::apply_body_defaults(&mut args);
+    // Caves carve into the filled ground, so they bring it with them.
+    if args.caves {
+        args.fillground = true;
+    }
     let args = args;
 
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
         eprintln!("{}: {}", "Error".red().bold(), e);
         std::process::exit(1);
+    }
+
+    // Cave zone-map mode renders the cave biome layout for --bbox and exits, before any world
+    // exists. It uses the same zone picker, seed and --cave-biomes amounts as --caves.
+    if args.cave_zone_map.is_some() {
+        if let Err(e) = caves::zone_map::render(&args) {
+            eprintln!("{}: {}", "Error".red().bold(), e);
+            std::process::exit(1);
+        }
+        return;
     }
 
     // Open up the world floor before anything touches the editor. The bundled packs already

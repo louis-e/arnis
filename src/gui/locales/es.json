@@ -47,6 +47,7 @@
   "mode_terrain_only": "Solo Terreno",
   "interior": "Generación Interior",
   "fillground": "Rellenar Suelo",
+  "caves": "Cuevas",
   "legacy_trees": "Árboles clásicos",
   "canopy_height": "Cobertura arbórea real",
   "max_tree_size": "Tamaño máx. de árbol",

@@ -1000,9 +1000,143 @@ pub fn to_bedrock_block_with_properties(
     if java_name == "chiseled_bookshelf" {
         return convert_chiseled_bookshelf(props_map);
     }
+    if let Some(cave_block) = convert_cave_block(java_name, props_map) {
+        return cave_block;
+    }
 
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
+}
+
+/// Blocks the cave passes place whose Bedrock form differs from Java's. Like the rest of this
+/// file, the older Bedrock names (`coral_block` with a colour state) are used; the game
+/// upgrades them on load.
+fn convert_cave_block(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> Option<BedrockBlock> {
+    use BedrockBlockStateValue::{Bool, Int, String as Str};
+    let prop = |key: &str| match props.and_then(|p| p.get(key)) {
+        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
+        _ => None,
+    };
+    let is_true = |key: &str| prop(key) == Some("true");
+    // Bedrock's facing_direction order: down, up, north, south, west, east.
+    let facing_direction = |facing: Option<&str>| match facing {
+        Some("down") => 0,
+        Some("north") => 2,
+        Some("south") => 3,
+        Some("west") => 4,
+        Some("east") => 5,
+        _ => 1,
+    };
+    let coral_color = |species: &str| match species {
+        "tube" => "blue",
+        "brain" => "pink",
+        "bubble" => "purple",
+        "fire" => "red",
+        _ => "yellow",
+    };
+
+    Some(match java_name {
+        "pointed_dripstone" => BedrockBlock::with_states(
+            "pointed_dripstone",
+            vec![
+                (
+                    "dripstone_thickness",
+                    Str(match prop("thickness").unwrap_or("tip") {
+                        "tip_merge" => "merge".to_string(),
+                        other => other.to_string(),
+                    }),
+                ),
+                ("hanging", Bool(prop("vertical_direction") == Some("down"))),
+            ],
+        ),
+        // One bit per covered face: down, up, south, west, north, east.
+        "glow_lichen" | "sculk_vein" => {
+            let bits = ["down", "up", "south", "west", "north", "east"]
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| is_true(face))
+                .fold(0, |acc, (i, _)| acc | (1 << i));
+            // 0 would cover every face; a face-less block lies on the floor.
+            let bits = if bits == 0 { 1 } else { bits };
+            BedrockBlock::with_states(java_name, vec![("multi_face_direction_bits", Int(bits))])
+        }
+        // Bedrock splits the vines by berries and by head/body rather than using a state.
+        "cave_vines" | "cave_vines_plant" => {
+            let name = match (java_name == "cave_vines", is_true("berries")) {
+                (true, true) => "cave_vines_head_with_berries",
+                (false, true) => "cave_vines_body_with_berries",
+                _ => "cave_vines",
+            };
+            BedrockBlock::with_states(name, vec![("growing_plant_age", Int(25))])
+        }
+        "amethyst_cluster"
+        | "small_amethyst_bud"
+        | "medium_amethyst_bud"
+        | "large_amethyst_bud" => BedrockBlock::with_states(
+            java_name,
+            vec![("facing_direction", Int(facing_direction(prop("facing"))))],
+        ),
+        "big_dripleaf" | "big_dripleaf_stem" => BedrockBlock::with_states(
+            "big_dripleaf",
+            vec![
+                ("big_dripleaf_head", Bool(java_name == "big_dripleaf")),
+                ("big_dripleaf_tilt", Str("none".to_string())),
+                ("direction", Int(0)),
+            ],
+        ),
+        "small_dripleaf" => BedrockBlock::with_states(
+            "small_dripleaf_block",
+            vec![
+                ("upper_block_bit", Bool(prop("half") == Some("upper"))),
+                ("direction", Int(0)),
+            ],
+        ),
+        "basalt" => convert_log(java_name, props),
+        // All six faces show the cap (14) or the stem (15).
+        "red_mushroom_block" | "brown_mushroom_block" => {
+            BedrockBlock::with_states(java_name, vec![("huge_mushroom_bits", Int(14))])
+        }
+        "mushroom_stem" => {
+            BedrockBlock::with_states("mushroom_stem", vec![("huge_mushroom_bits", Int(15))])
+        }
+        name if name.ends_with("_coral_block") => {
+            let dead = name.starts_with("dead_");
+            let species = name
+                .trim_start_matches("dead_")
+                .trim_end_matches("_coral_block");
+            BedrockBlock::with_states(
+                "coral_block",
+                vec![
+                    ("coral_color", Str(coral_color(species).to_string())),
+                    ("dead_bit", Bool(dead)),
+                ],
+            )
+        }
+        name if name.ends_with("_coral_fan") => BedrockBlock::with_states(
+            "coral_fan",
+            vec![
+                (
+                    "coral_color",
+                    Str(coral_color(name.trim_end_matches("_coral_fan")).to_string()),
+                ),
+                ("coral_fan_direction", Int(0)),
+            ],
+        ),
+        name if name.ends_with("_coral") => BedrockBlock::with_states(
+            "coral",
+            vec![
+                (
+                    "coral_color",
+                    Str(coral_color(name.trim_end_matches("_coral")).to_string()),
+                ),
+                ("dead_bit", Bool(false)),
+            ],
+        ),
+        _ => return None,
+    })
 }
 
 /// Convert Java stair block to Bedrock format with proper orientation.

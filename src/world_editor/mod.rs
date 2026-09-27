@@ -1174,6 +1174,46 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// Schedules a fluid tick so a worldgen-placed water or lava source flows on first chunk
+    /// load. Without one the source sits frozen until some unrelated neighbour update pokes it.
+    /// Java only: Bedrock and Luanti have no such list.
+    pub fn schedule_fluid_tick(&mut self, fluid: Block, x: i32, y: i32, z: i32) {
+        if self.format != WorldFormat::JavaAnvil {
+            return;
+        }
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return;
+        }
+        let id = if fluid == LAVA {
+            "minecraft:lava"
+        } else {
+            "minecraft:water"
+        };
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region = self.world.get_or_create_region(chunk_x >> 5, chunk_z >> 5);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+        // `t` is the delay in ticks and `p` the priority; 0 fires on the first tick.
+        let tick = HashMap::from([
+            ("i".to_string(), Value::String(id.to_string())),
+            ("x".to_string(), Value::Int(x)),
+            ("y".to_string(), Value::Int(y)),
+            ("z".to_string(), Value::Int(z)),
+            ("t".to_string(), Value::Int(0)),
+            ("p".to_string(), Value::Int(0)),
+        ]);
+        match chunk.other.entry("fluid_ticks".to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(tick));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(tick)]));
+            }
+        }
+    }
+
     /// Writes a minecraft:bed block entity; beds have no baked model and render only when present.
     pub fn set_bed_block_entity_absolute(&mut self, x: i32, absolute_y: i32, z: i32) {
         let mut be = HashMap::new();

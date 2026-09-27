@@ -77,6 +77,41 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub fillground: bool,
 
+    /// Carve Minecraft-style caves into the filled ground: vanilla 1.21 noise caves and
+    /// tunnel carvers, flooded pools and underground rivers, a lava sea at the bottom of the
+    /// world, vanilla ores and eight themed cave biomes. Implies --fillground. Caves need rock
+    /// to carve into: at the default ground level they only appear under terrain that rises
+    /// above the lowest point of the area.
+    #[arg(long, default_value_t = false)]
+    pub caves: bool,
+
+    /// Directory of a cave asset pack (cave_pack.json plus Sponge .schem formations such as
+    /// ice spikes, dripstone columns and amethyst clusters) stamped into --caves. Defaults to
+    /// a `cave-pack` directory next to the executable when one exists; without either, caves
+    /// keep their procedural decoration only.
+    #[arg(long = "cave-asset-pack", value_name = "DIR")]
+    pub cave_asset_pack: Option<PathBuf>,
+
+    /// Per-biome cave theme amounts as comma-separated `name=percent` pairs. Names: lush,
+    /// dripstone, deepdark, mushroom, ice, amethyst, volcanic, coral. 100 is the default
+    /// share, 0 turns the biome off, 200 roughly doubles its area. Depth and terrain gates
+    /// (volcanic at the bottom, ice under mountains, coral in flooded pools) always apply.
+    /// Example: --cave-biomes lush=150,deepdark=0,amethyst=60
+    #[arg(long = "cave-biomes", value_name = "LIST")]
+    pub cave_biomes: Option<String>,
+
+    /// Render the cave biome layout for --bbox and exit without generating a world: writes
+    /// `<PREFIX>-upper.png` (upper caves) and `<PREFIX>-deep.png` (deep caves), transparent
+    /// where the cave is plain rock, and prints a `ZONEMAP {json}` line with each theme's
+    /// share. Honours --scale and --cave-biomes, so it matches what --caves will carve.
+    #[arg(long = "cave-zone-map", value_name = "PREFIX")]
+    pub cave_zone_map: Option<PathBuf>,
+
+    /// Blocks per output pixel for --cave-zone-map (1-512). Omitted picks a fine step that
+    /// keeps the image within 1536 pixels.
+    #[arg(long = "cave-zone-map-step", value_name = "BLOCKS")]
+    pub cave_zone_map_step: Option<u32>,
+
     /// Use the legacy procedural trees instead of the bundled schematic tree pack.
     /// Schematic trees are on by default; this flag opts out.
     #[arg(long, default_value_t = false)]
@@ -563,6 +598,8 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.interior = false;
     args.legacy_trees = false;
     args.aws_only_elevation = false;
+    // The cave passes dress an Earth underground: lush moss, rivers, coral reefs.
+    args.caves = false;
     // Terrain only means no walls, so neither facade source has anything to
     // hang a photograph on. Cleared rather than left set so the run does not
     // pay for a Mapillary fetch or a resource pack it cannot use.
@@ -702,6 +739,38 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         }
     }
 
+    let cave_preview = args.cave_zone_map.is_some();
+    if let Some(spec) = &args.cave_biomes {
+        crate::caves::decoration::BiomeAmounts::parse(spec)
+            .map_err(|e| format!("--cave-biomes: {e}"))?;
+        if !args.caves && !cave_preview {
+            return Err("--cave-biomes only applies to --caves or --cave-zone-map.".to_string());
+        }
+    }
+    if let Some(dir) = &args.cave_asset_pack {
+        if !args.caves {
+            return Err("--cave-asset-pack only applies to --caves.".to_string());
+        }
+        if !dir.join("cave_pack.json").is_file() {
+            return Err(format!(
+                "--cave-asset-pack: {} has no cave_pack.json.",
+                dir.display()
+            ));
+        }
+    }
+    if args.cave_zone_map_step.is_some() && !cave_preview {
+        return Err("--cave-zone-map-step only applies to --cave-zone-map.".to_string());
+    }
+    if cave_preview {
+        if args.bbox.is_none() {
+            return Err("--cave-zone-map needs --bbox.".to_string());
+        }
+        // The images are laid out on the unrotated bbox, so a rotated world would not match.
+        if args.rotation != 0.0 {
+            return Err("--cave-zone-map does not support --rotation.".to_string());
+        }
+    }
+
     // A bounding box is required unless a local --file supplies one to derive it from.
     // Terrain-only mode ignores --file (it never loads OSM objects), so it always needs --bbox.
     if args.bbox.is_none() {
@@ -739,8 +808,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
-    } else if args.mapillary_probe {
-        // The probe writes no world, so it needs no output directory.
+    } else if args.mapillary_probe || cave_preview {
+        // The probe and the cave preview write no world, so they need no output directory.
     } else {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.

@@ -48,6 +48,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await initSavePath();
   initSettings();
   initVoxyLightingCoupling();
+  initCavesFillCoupling();
   refreshHeightLimitRow();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
@@ -131,6 +132,7 @@ async function applyLocalization(localization) {
     "span[data-localize='terrain']": "terrain",
     "span[data-localize='interior']": "interior",
     "span[data-localize='fillground']": "fillground",
+    "span[data-localize='caves']": "caves",
     "span[data-localize='legacy_trees']": "legacy_trees",
     "span[data-localize='overture']": "overture",
     "span[data-localize='three_dmr']": "three_dmr",
@@ -1511,6 +1513,28 @@ function initVoxyLightingCoupling() {
   });
 }
 
+// Caves are carved into the filled ground, so turning them on turns Fill Ground
+// on, and turning Fill Ground off takes the caves with it.
+function initCavesFillCoupling() {
+  const caves = document.getElementById('caves-toggle');
+  const fill = document.getElementById('fillground-toggle');
+  if (!caves || !fill) return;
+
+  // Dispatch so the settings store persists the knock-on change too.
+  const set = (el, value) => {
+    if (el.checked === value) return;
+    el.checked = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  caves.addEventListener('change', () => {
+    if (caves.checked) set(fill, true);
+  });
+  fill.addEventListener('change', () => {
+    if (!fill.checked) set(caves, false);
+  });
+}
+
 function initWorldFormatToggle() {
   initLuantiExperimentalToggle();
 
@@ -2774,6 +2798,7 @@ async function startGeneration() {
 
     var interior = document.getElementById("interior-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
+    var caves = document.getElementById("caves-toggle").checked;
     var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
     var canopy_height = document.getElementById("canopy-height-toggle").checked;
     var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
@@ -2821,6 +2846,7 @@ async function startGeneration() {
         skipOsmObjects: skipOsmObjects,
         interiorEnabled: interior,
         fillgroundEnabled: fill_ground,
+        cavesEnabled: caves,
         legacyTreesEnabled: legacy_trees,
         maxTreeSize: maxTreeSize,
         canopyHeightEnabled: canopy_height,

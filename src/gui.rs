@@ -1310,6 +1310,7 @@ fn gui_start_generation(
     skip_osm_objects: bool,
     interior_enabled: bool,
     fillground_enabled: bool,
+    caves_enabled: bool,
     legacy_trees_enabled: bool,
     max_tree_size: String,
     canopy_height_enabled: bool,
@@ -1643,6 +1644,13 @@ fn gui_start_generation(
                 legacy_terrain: false,
                 interior: interior_enabled,
                 fillground: fillground_enabled,
+                caves: caves_enabled,
+                // The asset pack, biome mix and zone preview are CLI aids; the GUI toggle
+                // carves with the defaults and a `cave-pack` folder next to the executable.
+                cave_asset_pack: None,
+                cave_biomes: None,
+                cave_zone_map: None,
+                cave_zone_map_step: None,
                 legacy_trees: legacy_trees_enabled,
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
                 canopy_height: canopy_height_enabled,
@@ -1710,6 +1718,10 @@ fn gui_start_generation(
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
+            // Same as run_cli: caves carve into the filled ground, so they bring it with them.
+            if args.caves {
+                args.fillground = true;
+            }
             let args = args;
 
             // Same as run_cli: the facade pipeline needs only the bbox, and its

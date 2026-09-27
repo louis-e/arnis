@@ -25,6 +25,7 @@ const SETTINGS = [
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
   { id: 'interior-toggle', kind: 'checkbox', store: OWN },
   { id: 'fillground-toggle', kind: 'checkbox', store: OWN },
+  { id: 'caves-toggle', kind: 'checkbox', store: OWN },
   { id: 'canopy-height-toggle', kind: 'checkbox', store: OWN },
   { id: 'max-tree-size-group', kind: 'segmented', store: OWN, valueAttr: 'data-max-tree-size' },
   { id: 'legacy-trees-toggle', kind: 'checkbox', store: OWN },

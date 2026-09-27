@@ -47,6 +47,7 @@
   "mode_terrain_only": "仅地形",
   "interior": "内部生成",
   "fillground": "填充地面",
+  "caves": "洞穴",
   "legacy_trees": "经典树木",
   "canopy_height": "真实树木覆盖",
   "max_tree_size": "最大树木尺寸",

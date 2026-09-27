@@ -47,6 +47,7 @@
   "mode_terrain_only": "Nur Terrain",
   "interior": "Innenraum Generierung",
   "fillground": "Boden füllen",
+  "caves": "Höhlen",
   "legacy_trees": "Klassische Bäume",
   "canopy_height": "Echte Baumdichte",
   "max_tree_size": "Max. Baumgröße",
