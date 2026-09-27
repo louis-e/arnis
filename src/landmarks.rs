@@ -3,7 +3,6 @@
 //! from the anchor lat/lon because ways get clipped to the selected area.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use colored::Colorize;
 
@@ -547,7 +546,7 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
                 let props = b
                     .properties
                     .as_ref()
-                    .map(|p| Arc::new(rotate_props(p, quarter)));
+                    .map(|p| crate::block_definitions::intern_props(rotate_props(p, quarter)));
                 BlockWithProperties::from_arc(b.block, props)
             })
             .collect()

@@ -65,7 +65,7 @@ impl BlockWithProperties {
     pub fn new(block: Block, properties: Option<Value>) -> Self {
         Self {
             block,
-            properties: properties.map(Arc::new),
+            properties: properties.map(intern_props),
         }
     }
 
@@ -934,14 +934,48 @@ pub fn create_stair_with_properties(
 }
 // Add half=top to make it upside-down.
 pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
-    if let Some(props) = stair.properties.as_ref() {
-        if let Value::Compound(map) = props.as_ref() {
-            let mut new_map = map.clone();
-            new_map.insert("half".to_string(), Value::String("top".to_string()));
-            stair.properties = Some(Arc::new(Value::Compound(new_map)));
-        }
+    if let Some(Value::Compound(map)) = stair.properties.as_deref() {
+        let mut new_map = map.clone();
+        new_map.insert("half".to_string(), Value::String("top".to_string()));
+        stair.properties = Some(intern_props(Value::Compound(new_map)));
     }
     stair
+}
+
+/// One shared allocation per distinct block state.
+///
+/// A placed block keeps its state compound for as long as its section is resident, and
+/// the same few thousand states (a flipped stair, a slab half, a log axis) were built
+/// afresh for every block that used them: 345k compounds for 12k distinct states on a
+/// 13 km² city, around a hundred megabytes at the memory peak. Compounds of plain strings
+/// are shared through here; anything else is wrapped as it is.
+pub fn intern_props(value: Value) -> Arc<Value> {
+    const SHARDS: usize = 16;
+    type Shard = Mutex<fnv::FnvHashMap<String, Arc<Value>>>;
+    static STATES: Lazy<[Shard; SHARDS]> = Lazy::new(|| std::array::from_fn(|_| Mutex::default()));
+
+    let Value::Compound(map) = &value else {
+        return Arc::new(value);
+    };
+    if !map.values().all(|v| matches!(v, Value::String(_))) {
+        return Arc::new(value);
+    }
+    let mut state: Vec<(&str, &str)> = map
+        .iter()
+        .filter_map(|(k, v)| match v {
+            Value::String(s) => Some((k.as_str(), s.as_str())),
+            _ => None,
+        })
+        .collect();
+    state.sort_unstable();
+    let key: String = state.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]).collect();
+    let shard = key
+        .bytes()
+        .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
+    let mut states = STATES[shard % SHARDS]
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    states.entry(key).or_insert_with(|| Arc::new(value)).clone()
 }
 
 // Lazy static blocks
@@ -1868,6 +1902,28 @@ mod material_tests {
 
     fn rng() -> ChaCha8Rng {
         ChaCha8Rng::seed_from_u64(1)
+    }
+
+    // Every flip of one stair state shares a compound, and the flip still reads half=top.
+    #[test]
+    fn top_stairs_share_one_compound_per_state() {
+        let flip = |facing, shape| {
+            top_stair(create_stair_with_properties(OAK_STAIRS, facing, shape))
+                .properties
+                .unwrap()
+        };
+        let a = flip(StairFacing::North, StairShape::Straight);
+        let b = flip(StairFacing::North, StairShape::Straight);
+        assert!(Arc::ptr_eq(&a, &b));
+        let Value::Compound(map) = a.as_ref() else {
+            panic!("not a compound");
+        };
+        assert_eq!(map.get("half"), Some(&Value::String("top".into())));
+        assert_eq!(map.get("facing"), Some(&Value::String("north".into())));
+
+        let c = flip(StairFacing::North, StairShape::OuterLeft);
+        let d = flip(StairFacing::South, StairShape::Straight);
+        assert!(!Arc::ptr_eq(&a, &c) && !Arc::ptr_eq(&a, &d));
     }
 
     #[test]

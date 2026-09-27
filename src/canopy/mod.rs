@@ -22,6 +22,14 @@ const CACHE_DIR: &str = "arnis-canopy-cache";
 /// Caps how much of the download is held at once, at one request per batch.
 const FETCH_BATCH_BYTES: u64 = 16 << 20;
 
+/// Source rows per cached block. Strips span the whole 78 km tile, so a city window
+/// downloads tens of megabytes of rows it mostly throws away, and every later run over the
+/// same band of latitude would download them again. About a megabyte per block.
+const ROW_BLOCK: usize = 128;
+
+/// Cached row blocks older than this are deleted at the start of a fetch.
+const ROW_CACHE_MAX_AGE_DAYS: u64 = 30;
+
 /// No measurement here. A measured zero means bare ground.
 pub const CANOPY_NODATA: u8 = 255;
 
@@ -430,39 +438,51 @@ fn fill_from_tile(
 
     let index = cached_strip_index(client, &url, &key)?;
     let w = cols.len();
-    let (mut first, mut out_i) = (0usize, 0usize);
-    while first < unique.len() {
-        // Strips sit in row order, so one range per batch beats one per row.
-        let lo = index.offsets[unique[first]];
-        let mut end = first + 1;
-        while end < unique.len() {
-            let r = unique[end];
-            if index.offsets[r] + index.counts[r] - lo > FETCH_BATCH_BYTES {
-                break;
-            }
-            end += 1;
-        }
-        let last = unique[end - 1];
-        let hi = index.offsets[last] + index.counts[last];
-        if hi <= lo {
-            return Err("strip table is not ascending".into());
-        }
-        let blob = fetch_range(client, &url, lo, hi - lo)?;
+    let blocks: Vec<usize> = {
+        let mut b: Vec<usize> = unique.iter().map(|r| r / ROW_BLOCK).collect();
+        b.dedup();
+        b
+    };
+    let (mut first, mut out_i, mut bi) = (0usize, 0usize, 0usize);
+    while bi < blocks.len() {
+        // A cached block is read back; missing blocks that follow each other share one
+        // range request, as the whole window did before there was a cache.
+        let cached = read_row_block(&key, blocks[bi], &index);
+        let from_cache = cached.is_some();
+        let (lo, mut blob, nb) = match cached {
+            Some((lo, blob)) => (lo, blob, 1),
+            None => fetch_row_blocks(client, &url, &key, &index, &blocks[bi..])?,
+        };
+        let last = block_rows(blocks[bi + nb - 1]).1;
+        let end = first + unique[first..].partition_point(|&r| r <= last);
 
         // Inflating a row decompresses all 65536 columns, so this dominates.
-        let mut batch = vec![CANOPY_NODATA; w * (end - first)];
-        batch
-            .par_chunks_mut(w)
-            .enumerate()
-            .try_for_each_init(Vec::new, |scratch, (i, out)| {
-                let r = unique[first + i];
-                let start = (index.offsets[r] - lo) as usize;
-                let len = index.counts[r] as usize;
-                if start + len > blob.len() {
-                    return Err("strip past the fetched range".to_string());
-                }
-                inflate_sampled(&blob[start..start + len], &cols, scratch, out)
-            })?;
+        let inflate = |blob: &[u8]| -> Result<Vec<u8>, String> {
+            let mut batch = vec![CANOPY_NODATA; w * (end - first)];
+            batch.par_chunks_mut(w).enumerate().try_for_each_init(
+                Vec::new,
+                |scratch, (i, out)| {
+                    let r = unique[first + i];
+                    let start = (index.offsets[r] - lo) as usize;
+                    let len = index.counts[r] as usize;
+                    if start + len > blob.len() {
+                        return Err("strip past the fetched range".to_string());
+                    }
+                    inflate_sampled(&blob[start..start + len], &cols, scratch, out)
+                },
+            )?;
+            Ok(batch)
+        };
+        let batch = match inflate(&blob) {
+            Ok(batch) => batch,
+            // A damaged cache file is replaced from the source, not trusted again.
+            Err(_) if from_cache => {
+                let _ = std::fs::remove_file(row_block_path(&key, blocks[bi]));
+                blob = fetch_row_blocks(client, &url, &key, &index, &blocks[bi..bi + 1])?.1;
+                inflate(&blob)?
+            }
+            Err(e) => return Err(e),
+        };
 
         while out_i < rows.len() && rows[out_i] <= last {
             let src = (unique.partition_point(|&u| u < rows[out_i]) - first) * w;
@@ -471,8 +491,131 @@ fn fill_from_tile(
             out_i += 1;
         }
         first = end;
+        bi += nb;
     }
     Ok(out_i * w)
+}
+
+/// First and last source row of row block `b`.
+fn block_rows(b: usize) -> (usize, usize) {
+    let first = b * ROW_BLOCK;
+    (first, (first + ROW_BLOCK).min(TILE_PX as usize) - 1)
+}
+
+/// Byte range the strips of source rows `r0..=r1` occupy.
+fn strip_span(index: &StripIndex, r0: usize, r1: usize) -> Result<(u64, u64), String> {
+    let lo = index.offsets[r0];
+    let hi = index.offsets[r1] + index.counts[r1];
+    if hi <= lo {
+        return Err("strip table is not ascending".into());
+    }
+    Ok((lo, hi))
+}
+
+fn row_block_path(key: &str, b: usize) -> PathBuf {
+    cache_dir()
+        .join("rows")
+        .join(key)
+        .join(format!("{b}.strips"))
+}
+
+/// Cached strips of row block `b` and the file offset they start at, when the cache holds
+/// the block at the length the strip table gives it.
+fn read_row_block(key: &str, b: usize, index: &StripIndex) -> Option<(u64, Vec<u8>)> {
+    let (r0, r1) = block_rows(b);
+    let (lo, hi) = strip_span(index, r0, r1).ok()?;
+    let bytes = std::fs::read(row_block_path(key, b)).ok()?;
+    (bytes.len() as u64 == hi - lo).then_some((lo, bytes))
+}
+
+/// Fetch `blocks[0]` and whichever of the next ones directly follow it and are missing from
+/// the cache, in one range of at most `FETCH_BATCH_BYTES` (never less than one block).
+/// Every block is written to the cache. Returns the range start, its bytes and how many
+/// blocks it covers.
+fn fetch_row_blocks(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    key: &str,
+    index: &StripIndex,
+    blocks: &[usize],
+) -> Result<(u64, Vec<u8>, usize), String> {
+    let (r0, r1) = block_rows(blocks[0]);
+    let (lo, mut hi) = strip_span(index, r0, r1)?;
+    let mut nb = 1;
+    while nb < blocks.len()
+        && blocks[nb] == blocks[0] + nb
+        && !row_block_cached(key, blocks[nb], index)
+    {
+        let (_, next_hi) = strip_span(index, block_rows(blocks[nb]).0, block_rows(blocks[nb]).1)?;
+        if next_hi <= hi || next_hi - lo > FETCH_BATCH_BYTES {
+            break;
+        }
+        hi = next_hi;
+        nb += 1;
+    }
+    let blob = fetch_range(client, url, lo, hi - lo)?;
+    if blob.len() as u64 != hi - lo {
+        return Err("short canopy range".into());
+    }
+    for &b in &blocks[..nb] {
+        let (r0, r1) = block_rows(b);
+        let (b_lo, b_hi) = strip_span(index, r0, r1)?;
+        store_row_block(key, b, &blob[(b_lo - lo) as usize..(b_hi - lo) as usize]);
+    }
+    Ok((lo, blob, nb))
+}
+
+/// Whether the cache already holds block `b` at the right length, without reading it.
+fn row_block_cached(key: &str, b: usize, index: &StripIndex) -> bool {
+    let (r0, r1) = block_rows(b);
+    strip_span(index, r0, r1).is_ok_and(|(lo, hi)| {
+        std::fs::metadata(row_block_path(key, b)).is_ok_and(|m| m.len() == hi - lo)
+    })
+}
+
+/// Best effort: a failed write only costs the next run a download. Written beside the
+/// target and renamed, so a reader never sees half a block.
+fn store_row_block(key: &str, b: usize, bytes: &[u8]) {
+    let path = row_block_path(key, b);
+    let Some(dir) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// Drop cached row blocks nobody has written in a month. A city window is tens of
+/// megabytes of blocks, so without this the cache only ever grows.
+fn prune_row_cache() {
+    let max_age = std::time::Duration::from_secs(ROW_CACHE_MAX_AGE_DAYS * 24 * 60 * 60);
+    let Ok(tiles) = std::fs::read_dir(cache_dir().join("rows")) else {
+        return;
+    };
+    for tile in tiles.flatten() {
+        if !tile.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(tile.path()) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let old = file
+                .metadata()
+                .ok()
+                .filter(|m| m.is_file())
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > max_age);
+            if old {
+                let _ = std::fs::remove_file(file.path());
+            }
+        }
+    }
 }
 
 /// Fetch canopy heights for `bbox` onto a `grid_width` x `grid_height` grid.
@@ -487,6 +630,7 @@ pub fn fetch_canopy_data(
     }
     // No progress emit, this runs behind the land cover and elevation fetches.
     println!("Fetching canopy height data (Meta/WRI 1m global canopy height)...");
+    prune_row_cache();
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(90))

@@ -35,7 +35,7 @@ fn props(pairs: &[(&str, &str)]) -> Option<Arc<Value>> {
     for (k, v) in pairs {
         m.insert((*k).to_string(), Value::String((*v).to_string()));
     }
-    Some(Arc::new(Value::Compound(m)))
+    Some(crate::block_definitions::intern_props(Value::Compound(m)))
 }
 fn multiface(face: &str) -> Option<Arc<Value>> {
     let mut m: HashMap<String, Value> = HashMap::new();
@@ -45,7 +45,7 @@ fn multiface(face: &str) -> Option<Arc<Value>> {
             Value::String(if f == face { "true" } else { "false" }.into()),
         );
     }
-    Some(Arc::new(Value::Compound(m)))
+    Some(crate::block_definitions::intern_props(Value::Compound(m)))
 }
 /// place into AIR only (won't touch ore/rock/buildings).
 fn put(ed: &mut WorldEditor, b: Block, x: i32, y: i32, z: i32, p: Option<Arc<Value>>) {
