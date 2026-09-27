@@ -5,8 +5,9 @@
 //! means range-fetching the strip index and then only the rows it covers.
 //! Licensed CC BY 4.0, see NOTICE.
 
-use std::io::Read;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rayon::prelude::*;
 
@@ -573,18 +574,30 @@ fn row_block_cached(key: &str, b: usize, index: &StripIndex) -> bool {
     })
 }
 
-/// Best effort: a failed write only costs the next run a download. Written beside the
-/// target and renamed, so a reader never sees half a block.
+/// Best effort: a failed write only costs the next run a download.
 fn store_row_block(key: &str, b: usize, bytes: &[u8]) {
-    let path = row_block_path(key, b);
+    write_whole(&row_block_path(key, b), bytes);
+}
+
+/// Write `bytes` to `path` so a reader sees the old file or all of the new one, never half.
+/// Each call writes a temporary file only it can have created, then renames it into place,
+/// so two writers of one block cannot mix their bytes. Nothing is left behind on failure.
+fn write_whole(path: &Path, bytes: &[u8]) {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let Some(dir) = path.parent() else {
         return;
     };
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp{}-{n}", std::process::id()));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(bytes));
+    if written.is_err() || std::fs::rename(&tmp, path).is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
 }
@@ -787,6 +800,31 @@ mod tests {
         assert!((0.10..0.35).contains(&fraction), "fraction {fraction}");
         assert!((5.0..20.0).contains(&mean), "mean {mean}");
         assert!((20..60).contains(&max), "max {max}");
+    }
+
+    // Writers racing on one block each land a whole payload, and leave no temporary files.
+    #[test]
+    fn concurrent_block_writes_never_mix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("7.strips");
+        let payloads: Vec<Vec<u8>> = (0..8u8).map(|i| vec![i; 64 * 1024]).collect();
+        std::thread::scope(|s| {
+            for p in &payloads {
+                let path = &path;
+                s.spawn(move || {
+                    for _ in 0..20 {
+                        write_whole(path, p);
+                    }
+                });
+            }
+        });
+        let got = std::fs::read(&path).unwrap();
+        assert!(payloads.contains(&got), "a block mixed two writers");
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["7.strips".to_string()]);
     }
 
     #[test]
