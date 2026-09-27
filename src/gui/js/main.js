@@ -2979,8 +2979,9 @@ function restoreNaturalRows() {
   refreshHeightLimitRow();
 }
 
-// Rotation stays 0 and the Voxy cache off while the mode is on; scale,
-// build height and elevation source follow the world once it exists.
+// Rotation stays 0, the Voxy cache off and the build height extended while
+// the mode is on; scale, build height and elevation source follow the world
+// once it exists.
 function applyOneWorldPins(info) {
   oneWorldPinned = true;
   const rotationInput = document.getElementById('rotation-angle-input');
@@ -2992,12 +2993,12 @@ function applyOneWorldPins(info) {
   const exists = !!(info && info.exists);
   pinControl('scale-value-slider', exists && typeof info.scale === 'number' ? info.scale : null);
   pinControl('disable-height-limit-toggle',
-    exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : null);
+    exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
   setSettingsRowAvailable('voxy-lod-toggle', false);
+  setSettingsRowAvailable('disable-height-limit-toggle', false);
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false);
-    setSettingsRowAvailable('disable-height-limit-toggle', false);
     setSettingsRowAvailable('aws-only-elevation-toggle', false);
   }
 }
@@ -3333,6 +3334,8 @@ async function startGeneration() {
     if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
       if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
       if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
+    } else if (oneWorld) {
+      disable_height_limit = true;
     }
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI

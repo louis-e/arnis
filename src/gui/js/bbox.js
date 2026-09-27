@@ -1258,9 +1258,10 @@ $(document).ready(function () {
             var mercY = function (latDeg) {
                 return R * Math.log(Math.tan(Math.PI / 4 + latDeg * rad / 2));
             };
-            var x = R * (lng - data.origin_lon) * rad * k;
-            var z = -(mercY(lat) - mercY(data.origin_lat)) * k;
-            return { x: Math.floor(x), y: 100, z: Math.floor(z) };
+            var x = Math.floor(R * (lng - data.origin_lon) * rad * k);
+            var z = Math.floor(-(mercY(lat) - mercY(data.origin_lat)) * k);
+            // Terrain can be anywhere from Y -2014 to 2016, so land on the top block.
+            return { x: x, y: 100, z: z, command: '/spreadplayers ' + x + ' ' + z + ' 0 1 false @s' };
         }
 
         // Check if Minecraft coordinate bounds are available (not all zeros)
@@ -1298,7 +1299,7 @@ $(document).ready(function () {
         var coords = calculateMinecraftCoords(lat, lng);
         if (!coords) return;
 
-        var tpCommand = '/tp ' + coords.x + ' ' + coords.y + ' ' + coords.z;
+        var tpCommand = coords.command || ('/tp ' + coords.x + ' ' + coords.y + ' ' + coords.z);
 
         // Copy to clipboard using modern API with fallback
         if (navigator.clipboard && navigator.clipboard.writeText) {

@@ -20,13 +20,23 @@ pub const PREVIEW_DIR: &str = "arnis_one_world/previews";
 pub const DEFAULT_WORLD_NAME: &str = "Arnis One World";
 /// 2: merges write into empty region files. Version 1 worlds still hold
 /// region template chunks outside their areas and are repaired once.
-pub const MANIFEST_VERSION: u32 = 2;
+/// 3: new worlds have the extended build height and a whole-Earth elevation
+/// mapping, which older builds would not apply.
+pub const MANIFEST_VERSION: u32 = 3;
 
 /// Geometry kept past the area edge, so an element straddling a seam is
 /// built whole on both sides.
 pub const CLIP_PAD_BLOCKS: i32 = 64;
 
 const MAX_ABS_LAT: f64 = 85.0;
+
+/// Rounds to `decimals` places. serde_json reads such short decimals back
+/// exactly, but not every f64 it writes, and the first run has to use the same
+/// numbers as the runs that load them.
+fn stable(v: f64, decimals: i32) -> f64 {
+    let f = 10f64.powi(decimals);
+    (v * f).round() / f
+}
 
 /// Ground data is fetched this far past the area and cropped again, so the
 /// smoothing passes (widest: built-up Gaussian, ~90 m) agree across seams.
@@ -73,7 +83,8 @@ pub struct Manifest {
     pub terrain: bool,
     pub disable_height_limit: bool,
     pub aws_only_elevation: bool,
-    /// Metre to Y mapping shared by every area, set by the first terrain area.
+    /// Metre to Y mapping shared by every area. Set at creation; worlds from
+    /// before version 3 take it from their first terrain area.
     pub elevation: Option<ElevationAffine>,
     pub next_area_id: u32,
     pub areas: Vec<GeneratedArea>,
@@ -81,18 +92,32 @@ pub struct Manifest {
 
 impl Manifest {
     fn new(args: &Args, origin_lat: f64, origin_lon: f64) -> Self {
+        let scale = stable(args.scale, 9);
         Self {
             version: MANIFEST_VERSION,
             created_with: format!("arnis {}", env!("CARGO_PKG_VERSION")),
             created_at: unix_now(),
-            origin_lat,
-            origin_lon,
-            scale: args.scale,
+            origin_lat: stable(origin_lat, 7),
+            origin_lon: stable(origin_lon, 7),
+            scale,
             ground_level: args.ground_level,
             terrain: args.terrain(),
             disable_height_limit: args.disable_height_limit,
             aws_only_elevation: args.aws_only_elevation,
-            elevation: None,
+            // One section up, so water carved at the lowest level stays above the floor.
+            elevation: args.terrain().then(|| {
+                let mut e = ElevationAffine::whole_earth(
+                    scale,
+                    crate::ground::min_ground_level_for(args) + 16,
+                    crate::ground::extended_max_y_for(args),
+                );
+                if let Some(top) = e.soft_top.as_mut() {
+                    top.knee_m = stable(top.knee_m, 6);
+                    // Down, so Everest stays under the ceiling.
+                    top.width_blocks = stable(top.width_blocks - 5e-7, 6);
+                }
+                e
+            }),
             next_area_id: 1,
             areas: Vec::new(),
         }
@@ -137,9 +162,13 @@ impl Manifest {
         }
         crate::args::validate_scale(self.scale)?;
         if let Some(e) = &self.elevation {
+            let soft_top_ok = e.soft_top.is_none_or(|t| {
+                t.knee_m.is_finite() && t.width_blocks.is_finite() && t.width_blocks > 0.0
+            });
             if !(e.min_height_m.is_finite()
                 && e.blocks_per_meter.is_finite()
-                && e.blocks_per_meter >= 0.0)
+                && e.blocks_per_meter >= 0.0
+                && soft_top_ok)
             {
                 return Err("elevation mapping".to_string());
             }
@@ -257,16 +286,6 @@ fn compatibility_errors(manifest: &Manifest, args: &Args) -> Vec<String> {
             if manifest.terrain { "with" } else { "without" }
         ));
     }
-    if manifest.disable_height_limit != args.disable_height_limit {
-        errors.push(format!(
-            "the world was generated {} the extended build height",
-            if manifest.disable_height_limit {
-                "with"
-            } else {
-                "without"
-            }
-        ));
-    }
     errors
 }
 
@@ -356,7 +375,17 @@ fn resolve(
                     errors.join("; ")
                 ));
             }
-            args.scale = manifest.scale;
+            if manifest.disable_height_limit != args.disable_height_limit {
+                println!(
+                    "Note: One World keeps the build height it was created with ({}).",
+                    if manifest.disable_height_limit {
+                        "extended"
+                    } else {
+                        "vanilla"
+                    }
+                );
+                args.disable_height_limit = manifest.disable_height_limit;
+            }
             (manifest, false)
         }
         None => {
@@ -373,12 +402,20 @@ fn resolve(
                 ));
             }
             *owned = true;
+            // Room for any place on Earth, so the first area does not limit later ones.
+            if !args.disable_height_limit {
+                println!(
+                    "Note: One World uses the extended build height, so any place on Earth fits."
+                );
+                args.disable_height_limit = true;
+            }
             let origin_lat = (requested.min().lat() + requested.max().lat()) / 2.0;
             let origin_lon = (requested.min().lng() + requested.max().lng()) / 2.0;
             (Manifest::new(args, origin_lat, origin_lon), true)
         }
     };
 
+    args.scale = manifest.scale;
     let (xzbbox, llbbox) = snap_bbox_to_chunks(&manifest.projection(), requested)?;
 
     if created {
@@ -402,7 +439,7 @@ fn resolve(
         println!(
             "One World: repaired a world from an earlier build ({removed} stray chunks dropped)."
         );
-        manifest.version = MANIFEST_VERSION;
+        manifest.version = 2;
         manifest.save(world_dir)?;
     }
 
@@ -646,14 +683,14 @@ mod tests {
         let world = dir.path().join("w");
         let mut args = args_for(MUNICH, &[]);
         let session = prepare(&world, &LLBBox::from_str(MUNICH).unwrap(), &mut args).unwrap();
-        let affine = ElevationAffine {
-            min_height_m: 500.0,
-            blocks_per_meter: 1.0,
-            ground_level: -62,
-        };
-        record(&args, &session, Some(affine));
-        drop(session);
         let run = args.one_world_run.clone().unwrap();
+        let affine = run.elevation.expect("set when the world is created");
+        let other = ElevationAffine {
+            min_height_m: 500.0,
+            ..affine
+        };
+        record(&args, &session, Some(other));
+        drop(session);
 
         let east = "48.130,11.585,48.145,11.610";
         let mut args2 = args_for(east, &[]);
@@ -684,6 +721,55 @@ mod tests {
             .err()
             .unwrap();
         assert!(err.contains("with terrain"), "{err}");
+    }
+
+    #[test]
+    fn a_new_world_has_room_for_all_of_earth() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let mut args = args_for(MUNICH, &[]);
+        assert!(!args.disable_height_limit);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        assert!(args.disable_height_limit);
+        let manifest = Manifest::load(&world).unwrap().unwrap();
+        assert_eq!(manifest.version, MANIFEST_VERSION);
+        assert!(manifest.disable_height_limit);
+        let e = manifest.elevation.unwrap();
+        assert_eq!(e.y_for_metres(-430.0), -2014.0);
+        assert_eq!(e.y_for_metres(520.0), -1064.0);
+        assert!(e.y_for_metres(8849.0) <= 2016.0);
+        // What the first run used is exactly what later runs read back.
+        let run = args.one_world_run.as_ref().unwrap();
+        assert_eq!(run.elevation, Some(e));
+        assert_eq!(
+            (run.origin_lat, run.origin_lon),
+            (manifest.origin_lat, manifest.origin_lon)
+        );
+
+        let flat = dir.path().join("flat");
+        let mut args = args_for(MUNICH, &["--mode", "geo-only"]);
+        drop(prepare(&flat, &req, &mut args).unwrap());
+        assert_eq!(Manifest::load(&flat).unwrap().unwrap().elevation, None);
+    }
+
+    #[test]
+    fn an_older_world_keeps_its_build_height() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        drop(prepare(&world, &req, &mut args_for(MUNICH, &[])).unwrap());
+        let mut manifest = Manifest::load(&world).unwrap().unwrap();
+        manifest.version = 2;
+        manifest.disable_height_limit = false;
+        manifest.elevation = None;
+        manifest.save(&world).unwrap();
+
+        let mut args = args_for(MUNICH, &["--disable-height-limit"]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        assert!(!args.disable_height_limit);
+        assert_eq!(args.one_world_run.unwrap().elevation, None);
+        assert_eq!(Manifest::load(&world).unwrap().unwrap().version, 2);
     }
 
     #[test]

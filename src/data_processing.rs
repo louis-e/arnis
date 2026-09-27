@@ -785,14 +785,14 @@ pub fn generate_world_with_options(
     ground.warm_water_blend();
     bench.mark("ground_warm");
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
-    // Uses the ground's real base, not args: the montane check measures blocks above it, and
-    // the base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
+    // Uses the area's floor, not args: the montane check measures blocks above it, and the
+    // base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
     // blocks back into metres, which compression makes far smaller than args.scale.
     let tree_pack = crate::trees::tree_pack::load(
         args,
         llbbox,
         args.scale,
-        ground.base_level(),
+        crate::ground::area_floor_for(&ground, args),
         ground.blocks_per_meter(),
     )
     .map(Arc::new);

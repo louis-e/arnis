@@ -13,7 +13,7 @@ use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
     scale_to_minecraft_with,
 };
-pub use postprocess::{AffinePolicy, ElevationAffine};
+pub use postprocess::{AffinePolicy, ElevationAffine, SoftTop};
 use provider::{ElevationProvider, RawElevationGrid};
 use selector::select_provider;
 pub use selector::SourceMode;
@@ -49,6 +49,7 @@ pub struct ElevationData {
     /// Terrain base actually used: the requested ground level, or lower if the relief
     /// needed the extended floor. Every consumer of the affine must use this, not args.
     pub(crate) ground_level: i32,
+    pub(crate) soft_top: Option<SoftTop>,
 }
 
 impl ElevationData {
@@ -57,7 +58,35 @@ impl ElevationData {
             min_height_m: self.min_height_m,
             blocks_per_meter: self.blocks_per_meter,
             ground_level: self.ground_level,
+            soft_top: self.soft_top,
         }
+    }
+
+    /// How much the soft top compresses heights at `y`: 1 up to the knee, then
+    /// `cosh((y - knee_y) / width)`, the inverse slope of the curve there.
+    #[inline]
+    pub fn soft_top_stretch(&self, y: i32) -> f64 {
+        let Some(top) = self.soft_top else {
+            return 1.0;
+        };
+        let knee_y =
+            self.ground_level as f64 + (top.knee_m - self.min_height_m) * self.blocks_per_meter;
+        let above = f64::from(y) - knee_y;
+        if above <= 0.0 {
+            1.0
+        } else {
+            (above / top.width_blocks).cosh()
+        }
+    }
+
+    /// Lowest terrain Y in the grid, rounded down.
+    pub fn lowest_y(&self) -> Option<i32> {
+        self.heights
+            .iter()
+            .flatten()
+            .filter(|h| h.is_finite())
+            .map(|&h| h.floor() as i32)
+            .min()
     }
 
     pub fn remap_rows_to_mercator(&mut self, lat_top: f64, lat_bottom: f64) {
@@ -273,6 +302,7 @@ pub fn fetch_elevation_data(
         min_height_m,
         blocks_per_meter,
         ground_level: effective_ground_level,
+        soft_top,
     } = affine;
     bench.mark("elev_scale_to_mc");
 
@@ -313,6 +343,7 @@ pub fn fetch_elevation_data(
             1.0
         },
         ground_level: effective_ground_level,
+        soft_top,
     })
 }
 

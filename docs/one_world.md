@@ -85,11 +85,9 @@ Minecraft already moved out of the chunk do not linger over the new blocks.
   sampled at its centre. Elevation, land cover and canopy are fetched with a
   margin (`ground_pad_blocks`, at least 96 blocks) and cropped, so the smoothing
   passes see the same neighbourhood on both sides of a seam.
-- **Metres to Y**: the first terrain area settles
-  `y = ground_level + (h_m - min_height_m) * blocks_per_metre`, keeps up to 96
-  blocks of headroom below its lowest cell for lower neighbours, and stores the
-  mapping in the manifest as soon as it is known, before any region is written.
-  Later areas reuse it (`AffinePolicy::Fixed`).
+- **Metres to Y**: one mapping for the whole world, stored in the manifest when
+  the world is created (see [Build height](#build-height)). Every area uses it
+  (`AffinePolicy::Fixed`), so the same height is the same Y everywhere.
 - **Elements across a seam**: OSM ways and Overture footprints are clipped to
   the area plus 64 blocks, so a building on the edge is built whole on both
   sides; writes outside the area are dropped.
@@ -115,22 +113,50 @@ with their previews.
 ### What the manifest fixes
 
 Refused with a message naming the mismatch: world scale, ground level, terrain
-on/off, extended build height. Taken from the manifest: the elevation source.
+on/off. Taken from the manifest: the elevation source and the build height.
 Forced: rotation 0, Web Mercator, no Voxy LOD cache, Mapillary facades as
-blocks, no preset facades, map preview on, no Luanti. The GUI greys and pins these rows and
-puts the user's own values back when One World is turned off. Everything else
-may differ per area.
-
-The extended build height pack is installed only when the world is created, so
-a later Arnis cannot resize an existing world's dimension.
+blocks, no preset facades, map preview on, no Luanti. The GUI greys and pins
+these rows and puts the user's own values back when One World is turned off.
+Everything else may differ per area.
 
 ### Build height
 
-Without the pack the band is vanilla Y -64 to 319, with it Y -2032 to 2031,
-fixed by the first area. A later area outside the band is flattened where it
-clamps, and the run says so when that affects more than 0.5% of it. 384 blocks
-cover the relief of almost any city; only a world that mixes lowland with high
-mountains needs the pack.
+A One World can end up holding the Alps next to a coastal city, so every new
+world gets the extended build height pack (Y -2032 to 2031) when it is created,
+whatever the setting says, and a mapping that has room for all land on Earth
+(`ElevationAffine::whole_earth`):
+
+- The Dead Sea shore (-430 m) is Y -2014, one section above the lowest terrain
+  Y the pack allows, so water carved there keeps its bed.
+- Above it, one block per metre at scale 1 (`scale` blocks per metre in
+  general), the same proportion as horizontally. Sea level is Y -1584, Munich
+  about Y -1064.
+- The top 800 blocks under the terrain ceiling (Y 2016) are a soft top: from
+  2800 m up, `asinh` compresses heights more the higher they are, so Everest
+  lands exactly on the ceiling and nothing on land is cut flat. At the knee the
+  slope matches the straight part. Mont Blanc (4808 m) is about Y 1800.
+- Only sea floor below -430 m is clamped, and it lies under water.
+
+Scales of 0.4 and below fit Everest without the soft top. The knee and its
+width are stored in the manifest, so later builds keep using the same curve.
+Slopes are measured through the curve (`ElevationData::soft_top_stretch`), so a
+rock face above the knee still counts as steep for the rock and snow rules.
+
+Numbers the manifest stores at creation (origin, scale, knee, width) are
+rounded to a few decimals first: serde_json reads short decimals back exactly,
+but not every `f64` it writes, and the first run must use the same numbers as
+every later one.
+
+The world's base is the Dead Sea, far below most areas, so bedrock, the
+superflat plane and the montane tree check follow each area's own lowest point
+instead (`ground::area_floor_for`). Bedrock sits 64 blocks under it, as in an
+ordinary world, which keeps `--fillground` columns short. Minecraft generates the
+land outside the areas as a superflat plane at the first area's lowest point.
+
+Worlds created before manifest version 3 keep the build height they were made
+with and the mapping their first area settled (vanilla band, up to 96 blocks of
+headroom below that area). A later area outside that band is flattened where it
+clamps, and the run says so when that affects more than 0.5% of it.
 
 ### Locking
 
@@ -149,7 +175,9 @@ after its regions and preview are written; the elevation mapping is stored
 earlier, so a rerun of a failed first area stays on the same mapping.
 
 Moving the spawn with a marker also moves the player into the overworld, in case
-they logged out in another dimension.
+they logged out in another dimension. The map's "Copy coordinates" gives a
+`/spreadplayers` command for a One World, which lands on the top block, since
+terrain can be anywhere between Y -2014 and 2016.
 
 Every run moves `LastPlayed` in `level.dat` to now, so the world is listed first
 in Minecraft's world list.
@@ -158,13 +186,16 @@ in Minecraft's world list.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "created_with": "arnis 3.2.0",
   "created_at": 1789000000,
   "origin_lat": 48.1372, "origin_lon": 11.5755,
   "scale": 1.0, "ground_level": -62,
-  "terrain": true, "disable_height_limit": false, "aws_only_elevation": false,
-  "elevation": { "min_height_m": 421.3, "blocks_per_meter": 1.0, "ground_level": -62 },
+  "terrain": true, "disable_height_limit": true, "aws_only_elevation": false,
+  "elevation": {
+    "min_height_m": -430.0, "blocks_per_meter": 1.0, "ground_level": -2014,
+    "soft_top": { "knee_m": 2800.0, "width_blocks": 194.4 }
+  },
   "next_area_id": 3,
   "areas": [
     { "id": 1, "generated_at": 1789000000, "arnis_version": "3.2.0",
@@ -221,18 +252,29 @@ Manifests are validated on load. Preview paths are only followed inside
 
 - Ordinary generation (One World off) produces the same block hash as `main`
   in the default, rotated, flat and terrain-only modes, once `main`'s own
-  node-order nondeterminism is fixed on both sides.
+  node-order nondeterminism is fixed on both sides. The whole-Earth mapping
+  left it unchanged too (default, rotated, flat, terrain-only, a compressed
+  Matterhorn area and the extended build height, against the previous build).
 - Three CLI runs into one world on the Arnis test area (the area, its eastern
   neighbour, a smaller area across their seam): no chunk missing, no misplaced
   chunk, the overlap reported and rebuilt. Surface heights across the area seam
   match 86.6% exactly and 6.9% within one block, in line with ordinary chunk
   boundaries inside an area.
+- A new world with Munich, its eastern neighbour and the Matterhorn 300 km away:
+  the pack is enabled in `level.dat`, the superflat plane sits at Munich's
+  lowest point (Y -1078), Munich spans Y -1090 to -969 with bedrock at -1152,
+  and the Matterhorn reaches Y 1772 with bedrock at 1072, snow-capped like an
+  ordinary world of the same area. The seam between the Munich areas is in the
+  range of the interior chunk boundaries next to it. 10 to 14 s per area.
+- A world made by the previous build (vanilla height, version 2) is extended
+  with its own mapping, no pack, and stays version 2.
 - The same area generated into two fresh worlds gives identical blocks.
 - A second process holding `session.lock` makes the run refuse without touching
-  the manifest.
+  the manifest; the test for it runs on Windows and Linux CI.
 - A copy of a world from the first build is repaired (7607 stray chunks
   dropped) and extended correctly.
 - Unit tests cover the projection, snapping, manifest life cycle, locks, region
-  merge and repair, row remap and crop, ground fetch plan and affine policies.
-- The Unix lock code was compiled for macOS in isolation; it has not run on
-  macOS or Linux yet. The GUI flow was reviewed but not clicked through.
+  merge and repair, row remap and crop, ground fetch plan, affine policies and
+  the whole-Earth mapping.
+- The Unix lock code has not run on macOS. The GUI flow was reviewed but not
+  clicked through.

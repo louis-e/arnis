@@ -221,7 +221,11 @@ fn snow_threshold_for(ed: &ElevationData, lat_deg: f64, ground_level: i32) -> i3
             i32::MAX
         };
     }
-    (ground_level as f64 + (snowline - ed.min_height_m) * ed.blocks_per_meter).round() as i32
+    let affine = ElevationAffine {
+        ground_level,
+        ..ed.affine()
+    };
+    affine.y_for_metres(snowline).round() as i32
 }
 
 impl Ground {
@@ -360,6 +364,7 @@ impl Ground {
                 blocks_per_meter: 1.0,
                 slope_correction: 1.0,
                 ground_level: 0,
+                soft_top: None,
             }),
             land_cover: None,
             canopy: None,
@@ -828,11 +833,10 @@ impl Ground {
         // Saturate: pathological CLI input (e.g. very negative ground_level)
         // can push max - min past i32::MAX.
         let raw = max_val.saturating_sub(min_val);
-        let correction = self
-            .elevation_data
-            .as_ref()
-            .map(|d| d.slope_correction)
-            .unwrap_or(1.0);
+        let correction = match &self.elevation_data {
+            Some(d) => d.slope_correction * d.soft_top_stretch(min_val.saturating_add(raw / 2)),
+            None => 1.0,
+        };
         (raw as f64 * correction).round() as i32
     }
 
@@ -1212,8 +1216,9 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         );
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
-        crate::world_editor::set_base_chunk_y(ground.base_level());
-        crate::world_editor::set_terrain_floor_y(ground.base_level());
+        let floor = area_floor_for(&ground, args);
+        crate::world_editor::set_base_chunk_y(floor);
+        crate::world_editor::set_terrain_floor_y(floor);
         // A grass plane around a lunar crater would be the most visible thing in it.
         crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
         if args.debug {
@@ -1235,6 +1240,18 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
     ground
+}
+
+/// The terrain base, except in a One World with the extended floor: its base is the
+/// lowest land on Earth, so bedrock, the filler plane and montane trees follow the
+/// area's own lowest point instead.
+pub(crate) fn area_floor_for(ground: &Ground, args: &Args) -> i32 {
+    match &ground.elevation_data {
+        Some(d) if args.one_world_run.is_some() && args.disable_height_limit => {
+            d.lowest_y().unwrap_or(ground.base_level())
+        }
+        _ => ground.base_level(),
+    }
 }
 
 /// Surface block for the out-of-bbox filler plane that borders the world.
@@ -1323,6 +1340,7 @@ mod tests {
                 blocks_per_meter: 1.0,
                 slope_correction: 1.0,
                 ground_level: 0,
+                soft_top: None,
             }),
             land_cover: None,
             canopy: None,
@@ -1436,6 +1454,7 @@ mod tests {
             blocks_per_meter: bpm,
             slope_correction: 1.0,
             ground_level: 0,
+            soft_top: None,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
         assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);
@@ -1473,6 +1492,27 @@ mod tests {
         // Same hillside with the relief squeezed 4:1 into the vanilla ceiling.
         let compressed = scaled_ground(ramp(0.25), 0.25, 4.0);
         assert_eq!(compressed.slope(XZPoint::new(8, 8)), 8);
+    }
+
+    #[test]
+    fn slope_undoes_the_soft_top() {
+        // A 45 degree face at 3500 m, where the soft top squeezes it to about a quarter.
+        let affine = ElevationAffine::whole_earth(1.0, -2014, 2031);
+        let heights: Vec<Vec<f32>> = (0..17)
+            .map(|_| {
+                (0..17)
+                    .map(|x| affine.y_for_metres(3500.0 + x as f64) as f32)
+                    .collect()
+            })
+            .collect();
+        let mut g = scaled_ground(heights, 1.0, 1.0);
+        let d = g.elevation_data.as_mut().unwrap();
+        d.min_height_m = affine.min_height_m;
+        d.ground_level = affine.ground_level;
+        d.soft_top = affine.soft_top;
+        // Steep, as a real 45 degree face is, instead of the 2 the blocks alone show.
+        let slope = g.slope(XZPoint::new(8, 8));
+        assert!(slope > 4, "{slope}");
     }
 
     #[test]
@@ -1584,6 +1624,7 @@ pub(crate) mod test_support {
                 blocks_per_meter: 1.0,
                 slope_correction: 1.0,
                 ground_level: 0,
+                soft_top: None,
             }),
             land_cover: Some(land_cover),
             canopy: None,

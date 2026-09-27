@@ -1817,18 +1817,78 @@ pub fn scale_to_minecraft(
     )
 }
 
-/// `y = ground_level + (h_m - min_height_m) * blocks_per_meter`.
+/// `y = ground_level + (h_m - min_height_m) * blocks_per_meter`, bent above
+/// `soft_top` if set.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct ElevationAffine {
     pub min_height_m: f64,
     pub blocks_per_meter: f64,
     pub ground_level: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_top: Option<SoftTop>,
 }
+
+/// Above `knee_m` heights are compressed more the higher they are instead of
+/// clamped: `y = y(knee) + width * asinh((h - knee) * blocks_per_meter / width)`.
+/// The slope at the knee matches the straight part.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct SoftTop {
+    pub knee_m: f64,
+    pub width_blocks: f64,
+}
+
+/// Lowest and highest land on Earth: the Dead Sea shore and Everest.
+const LOWEST_LAND_M: f64 = -430.0;
+const HIGHEST_LAND_M: f64 = 8849.0;
+/// Blocks under the ceiling that the soft top may use.
+const SOFT_TOP_BLOCKS: f64 = 800.0;
 
 impl ElevationAffine {
     #[inline]
     pub fn y_for_metres(&self, h_m: f64) -> f64 {
-        self.ground_level as f64 + (h_m - self.min_height_m) * self.blocks_per_meter
+        match self.soft_top {
+            Some(top) if h_m > top.knee_m => {
+                let knee_y = self.ground_level as f64
+                    + (top.knee_m - self.min_height_m) * self.blocks_per_meter;
+                let rise = (h_m - top.knee_m) * self.blocks_per_meter;
+                knee_y + top.width_blocks * (rise / top.width_blocks).asinh()
+            }
+            _ => self.ground_level as f64 + (h_m - self.min_height_m) * self.blocks_per_meter,
+        }
+    }
+
+    /// One mapping for all land on Earth: `scale` blocks per metre from the
+    /// Dead Sea at `floor` upwards, with a soft top if Everest would otherwise
+    /// end above the ceiling.
+    pub fn whole_earth(scale: f64, floor: i32, extended_max_y: i32) -> Self {
+        let ceiling = terrain_ceiling(true, extended_max_y) as f64;
+        let mut affine = Self {
+            min_height_m: LOWEST_LAND_M,
+            blocks_per_meter: scale,
+            ground_level: floor,
+            soft_top: None,
+        };
+        let knee_y = ceiling - SOFT_TOP_BLOCKS;
+        if affine.y_for_metres(HIGHEST_LAND_M) <= ceiling || knee_y <= floor as f64 {
+            return affine;
+        }
+        let knee_m = LOWEST_LAND_M + (knee_y - floor as f64) / scale;
+        let rise = (HIGHEST_LAND_M - knee_m) * scale;
+        // width * asinh(rise / width) grows with the width towards `rise`.
+        let (mut lo, mut hi) = (1e-3, 1e9);
+        for _ in 0..200 {
+            let mid = (lo + hi) / 2.0;
+            if mid * (rise / mid).asinh() > SOFT_TOP_BLOCKS {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        affine.soft_top = Some(SoftTop {
+            knee_m,
+            width_blocks: lo,
+        });
+        affine
     }
 }
 
@@ -1946,6 +2006,7 @@ fn derive_affine(
             min_height_m: min_height,
             blocks_per_meter,
             ground_level,
+            soft_top: None,
         },
         FitRange {
             height_range,
@@ -2053,14 +2114,18 @@ pub fn scale_to_minecraft_with(
         }
         AffinePolicy::Fixed(affine) => {
             eprintln!(
-                "One World: reusing the world's elevation mapping (1 block = {:.2} m, {:.0} m at Y {})",
+                "One World: using the world's elevation mapping (1 block = {:.2} m, {:.0} m at Y {}{})",
                 if affine.blocks_per_meter > 0.0 {
                     1.0 / affine.blocks_per_meter
                 } else {
                     f64::INFINITY
                 },
                 affine.min_height_m,
-                affine.ground_level
+                affine.ground_level,
+                match affine.soft_top {
+                    Some(top) => format!(", compressed above {:.0} m", top.knee_m),
+                    None => String::new(),
+                }
             );
             affine
         }
@@ -2082,7 +2147,8 @@ pub fn scale_to_minecraft_with(
                     if h.is_finite() {
                         n += 1;
                         let y = affine.y_for_metres(h);
-                        if y < base || y > upper_clamp {
+                        // Anything below the lowest land is sea floor, under water anyway.
+                        if (y < base && h > LOWEST_LAND_M) || y > upper_clamp {
                             c += 1;
                         }
                     }
@@ -2093,9 +2159,14 @@ pub fn scale_to_minecraft_with(
         if total > 0 && clamped * 200 > total {
             let pct = clamped as f64 * 100.0 / total as f64;
             eprintln!(
-                "Warning: {pct:.1}% of this area lies outside the world's height band (Y {} to {}) and is flattened there. \
-                 The band was fixed by the first area; a taller band needs a new One World with the extended build height.",
-                affine.ground_level, upper_clamp as i32
+                "Warning: {pct:.1}% of this area lies outside the world's height band (Y {} to {}) and is flattened there.{}",
+                affine.ground_level,
+                upper_clamp as i32,
+                if disable_height_limit {
+                    ""
+                } else {
+                    " The band was fixed by the first area; a new One World has room for all of Earth."
+                }
             );
             crate::progress::emit_gui_progress_update(
                 crate::progress::MESSAGE_ONLY,
@@ -2921,6 +2992,7 @@ mod affine_policy_tests {
             min_height_m: 404.0,
             blocks_per_meter: 1.0,
             ground_level: -62,
+            soft_top: None,
         };
         let mut grid = ramp();
         grid[0][0] = 300.0; // below the world's lowest: clamps at the base
@@ -2933,5 +3005,54 @@ mod affine_policy_tests {
         assert_eq!(mc[3][3], (MAX_Y - TERRAIN_HEIGHT_BUFFER) as f64);
         assert!(mc[1][1].is_nan());
         assert_eq!(mc[0][1], -62.0 + (501.0 - 404.0));
+    }
+
+    #[test]
+    fn the_whole_earth_fits_one_to_one_up_to_the_soft_top() {
+        let e = ElevationAffine::whole_earth(1.0, -2014, 2031);
+        let top = e.soft_top.unwrap();
+        assert_eq!(top.knee_m, 2800.0);
+        assert_eq!(e.y_for_metres(-430.0), -2014.0);
+        assert_eq!(e.y_for_metres(0.0), -1584.0);
+        assert_eq!(e.y_for_metres(2500.0), 916.0);
+        assert!((e.y_for_metres(8849.0) - 2016.0).abs() < 1e-6);
+
+        // Continuous with the same slope at the knee, and still rising at Everest.
+        let below = e.y_for_metres(top.knee_m - 0.01);
+        let above = e.y_for_metres(top.knee_m + 0.01);
+        assert!((above - below - 0.02).abs() < 1e-6);
+        let mut last = f64::MIN;
+        for h in (0..=8849).step_by(7) {
+            let y = e.y_for_metres(h as f64);
+            assert!(y > last);
+            last = y;
+        }
+        assert!(e.y_for_metres(8849.0) - e.y_for_metres(8800.0) > 1.0);
+    }
+
+    #[test]
+    fn the_whole_earth_needs_no_soft_top_when_it_fits() {
+        let e = ElevationAffine::whole_earth(0.4, -2014, 2031);
+        assert_eq!(e.soft_top, None);
+        assert!(e.y_for_metres(8849.0) <= 2016.0);
+    }
+
+    #[test]
+    fn a_whole_earth_mapping_only_clamps_the_sea_floor() {
+        let stored = ElevationAffine::whole_earth(1.0, -2014, 2031);
+        let grid = vec![vec![-1500.0, -10.0, 520.0], vec![3000.0, 4808.0, 8849.0]];
+        let (mc, _) = scale_to_minecraft_with(
+            &grid,
+            1.0,
+            -62,
+            -2030,
+            true,
+            2031,
+            AffinePolicy::Fixed(stored),
+        );
+        assert_eq!(mc[0][0], -2014.0);
+        assert_eq!(mc[0][1], -1594.0);
+        assert_eq!(mc[0][2], -1064.0);
+        assert!(mc[1][0] < mc[1][1] && mc[1][1] < mc[1][2] && mc[1][2] <= 2016.0);
     }
 }

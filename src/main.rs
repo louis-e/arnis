@@ -333,6 +333,11 @@ fn run_cli() {
                 std::process::exit(1);
             });
         effective_bbox = session.llbbox;
+        // The world decides the build height.
+        world_editor::set_world_bounds(
+            ground::extended_min_y_for(&args),
+            ground::world_top_y_for(&args),
+        );
         *ONE_WORLD_RUN.lock().unwrap_or_else(|e| e.into_inner()) = Some(OneWorldRun {
             lock: session.lock,
             created: session.created.then(|| world_dir.clone()),

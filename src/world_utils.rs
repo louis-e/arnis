@@ -853,7 +853,6 @@ fn raise_superflat_floor(root: &mut Value, base_y: i32, min_y: i32) {
     }
 }
 
-// Writes GameType, DayTime and the player's game mode into an existing level.dat.
 /// Sets `LastPlayed` to now, which lists the world first in Minecraft.
 pub fn touch_last_played(world_path: &Path) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
@@ -888,6 +887,7 @@ pub fn touch_last_played(world_path: &Path) -> Result<(), String> {
     replace_file_atomically(&level_path, &compressed)
 }
 
+// Writes GameType, DayTime and the player's game mode into an existing level.dat.
 pub fn apply_java_world_settings(
     world_path: &Path,
     game_mode: crate::args::GameMode,
