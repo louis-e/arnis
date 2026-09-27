@@ -47,6 +47,7 @@
   "mode_terrain_only": "지형만",
   "interior": "내부 생성",
   "fillground": "지면 채우기",
+  "caves": "동굴",
   "legacy_trees": "기존 나무",
   "canopy_height": "실제 수목 분포",
   "max_tree_size": "최대 나무 크기",

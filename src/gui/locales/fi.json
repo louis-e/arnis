@@ -47,6 +47,7 @@
   "mode_terrain_only": "Vain maasto",
   "interior": "Sisätilan luonti",
   "fillground": "Täytä maa",
+  "caves": "Luolat",
   "legacy_trees": "Perinteiset puut",
   "canopy_height": "Todellinen puusto",
   "max_tree_size": "Puiden enimmäiskoko",

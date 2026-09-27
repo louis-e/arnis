@@ -47,6 +47,7 @@
   "mode_terrain_only": "地形のみ",
   "interior": "内装生成",
   "fillground": "地面を埋める",
+  "caves": "洞窟",
   "legacy_trees": "従来の木",
   "canopy_height": "実際の樹木被覆",
   "max_tree_size": "最大の木のサイズ",

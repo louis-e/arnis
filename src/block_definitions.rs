@@ -479,6 +479,72 @@ impl Block {
             382 => "coal_block",
             383 => "blackstone_slab",
             384 => "iron_door",
+            385 => "lava",
+            386 => "obsidian",
+            387 => "ice",
+            388 => "blue_ice",
+            389 => "powder_snow",
+            390 => "calcite",
+            391 => "amethyst_block",
+            392 => "budding_amethyst",
+            393 => "amethyst_cluster",
+            394 => "small_amethyst_bud",
+            395 => "medium_amethyst_bud",
+            396 => "large_amethyst_bud",
+            397 => "basalt",
+            398 => "smooth_basalt",
+            399 => "dripstone_block",
+            400 => "pointed_dripstone",
+            401 => "sculk",
+            402 => "sculk_vein",
+            403 => "sculk_catalyst",
+            404 => "sculk_sensor",
+            405 => "sculk_shrieker",
+            406 => "glow_lichen",
+            407 => "moss_carpet",
+            408 => "cave_vines",
+            409 => "cave_vines_plant",
+            410 => "spore_blossom",
+            411 => "azalea",
+            412 => "flowering_azalea",
+            413 => "big_dripleaf",
+            414 => "big_dripleaf_stem",
+            415 => "small_dripleaf",
+            416 => "small_dripleaf",
+            417 => "mycelium",
+            418 => "red_mushroom",
+            419 => "brown_mushroom",
+            420 => "red_mushroom_block",
+            421 => "brown_mushroom_block",
+            422 => "mushroom_stem",
+            423 => "shroomlight",
+            424 => "tube_coral_block",
+            425 => "brain_coral_block",
+            426 => "bubble_coral_block",
+            427 => "fire_coral_block",
+            428 => "horn_coral_block",
+            429 => "dead_tube_coral_block",
+            430 => "dead_brain_coral_block",
+            431 => "dead_bubble_coral_block",
+            432 => "dead_fire_coral_block",
+            433 => "dead_horn_coral_block",
+            434 => "tube_coral",
+            435 => "brain_coral",
+            436 => "bubble_coral",
+            437 => "fire_coral",
+            438 => "horn_coral",
+            439 => "tube_coral_fan",
+            440 => "brain_coral_fan",
+            441 => "bubble_coral_fan",
+            442 => "fire_coral_fan",
+            443 => "horn_coral_fan",
+            444 => "deepslate_coal_ore",
+            445 => "deepslate_iron_ore",
+            446 => "deepslate_copper_ore",
+            447 => "deepslate_gold_ore",
+            448 => "deepslate_redstone_ore",
+            449 => "deepslate_lapis_ore",
+            450 => "deepslate_diamond_ore",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -803,6 +869,17 @@ impl Block {
             })),
             // Oak door upper
             366 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Small dripleaf lower/upper halves.
+            415 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            416 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
@@ -1283,6 +1360,74 @@ pub const PALE_OAK_TRAPDOOR: Block = Block::new(381);
 pub const COAL_BLOCK: Block = Block::new(382);
 pub const BLACKSTONE_SLAB: Block = Block::new(383);
 pub const IRON_DOOR: Block = Block::new(384);
+
+// Placed by the cave passes (--caves).
+pub const LAVA: Block = Block::new(385);
+pub const OBSIDIAN: Block = Block::new(386);
+pub const ICE: Block = Block::new(387);
+pub const BLUE_ICE: Block = Block::new(388);
+pub const POWDER_SNOW: Block = Block::new(389);
+pub const CALCITE: Block = Block::new(390);
+pub const AMETHYST_BLOCK: Block = Block::new(391);
+pub const BUDDING_AMETHYST: Block = Block::new(392);
+pub const AMETHYST_CLUSTER: Block = Block::new(393);
+pub const SMALL_AMETHYST_BUD: Block = Block::new(394);
+pub const MEDIUM_AMETHYST_BUD: Block = Block::new(395);
+pub const LARGE_AMETHYST_BUD: Block = Block::new(396);
+pub const BASALT: Block = Block::new(397);
+pub const SMOOTH_BASALT: Block = Block::new(398);
+pub const DRIPSTONE_BLOCK: Block = Block::new(399);
+pub const POINTED_DRIPSTONE: Block = Block::new(400);
+pub const SCULK: Block = Block::new(401);
+pub const SCULK_VEIN: Block = Block::new(402);
+pub const SCULK_CATALYST: Block = Block::new(403);
+pub const SCULK_SENSOR: Block = Block::new(404);
+pub const SCULK_SHRIEKER: Block = Block::new(405);
+pub const GLOW_LICHEN: Block = Block::new(406);
+pub const MOSS_CARPET: Block = Block::new(407);
+pub const CAVE_VINES: Block = Block::new(408);
+pub const CAVE_VINES_PLANT: Block = Block::new(409);
+pub const SPORE_BLOSSOM: Block = Block::new(410);
+pub const AZALEA: Block = Block::new(411);
+pub const FLOWERING_AZALEA: Block = Block::new(412);
+pub const BIG_DRIPLEAF: Block = Block::new(413);
+pub const BIG_DRIPLEAF_STEM: Block = Block::new(414);
+pub const SMALL_DRIPLEAF_LOWER: Block = Block::new(415);
+pub const SMALL_DRIPLEAF_UPPER: Block = Block::new(416);
+pub const MYCELIUM: Block = Block::new(417);
+pub const RED_MUSHROOM: Block = Block::new(418);
+pub const BROWN_MUSHROOM: Block = Block::new(419);
+pub const RED_MUSHROOM_BLOCK: Block = Block::new(420);
+pub const BROWN_MUSHROOM_BLOCK: Block = Block::new(421);
+pub const MUSHROOM_STEM: Block = Block::new(422);
+pub const SHROOMLIGHT: Block = Block::new(423);
+pub const TUBE_CORAL_BLOCK: Block = Block::new(424);
+pub const BRAIN_CORAL_BLOCK: Block = Block::new(425);
+pub const BUBBLE_CORAL_BLOCK: Block = Block::new(426);
+pub const FIRE_CORAL_BLOCK: Block = Block::new(427);
+pub const HORN_CORAL_BLOCK: Block = Block::new(428);
+pub const DEAD_TUBE_CORAL_BLOCK: Block = Block::new(429);
+pub const DEAD_BRAIN_CORAL_BLOCK: Block = Block::new(430);
+pub const DEAD_BUBBLE_CORAL_BLOCK: Block = Block::new(431);
+pub const DEAD_FIRE_CORAL_BLOCK: Block = Block::new(432);
+pub const DEAD_HORN_CORAL_BLOCK: Block = Block::new(433);
+pub const TUBE_CORAL: Block = Block::new(434);
+pub const BRAIN_CORAL: Block = Block::new(435);
+pub const BUBBLE_CORAL: Block = Block::new(436);
+pub const FIRE_CORAL: Block = Block::new(437);
+pub const HORN_CORAL: Block = Block::new(438);
+pub const TUBE_CORAL_FAN: Block = Block::new(439);
+pub const BRAIN_CORAL_FAN: Block = Block::new(440);
+pub const BUBBLE_CORAL_FAN: Block = Block::new(441);
+pub const FIRE_CORAL_FAN: Block = Block::new(442);
+pub const HORN_CORAL_FAN: Block = Block::new(443);
+pub const DEEPSLATE_COAL_ORE: Block = Block::new(444);
+pub const DEEPSLATE_IRON_ORE: Block = Block::new(445);
+pub const DEEPSLATE_COPPER_ORE: Block = Block::new(446);
+pub const DEEPSLATE_GOLD_ORE: Block = Block::new(447);
+pub const DEEPSLATE_REDSTONE_ORE: Block = Block::new(448);
+pub const DEEPSLATE_LAPIS_ORE: Block = Block::new(449);
+pub const DEEPSLATE_DIAMOND_ORE: Block = Block::new(450);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

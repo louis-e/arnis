@@ -1550,6 +1550,12 @@ impl WorldToModify {
         None
     }
 
+    /// Per-chunk lists a tile carries into the merged world. Fluid ticks ride along so cave
+    /// water and lava placed in a tile still flow once its chunk meets another tile's data.
+    fn merges_as_list(key: &str) -> bool {
+        matches!(key, "block_entities" | "entities" | "fluid_ticks")
+    }
+
     /// Appends `other_list` into `self_list`, skipping entries already present at a coordinate.
     /// Tile halos process boundary features twice, so this drops the duplicate copies instead of
     /// retaining both (which also spared the save path from stripping them later).
@@ -1607,7 +1613,7 @@ impl WorldToModify {
                                 );
                             }
                             for (key, value) in other_chunk.other {
-                                if key == "block_entities" || key == "entities" {
+                                if Self::merges_as_list(&key) {
                                     match self_chunk.other.entry(key) {
                                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                                             if let Value::List(self_list) = entry.get_mut() {
@@ -1675,7 +1681,7 @@ impl WorldToModify {
                                 );
                             }
                             for (key, value) in other_chunk.other {
-                                if key == "block_entities" || key == "entities" {
+                                if Self::merges_as_list(&key) {
                                     match self_chunk.other.entry(key) {
                                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                                             if let Value::List(self_list) = entry.get_mut() {
@@ -1729,7 +1735,7 @@ impl WorldToModify {
 
                 // Merge block entities and entities
                 for (key, value) in other_chunk.other {
-                    if key == "block_entities" || key == "entities" {
+                    if Self::merges_as_list(&key) {
                         match self_chunk.other.entry(key) {
                             std::collections::hash_map::Entry::Occupied(mut entry) => {
                                 if let Value::List(self_list) = entry.get_mut() {
@@ -1762,7 +1768,7 @@ impl WorldToModify {
 
             // Append entities/block_entities from halo
             for (key, value) in other_chunk.other {
-                if key == "block_entities" || key == "entities" {
+                if Self::merges_as_list(&key) {
                     match self_chunk.other.entry(key) {
                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                             if let Value::List(self_list) = entry.get_mut() {

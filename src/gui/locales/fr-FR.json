@@ -47,6 +47,7 @@
   "mode_terrain_only": "Terrain uniquement",
   "interior": "Génération d'intérieur",
   "fillground": "Remplir le sol",
+  "caves": "Grottes",
   "legacy_trees": "Arbres classiques",
   "canopy_height": "Couvert arboré réel",
   "max_tree_size": "Taille max. des arbres",

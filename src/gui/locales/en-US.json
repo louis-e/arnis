@@ -54,6 +54,7 @@
   "mode_terrain_only": "Terrain only",
   "interior": "Interior Generation",
   "fillground": "Fill Ground",
+  "caves": "Caves",
   "legacy_trees": "Legacy Trees",
   "canopy_height": "Real Tree Cover",
   "max_tree_size": "Max Tree Size",
