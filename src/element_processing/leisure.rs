@@ -97,8 +97,11 @@ pub fn generate_leisure(
                 // Land-cover water is skipped because a park often spans its
                 // own lake, and the carve after this leaves plants floating. A pitch
                 // or path inside the park is drawn after it, so its columns still
-                // read as grass here and only the mask tells them apart.
+                // read as grass here and only the mask tells them apart. Halo cells
+                // are left to the tile that owns them, whose own random sequence
+                // decides what grows there.
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
+                    && editor.owns(x, z)
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                     && !editor.surface_is_sealed(x, z)
                     && !editor.is_lc_water(x, z)

@@ -1,13 +1,13 @@
-//! Natural surface materials: rock on steep ground, snow by altitude and terrain
-//! shape, and the ground left over in built-up land.
+//! Natural surface materials: rock on steep ground, and snow by altitude and
+//! terrain shape.
 //!
 //! Every choice reads smooth, salted noise fields keyed on world coordinates, so
 //! materials form patches and layers tens of blocks across instead of per-block
 //! speckle, and tiles stitch without seams.
 
 use crate::block_definitions::{
-    Block, BlockWithProperties, ANDESITE, COARSE_DIRT, DIRT, GRASS_BLOCK, GRAVEL, PACKED_ICE,
-    PODZOL, SNOW_LAYER, STONE, TUFF,
+    Block, ANDESITE, COARSE_DIRT, DIRT, GRASS_BLOCK, GRAVEL, PACKED_ICE, PODZOL, SNOWY_GRASS_BLOCK,
+    SNOWY_PODZOL, SNOW_LAYER, STONE, TUFF,
 };
 use crate::climate::Climate;
 use crate::ground::Ground;
@@ -26,7 +26,6 @@ const SALT_BARE_ROCK: u32 = 0xBA4E_40C3;
 const SALT_SNOW_LINE: u32 = 0x5A0E_11A4;
 const SALT_SNOW_DRIFT: u32 = 0xD41F_7B05;
 const SALT_SNOW_FIELD: u32 = 0xF1E1_D5A0;
-const SALT_YARD: u32 = 0x7A4D_0C16;
 
 /// Rock strata of one column: horizontal layers that bend gently across the
 /// landscape, so cliff faces and the steps of a stepped slope show bedding
@@ -59,10 +58,22 @@ impl Strata {
 /// Fills `y_min..=y_max` of a rock column with its strata, keeping whatever is
 /// already there.
 pub(crate) fn fill_strata(editor: &mut WorldEditor, x: i32, z: i32, y_min: i32, y_max: i32) {
-    let strata = Strata::at(x, z);
-    for y in y_min..=y_max {
-        editor.set_block_if_absent_absolute(strata.block(y), x, y, z);
+    if y_min > y_max {
+        return;
     }
+    // One column fill per bed rather than one lookup per block.
+    let strata = Strata::at(x, z);
+    let mut run_start = y_min;
+    let mut run_block = strata.block(y_min);
+    for y in y_min + 1..=y_max {
+        let block = strata.block(y);
+        if block != run_block {
+            editor.fill_column_absolute(run_block, x, z, run_start, y - 1, true);
+            run_start = y;
+            run_block = block;
+        }
+    }
+    editor.fill_column_absolute(run_block, x, z, run_start, y_max, true);
 }
 
 /// Land cover whose steep ground still carries soil between rock outcrops.
@@ -118,19 +129,6 @@ pub(crate) fn bare_rock_palette(x: i32, z: i32) -> (Block, Block) {
         (ANDESITE, STONE)
     } else {
         (STONE, STONE)
-    }
-}
-
-/// Ground in built-up land that no mapped feature claimed: yards and verges, so
-/// the local natural surface with a few worn patches, not paving.
-pub(crate) fn built_up_palette(climate: Climate, x: i32, z: i32) -> (Block, Block) {
-    if let Some(p) = climate.surface_palette(LC_GRASSLAND, x, z) {
-        return p;
-    }
-    if patch_noise(x, z, 8, SALT_YARD) < 0.12 {
-        (COARSE_DIRT, DIRT)
-    } else {
-        (GRASS_BLOCK, DIRT)
     }
 }
 
@@ -240,23 +238,17 @@ pub(crate) fn glacier_depth(depth: f64) -> f64 {
 /// Surface for flat and moderate glacier ground before snow is laid on it.
 pub(crate) const GLACIER_ICE: (Block, Block) = (PACKED_ICE, PACKED_ICE);
 
-/// Lays a snow layer on `ground_y` and marks grass and podzol under it as snowy,
-/// which the game only does on a block update.
+/// Lays a snow layer on `ground_y` and swaps grass and podzol under it for their
+/// snowy variants, which the game only does on a block update. Those are blocks
+/// of their own, so a snowfield costs no per-block property storage.
 pub(crate) fn place_snow_layer(editor: &mut WorldEditor, x: i32, ground_y: i32, z: i32) {
     if editor.block_exists_absolute(x, ground_y + 1, z) {
         return;
     }
     editor.set_block_if_absent_absolute(SNOW_LAYER, x, ground_y + 1, z);
-    for soil in [GRASS_BLOCK, PODZOL] {
+    for (soil, snowy) in [(GRASS_BLOCK, SNOWY_GRASS_BLOCK), (PODZOL, SNOWY_PODZOL)] {
         if editor.check_for_block_absolute(x, ground_y, z, Some(&[soil]), None) {
-            editor.set_block_with_properties_absolute(
-                BlockWithProperties::new(soil, Some(fastnbt::nbt!({ "snowy": "true" }))),
-                x,
-                ground_y,
-                z,
-                Some(&[soil]),
-                None,
-            );
+            editor.set_block_absolute(snowy, x, ground_y, z, Some(&[soil]), None);
         }
     }
 }
@@ -269,6 +261,26 @@ pub(crate) fn is_glacier_cover(cover: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fill_strata_lays_every_bed_and_keeps_what_is_there() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_block_absolute(GRAVEL, 5, 20, 5, None, None);
+        fill_strata(&mut editor, 5, 5, 0, 40);
+        let strata = Strata::at(5, 5);
+        for y in 0..=40 {
+            let want = if y == 20 { GRAVEL } else { strata.block(y) };
+            assert!(
+                editor.check_for_block_absolute(5, y, 5, Some(&[want]), None),
+                "y={y}"
+            );
+        }
+    }
 
     #[test]
     fn patch_noise_shares_match_their_thresholds() {

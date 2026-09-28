@@ -561,6 +561,8 @@ impl Block {
             468 => "pumpkin",
             469 => "lily_pad",
             470 => "cactus",
+            471 => "grass_block",
+            472 => "podzol",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -900,7 +902,7 @@ impl Block {
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
-            // Tall flowers: even ids are the lower half, odd ids the upper.
+            // Tall flowers: odd ids are the lower half, even ids the upper.
             459 | 461 | 463 | 465 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("lower".to_string()));
@@ -909,6 +911,13 @@ impl Block {
             460 | 462 | 464 | 466 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Grass and podzol under a snow layer, whose sides the game only turns
+            // snowy on a block update.
+            471 | 472 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("snowy".to_string(), Value::String("true".to_string()));
                 map
             })),
             // Ripe, so the bush shows its berries.
@@ -1542,6 +1551,8 @@ pub const SWEET_BERRY_BUSH: Block = Block::new(467);
 pub const PUMPKIN: Block = Block::new(468);
 pub const LILY_PAD: Block = Block::new(469);
 pub const CACTUS: Block = Block::new(470);
+pub const SNOWY_GRASS_BLOCK: Block = Block::new(471);
+pub const SNOWY_PODZOL: Block = Block::new(472);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

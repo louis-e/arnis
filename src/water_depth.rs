@@ -487,29 +487,28 @@ pub fn carve_water_column(
 }
 
 /// Strip plants left floating on a freshly carved water surface, leaving piers
-/// alone. Reading first avoids filling a section with air per water cell. Cane
-/// and cacti stand three high.
+/// alone. Reading first avoids filling a section with air per water cell. Only
+/// cane and cacti reach a third block, so canopy leaves up there are left be.
 fn clear_stranded_vegetation(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32) {
     for y in water_y + 1..=water_y + 3 {
         if editor.get_block_absolute(x, y, z).is_some() {
-            editor.set_block_absolute(
-                AIR,
-                x,
-                y,
-                z,
-                Some(crate::ground_decoration::LOOSE_PLANTS),
-                None,
-            );
+            let plants = if y <= water_y + 2 {
+                crate::ground_decoration::LOOSE_PLANTS
+            } else {
+                crate::ground_decoration::STACKED_PLANT_PARTS
+            };
+            editor.set_block_absolute(AIR, x, y, z, Some(plants), None);
         }
     }
     // A trunk rooted on the new surface has to go whole. Trees are placed
     // before the polygon that floods them, and the land-cover water mask is
     // coarser than the carve, so the guards on the tree paths can miss it.
-    if editor
-        .get_block_absolute(x, water_y + 1, z)
-        .is_some_and(is_trunk)
-    {
+    let above = editor.get_block_absolute(x, water_y + 1, z);
+    if above.is_some_and(is_trunk) {
         clear_tree_from(editor, x, water_y + 1, z);
+    } else if above.is_some_and(|b| b.name().ends_with("_leaves")) {
+        // A leaf resting right on the new surface reads as floating.
+        editor.set_block_absolute(AIR, x, water_y + 1, z, None, Some(&[]));
     }
 }
 

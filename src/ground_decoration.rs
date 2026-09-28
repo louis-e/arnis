@@ -13,12 +13,13 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    Block, ALLIUM, BLUE_FLOWER, BROWN_MUSHROOM, CACTUS, COARSE_DIRT, CORNFLOWER, DEAD_BUSH, DIRT,
-    FERN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
-    LILY_OF_THE_VALLEY, LILY_PAD, MOSS_BLOCK, MOSS_CARPET, MUD, MYCELIUM, OAK_LEAVES,
-    ORANGE_TERRACOTTA, ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL,
-    PUMPKIN, RED_FLOWER, RED_MUSHROOM, RED_TERRACOTTA, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER,
-    SAND, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TALL_GRASS_BOTTOM,
+    Block, ACACIA_LOG, ALLIUM, BIRCH_LOG, BLUE_FLOWER, BROWN_MUSHROOM, CACTUS, CHERRY_LOG,
+    COARSE_DIRT, CORNFLOWER, DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GRASS, GRASS_BLOCK, JUNGLE_LOG,
+    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
+    MANGROVE_LOG, MOSS_BLOCK, MOSS_CARPET, MUD, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TERRACOTTA,
+    ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, PUMPKIN, RED_FLOWER,
+    RED_MUSHROOM, RED_TERRACOTTA, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SPRUCE_LOG,
+    SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TALL_GRASS_BOTTOM,
     TALL_GRASS_TOP, TERRACOTTA, WATER, WHITE_FLOWER, WHITE_TULIP, YELLOW_FLOWER, YELLOW_TERRACOTTA,
 };
 use crate::climate::Climate;
@@ -71,14 +72,46 @@ pub(crate) const LOOSE_PLANTS: &[Block] = &[
     OAK_LEAVES,
 ];
 
-/// Upper halves of the two-block plants in `LOOSE_PLANTS`.
-pub(crate) const PLANT_UPPER_HALVES: &[Block] = &[
+/// A loose plant other than the leaf-block bush, which can't be told apart from
+/// a tree's own foliage.
+pub(crate) fn is_undergrowth(block: Block) -> bool {
+    block != OAK_LEAVES && LOOSE_PLANTS.contains(&block)
+}
+
+/// Tree logs. Nothing that grows on the ground belongs directly beneath one: a
+/// plant squeezed under a branch or trunk reads as having taken the wood's place.
+pub(crate) const WOOD: &[Block] = &[
+    OAK_LOG,
+    SPRUCE_LOG,
+    BIRCH_LOG,
+    DARK_OAK_LOG,
+    JUNGLE_LOG,
+    ACACIA_LOG,
+    CHERRY_LOG,
+    MANGROVE_LOG,
+];
+
+/// Lower halves of the two-block plants in `LOOSE_PLANTS`.
+pub(crate) const PLANT_LOWER_HALVES: &[Block] = &[
+    TALL_GRASS_BOTTOM,
+    LARGE_FERN_LOWER,
+    SUNFLOWER_LOWER,
+    LILAC_LOWER,
+    ROSE_BUSH_LOWER,
+    PEONY_LOWER,
+];
+
+/// What stands above the ground block of a plant in `LOOSE_PLANTS`: upper halves
+/// of two-block plants, and the rest of a stack of cane or cactus.
+pub(crate) const STACKED_PLANT_PARTS: &[Block] = &[
     TALL_GRASS_TOP,
     LARGE_FERN_UPPER,
     SUNFLOWER_UPPER,
     LILAC_UPPER,
     ROSE_BUSH_UPPER,
     PEONY_UPPER,
+    SUGAR_CANE,
+    CACTUS,
 ];
 
 /// Patch origins rolled per chunk; each picks at most one feature.
@@ -528,6 +561,13 @@ fn grow_patch(
     oz: i32,
 ) {
     let (tries, spread) = feature.shape();
+    // Most flower patches are small; now and then one grows into a full drift.
+    let tries = match feature {
+        Feature::Flowers(_) | Feature::TallFlowers(_) if rng.random_range(0..100) >= 12 => {
+            tries * 2 / 5
+        }
+        _ => tries,
+    };
     // Species for a flower patch: the drift's main one, plus one of the patch's own.
     let (main, second) = match feature {
         Feature::Flowers(palette) => {
@@ -621,10 +661,12 @@ fn grow_patch(
     }
 }
 
-/// A free spot for a plant above `ground_y`: nothing there, or short grass it may take over.
+/// A free spot for a plant above `ground_y`: nothing there, or short grass it may
+/// take over, and no wood right above it.
 fn open_above(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> bool {
-    !editor.block_exists_absolute(x, ground_y + 1, z)
-        || editor.check_for_block_absolute(x, ground_y + 1, z, Some(&[GRASS]), None)
+    (!editor.block_exists_absolute(x, ground_y + 1, z)
+        || editor.check_for_block_absolute(x, ground_y + 1, z, Some(&[GRASS]), None))
+        && !editor.check_for_block_absolute(x, ground_y + 2, z, Some(WOOD), None)
 }
 
 fn place_plant(
@@ -815,8 +857,8 @@ mod tests {
     }
 
     #[test]
-    fn every_loose_plant_upper_half_is_listed() {
-        for upper in PLANT_UPPER_HALVES {
+    fn every_stacked_plant_part_is_a_loose_plant() {
+        for upper in STACKED_PLANT_PARTS {
             assert!(LOOSE_PLANTS.contains(upper));
         }
     }

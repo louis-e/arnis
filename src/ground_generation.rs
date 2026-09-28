@@ -15,18 +15,19 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, CLAY, COARSE_DIRT, CRACKED_STONE_BRICKS,
-    CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS, GRASS_BLOCK, GRAVEL,
-    GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD,
-    OAK_LEAVES, OAK_PLANKS, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE,
-    STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE,
+    AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
+    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS,
+    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
+    MOSS_BLOCK, MUD, OAK_LEAVES, OAK_PLANKS, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE,
+    SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
+    WHITE_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
-use crate::ground_decoration::{LOOSE_PLANTS, PLANT_UPPER_HALVES};
+use crate::ground_decoration::{LOOSE_PLANTS, STACKED_PLANT_PARTS, WOOD};
 use crate::land_cover;
 use crate::progress::emit_gui_progress_update;
 use crate::terrain_surface;
@@ -41,7 +42,6 @@ const SALT_FOREST_FLOOR: u32 = 0xF0E5_7F10;
 const SALT_SHRUB_FLOOR: u32 = 0x5B7B_F10A;
 const SALT_SWARD: u32 = 0x5A7D_0001;
 const SALT_TALL_SWARD: u32 = 0x5A7D_0002;
-const SALT_YARD_GRASS: u32 = 0x7A4D_6A55;
 const SALT_WETLAND_POOLS: u32 = 0x9001_5E75;
 
 /// Per-chunk cache of ground Y values.
@@ -302,6 +302,19 @@ pub fn generate_ground_region(
     // Snow line and the band over which snow thickens into full cover.
     let snow_line = terrain_surface::SnowLine::new(ground);
     // Share of forest-floor grass that grows as ferns, by the habitat the forest is in.
+    // Undergrowth thins out with dryness: sparse in deserts, thinner on steppe,
+    // full in savanna, temperate and boreal country.
+    let climate_sward = match climate {
+        crate::climate::Climate::HotDesert => 0.25,
+        crate::climate::Climate::ColdDesert => 0.3,
+        crate::climate::Climate::IceCap => 0.3,
+        crate::climate::Climate::HotSteppe => 0.55,
+        crate::climate::Climate::ColdSteppe => 0.7,
+        crate::climate::Climate::Tundra => 0.7,
+        crate::climate::Climate::DryContinental => 0.85,
+        crate::climate::Climate::Boreal => 0.9,
+        crate::climate::Climate::Temperate | crate::climate::Climate::TropicalSavanna => 1.0,
+    };
     let forest_fern_share = match crate::ground_decoration::habitat(
         land_cover::LC_TREE_COVER,
         climate,
@@ -662,10 +675,17 @@ pub fn generate_ground_region(
                                         }
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_CROPLAND => (FARMLAND, DIRT),
-                                        // Whatever no mapped feature claimed in a town is
-                                        // yards and verges, not paving.
                                         land_cover::LC_BUILT_UP => {
-                                            terrain_surface::built_up_palette(climate, x, z)
+                                            let h = land_cover::coord_hash(x, z) % 100;
+                                            if h < 72 {
+                                                (STONE_BRICKS, STONE)
+                                            } else if h < 87 {
+                                                (CRACKED_STONE_BRICKS, STONE)
+                                            } else if h < 92 {
+                                                (STONE, STONE)
+                                            } else {
+                                                (COBBLESTONE, STONE)
+                                            }
                                         }
                                         land_cover::LC_BARE | land_cover::LC_SNOW_ICE => {
                                             // Skip isolated bare pixels (surrounded by non-bare)
@@ -1006,6 +1026,15 @@ pub fn generate_ground_region(
                             {
                                 let cover = ground.cover_class(coord);
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
+                                // Worn coarse-dirt ground carries half the grass of a lawn.
+                                let worn = editor.check_for_block_absolute(
+                                    x,
+                                    ground_y,
+                                    z,
+                                    Some(&[COARSE_DIRT]),
+                                    None,
+                                );
+                                let sward = climate_sward * if worn { 0.5 } else { 1.0 };
 
                                 match cover {
                                     land_cover::LC_TREE_COVER
@@ -1031,7 +1060,12 @@ pub fn generate_ground_region(
                                                 Some(bridge_surface),
                                             );
                                         } else if ground_is_natural
-                                            && undergrowth_roll(x, z, 0.4, SALT_FOREST_FLOOR)
+                                            && undergrowth_roll(
+                                                x,
+                                                z,
+                                                0.4 * sward,
+                                                SALT_FOREST_FLOOR,
+                                            )
                                         {
                                             // Undergrowth only on natural surfaces. Flowers
                                             // come in patches from the decoration pass.
@@ -1061,7 +1095,12 @@ pub fn generate_ground_region(
                                                 None,
                                                 None,
                                             );
-                                        } else if undergrowth_roll(x, z, 0.28, SALT_SHRUB_FLOOR) {
+                                        } else if undergrowth_roll(
+                                            x,
+                                            z,
+                                            0.28 * sward,
+                                            SALT_SHRUB_FLOOR,
+                                        ) {
                                             editor.set_block_absolute(
                                                 GRASS,
                                                 x,
@@ -1077,7 +1116,7 @@ pub fn generate_ground_region(
                                     // gathered in its own stands.
                                     land_cover::LC_GRASSLAND
                                         if ground_is_natural
-                                            && undergrowth_roll(x, z, 0.55, SALT_SWARD) =>
+                                            && undergrowth_roll(x, z, 0.55 * sward, SALT_SWARD) =>
                                     {
                                         let stand = patch_noise(x, z, 9, SALT_TALL_SWARD) > 0.8;
                                         let tall_share = if stand { 35 } else { 4 };
@@ -1108,20 +1147,6 @@ pub fn generate_ground_region(
                                                 None,
                                             );
                                         }
-                                    }
-                                    // Yards and verges keep a light, uneven sward.
-                                    land_cover::LC_BUILT_UP
-                                        if ground_is_natural
-                                            && undergrowth_roll(x, z, 0.1, SALT_YARD_GRASS) =>
-                                    {
-                                        editor.set_block_absolute(
-                                            GRASS,
-                                            x,
-                                            ground_y + 1,
-                                            z,
-                                            None,
-                                            None,
-                                        );
                                     }
                                     land_cover::LC_CROPLAND
                                         if editor.check_for_block_absolute(
@@ -1309,11 +1334,15 @@ pub fn generate_ground_region(
                         }
                     }
 
-                    // Post-processing: remove stray vegetation from road surfaces.
+                    // Post-processing: remove stray vegetation from road and water surfaces.
                     // Despite guards in natural/landuse processing, overlapping elements
                     // with the same priority can still place vegetation on roads depending
-                    // on sort order. This cleanup pass catches any remaining cases.
-                    if editor.check_for_block_absolute(
+                    // on sort order, and an area that floods its ground later (a wetland
+                    // puddle, a shoal) leaves another area's plants floating on the water.
+                    // A plant with a trunk or branch right above it reads as having
+                    // taken the wood's place, so it goes too. This cleanup pass
+                    // catches any remaining cases.
+                    let stray_surface = editor.check_for_block_absolute(
                         x,
                         ground_y,
                         z,
@@ -1325,15 +1354,20 @@ pub fn generate_ground_region(
                             LIGHT_GRAY_CONCRETE,
                             WHITE_CONCRETE,
                             DIRT_PATH,
+                            WATER,
                         ]),
                         None,
-                    ) && editor.check_for_block_absolute(
-                        x,
-                        ground_y + 1,
-                        z,
-                        Some(LOOSE_PLANTS),
-                        None,
-                    ) {
+                    );
+                    if editor.check_for_block_absolute(x, ground_y + 1, z, Some(LOOSE_PLANTS), None)
+                        && (stray_surface
+                            || editor.check_for_block_absolute(
+                                x,
+                                ground_y + 2,
+                                z,
+                                Some(WOOD),
+                                None,
+                            ))
+                    {
                         editor.set_block_absolute(
                             AIR,
                             x,
@@ -1342,20 +1376,23 @@ pub fn generate_ground_region(
                             Some(LOOSE_PLANTS),
                             None,
                         );
-                        // Also clear the top of a two-block plant
-                        if editor.check_for_block_absolute(
-                            x,
-                            ground_y + 2,
-                            z,
-                            Some(PLANT_UPPER_HALVES),
-                            None,
-                        ) {
+                        // Also clear the top of a two-block plant, or a stack of cane.
+                        for y in ground_y + 2..=ground_y + 3 {
+                            if !editor.check_for_block_absolute(
+                                x,
+                                y,
+                                z,
+                                Some(STACKED_PLANT_PARTS),
+                                None,
+                            ) {
+                                break;
+                            }
                             editor.set_block_absolute(
                                 AIR,
                                 x,
-                                ground_y + 2,
+                                y,
                                 z,
-                                Some(PLANT_UPPER_HALVES),
+                                Some(STACKED_PLANT_PARTS),
                                 None,
                             );
                         }

@@ -173,8 +173,11 @@ pub fn generate_landuse(
         }
 
         // Nothing is scattered on land-cover water: the depth carve turns these
-        // cells into lake after this runs, leaving plants floating on top.
-        if editor.is_lc_water(x, z) {
+        // cells into lake after this runs, leaving plants floating on top. And
+        // only this tile's own cells get plants and trees: a neighbouring tile's
+        // halo copy draws its own random sequence, so its plants and trees would
+        // land on this tile's water and under its trunks.
+        if editor.is_lc_water(x, z) || !editor.owns(x, z) {
             continue;
         }
 
