@@ -207,6 +207,21 @@ pub fn create_new_world_with_name(
     Ok(new_world_path.display().to_string())
 }
 
+/// Flat template chunks the skeleton writes as `region/r.0.0.mca`.
+const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
+
+/// Deletes `region/r.0.0.mca` while it is still exactly the skeleton's template, so a void
+/// world keeps no flat chunks where its area never reaches. A file anything has written to
+/// is left alone.
+pub fn remove_untouched_template_region(world_path: &Path) {
+    let path = world_path.join("region").join("r.0.0.mca");
+    let untouched = fs::metadata(&path).is_ok_and(|m| m.len() == REGION_TEMPLATE.len() as u64)
+        && fs::read(&path).is_ok_and(|bytes| bytes == REGION_TEMPLATE);
+    if untouched {
+        let _ = fs::remove_file(&path);
+    }
+}
+
 /// Writes `level.dat`, the icon and `region/` for a new Java world. One World
 /// skips the region template, whose placeholder chunks it would not overwrite.
 pub fn write_world_skeleton(
@@ -222,7 +237,6 @@ pub fn write_world_skeleton(
 
     // Copy the region template file
     if with_template_region {
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
         let region_path = new_world_path.join("region").join("r.0.0.mca");
         fs::write(&region_path, REGION_TEMPLATE)
             .map_err(|e| format!("Failed to create region file: {e}"))?;
@@ -1097,6 +1111,22 @@ mod tests {
             world.file_name().unwrap(),
             "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS).as_str()
         );
+    }
+
+    #[test]
+    fn only_an_untouched_template_region_is_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let region = world.join("region").join("r.0.0.mca");
+        assert!(region.is_file());
+        remove_untouched_template_region(&world);
+        assert!(!region.exists(), "the template goes");
+
+        let mut written = REGION_TEMPLATE.to_vec();
+        written[8192] ^= 1;
+        fs::write(&region, &written).unwrap();
+        remove_untouched_template_region(&world);
+        assert!(region.exists(), "a region something wrote to stays");
     }
 
     #[test]

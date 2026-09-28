@@ -597,9 +597,14 @@ pub fn generate_world_with_options(
     // producing that.
     let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
     editor.set_bake_lighting(args.bake_lighting || wants_voxy);
-    editor.set_void_world(
-        world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void,
-    );
+    let void_world =
+        world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
+    editor.set_void_world(void_world);
+    if void_world && !extending {
+        // A world made by `create_new_world` starts with the flat template region. The area
+        // rewrites it when it reaches that region; one it misses would stay a grass square.
+        crate::world_utils::remove_untouched_template_region(&output_path);
+    }
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
