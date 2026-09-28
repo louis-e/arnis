@@ -1631,7 +1631,28 @@ $(document).ready(function () {
     }
     window.refreshMapToolLabel = refreshToolLabel;
 
-    // While there is no area yet, the tool that draws one is outlined.
+    // Whether this user has ever selected an area. The hint at the bottom of
+    // the map and the outline on the area tool teach that one step; once it
+    // has been done they stay away, across restarts too. Storage that throws
+    // (blocked, private) simply keeps teaching. The key is written out in both
+    // functions: they are hoisted, and may run before a variable here is set.
+    function areaToolLearned() {
+        try {
+            return localStorage.getItem('arnis-area-selected-once') === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function markAreaToolLearned() {
+        try {
+            localStorage.setItem('arnis-area-selected-once', 'true');
+        } catch (e) {
+            // Not remembered; the hint returns next time, which is harmless.
+        }
+    }
+
+    // Until the first area is selected, the tool that draws one is outlined.
     function refreshAreaToolAttention() {
         var areaBtn = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-rectangle');
         if (!areaBtn) return;
@@ -1639,7 +1660,7 @@ $(document).ready(function () {
         drawnItems.eachLayer(function (l) {
             if (l instanceof L.Rectangle) hasArea = true;
         });
-        areaBtn.classList.toggle('map-tool-attention', !hasArea);
+        areaBtn.classList.toggle('map-tool-attention', !hasArea && !areaToolLearned());
     }
     drawnItems.on('layeradd layerremove', refreshAreaToolAttention);
 
@@ -1813,7 +1834,8 @@ $(document).ready(function () {
         }
     })();
 
-    // Add hint overlay at bottom-center of map when no bbox is selected
+    // Hint at the bottom-center of the map, shown until the first area is
+    // selected (see areaToolLearned)
     var hintDiv = document.createElement('div');
     hintDiv.className = 'bbox-hint-overlay';
     // This script runs inside the map iframe, and the locale is loaded by the
@@ -1831,6 +1853,7 @@ $(document).ready(function () {
     }
     renderBboxHint();
     window.renderBboxHint = renderBboxHint;
+    if (areaToolLearned()) hintDiv.style.display = 'none';
     map.getContainer().appendChild(hintDiv);
 
     // Add world preview button to the edit toolbar after drawControl is added
@@ -2071,8 +2094,10 @@ $(document).ready(function () {
         // instanceof, not layerType: restore paths fire rectangles as "polygon"
         var isRectangle = e.layer instanceof L.Rectangle;
 
-        // Hide the hint overlay when a bbox area is drawn
+        // The first area ever selected retires the hint for good. Recorded
+        // before the layer is added below, whose layeradd refreshes the outline.
         if (isRectangle) {
+            markAreaToolLearned();
             var hint = document.querySelector('.bbox-hint-overlay');
             if (hint) hint.style.display = 'none';
         }
@@ -2150,12 +2175,13 @@ $(document).ready(function () {
             drawnItems.removeLayer(l);
         });
 
-        // Show hint overlay again if no rectangles remain
+        // No area left: the hint only comes back for someone who has never
+        // selected one.
         var hasRectangle = false;
         drawnItems.eachLayer(function(layer) {
             if (layer instanceof L.Rectangle) hasRectangle = true;
         });
-        if (!hasRectangle) {
+        if (!hasRectangle && !areaToolLearned()) {
             var hint = document.querySelector('.bbox-hint-overlay');
             if (hint) hint.style.display = '';
         }
