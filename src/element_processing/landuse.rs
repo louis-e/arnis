@@ -456,7 +456,7 @@ pub fn generate_landuse(
 /// Ground for `landuse=military`. A base is mown grass and worn training ground around a
 /// paved core, and the land cover says which of those a cell is, so a base that is really a
 /// forest, a heath or a desert keeps looking like one instead of turning into a concrete slab.
-/// Water, wetland and ice give `None` and stay with the land cover. Positional only, so the
+/// Water, wetland, beach and ice give `None` and stay with the land cover. Positional only, so the
 /// tiles agree at their seams.
 fn military_ground(
     editor: &WorldEditor,
@@ -467,13 +467,13 @@ fn military_ground(
 ) -> Option<Block> {
     use crate::ground_generation::value_noise_01;
     use crate::land_cover::{
-        coord_hash, LC_BARE, LC_BUILT_UP, LC_MANGROVES, LC_SNOW_ICE, LC_WATER, LC_WETLAND,
+        coord_hash, LC_BARE, LC_BEACH, LC_BUILT_UP, LC_MANGROVES, LC_SNOW_ICE, LC_WATER, LC_WETLAND,
     };
 
     let cover = editor.cover_class(x, z);
     let h = coord_hash(x, z);
     match cover {
-        LC_WATER | LC_WETLAND | LC_MANGROVES | LC_SNOW_ICE => None,
+        LC_WATER | LC_WETLAND | LC_MANGROVES | LC_SNOW_ICE | LC_BEACH => None,
         LC_BUILT_UP => {
             // Concrete yards with gravel hardstands for the vehicles and strips of lawn.
             let n = value_noise_01(x + 211, z + 17, 7);
