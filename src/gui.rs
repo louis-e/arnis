@@ -138,7 +138,8 @@ pub fn run_gui() -> Result<(), String> {
             gui_one_world_info,
             gui_one_world_overlap,
             gui_get_one_world_overlays,
-            gui_log
+            gui_log,
+            gui_set_telemetry_consent
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -312,6 +313,29 @@ fn gui_log(level: String, message: String) {
     }
 }
 
+/// Trims `area_name` so "<base_name>: <area_name>" stays within 30 characters.
+/// `None` when the base name leaves no room. Custom names can start with
+/// "Arnis World " and already be that long, so the budget saturates.
+fn fit_area_name(base_name: &str, area_name: String) -> Option<String> {
+    let max_len = 30usize.saturating_sub(base_name.chars().count() + 2); // 2 for ": "
+    if max_len == 0 {
+        None
+    } else if area_name.chars().count() > max_len {
+        Some(area_name.chars().take(max_len).collect())
+    } else {
+        Some(area_name)
+    }
+}
+
+/// Mirrors the frontend's consent record into the backend. Called on startup and
+/// whenever the user answers or flips it, so crashes before the first generation
+/// are covered and a withdrawal takes effect immediately rather than at the next
+/// generation.
+#[tauri::command]
+fn gui_set_telemetry_consent(consent: bool) {
+    telemetry::set_telemetry_consent(consent);
+}
+
 /// Opens a native folder-picker dialog and returns the chosen path.
 #[tauri::command]
 fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
@@ -429,23 +453,10 @@ fn add_localized_world_name(
         }
     };
 
-    // Create new name with localized area name, ensuring total length doesn't exceed 30 characters
     let base_name = current_name.clone();
-    let max_area_name_len = 30 - base_name.len() - 2; // 2 chars for ": "
-
-    let truncated_area_name =
-        if area_name.chars().count() > max_area_name_len && max_area_name_len > 0 {
-            // Truncate the area name to fit within the 30 character limit
-            area_name
-                .chars()
-                .take(max_area_name_len)
-                .collect::<String>()
-        } else if max_area_name_len == 0 {
-            // If base name is already too long, don't add area name
-            return world_path;
-        } else {
-            area_name
-        };
+    let Some(truncated_area_name) = fit_area_name(&base_name, area_name) else {
+        return world_path;
+    };
 
     let new_name = format!("{base_name}: {truncated_area_name}");
     let mut write_succeeded = false;
@@ -2040,6 +2051,8 @@ fn gui_start_generation(
                         outline_suppression,
                         part_groups,
                     ) {
+                        eprintln!("World generation failed: {e}");
+                        send_log(LogLevel::Error, &format!("World generation failed: {e}"));
                         emit_gui_error(&e);
                         return Err(e);
                     }
@@ -2072,6 +2085,46 @@ fn gui_start_generation(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod fit_area_name_tests {
+    use super::fit_area_name;
+
+    #[test]
+    fn short_base_keeps_or_truncates_area() {
+        assert_eq!(
+            fit_area_name("Arnis World 1", "Berlin".into()).as_deref(),
+            Some("Berlin")
+        );
+        // 30 - 13 - 2 = 15 characters of room
+        assert_eq!(
+            fit_area_name("Arnis World 1", "Charlottenburg-Wilmersdorf".into()).as_deref(),
+            Some("Charlottenburg-")
+        );
+    }
+
+    #[test]
+    fn long_base_leaves_name_alone_instead_of_underflowing() {
+        assert_eq!(
+            fit_area_name("Arnis World 1 of my home town", "X".into()),
+            None
+        );
+        assert_eq!(
+            fit_area_name("Arnis World Downtown Berlin 2026", "X".into()),
+            None
+        );
+    }
+
+    #[test]
+    fn counts_characters_not_bytes() {
+        // 16 characters but 48 bytes; there is still room for 12 characters.
+        let out = fit_area_name(
+            "Arnis World 東京東京",
+            "大阪大阪大阪大阪大阪大阪大阪".into(),
+        );
+        assert_eq!(out.map(|s| s.chars().count()), Some(12));
+    }
 }
 
 #[cfg(test)]

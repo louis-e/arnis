@@ -2221,11 +2221,8 @@ impl<'a> WorldEditor<'a> {
                     };
                     eprintln!("{}", user_msg);
                     #[cfg(feature = "gui")]
-                    {
-                        send_log(LogLevel::Error, &user_msg);
-                        emit_gui_error(&user_msg);
-                    }
-                    return Err(e);
+                    emit_gui_error(&user_msg);
+                    return Err(user_msg.into());
                 }
                 self.finish_voxy();
             }
@@ -2246,11 +2243,8 @@ impl<'a> WorldEditor<'a> {
                     let user_msg = format!("Failed to save Luanti world: {}", e);
                     eprintln!("{}", user_msg);
                     #[cfg(feature = "gui")]
-                    {
-                        send_log(LogLevel::Error, &user_msg);
-                        emit_gui_error(&user_msg);
-                    }
-                    return Err(e);
+                    emit_gui_error(&user_msg);
+                    return Err(user_msg.into());
                 }
             }
         }
@@ -2288,10 +2282,7 @@ impl<'a> WorldEditor<'a> {
             let user_msg = format!("Failed to save Bedrock world: {error}");
             eprintln!("{user_msg}");
             #[cfg(feature = "gui")]
-            {
-                send_log(LogLevel::Error, &user_msg);
-                emit_gui_error(&user_msg);
-            }
+            emit_gui_error(&user_msg);
             return Err(user_msg.into());
         }
         Ok(())

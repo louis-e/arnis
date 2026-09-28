@@ -1,5 +1,3 @@
-#[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
 use once_cell::sync::OnceCell;
 use serde_json::json;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -97,10 +95,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         });
 
         if let Err(e) = window.emit("progress-update", payload) {
-            let error_msg = format!("Failed to emit progress event: {}", e);
-            eprintln!("{}", error_msg);
-            #[cfg(feature = "gui")]
-            send_log(LogLevel::Warning, &error_msg);
+            eprintln!("Failed to emit progress event: {e}");
         }
     }
 }
@@ -120,10 +115,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
             "streaming": streaming
         });
         if let Err(e) = window.emit("progress-update", payload) {
-            let error_msg = format!("Failed to emit progress event: {}", e);
-            eprintln!("{}", error_msg);
-            #[cfg(feature = "gui")]
-            send_log(LogLevel::Warning, &error_msg);
+            eprintln!("Failed to emit progress event: {e}");
         }
     }
 }

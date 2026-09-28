@@ -1457,6 +1457,7 @@ function initSettings() {
   telemetryToggle.addEventListener("change", () => {
     const isEnabled = telemetryToggle.checked;
     localStorage.setItem(telemetryKey, isEnabled ? 'true' : 'false');
+    syncTelemetryConsent();
   });
 
 
@@ -1750,6 +1751,13 @@ function updateFormatToggleUI(format) {
 // Expose to window for onclick handlers
 window.setWorldFormat = setWorldFormat;
 
+// The backend only reports crashes and errors while it holds a consent of true,
+// so push the stored answer to it at startup and on every change.
+function syncTelemetryConsent() {
+  const consent = localStorage.getItem('telemetry-consent') === 'true';
+  Promise.resolve(invoke('gui_set_telemetry_consent', { consent })).catch(() => {});
+}
+
 // Telemetry consent (first run only)
 function initTelemetryConsent() {
   const key = 'telemetry-consent'; // values: 'true' | 'false'
@@ -1762,11 +1770,13 @@ function initTelemetryConsent() {
     // First run: ask for consent
     showModal(modal);
   }
+  syncTelemetryConsent();
 
   // Expose handlers
   window.acceptTelemetry = () => {
     localStorage.setItem(key, 'true');
     hideModal(modal);
+    syncTelemetryConsent();
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -1779,6 +1789,7 @@ function initTelemetryConsent() {
   window.rejectTelemetry = () => {
     localStorage.setItem(key, 'false');
     hideModal(modal);
+    syncTelemetryConsent();
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
