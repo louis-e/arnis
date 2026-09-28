@@ -512,29 +512,6 @@ fn generate_unique_default_world_name(base_path: &Path) -> String {
 /// "Arnis World N" scheme if nothing usable survives sanitization (e.g. the
 /// input was only invalid characters).
 fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String {
-    generate_unique_custom_world_name_excluding(base_path, raw_name, None)
-}
-
-/// True when both paths exist and resolve to the same directory entry.
-/// Canonicalizing normalises the case on case-insensitive filesystems, which
-/// a textual `Path` comparison would not. Returns false if either side can't
-/// be resolved, so an unreadable path is never mistaken for a match.
-fn is_same_existing_path(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
-}
-
-/// Same as [`generate_unique_custom_world_name`], but a candidate path that
-/// resolves to `exclude` is treated as available. Used when renaming a world
-/// in place so keeping (or case-tweaking) its current name doesn't get bumped
-/// to " (2)" just because its own directory already "collides" with itself.
-fn generate_unique_custom_world_name_excluding(
-    base_path: &Path,
-    raw_name: &str,
-    exclude: Option<&Path>,
-) -> String {
     let sanitized = sanitize_custom_world_name(raw_name);
 
     // Nothing usable survived sanitization (e.g. the input was only invalid
@@ -544,133 +521,18 @@ fn generate_unique_custom_world_name_excluding(
         return generate_unique_default_world_name(base_path);
     }
 
-    let is_available = |candidate: &Path| -> bool {
-        if !candidate.exists() {
-            return true;
-        }
-        // The candidate is taken - unless it *is* the excluded world's own
-        // directory. Compared canonically rather than by path equality: on
-        // Windows and macOS the filesystem matches case-insensitively, so
-        // re-capitalising a world ("My World" -> "my world") finds an
-        // existing directory whose path text differs from `exclude`, and a
-        // plain `==` would read the world's own directory as a collision and
-        // bump it to " (2)".
-        exclude.is_some_and(|excluded| is_same_existing_path(candidate, excluded))
-    };
-
-    let candidate_path = base_path.join(&sanitized);
-    if is_available(&candidate_path) {
+    if !base_path.join(&sanitized).exists() {
         return sanitized;
     }
 
     let mut counter: i32 = 2;
     loop {
         let candidate = format!("{sanitized} ({counter})");
-        let candidate_path = base_path.join(&candidate);
-        if is_available(&candidate_path) {
+        if !base_path.join(&candidate).exists() {
             return candidate;
         }
         counter += 1;
     }
-}
-
-/// Overwrites the `LevelName` field in an existing world's `level.dat`.
-fn update_level_name(world_path: &Path, new_name: &str) -> Result<(), String> {
-    let level_path = world_path.join("level.dat");
-    let level_data = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
-
-    let mut decoder = GzDecoder::new(level_data.as_slice());
-    let mut decompressed_data = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
-
-    let mut nbt_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat: {e}"))?;
-
-    match nbt_data {
-        Value::Compound(ref mut root) => match root.get_mut("Data") {
-            Some(Value::Compound(ref mut data)) => {
-                data.insert("LevelName".to_string(), Value::String(new_name.to_string()));
-            }
-            _ => return Err("level.dat is missing its Data compound".to_string()),
-        },
-        _ => return Err("level.dat root is not a compound".to_string()),
-    }
-
-    let serialized_data =
-        fastnbt::to_bytes(&nbt_data).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
-
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(&serialized_data)
-        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
-    let compressed_data = encoder
-        .finish()
-        .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
-
-    fs::write(&level_path, compressed_data).map_err(|e| format!("Failed to write level.dat: {e}"))
-}
-
-/// Renames an already-created Java world in place: moves its directory to a
-/// sanitized, de-duplicated version of `new_name` (excluding the world's own
-/// current directory from collision checks) and updates `LevelName` in its
-/// `level.dat` to match. Returns the world's new full path.
-///
-/// Fails (without touching anything) if `world_path` isn't an existing
-/// directory or doesn't look like a world (no `level.dat`), so callers can't
-/// accidentally rename an arbitrary/unrelated folder. A failure to rewrite
-/// `level.dat` also moves the directory back, so an `Err` means the world is
-/// still where and what the caller last saw it - unless the rollback itself
-/// fails, which the error message then spells out.
-pub fn rename_world(world_path: &Path, new_name: &str) -> Result<String, String> {
-    if !world_path.is_dir() {
-        return Err("World directory does not exist".to_string());
-    }
-    if !world_path.join("level.dat").is_file() {
-        return Err("Not a valid world directory (missing level.dat)".to_string());
-    }
-    let base_path = world_path
-        .parent()
-        .ok_or_else(|| "World path has no parent directory".to_string())?;
-
-    let trimmed = new_name.trim();
-    if trimmed.is_empty() {
-        return Err("World name cannot be blank".to_string());
-    }
-    // Same sanitizer the new name is actually built with, so this check can't
-    // pass a name that later resolves to nothing.
-    if sanitize_custom_world_name(trimmed).is_empty() {
-        return Err("World name is invalid after sanitization".to_string());
-    }
-
-    let unique_name =
-        generate_unique_custom_world_name_excluding(base_path, trimmed, Some(world_path));
-    let new_world_path = base_path.join(&unique_name);
-
-    let moved = new_world_path != world_path;
-    if moved {
-        fs::rename(world_path, &new_world_path)
-            .map_err(|e| format!("Failed to rename world directory: {e}"))?;
-    }
-
-    if let Err(update_error) = update_level_name(&new_world_path, &unique_name) {
-        // Put the directory back. Without this, a reported failure would still
-        // have moved the world, leaving the caller holding a `world_path` that
-        // no longer exists while it believes nothing changed.
-        if moved {
-            if let Err(rollback_error) = fs::rename(&new_world_path, world_path) {
-                return Err(format!(
-                    "{update_error}. The world was also left renamed to \
-                     \"{unique_name}\" because it could not be moved back: \
-                     {rollback_error}"
-                ));
-            }
-        }
-        return Err(update_error);
-    }
-
-    Ok(new_world_path.display().to_string())
 }
 
 /// Name of the bundled Java datapack that extends the Overworld build height.
@@ -1235,108 +1097,6 @@ mod tests {
             world.file_name().unwrap(),
             "あ".repeat(MAX_CUSTOM_WORLD_NAME_CHARS).as_str()
         );
-    }
-
-    #[test]
-    fn rename_world_moves_directory_and_updates_level_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "New Name").unwrap());
-
-        assert_eq!(renamed.file_name().unwrap(), "New Name");
-        assert!(!world.exists());
-        assert!(renamed.exists());
-        assert_eq!(level_name(&renamed), "New Name");
-    }
-
-    #[test]
-    fn rename_world_dedupes_against_other_worlds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world_a = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Alpha")).unwrap());
-        let _world_b = create_new_world_with_name(tmp.path(), Some("Beta")).unwrap();
-
-        // Renaming "Alpha" to the already-taken "Beta" must not clobber it.
-        let renamed = PathBuf::from(rename_world(&world_a, "Beta").unwrap());
-        assert_eq!(renamed.file_name().unwrap(), "Beta (2)");
-        assert_eq!(level_name(&renamed), "Beta (2)");
-    }
-
-    #[test]
-    fn rename_world_to_its_own_name_is_a_no_op() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Same Name")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "Same Name").unwrap());
-        assert_eq!(renamed, world);
-        assert!(renamed.exists());
-        assert_eq!(level_name(&renamed), "Same Name");
-    }
-
-    #[test]
-    fn rename_world_allows_case_only_change() {
-        // On Windows/macOS the new directory "exists" (the filesystem matches
-        // case-insensitively) *and* is the world's own directory, so a plain
-        // path comparison against `exclude` misses it and the world gets
-        // bumped to "... (2)" for merely re-capitalising its own name.
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My World")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "my world").unwrap());
-
-        assert_eq!(renamed.file_name().unwrap(), "my world");
-        assert_eq!(level_name(&renamed), "my world");
-        // Exactly one world directory, not an extra "my world (2)".
-        let dirs: Vec<_> = fs::read_dir(tmp.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_dir())
-            .collect();
-        assert_eq!(
-            dirs.len(),
-            1,
-            "case-only rename must not create a second world"
-        );
-    }
-
-    #[test]
-    fn rename_world_rejects_blank_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
-        assert!(rename_world(&world, "   ").is_err());
-        // Nothing should have moved on failure.
-        assert!(world.exists());
-    }
-
-    #[test]
-    fn rename_world_rejects_name_that_becomes_empty_after_sanitization() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
-        assert!(rename_world(&world, "...  ").is_err());
-        assert!(world.exists());
-        assert_eq!(level_name(&world), "Keep Me");
-    }
-
-    #[test]
-    fn rename_world_rolls_back_the_move_when_level_dat_cannot_be_updated() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
-        // Unreadable as NBT, but still a file, so the up-front validation
-        // passes and the failure lands after the directory has been moved.
-        fs::write(world.join("level.dat"), b"not gzipped nbt").unwrap();
-
-        assert!(rename_world(&world, "New Name").is_err());
-        // An Err must mean nothing moved.
-        assert!(world.exists(), "world should have been moved back");
-        assert!(!tmp.path().join("New Name").exists());
-    }
-
-    #[test]
-    fn rename_world_rejects_nonexistent_directory() {
-        let tmp = tempfile::tempdir().unwrap();
-        let missing = tmp.path().join("Does Not Exist");
-        assert!(rename_world(&missing, "New Name").is_err());
     }
 
     #[test]
