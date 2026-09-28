@@ -1414,6 +1414,7 @@ fn gui_start_generation(
     rotation_angle: f64,
     gamemode: String,
     world_time: i64,
+    world_type: String,
     map_item: bool,
     signage: String,
     mapillary_token: String,
@@ -1752,6 +1753,7 @@ fn gui_start_generation(
                 voxy_lod: voxy_lod_enabled,
                 gamemode: crate::args::GameMode::from_str_lossy(&gamemode),
                 world_time: world_time.clamp(0, 23999),
+                world_type: crate::args::WorldType::from_str_lossy(&world_type),
                 map_item,
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld

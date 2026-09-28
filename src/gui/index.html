@@ -316,6 +316,26 @@
                   </div>
                 </div>
 
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="world_type">World Type</span>
+                        <span class="tooltip-icon" data-tooltip="What Minecraft generates past the edge of the area (Java only). Void leaves empty space, so the area is an island; Flat continues it with a flat grass plain.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="world_type_desc">What lies past the edge of the area. Java only.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="world-type-group">
+                      <!-- data-default marks the shipped default; the active class is moved by JS -->
+                      <button type="button" class="segment active" data-default data-world-type="void" data-localize="world_type_void">Void</button>
+                      <button type="button" class="segment" data-world-type="flat" data-localize="world_type_flat">Flat</button>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="settings-row setting-tile">
                   <label for="map-item-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map"></use></svg>

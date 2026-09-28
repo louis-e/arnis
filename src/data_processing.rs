@@ -597,6 +597,9 @@ pub fn generate_world_with_options(
     // producing that.
     let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
     editor.set_bake_lighting(args.bake_lighting || wants_voxy);
+    editor.set_void_world(
+        world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void,
+    );
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
@@ -1823,6 +1826,7 @@ pub fn generate_world_with_options(
             &output_path,
             args.gamemode,
             args.world_time,
+            args.world_type,
         ) {
             eprintln!("Warning: Failed to apply world settings: {e}");
         }

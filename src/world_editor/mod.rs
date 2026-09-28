@@ -224,6 +224,9 @@ pub struct WorldEditor<'a> {
     luanti_game: LuantiGame,
     /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
     bake_lighting: bool,
+    /// Java: leave every chunk outside the area unwritten for the void generator,
+    /// instead of filling it with the flat ground plane.
+    void_world: bool,
     /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
@@ -278,6 +281,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
+            void_world: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -328,6 +332,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
+            void_world: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -378,6 +383,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: ground_level,
             luanti_game: game,
             bake_lighting: false,
+            void_world: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -560,6 +566,11 @@ impl<'a> WorldEditor<'a> {
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;
+    }
+
+    /// Java: write only the chunks the area touches and leave the rest to a void generator.
+    pub fn set_void_world(&mut self, enabled: bool) {
+        self.void_world = enabled;
     }
 
     pub fn set_game_settings(&mut self, mode: crate::args::GameMode, world_time: i64) {
@@ -978,6 +989,7 @@ impl<'a> WorldEditor<'a> {
             self.llbbox,
             self.ground.clone(),
             self.bake_lighting,
+            self.void_world,
             self.preview.clone(),
             self.voxy.clone(),
             self.region_write_mode(),
@@ -2681,6 +2693,7 @@ mod eviction_guard_tests {
             LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
             None,
             false,
+            false,
             None,
             None,
             java::RegionWriteMode::Fresh,
@@ -2696,6 +2709,47 @@ mod eviction_guard_tests {
         let section = chunk.sections.entry(0).or_default();
         section.storage.set(0, SMOOTH_STONE);
         region
+    }
+
+    /// Chunks stored in a written region file.
+    fn stored_chunks(path: &std::path::Path) -> usize {
+        let file = std::fs::File::open(path).unwrap();
+        let mut region = fastanvil::Region::from_stream(file).unwrap();
+        (0..32)
+            .flat_map(|x| (0..32).map(move |z| (x, z)))
+            .filter(|&(x, z)| region.read_chunk(x, z).unwrap().is_some())
+            .count()
+    }
+
+    #[test]
+    fn a_void_world_writes_only_the_chunks_the_area_touches() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("region").join("r.0.0.mca");
+        let write = |void_world: bool| {
+            java::RegionWriteCtx::new(
+                dir.path().to_path_buf(),
+                LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
+                None,
+                false,
+                void_world,
+                None,
+                None,
+                java::RegionWriteMode::Fresh,
+                None,
+                (0, 0),
+            )
+            .write(0, 0, &flush_test_region())
+            .unwrap();
+        };
+
+        write(false);
+        assert_eq!(stored_chunks(&path), 1024, "a flat world fills the region");
+        write(true);
+        assert_eq!(
+            stored_chunks(&path),
+            1,
+            "a void world leaves the rest to the void generator"
+        );
     }
 
     #[test]

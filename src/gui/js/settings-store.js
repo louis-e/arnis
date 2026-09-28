@@ -35,6 +35,7 @@ const SETTINGS = [
   // World
   { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
+  { id: 'world-type-group', kind: 'segmented', store: OWN, valueAttr: 'data-world-type' },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   { id: 'one-world-toggle', kind: 'checkbox', store: OWN },

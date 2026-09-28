@@ -1219,6 +1219,15 @@ function initSettings() {
     });
   });
 
+  // World type segmented control
+  const worldTypeGroup = document.getElementById("world-type-group");
+  worldTypeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      worldTypeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
   // Signage segmented control
   const signageGroup = document.getElementById("signage-group");
   signageGroup.querySelectorAll(".segment").forEach((btn) => {
@@ -1715,12 +1724,24 @@ function refreshHeightLimitRow(format) {
   }
 }
 
+// Bedrock and Luanti keep their own flat generators, so the choice only means
+// something for Java. Greyed rather than hidden, like the other format gates.
+function refreshWorldTypeRow(format) {
+  const group = document.getElementById('world-type-group');
+  if (!group) return;
+  const java = (format || selectedWorldFormat) === 'java';
+  group.classList.toggle('segmented-disabled', !java);
+  const row = group.closest('.settings-row');
+  if (row) row.classList.toggle('settings-row-unavailable', !java);
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
   const luantiBtn = document.getElementById('format-luanti');
 
   refreshHeightLimitRow(format);
+  refreshWorldTypeRow(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -3364,6 +3385,8 @@ async function startGeneration() {
 
     var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
     var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
+    var worldTypeBtn = document.querySelector("#world-type-group .segment.active");
+    var worldType = worldTypeBtn ? worldTypeBtn.dataset.worldType : "void";
     var mapItem = document.getElementById("map-item-toggle").checked;
     var signageBtn = document.querySelector("#signage-group .segment.active");
     var signage = signageBtn ? signageBtn.dataset.signage : "basic";
@@ -3400,6 +3423,7 @@ async function startGeneration() {
         rotationAngle: rotationAngle,
         gamemode: gamemode,
         worldTime: worldTime,
+        worldType: worldType,
         mapItem: mapItem,
         signage: signage,
         mapillaryToken: getMapillaryToken(),

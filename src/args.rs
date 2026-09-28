@@ -229,6 +229,10 @@ pub struct Args {
     #[arg(long, default_value_t = DEFAULT_WORLD_TIME, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
 
+    /// Java only: what the game generates around the area, empty void or a flat grass plain
+    #[arg(long = "world-type", value_enum, default_value_t = WorldType::Void)]
+    pub world_type: WorldType,
+
     /// Readable image signs, Java only. `basic` covers public signage: street names,
     /// traffic signs, transit stops, information boards and billboards. `full` adds
     /// building signage: shop name plates, house numbers and crossing signs.
@@ -560,6 +564,24 @@ impl FacadeMode {
     /// Whether the texture is hung as item display entities.
     pub fn places_displays(self) -> bool {
         matches!(self, FacadeMode::Photos)
+    }
+}
+
+/// What a Java world generates past the area Arnis wrote.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum WorldType {
+    /// Nothing: the area is an island in the void.
+    Void,
+    /// A superflat grass plain at the area's ground level.
+    Flat,
+}
+
+impl WorldType {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "flat" => WorldType::Flat,
+            _ => WorldType::Void,
+        }
     }
 }
 
