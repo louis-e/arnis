@@ -2740,25 +2740,33 @@ pub fn drop_buildings_on_aircraft_pavement(
 ) -> usize {
     let mut runways: Vec<StripSegment> = Vec::new();
     let mut taxiways: Vec<StripSegment> = Vec::new();
+    // Paved surfaces drawn as polygons: runway areas drop every building, the
+    // rest (aprons, taxiway areas) only traced ones.
+    let mut runway_areas: Vec<Vec<(i32, i32)>> = Vec::new();
     let mut aprons: Vec<Vec<(i32, i32)>> = Vec::new();
     for element in elements.iter() {
         let ProcessedElement::Way(way) = element else {
             continue;
         };
-        match way.tags.get("aeroway").map(String::as_str) {
-            Some("runway") => push_strip_segments(&mut runways, way, scale),
-            Some("taxiway") => push_strip_segments(&mut taxiways, way, scale),
-            Some("apron")
-                if way.nodes.len() >= 4
-                    && way.nodes.first().map(|n| (n.x, n.z))
-                        == way.nodes.last().map(|n| (n.x, n.z)) =>
+        let closed = way.nodes.len() >= 4
+            && way.nodes.first().map(|n| (n.x, n.z)) == way.nodes.last().map(|n| (n.x, n.z));
+        let ring = || way.nodes.iter().map(|n| (n.x, n.z)).collect::<Vec<_>>();
+        let area_kind = way.tags.get("area:aeroway").map(String::as_str);
+        match (way.tags.get("aeroway").map(String::as_str), area_kind) {
+            (_, Some("runway")) if closed => runway_areas.push(ring()),
+            (_, Some("taxiway")) if closed => aprons.push(ring()),
+            (Some("runway"), _)
+                if closed && way.tags.get("area").map(String::as_str) == Some("yes") =>
             {
-                aprons.push(way.nodes.iter().map(|n| (n.x, n.z)).collect());
+                runway_areas.push(ring())
             }
+            (Some("runway"), _) => push_strip_segments(&mut runways, way, scale),
+            (Some("taxiway"), _) => push_strip_segments(&mut taxiways, way, scale),
+            (Some("apron"), _) if closed => aprons.push(ring()),
             _ => {}
         }
     }
-    if runways.is_empty() && taxiways.is_empty() && aprons.is_empty() {
+    if runways.is_empty() && taxiways.is_empty() && runway_areas.is_empty() && aprons.is_empty() {
         return 0;
     }
 
@@ -2770,7 +2778,7 @@ pub fn drop_buildings_on_aircraft_pavement(
         min_z = min_z.min(s.az.min(s.bz) - s.half);
         max_z = max_z.max(s.az.max(s.bz) + s.half);
     }
-    for &(x, z) in aprons.iter().flatten() {
+    for &(x, z) in aprons.iter().chain(&runway_areas).flatten() {
         min_x = min_x.min(x as f64);
         max_x = max_x.max(x as f64);
         min_z = min_z.min(z as f64);
@@ -2793,7 +2801,9 @@ pub fn drop_buildings_on_aircraft_pavement(
         if cx < min_x || cx > max_x || cz < min_z || cz > max_z {
             return true;
         }
-        if runways.iter().any(|s| s.contains(cx, cz)) {
+        if runways.iter().any(|s| s.contains(cx, cz))
+            || runway_areas.iter().any(|ring| ring_contains(ring, cx, cz))
+        {
             return false;
         }
         let traced = way.tags.get("source").map(String::as_str) == Some("overture_maps");
@@ -4314,6 +4324,22 @@ mod tests {
         let dropped = drop_buildings_on_aircraft_pavement(&mut elements, 1.0);
         assert_eq!(dropped, 2);
         assert_eq!(kept_ids(&elements), vec![1, 12]);
+    }
+
+    #[test]
+    fn a_runway_drawn_as_an_area_clears_its_whole_surface() {
+        let mut elements = vec![
+            line_way(
+                4,
+                &[(0, 0), (600, 0), (600, 60), (0, 60), (0, 0)],
+                &[("area:aeroway", "runway")],
+            ),
+            // Mapped, in the middle of the runway surface, far from any centre line.
+            building(40, 300, 40, 320, 55, false),
+            building(41, 700, 40, 720, 55, false),
+        ];
+        assert_eq!(drop_buildings_on_aircraft_pavement(&mut elements, 1.0), 1);
+        assert_eq!(kept_ids(&elements), vec![4, 41]);
     }
 
     #[test]
