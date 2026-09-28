@@ -2976,6 +2976,7 @@ function restoreNaturalRows() {
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('voxy-lod-toggle', true);
+  setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
 }
 

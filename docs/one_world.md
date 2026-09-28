@@ -234,6 +234,9 @@ Manifests are validated on load. Preview paths are only followed inside
 8. **Region palettes** can list the same blocks in a different order between
    identical runs (pre-existing, from how property blocks are deduplicated). The
    blocks themselves are identical.
+9. **Caves** follow each area's bedrock plane, so where two neighbouring areas
+   got different floors their caves and deepslate line do not line up at the
+   seam. Within an area they match across tiles as usual.
 
 ## Where to look
 
