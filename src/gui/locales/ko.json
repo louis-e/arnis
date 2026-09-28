@@ -177,6 +177,7 @@
   "map_tool_area_desc": "지도 위를 드래그해 생성할 영역을 고릅니다.",
   "map_tool_rotation": "회전 각도",
   "map_tool_rotation_desc": "도로를 따라 선을 그어 월드를 그 방향에 맞춥니다.",
+  "map_tool_rotation_one_world": "하나의 월드 모드에서는 꺼져 있습니다.",
   "map_tool_spawn": "스폰 지점",
   "map_tool_spawn_desc": "월드에서 플레이어가 시작할 곳을 클릭합니다.",
   "map_tool_clear": "선택 지우기",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "토지 피복",
   "preview3d_buildings": "건물",
   "preview3d_controls_hint": "드래그로 이동 · 오른쪽 드래그로 회전 및 기울이기",
-  "preview3d_buildings_too_large": "건물 레이어에 비해 영역이 너무 큽니다(최대 10km²)"
+  "preview3d_buildings_too_large": "건물 레이어에 비해 영역이 너무 큽니다(최대 10km²)",
+  "one_world": "하나의 월드",
+  "one_world_desc": "각 지역이 실제 위치에 맞춰 계속 커지는 하나의 월드에 추가됩니다. Java 전용.",
+  "one_world_will_create": "하나의 월드 “{name}”이(가) 생성됩니다",
+  "one_world_areas": "하나의 월드 “{name}” · 영역: {count}",
+  "one_world_locked": "Minecraft에서 열려 있음",
+  "one_world_foreign": "폴더 “{name}”이(가) 있지만 하나의 월드가 아닙니다",
+  "one_world_needs_terrain": "이 월드는 지형을 사용합니다",
+  "one_world_needs_flat": "이 월드는 평평합니다 (객체만)",
+  "one_world_no_save_path": "먼저 설정에서 Minecraft 저장 폴더를 지정하세요",
+  "one_world_confirm_title": "기존 청크를 바꿀까요?",
+  "one_world_confirm_text": "이 영역의 청크 {count}개가 이미 월드에 있습니다. 다시 생성되며 Minecraft에서 그곳에 지은 것은 모두 바뀝니다.",
+  "one_world_confirm_cancel": "취소",
+  "one_world_confirm_ok": "생성"
 }

@@ -1,24 +1,13 @@
 use super::cartesian::{XZBBox, XZPoint};
 use super::geographic::{LLBBox, LLPoint};
-
-/// Earth radius in meters (WGS84 spherical approximation), matching the
-/// value used in `crate::projection::web_mercator`.
-const EARTH_RADIUS: f64 = 6_371_000.0;
+use crate::projection::WebMercatorProjection;
 
 /// Internal mode discriminator so `transform_point` can dispatch between the
 /// legacy linear interpolation and Web Mercator projection.
-#[allow(dead_code)]
 enum ProjectionMode {
     /// Existing linear-interpolation mode (no geographic projection).
     Local,
-    /// Web Mercator projection with a local origin offset.
-    WebMercator {
-        origin_lat: f64,
-        origin_lon: f64,
-        scale: f64,
-        cos_lat_ref: f64,
-        z_offset: f64,
-    },
+    WebMercator(WebMercatorProjection),
 }
 
 /// Transform geographic space (within llbbox) to a local tangential cartesian space (within xzbbox)
@@ -74,62 +63,40 @@ impl CoordTransformer {
 
     /// Create a `CoordTransformer` using a Web Mercator projection.
     ///
-    /// The bounding box is computed by projecting all four corners of the
-    /// `llbbox` and taking the axis-aligned envelope. The returned `XZBBox`
-    /// represents the Minecraft world extents for the projected area.
+    /// Block `X` spans `[X, X + 1)`, so the far edges round down to the last
+    /// block inside the bbox.
     pub fn with_projection(
         llbbox: &LLBBox,
         scale: f64,
-        projection: &dyn crate::projection::Projection,
+        projection: WebMercatorProjection,
     ) -> Result<(CoordTransformer, XZBBox), String> {
         if scale <= 0.0 {
             return Err("Scale must be > 0.0".to_string());
         }
 
-        // Project all four corners to find the Minecraft bounding box.
-        // NW corner
-        let (x_nw, z_nw) = projection.forward(llbbox.max().lat(), llbbox.min().lng());
-        // SE corner
-        let (x_se, z_se) = projection.forward(llbbox.min().lat(), llbbox.max().lng());
-        // NE corner
-        let (x_ne, z_ne) = projection.forward(llbbox.max().lat(), llbbox.max().lng());
-        // SW corner
-        let (x_sw, z_sw) = projection.forward(llbbox.min().lat(), llbbox.min().lng());
+        let x_w = projection.x_for_lon(llbbox.min().lng());
+        let x_e = projection.x_for_lon(llbbox.max().lng());
+        let z_n = projection.z_for_lat(llbbox.max().lat());
+        let z_s = projection.z_for_lat(llbbox.min().lat());
+        crate::projection::check_projected_edges([x_w, x_e, z_n, z_s])?;
 
-        let x_min = x_nw.min(x_sw).min(x_ne).min(x_se).floor() as i32;
-        let x_max = x_nw.max(x_sw).max(x_ne).max(x_se).ceil() as i32;
-        let z_min = z_nw.min(z_sw).min(z_ne).min(z_se).floor() as i32;
-        let z_max = z_nw.max(z_sw).max(z_ne).max(z_se).ceil() as i32;
+        let x_min = crate::projection::snap_edge(x_w, false);
+        let z_min = crate::projection::snap_edge(z_n, false);
+        let x_max = (crate::projection::snap_edge(x_e, true) - 1).max(x_min);
+        let z_max = (crate::projection::snap_edge(z_s, true) - 1).max(z_min);
 
         let xzbbox = XZBBox::rect_from_min_max(x_min, z_min, x_max, z_max)
             .map_err(|e| format!("Failed to create XZBBox from projection: {}", e))?;
-
-        let origin_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
-        let origin_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
-        let cos_lat_ref = origin_lat.to_radians().cos();
-
-        // z_offset chosen so that forward(origin_lat, _) gives z = 0.
-        let z_offset = EARTH_RADIUS
-            * (std::f64::consts::FRAC_PI_4 + origin_lat.to_radians() / 2.0)
-                .tan()
-                .ln()
-            * scale;
 
         Ok((
             CoordTransformer {
                 len_lat: llbbox.max().lat() - llbbox.min().lat(),
                 len_lng: llbbox.max().lng() - llbbox.min().lng(),
-                scale_factor_x: (x_max - x_min) as f64,
-                scale_factor_z: (z_max - z_min) as f64,
+                scale_factor_x: (x_max - x_min + 1) as f64,
+                scale_factor_z: (z_max - z_min + 1) as f64,
                 min_lat: llbbox.min().lat(),
                 min_lng: llbbox.min().lng(),
-                mode: ProjectionMode::WebMercator {
-                    origin_lat,
-                    origin_lon,
-                    scale,
-                    cos_lat_ref,
-                    z_offset,
-                },
+                mode: ProjectionMode::WebMercator(projection),
             },
             xzbbox,
         ))
@@ -148,22 +115,9 @@ impl CoordTransformer {
 
                 XZPoint::new(x, z)
             }
-            ProjectionMode::WebMercator {
-                origin_lon,
-                scale,
-                cos_lat_ref,
-                z_offset,
-                ..
-            } => {
-                let x =
-                    EARTH_RADIUS * (llpoint.lng() - origin_lon).to_radians() * cos_lat_ref * scale;
-                let z = -EARTH_RADIUS
-                    * (std::f64::consts::FRAC_PI_4 + llpoint.lat().to_radians() / 2.0)
-                        .tan()
-                        .ln()
-                    * scale
-                    + z_offset;
-
+            ProjectionMode::WebMercator(proj) => {
+                let x = proj.x_for_lon(llpoint.lng()).floor();
+                let z = proj.z_for_lat(llpoint.lat()).floor();
                 XZPoint::new(x as i32, z as i32)
             }
         }
@@ -299,7 +253,7 @@ mod test {
             (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
             1.0,
         );
-        let result = CoordTransformer::with_projection(&llbbox, 1.0, &proj);
+        let result = CoordTransformer::with_projection(&llbbox, 1.0, proj);
         assert!(result.is_ok());
     }
 
@@ -308,8 +262,8 @@ mod test {
         let llbbox = get_llbbox_arnis();
         let proj = crate::projection::WebMercatorProjection::new(54.63, 9.93, 1.0);
 
-        assert!(CoordTransformer::with_projection(&llbbox, 0.0, &proj).is_err());
-        assert!(CoordTransformer::with_projection(&llbbox, -1.0, &proj).is_err());
+        assert!(CoordTransformer::with_projection(&llbbox, 0.0, proj).is_err());
+        assert!(CoordTransformer::with_projection(&llbbox, -1.0, proj).is_err());
     }
 
     #[test]
@@ -320,7 +274,7 @@ mod test {
             (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
             1.0,
         );
-        let (transformer, xzbbox) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
+        let (transformer, xzbbox) = CoordTransformer::with_projection(&llbbox, 1.0, proj).unwrap();
 
         // All four corners should map inside the xzbbox
         let corners = [
@@ -361,7 +315,7 @@ mod test {
         let origin_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
         let origin_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
         let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, 1.0);
-        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
+        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, proj).unwrap();
 
         let test_point = LLPoint::new(
             llbbox.min().lat() + (llbbox.max().lat() - llbbox.min().lat()) * 0.3,
@@ -373,16 +327,15 @@ mod test {
         let (expected_x, expected_z) =
             crate::projection::Projection::forward(&proj, test_point.lat(), test_point.lng());
 
-        // Integer truncation: the transformer casts with `as i32`
-        assert_eq!(pt.x, expected_x as i32);
-        assert_eq!(pt.z, expected_z as i32);
+        assert_eq!(pt.x, expected_x.floor() as i32);
+        assert_eq!(pt.z, expected_z.floor() as i32);
     }
 
     #[test]
     fn test_with_projection_east_increases_x() {
         let llbbox = get_llbbox_arnis();
         let proj = crate::projection::WebMercatorProjection::new(54.63, 9.93, 1.0);
-        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
+        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, proj).unwrap();
 
         let west = LLPoint::new(54.63, 9.928).unwrap();
         let east = LLPoint::new(54.63, 9.937).unwrap();
@@ -401,7 +354,7 @@ mod test {
     fn test_with_projection_north_decreases_z() {
         let llbbox = get_llbbox_arnis();
         let proj = crate::projection::WebMercatorProjection::new(54.63, 9.93, 1.0);
-        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
+        let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, proj).unwrap();
 
         let south = LLPoint::new(54.628, 9.93).unwrap();
         let north = LLPoint::new(54.634, 9.93).unwrap();

@@ -11,8 +11,9 @@ use crate::{
 };
 use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
-    scale_to_minecraft,
+    scale_to_minecraft_with,
 };
+pub use postprocess::{AffinePolicy, ElevationAffine, SoftTop};
 use provider::{ElevationProvider, RawElevationGrid};
 use selector::select_provider;
 pub use selector::SourceMode;
@@ -48,6 +49,63 @@ pub struct ElevationData {
     /// Terrain base actually used: the requested ground level, or lower if the relief
     /// needed the extended floor. Every consumer of the affine must use this, not args.
     pub(crate) ground_level: i32,
+    pub(crate) soft_top: Option<SoftTop>,
+}
+
+impl ElevationData {
+    pub fn affine(&self) -> ElevationAffine {
+        ElevationAffine {
+            min_height_m: self.min_height_m,
+            blocks_per_meter: self.blocks_per_meter,
+            ground_level: self.ground_level,
+            soft_top: self.soft_top,
+        }
+    }
+
+    /// How much the soft top compresses heights at `y`: 1 up to the knee, then
+    /// `cosh((y - knee_y) / width)`, the inverse slope of the curve there.
+    #[inline]
+    pub fn soft_top_stretch(&self, y: i32) -> f64 {
+        let Some(top) = self.soft_top else {
+            return 1.0;
+        };
+        let knee_y =
+            self.ground_level as f64 + (top.knee_m - self.min_height_m) * self.blocks_per_meter;
+        let above = f64::from(y) - knee_y;
+        if above <= 0.0 {
+            1.0
+        } else {
+            (above / top.width_blocks).cosh()
+        }
+    }
+
+    /// Lowest terrain Y in the grid, rounded down.
+    pub fn lowest_y(&self) -> Option<i32> {
+        self.heights
+            .iter()
+            .flatten()
+            .filter(|h| h.is_finite())
+            .map(|&h| h.floor() as i32)
+            .min()
+    }
+
+    pub fn remap_rows_to_mercator(&mut self, lat_top: f64, lat_bottom: f64) {
+        let rows = self.height;
+        crate::grid_ops::remap_rows_in_place(
+            &mut self.heights,
+            |gz| crate::grid_ops::mercator_source_row(lat_top, lat_bottom, rows, gz),
+            |a, b, t| (a as f64 * (1.0 - t) + b as f64 * t) as f32,
+        );
+    }
+
+    /// Only meaningful while one cell is one block.
+    pub fn crop(&mut self, x0: usize, z0: usize, width: usize, height: usize) {
+        crate::grid_ops::crop_rows(&mut self.heights, x0, z0, width, height);
+        self.width = width;
+        self.height = height;
+        self.world_width = width;
+        self.world_height = height;
+    }
 }
 
 /// Maximum elevation grid dimension requested from providers per axis.
@@ -89,7 +147,14 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
     // scale_factor+1 distinct positions.
     let world_width: usize = scale_factor_x as usize + 1;
     let world_height: usize = scale_factor_z as usize + 1;
+    compute_grid_dims_for_world(world_width, world_height)
+}
 
+/// `compute_grid_dims` for a world whose block size is already known.
+pub fn compute_grid_dims_for_world(
+    world_width: usize,
+    world_height: usize,
+) -> (usize, usize, usize, usize) {
     // One elevation sample per block is the ideal: finer buys nothing (a block is the
     // smallest representable unit), coarser blurs the terrain. Only shrink below that when
     // the grid would breach a limit.
@@ -121,6 +186,8 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
 /// and coastal tile-boundary artifacts.
 ///
 /// The returned ElevationData contains heights in Minecraft Y coordinates.
+///
+/// `dims` comes from `compute_grid_dims`, so it matches the land cover grid.
 #[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
@@ -132,9 +199,11 @@ pub fn fetch_elevation_data(
     land_cover: Option<&mut LandCoverData>,
     source_mode: SourceMode,
     benchmark: bool,
+    dims: (usize, usize, usize, usize),
+    affine: AffinePolicy,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let mut bench = crate::bench::Bench::new(benchmark);
-    let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
+    let (world_width, world_height, grid_width, grid_height) = dims;
 
     // Fallback chain: selected provider, then Mapterhorn, then AWS.
     let provider = select_provider(bbox, source_mode);
@@ -220,14 +289,21 @@ pub fn fetch_elevation_data(
     bench.mark("elev_landcover_repair");
     emit_gui_progress_update(16.0, "Processing elevation...");
 
-    let (mc_heights, min_height_m, blocks_per_meter, effective_ground_level) = scale_to_minecraft(
+    let (mc_heights, affine) = scale_to_minecraft_with(
         &height_grid,
         scale,
         ground_level,
         min_ground_level,
         disable_height_limit,
         extended_max_y,
+        affine,
     );
+    let ElevationAffine {
+        min_height_m,
+        blocks_per_meter,
+        ground_level: effective_ground_level,
+        soft_top,
+    } = affine;
     bench.mark("elev_scale_to_mc");
 
     // Log min/max block heights
@@ -267,6 +343,7 @@ pub fn fetch_elevation_data(
             1.0
         },
         ground_level: effective_ground_level,
+        soft_top,
     })
 }
 

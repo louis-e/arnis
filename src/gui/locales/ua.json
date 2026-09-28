@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Проведіть по карті, щоб вибрати, що буде згенеровано.",
   "map_tool_rotation": "Кут повороту",
   "map_tool_rotation_desc": "Проведіть лінію вздовж вулиці, щоб вирівняти за нею світ.",
+  "map_tool_rotation_one_world": "Вимкнено в режимі «Єдиний світ».",
   "map_tool_spawn": "Точка появи",
   "map_tool_spawn_desc": "Клацніть там, де гравці починають у світі.",
   "map_tool_clear": "Очистити виділення",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Покрив землі",
   "preview3d_buildings": "Будівлі",
   "preview3d_controls_hint": "Перетягування — зсув · правою кнопкою — поворот і нахил",
-  "preview3d_buildings_too_large": "Область завелика для шару будівель (макс. 10 км²)"
+  "preview3d_buildings_too_large": "Область завелика для шару будівель (макс. 10 км²)",
+  "one_world": "Єдиний світ",
+  "one_world_desc": "Кожна область додається до одного світу, що росте, на своє справжнє місце. Лише Java.",
+  "one_world_will_create": "Буде створено єдиний світ «{name}»",
+  "one_world_areas": "Єдиний світ «{name}» · областей: {count}",
+  "one_world_locked": "відкрито в Minecraft",
+  "one_world_foreign": "Тека «{name}» існує, але це не єдиний світ",
+  "one_world_needs_terrain": "цей світ використовує рельєф",
+  "one_world_needs_flat": "цей світ плоский (лише об’єкти)",
+  "one_world_no_save_path": "Спочатку вкажіть теку збережень Minecraft у налаштуваннях",
+  "one_world_confirm_title": "Замінити наявні чанки?",
+  "one_world_confirm_text": "Чанків цієї області вже є у світі: {count}. Вони будуть створені знову, і все побудоване там у Minecraft буде замінено.",
+  "one_world_confirm_cancel": "Скасувати",
+  "one_world_confirm_ok": "Створити"
 }

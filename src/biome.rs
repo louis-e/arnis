@@ -109,11 +109,14 @@ pub type ChunkBiomeNbt = Value;
 /// which is flat: every cell in a column gets the same biome. The voxy LOD
 /// writer wants the names rather than the packed NBT, so both callers share
 /// this.
+///
+/// `ground_origin` is the world position of the ground grid's first cell.
 pub fn chunk_biome_names(
     chunk_x: i32,
     chunk_z: i32,
     ground: Option<&Ground>,
     center_lat_deg: f64,
+    ground_origin: (i32, i32),
 ) -> [&'static str; 16] {
     let mut names: [&'static str; 16] = ["minecraft:plains"; 16];
 
@@ -127,7 +130,7 @@ pub fn chunk_biome_names(
                 for xi in 0..4i32 {
                     let world_x = chunk_x * 16 + xi * 4 + 2;
                     let world_z = chunk_z * 16 + zi * 4 + 2;
-                    let coord = XZPoint::new(world_x, world_z);
+                    let coord = XZPoint::new(world_x - ground_origin.0, world_z - ground_origin.1);
                     let lc = g.cover_class(coord);
                     let wd = g.water_distance(coord);
                     names[(zi * 4 + xi) as usize] =
@@ -252,7 +255,7 @@ mod tests {
 
     #[test]
     fn no_ground_yields_plains_palette() {
-        let nbt = biome_nbt_from_names(&chunk_biome_names(0, 0, None, 0.0));
+        let nbt = biome_nbt_from_names(&chunk_biome_names(0, 0, None, 0.0, (0, 0)));
         match nbt {
             Value::Compound(map) => {
                 assert!(map.contains_key("palette"));

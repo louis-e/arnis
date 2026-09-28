@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Drag over the map to choose what gets generated.",
   "map_tool_rotation": "Rotation angle",
   "map_tool_rotation_desc": "Draw a line along a street to line the world up with it.",
+  "map_tool_rotation_one_world": "Off in One World mode.",
   "map_tool_spawn": "Spawn point",
   "map_tool_spawn_desc": "Click where players start in the world.",
   "map_tool_clear": "Clear selection",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Land cover",
   "preview3d_buildings": "Buildings",
   "preview3d_controls_hint": "Drag to pan · right-drag to rotate and tilt",
-  "preview3d_buildings_too_large": "Area too large for the buildings overlay (max 10 km²)"
+  "preview3d_buildings_too_large": "Area too large for the buildings overlay (max 10 km²)",
+  "one_world": "One World",
+  "one_world_desc": "Each area joins one growing world at its real position. Java only.",
+  "one_world_will_create": "One World \"{name}\" will be created",
+  "one_world_areas": "One World \"{name}\" · Areas: {count}",
+  "one_world_locked": "open in Minecraft",
+  "one_world_foreign": "Folder \"{name}\" exists but is not a One World",
+  "one_world_needs_terrain": "this world uses terrain",
+  "one_world_needs_flat": "this world is flat (Objects only)",
+  "one_world_no_save_path": "Set the Minecraft saves folder in Settings first",
+  "one_world_confirm_title": "Replace existing chunks?",
+  "one_world_confirm_text": "{count} chunks of this area already exist in the world. They are generated again, and anything built there in Minecraft is replaced.",
+  "one_world_confirm_cancel": "Cancel",
+  "one_world_confirm_ok": "Generate"
 }

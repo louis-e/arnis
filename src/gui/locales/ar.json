@@ -177,6 +177,7 @@
   "map_tool_area_desc": "اسحب على الخريطة لاختيار ما سيُولَّد.",
   "map_tool_rotation": "زاوية الدوران",
   "map_tool_rotation_desc": "ارسم خطًا على امتداد شارع لمحاذاة العالم معه.",
+  "map_tool_rotation_one_world": "معطّل في وضع عالم واحد.",
   "map_tool_spawn": "نقطة الظهور",
   "map_tool_spawn_desc": "انقر حيث يبدأ اللاعبون في العالم.",
   "map_tool_clear": "مسح التحديد",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "الغطاء الأرضي",
   "preview3d_buildings": "المباني",
   "preview3d_controls_hint": "اسحب للتحريك · اسحب بالزر الأيمن للتدوير والإمالة",
-  "preview3d_buildings_too_large": "المنطقة كبيرة جدًا لطبقة المباني (الحد الأقصى 10 كم²)"
+  "preview3d_buildings_too_large": "المنطقة كبيرة جدًا لطبقة المباني (الحد الأقصى 10 كم²)",
+  "one_world": "عالم واحد",
+  "one_world_desc": "تنضم كل منطقة إلى عالم واحد متنامٍ في موقعها الحقيقي. Java فقط.",
+  "one_world_will_create": "سيتم إنشاء العالم الواحد “{name}”",
+  "one_world_areas": "العالم الواحد “{name}” · المناطق: {count}",
+  "one_world_locked": "مفتوح في Minecraft",
+  "one_world_foreign": "المجلد “{name}” موجود لكنه ليس عالمًا واحدًا",
+  "one_world_needs_terrain": "هذا العالم يستخدم التضاريس",
+  "one_world_needs_flat": "هذا العالم مسطح (العناصر فقط)",
+  "one_world_no_save_path": "حدّد أولًا مجلد عوالم Minecraft في الإعدادات",
+  "one_world_confirm_title": "استبدال القطع الموجودة؟",
+  "one_world_confirm_text": "يوجد {count} من قطع هذه المنطقة في العالم بالفعل. ستُنشأ من جديد، وسيُستبدل كل ما بُني هناك في Minecraft.",
+  "one_world_confirm_cancel": "إلغاء",
+  "one_world_confirm_ok": "إنشاء"
 }

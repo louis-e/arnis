@@ -177,6 +177,7 @@
   "map_tool_area_desc": "地図上をドラッグして生成する範囲を選びます。",
   "map_tool_rotation": "回転角度",
   "map_tool_rotation_desc": "通りに沿って線を引き、ワールドをその向きに合わせます。",
+  "map_tool_rotation_one_world": "ワンワールドモードではオフです。",
   "map_tool_spawn": "スポーン地点",
   "map_tool_spawn_desc": "ワールドでプレイヤーが開始する場所をクリックします。",
   "map_tool_clear": "選択を解除",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "土地被覆",
   "preview3d_buildings": "建物",
   "preview3d_controls_hint": "ドラッグで移動 · 右ドラッグで回転と傾き",
-  "preview3d_buildings_too_large": "建物レイヤーには範囲が大きすぎます（最大 10 km²）"
+  "preview3d_buildings_too_large": "建物レイヤーには範囲が大きすぎます（最大 10 km²）",
+  "one_world": "ワンワールド",
+  "one_world_desc": "各エリアを実際の位置で、成長し続ける1つのワールドに追加します。Java のみ。",
+  "one_world_will_create": "ワンワールド「{name}」を作成します",
+  "one_world_areas": "ワンワールド「{name}」· エリア数: {count}",
+  "one_world_locked": "Minecraft で開かれています",
+  "one_world_foreign": "フォルダ「{name}」は存在しますがワンワールドではありません",
+  "one_world_needs_terrain": "このワールドは地形を使用します",
+  "one_world_needs_flat": "このワールドは平坦です（オブジェクトのみ）",
+  "one_world_no_save_path": "先に設定で Minecraft のセーブフォルダーを指定してください",
+  "one_world_confirm_title": "既存のチャンクを置き換えますか？",
+  "one_world_confirm_text": "このエリアの {count} チャンクは既にワールドにあります。再生成され、Minecraft でそこに建てたものは置き換えられます。",
+  "one_world_confirm_cancel": "キャンセル",
+  "one_world_confirm_ok": "生成"
 }
