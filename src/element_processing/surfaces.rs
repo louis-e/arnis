@@ -14,6 +14,10 @@ pub const CYCLEWAY_MIX: &[Block] = &[RED_TERRACOTTA, RED_TERRACOTTA, RED_CONCRET
 /// tagged at all. An unpaved surface keeps its own blocks, and so does a colour tag that says
 /// anything but red, so a mapped grey or green path stays that way.
 pub fn cycleway_palette(tags: &HashMap<String, String>) -> Option<&'static [Block]> {
+    // Where the path crosses a road the road keeps its surface.
+    if tags.get("cycleway").is_some_and(|v| v == "crossing") || tags.contains_key("crossing") {
+        return None;
+    }
     let colour = tags.get("surface:colour").or_else(|| tags.get("colour"));
     if colour.is_some_and(|c| !is_red_colour(c)) {
         return None;

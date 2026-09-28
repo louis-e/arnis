@@ -201,6 +201,27 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     SEA_LANTERN,
     ANDESITE_WALL,
     SMOOTH_SANDSTONE_STAIRS,
+    // A red bicycle path next to a road, so the road's width does not pave it over.
+    RED_TERRACOTTA,
+    RED_CONCRETE,
+];
+
+/// What a red bicycle path must not overwrite: the road list without the
+/// asphalt mix, so the path shows where a road's width runs over it whichever
+/// of the two is built first. Lane stripes and zebras still win.
+const CYCLEWAY_PROTECTED_SURFACES: &[Block] = &[
+    BLACK_CONCRETE,
+    WHITE_CONCRETE,
+    WARPED_STAIRS,
+    WARPED_TRAPDOOR,
+    WARPED_SLAB,
+    STRIPPED_WARPED_STEM,
+    STRIPPED_WARPED_HYPHAE,
+    SEA_LANTERN,
+    ANDESITE_WALL,
+    SMOOTH_SANDSTONE_STAIRS,
+    RED_TERRACOTTA,
+    RED_CONCRETE,
 ];
 
 /// True when the way should render as a pedestrian walkway
@@ -1511,9 +1532,11 @@ fn generate_highways_internal(
             }
 
             // Bicycle paths are red wherever they are paved.
+            let mut surface_protect = ROAD_PROTECTED_SURFACES;
             if highway_type == "cycleway" {
                 if let Some(red) = cycleway_palette(&way.tags) {
                     block_types = red;
+                    surface_protect = CYCLEWAY_PROTECTED_SURFACES;
                 }
             }
 
@@ -1956,7 +1979,7 @@ fn generate_highways_internal(
                                             cell_y,
                                             set_z,
                                             None,
-                                            Some(ROAD_PROTECTED_SURFACES),
+                                            Some(surface_protect),
                                         );
                                     } else {
                                         editor.set_block(
@@ -1965,7 +1988,7 @@ fn generate_highways_internal(
                                             cell_y,
                                             set_z,
                                             None,
-                                            Some(ROAD_PROTECTED_SURFACES),
+                                            Some(surface_protect),
                                         );
                                     }
                                 }
@@ -3348,6 +3371,87 @@ mod tests {
             editor.check_for_block(200, 0, 20, Some(&[YELLOW_CONCRETE])),
             "taxiway intact off-runway"
         );
+    }
+
+    fn way_along(id: u64, from: (i32, i32), to: (i32, i32), tags: &[(&str, &str)]) -> ProcessedWay {
+        ProcessedWay {
+            id,
+            nodes: vec![
+                ProcessedNode {
+                    id: id * 10,
+                    tags: StdMap::new(),
+                    x: from.0,
+                    z: from.1,
+                },
+                ProcessedNode {
+                    id: id * 10 + 1,
+                    tags: StdMap::new(),
+                    x: to.0,
+                    z: to.1,
+                },
+            ],
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    fn build_ways(editor: &mut WorldEditor, ways: &[ProcessedWay]) {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        let mut cells = Vec::new();
+        for way in ways {
+            generate_highways(
+                editor,
+                &ProcessedElement::Way(way.clone()),
+                &args,
+                &HighwayConnectivityMap::new(),
+                &FloodFillCache::new(),
+                &empty,
+                &structures,
+                &surface,
+                &TunnelInternalEndpoints::default(),
+                &TunnelPortalMap::default(),
+                &empty,
+                &mut cells,
+            );
+        }
+    }
+
+    #[test]
+    fn a_road_does_not_pave_over_the_red_cycleway_beside_it_in_either_order() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 100.0).unwrap();
+        let road = way_along(1, (10, 50), (190, 50), &[("highway", "primary")]);
+        let path = way_along(2, (10, 52), (190, 52), &[("highway", "cycleway")]);
+        let crossing = way_along(
+            3,
+            (100, 30),
+            (100, 70),
+            &[("highway", "cycleway"), ("cycleway", "crossing")],
+        );
+        let asphalt = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
+        let red = &[RED_TERRACOTTA, RED_CONCRETE];
+        for ways in [
+            [road.clone(), path.clone(), crossing.clone()],
+            [path.clone(), crossing.clone(), road.clone()],
+        ] {
+            let mut editor = test_editor(&xzbbox);
+            build_ways(&mut editor, &ways);
+            for x in [40, 150] {
+                assert!(editor.check_for_block(x, 0, 52, Some(red)), "path at x={x}");
+                assert!(
+                    editor.check_for_block(x, 0, 49, Some(asphalt)),
+                    "road at x={x}"
+                );
+            }
+            // The crossing leaves the carriageway to the road.
+            assert!(editor.check_for_block(100, 0, 49, Some(asphalt)));
+            assert!(!editor.check_for_block(100, 0, 49, Some(red)));
+        }
     }
 
     fn straight_tunnel(tags: &[(&str, &str)]) -> ProcessedWay {
