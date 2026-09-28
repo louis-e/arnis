@@ -108,15 +108,18 @@ pub fn generate_leisure(
                     match random_choice {
                         0..30 => {
                             // Plants
-                            let plant_choice = match random_choice {
-                                0..5 => RED_FLOWER,
-                                5..10 => YELLOW_FLOWER,
-                                10..16 => BLUE_FLOWER,
-                                16..22 => WHITE_FLOWER,
-                                22..30 => FERN,
-                                _ => unreachable!(),
+                            let setting = if leisure_type == "nature_reserve" {
+                                crate::ground_decoration::FlowerSetting::Meadow
+                            } else {
+                                crate::ground_decoration::FlowerSetting::Garden
                             };
-                            editor.set_block(plant_choice, x, 1, z, None, None);
+                            if random_choice < 22 {
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor, x, z, setting,
+                                );
+                            } else {
+                                editor.set_block(FERN, x, 1, z, None, None);
+                            }
                         }
                         30..90 => {
                             // Grass
@@ -152,17 +155,15 @@ pub fn generate_leisure(
 
             if leisure_type == "pitch" {
                 // Clear park/ground vegetation scattered onto the pitch before marking.
-                let vegetation: &[Block] = &[
-                    GRASS,
-                    FERN,
-                    RED_FLOWER,
-                    YELLOW_FLOWER,
-                    BLUE_FLOWER,
-                    WHITE_FLOWER,
-                    OAK_LEAVES,
-                ];
                 for &(x, z) in filled_area.iter() {
-                    editor.set_block(AIR, x, 1, z, Some(vegetation), None);
+                    editor.set_block(
+                        AIR,
+                        x,
+                        1,
+                        z,
+                        Some(crate::ground_decoration::LOOSE_PLANTS),
+                        None,
+                    );
                 }
                 crate::element_processing::sport_pitches::draw_pitch_markings(
                     editor,

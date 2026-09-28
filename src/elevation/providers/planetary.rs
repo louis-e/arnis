@@ -112,10 +112,6 @@ impl ElevationProvider for PlanetaryDem {
         }
     }
 
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        None
-    }
-
     fn native_resolution_m(&self) -> f64 {
         let Some(spec) = DemSpec::for_body(self.body) else {
             return f64::MAX;

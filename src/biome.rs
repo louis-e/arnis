@@ -103,6 +103,43 @@ fn biome_temperate(lc: u8, lat_deg: f64, water_dist: u8) -> &'static str {
     }
 }
 
+/// High-mountain biome for a cell `above_m` metres above the snow line, or `None`
+/// below the alpine band, where the land-cover mapping holds.
+///
+/// Above the line everything is snow country, which also lets the game snow and
+/// freeze there. Up to a kilometre below it, open ground is alpine meadow and bare
+/// ground is stony peaks.
+pub fn mountain_biome(
+    lc: u8,
+    climate: Climate,
+    water_dist: u8,
+    above_m: f64,
+    slope: i32,
+) -> Option<&'static str> {
+    if lc == LC_WATER {
+        // Mountain lakes and streams; open sea keeps its ocean biome.
+        return (above_m >= 0.0 && water_dist < 8).then_some("minecraft:frozen_river");
+    }
+    if above_m >= 0.0 {
+        return Some(match slope {
+            i32::MIN..=1 => "minecraft:snowy_plains",
+            2..=6 => "minecraft:snowy_slopes",
+            _ => "minecraft:jagged_peaks",
+        });
+    }
+    if above_m < -crate::ground_decoration::ALPINE_BAND_METRES
+        || matches!(climate, Climate::HotDesert | Climate::ColdDesert)
+    {
+        return None;
+    }
+    match lc {
+        LC_GRASSLAND | LC_SHRUBLAND | LC_MOSS => Some("minecraft:meadow"),
+        LC_BARE => Some("minecraft:stony_peaks"),
+        LC_SNOW_ICE => Some("minecraft:snowy_slopes"),
+        _ => None,
+    }
+}
+
 pub type ChunkBiomeNbt = Value;
 
 /// Biome per 4x4 horizontal cell of one chunk, in `zi * 4 + xi` order.
@@ -128,6 +165,11 @@ pub fn chunk_biome_names(
             names = [g.body().biome(); 16];
         } else {
             let climate = g.climate();
+            let snow_y = if g.elevation_enabled {
+                g.snow_threshold_y()
+            } else {
+                i32::MAX
+            };
             for zi in 0..4i32 {
                 for xi in 0..4i32 {
                     let world_x = chunk_x * 16 + xi * 4 + 2;
@@ -135,8 +177,17 @@ pub fn chunk_biome_names(
                     let coord = XZPoint::new(world_x - ground_origin.0, world_z - ground_origin.1);
                     let lc = g.cover_class(coord);
                     let wd = g.water_distance(coord);
-                    names[(zi * 4 + xi) as usize] =
-                        biome_for_class(lc, climate, center_lat_deg, wd);
+                    let mountain = (snow_y != i32::MAX)
+                        .then(|| {
+                            let above_m = match snow_y {
+                                i32::MIN => f64::INFINITY,
+                                t => f64::from(g.level(coord) - t) / g.blocks_per_meter(),
+                            };
+                            mountain_biome(lc, climate, wd, above_m, g.slope(coord))
+                        })
+                        .flatten();
+                    names[(zi * 4 + xi) as usize] = mountain
+                        .unwrap_or_else(|| biome_for_class(lc, climate, center_lat_deg, wd));
                 }
             }
         }
@@ -325,6 +376,35 @@ mod tests {
             biome_for_class(LC_WATER, Climate::IceCap, 70.0, 8),
             "minecraft:frozen_ocean"
         );
+    }
+
+    #[test]
+    fn mountains_band_under_the_snow_line() {
+        let t = Climate::Temperate;
+        assert_eq!(
+            mountain_biome(LC_GRASSLAND, t, 0, -400.0, 2),
+            Some("minecraft:meadow")
+        );
+        assert_eq!(
+            mountain_biome(LC_BARE, t, 0, -200.0, 5),
+            Some("minecraft:stony_peaks")
+        );
+        assert_eq!(
+            mountain_biome(LC_BARE, t, 0, 150.0, 4),
+            Some("minecraft:snowy_slopes")
+        );
+        assert_eq!(
+            mountain_biome(LC_BARE, t, 0, 150.0, 12),
+            Some("minecraft:jagged_peaks")
+        );
+        // Below the alpine band, and forests at any height, keep the land-cover mapping.
+        assert_eq!(mountain_biome(LC_GRASSLAND, t, 0, -1500.0, 2), None);
+        assert_eq!(mountain_biome(LC_TREE_COVER, t, 0, -300.0, 2), None);
+        assert_eq!(
+            mountain_biome(LC_WATER, t, 2, 50.0, 0),
+            Some("minecraft:frozen_river")
+        );
+        assert_eq!(mountain_biome(LC_WATER, t, 12, 50.0, 0), None);
     }
 
     #[test]

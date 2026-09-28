@@ -25,6 +25,7 @@ mod floodfill;
 mod floodfill_cache;
 mod grid_ops;
 mod ground;
+mod ground_decoration;
 mod ground_generation;
 mod land_cover;
 mod landmarks;
@@ -51,6 +52,7 @@ mod retrieve_data;
 mod structures;
 #[cfg(feature = "gui")]
 mod telemetry;
+mod terrain_surface;
 #[cfg(test)]
 mod test_utilities;
 mod tile;

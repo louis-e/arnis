@@ -200,7 +200,7 @@ pub struct Args {
     pub disable_height_limit: bool,
 
     /// Use only the legacy AWS Terrain Tiles source (~30m) instead of
-    /// Mapterhorn and the regional high-resolution providers.
+    /// Mapterhorn.
     #[arg(long, default_value_t = false)]
     pub aws_only_elevation: bool,
 

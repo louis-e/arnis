@@ -545,6 +545,22 @@ impl Block {
             448 => "deepslate_redstone_ore",
             449 => "deepslate_lapis_ore",
             450 => "deepslate_diamond_ore",
+            451 => "cornflower",
+            452 => "oxeye_daisy",
+            453 => "allium",
+            454 => "lily_of_the_valley",
+            455 => "red_tulip",
+            456 => "orange_tulip",
+            457 => "white_tulip",
+            458 => "pink_tulip",
+            459..=460 => "sunflower",
+            461..=462 => "lilac",
+            463..=464 => "rose_bush",
+            465..=466 => "peony",
+            467 => "sweet_berry_bush",
+            468 => "pumpkin",
+            469 => "lily_pad",
+            470 => "cactus",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -882,6 +898,23 @@ impl Block {
             416 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Tall flowers: even ids are the lower half, odd ids the upper.
+            459 | 461 | 463 | 465 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            460 | 462 | 464 | 466 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Ripe, so the bush shows its berries.
+            467 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("age".to_string(), Value::String("3".to_string()));
                 map
             })),
 
@@ -1489,6 +1522,26 @@ pub const DEEPSLATE_GOLD_ORE: Block = Block::new(447);
 pub const DEEPSLATE_REDSTONE_ORE: Block = Block::new(448);
 pub const DEEPSLATE_LAPIS_ORE: Block = Block::new(449);
 pub const DEEPSLATE_DIAMOND_ORE: Block = Block::new(450);
+pub const CORNFLOWER: Block = Block::new(451);
+pub const OXEYE_DAISY: Block = Block::new(452);
+pub const ALLIUM: Block = Block::new(453);
+pub const LILY_OF_THE_VALLEY: Block = Block::new(454);
+pub const RED_TULIP: Block = Block::new(455);
+pub const ORANGE_TULIP: Block = Block::new(456);
+pub const WHITE_TULIP: Block = Block::new(457);
+pub const PINK_TULIP: Block = Block::new(458);
+pub const SUNFLOWER_LOWER: Block = Block::new(459);
+pub const SUNFLOWER_UPPER: Block = Block::new(460);
+pub const LILAC_LOWER: Block = Block::new(461);
+pub const LILAC_UPPER: Block = Block::new(462);
+pub const ROSE_BUSH_LOWER: Block = Block::new(463);
+pub const ROSE_BUSH_UPPER: Block = Block::new(464);
+pub const PEONY_LOWER: Block = Block::new(465);
+pub const PEONY_UPPER: Block = Block::new(466);
+pub const SWEET_BERRY_BUSH: Block = Block::new(467);
+pub const PUMPKIN: Block = Block::new(468);
+pub const LILY_PAD: Block = Block::new(469);
+pub const CACTUS: Block = Block::new(470);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

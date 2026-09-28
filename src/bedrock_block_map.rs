@@ -354,6 +354,30 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             )],
         ),
 
+        // The other small flowers share red_flower too, told apart by flower_type.
+        "cornflower" | "oxeye_daisy" | "allium" | "lily_of_the_valley" | "red_tulip"
+        | "orange_tulip" | "white_tulip" | "pink_tulip" => BedrockBlock::with_states(
+            "red_flower",
+            vec![(
+                "flower_type",
+                BedrockBlockStateValue::String(red_flower_type(java_name).to_string()),
+            )],
+        ),
+
+        "sunflower" | "lilac" | "rose_bush" | "peony" => convert_double_plant(java_name, None),
+        "sweet_berry_bush" => BedrockBlock::with_states(
+            "sweet_berry_bush",
+            vec![("growth", BedrockBlockStateValue::Int(3))],
+        ),
+        "pumpkin" => BedrockBlock::with_states(
+            "pumpkin",
+            vec![("direction", BedrockBlockStateValue::Int(0))],
+        ),
+        "lily_pad" => BedrockBlock::simple("waterlily"),
+        "cactus" => {
+            BedrockBlock::with_states("cactus", vec![("age", BedrockBlockStateValue::Int(0))])
+        }
+
         // Concrete colors (Bedrock uses a single block with color state)
         "white_concrete" => BedrockBlock::with_states(
             "concrete",
@@ -985,7 +1009,10 @@ pub fn to_bedrock_block_with_properties(
     if matches!(java_name, "wheat" | "carrots" | "potatoes") {
         return convert_crop(java_name, props_map);
     }
-    if matches!(java_name, "tall_grass" | "large_fern") {
+    if matches!(
+        java_name,
+        "tall_grass" | "large_fern" | "sunflower" | "lilac" | "rose_bush" | "peony"
+    ) {
         return convert_double_plant(java_name, props_map);
     }
     if java_name == "tall_seagrass" {
@@ -1724,10 +1751,13 @@ fn convert_double_plant(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let plant_type = if java_name == "large_fern" {
-        "fern"
-    } else {
-        "grass"
+    let plant_type = match java_name {
+        "large_fern" => "fern",
+        "sunflower" => "sunflower",
+        "lilac" => "syringa",
+        "rose_bush" => "rose",
+        "peony" => "paeonia",
+        _ => "grass",
     };
 
     BedrockBlock::with_states(
@@ -1743,6 +1773,21 @@ fn convert_double_plant(
             ),
         ],
     )
+}
+
+/// Legacy `flower_type` of the small flowers Bedrock folds into `red_flower`.
+fn red_flower_type(java_name: &str) -> &'static str {
+    match java_name {
+        "cornflower" => "cornflower",
+        "oxeye_daisy" => "oxeye",
+        "allium" => "allium",
+        "lily_of_the_valley" => "lily_of_the_valley",
+        "red_tulip" => "tulip_red",
+        "orange_tulip" => "tulip_orange",
+        "white_tulip" => "tulip_white",
+        "pink_tulip" => "tulip_pink",
+        _ => "poppy",
+    }
 }
 
 /// Convert Java `tall_seagrass` to Bedrock's `seagrass`, which encodes both
@@ -2253,12 +2298,18 @@ mod tests {
     #[test]
     fn test_double_plants_keep_their_half() {
         use crate::block_definitions::{
-            LARGE_FERN_LOWER, LARGE_FERN_UPPER, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+            LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, PEONY_LOWER, PEONY_UPPER,
+            ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SUNFLOWER_LOWER, SUNFLOWER_UPPER, TALL_GRASS_BOTTOM,
+            TALL_GRASS_TOP,
         };
 
         for (lower, upper, plant) in [
             (TALL_GRASS_BOTTOM, TALL_GRASS_TOP, "grass"),
             (LARGE_FERN_LOWER, LARGE_FERN_UPPER, "fern"),
+            (SUNFLOWER_LOWER, SUNFLOWER_UPPER, "sunflower"),
+            (LILAC_LOWER, LILAC_UPPER, "syringa"),
+            (ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, "rose"),
+            (PEONY_LOWER, PEONY_UPPER, "paeonia"),
         ] {
             for (block, is_upper) in [(lower, false), (upper, true)] {
                 let bedrock = to_bedrock_block_with_properties(block, None);
@@ -2275,6 +2326,24 @@ mod tests {
                     "wrong half for {plant} (upper={is_upper})"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_small_flowers_fold_into_red_flower() {
+        use crate::block_definitions::{CORNFLOWER, OXEYE_DAISY, PINK_TULIP};
+
+        for (block, flower_type) in [
+            (CORNFLOWER, "cornflower"),
+            (OXEYE_DAISY, "oxeye"),
+            (PINK_TULIP, "tulip_pink"),
+        ] {
+            let bedrock = to_bedrock_block_with_properties(block, None);
+            assert_eq!(bedrock.name, "minecraft:red_flower");
+            assert!(matches!(
+                bedrock.states.get("flower_type"),
+                Some(BedrockBlockStateValue::String(t)) if t == flower_type
+            ));
         }
     }
 

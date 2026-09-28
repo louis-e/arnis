@@ -1,7 +1,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
-use crate::elevation::providers::fixed_tile::MAX_TILES_PER_FETCH;
+use crate::elevation::providers::tile_math::MAX_TILES_PER_FETCH;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use rayon::prelude::*;
@@ -36,10 +36,6 @@ pub struct AwsTerrain;
 impl ElevationProvider for AwsTerrain {
     fn name(&self) -> &'static str {
         "aws"
-    }
-
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        None // Global coverage
     }
 
     fn native_resolution_m(&self) -> f64 {
@@ -343,10 +339,13 @@ fn fetch_or_load_tile(
     tile_path: &Path,
 ) -> Result<TileImage, String> {
     if tile_path.exists() {
+        // A uniform tile (open water, flat ground) is a valid PNG of well under a
+        // kilobyte, so only an empty file counts as broken; the decode below
+        // catches the rest.
         let file_size = std::fs::metadata(tile_path).map(|m| m.len()).unwrap_or(0);
-        if file_size < 1000 {
+        if file_size == 0 {
             eprintln!(
-                "Warning: Cached tile at {} is too small ({file_size} bytes). Re-downloading...",
+                "Warning: Cached tile at {} is empty. Re-downloading...",
                 tile_path.display(),
             );
             let _ = std::fs::remove_file(tile_path);

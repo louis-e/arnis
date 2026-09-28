@@ -110,7 +110,13 @@ fn is_passable_cover(name: &str) -> bool {
             | "poppy"
             | "blue_orchid"
             | "azure_bluet"
+            | "cornflower"
+            | "oxeye_daisy"
+            | "allium"
+            | "lily_of_the_valley"
+            | "sweet_berry_bush"
     ) || name.ends_with("_carpet")
+        || name.ends_with("_tulip")
 }
 
 /// Quotes `s` as a JSON string literal for a sign text component.

@@ -336,13 +336,12 @@ pub fn generate_natural(
                                     Some(bridge_surface),
                                 );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Meadow,
+                                );
                             } else if random_choice < 40 {
                                 editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                                 if random_choice < 15 {
@@ -378,13 +377,12 @@ pub fn generate_natural(
                                     false,
                                 );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Forest,
+                                );
                             } else if random_choice <= 12 {
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
@@ -657,13 +655,12 @@ pub fn generate_natural(
                                 );
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Meadow,
+                                );
                             } else if hill_chance < 600 {
                                 // 55% chance for grass
                                 editor.set_block(GRASS, x, 1, z, None, None);

@@ -15,22 +15,8 @@ pub trait ElevationProvider: Send + Sync {
     /// Human-readable name for logging and cache directory naming.
     fn name(&self) -> &'static str;
 
-    /// Coverage bounding boxes in EPSG:4326.
-    /// Returns `None` for global fallback providers (e.g., AWS Terrain Tiles).
-    /// Returns multiple bboxes for providers covering non-contiguous regions
-    /// (e.g., France + overseas territories).
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>>;
-
     /// Approximate native resolution in meters per pixel.
-    /// Used to rank providers (lower = better resolution).
     fn native_resolution_m(&self) -> f64;
-
-    /// Whether this provider is willing to serve the given bbox.
-    /// Lets rate-limited providers decline oversized areas so the
-    /// selector falls through to the next candidate.
-    fn accepts(&self, _bbox: &LLBBox) -> bool {
-        true
-    }
 
     /// Fetch raw elevation data for the given EPSG:4326 bbox,
     /// sampled onto a grid of the given dimensions.
