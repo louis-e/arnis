@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Über die Karte ziehen, um zu wählen, was generiert wird.",
   "map_tool_rotation": "Rotationswinkel",
   "map_tool_rotation_desc": "Eine Linie entlang einer Straße ziehen, um die Welt daran auszurichten.",
+  "map_tool_rotation_one_world": "Im Eine-Welt-Modus aus.",
   "map_tool_spawn": "Spawnpunkt",
   "map_tool_spawn_desc": "Klicke dorthin, wo Spieler in der Welt starten.",
   "map_tool_clear": "Auswahl löschen",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Bodenbedeckung",
   "preview3d_buildings": "Gebäude",
   "preview3d_controls_hint": "Ziehen zum Verschieben · mit Rechtsklick ziehen zum Drehen und Neigen",
-  "preview3d_buildings_too_large": "Bereich zu groß für die Gebäudeebene (max. 10 km²)"
+  "preview3d_buildings_too_large": "Bereich zu groß für die Gebäudeebene (max. 10 km²)",
+  "one_world": "Eine Welt",
+  "one_world_desc": "Jedes Gebiet kommt an seiner echten Position in eine wachsende Welt. Nur Java.",
+  "one_world_will_create": "Eine Welt „{name}“ wird erstellt",
+  "one_world_areas": "Eine Welt „{name}“ · Gebiete: {count}",
+  "one_world_locked": "in Minecraft geöffnet",
+  "one_world_foreign": "Ordner „{name}“ existiert, ist aber keine Eine-Welt",
+  "one_world_needs_terrain": "diese Welt nutzt Gelände",
+  "one_world_needs_flat": "diese Welt ist flach (nur Objekte)",
+  "one_world_no_save_path": "Lege zuerst in den Einstellungen den Minecraft-Speicherordner fest",
+  "one_world_confirm_title": "Vorhandene Chunks ersetzen?",
+  "one_world_confirm_text": "{count} Chunks dieses Gebiets gibt es in der Welt schon. Sie werden neu generiert, und alles, was dort in Minecraft gebaut wurde, wird ersetzt.",
+  "one_world_confirm_cancel": "Abbrechen",
+  "one_world_confirm_ok": "Generieren"
 }

@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Povlecite čez zemljevid, da izberete, kaj se generira.",
   "map_tool_rotation": "Kot zasuka",
   "map_tool_rotation_desc": "Narišite črto vzdolž ulice, da svet poravnate z njo.",
+  "map_tool_rotation_one_world": "Izklopljeno v načinu En svet.",
   "map_tool_spawn": "Točka prihoda",
   "map_tool_spawn_desc": "Kliknite, kje igralci začnejo v svetu.",
   "map_tool_clear": "Počisti izbor",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Pokrovnost tal",
   "preview3d_buildings": "Stavbe",
   "preview3d_controls_hint": "Povlecite za premik · povlecite z desnim gumbom za vrtenje in nagib",
-  "preview3d_buildings_too_large": "Območje je preveliko za plast stavb (največ 10 km²)"
+  "preview3d_buildings_too_large": "Območje je preveliko za plast stavb (največ 10 km²)",
+  "one_world": "En svet",
+  "one_world_desc": "Vsako območje se pridruži enemu rastočemu svetu na svojem pravem mestu. Samo Java.",
+  "one_world_will_create": "Ustvarjen bo en svet „{name}“",
+  "one_world_areas": "En svet „{name}“ · Območja: {count}",
+  "one_world_locked": "odprt v Minecraftu",
+  "one_world_foreign": "Mapa „{name}“ obstaja, a ni en svet",
+  "one_world_needs_terrain": "ta svet uporablja relief",
+  "one_world_needs_flat": "ta svet je raven (samo objekti)",
+  "one_world_no_save_path": "Najprej v nastavitvah določite mapo s shranjenimi svetovi Minecrafta",
+  "one_world_confirm_title": "Zamenjam obstoječe chunke?",
+  "one_world_confirm_text": "{count} chunkov tega območja v svetu že obstaja. Ustvarjeni bodo znova, vse, kar je bilo tam zgrajeno v Minecraftu, pa bo zamenjano.",
+  "one_world_confirm_cancel": "Prekliči",
+  "one_world_confirm_ok": "Ustvari"
 }

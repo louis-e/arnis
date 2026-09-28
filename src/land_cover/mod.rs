@@ -96,6 +96,24 @@ pub struct LandCoverData {
 }
 
 impl LandCoverData {
+    /// Nearest row per cell: classes do not blend.
+    pub fn remap_rows_to_mercator(&mut self, lat_top: f64, lat_bottom: f64) {
+        let rows = self.height;
+        let src = |gz: usize| crate::grid_ops::mercator_source_row(lat_top, lat_bottom, rows, gz);
+        let nearest = |a: u8, b: u8, t: f64| if t < 0.5 { a } else { b };
+        crate::grid_ops::remap_rows_in_place(&mut self.grid, src, nearest);
+        crate::grid_ops::remap_rows_in_place(&mut self.water_distance, src, nearest);
+        self.invalidate_water_blend_grid();
+    }
+
+    pub fn crop(&mut self, x0: usize, z0: usize, width: usize, height: usize) {
+        crate::grid_ops::crop_rows(&mut self.grid, x0, z0, width, height);
+        crate::grid_ops::crop_rows(&mut self.water_distance, x0, z0, width, height);
+        self.width = width;
+        self.height = height;
+        self.invalidate_water_blend_grid();
+    }
+
     /// Smoothed water mask, computed on first use after the last grid mutation.
     pub(crate) fn water_blend_grid(&self) -> &[Vec<f32>] {
         self.water_blend_cache.get_or_init(|| {

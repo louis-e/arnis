@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Arraste sobre o mapa para escolher o que será gerado.",
   "map_tool_rotation": "Ângulo de rotação",
   "map_tool_rotation_desc": "Trace uma linha ao longo de uma rua para alinhar o mundo a ela.",
+  "map_tool_rotation_one_world": "Desativado no modo Mundo único.",
   "map_tool_spawn": "Ponto de spawn",
   "map_tool_spawn_desc": "Clique onde os jogadores começam no mundo.",
   "map_tool_clear": "Limpar seleção",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Cobertura do solo",
   "preview3d_buildings": "Edifícios",
   "preview3d_controls_hint": "Arraste para mover · arraste com o botão direito para girar e inclinar",
-  "preview3d_buildings_too_large": "Área grande demais para a camada de edifícios (máx. 10 km²)"
+  "preview3d_buildings_too_large": "Área grande demais para a camada de edifícios (máx. 10 km²)",
+  "one_world": "Mundo único",
+  "one_world_desc": "Cada área entra em um mundo que cresce, na sua posição real. Só Java.",
+  "one_world_will_create": "O mundo único “{name}” será criado",
+  "one_world_areas": "Mundo único “{name}” · Áreas: {count}",
+  "one_world_locked": "aberto no Minecraft",
+  "one_world_foreign": "A pasta “{name}” existe, mas não é um mundo único",
+  "one_world_needs_terrain": "este mundo usa terreno",
+  "one_world_needs_flat": "este mundo é plano (apenas objetos)",
+  "one_world_no_save_path": "Primeiro defina a pasta de mundos do Minecraft nas configurações",
+  "one_world_confirm_title": "Substituir chunks existentes?",
+  "one_world_confirm_text": "{count} chunks desta área já existem no mundo. Eles são gerados novamente e tudo o que foi construído ali no Minecraft é substituído.",
+  "one_world_confirm_cancel": "Cancelar",
+  "one_world_confirm_ok": "Gerar"
 }

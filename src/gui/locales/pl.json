@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Przeciągnij po mapie, aby wybrać, co zostanie wygenerowane.",
   "map_tool_rotation": "Kąt obrotu",
   "map_tool_rotation_desc": "Narysuj linię wzdłuż ulicy, aby wyrównać do niej świat.",
+  "map_tool_rotation_one_world": "Wyłączone w trybie Jeden świat.",
   "map_tool_spawn": "Punkt odrodzenia",
   "map_tool_spawn_desc": "Kliknij miejsce, w którym gracze zaczynają w świecie.",
   "map_tool_clear": "Wyczyść zaznaczenie",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Pokrycie terenu",
   "preview3d_buildings": "Budynki",
   "preview3d_controls_hint": "Przeciągnij, aby przesunąć · prawym przyciskiem, aby obrócić i pochylić",
-  "preview3d_buildings_too_large": "Obszar za duży dla warstwy budynków (maks. 10 km²)"
+  "preview3d_buildings_too_large": "Obszar za duży dla warstwy budynków (maks. 10 km²)",
+  "one_world": "Jeden świat",
+  "one_world_desc": "Każdy obszar trafia do jednego rosnącego świata, w swoje prawdziwe miejsce. Tylko Java.",
+  "one_world_will_create": "Jeden świat „{name}” zostanie utworzony",
+  "one_world_areas": "Jeden świat „{name}” · obszary: {count}",
+  "one_world_locked": "otwarty w Minecrafcie",
+  "one_world_foreign": "Folder „{name}” istnieje, ale nie jest jednym światem",
+  "one_world_needs_terrain": "ten świat używa terenu",
+  "one_world_needs_flat": "ten świat jest płaski (tylko obiekty)",
+  "one_world_no_save_path": "Najpierw ustaw folder zapisów Minecrafta w ustawieniach",
+  "one_world_confirm_title": "Zastąpić istniejące chunki?",
+  "one_world_confirm_text": "{count} chunków tego obszaru już istnieje w świecie. Zostaną wygenerowane ponownie, a wszystko, co tam zbudowano w Minecrafcie, zostanie zastąpione.",
+  "one_world_confirm_cancel": "Anuluj",
+  "one_world_confirm_ok": "Generuj"
 }

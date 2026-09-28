@@ -60,6 +60,10 @@ impl Climate {
         Climate::from_class(koppen_class(lat, lon))
     }
 
+    pub fn classify_at(lat: f64, lon: f64) -> Climate {
+        Climate::from_class(koppen_class(lat, lon))
+    }
+
     /// Surface palette (surface, under) for veg/bare cover, or None to keep the baseline.
     pub fn surface_palette(self, cover: u8, x: i32, z: i32) -> Option<(Block, Block)> {
         // DryContinental (Grand Canyon) keeps baseline blocks; only its biome is adapted.
