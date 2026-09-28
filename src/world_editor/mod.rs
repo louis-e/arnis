@@ -479,6 +479,14 @@ impl<'a> WorldEditor<'a> {
             .is_some_and(|m| m.contains(x, z))
     }
 
+    /// ESA land-cover class at (x, z), or 0 where there is no land cover.
+    #[inline]
+    pub fn cover_class(&self, x: i32, z: i32) -> u8 {
+        self.ground
+            .as_ref()
+            .map_or(0, |g| g.cover_class(self.ground_point(x, z)))
+    }
+
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
     pub fn is_lc_water(&self, x: i32, z: i32) -> bool {
         self.ground.as_ref().is_some_and(|g| {
