@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::climate::Climate;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree::{Tree, TreeType};
@@ -103,19 +104,12 @@ pub fn generate_natural(
             let mut previous_node: Option<(i32, i32)> = None;
             let mut corner_count: i32 = 0;
             let mut current_natural: Vec<(i32, i32)> = vec![];
-            let binding: String = "".to_string();
 
             // Determine block type based on natural tag
             let block_type: Block = match natural_type.as_str() {
                 "scrub" | "grassland" | "wood" | "heath" | "tree_row" => GRASS_BLOCK,
                 "sand" | "dune" => SAND,
-                "beach" | "shoal" => {
-                    let surface = element.tags().get("natural").unwrap_or(&binding);
-                    match surface.as_str() {
-                        "gravel" => GRAVEL,
-                        _ => SAND,
-                    }
-                }
+                "beach" | "shoal" => beach_block(element.tags().get("surface")),
                 "water" | "reef" | "bay" => WATER,
                 "bare_rock" => STONE,
                 "blockfield" => COBBLESTONE,
@@ -252,6 +246,14 @@ pub fn generate_natural(
                 ];
 
                 let mut wetland_puddles: Vec<(i32, i32)> = Vec::new();
+                let arid = natural_type == "sand"
+                    && matches!(
+                        editor.climate(),
+                        Climate::HotDesert
+                            | Climate::HotSteppe
+                            | Climate::ColdDesert
+                            | Climate::ColdSteppe
+                    );
 
                 for &(x, z) in filled_area.iter() {
                     // Roads, paths and paved areas keep their own surface. Checked
@@ -271,7 +273,7 @@ pub fn generate_natural(
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
                         "beach" | "sand" | "dune" | "shoal" => {
-                            editor.set_block(SAND, x, 0, z, None, None);
+                            editor.set_block(block_type, x, 0, z, None, None);
                         }
                         "glacier" => {
                             editor.set_block(PACKED_ICE, x, 0, z, None, None);
@@ -387,8 +389,10 @@ pub fn generate_natural(
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }
+                        // Dead bushes belong to deserts; coastal dunes elsewhere stay bare.
                         "sand"
-                            if editor.check_for_block(x, 0, z, Some(&[SAND]))
+                            if arid
+                                && editor.check_for_block(x, 0, z, Some(&[SAND]))
                                 && rng.random_range(0..100) == 1 =>
                         {
                             editor.set_block(DEAD_BUSH, x, 1, z, None, None);
@@ -804,6 +808,16 @@ pub fn generate_natural_from_relation(
     }
 }
 
+/// Ground of a `natural=beach` or `shoal`, from its `surface=*`: sand unless mapped otherwise.
+fn beach_block(surface: Option<&String>) -> Block {
+    match surface.map(String::as_str) {
+        Some("gravel" | "fine_gravel" | "pebblestone" | "pebbles" | "shingle" | "stones") => GRAVEL,
+        Some("rock" | "stone" | "bare_rock") => STONE,
+        Some("mud") => MUD,
+        _ => SAND,
+    }
+}
+
 /// Vary a rock block type per-coordinate for natural rock areas.
 /// Uses coord_hash for deterministic, spatially-coherent variation.
 fn vary_rock_block(base: Block, x: i32, z: i32) -> Block {
@@ -896,5 +910,76 @@ mod tests {
         assert!(!try_place_wetland_puddle(&mut editor, 4, 4));
         assert!(try_place_wetland_puddle(&mut editor, 5, 5));
         assert!(editor.check_for_block(5, 0, 5, Some(&[WATER])));
+    }
+
+    #[test]
+    fn a_beach_takes_its_ground_from_the_surface_tag() {
+        let surface = |s: &str| Some(s.to_string());
+        assert_eq!(beach_block(None), SAND);
+        assert_eq!(beach_block(surface("sand").as_ref()), SAND);
+        for pebbles in ["gravel", "pebblestone", "shingle", "fine_gravel"] {
+            assert_eq!(beach_block(surface(pebbles).as_ref()), GRAVEL, "{pebbles}");
+        }
+        assert_eq!(beach_block(surface("rock").as_ref()), STONE);
+    }
+
+    /// Renders one natural area over x/z 5..=54 at the given place and returns the editor.
+    fn render_natural(llbbox: LLBBox, tags: &[(&str, &str)]) -> WorldEditor<'static> {
+        use crate::element_processing::bridge_styles::BridgeOutlineIndex;
+        use crate::element_processing::bridges::BridgeStructureMap;
+        use crate::element_processing::building_test_support::rect_way;
+        use clap::Parser as _;
+
+        let xzbbox = Box::leak(Box::new(XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap()));
+        let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        let way = rect_way(9, 5, 5, 54, 54, tags);
+        generate_natural(
+            &mut editor,
+            &ProcessedElement::Way(way),
+            &args,
+            &FloodFillCache::new(),
+            &BuildingFootprintBitmap::new_empty(),
+            &surface,
+        );
+        editor
+    }
+
+    fn count(editor: &WorldEditor, y: i32, blocks: &[Block]) -> usize {
+        (10..50)
+            .flat_map(|x| (10..50).map(move |z| (x, z)))
+            .filter(|&(x, z)| editor.check_for_block(x, y, z, Some(blocks)))
+            .count()
+    }
+
+    #[test]
+    fn a_gravel_beach_is_gravel_and_a_plain_beach_is_sand() {
+        let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let gravel = render_natural(place, &[("natural", "beach"), ("surface", "gravel")]);
+        assert_eq!(count(&gravel, 0, &[GRAVEL]), 1600);
+        let sand = render_natural(place, &[("natural", "beach")]);
+        assert_eq!(count(&sand, 0, &[SAND]), 1600);
+    }
+
+    #[test]
+    fn dead_bushes_grow_on_desert_sand_but_not_on_coastal_sand() {
+        let baltic = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let coast = render_natural(baltic, &[("natural", "sand")]);
+        assert_eq!(count(&coast, 1, &[DEAD_BUSH]), 0);
+
+        let sahara = LLBBox::new(25.0, 25.0, 25.01, 25.01).unwrap();
+        let desert = render_natural(sahara, &[("natural", "sand")]);
+        assert!(count(&desert, 1, &[DEAD_BUSH]) > 0);
     }
 }

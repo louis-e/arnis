@@ -416,7 +416,20 @@ pub fn generate_ground_region(
                     // at that slope would wipe e.g. a `landuse=quarry` STONE surface
                     // with GRASS_BLOCK for no good reason — it's only a 27° hiking
                     // slope, not a cliff.
-                    let steep_override = terrain_enabled && slope > 4;
+                    //
+                    // Mapped sand holds up to its angle of repose (~34°, below the
+                    // `slope > 6` tier), so a dune's slip face stays sand, not a stripe of
+                    // scree down the dune field.
+                    let steep_override = terrain_enabled
+                        && slope > 4
+                        && (slope > 6
+                            || !editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z,
+                                Some(&[SAND]),
+                                None,
+                            ));
                     let mut did_underfill = false;
 
                     // Determine surface and under-block material for this column.
@@ -663,6 +676,7 @@ pub fn generate_ground_region(
                                                         ));
                                                         cc == land_cover::LC_BARE
                                                             || cc == land_cover::LC_SNOW_ICE
+                                                            || cc == land_cover::LC_BEACH
                                                     })
                                                     .count();
                                             if neighbors_bare == 0 {
@@ -698,6 +712,21 @@ pub fn generate_ground_region(
                                                         _ => (ANDESITE, STONE), // 17% more andesite
                                                     }
                                                 }
+                                            }
+                                        }
+                                        // Sand, or shingle where it is cold. No slope
+                                        // check needed: steep shores took the rock
+                                        // tiers above.
+                                        land_cover::LC_BEACH => {
+                                            if matches!(
+                                                climate,
+                                                crate::climate::Climate::Tundra
+                                                    | crate::climate::Climate::IceCap
+                                            ) && value_noise_01(x + 41, z + 5, 6) < 0.7
+                                            {
+                                                (GRAVEL, STONE)
+                                            } else {
+                                                (SAND, SANDSTONE)
                                             }
                                         }
                                         // LC_WATER handled above with variable depth

@@ -647,6 +647,13 @@ impl Ground {
         );
     }
 
+    /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
+    pub fn mark_beaches(&mut self) {
+        if let Some(lc) = self.land_cover.as_mut() {
+            land_cover::mark_beaches(lc);
+        }
+    }
+
     /// Reclassify cells under bridges to the surrounding class, sinking new water.
     pub fn apply_bridge_land_cover_repair(
         &mut self,
@@ -1089,6 +1096,7 @@ impl Ground {
                     land_cover::LC_WETLAND => Rgb([0x00, 0x96, 0xa0]),
                     land_cover::LC_MANGROVES => Rgb([0x00, 0xcf, 0x75]),
                     land_cover::LC_MOSS => Rgb([0xfa, 0xe6, 0xa0]),
+                    land_cover::LC_BEACH => Rgb([0xe8, 0xd8, 0x9c]),
                     _ => Rgb([0x00, 0x00, 0x00]),
                 };
                 img.put_pixel(x as u32, y as u32, color);
