@@ -951,11 +951,16 @@
     gcDatasets();
   }
 
+  // Where focus goes back to once the viewer closes, as with the other dialogs
+  // (showModal/hideModal in main.js).
+  let focusBeforeModal = null;
+
   // Clicking the mini preview reuses the cached payload for an instant
   // modal open (same data, bigger canvas).
   window.expandPreview3D = function () {
     if (!payloadCache.data) return;
     const modal = document.getElementById("preview3d-modal");
+    if (!isModalOpen()) focusBeforeModal = document.activeElement;
     modal.style.display = "flex";
     // Keyboard focus into the dialog, off the map behind it.
     const dialog = modal.querySelector(".dialog");
@@ -967,9 +972,18 @@
 
   window.closePreview3D = function () {
     const modal = document.getElementById("preview3d-modal");
-    // Focus must not stay on a control that is about to be hidden.
-    if (modal.contains(document.activeElement)) document.activeElement.blur();
+    const focusInside = modal.contains(document.activeElement);
     modal.style.display = "none";
+    // Back to what had focus before it opened. If that is gone (or was the
+    // page itself), at least do not leave focus on a control now hidden.
+    const back = focusBeforeModal;
+    focusBeforeModal = null;
+    if (back && back !== document.body && document.contains(back) &&
+        typeof back.focus === "function") {
+      back.focus({ preventScroll: true });
+    } else if (focusInside) {
+      document.activeElement.blur();
+    }
     disposeView(modalView);
     modalView = null;
     gcDatasets();
