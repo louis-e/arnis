@@ -194,5 +194,10 @@
   "map_search_placeholder": "Search for a city...",
   "map_search_searching": "Searching...",
   "map_search_none": "No cities found",
-  "map_search_failed": "Search failed. Please try again."
+  "map_search_failed": "Search failed. Please try again.",
+  "preview3d_exaggeration": "Exaggeration",
+  "preview3d_land_cover": "Land cover",
+  "preview3d_buildings": "Buildings",
+  "preview3d_controls_hint": "Drag to pan · right-drag to rotate and tilt",
+  "preview3d_buildings_too_large": "Area too large for the buildings overlay (max 10 km²)"
 }

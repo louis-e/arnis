@@ -563,6 +563,63 @@ button:hover {
   background-color: var(--primary-accent-dark);
 }
 
+/* Switch: a real checkbox, so `checked`, change events and the settings
+   store work exactly as they would on a plain one. Used on the settings page
+   and in the dialogs. */
+input.switch {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: #5e5e5e;
+  cursor: pointer;
+  transition: background-color 0.18s ease;
+}
+
+input.switch::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #d6d6d6;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+input.switch:checked {
+  background: var(--ui-accent);
+}
+
+input.switch:checked::before {
+  transform: translateX(18px);
+  background: #ffffff;
+}
+
+input.switch:disabled {
+  cursor: default;
+}
+
+input.switch:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input.switch,
+  input.switch::before {
+    transition: none;
+  }
+}
+
 /* Backdrop behind every dialog; the dialogs themselves are in dialogs.css. */
 .modal {
   position: fixed;

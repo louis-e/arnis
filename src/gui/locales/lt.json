@@ -194,5 +194,10 @@
   "map_search_placeholder": "Ieškoti miesto...",
   "map_search_searching": "Ieškoma...",
   "map_search_none": "Miestų nerasta",
-  "map_search_failed": "Paieška nepavyko. Bandykite dar kartą."
+  "map_search_failed": "Paieška nepavyko. Bandykite dar kartą.",
+  "preview3d_exaggeration": "Perdėjimas",
+  "preview3d_land_cover": "Žemės danga",
+  "preview3d_buildings": "Pastatai",
+  "preview3d_controls_hint": "Vilkite, kad perkeltumėte · vilkite dešiniuoju, kad pasuktumėte ir pakreiptumėte",
+  "preview3d_buildings_too_large": "Sritis per didelė pastatų sluoksniui (daugiausia 10 km²)"
 }

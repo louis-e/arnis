@@ -194,5 +194,10 @@
   "map_search_placeholder": "Buscar una ciudad...",
   "map_search_searching": "Buscando...",
   "map_search_none": "No se encontraron ciudades",
-  "map_search_failed": "La búsqueda falló. Inténtalo de nuevo."
+  "map_search_failed": "La búsqueda falló. Inténtalo de nuevo.",
+  "preview3d_exaggeration": "Exageración",
+  "preview3d_land_cover": "Cobertura del suelo",
+  "preview3d_buildings": "Edificios",
+  "preview3d_controls_hint": "Arrastra para mover · arrastra con el botón derecho para girar e inclinar",
+  "preview3d_buildings_too_large": "Área demasiado grande para la capa de edificios (máx. 10 km²)"
 }

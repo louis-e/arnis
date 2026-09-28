@@ -1035,35 +1035,43 @@
       </div>
     </div>
 
-    <!-- 3D Terrain Preview Modal -->
+    <!-- 3D Terrain Preview Modal, in the dialog shell (css/dialogs.css) with
+         the view filling the body. preview3d.js drives it by these ids. -->
     <div id="preview3d-modal" class="modal" style="display: none;">
-      <div class="preview3d-content">
-        <div class="preview3d-header">
-          <h2>3D Terrain Preview</h2>
+      <div class="dialog dialog--viewer" role="dialog" aria-modal="true" aria-labelledby="preview3d-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="preview3d-title" data-localize="map_tool_terrain">3D terrain preview</h2>
+            <div id="preview3d-meta" class="dialog-meta"></div>
+          </div>
           <div class="preview3d-controls">
             <label class="preview3d-ctl">
-              Exaggeration
+              <span data-localize="preview3d_exaggeration">Exaggeration</span>
               <input type="range" id="preview3d-exaggeration" min="0.2" max="3" step="0.1" value="1.2">
-              <span id="preview3d-exaggeration-value">1.2×</span>
+              <span id="preview3d-exaggeration-value" class="preview3d-value">1.2×</span>
             </label>
             <label class="preview3d-ctl">
-              <input type="checkbox" id="preview3d-landcover" checked>
-              Land cover
+              <input type="checkbox" class="switch" id="preview3d-landcover" checked>
+              <span data-localize="preview3d_land_cover">Land cover</span>
             </label>
             <label class="preview3d-ctl">
-              <input type="checkbox" id="preview3d-buildings" checked>
-              Buildings
+              <input type="checkbox" class="switch" id="preview3d-buildings" checked>
+              <span data-localize="preview3d_buildings">Buildings</span>
             </label>
           </div>
-          <span class="close-button" onclick="closePreview3D()">&times;</span>
+          <button type="button" class="dialog-close" onclick="closePreview3D()" aria-label="Close" title="Close (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="preview3d-body">
+          <div id="preview3d-map">
+            <div id="preview3d-status" class="preview3d-status" style="display: none;"></div>
+          </div>
         </div>
-        <div id="preview3d-map">
-          <div id="preview3d-status" class="preview3d-status" style="display: none;"></div>
-        </div>
-        <div class="preview3d-footer">
-          <span id="preview3d-meta"></span>
-          <span>Drag to pan · right-drag to rotate/tilt · Land cover © ESA WorldCover 2021</span>
-        </div>
+        <footer class="dialog-footer preview3d-footer">
+          <span class="dialog-footer-note" data-localize="preview3d_controls_hint">Drag to pan · right-drag to rotate and tilt</span>
+          <span class="preview3d-attribution">Land cover © ESA WorldCover 2021</span>
+        </footer>
       </div>
     </div>
 

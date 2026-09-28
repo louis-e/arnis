@@ -564,50 +564,6 @@ label[for].setting-label {
   fill: var(--primary-accent);
 }
 
-/* Switch: a real checkbox, so `checked`, change events and the settings
-   store work exactly as before. */
-.settings-page input.switch {
-  -webkit-appearance: none;
-  appearance: none;
-  position: relative;
-  flex-shrink: 0;
-  width: 42px;
-  height: 24px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 12px;
-  background: #5e5e5e;
-  cursor: pointer;
-  transition: background-color 0.18s ease;
-}
-
-.settings-page input.switch::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #d6d6d6;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  transition: transform 0.18s ease, background-color 0.18s ease;
-}
-
-.settings-page input.switch:checked {
-  background: var(--ui-accent);
-}
-
-.settings-page input.switch:checked::before {
-  transform: translateX(18px);
-  background: #ffffff;
-}
-
-.settings-page input.switch:disabled {
-  cursor: default;
-}
-
 /* Segmented control: a compact pill group for short, fixed choices */
 .settings-page .segmented-control {
   display: inline-flex;
@@ -1000,8 +956,7 @@ label[for].setting-label {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-page *,
-  .settings-page input.switch::before {
+  .settings-page * {
     transition: none !important;
   }
 }

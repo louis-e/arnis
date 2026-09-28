@@ -194,5 +194,10 @@
   "map_search_placeholder": "Sök efter en stad...",
   "map_search_searching": "Söker...",
   "map_search_none": "Inga städer hittades",
-  "map_search_failed": "Sökningen misslyckades. Försök igen."
+  "map_search_failed": "Sökningen misslyckades. Försök igen.",
+  "preview3d_exaggeration": "Överhöjning",
+  "preview3d_land_cover": "Marktäcke",
+  "preview3d_buildings": "Byggnader",
+  "preview3d_controls_hint": "Dra för att panorera · högerdra för att rotera och luta",
+  "preview3d_buildings_too_large": "Området är för stort för byggnadslagret (max 10 km²)"
 }

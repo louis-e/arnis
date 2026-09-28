@@ -194,5 +194,10 @@
   "map_search_placeholder": "Hae kaupunkia...",
   "map_search_searching": "Haetaan...",
   "map_search_none": "Kaupunkeja ei löytynyt",
-  "map_search_failed": "Haku epäonnistui. Yritä uudelleen."
+  "map_search_failed": "Haku epäonnistui. Yritä uudelleen.",
+  "preview3d_exaggeration": "Korostus",
+  "preview3d_land_cover": "Maanpeite",
+  "preview3d_buildings": "Rakennukset",
+  "preview3d_controls_hint": "Vedä siirtääksesi · vedä hiiren oikealla kääntääksesi ja kallistaaksesi",
+  "preview3d_buildings_too_large": "Alue on liian suuri rakennuskerrokselle (enintään 10 km²)"
 }

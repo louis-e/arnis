@@ -194,5 +194,10 @@
   "map_search_placeholder": "Poišči mesto...",
   "map_search_searching": "Iskanje...",
   "map_search_none": "Ni najdenih mest",
-  "map_search_failed": "Iskanje ni uspelo. Poskusite znova."
+  "map_search_failed": "Iskanje ni uspelo. Poskusite znova.",
+  "preview3d_exaggeration": "Pretiravanje",
+  "preview3d_land_cover": "Pokrovnost tal",
+  "preview3d_buildings": "Stavbe",
+  "preview3d_controls_hint": "Povlecite za premik · povlecite z desnim gumbom za vrtenje in nagib",
+  "preview3d_buildings_too_large": "Območje je preveliko za plast stavb (največ 10 km²)"
 }

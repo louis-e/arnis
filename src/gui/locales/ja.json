@@ -194,5 +194,10 @@
   "map_search_placeholder": "都市を検索...",
   "map_search_searching": "検索中...",
   "map_search_none": "都市が見つかりません",
-  "map_search_failed": "検索に失敗しました。もう一度お試しください。"
+  "map_search_failed": "検索に失敗しました。もう一度お試しください。",
+  "preview3d_exaggeration": "誇張",
+  "preview3d_land_cover": "土地被覆",
+  "preview3d_buildings": "建物",
+  "preview3d_controls_hint": "ドラッグで移動 · 右ドラッグで回転と傾き",
+  "preview3d_buildings_too_large": "建物レイヤーには範囲が大きすぎます（最大 10 km²）"
 }

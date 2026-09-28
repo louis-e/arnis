@@ -194,5 +194,10 @@
   "map_search_placeholder": "Найти город...",
   "map_search_searching": "Поиск...",
   "map_search_none": "Города не найдены",
-  "map_search_failed": "Поиск не удался. Попробуйте ещё раз."
+  "map_search_failed": "Поиск не удался. Попробуйте ещё раз.",
+  "preview3d_exaggeration": "Преувеличение",
+  "preview3d_land_cover": "Покров земли",
+  "preview3d_buildings": "Здания",
+  "preview3d_controls_hint": "Перетаскивание — сдвиг · правой кнопкой — поворот и наклон",
+  "preview3d_buildings_too_large": "Область слишком велика для слоя зданий (макс. 10 км²)"
 }

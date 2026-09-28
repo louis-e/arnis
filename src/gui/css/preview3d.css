@@ -91,61 +91,80 @@
   to { background-position: 22.627px 0; }
 }
 
-.preview3d-content {
-  display: flex;
-  flex-direction: column;
+/* Expanded view: the dialog shell of dialogs.css, sized for a viewer, with the
+   controls in the title bar so the terrain gets the whole body. The viewport
+   is a dark well; preview3d.js paints the terrain's base plate in the same
+   colour (MODAL_BG) so it fades into it. */
+.dialog.dialog--viewer {
   width: 92vw;
   height: 88vh;
-  background-color: #717171;
-  border: 1px solid #797979;
-  border-radius: 10px;
-  padding: 14px 16px 12px 16px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  max-height: none;
 }
 
-.preview3d-header {
-  display: flex;
+.dialog--viewer .dialog-header {
   align-items: center;
-  gap: 18px;
-  margin-bottom: 10px;
 }
 
-.preview3d-header h2 {
-  margin: 0;
-  font-size: 1.1em;
-  color: #ffffff;
-  white-space: nowrap;
+.dialog--viewer .dialog-heading {
+  padding-top: 0;
+}
+
+.dialog--viewer .dialog-close {
+  align-self: center;
 }
 
 .preview3d-controls {
   display: flex;
   align-items: center;
-  gap: 18px;
-  flex: 1;
-  justify-content: flex-end;
-  margin-right: 8px;
+  gap: 22px;
+  flex-shrink: 0;
 }
 
 .preview3d-ctl {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #ececec;
-  font-size: 0.85em;
+  gap: 9px;
+  color: var(--ui-text);
+  font-size: 13px;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .preview3d-ctl input[type="range"] {
-  width: 110px;
+  width: 120px;
+  margin: 0;
+  accent-color: var(--ui-accent);
+  cursor: pointer;
+}
+
+.preview3d-value {
+  min-width: 32px;
+  color: var(--ui-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A switch that cannot be used yet (the buildings are still loading, or the
+   area is too large for them) */
+.preview3d-ctl:has(input:disabled) {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.preview3d-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 14px 16px 0;
 }
 
 #preview3d-map {
   position: relative;
   flex: 1;
   min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   overflow: hidden;
-  background: #717171;
+  background: #262626;
 }
 
 .preview3d-status {
@@ -157,20 +176,22 @@
   justify-content: center;
   text-align: center;
   padding: 20px;
-  color: #ececec;
-  font-size: 0.95em;
-  background: rgba(87, 87, 87, 0.9);
+  color: var(--ui-muted);
+  font-size: 13.5px;
+  background: rgba(38, 38, 38, 0.92);
 }
 
 .preview3d-status-error {
   color: #fa7878;
 }
 
-.preview3d-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
-  color: #d6d6d6;
-  font-size: 0.75em;
+.dialog-footer.preview3d-footer {
+  border-top: none;
+  padding-top: 10px;
+}
+
+.preview3d-attribution {
+  font-size: 12px;
+  color: var(--ui-faint);
+  white-space: nowrap;
 }

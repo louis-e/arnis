@@ -194,5 +194,10 @@
   "map_search_placeholder": "搜索城市...",
   "map_search_searching": "搜索中...",
   "map_search_none": "未找到城市",
-  "map_search_failed": "搜索失败，请重试。"
+  "map_search_failed": "搜索失败，请重试。",
+  "preview3d_exaggeration": "夸张",
+  "preview3d_land_cover": "地表覆盖",
+  "preview3d_buildings": "建筑",
+  "preview3d_controls_hint": "拖动平移 · 右键拖动旋转和倾斜",
+  "preview3d_buildings_too_large": "区域过大，无法显示建筑图层（最大 10 km²）"
 }

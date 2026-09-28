@@ -194,5 +194,10 @@
   "map_search_placeholder": "Nach einer Stadt suchen...",
   "map_search_searching": "Suche...",
   "map_search_none": "Keine Städte gefunden",
-  "map_search_failed": "Suche fehlgeschlagen. Bitte erneut versuchen."
+  "map_search_failed": "Suche fehlgeschlagen. Bitte erneut versuchen.",
+  "preview3d_exaggeration": "Überhöhung",
+  "preview3d_land_cover": "Bodenbedeckung",
+  "preview3d_buildings": "Gebäude",
+  "preview3d_controls_hint": "Ziehen zum Verschieben · mit Rechtsklick ziehen zum Drehen und Neigen",
+  "preview3d_buildings_too_large": "Bereich zu groß für die Gebäudeebene (max. 10 km²)"
 }

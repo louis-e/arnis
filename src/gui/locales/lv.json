@@ -194,5 +194,10 @@
   "map_search_placeholder": "Meklēt pilsētu...",
   "map_search_searching": "Meklē...",
   "map_search_none": "Pilsētas nav atrastas",
-  "map_search_failed": "Meklēšana neizdevās. Mēģiniet vēlreiz."
+  "map_search_failed": "Meklēšana neizdevās. Mēģiniet vēlreiz.",
+  "preview3d_exaggeration": "Pārspīlējums",
+  "preview3d_land_cover": "Zemes segums",
+  "preview3d_buildings": "Ēkas",
+  "preview3d_controls_hint": "Velciet, lai pārvietotu · velciet ar labo pogu, lai pagrieztu un sasvērtu",
+  "preview3d_buildings_too_large": "Apgabals ir pārāk liels ēku slānim (maks. 10 km²)"
 }

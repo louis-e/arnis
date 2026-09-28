@@ -194,5 +194,10 @@
   "map_search_placeholder": "ქალაქის ძიება...",
   "map_search_searching": "ძიება...",
   "map_search_none": "ქალაქები ვერ მოიძებნა",
-  "map_search_failed": "ძიება ვერ მოხერხდა. სცადეთ ხელახლა."
+  "map_search_failed": "ძიება ვერ მოხერხდა. სცადეთ ხელახლა.",
+  "preview3d_exaggeration": "გაზვიადება",
+  "preview3d_land_cover": "მიწის საფარი",
+  "preview3d_buildings": "შენობები",
+  "preview3d_controls_hint": "გადაათრიეთ გადასაადგილებლად · მარჯვენა ღილაკით გადათრევა — მობრუნება და დახრა",
+  "preview3d_buildings_too_large": "არეალი ძალიან დიდია შენობების ფენისთვის (მაქს. 10 კმ²)"
 }

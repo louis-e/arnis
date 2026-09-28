@@ -438,13 +438,15 @@ function closeOnBackdrop(modal, close) {
   });
 }
 
-// License and version info are read-only, so a click beside them may close
-// them. The consent dialog is left alone: it wants an answer.
+// License, version info and the 3D preview are read-only, so a click beside
+// them may close them. The consent dialog is left alone: it wants an answer.
 function initDialogs() {
   const license = document.getElementById("license-modal");
   const update = document.getElementById("update-modal");
+  const preview3d = document.getElementById("preview3d-modal");
   if (license) closeOnBackdrop(license, () => window.closeLicense());
   if (update) closeOnBackdrop(update, closeUpdateModal);
+  if (preview3d) closeOnBackdrop(preview3d, () => window.closePreview3D && window.closePreview3D());
 }
 
 function openUpdateInBrowser() {

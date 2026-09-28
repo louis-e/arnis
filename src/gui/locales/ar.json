@@ -194,5 +194,10 @@
   "map_search_placeholder": "ابحث عن مدينة...",
   "map_search_searching": "جارٍ البحث...",
   "map_search_none": "لم يُعثر على مدن",
-  "map_search_failed": "فشل البحث. حاول مرة أخرى."
+  "map_search_failed": "فشل البحث. حاول مرة أخرى.",
+  "preview3d_exaggeration": "المبالغة",
+  "preview3d_land_cover": "الغطاء الأرضي",
+  "preview3d_buildings": "المباني",
+  "preview3d_controls_hint": "اسحب للتحريك · اسحب بالزر الأيمن للتدوير والإمالة",
+  "preview3d_buildings_too_large": "المنطقة كبيرة جدًا لطبقة المباني (الحد الأقصى 10 كم²)"
 }

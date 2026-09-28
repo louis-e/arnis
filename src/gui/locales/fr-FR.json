@@ -194,5 +194,10 @@
   "map_search_placeholder": "Rechercher une ville...",
   "map_search_searching": "Recherche...",
   "map_search_none": "Aucune ville trouvée",
-  "map_search_failed": "La recherche a échoué. Veuillez réessayer."
+  "map_search_failed": "La recherche a échoué. Veuillez réessayer.",
+  "preview3d_exaggeration": "Exagération",
+  "preview3d_land_cover": "Occupation du sol",
+  "preview3d_buildings": "Bâtiments",
+  "preview3d_controls_hint": "Glisser pour déplacer · glisser avec le clic droit pour tourner et incliner",
+  "preview3d_buildings_too_large": "Zone trop grande pour la couche des bâtiments (10 km² max.)"
 }

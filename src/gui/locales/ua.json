@@ -194,5 +194,10 @@
   "map_search_placeholder": "Знайти місто...",
   "map_search_searching": "Пошук...",
   "map_search_none": "Міст не знайдено",
-  "map_search_failed": "Пошук не вдався. Спробуйте ще раз."
+  "map_search_failed": "Пошук не вдався. Спробуйте ще раз.",
+  "preview3d_exaggeration": "Перебільшення",
+  "preview3d_land_cover": "Покрив землі",
+  "preview3d_buildings": "Будівлі",
+  "preview3d_controls_hint": "Перетягування — зсув · правою кнопкою — поворот і нахил",
+  "preview3d_buildings_too_large": "Область завелика для шару будівель (макс. 10 км²)"
 }

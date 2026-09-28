@@ -14,9 +14,10 @@
   const MINI_MAX_AREA_M2 = 500000000;
   // Mirrors BUILDINGS_MAX_AREA_M2 in preview_3d.rs.
   const BUILDINGS_MAX_AREA_M2 = 10000000;
-  // Arnis palette: panel gray hosts the mini, modal gray hosts the expanded view.
+  // The base plate fades into what hosts the view: the panel gray for the
+  // mini, the expanded view's dark viewport (#preview3d-map in preview3d.css).
   const PANEL_BG = "#575757";
-  const MODAL_BG = "#717171";
+  const MODAL_BG = "#262626";
   // Terrain outside the bbox fades onto a flat plate over this fraction of the
   // bbox span, replacing the stretched clamp-to-edge look with a clean base.
   const EDGE_FADE_FRAC = 0.12;
@@ -940,8 +941,9 @@
     const buildingsGated = bboxAreaM2(bboxText) > BUILDINGS_MAX_AREA_M2;
     bToggle.disabled = true;
     bToggle.checked = !buildingsGated;
+    const loc = window.localization || {};
     bToggle.parentElement.title = buildingsGated
-      ? "Area too large for the buildings overlay (max 10 km²)"
+      ? loc.preview3d_buildings_too_large || "Area too large for the buildings overlay (max 10 km²)"
       : "";
     modalView = { map: map, gen: d.gen };
     attachBuildings(modalView, bboxText);
@@ -955,13 +957,19 @@
     if (!payloadCache.data) return;
     const modal = document.getElementById("preview3d-modal");
     modal.style.display = "flex";
+    // Keyboard focus into the dialog, off the map behind it.
+    const dialog = modal.querySelector(".dialog");
+    if (dialog) dialog.focus({ preventScroll: true });
     setStatus(null);
     openModalWithData(payloadCache.data, payloadCache.data.bboxText);
     loadBuildings(payloadCache.data.bboxText);
   };
 
   window.closePreview3D = function () {
-    document.getElementById("preview3d-modal").style.display = "none";
+    const modal = document.getElementById("preview3d-modal");
+    // Focus must not stay on a control that is about to be hidden.
+    if (modal.contains(document.activeElement)) document.activeElement.blur();
+    modal.style.display = "none";
     disposeView(modalView);
     modalView = null;
     gcDatasets();

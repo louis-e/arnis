@@ -194,5 +194,10 @@
   "map_search_placeholder": "Város keresése...",
   "map_search_searching": "Keresés...",
   "map_search_none": "Nem található város",
-  "map_search_failed": "A keresés sikertelen. Próbáld újra."
+  "map_search_failed": "A keresés sikertelen. Próbáld újra.",
+  "preview3d_exaggeration": "Túlzás",
+  "preview3d_land_cover": "Felszínborítás",
+  "preview3d_buildings": "Épületek",
+  "preview3d_controls_hint": "Húzás: mozgatás · jobb gombos húzás: forgatás és döntés",
+  "preview3d_buildings_too_large": "A terület túl nagy az épületréteghez (max. 10 km²)"
 }

@@ -194,5 +194,10 @@
   "map_search_placeholder": "도시 검색...",
   "map_search_searching": "검색 중...",
   "map_search_none": "도시를 찾을 수 없습니다",
-  "map_search_failed": "검색에 실패했습니다. 다시 시도하세요."
+  "map_search_failed": "검색에 실패했습니다. 다시 시도하세요.",
+  "preview3d_exaggeration": "과장",
+  "preview3d_land_cover": "토지 피복",
+  "preview3d_buildings": "건물",
+  "preview3d_controls_hint": "드래그로 이동 · 오른쪽 드래그로 회전 및 기울이기",
+  "preview3d_buildings_too_large": "건물 레이어에 비해 영역이 너무 큽니다(최대 10km²)"
 }
