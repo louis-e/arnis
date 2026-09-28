@@ -174,7 +174,8 @@ pub fn run_gui() -> Result<(), String> {
             gui_get_preview_facades,
             gui_precompute_facades,
             gui_cancel_precompute,
-            gui_log
+            gui_log,
+            gui_set_telemetry_consent
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -346,6 +347,15 @@ fn gui_log(level: String, message: String) {
         "warn" => log::warn!(target: "webview", "{message}"),
         _ => log::info!(target: "webview", "{message}"),
     }
+}
+
+/// Mirrors the frontend's consent record into the backend. Called on startup and
+/// whenever the user answers or flips it, so crashes before the first generation
+/// are covered and a withdrawal takes effect immediately rather than at the next
+/// generation.
+#[tauri::command]
+fn gui_set_telemetry_consent(consent: bool) {
+    telemetry::set_telemetry_consent(consent);
 }
 
 /// Opens a native folder-picker dialog and returns the chosen path.
@@ -1889,7 +1899,9 @@ fn gui_start_generation(
                         .map_err(|e| format!("Rotation failed: {e}"))?;
                     }
 
-                    let _ = data_processing::generate_world_with_options(
+                    // Streamed region writes, the ground layer and the final save all
+                    // surface here; without this a mid-run write failure read as "Done!".
+                    if let Err(e) = data_processing::generate_world_with_options(
                         parsed_elements,
                         xzbbox,
                         bbox,
@@ -1898,7 +1910,14 @@ fn gui_start_generation(
                         generation_options.clone(),
                         outline_suppression,
                         part_groups,
-                    );
+                    ) {
+                        let error_msg = format!("World generation failed: {e}");
+                        eprintln!("{error_msg}");
+                        send_log(LogLevel::Error, &error_msg);
+                        emit_gui_error(&e);
+                        // cleanup_guard stays armed and removes the partial world.
+                        return Err(error_msg);
+                    }
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
                     }
