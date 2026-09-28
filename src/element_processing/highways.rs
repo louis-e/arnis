@@ -8,7 +8,7 @@ use crate::element_processing::bridge_styles::{
 use crate::element_processing::bridges::{is_bridge_way, BridgeStructureMap, BridgeSurfaceMap};
 use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
-    get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
+    cycleway_palette, get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
 };
 use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
@@ -890,7 +890,10 @@ pub fn generate_highway_tunnel_shell(
         "path" => &[DIRT_PATH],
         _ => DEFAULT_ROAD_MIX,
     };
-    let palette = get_blocks_for_surface_way(way, default_palette);
+    let palette = (highway_type == "cycleway")
+        .then(|| cycleway_palette(&way.tags))
+        .flatten()
+        .unwrap_or_else(|| get_blocks_for_surface_way(way, default_palette));
     let faces = tunnel_portal_faces(&pts, internal_endpoints);
 
     for i in 0..n {
@@ -1505,6 +1508,13 @@ fn generate_highways_internal(
                 )
             {
                 block_types = &[SMOOTH_STONE];
+            }
+
+            // Bicycle paths are red wherever they are paved.
+            if highway_type == "cycleway" {
+                if let Some(red) = cycleway_palette(&way.tags) {
+                    block_types = red;
+                }
             }
 
             // Canonical width (shared with prescan/bridge consumers).
@@ -2729,7 +2739,9 @@ pub(crate) fn highway_block_range(
 ) -> i32 {
     let (mut block_range, scales_with_lanes): (i32, bool) = match highway_type {
         "footway" | "pedestrian" => (1, false),
-        "path" => (1, false),
+        // Bicycle paths are 2-4 m across; at the road default they swallowed the verge
+        // and the kerb of the road they run beside.
+        "path" | "cycleway" => (1, false),
         "motorway" | "primary" | "trunk" => (5, true),
         "secondary" => (4, true),
         "tertiary" => (2, true),
@@ -2988,6 +3000,7 @@ mod tests {
             highway_block_range("footway", &tags(&[("lanes", "4")]), 1.0),
             1
         );
+        assert_eq!(highway_block_range("cycleway", &tags(&[]), 1.0), 1);
         // Explicit width=* wins and tolerates a unit suffix.
         assert_eq!(
             highway_block_range("residential", &tags(&[("width", "8")]), 1.0),
