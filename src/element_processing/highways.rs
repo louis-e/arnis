@@ -2649,6 +2649,138 @@ fn paint_helipad(
     }
 }
 
+/// One centerline segment of an aeroway strip and the half-width it renders at, in blocks.
+struct StripSegment {
+    ax: f64,
+    az: f64,
+    bx: f64,
+    bz: f64,
+    half: f64,
+}
+
+impl StripSegment {
+    fn contains(&self, x: f64, z: f64) -> bool {
+        let (dx, dz) = (self.bx - self.ax, self.bz - self.az);
+        let len2 = dx * dx + dz * dz;
+        let t = if len2 > 0.0 {
+            (((x - self.ax) * dx + (z - self.az) * dz) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (px, pz) = (self.ax + t * dx - x, self.az + t * dz - z);
+        px * px + pz * pz <= self.half * self.half
+    }
+}
+
+/// The strip `generate_aeroway` paves along a runway or taxiway, as segments.
+fn push_strip_segments(out: &mut Vec<StripSegment>, way: &ProcessedWay, scale: f64) {
+    let half_m = parse_width_tag_m(&way.tags)
+        .map(|w| (w * 0.5).clamp(AEROWAY_MIN_HALF_M, AEROWAY_MAX_HALF_M))
+        .unwrap_or(AEROWAY_DEFAULT_HALF_M);
+    let half = (half_m * scale).round().max(1.0);
+    for pair in way.nodes.windows(2) {
+        out.push(StripSegment {
+            ax: pair[0].x as f64,
+            az: pair[0].z as f64,
+            bx: pair[1].x as f64,
+            bz: pair[1].z as f64,
+            half,
+        });
+    }
+}
+
+/// Even-odd point in polygon for a closed ring.
+fn ring_contains(ring: &[(i32, i32)], x: f64, z: f64) -> bool {
+    let mut inside = false;
+    for pair in ring.windows(2) {
+        let ((x1, z1), (x2, z2)) = (
+            (pair[0].0 as f64, pair[0].1 as f64),
+            (pair[1].0 as f64, pair[1].1 as f64),
+        );
+        if (z1 > z) != (z2 > z) && x < x1 + (z - z1) * (x2 - x1) / (z2 - z1) {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// Removes the buildings that would stand on pavement aircraft use. Nothing is ever built on
+/// a runway, so any building whose middle lies on one goes. Taxiways and aprons only lose the
+/// buildings Overture traced from imagery, which there are mostly parked aircraft read as
+/// roofs; a mapped hangar a taxiway line runs into stays. Returns how many were dropped.
+///
+/// Costs a scan of the elements plus, for the few buildings inside the airport's bounds, one
+/// test per strip segment; nothing is allocated per block.
+pub fn drop_buildings_on_aircraft_pavement(
+    elements: &mut Vec<ProcessedElement>,
+    scale: f64,
+) -> usize {
+    let mut runways: Vec<StripSegment> = Vec::new();
+    let mut taxiways: Vec<StripSegment> = Vec::new();
+    let mut aprons: Vec<Vec<(i32, i32)>> = Vec::new();
+    for element in elements.iter() {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        match way.tags.get("aeroway").map(String::as_str) {
+            Some("runway") => push_strip_segments(&mut runways, way, scale),
+            Some("taxiway") => push_strip_segments(&mut taxiways, way, scale),
+            Some("apron")
+                if way.nodes.len() >= 4
+                    && way.nodes.first().map(|n| (n.x, n.z))
+                        == way.nodes.last().map(|n| (n.x, n.z)) =>
+            {
+                aprons.push(way.nodes.iter().map(|n| (n.x, n.z)).collect());
+            }
+            _ => {}
+        }
+    }
+    if runways.is_empty() && taxiways.is_empty() && aprons.is_empty() {
+        return 0;
+    }
+
+    // Everything that can drop a building lies inside these bounds.
+    let (mut min_x, mut min_z, mut max_x, mut max_z) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for s in runways.iter().chain(&taxiways) {
+        min_x = min_x.min(s.ax.min(s.bx) - s.half);
+        max_x = max_x.max(s.ax.max(s.bx) + s.half);
+        min_z = min_z.min(s.az.min(s.bz) - s.half);
+        max_z = max_z.max(s.az.max(s.bz) + s.half);
+    }
+    for &(x, z) in aprons.iter().flatten() {
+        min_x = min_x.min(x as f64);
+        max_x = max_x.max(x as f64);
+        min_z = min_z.min(z as f64);
+        max_z = max_z.max(z as f64);
+    }
+
+    let before = elements.len();
+    elements.retain(|element| {
+        let ProcessedElement::Way(way) = element else {
+            return true;
+        };
+        if way.nodes.len() < 3
+            || !(way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+        {
+            return true;
+        }
+        let n = way.nodes.len() as f64;
+        let cx = way.nodes.iter().map(|p| p.x as f64).sum::<f64>() / n;
+        let cz = way.nodes.iter().map(|p| p.z as f64).sum::<f64>() / n;
+        if cx < min_x || cx > max_x || cz < min_z || cz > max_z {
+            return true;
+        }
+        if runways.iter().any(|s| s.contains(cx, cz)) {
+            return false;
+        }
+        let traced = way.tags.get("source").map(String::as_str) == Some("overture_maps");
+        !(traced
+            && (taxiways.iter().any(|s| s.contains(cx, cz))
+                || aprons.iter().any(|ring| ring_contains(ring, cx, cz))))
+    });
+    before - elements.len()
+}
+
 /// Renders an `aeroway=helipad` way as a filled pad with markings.
 fn generate_helipad_way(
     editor: &mut WorldEditor,
@@ -4029,5 +4161,89 @@ mod tests {
         let editor = tunnel_editor(&xzbbox, crate::ground::Ground::new_flat(0));
         let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0);
         assert!(!mask.contains(50, 50), "tunnel is not a surface road");
+    }
+
+    fn line_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedElement {
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes: points
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: id * 100 + i as u64,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    fn building(id: u64, x0: i32, z0: i32, x1: i32, z1: i32, traced: bool) -> ProcessedElement {
+        let mut tags = vec![("building", "yes")];
+        if traced {
+            tags.push(("source", "overture_maps"));
+        }
+        ProcessedElement::Way(crate::element_processing::building_test_support::rect_way(
+            id, x0, z0, x1, z1, &tags,
+        ))
+    }
+
+    fn kept_ids(elements: &[ProcessedElement]) -> Vec<u64> {
+        elements.iter().map(|e| e.id()).collect()
+    }
+
+    #[test]
+    fn buildings_never_stand_on_a_runway() {
+        // East-west runway along z = 100, 24 m wide by default.
+        let mut elements = vec![
+            line_way(1, &[(0, 100), (1000, 100)], &[("aeroway", "runway")]),
+            building(10, 400, 95, 420, 105, false),
+            building(11, 500, 90, 530, 108, true),
+            // A hangar beside the runway, clear of its pavement.
+            building(12, 400, 130, 460, 170, false),
+        ];
+        let dropped = drop_buildings_on_aircraft_pavement(&mut elements, 1.0);
+        assert_eq!(dropped, 2);
+        assert_eq!(kept_ids(&elements), vec![1, 12]);
+    }
+
+    #[test]
+    fn taxiways_and_aprons_only_lose_imagery_traced_buildings() {
+        let mut elements = vec![
+            line_way(
+                2,
+                &[(0, 300), (200, 300)],
+                &[("aeroway", "taxiway"), ("width", "20")],
+            ),
+            line_way(
+                3,
+                &[(300, 300), (400, 300), (400, 400), (300, 400), (300, 300)],
+                &[("aeroway", "apron")],
+            ),
+            // A mapped hangar the taxiway line runs into stays.
+            building(20, 180, 290, 220, 310, false),
+            // Parked aircraft traced as roofs go.
+            building(21, 90, 296, 110, 304, true),
+            building(22, 340, 340, 360, 360, true),
+            // A mapped building on the apron stays.
+            building(23, 370, 370, 380, 380, false),
+            // Traced buildings away from the airport stay.
+            building(24, 900, 900, 920, 920, true),
+        ];
+        let dropped = drop_buildings_on_aircraft_pavement(&mut elements, 1.0);
+        assert_eq!(dropped, 2);
+        assert_eq!(kept_ids(&elements), vec![2, 3, 20, 23, 24]);
+    }
+
+    #[test]
+    fn no_airport_leaves_every_building_alone() {
+        let mut elements = vec![building(30, 0, 0, 10, 10, true)];
+        assert_eq!(drop_buildings_on_aircraft_pavement(&mut elements, 1.0), 0);
+        assert_eq!(elements.len(), 1);
     }
 }

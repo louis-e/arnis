@@ -562,6 +562,12 @@ pub fn generate_world_with_options(
     let extending = one_world.is_some_and(|run| run.extending);
     let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
 
+    // Before anything reads a footprint: nothing is built on a runway.
+    let dropped = highways::drop_buildings_on_aircraft_pavement(&mut elements, args.scale);
+    if dropped > 0 {
+        println!("  Skipped {dropped} building(s) on runways, taxiways and aprons");
+    }
+
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
         WorldEditor::new_luanti(
