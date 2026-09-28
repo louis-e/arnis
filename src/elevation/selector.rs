@@ -4,15 +4,12 @@ use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
 use crate::elevation::providers::mapterhorn::Mapterhorn;
 use crate::elevation::providers::planetary::PlanetaryDem;
-use crate::elevation::providers::usgs_3dep::Usgs3dep;
 
 /// How the caller wants the elevation source chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceMode {
-    /// Regional high-res providers first, then Mapterhorn. Used for generation.
+    /// Mapterhorn, falling back to AWS. Used for generation and the 3D preview.
     Auto,
-    /// Mapterhorn only; used by the 3D preview to skip regional services.
-    GlobalOnly,
     /// Legacy AWS tiles only (--aws-only-elevation / "Legacy terrain" toggle).
     AwsOnly,
     /// NASA PDS raster for a non-Earth body. No fallback: an Earth provider would
@@ -27,52 +24,25 @@ impl SourceMode {
     }
 }
 
-/// Check if two EPSG:4326 bounding boxes overlap.
-pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
-    a.min().lat() <= b.max().lat()
-        && a.max().lat() >= b.min().lat()
-        && a.min().lng() <= b.max().lng()
-        && a.max().lng() >= b.min().lng()
-}
-
-/// Select the best elevation provider for the given bounding box.
-/// The caller chains fetch-time fallbacks: regional, then Mapterhorn, then AWS.
-pub fn select_provider(bbox: &LLBBox, mode: SourceMode) -> Box<dyn ElevationProvider> {
+/// Select the elevation provider for the given bounding box.
+/// The caller chains the fetch-time fallback to AWS.
+///
+/// Mapterhorn serves Earth everywhere: its pyramid carries the national LiDAR
+/// and DEM surveys (USGS 3DEP 1 m, Canada's HRDEM, most of Europe, Japan, New
+/// Zealand, ...) above a global 30 m floor, and falls back per tile, so one
+/// source covers any bbox without seams between services.
+pub fn select_provider(_bbox: &LLBBox, mode: SourceMode) -> Box<dyn ElevationProvider> {
     match mode {
         SourceMode::AwsOnly => {
             println!("Using AWS Terrain Tiles only (legacy mode, ~30m resolution)");
-            return Box::new(AwsTerrain);
+            Box::new(AwsTerrain)
         }
-        SourceMode::GlobalOnly => {
-            println!("Using Mapterhorn terrain tiles (global)");
-            return Box::new(Mapterhorn);
-        }
-        SourceMode::Planetary(body) => return Box::new(PlanetaryDem { body }),
-        SourceMode::Auto => {}
-    }
-
-    for provider in build_provider_list() {
-        if let Some(coverages) = provider.coverage_bboxes() {
-            if coverages.iter().any(|c| bboxes_overlap(c, bbox)) && provider.accepts(bbox) {
-                println!(
-                    "Selected elevation provider: {} ({:.0}m resolution)",
-                    provider.name(),
-                    provider.native_resolution_m()
-                );
-                return provider;
-            }
+        SourceMode::Planetary(body) => Box::new(PlanetaryDem { body }),
+        SourceMode::Auto => {
+            println!("Using Mapterhorn terrain tiles (global; high-res where available)");
+            Box::new(Mapterhorn)
         }
     }
-
-    println!("Using Mapterhorn terrain tiles (global; high-res where available)");
-    Box::new(Mapterhorn)
-}
-
-/// Regional providers that beat Mapterhorn in their coverage area, finest first.
-fn build_provider_list() -> Vec<Box<dyn ElevationProvider>> {
-    vec![
-        Box::new(Usgs3dep), // 1m 3DEP; Mapterhorn only has 10m for most of the US
-    ]
 }
 
 #[cfg(test)]
@@ -80,45 +50,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bboxes_overlap() {
-        let a = LLBBox::new(0.0, 0.0, 10.0, 10.0).unwrap();
-        let b = LLBBox::new(5.0, 5.0, 15.0, 15.0).unwrap();
-        assert!(bboxes_overlap(&a, &b));
-
-        let c = LLBBox::new(20.0, 20.0, 30.0, 30.0).unwrap();
-        assert!(!bboxes_overlap(&a, &c));
-    }
-
-    #[test]
-    fn test_bboxes_touching_overlap() {
-        let a = LLBBox::new(0.0, 0.0, 10.0, 10.0).unwrap();
-        let b = LLBBox::new(10.0, 0.0, 20.0, 10.0).unwrap();
-        // Touching edges should overlap
-        assert!(bboxes_overlap(&a, &b));
-    }
-
-    #[test]
     fn test_select_provider_global_default() {
-        // Bbox outside all regional coverage gets the global provider
         let bbox = LLBBox::new(-33.86, 151.20, -33.85, 151.22).unwrap();
         let provider = select_provider(&bbox, SourceMode::Auto);
         assert_eq!(provider.name(), "mapterhorn");
     }
 
     #[test]
-    fn test_select_provider_regional_beats_global() {
-        // A US bbox keeps the 1m USGS 3DEP provider
-        let bbox = LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap();
-        let provider = select_provider(&bbox, SourceMode::Auto);
-        assert_eq!(provider.name(), "usgs_3dep");
-    }
-
-    #[test]
-    fn test_select_provider_global_only_skips_regional() {
-        // Even bboxes inside regional coverage come back as Mapterhorn
-        let bbox = LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap();
-        let provider = select_provider(&bbox, SourceMode::GlobalOnly);
-        assert_eq!(provider.name(), "mapterhorn");
+    fn test_select_provider_uses_mapterhorn_in_north_america() {
+        // Mapterhorn carries 3DEP 1 m in the US and HRDEM in Canada, so neither
+        // needs a regional service, and a Canadian city is never sent to a US one.
+        for bbox in [
+            LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap(),
+            LLBBox::new(49.215467, -123.266945, 49.280852, -123.177338).unwrap(),
+        ] {
+            assert_eq!(
+                select_provider(&bbox, SourceMode::Auto).name(),
+                "mapterhorn"
+            );
+        }
     }
 
     #[test]

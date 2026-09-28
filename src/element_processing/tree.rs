@@ -399,7 +399,10 @@ impl LeafPlacer<'_> {
     }
 
     fn place_with(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32, allow_accent: bool) {
-        if self.blocked(x, y, z) {
+        // A leaf resting right on water reads as floating.
+        if self.blocked(x, y, z)
+            || editor.check_for_block_absolute(x, y - 1, z, Some(&[WATER]), None)
+        {
             return;
         }
         let h = leaf_hash(x, y, z);
@@ -553,6 +556,14 @@ impl Tree {
             }
         }
 
+        // A request from a tile's halo is the owning tile's to make: the halo copy
+        // runs its own random sequence and would stack a different tree on the
+        // owner's undergrowth. Only the request is checked, so a trunk slot that
+        // snaps across the seam is still planted by the tile that asked.
+        if !editor.owns(x, z) {
+            return;
+        }
+
         // A tree rooted under a bridge deck would grow straight up through the roadway.
         if bridge_surface.is_some_and(|b| b.contains(x, z)) {
             return;
@@ -636,6 +647,13 @@ impl Tree {
                 density_decided,
             };
             if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y, req) {
+                // A slot across a tile seam would put this tile's trunk on the
+                // neighbour's undergrowth, so the tree keeps to the requested cell.
+                let (sx, sz) = if editor.owns(sx, sz) {
+                    (sx, sz)
+                } else {
+                    (x, z)
+                };
                 // The slot can be a few blocks off (x,z), so every check that
                 // rejected the request has to run again on the moved trunk.
                 // Without the footprint one a tree asked for beside a building
@@ -1545,6 +1563,24 @@ mod tests {
             !placer.blocked(30, roof_y - 5, 30),
             "columns outside the footprint are never culled"
         );
+    }
+
+    /// A request from a tile's halo is left to the tile that owns the cell.
+    #[test]
+    fn a_halo_request_is_left_to_the_owning_tile() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let has_trunk = |editor: &WorldEditor| editor.check_for_block(30, 2, 30, Some(&[OAK_LOG]));
+
+        let mut halo = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        halo.set_strict_bounds(0, 0, 20, 63);
+        Tree::create_of_type(&mut halo, (30, 1, 30), TreeType::Oak, None, None, false);
+        assert!(!has_trunk(&halo));
+
+        let mut owner = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        owner.set_strict_bounds(21, 0, 63, 63);
+        Tree::create_of_type(&mut owner, (30, 1, 30), TreeType::Oak, None, None, false);
+        assert!(has_trunk(&owner));
     }
 
     // allow_on_paved lets a mapped tree stand on paving, water always rejected

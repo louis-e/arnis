@@ -6,11 +6,12 @@ use std::io::Read;
 use fastnbt::Value;
 
 use crate::block_definitions::{
-    Block, ACACIA_LEAVES, ACACIA_LOG, AZALEA_LEAVES, BIRCH_LEAVES, BIRCH_LOG, BLACK_CONCRETE,
+    Block, ACACIA_LEAVES, ACACIA_LOG, AIR, AZALEA_LEAVES, BIRCH_LEAVES, BIRCH_LOG, BLACK_CONCRETE,
     CHERRY_LEAVES, CHERRY_LOG, CYAN_TERRACOTTA, DARK_OAK_LEAVES, DARK_OAK_LOG, DIRT_PATH,
     GRAY_CONCRETE, GRAY_CONCRETE_POWDER, JUNGLE_LEAVES, JUNGLE_LOG, LIGHT_GRAY_CONCRETE,
     MANGROVE_LEAVES, MANGROVE_LOG, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
 };
+use crate::ground_decoration::{LOOSE_PLANTS, PLANT_LOWER_HALVES};
 use crate::world_editor::WorldEditor;
 
 /// A parsed schematic: dimensions plus the non-air log/leaf voxels. The origin is the
@@ -264,17 +265,7 @@ impl Schematic {
 
 /// One of the eight trunk log types `map_block` can emit.
 fn is_log(b: Block) -> bool {
-    matches!(
-        b,
-        OAK_LOG
-            | BIRCH_LOG
-            | SPRUCE_LOG
-            | DARK_OAK_LOG
-            | JUNGLE_LOG
-            | ACACIA_LOG
-            | CHERRY_LOG
-            | MANGROVE_LOG
-    )
+    crate::ground_decoration::WOOD.contains(&b)
 }
 
 /// Max blocks above the schem floor for a log column to count as a ground-rooted trunk base.
@@ -329,6 +320,8 @@ pub fn place_schematic_tree(
 
     let mut trunk_bottom: HashMap<(i32, i32), (i32, Block)> =
         HashMap::with_capacity((schem.width * schem.length).max(0) as usize);
+    // Lowest log at or above the base, per column: below it lie only roots.
+    let mut base_logs: HashMap<(i32, i32), (i32, Block)> = HashMap::new();
     for &(vx, vy, vz, block) in &schem.voxels {
         let (rx, rz) = rotate_xz(vx, vz, schem.width, schem.length, rot);
         let wx = anchor_x + rx - cx;
@@ -339,7 +332,13 @@ pub fn place_schematic_tree(
                 continue;
             }
         }
-        // Logs over water are skipped (only root-level logs for predicted ESA water); leaves overhang.
+        // Logs over water are skipped (only root-level logs for predicted ESA water); leaves
+        // overhang, but not one resting on the surface, which reads as floating.
+        if !is_log(block)
+            && editor.check_for_block_absolute(wx, base_y + vy - 1, wz, Some(&[WATER]), None)
+        {
+            continue;
+        }
         if is_log(block) {
             let root_level = vy <= min_log_vy + ROOT_BASE_VY;
             let over_water = editor.check_for_block(wx, 0, wz, Some(&[WATER]))
@@ -351,6 +350,25 @@ pub fn place_schematic_tree(
         editor.set_block_absolute(block, wx, base_y + vy, wz, None, Some(blacklist));
         if is_log(block) {
             let wy = base_y + vy;
+            // Undergrowth already standing right under the wood would read as
+            // having taken its place. Leaves are the tree's own and stay.
+            if editor
+                .get_block_absolute(wx, wy - 1, wz)
+                .is_some_and(crate::ground_decoration::is_undergrowth)
+            {
+                editor.set_block_absolute(AIR, wx, wy - 1, wz, Some(LOOSE_PLANTS), None);
+                editor.set_block_absolute(AIR, wx, wy - 2, wz, Some(PLANT_LOWER_HALVES), None);
+            }
+            if vy >= 0 {
+                base_logs
+                    .entry((wx, wz))
+                    .and_modify(|e| {
+                        if wy < e.0 {
+                            *e = (wy, block);
+                        }
+                    })
+                    .or_insert((wy, block));
+            }
             trunk_bottom
                 .entry((wx, wz))
                 .and_modify(|e| {
@@ -393,11 +411,78 @@ pub fn place_schematic_tree(
             editor.set_block_absolute(log, wx, wy, wz, None, Some(&root_blacklist));
         }
     }
+    // Roots below the base make the pass above skip trunk columns that start a
+    // few blocks up a slope, where the ground falls away from the base. A column
+    // whose wood starts at the trunk's base height is trunk or root flare, so it
+    // goes down to its own ground, before undergrowth can take the gap and read
+    // as a plant in place of the wood. Branches start higher and stay put.
+    const TRUNK_GAP_MAX: i32 = 3;
+    let trunk_base_y = base_logs.values().map(|&(wy, _)| wy).min();
+    for ((wx, wz), (bottom, log)) in base_logs {
+        if Some(bottom) != trunk_base_y || editor.is_lc_water(wx, wz) {
+            continue;
+        }
+        let gy = editor.get_absolute_y(wx, y_offset, wz);
+        if !(1..=TRUNK_GAP_MAX).contains(&(bottom - gy)) {
+            continue;
+        }
+        for wy in gy..bottom {
+            editor.set_block_absolute(log, wx, wy, wz, None, Some(&root_blacklist));
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A trunk base left hanging above lower ground goes down to it, even when
+    /// roots below the base hid it from the root pass; a low branch stays a
+    /// branch, and undergrowth under it is cleared.
+    #[test]
+    fn trunks_reach_their_ground_and_branches_do_not() {
+        use crate::block_definitions::{GRASS, OAK_LOG, RED_FLOWER};
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        // Ground at 0 everywhere, so a base of 3 hangs the trunk two blocks up.
+        let schem = Schematic {
+            width: 3,
+            height: 6,
+            length: 1,
+            voxels: vec![
+                (0, 0, 0, OAK_LOG),
+                (0, 1, 0, OAK_LOG),
+                (0, 2, 0, OAK_LOG),
+                (1, -3, 0, OAK_LOG),
+                (2, 2, 0, OAK_LOG),
+            ],
+            min_log_vy: -3,
+        };
+        editor.set_block_absolute(GRASS, 10, 1, 10, None, None);
+        editor.set_block_absolute(RED_FLOWER, 12, 4, 10, None, None);
+        place_schematic_tree(&mut editor, &schem, 11, 10, 3, 0, &[], None, 1);
+
+        for y in 1..=2 {
+            assert!(
+                editor.check_for_block_absolute(10, y, 10, Some(&[OAK_LOG]), None),
+                "trunk gap at y={y}"
+            );
+        }
+        for y in 1..=3 {
+            assert!(
+                !editor.block_exists_absolute(12, y, 10),
+                "branch post at y={y}"
+            );
+        }
+        assert!(
+            !editor.block_exists_absolute(12, 4, 10),
+            "undergrowth right under the branch is cleared"
+        );
+    }
 
     #[test]
     fn rotation_corners_and_bounds() {

@@ -2,6 +2,7 @@
 
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::ground_generation::patch_noise;
 use crate::land_cover::{
     coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
     LC_TREE_COVER,
@@ -81,66 +82,71 @@ impl Climate {
         if !veg && !bare {
             return None;
         }
-        let h = coord_hash(x, z);
+        // Shares along one smooth field, so each material forms patches and the
+        // listed order is also the order they grade into one another.
+        let n = patch_noise(x, z, 9, 0x00C1_1A7E);
+        let pick = |bands: &[(f64, (Block, Block))]| {
+            bands
+                .iter()
+                .find(|(upto, _)| n < *upto)
+                .map_or(bands[bands.len() - 1].1, |(_, p)| *p)
+        };
         let pal = match self {
             Climate::IceCap => {
-                if h.is_multiple_of(6) {
+                if patch_noise(x, z, 20, 0x001C_ECA9) < 0.17 {
                     (PACKED_ICE, PACKED_ICE)
                 } else {
                     (SNOW_BLOCK, SNOW_BLOCK)
                 }
             }
-            Climate::HotDesert => match h % 12 {
-                0 => (SANDSTONE, SANDSTONE),
-                1 => (SMOOTH_SANDSTONE, SANDSTONE),
-                _ => (SAND, SANDSTONE),
-            },
-            Climate::HotSteppe if bare => match h % 10 {
-                0..=4 => (SAND, SANDSTONE),
-                _ => (COARSE_DIRT, DIRT),
-            },
-            Climate::HotSteppe => match h % 10 {
-                0..=2 => (SAND, SANDSTONE),
-                3..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::ColdDesert if bare => match h % 12 {
-                0..=4 => (GRAVEL, STONE),
-                5..=8 => (COARSE_DIRT, DIRT),
-                _ => (STONE, STONE),
-            },
-            Climate::ColdDesert => match h % 10 {
-                0..=4 => (COARSE_DIRT, DIRT),
-                5..=7 => (GRAVEL, STONE),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::ColdSteppe if bare => match h % 10 {
-                0..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRAVEL, STONE),
-            },
-            Climate::ColdSteppe => match h % 10 {
-                0..=2 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::Boreal if bare => match h % 10 {
-                0..=4 => (COARSE_DIRT, DIRT),
-                _ => (GRAVEL, STONE),
-            },
-            Climate::Boreal => match h % 10 {
-                0..=3 => (PODZOL, DIRT),
-                4..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::Tundra if bare => match h % 10 {
-                0..=4 => (GRAVEL, STONE),
-                5..=7 => (COARSE_DIRT, DIRT),
-                _ => (STONE, STONE),
-            },
-            Climate::Tundra => match h % 10 {
-                0..=3 => (COARSE_DIRT, DIRT),
-                4..=5 => (MOSS_BLOCK, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
+            Climate::HotDesert => {
+                // Sandstone crops out in patches; per-block sandstone read as speckle.
+                if patch_noise(x, z, 12, 0x00DE_5E27) < 0.06 {
+                    (SANDSTONE, SANDSTONE)
+                } else if coord_hash(x, z).is_multiple_of(40) {
+                    (SMOOTH_SANDSTONE, SANDSTONE)
+                } else {
+                    (SAND, SANDSTONE)
+                }
+            }
+            Climate::HotSteppe if bare => {
+                pick(&[(0.5, (SAND, SANDSTONE)), (1.0, (COARSE_DIRT, DIRT))])
+            }
+            Climate::HotSteppe => pick(&[
+                (0.3, (SAND, SANDSTONE)),
+                (0.6, (COARSE_DIRT, DIRT)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
+            Climate::ColdDesert if bare => pick(&[
+                (0.42, (GRAVEL, STONE)),
+                (0.75, (COARSE_DIRT, DIRT)),
+                (1.0, (STONE, STONE)),
+            ]),
+            Climate::ColdDesert => pick(&[
+                (0.5, (COARSE_DIRT, DIRT)),
+                (0.8, (GRAVEL, STONE)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
+            Climate::ColdSteppe if bare => {
+                pick(&[(0.6, (COARSE_DIRT, DIRT)), (1.0, (GRAVEL, STONE))])
+            }
+            Climate::ColdSteppe => pick(&[(0.3, (COARSE_DIRT, DIRT)), (1.0, (GRASS_BLOCK, DIRT))]),
+            Climate::Boreal if bare => pick(&[(0.5, (COARSE_DIRT, DIRT)), (1.0, (GRAVEL, STONE))]),
+            Climate::Boreal => pick(&[
+                (0.4, (PODZOL, DIRT)),
+                (0.6, (COARSE_DIRT, DIRT)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
+            Climate::Tundra if bare => pick(&[
+                (0.5, (GRAVEL, STONE)),
+                (0.8, (COARSE_DIRT, DIRT)),
+                (1.0, (STONE, STONE)),
+            ]),
+            Climate::Tundra => pick(&[
+                (0.4, (COARSE_DIRT, DIRT)),
+                (0.6, (MOSS_BLOCK, DIRT)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
             Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental => return None,
         };
         Some(pal)

@@ -299,6 +299,20 @@ pub fn generate_natural(
                     if editor.check_for_block(x, 0, z, Some(&[WATER])) {
                         continue;
                     }
+                    // Only this tile's own cells get plants and trees: a neighbouring
+                    // tile's halo copy draws its own random sequence, so its plants and
+                    // trees would land on this tile's water and under its trunks. Wetland
+                    // puddles are positional, so halo cells still record them, and the
+                    // ring and cane around a puddle just across the seam come out whole.
+                    if !editor.owns(x, z) {
+                        if natural_type == "wetland"
+                            && wetland_puddle_cell(element.tags(), x, z)
+                            && try_place_wetland_puddle(editor, x, z)
+                        {
+                            wetland_puddles.push((x, z));
+                        }
+                        continue;
+                    }
                     match natural_type.as_str() {
                         "grassland" => {
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
@@ -336,13 +350,12 @@ pub fn generate_natural(
                                     Some(bridge_surface),
                                 );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Meadow,
+                                );
                             } else if random_choice < 40 {
                                 editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                                 if random_choice < 15 {
@@ -378,13 +391,12 @@ pub fn generate_natural(
                                     false,
                                 );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Forest,
+                                );
                             } else if random_choice <= 12 {
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
@@ -423,7 +435,7 @@ pub fn generate_natural(
                             }
                             // Positional wet/dry mosaic; puddle cells take water and skip vegetation
                             let wet = wetland_wet_zone(x, z);
-                            if wet && wetland_puddle_noise(x, z) {
+                            if wetland_puddle_cell(element.tags(), x, z) {
                                 if try_place_wetland_puddle(editor, x, z) {
                                     wetland_puddles.push((x, z));
                                 }
@@ -657,13 +669,12 @@ pub fn generate_natural(
                                 );
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Meadow,
+                                );
                             } else if hill_chance < 600 {
                                 // 55% chance for grass
                                 editor.set_block(GRASS, x, 1, z, None, None);
@@ -735,7 +746,7 @@ pub fn generate_natural(
                     for &(px, pz) in &wetland_puddles {
                         for &(dx, dz) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                             let (nx, nz) = (px + dx, pz + dz);
-                            if !area.contains(nx, nz) {
+                            if !area.contains(nx, nz) || !editor.owns(nx, nz) {
                                 continue;
                             }
                             if crate::land_cover::coord_hash(
@@ -840,6 +851,15 @@ fn vary_rock_block(base: Block, x: i32, z: i32) -> Block {
 }
 
 // Wet/dry mosaic gate for wetland cells, positional so it is seam-safe
+/// A cell of a water-bearing wetland that holds a puddle; positional, so every
+/// tile reaching the cell agrees.
+fn wetland_puddle_cell(tags: &std::collections::HashMap<String, String>, x: i32, z: i32) -> bool {
+    let wetland_type = tags.get("wetland").map(String::as_str).unwrap_or("");
+    !matches!(wetland_type, "wet_meadow" | "fen" | "tidalflat")
+        && wetland_wet_zone(x, z)
+        && wetland_puddle_noise(x, z)
+}
+
 fn wetland_wet_zone(x: i32, z: i32) -> bool {
     crate::ground_generation::value_noise_01(x + 11, z + 7, 28) > 0.55
 }

@@ -849,6 +849,66 @@ impl Ground {
         (raw as f64 * correction).round() as i32
     }
 
+    /// `slope` from unrounded heights. Same units, but without the jitter of
+    /// whole-block steps, which flips columns along a contour between the
+    /// material tiers and draws stripes on hillsides.
+    pub fn slope_exact(&self, coord: XZPoint) -> f64 {
+        if !self.elevation_enabled {
+            return 0.0;
+        }
+
+        const STEP: i32 = 4;
+        let samples = [
+            self.level_exact(XZPoint::new(coord.x + STEP, coord.z)),
+            self.level_exact(XZPoint::new(coord.x - STEP, coord.z)),
+            self.level_exact(XZPoint::new(coord.x, coord.z - STEP)),
+            self.level_exact(XZPoint::new(coord.x, coord.z + STEP)),
+        ];
+        let max_val = samples.iter().copied().fold(f64::MIN, f64::max);
+        let min_val = samples.iter().copied().fold(f64::MAX, f64::min);
+        let raw = max_val - min_val;
+        (raw * self.slope_units(((min_val + max_val) * 0.5).round() as i32)).max(0.0)
+    }
+
+    /// How far the ground sits below its surroundings: the mean height eight
+    /// blocks out minus the column's own, from unrounded heights, in `slope`
+    /// units. Positive in hollows and gullies, negative on ridges and knolls.
+    pub fn convexity(&self, coord: XZPoint) -> f64 {
+        if !self.elevation_enabled {
+            return 0.0;
+        }
+
+        const RADIUS: i32 = 8;
+        const DIAGONAL: i32 = 6;
+        let ring = [
+            (RADIUS, 0),
+            (-RADIUS, 0),
+            (0, RADIUS),
+            (0, -RADIUS),
+            (DIAGONAL, DIAGONAL),
+            (DIAGONAL, -DIAGONAL),
+            (-DIAGONAL, DIAGONAL),
+            (-DIAGONAL, -DIAGONAL),
+        ];
+        let center = self.level_exact(coord);
+        let mean = ring
+            .iter()
+            .map(|&(dx, dz)| self.level_exact(XZPoint::new(coord.x + dx, coord.z + dz)))
+            .sum::<f64>()
+            / ring.len() as f64;
+        // Slope units count the rise over four blocks, the ring sits twice as far.
+        (mean - center) * 0.5 * self.slope_units(center.round() as i32)
+    }
+
+    /// Converts a block-space height difference into the `8 * tan(incline)`
+    /// units the slope thresholds are written in.
+    fn slope_units(&self, y: i32) -> f64 {
+        match &self.elevation_data {
+            Some(d) => d.slope_correction * d.soft_top_stretch(y),
+            None => 1.0,
+        }
+    }
+
     pub fn elevation_affine(&self) -> Option<ElevationAffine> {
         if !self.elevation_enabled {
             return None;
@@ -876,6 +936,18 @@ impl Ground {
         let data: &ElevationData = self.elevation_data.as_ref().unwrap();
         let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
         self.interpolate_height(x_ratio, z_ratio, data)
+    }
+
+    /// `level` before rounding to a whole block.
+    #[inline(always)]
+    pub fn level_exact(&self, coord: XZPoint) -> f64 {
+        match &self.elevation_data {
+            Some(data) if self.elevation_enabled => {
+                let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
+                Self::interpolate_height_exact(x_ratio, z_ratio, data)
+            }
+            _ => f64::from(self.ground_level),
+        }
     }
 
     /// Returns the appropriate Y level for water placement.
@@ -958,6 +1030,11 @@ impl Ground {
     /// Bilinearly interpolates height value from the elevation grid
     #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
+        Self::interpolate_height_exact(x_ratio, z_ratio, data).round() as i32
+    }
+
+    #[inline(always)]
+    fn interpolate_height_exact(x_ratio: f64, z_ratio: f64, data: &ElevationData) -> f64 {
         let fx = x_ratio * (data.width - 1) as f64;
         let fz = z_ratio * (data.height - 1) as f64;
         let x0 = fx.floor() as usize;
@@ -979,8 +1056,7 @@ impl Ground {
         let v11 = data.heights[z1][x1] as f64;
         let lerp_top = v00 + (v10 - v00) * dx;
         let lerp_bot = v01 + (v11 - v01) * dx;
-        let result = lerp_top + (lerp_bot - lerp_top) * dz;
-        result.round() as i32
+        lerp_top + (lerp_bot - lerp_top) * dz
     }
 
     /// Replace the elevation grid with new rotated/transformed data.

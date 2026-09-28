@@ -173,8 +173,11 @@ pub fn generate_landuse(
         }
 
         // Nothing is scattered on land-cover water: the depth carve turns these
-        // cells into lake after this runs, leaving plants floating on top.
-        if editor.is_lc_water(x, z) {
+        // cells into lake after this runs, leaving plants floating on top. And
+        // only this tile's own cells get plants and trees: a neighbouring tile's
+        // halo copy draws its own random sequence, so its plants and trees would
+        // land on this tile's water and under its trunks.
+        if editor.is_lc_water(x, z) || !editor.owns(x, z) {
             continue;
         }
 
@@ -223,15 +226,16 @@ pub fn generate_landuse(
                 } else {
                     let random_choice: i32 = rng.random_range(0..30);
                     if random_choice == 2 {
-                        let flower_block: Block = match rng.random_range(1..=6) {
-                            1 => OAK_LEAVES,
-                            2 => RED_FLOWER,
-                            3 => BLUE_FLOWER,
-                            4 => YELLOW_FLOWER,
-                            5 => FERN,
-                            _ => WHITE_FLOWER,
-                        };
-                        editor.set_block(flower_block, x, 1, z, None, None);
+                        match rng.random_range(1..=6) {
+                            1 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                            5 => editor.set_block(FERN, x, 1, z, None, None),
+                            _ => crate::ground_decoration::place_scattered_flower(
+                                editor,
+                                x,
+                                z,
+                                crate::ground_decoration::FlowerSetting::Forest,
+                            ),
+                        }
                     } else if random_choice <= 12 {
                         if rng.random_range(0..100) < 12 {
                             editor.set_block(FERN, x, 1, z, None, None);
@@ -358,7 +362,12 @@ pub fn generate_landuse(
                         Some(bridge_surface),
                     );
                 } else if random_choice < 6 {
-                    editor.set_block(RED_FLOWER, x, 1, z, None, None);
+                    crate::ground_decoration::place_scattered_flower(
+                        editor,
+                        x,
+                        z,
+                        crate::ground_decoration::FlowerSetting::Meadow,
+                    );
                 } else if random_choice < 9 {
                     editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                 } else if random_choice < 40 {

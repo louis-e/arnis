@@ -110,7 +110,21 @@ fn is_passable_cover(name: &str) -> bool {
             | "poppy"
             | "blue_orchid"
             | "azure_bluet"
+            | "cornflower"
+            | "oxeye_daisy"
+            | "allium"
+            | "lily_of_the_valley"
+            | "sweet_berry_bush"
+            | "sunflower"
+            | "lilac"
+            | "rose_bush"
+            | "peony"
+            | "brown_mushroom"
+            | "red_mushroom"
+            | "sugar_cane"
+            | "lily_pad"
     ) || name.ends_with("_carpet")
+        || name.ends_with("_tulip")
 }
 
 /// Quotes `s` as a JSON string literal for a sign text component.
@@ -601,6 +615,7 @@ impl<'a> WorldEditor<'a> {
 
     /// True if this editor is the single owner of (x, z): always for the main editor, and
     /// inside the strict tile bounds for a tile editor.
+    #[inline]
     pub fn owns(&self, x: i32, z: i32) -> bool {
         match self.strict_bounds {
             None => true,
@@ -1970,6 +1985,12 @@ impl<'a> WorldEditor<'a> {
         if self.is_region_flushed(x, z) {
             return;
         }
+        // A tile's halo repeats what the owning tile draws there, and the merge lets
+        // it in wherever the owner left air: on its water, under its trunks. The owner
+        // draws its own undergrowth, so the halo keeps none.
+        if !self.owns(x, z) && crate::ground_decoration::is_undergrowth(block_with_props.block) {
+            return;
+        }
 
         // None/None is the dominant pattern; skip the redundant get_block() read.
         if override_whitelist.is_none() && override_blacklist.is_none() {
@@ -2883,6 +2904,33 @@ mod eviction_guard_tests {
         }
         assert_eq!(uuids.len(), 2);
         assert_ne!(uuids[0], uuids[1], "same cell, different face, same UUID");
+    }
+
+    /// The owning tile draws its own undergrowth; a halo copy would land on its
+    /// water and under its trunks. Wood, leaves and ground still pass.
+    #[test]
+    fn a_tile_halo_keeps_no_undergrowth() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_strict_bounds(0, 0, 31, 63);
+        for (x, block) in [
+            (10, GRASS),
+            (40, GRASS),
+            (41, CORNFLOWER),
+            (42, OAK_LOG),
+            (43, OAK_LEAVES),
+        ] {
+            editor.set_block_absolute(block, x, 1, 10, None, None);
+        }
+        assert!(
+            editor.block_exists_absolute(10, 1, 10),
+            "owned undergrowth stays"
+        );
+        assert!(!editor.block_exists_absolute(40, 1, 10));
+        assert!(!editor.block_exists_absolute(41, 1, 10));
+        assert!(editor.block_exists_absolute(42, 1, 10), "halo wood passes");
+        assert!(editor.block_exists_absolute(43, 1, 10), "halo leaves pass");
     }
 
     #[test]

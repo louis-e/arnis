@@ -177,8 +177,7 @@ pub fn compute_grid_dims_for_world(
 
 /// Fetch elevation data for the given bounding box.
 ///
-/// Selects the best provider for the region, with a fetch-time fallback
-/// chain: regional provider, then Mapterhorn, then AWS Terrain Tiles.
+/// Fetches from Mapterhorn, falling back to AWS Terrain Tiles if it fails.
 ///
 /// If `land_cover` is provided, applies land-cover-aware artifact repair
 /// (water leveling, built-up smoothing) before scaling. This fixes LiDAR
@@ -207,16 +206,11 @@ pub fn fetch_elevation_data(
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = dims;
 
-    // Fallback chain: selected provider, then Mapterhorn, then AWS.
+    // Fallback chain: Mapterhorn, then AWS if it fails outright.
     let provider = select_provider(bbox, source_mode);
     let mut chain: Vec<Box<dyn ElevationProvider>> = vec![provider];
-    if source_mode.allows_earth_fallback() {
-        if chain[0].name() != "mapterhorn" && chain[0].name() != "aws" {
-            chain.push(Box::new(providers::mapterhorn::Mapterhorn));
-        }
-        if chain[0].name() != "aws" {
-            chain.push(Box::new(providers::aws_terrain::AwsTerrain));
-        }
+    if source_mode.allows_earth_fallback() && chain[0].name() != "aws" {
+        chain.push(Box::new(providers::aws_terrain::AwsTerrain));
     }
 
     emit_gui_progress_update(10.0, "Downloading data...");
