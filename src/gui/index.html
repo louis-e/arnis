@@ -505,6 +505,23 @@
               </header>
 
               <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide">
+                  <label for="height-multiplier-slider" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-mountain"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="height_multiplier">Terrain Height</span>
+                        <span class="tooltip-icon" data-tooltip="Stretches the terrain vertically; buildings and trees keep their size. Relief that would pass the build height is compressed to fit, so turn on Extend build height for high values in the mountains.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="height_multiplier_desc">1.00 is real height. Higher values make hills and mountains taller.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="range" id="height-multiplier-slider" name="height-multiplier-slider" min="0.25" max="4" step="0.05" value="1">
+                    <span id="height-multiplier-value" class="setting-value">1.00&times;</span>
+                  </div>
+                </div>
+
                 <div class="settings-row setting-tile">
                   <label for="fillground-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-pickaxe"></use></svg>

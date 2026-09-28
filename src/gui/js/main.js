@@ -1210,6 +1210,19 @@ function initSettings() {
   });
   refreshScaleDisplay();
 
+  const heightSlider = document.getElementById("height-multiplier-slider");
+  const heightValue = document.getElementById("height-multiplier-value");
+  const refreshHeightDisplay = () => {
+    heightValue.textContent = parseFloat(heightSlider.value).toFixed(2) + "\u00d7";
+  };
+  heightSlider.addEventListener("input", refreshHeightDisplay);
+  heightSlider.addEventListener("dblclick", () => {
+    heightSlider.value = 1;
+    heightSlider.dispatchEvent(new Event("input", { bubbles: true }));
+    heightSlider.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  refreshHeightDisplay();
+
   // Game mode segmented control
   const gamemodeGroup = document.getElementById("gamemode-group");
   gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
@@ -3006,6 +3019,7 @@ function pinControl(id, value) {
 
 function restoreNaturalRows() {
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('height-multiplier-slider', true);
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('voxy-lod-toggle', true);
   setSettingsRowAvailable('disable-height-limit-toggle', true);
@@ -3025,6 +3039,8 @@ function applyOneWorldPins(info) {
 
   const exists = !!(info && info.exists);
   pinControl('scale-value-slider', exists && typeof info.scale === 'number' ? info.scale : null);
+  pinControl('height-multiplier-slider',
+    exists && typeof info.height_multiplier === 'number' ? info.height_multiplier : null);
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
@@ -3032,6 +3048,7 @@ function applyOneWorldPins(info) {
   setSettingsRowAvailable('disable-height-limit-toggle', false);
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false);
+    setSettingsRowAvailable('height-multiplier-slider', false);
     setSettingsRowAvailable('aws-only-elevation-toggle', false);
   }
 }
@@ -3040,6 +3057,7 @@ function releaseOneWorldPins() {
   if (!oneWorldPinned) return;
   oneWorldPinned = false;
   pinControl('scale-value-slider', null);
+  pinControl('height-multiplier-slider', null);
   pinControl('disable-height-limit-toggle', null);
   setSettingsRowAvailable('rotation-angle-input', true);
   restoreNaturalRows();
@@ -3364,8 +3382,10 @@ async function startGeneration() {
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    var heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
     if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
       if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
+      if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
       if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
     } else if (oneWorld) {
       disable_height_limit = true;
@@ -3401,6 +3421,7 @@ async function startGeneration() {
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
         worldScale: scale,
+        heightMultiplier: heightMultiplier,
         groundLevel: ground_level,
         terrainEnabled: terrain,
         skipOsmObjects: skipOsmObjects,

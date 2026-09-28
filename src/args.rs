@@ -43,6 +43,12 @@ pub struct Args {
     #[arg(long, default_value_t = 1.0, allow_hyphen_values = true, value_parser = parse_scale)]
     pub scale: f64,
 
+    /// Multiplies terrain height: 2.0 makes hills twice as tall, 0.5 half as tall.
+    /// Buildings and trees keep their size. Relief that no longer fits the build
+    /// height is compressed to fit, as it is at 1.0.
+    #[arg(long, default_value_t = 1.0, value_parser = parse_height_multiplier)]
+    pub height_multiplier: f64,
+
     /// Celestial body to generate. moon and mars use NASA PDS elevation at a fixed
     /// low scale and have no OSM data, so every object option is ignored.
     #[arg(long, value_enum, default_value_t = crate::celestial::CelestialBody::Earth)]
@@ -460,6 +466,27 @@ pub fn validate_scale(scale: f64) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Range of `--height-multiplier`. Past 10 even a gentle hill outgrows vanilla build height.
+pub const MIN_HEIGHT_MULTIPLIER: f64 = 0.1;
+pub const MAX_HEIGHT_MULTIPLIER: f64 = 10.0;
+
+pub fn validate_height_multiplier(multiplier: f64) -> Result<(), String> {
+    if !(MIN_HEIGHT_MULTIPLIER..=MAX_HEIGHT_MULTIPLIER).contains(&multiplier) {
+        return Err(format!(
+            "Terrain height multiplier must be between {MIN_HEIGHT_MULTIPLIER} and {MAX_HEIGHT_MULTIPLIER} (got {multiplier})."
+        ));
+    }
+    Ok(())
+}
+
+fn parse_height_multiplier(arg: &str) -> Result<f64, String> {
+    let multiplier: f64 = arg
+        .parse()
+        .map_err(|_| format!("`{arg}` is not a number"))?;
+    validate_height_multiplier(multiplier)?;
+    Ok(multiplier)
 }
 
 fn parse_scale(arg: &str) -> Result<f64, String> {
@@ -998,6 +1025,29 @@ mod tests {
         assert!(validate_args(&parse(&["--projection", "local"])).is_ok());
         assert!(validate_args(&parse(&["--projection", "web_mercator"])).is_ok());
         assert!(validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_ok());
+    }
+
+    #[test]
+    fn height_multiplier_defaults_to_real_height_and_is_bounded() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::try_parse_from(cmd.iter())
+        };
+
+        assert_eq!(parse(&[]).unwrap().height_multiplier, 1.0);
+        assert_eq!(
+            parse(&["--height-multiplier", "2.5"])
+                .unwrap()
+                .height_multiplier,
+            2.5
+        );
+        for bad in ["0", "0.05", "11", "NaN", "inf", "tall"] {
+            assert!(
+                parse(&["--height-multiplier", bad]).is_err(),
+                "accepted {bad}"
+            );
+        }
     }
 
     #[test]

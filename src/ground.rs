@@ -381,6 +381,7 @@ impl Ground {
     pub fn new_enabled(
         bbox: &LLBBox,
         scale: f64,
+        height_multiplier: f64,
         ground_level: i32,
         min_ground_level: i32,
         disable_height_limit: bool,
@@ -444,6 +445,7 @@ impl Ground {
             match fetch_elevation_data(
                 bbox,
                 scale,
+                height_multiplier,
                 water_floor,
                 sink_floor,
                 disable_height_limit,
@@ -1212,6 +1214,7 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         let ground = Ground::new_enabled(
             &bbox,
             args.scale,
+            args.height_multiplier,
             args.ground_level,
             min_ground_level_for(args),
             args.disable_height_limit,

@@ -1056,6 +1056,7 @@ struct OneWorldInfo {
     locked: bool,
     area_count: usize,
     scale: Option<f64>,
+    height_multiplier: Option<f64>,
     terrain: Option<bool>,
     disable_height_limit: Option<bool>,
     aws_only_elevation: Option<bool>,
@@ -1085,6 +1086,7 @@ fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldI
         locked: manifest.is_some() && crate::world_utils::world_is_locked(&world_path),
         area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
         scale: manifest.as_ref().map(|m| m.scale),
+        height_multiplier: manifest.as_ref().map(|m| m.height_multiplier),
         terrain: manifest.as_ref().map(|m| m.terrain),
         disable_height_limit: manifest.as_ref().map(|m| m.disable_height_limit),
         aws_only_elevation: manifest.as_ref().map(|m| m.aws_only_elevation),
@@ -1392,6 +1394,7 @@ fn gui_start_generation(
     bedrock_save_path: String,
     luanti_save_path: String,
     world_scale: f64,
+    height_multiplier: f64,
     ground_level: i32,
     terrain_enabled: bool,
     skip_osm_objects: bool,
@@ -1466,6 +1469,10 @@ fn gui_start_generation(
             emit_gui_error(&e);
             return Err(e);
         }
+    }
+    if let Err(e) = crate::args::validate_height_multiplier(height_multiplier) {
+        emit_gui_error(&e);
+        return Err(e);
     }
 
     // Store telemetry consent for crash reporting
@@ -1706,6 +1713,7 @@ fn gui_start_generation(
                 luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                height_multiplier,
                 projection: crate::projection::ProjectionKind::Local,
                 one_world: false,
                 world_name: None,

@@ -99,6 +99,7 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
     let elevation = fetch_elevation_data(
         &bbox,
         preview_scale,
+        1.0,
         0,
         0,
         false,
