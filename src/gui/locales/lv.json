@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Velciet pār karti, lai izvēlētos, ko ģenerēt.",
   "map_tool_rotation": "Rotācijas leņķis",
   "map_tool_rotation_desc": "Novelciet līniju gar ielu, lai pasauli izlīdzinātu ar to.",
+  "map_tool_rotation_one_world": "Izslēgts Vienas pasaules režīmā.",
   "map_tool_spawn": "Rašanās punkts",
   "map_tool_spawn_desc": "Noklikšķiniet, kur spēlētāji sāk pasaulē.",
   "map_tool_clear": "Notīrīt atlasi",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Zemes segums",
   "preview3d_buildings": "Ēkas",
   "preview3d_controls_hint": "Velciet, lai pārvietotu · velciet ar labo pogu, lai pagrieztu un sasvērtu",
-  "preview3d_buildings_too_large": "Apgabals ir pārāk liels ēku slānim (maks. 10 km²)"
+  "preview3d_buildings_too_large": "Apgabals ir pārāk liels ēku slānim (maks. 10 km²)",
+  "one_world": "Viena pasaule",
+  "one_world_desc": "Katrs apgabals pievienojas vienai augošai pasaulei savā īstajā vietā. Tikai Java.",
+  "one_world_will_create": "Tiks izveidota viena pasaule “{name}”",
+  "one_world_areas": "Viena pasaule “{name}” · Apgabali: {count}",
+  "one_world_locked": "atvērta Minecraft",
+  "one_world_foreign": "Mape “{name}” pastāv, bet nav viena pasaule",
+  "one_world_needs_terrain": "šī pasaule izmanto reljefu",
+  "one_world_needs_flat": "šī pasaule ir līdzena (tikai objekti)",
+  "one_world_no_save_path": "Vispirms iestatījumos norādiet Minecraft saglabājumu mapi",
+  "one_world_confirm_title": "Aizstāt esošos chunkus?",
+  "one_world_confirm_text": "{count} šī apgabala chunki pasaulē jau ir. Tie tiek ģenerēti no jauna, un viss, kas tur uzbūvēts Minecraft, tiek aizstāts.",
+  "one_world_confirm_cancel": "Atcelt",
+  "one_world_confirm_ok": "Ģenerēt"
 }

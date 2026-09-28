@@ -37,6 +37,7 @@
     <symbol id="i-pickaxe" viewBox="0 0 24 24"><path d="M9 4.5Q18.5 4 19.5 15"/><path d="M15.5 8.5 4 20"/></symbol>
     <symbol id="i-brick-wall" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 9v6"/><path d="M16 15v6"/><path d="M16 3v6"/><path d="M3 15h18"/><path d="M3 9h18"/><path d="M8 15v6"/><path d="M8 3v6"/></symbol>
     <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></symbol>
+    <symbol id="i-map-plus" viewBox="0 0 24 24"><path d="m11 19-1.106-.552a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0l4.212 2.106a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619V12"/><path d="M15 5.764V12"/><path d="M18 15v6"/><path d="M21 18h-6"/><path d="M9 3.236v15"/></symbol>
     <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
@@ -133,6 +134,8 @@
                   Luanti
                 </button>
               </div>
+              <!-- One World: which persistent world the next area joins (hidden unless the mode is on) -->
+              <div id="one-world-status" class="one-world-status" style="display: none;" aria-live="polite"></div>
             </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
 
@@ -339,6 +342,22 @@
                   </label>
                   <div class="settings-control">
                     <input type="checkbox" class="switch" id="custom-world-name-toggle" name="custom-world-name-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile is-wide">
+                  <label for="one-world-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map-plus"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="one_world">One World</span>
+                        <span class="tooltip-icon" data-tooltip="Generate every area into one persistent world that grows with each generation (Java, Earth). Areas share one map frame and join seamlessly. The first area fixes scale, terrain, build height and elevation source; rotation, the Voxy LOD cache and facade photo panels are off. With Custom World Name on, the pencil picks the world, otherwise it is 'Arnis One World'.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="one_world_desc">Each area joins one growing world at its real position. Java only.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="one-world-toggle" name="one-world-toggle">
                   </div>
                 </div>
               </div>
@@ -1098,6 +1117,27 @@
         <footer class="dialog-footer">
           <button type="button" class="dialog-button" onclick="rejectTelemetry()">No thanks</button>
           <button type="button" class="dialog-button is-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- One World: asks before chunks already in the world are generated again -->
+    <div id="one-world-confirm-modal" class="modal" style="display: none;">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="one-world-confirm-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="one-world-confirm-title" data-localize="one_world_confirm_title">Replace existing chunks?</h2>
+          </div>
+          <button type="button" class="dialog-close" id="one-world-confirm-close" aria-label="Close" title="Close (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="dialog-body">
+          <p id="one-world-confirm-text"></p>
+        </div>
+        <footer class="dialog-footer">
+          <button type="button" class="dialog-button" id="one-world-confirm-cancel" data-localize="one_world_confirm_cancel">Cancel</button>
+          <button type="button" class="dialog-button is-primary" id="one-world-confirm-ok" data-localize="one_world_confirm_ok">Generate</button>
         </footer>
       </div>
     </div>

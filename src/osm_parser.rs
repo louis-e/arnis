@@ -1,7 +1,6 @@
 use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
@@ -813,12 +812,29 @@ pub fn arch_era_from_hint(hint: StyleHint) -> ArchEra {
     }
 }
 
+fn way_touches_rect(nodes: &[ProcessedNode], rect: &XZBBox) -> bool {
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_z = i32::MAX;
+    let mut max_z = i32::MIN;
+    for n in nodes {
+        min_x = min_x.min(n.x);
+        max_x = max_x.max(n.x);
+        min_z = min_z.min(n.z);
+        max_z = max_z.max(n.z);
+    }
+    !nodes.is_empty()
+        && max_x >= rect.min_x()
+        && min_x <= rect.max_x()
+        && max_z >= rect.min_z()
+        && min_z <= rect.max_z()
+}
+
 pub fn parse_osm_data(
     osm_data: OsmData,
     bbox: LLBBox,
-    scale: f64,
     debug: bool,
-    projection: crate::projection::ProjectionKind,
+    projection: &crate::projection::ProjectionSpec,
 ) -> (
     Vec<ProcessedElement>,
     XZBBox,
@@ -831,22 +847,18 @@ pub fn parse_osm_data(
     // Deserialize the JSON data into the OSMData structure
     let data = SplitOsmData::from_raw_osm_data(osm_data);
 
-    let (coord_transformer, xzbbox) = match projection {
-        crate::projection::ProjectionKind::WebMercator => {
-            let origin_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-            let origin_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-            let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, scale);
-            CoordTransformer::with_projection(&bbox, scale, &proj)
-        }
-        crate::projection::ProjectionKind::Local => {
-            CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
-        }
-    }
-    // Panics rather than exits: the GUI calls this from a Tauri blocking task, where an
-    // exit would take the whole app down. Bad scales are rejected up front by validate_scale.
-    .unwrap_or_else(|e| {
-        panic!("Error in defining coordinate transformation:\n{e}");
-    });
+    let (coord_transformer, xzbbox) = projection
+        .transformer(&bbox)
+        // Panics rather than exits: the GUI calls this from a Tauri blocking task, where an
+        // exit would take the whole app down. Bad scales are rejected up front by validate_scale.
+        .unwrap_or_else(|e| {
+            panic!("Error in defining coordinate transformation:\n{e}");
+        });
+    // Ways lying only in the clip margin cannot put a block into the world.
+    let clip_bbox = projection.clip_bbox(&xzbbox);
+    let touches_world = |nodes: &[ProcessedNode]| -> bool {
+        projection.clip_pad <= 0 || way_touches_rect(nodes, &xzbbox)
+    };
 
     if debug {
         println!("Total elements: {}", data.total_count());
@@ -970,10 +982,10 @@ pub fn parse_osm_data(
         ways_map.insert(element.id, Arc::clone(&way));
 
         // Clip way nodes for standalone way processing (not relations)
-        let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+        let clipped_nodes = clip_way_to_bbox(&way.nodes, &clip_bbox);
 
         // Skip ways that are completely outside the bbox (empty after clipping)
-        if clipped_nodes.is_empty() {
+        if clipped_nodes.is_empty() || !touches_world(&clipped_nodes) {
             continue;
         }
 
@@ -1077,7 +1089,7 @@ pub fn parse_osm_data(
                 let final_way = if keep_unclipped {
                     way
                 } else {
-                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &clip_bbox);
                     if clipped_nodes.is_empty() {
                         return None;
                     }

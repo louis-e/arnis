@@ -177,6 +177,7 @@
   "map_tool_area_desc": "Vedä kartan yli valitaksesi, mitä generoidaan.",
   "map_tool_rotation": "Kiertokulma",
   "map_tool_rotation_desc": "Piirrä viiva kadun suuntaisesti kohdistaaksesi maailman siihen.",
+  "map_tool_rotation_one_world": "Pois käytöstä Yksi maailma -tilassa.",
   "map_tool_spawn": "Syntymäpiste",
   "map_tool_spawn_desc": "Napsauta kohtaa, josta pelaajat aloittavat maailmassa.",
   "map_tool_clear": "Tyhjennä valinta",
@@ -199,5 +200,18 @@
   "preview3d_land_cover": "Maanpeite",
   "preview3d_buildings": "Rakennukset",
   "preview3d_controls_hint": "Vedä siirtääksesi · vedä hiiren oikealla kääntääksesi ja kallistaaksesi",
-  "preview3d_buildings_too_large": "Alue on liian suuri rakennuskerrokselle (enintään 10 km²)"
+  "preview3d_buildings_too_large": "Alue on liian suuri rakennuskerrokselle (enintään 10 km²)",
+  "one_world": "Yksi maailma",
+  "one_world_desc": "Jokainen alue liitetään yhteen kasvavaan maailmaan oikealle paikalleen. Vain Java.",
+  "one_world_will_create": "Yksi maailma ”{name}” luodaan",
+  "one_world_areas": "Yksi maailma ”{name}” · Alueita: {count}",
+  "one_world_locked": "avoinna Minecraftissa",
+  "one_world_foreign": "Kansio ”{name}” on olemassa, mutta se ei ole yksi maailma",
+  "one_world_needs_terrain": "tämä maailma käyttää maastoa",
+  "one_world_needs_flat": "tämä maailma on tasainen (vain objektit)",
+  "one_world_no_save_path": "Määritä ensin Minecraftin tallennuskansio asetuksissa",
+  "one_world_confirm_title": "Korvataanko olemassa olevat chunkit?",
+  "one_world_confirm_text": "Tämän alueen {count} chunkia on jo maailmassa. Ne luodaan uudelleen, ja kaikki mitä niihin on Minecraftissa rakennettu korvataan.",
+  "one_world_confirm_cancel": "Peruuta",
+  "one_world_confirm_ok": "Luo"
 }

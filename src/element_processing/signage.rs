@@ -702,6 +702,7 @@ pub fn build_context(
     args: &Args,
     llbbox: LLBBox,
     xzbbox: &XZBBox,
+    first_map_id: i32,
 ) -> Option<SignageContext> {
     let level = args.signage;
     if !level.enabled() {
@@ -729,7 +730,7 @@ pub fn build_context(
     }
 
     Some(SignageContext {
-        registry: DecalRegistry::from_keys(keys),
+        registry: DecalRegistry::from_keys_starting_at(keys, first_map_id),
         level,
         region,
         intersections,

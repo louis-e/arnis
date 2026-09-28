@@ -215,6 +215,7 @@ dependencies = [
  "indicatif",
  "itertools 0.15.0",
  "jsonwebtoken 11.0.0",
+ "libc",
  "log",
  "mimalloc",
  "nbtx",
