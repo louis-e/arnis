@@ -74,6 +74,70 @@ pub const LC_MANGROVES: u8 = 95;
 /// Moss and lichen (falls through to default grass in surface selection)
 #[allow(dead_code)]
 pub const LC_MOSS: u8 = 100;
+/// Bare ground at the water's edge: a sand or shingle beach where bare ground elsewhere is
+/// rock and scree. Synthetic, never read from ESA; set by [`mark_beaches`].
+pub const LC_BEACH: u8 = 61;
+
+/// How far from the water bare ground still counts as beach.
+const BEACH_REACH_M: f64 = 50.0;
+
+/// Turns bare cells that reach water through bare ground within [`BEACH_REACH_M`] into
+/// [`LC_BEACH`]. ESA classifies a sand beach as bare/sparse like any rock outcrop, so an
+/// unmapped beach used to render as stone, andesite and gravel with dead bushes on it. Runs
+/// once, after every pass that moves the water, in place: the BFS frontier is all it holds.
+pub fn mark_beaches(lc: &mut LandCoverData) {
+    let (width, height) = (lc.width, lc.height);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let reach = (BEACH_REACH_M * lc.cells_per_meter)
+        .round()
+        .clamp(1.0, 255.0) as u32;
+    let grid = &mut lc.grid;
+
+    let mut frontier: Vec<(u32, u32)> = Vec::new();
+    for z in 0..height {
+        for x in 0..width {
+            if grid[z][x] != LC_BARE {
+                continue;
+            }
+            let touches_water = (x > 0 && grid[z][x - 1] == LC_WATER)
+                || (x + 1 < width && grid[z][x + 1] == LC_WATER)
+                || (z > 0 && grid[z - 1][x] == LC_WATER)
+                || (z + 1 < height && grid[z + 1][x] == LC_WATER);
+            if touches_water {
+                frontier.push((x as u32, z as u32));
+            }
+        }
+    }
+    for &(x, z) in &frontier {
+        grid[z as usize][x as usize] = LC_BEACH;
+    }
+
+    let mut next: Vec<(u32, u32)> = Vec::new();
+    for _ in 1..reach {
+        if frontier.is_empty() {
+            break;
+        }
+        for &(x, z) in &frontier {
+            let (x, z) = (x as usize, z as usize);
+            let candidates = [
+                (x.wrapping_sub(1), z),
+                (x + 1, z),
+                (x, z.wrapping_sub(1)),
+                (x, z + 1),
+            ];
+            for (nx, nz) in candidates {
+                if nx < width && nz < height && grid[nz][nx] == LC_BARE {
+                    grid[nz][nx] = LC_BEACH;
+                    next.push((nx as u32, nz as u32));
+                }
+            }
+        }
+        std::mem::swap(&mut frontier, &mut next);
+        next.clear();
+    }
+}
 
 // ─── Data structures ──────────────────────────────────────────────────────
 
@@ -1501,5 +1565,63 @@ mod smoothing_scale_tests {
             corner_cut_area_m2(400, 0.1) > 0.0,
             "a coarse grid must still round the corners"
         );
+    }
+
+    fn lc_from_rows(rows: &[&str], cells_per_meter: f64) -> LandCoverData {
+        let grid: Vec<Vec<u8>> = rows
+            .iter()
+            .map(|r| {
+                r.chars()
+                    .map(|c| match c {
+                        'w' => LC_WATER,
+                        'b' => LC_BARE,
+                        _ => LC_GRASSLAND,
+                    })
+                    .collect()
+            })
+            .collect();
+        let (width, height) = (grid[0].len(), grid.len());
+        LandCoverData {
+            water_distance: compute_water_distance(&grid, width, height),
+            grid,
+            water_blend_cache: OnceCell::new(),
+            width,
+            height,
+            cells_per_meter,
+        }
+    }
+
+    #[test]
+    fn bare_ground_at_the_water_becomes_beach_within_reach() {
+        // 10 m cells, so the 50 m reach is five cells into the bare strip.
+        let mut lc = lc_from_rows(
+            &["wwbbbbbbbbg", "wwbbbbbbbbg", "wwgbbbbbbbg", "ggggggggbbb"],
+            0.1,
+        );
+        mark_beaches(&mut lc);
+        let row = |z: usize| -> String {
+            lc.grid[z]
+                .iter()
+                .map(|&c| match c {
+                    LC_WATER => 'w',
+                    LC_BEACH => 's',
+                    LC_BARE => 'b',
+                    _ => 'g',
+                })
+                .collect()
+        };
+        assert_eq!(row(0), "wwsssssbbbg");
+        assert_eq!(row(1), "wwsssssbbbg");
+        // Reached around the grass cell, through bare ground only, so a step further out.
+        assert_eq!(row(2), "wwgsssbbbbg");
+        // Bare ground cut off from the water by grass stays bare.
+        assert_eq!(row(3), "ggggggggbbb");
+    }
+
+    #[test]
+    fn beaches_leave_a_world_without_water_alone() {
+        let mut lc = lc_from_rows(&["bbbb", "gggg"], 1.0);
+        mark_beaches(&mut lc);
+        assert!(lc.grid[0].iter().all(|&c| c == LC_BARE));
     }
 }

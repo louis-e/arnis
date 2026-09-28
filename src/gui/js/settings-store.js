@@ -26,6 +26,7 @@ const SETTINGS = [
   { id: 'overture-toggle', kind: 'checkbox', store: OWN },
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
   { id: 'interior-toggle', kind: 'checkbox', store: OWN },
+  { id: 'height-multiplier-slider', kind: 'number', store: OWN },
   { id: 'fillground-toggle', kind: 'checkbox', store: OWN },
   { id: 'caves-toggle', kind: 'checkbox', store: OWN },
   { id: 'canopy-height-toggle', kind: 'checkbox', store: OWN },
@@ -35,6 +36,7 @@ const SETTINGS = [
   // World
   { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
+  { id: 'world-type-group', kind: 'segmented', store: OWN, valueAttr: 'data-world-type' },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   { id: 'one-world-toggle', kind: 'checkbox', store: OWN },

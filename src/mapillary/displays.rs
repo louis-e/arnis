@@ -80,9 +80,17 @@ pub const MAX_PANEL: i32 = 32;
 /// the wall's own surface.
 pub const PUSH_OUT: f64 = 0.06;
 
-/// `view_range` 1.0 is 64 blocks times the client's entity distance scaling.
-/// A facade has to stay up as long as the building itself is drawn.
-const VIEW_RANGE: f32 = 4.0;
+/// `view_range` 1.0 is 64 blocks times the client's entity distance scaling
+/// (50% to 500%). A facade has to stay up as long as the building itself is
+/// drawn, and past a certain distance the game decides that anyway: a display
+/// is only sent to a player within its tracking range, 10 chunks scaled by the
+/// server's `entity-broadcast-range-percentage` and capped at the view
+/// distance, so at most 32 chunks. 16 reaches those 512 blocks even at the
+/// lowest entity distance, so this is never the limit; at 4 the panels of a
+/// player who had turned entity distance down vanished at 128 blocks. Culling
+/// is off (see `width` below), so a longer range adds no work the tracking
+/// range does not already allow.
+const VIEW_RANGE: f32 = 16.0;
 
 /// Namespace of the models and their textures.
 const NAMESPACE: &str = "arnis";
@@ -2663,7 +2671,7 @@ mod tests {
             e.get("billboard"),
             Some(&Value::String("fixed".to_string()))
         );
-        assert_eq!(e.get("view_range"), Some(&Value::Float(4.0)));
+        assert_eq!(e.get("view_range"), Some(&Value::Float(16.0)));
         assert_eq!(e.get("width"), Some(&Value::Float(0.0)));
         assert_eq!(e.get("height"), Some(&Value::Float(0.0)));
         // A `fixed` billboard still turns the model by the entity's own yaw

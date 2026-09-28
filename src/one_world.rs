@@ -83,6 +83,9 @@ pub struct Manifest {
     pub terrain: bool,
     pub disable_height_limit: bool,
     pub aws_only_elevation: bool,
+    /// Already folded into `elevation`; kept so later areas are told which one applies.
+    #[serde(default = "real_height", skip_serializing_if = "is_real_height")]
+    pub height_multiplier: f64,
     /// Metre to Y mapping shared by every area. Set at creation; worlds from
     /// before version 3 take it from their first terrain area.
     pub elevation: Option<ElevationAffine>,
@@ -90,9 +93,18 @@ pub struct Manifest {
     pub areas: Vec<GeneratedArea>,
 }
 
+fn real_height() -> f64 {
+    1.0
+}
+
+fn is_real_height(multiplier: &f64) -> bool {
+    *multiplier == 1.0
+}
+
 impl Manifest {
     fn new(args: &Args, origin_lat: f64, origin_lon: f64) -> Self {
         let scale = stable(args.scale, 9);
+        let height_multiplier = stable(args.height_multiplier, 6);
         Self {
             version: MANIFEST_VERSION,
             created_with: format!("arnis {}", env!("CARGO_PKG_VERSION")),
@@ -104,10 +116,11 @@ impl Manifest {
             terrain: args.terrain(),
             disable_height_limit: args.disable_height_limit,
             aws_only_elevation: args.aws_only_elevation,
+            height_multiplier,
             // One section up, so water carved at the lowest level stays above the floor.
             elevation: args.terrain().then(|| {
                 let mut e = ElevationAffine::whole_earth(
-                    scale,
+                    scale * height_multiplier,
                     crate::ground::min_ground_level_for(args) + 16,
                     crate::ground::extended_max_y_for(args),
                 );
@@ -161,6 +174,7 @@ impl Manifest {
             return Err(format!("origin longitude {}", self.origin_lon));
         }
         crate::args::validate_scale(self.scale)?;
+        crate::args::validate_height_multiplier(self.height_multiplier)?;
         if let Some(e) = &self.elevation {
             let soft_top_ok = e.soft_top.is_none_or(|t| {
                 t.knee_m.is_finite() && t.width_blocks.is_finite() && t.width_blocks > 0.0
@@ -385,6 +399,13 @@ fn resolve(
                     }
                 );
                 args.disable_height_limit = manifest.disable_height_limit;
+            }
+            if manifest.height_multiplier != args.height_multiplier {
+                println!(
+                    "Note: One World keeps the terrain height multiplier it was created with ({}x).",
+                    manifest.height_multiplier
+                );
+                args.height_multiplier = manifest.height_multiplier;
             }
             (manifest, false)
         }
@@ -751,6 +772,30 @@ mod tests {
         let mut args = args_for(MUNICH, &["--mode", "geo-only"]);
         drop(prepare(&flat, &req, &mut args).unwrap());
         assert_eq!(Manifest::load(&flat).unwrap().unwrap().elevation, None);
+    }
+
+    #[test]
+    fn the_height_multiplier_is_fixed_by_the_first_area() {
+        let dir = tempfile::tempdir().unwrap();
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let real = dir.path().join("real");
+        drop(prepare(&real, &req, &mut args_for(MUNICH, &[])).unwrap());
+        let text = std::fs::read_to_string(Manifest::path_in(&real)).unwrap();
+        assert!(!text.contains("height_multiplier"), "{text}");
+
+        let world = dir.path().join("w");
+        let mut args = args_for(MUNICH, &["--height-multiplier", "2"]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        let manifest = Manifest::load(&world).unwrap().unwrap();
+        assert_eq!(manifest.height_multiplier, 2.0);
+        let e = manifest.elevation.unwrap();
+        assert_eq!(e.blocks_per_meter, 2.0);
+        assert_eq!(e.y_for_metres(520.0) - e.y_for_metres(-430.0), 1900.0);
+
+        let mut args = args_for(MUNICH, &[]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        assert_eq!(args.height_multiplier, 2.0);
+        assert_eq!(args.one_world_run.unwrap().elevation, Some(e));
     }
 
     #[test]

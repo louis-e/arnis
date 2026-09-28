@@ -386,7 +386,7 @@ impl FloodFillCache {
     /// This runs in parallel using Rayon, taking advantage of multiple CPU cores.
     pub fn precompute(elements: &[ProcessedElement], timeout: Option<&Duration>) -> Self {
         // Collect all ways that need flood fill
-        let ways_needing_fill: Vec<&ProcessedWay> = elements
+        let mut ways_needing_fill: Vec<&ProcessedWay> = elements
             .iter()
             .filter_map(|el| match el {
                 ProcessedElement::Way(way) => {
@@ -399,6 +399,24 @@ impl FloodFillCache {
                 _ => None,
             })
             .collect();
+
+        // The outer rings of the relations filled member by member. Every tile a relation
+        // overlaps used to fill them again, which for a large beach or dune field meant a
+        // full-size fill per tile thread; once here they are shared like a way's.
+        let mut seen: fnv::FnvHashSet<u64> = ways_needing_fill.iter().map(|w| w.id).collect();
+        for element in elements {
+            let ProcessedElement::Relation(rel) = element else {
+                continue;
+            };
+            if !Self::relation_fills_members(rel) {
+                continue;
+            }
+            for member in &rel.members {
+                if member.role == ProcessedMemberRole::Outer && seen.insert(member.way.id) {
+                    ways_needing_fill.push(&member.way);
+                }
+            }
+        }
 
         // Compute all way flood fills in parallel
         let way_results: Vec<(u64, Vec<(i32, i32)>)> = ways_needing_fill
@@ -508,6 +526,31 @@ impl FloodFillCache {
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar"))
+    }
+
+    /// Relations `process_element` renders by filling each outer member: natural, landuse
+    /// that paints ground, and parks. Mirrors its dispatch; keep the two in sync.
+    fn relation_fills_members(rel: &crate::osm_parser::ProcessedRelation) -> bool {
+        let tags = &rel.tags;
+        if tags.contains_key("building")
+            || tags.contains_key("building:part")
+            || tags.get("type").map(String::as_str) == Some("building")
+            || tags.contains_key("water")
+            || matches!(
+                tags.get("natural").map(String::as_str),
+                Some("water" | "bay")
+            )
+        {
+            return false;
+        }
+        if tags.contains_key("natural") {
+            return true;
+        }
+        if let Some(landuse) = tags.get("landuse") {
+            // generate_landuse returns before filling these.
+            return !matches!(landuse.as_str(), "residential" | "commercial");
+        }
+        tags.get("leisure").map(String::as_str) == Some("park")
     }
 
     /// Collects all building footprint coordinates from the pre-computed cache.
@@ -832,5 +875,43 @@ mod tests {
             cache.collect_sealed_surfaces(&elements, &roads).is_none(),
             "the pitch adds no column, so the road mask is already the answer"
         );
+    }
+
+    fn area_relation(id: u64, member_id: u64, tags: &[(&str, &str)]) -> ProcessedElement {
+        let mut member = tagged_way(
+            member_id,
+            &[(0, 0), (20, 0), (20, 20), (0, 20), (0, 0)],
+            &[],
+        );
+        member.tags.clear();
+        ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+            id,
+            members: vec![crate::osm_parser::ProcessedMember {
+                role: ProcessedMemberRole::Outer,
+                way: std::sync::Arc::new(member),
+            }],
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn filled_relations_are_precomputed_once_and_others_are_not() {
+        let elements = vec![
+            area_relation(1, 101, &[("natural", "sand")]),
+            area_relation(2, 102, &[("leisure", "park")]),
+            // Painted by nothing, so filling it up front would only cost memory.
+            area_relation(3, 103, &[("landuse", "residential")]),
+            area_relation(4, 104, &[("natural", "water")]),
+            area_relation(5, 105, &[("building", "yes")]),
+        ];
+        let cache = FloodFillCache::precompute(&elements, None);
+        assert!(cache.get_cached(101).is_some_and(|f| !f.is_empty()));
+        assert!(cache.get_cached(102).is_some_and(|f| !f.is_empty()));
+        for skipped in [103, 104, 105] {
+            assert!(cache.get_cached(skipped).is_none(), "member {skipped}");
+        }
     }
 }

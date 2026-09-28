@@ -125,6 +125,7 @@ async function applyLocalization(localization) {
   const localizationElements = {
     "#start-button > span[data-localize='start_generation']": "start_generation",
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
+    "input[id='world-name-input']": "placeholder_world_name",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     ".footer-link": "footer_text",
@@ -1210,11 +1211,33 @@ function initSettings() {
   });
   refreshScaleDisplay();
 
+  const heightSlider = document.getElementById("height-multiplier-slider");
+  const heightValue = document.getElementById("height-multiplier-value");
+  const refreshHeightDisplay = () => {
+    heightValue.textContent = parseFloat(heightSlider.value).toFixed(2) + "\u00d7";
+  };
+  heightSlider.addEventListener("input", refreshHeightDisplay);
+  heightSlider.addEventListener("dblclick", () => {
+    heightSlider.value = 1;
+    heightSlider.dispatchEvent(new Event("input", { bubbles: true }));
+    heightSlider.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  refreshHeightDisplay();
+
   // Game mode segmented control
   const gamemodeGroup = document.getElementById("gamemode-group");
   gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // World type segmented control
+  const worldTypeGroup = document.getElementById("world-type-group");
+  worldTypeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      worldTypeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -1715,12 +1738,24 @@ function refreshHeightLimitRow(format) {
   }
 }
 
+// Bedrock and Luanti keep their own flat generators, so the choice only means
+// something for Java. Greyed rather than hidden, like the other format gates.
+function refreshWorldTypeRow(format) {
+  const group = document.getElementById('world-type-group');
+  if (!group) return;
+  const java = (format || selectedWorldFormat) === 'java';
+  group.classList.toggle('segmented-disabled', !java);
+  const row = group.closest('.settings-row');
+  if (row) row.classList.toggle('settings-row-unavailable', !java);
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
   const luantiBtn = document.getElementById('format-luanti');
 
   refreshHeightLimitRow(format);
+  refreshWorldTypeRow(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -1736,6 +1771,8 @@ function updateFormatToggleUI(format) {
     if (luantiBtn) luantiBtn.classList.add('format-active');
     worldPath = "";
   }
+  // The label names the last Java world only while that is still the target.
+  if (!worldPath) worldLabelName = "";
 
   // The facade panels are Java entities, so the mode control changes with the
   // format. Called from here so a format picked before the settings modal is
@@ -2551,9 +2588,24 @@ function displayBboxInfoText(bboxText) {
 
 let worldPath = "";
 
+// Name of the world the last run made (or is making), as the label shows it.
+// A pending custom name is drawn over it without replacing it.
+let worldLabelName = "";
+
 function setWorldNameLabel(text) {
+  worldLabelName = text || "";
+  renderWorldNameLabel();
+}
+
+function renderWorldNameLabel() {
   const label = document.getElementById('world-name-label');
   if (!label) return;
+  const pending = pendingWorldName();
+  const text = pending || worldLabelName;
+  label.toggleAttribute('data-pending', !!pending);
+  label.title = pending
+    ? (window.localization && window.localization.placeholder_world_name) || 'Name of the next world'
+    : '';
   if (text) {
     label.removeAttribute('data-placeholder');
     label.textContent = text;
@@ -2576,16 +2628,11 @@ function basenameFromPath(p) {
 
 /* Custom world name (Java only, opt-in via Settings > Custom World Name) */
 
-// Holds the user's typed name across edits/generations. Only ever sent to
-// the backend while the setting is enabled; the backend sanitizes and
-// de-duplicates it, so this is just what the pencil editor shows/pre-fills.
+// Name for the next Java world, "" for the default "Arnis World N". The pencil
+// only ever names the world the next Start creates, never one already on disk,
+// and that world uses the name up. Only sent while the setting is on; the
+// backend sanitizes it and appends " (2)" if the folder is taken.
 let customWorldName = "";
-
-// True from the moment the user commits an edit until the next world is
-// actually created. Lets the label preview the pending name even when
-// `worldPath` still points at a previously generated world (otherwise that
-// stale real name would keep showing instead of what was just typed).
-let worldNameEditedSinceLastCreate = false;
 
 function isCustomWorldNameFeatureEnabled() {
   const toggle = document.getElementById('custom-world-name-toggle');
@@ -2595,32 +2642,24 @@ function isCustomWorldNameFeatureEnabled() {
   return !!(toggle && toggle.checked) && selectedWorldFormat === 'java';
 }
 
+// The name the next Start will ask for, if any.
+function pendingWorldName() {
+  if (isOneWorldEnabled() || !isCustomWorldNameFeatureEnabled()) return "";
+  return customWorldName;
+}
+
 function canEditCustomWorldName() {
-  // While a generation or rename is in flight, the world directory may be
-  // actively written to on disk, so renaming/recreating it out from under
-  // that write would corrupt or orphan the in-progress world.
+  // While a generation is in flight the next world's name is already taken
+  // from here, so an edit would only look like it applied to the running one.
   return isCustomWorldNameFeatureEnabled() && generationButtonEnabled;
 }
 
-// Shows the pending custom name (if any) unless a world already exists for
-// the current pending state, in which case its real (possibly
-// de-duplicated) name from the backend is authoritative.
 function updateWorldNamePreviewLabel() {
   if (isOneWorldEnabled()) {
     setWorldNameLabel(oneWorldDisplayName());
     return;
   }
-  if (worldPath && !worldNameEditedSinceLastCreate) return;
-  if (!isCustomWorldNameFeatureEnabled()) {
-    // Feature off: fall back to showing whatever world actually exists
-    // rather than blanking a real name to "".
-    setWorldNameLabel(basenameFromPath(worldPath));
-    return;
-  }
-  // customWorldName can be "" right after committing a blank edit on an
-  // already-existing world; that must keep showing the real name, not the
-  // "no world generated yet" placeholder (setWorldNameLabel("") would).
-  setWorldNameLabel(customWorldName || basenameFromPath(worldPath));
+  renderWorldNameLabel();
 }
 
 // Cancels any in-progress edit and shows/hides the pencil to match the
@@ -2631,7 +2670,7 @@ function refreshWorldNameEditUI() {
   const editButton = document.getElementById('world-name-edit-button');
   if (editButton) {
     editButton.style.display = canEditCustomWorldName() ? '' : 'none';
-    const title = isOneWorldEnabled() ? 'Choose the One World to extend or create' : 'Set a custom world name';
+    const title = isOneWorldEnabled() ? 'Choose the One World to extend or create' : 'Name the next world';
     editButton.title = title;
     editButton.setAttribute('aria-label', title);
   }
@@ -2665,16 +2704,9 @@ function startWorldNameEdit(event) {
   const editButton = document.getElementById('world-name-edit-button');
   if (!label || !input) return;
 
-  // Prefer an in-progress edit; otherwise pre-fill with the currently shown
-  // real world name (if any) so re-opening the editor lets the user rename
-  // an already-created world instead of starting from blank. Falling back
-  // to the directory basename keeps the input useful even if the label was
-  // not yet refreshed from disk.
-  const visibleName = label.hasAttribute('data-placeholder') ? '' : label.textContent.trim();
-  input.value = isOneWorldEnabled()
-    ? oneWorldFolderName()
-    : customWorldName || visibleName || basenameFromPath(worldPath);
-  input.dataset.originalValue = input.value;
+  // Starts from the pending name, never from the last world's: that world
+  // keeps its name, and asking for it again would only get "Name (2)".
+  input.value = isOneWorldEnabled() ? oneWorldFolderName() : customWorldName;
   label.style.display = 'none';
   if (editButton) editButton.style.display = 'none';
   input.style.display = '';
@@ -2683,14 +2715,9 @@ function startWorldNameEdit(event) {
   input.select();
 }
 
-// Commits the pencil editor. If no world has been created yet, this just
-// remembers the name for the next generation. If a world already exists,
-// this actually renames it on disk right away via gui_rename_world (moves
-// the directory + updates level.dat), rather than silently deferring to
-// "the next Start Generation click creates a new, separate world" - that
-// would leave the already-generated world's real name unchanged, which is
-// not what "rename" means to someone editing an existing world's name.
-async function commitWorldNameEdit() {
+// Commits the pencil editor: remembers the name for the next generation, or
+// clears it when left blank. Nothing on disk changes.
+function commitWorldNameEdit() {
   const input = document.getElementById('world-name-input');
   if (!input) {
     endWorldNameEdit();
@@ -2706,51 +2733,14 @@ async function commitWorldNameEdit() {
     return;
   }
 
-  if (worldPath) {
-    const currentName = input.dataset.originalValue || basenameFromPath(worldPath);
-    endWorldNameEdit();
-    if (!newName || newName === currentName) return; // nothing to rename
-
-    // Block Start Generation (and re-opening the editor) for the brief
-    // window the rename is in flight, so nothing else can read/write
-    // worldPath while it's changing.
-    setGenerationButtonEnabled(false);
-    try {
-      const renamedPath = await invoke('gui_rename_world', { worldPath: worldPath, worldName: newName });
-      if (renamedPath) {
-        worldPath = renamedPath;
-        customWorldName = basenameFromPath(renamedPath);
-        setWorldNameLabel(customWorldName);
-      }
-    } catch (error) {
-      console.error("Failed to rename world:", error);
-      // Nothing changed on disk; make sure the label still reflects that,
-      // and say why. A rename fails for reasons the user can act on - the
-      // world is open in Minecraft holding a lock on the directory, or the
-      // name was left with nothing usable after sanitization - and silently
-      // snapping the old name back just reads as a dead pencil.
-      setWorldNameLabel(currentName);
-      const progressInfo = document.getElementById('progress-info');
-      if (progressInfo) {
-        localizeElement(window.localization, { element: progressInfo }, "failed_to_rename_world");
-        progressInfo.style.color = "#fa7878";
-      }
-    } finally {
-      setGenerationButtonEnabled(true);
-    }
-    return;
-  }
-
   customWorldName = newName;
-  worldNameEditedSinceLastCreate = true;
   endWorldNameEdit();
 }
 
 // Hiding the still-focused input fires a native blur (asynchronously, after
 // the handler that hid it has returned), which would otherwise re-enter the
 // blur handler below and re-run the edit we are already finishing: Escape
-// would re-commit what it just discarded, and Enter would fire a second
-// gui_rename_world against the path the first one is still renaming.
+// would re-commit what it just discarded.
 // endWorldNameEdit() sets this whenever it hides a focused input.
 let suppressNextWorldNameBlur = false;
 
@@ -2985,6 +2975,7 @@ function pinControl(id, value) {
 
 function restoreNaturalRows() {
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('height-multiplier-slider', true);
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('voxy-lod-toggle', true);
   setSettingsRowAvailable('disable-height-limit-toggle', true);
@@ -3004,6 +2995,8 @@ function applyOneWorldPins(info) {
 
   const exists = !!(info && info.exists);
   pinControl('scale-value-slider', exists && typeof info.scale === 'number' ? info.scale : null);
+  pinControl('height-multiplier-slider',
+    exists && typeof info.height_multiplier === 'number' ? info.height_multiplier : null);
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
@@ -3011,6 +3004,7 @@ function applyOneWorldPins(info) {
   setSettingsRowAvailable('disable-height-limit-toggle', false);
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false);
+    setSettingsRowAvailable('height-multiplier-slider', false);
     setSettingsRowAvailable('aws-only-elevation-toggle', false);
   }
 }
@@ -3019,6 +3013,7 @@ function releaseOneWorldPins() {
   if (!oneWorldPinned) return;
   oneWorldPinned = false;
   pinControl('scale-value-slider', null);
+  pinControl('height-multiplier-slider', null);
   pinControl('disable-height-limit-toggle', null);
   setSettingsRowAvailable('rotation-angle-input', true);
   restoreNaturalRows();
@@ -3288,16 +3283,14 @@ async function startGeneration() {
         return;
       }
       try {
-        const requestedName = isCustomWorldNameFeatureEnabled() && customWorldName ? customWorldName : null;
+        const requestedName = pendingWorldName() || null;
         const worldName = await invoke('gui_create_world', { savePath: savePath, worldName: requestedName });
         if (worldName) {
           worldPath = worldName;
-          worldNameEditedSinceLastCreate = false;
-          const createdName = basenameFromPath(worldName);
-          setWorldNameLabel(createdName);
-          // Pre-fill the editor with the real (possibly de-duplicated) name,
-          // so editing again starts from what was actually created.
-          if (requestedName) customWorldName = createdName;
+          // Used up: the world after this one gets the default name again
+          // unless the pencil names it too.
+          if (requestedName) customWorldName = "";
+          setWorldNameLabel(basenameFromPath(worldName));
         }
       } catch (error) {
         handleWorldSelectionError(error);
@@ -3343,8 +3336,10 @@ async function startGeneration() {
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    var heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
     if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
       if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
+      if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
       if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
     } else if (oneWorld) {
       disable_height_limit = true;
@@ -3364,6 +3359,8 @@ async function startGeneration() {
 
     var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
     var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
+    var worldTypeBtn = document.querySelector("#world-type-group .segment.active");
+    var worldType = worldTypeBtn ? worldTypeBtn.dataset.worldType : "void";
     var mapItem = document.getElementById("map-item-toggle").checked;
     var signageBtn = document.querySelector("#signage-group .segment.active");
     var signage = signageBtn ? signageBtn.dataset.signage : "basic";
@@ -3378,6 +3375,7 @@ async function startGeneration() {
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
         worldScale: scale,
+        heightMultiplier: heightMultiplier,
         groundLevel: ground_level,
         terrainEnabled: terrain,
         skipOsmObjects: skipOsmObjects,
@@ -3400,6 +3398,7 @@ async function startGeneration() {
         rotationAngle: rotationAngle,
         gamemode: gamemode,
         worldTime: worldTime,
+        worldType: worldType,
         mapItem: mapItem,
         signage: signage,
         mapillaryToken: getMapillaryToken(),

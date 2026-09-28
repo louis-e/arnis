@@ -381,6 +381,7 @@ impl Ground {
     pub fn new_enabled(
         bbox: &LLBBox,
         scale: f64,
+        height_multiplier: f64,
         ground_level: i32,
         min_ground_level: i32,
         disable_height_limit: bool,
@@ -444,6 +445,7 @@ impl Ground {
             match fetch_elevation_data(
                 bbox,
                 scale,
+                height_multiplier,
                 water_floor,
                 sink_floor,
                 disable_height_limit,
@@ -645,6 +647,13 @@ impl Ground {
             xzbbox,
             scale,
         );
+    }
+
+    /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
+    pub fn mark_beaches(&mut self) {
+        if let Some(lc) = self.land_cover.as_mut() {
+            land_cover::mark_beaches(lc);
+        }
     }
 
     /// Reclassify cells under bridges to the surrounding class, sinking new water.
@@ -1089,6 +1098,7 @@ impl Ground {
                     land_cover::LC_WETLAND => Rgb([0x00, 0x96, 0xa0]),
                     land_cover::LC_MANGROVES => Rgb([0x00, 0xcf, 0x75]),
                     land_cover::LC_MOSS => Rgb([0xfa, 0xe6, 0xa0]),
+                    land_cover::LC_BEACH => Rgb([0xe8, 0xd8, 0x9c]),
                     _ => Rgb([0x00, 0x00, 0x00]),
                 };
                 img.put_pixel(x as u32, y as u32, color);
@@ -1204,6 +1214,7 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         let ground = Ground::new_enabled(
             &bbox,
             args.scale,
+            args.height_multiplier,
             args.ground_level,
             min_ground_level_for(args),
             args.disable_height_limit,

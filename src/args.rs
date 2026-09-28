@@ -43,6 +43,12 @@ pub struct Args {
     #[arg(long, default_value_t = 1.0, allow_hyphen_values = true, value_parser = parse_scale)]
     pub scale: f64,
 
+    /// Multiplies terrain height: 2.0 makes hills twice as tall, 0.5 half as tall.
+    /// Buildings and trees keep their size. Relief that no longer fits the build
+    /// height is compressed to fit, as it is at 1.0.
+    #[arg(long, default_value_t = 1.0, value_parser = parse_height_multiplier)]
+    pub height_multiplier: f64,
+
     /// Celestial body to generate. moon and mars use NASA PDS elevation at a fixed
     /// low scale and have no OSM data, so every object option is ignored.
     #[arg(long, value_enum, default_value_t = crate::celestial::CelestialBody::Earth)]
@@ -228,6 +234,10 @@ pub struct Args {
     /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
     #[arg(long, default_value_t = DEFAULT_WORLD_TIME, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
+
+    /// Java only: what the game generates around the area, empty void or a flat grass plain
+    #[arg(long = "world-type", value_enum, default_value_t = WorldType::Void)]
+    pub world_type: WorldType,
 
     /// Readable image signs, Java only. `basic` covers public signage: street names,
     /// traffic signs, transit stops, information boards and billboards. `full` adds
@@ -458,6 +468,27 @@ pub fn validate_scale(scale: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// Range of `--height-multiplier`. Past 10 even a gentle hill outgrows vanilla build height.
+pub const MIN_HEIGHT_MULTIPLIER: f64 = 0.1;
+pub const MAX_HEIGHT_MULTIPLIER: f64 = 10.0;
+
+pub fn validate_height_multiplier(multiplier: f64) -> Result<(), String> {
+    if !(MIN_HEIGHT_MULTIPLIER..=MAX_HEIGHT_MULTIPLIER).contains(&multiplier) {
+        return Err(format!(
+            "Terrain height multiplier must be between {MIN_HEIGHT_MULTIPLIER} and {MAX_HEIGHT_MULTIPLIER} (got {multiplier})."
+        ));
+    }
+    Ok(())
+}
+
+fn parse_height_multiplier(arg: &str) -> Result<f64, String> {
+    let multiplier: f64 = arg
+        .parse()
+        .map_err(|_| format!("`{arg}` is not a number"))?;
+    validate_height_multiplier(multiplier)?;
+    Ok(multiplier)
+}
+
 fn parse_scale(arg: &str) -> Result<f64, String> {
     let scale: f64 = arg
         .parse()
@@ -560,6 +591,24 @@ impl FacadeMode {
     /// Whether the texture is hung as item display entities.
     pub fn places_displays(self) -> bool {
         matches!(self, FacadeMode::Photos)
+    }
+}
+
+/// What a Java world generates past the area Arnis wrote.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum WorldType {
+    /// Nothing: the area is an island in the void.
+    Void,
+    /// A superflat grass plain at the area's ground level.
+    Flat,
+}
+
+impl WorldType {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "flat" => WorldType::Flat,
+            _ => WorldType::Void,
+        }
     }
 }
 
@@ -976,6 +1025,29 @@ mod tests {
         assert!(validate_args(&parse(&["--projection", "local"])).is_ok());
         assert!(validate_args(&parse(&["--projection", "web_mercator"])).is_ok());
         assert!(validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_ok());
+    }
+
+    #[test]
+    fn height_multiplier_defaults_to_real_height_and_is_bounded() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::try_parse_from(cmd.iter())
+        };
+
+        assert_eq!(parse(&[]).unwrap().height_multiplier, 1.0);
+        assert_eq!(
+            parse(&["--height-multiplier", "2.5"])
+                .unwrap()
+                .height_multiplier,
+            2.5
+        );
+        for bad in ["0", "0.05", "11", "NaN", "inf", "tall"] {
+            assert!(
+                parse(&["--height-multiplier", bad]).is_err(),
+                "accepted {bad}"
+            );
+        }
     }
 
     #[test]

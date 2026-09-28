@@ -604,6 +604,8 @@ fn run_cli() {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
     }
     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+    // Last, once the water has stopped moving.
+    ground.mark_beaches();
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_bridge_repair");
     }
@@ -629,6 +631,9 @@ fn run_cli() {
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
     bench.mark("transform_map");
+
+    // The default spawn is picked in the unrotated area and turned with it, as in the GUI.
+    let pre_rotation_bbox = xzbbox.clone();
 
     // Apply rotation if specified
     if args.rotation.abs() > f64::EPSILON {
@@ -681,7 +686,21 @@ fn run_cli() {
     // moved into `generate_world_with_options` below). Used only for Java's
     // post-generation `set_spawn_in_level_dat` call — Bedrock derives spawn Y
     // independently inside `BedrockWriter::write_level_dat`.
-    let spawn_y_for_java = spawn_point.map(|(sx, sz)| {
+    //
+    // Without a spawn given, Java starts at the corner of the area like the GUI does. The
+    // level.dat template's own spot lies outside the area: beside it in a flat world, and
+    // over nothing at all in a void one.
+    let java_spawn = spawn_point.or_else(|| {
+        (world_format == world_editor::WorldFormat::JavaAnvil).then(|| {
+            map_transformation::rotate::rotate_xz_point(
+                pre_rotation_bbox.min_x() + 1,
+                pre_rotation_bbox.min_z() + 1,
+                args.rotation,
+                &pre_rotation_bbox,
+            )
+        })
+    });
+    let spawn_y_for_java = java_spawn.map(|(sx, sz)| {
         use coordinate_system::cartesian::XZPoint;
         let rel = XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z());
         ground.level(rel) + 3
@@ -752,10 +771,10 @@ fn run_cli() {
                 );
             }
 
-            // For Java Edition, update spawn point in level.dat if provided
+            // For Java Edition, write the spawn point into level.dat
             let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
             if !args.bedrock && !extending {
-                if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (spawn_point, spawn_y_for_java) {
+                if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (java_spawn, spawn_y_for_java) {
                     if let Err(e) = world_utils::set_spawn_in_level_dat(
                         &generation_path,
                         spawn_x,

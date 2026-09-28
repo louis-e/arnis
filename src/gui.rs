@@ -113,7 +113,6 @@ pub fn run_gui() -> Result<(), String> {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             gui_create_world,
-            gui_rename_world,
             gui_get_default_save_path,
             gui_get_default_bedrock_save_path,
             gui_get_default_luanti_save_path,
@@ -375,22 +374,6 @@ fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<Str
 
 fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
     crate::world_utils::create_new_world_with_name(base_path, custom_name)
-}
-
-/// Renames an already-created Java world in place (moves its directory and
-/// updates `LevelName` in `level.dat`). Called when the user commits an edit
-/// via the custom-world-name pencil after a world already exists.
-///
-/// Returns the world's new full path on success, or a human-readable error
-/// message on failure (e.g. the world no longer exists, the name is blank,
-/// or the filesystem rename failed).
-#[tauri::command]
-fn gui_rename_world(world_path: String, world_name: String) -> Result<String, String> {
-    let trimmed = world_path.trim();
-    if trimmed.is_empty() {
-        return Err("No world selected".to_string());
-    }
-    crate::world_utils::rename_world(Path::new(trimmed), &world_name)
 }
 
 /// Adds localized area name to the world name in level.dat
@@ -1056,6 +1039,7 @@ struct OneWorldInfo {
     locked: bool,
     area_count: usize,
     scale: Option<f64>,
+    height_multiplier: Option<f64>,
     terrain: Option<bool>,
     disable_height_limit: Option<bool>,
     aws_only_elevation: Option<bool>,
@@ -1085,6 +1069,7 @@ fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldI
         locked: manifest.is_some() && crate::world_utils::world_is_locked(&world_path),
         area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
         scale: manifest.as_ref().map(|m| m.scale),
+        height_multiplier: manifest.as_ref().map(|m| m.height_multiplier),
         terrain: manifest.as_ref().map(|m| m.terrain),
         disable_height_limit: manifest.as_ref().map(|m| m.disable_height_limit),
         aws_only_elevation: manifest.as_ref().map(|m| m.aws_only_elevation),
@@ -1392,6 +1377,7 @@ fn gui_start_generation(
     bedrock_save_path: String,
     luanti_save_path: String,
     world_scale: f64,
+    height_multiplier: f64,
     ground_level: i32,
     terrain_enabled: bool,
     skip_osm_objects: bool,
@@ -1414,6 +1400,7 @@ fn gui_start_generation(
     rotation_angle: f64,
     gamemode: String,
     world_time: i64,
+    world_type: String,
     map_item: bool,
     signage: String,
     mapillary_token: String,
@@ -1465,6 +1452,10 @@ fn gui_start_generation(
             emit_gui_error(&e);
             return Err(e);
         }
+    }
+    if let Err(e) = crate::args::validate_height_multiplier(height_multiplier) {
+        emit_gui_error(&e);
+        return Err(e);
     }
 
     // Store telemetry consent for crash reporting
@@ -1705,6 +1696,7 @@ fn gui_start_generation(
                 luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                height_multiplier,
                 projection: crate::projection::ProjectionKind::Local,
                 one_world: false,
                 world_name: None,
@@ -1752,6 +1744,7 @@ fn gui_start_generation(
                 voxy_lod: voxy_lod_enabled,
                 gamemode: crate::args::GameMode::from_str_lossy(&gamemode),
                 world_time: world_time.clamp(0, 23999),
+                world_type: crate::args::WorldType::from_str_lossy(&world_type),
                 map_item,
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld
@@ -2022,6 +2015,7 @@ fn gui_start_generation(
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
                     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+                    ground.mark_beaches();
 
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(

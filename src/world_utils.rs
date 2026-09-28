@@ -207,6 +207,21 @@ pub fn create_new_world_with_name(
     Ok(new_world_path.display().to_string())
 }
 
+/// Flat template chunks the skeleton writes as `region/r.0.0.mca`.
+const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
+
+/// Deletes `region/r.0.0.mca` while it is still exactly the skeleton's template, so a void
+/// world keeps no flat chunks where its area never reaches. A file anything has written to
+/// is left alone.
+pub fn remove_untouched_template_region(world_path: &Path) {
+    let path = world_path.join("region").join("r.0.0.mca");
+    let untouched = fs::metadata(&path).is_ok_and(|m| m.len() == REGION_TEMPLATE.len() as u64)
+        && fs::read(&path).is_ok_and(|bytes| bytes == REGION_TEMPLATE);
+    if untouched {
+        let _ = fs::remove_file(&path);
+    }
+}
+
 /// Writes `level.dat`, the icon and `region/` for a new Java world. One World
 /// skips the region template, whose placeholder chunks it would not overwrite.
 pub fn write_world_skeleton(
@@ -222,7 +237,6 @@ pub fn write_world_skeleton(
 
     // Copy the region template file
     if with_template_region {
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
         let region_path = new_world_path.join("region").join("r.0.0.mca");
         fs::write(&region_path, REGION_TEMPLATE)
             .map_err(|e| format!("Failed to create region file: {e}"))?;
@@ -512,29 +526,6 @@ fn generate_unique_default_world_name(base_path: &Path) -> String {
 /// "Arnis World N" scheme if nothing usable survives sanitization (e.g. the
 /// input was only invalid characters).
 fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String {
-    generate_unique_custom_world_name_excluding(base_path, raw_name, None)
-}
-
-/// True when both paths exist and resolve to the same directory entry.
-/// Canonicalizing normalises the case on case-insensitive filesystems, which
-/// a textual `Path` comparison would not. Returns false if either side can't
-/// be resolved, so an unreadable path is never mistaken for a match.
-fn is_same_existing_path(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
-}
-
-/// Same as [`generate_unique_custom_world_name`], but a candidate path that
-/// resolves to `exclude` is treated as available. Used when renaming a world
-/// in place so keeping (or case-tweaking) its current name doesn't get bumped
-/// to " (2)" just because its own directory already "collides" with itself.
-fn generate_unique_custom_world_name_excluding(
-    base_path: &Path,
-    raw_name: &str,
-    exclude: Option<&Path>,
-) -> String {
     let sanitized = sanitize_custom_world_name(raw_name);
 
     // Nothing usable survived sanitization (e.g. the input was only invalid
@@ -544,133 +535,18 @@ fn generate_unique_custom_world_name_excluding(
         return generate_unique_default_world_name(base_path);
     }
 
-    let is_available = |candidate: &Path| -> bool {
-        if !candidate.exists() {
-            return true;
-        }
-        // The candidate is taken - unless it *is* the excluded world's own
-        // directory. Compared canonically rather than by path equality: on
-        // Windows and macOS the filesystem matches case-insensitively, so
-        // re-capitalising a world ("My World" -> "my world") finds an
-        // existing directory whose path text differs from `exclude`, and a
-        // plain `==` would read the world's own directory as a collision and
-        // bump it to " (2)".
-        exclude.is_some_and(|excluded| is_same_existing_path(candidate, excluded))
-    };
-
-    let candidate_path = base_path.join(&sanitized);
-    if is_available(&candidate_path) {
+    if !base_path.join(&sanitized).exists() {
         return sanitized;
     }
 
     let mut counter: i32 = 2;
     loop {
         let candidate = format!("{sanitized} ({counter})");
-        let candidate_path = base_path.join(&candidate);
-        if is_available(&candidate_path) {
+        if !base_path.join(&candidate).exists() {
             return candidate;
         }
         counter += 1;
     }
-}
-
-/// Overwrites the `LevelName` field in an existing world's `level.dat`.
-fn update_level_name(world_path: &Path, new_name: &str) -> Result<(), String> {
-    let level_path = world_path.join("level.dat");
-    let level_data = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
-
-    let mut decoder = GzDecoder::new(level_data.as_slice());
-    let mut decompressed_data = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
-
-    let mut nbt_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat: {e}"))?;
-
-    match nbt_data {
-        Value::Compound(ref mut root) => match root.get_mut("Data") {
-            Some(Value::Compound(ref mut data)) => {
-                data.insert("LevelName".to_string(), Value::String(new_name.to_string()));
-            }
-            _ => return Err("level.dat is missing its Data compound".to_string()),
-        },
-        _ => return Err("level.dat root is not a compound".to_string()),
-    }
-
-    let serialized_data =
-        fastnbt::to_bytes(&nbt_data).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
-
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(&serialized_data)
-        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
-    let compressed_data = encoder
-        .finish()
-        .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
-
-    fs::write(&level_path, compressed_data).map_err(|e| format!("Failed to write level.dat: {e}"))
-}
-
-/// Renames an already-created Java world in place: moves its directory to a
-/// sanitized, de-duplicated version of `new_name` (excluding the world's own
-/// current directory from collision checks) and updates `LevelName` in its
-/// `level.dat` to match. Returns the world's new full path.
-///
-/// Fails (without touching anything) if `world_path` isn't an existing
-/// directory or doesn't look like a world (no `level.dat`), so callers can't
-/// accidentally rename an arbitrary/unrelated folder. A failure to rewrite
-/// `level.dat` also moves the directory back, so an `Err` means the world is
-/// still where and what the caller last saw it - unless the rollback itself
-/// fails, which the error message then spells out.
-pub fn rename_world(world_path: &Path, new_name: &str) -> Result<String, String> {
-    if !world_path.is_dir() {
-        return Err("World directory does not exist".to_string());
-    }
-    if !world_path.join("level.dat").is_file() {
-        return Err("Not a valid world directory (missing level.dat)".to_string());
-    }
-    let base_path = world_path
-        .parent()
-        .ok_or_else(|| "World path has no parent directory".to_string())?;
-
-    let trimmed = new_name.trim();
-    if trimmed.is_empty() {
-        return Err("World name cannot be blank".to_string());
-    }
-    // Same sanitizer the new name is actually built with, so this check can't
-    // pass a name that later resolves to nothing.
-    if sanitize_custom_world_name(trimmed).is_empty() {
-        return Err("World name is invalid after sanitization".to_string());
-    }
-
-    let unique_name =
-        generate_unique_custom_world_name_excluding(base_path, trimmed, Some(world_path));
-    let new_world_path = base_path.join(&unique_name);
-
-    let moved = new_world_path != world_path;
-    if moved {
-        fs::rename(world_path, &new_world_path)
-            .map_err(|e| format!("Failed to rename world directory: {e}"))?;
-    }
-
-    if let Err(update_error) = update_level_name(&new_world_path, &unique_name) {
-        // Put the directory back. Without this, a reported failure would still
-        // have moved the world, leaving the caller holding a `world_path` that
-        // no longer exists while it believes nothing changed.
-        if moved {
-            if let Err(rollback_error) = fs::rename(&new_world_path, world_path) {
-                return Err(format!(
-                    "{update_error}. The world was also left renamed to \
-                     \"{unique_name}\" because it could not be moved back: \
-                     {rollback_error}"
-                ));
-            }
-        }
-        return Err(update_error);
-    }
-
-    Ok(new_world_path.display().to_string())
 }
 
 /// Name of the bundled Java datapack that extends the Overworld build height.
@@ -797,6 +673,54 @@ pub fn enable_datapack_in_level_dat(world_path: &Path, pack_dir_name: &str) -> R
     Ok(())
 }
 
+/// Turns the overworld's flat generator into the vanilla "The Void" preset: one layer of air
+/// over the void biome, without the start platform, lakes or structures, so everything the
+/// area does not cover stays empty. No-op when the overworld is not a flat generator.
+fn make_void_generator(root: &mut Value) {
+    let Value::Compound(root_map) = root else {
+        return;
+    };
+    let Some(Value::Compound(data)) = root_map.get_mut("Data") else {
+        return;
+    };
+    let Some(Value::Compound(settings)) = data.get_mut("WorldGenSettings") else {
+        return;
+    };
+    let Some(Value::Compound(dimensions)) = settings.get_mut("dimensions") else {
+        return;
+    };
+    let Some(Value::Compound(overworld)) = dimensions.get_mut("minecraft:overworld") else {
+        return;
+    };
+    let Some(Value::Compound(generator)) = overworld.get_mut("generator") else {
+        return;
+    };
+    if !matches!(generator.get("type"), Some(Value::String(t)) if t == "minecraft:flat") {
+        return;
+    }
+    let Some(Value::Compound(flat)) = generator.get_mut("settings") else {
+        return;
+    };
+    let mut air = std::collections::HashMap::new();
+    air.insert(
+        "block".to_string(),
+        Value::String("minecraft:air".to_string()),
+    );
+    air.insert("height".to_string(), Value::Int(1));
+    flat.insert(
+        "layers".to_string(),
+        Value::List(vec![Value::Compound(air)]),
+    );
+    flat.insert(
+        "biome".to_string(),
+        Value::String("minecraft:the_void".to_string()),
+    );
+    // The void biome's one feature is the stone start platform at the origin.
+    flat.insert("features".to_string(), Value::Byte(0));
+    flat.insert("lakes".to_string(), Value::Byte(0));
+    flat.insert("structure_overrides".to_string(), Value::List(Vec::new()));
+}
+
 /// Lifts the superflat generator plane to `base_y` by prepending an air layer.
 /// Flat layers stack up from the dimension floor, so with the tall datapack's -2032 floor the
 /// terrain outside the written regions would sit up to ~2000 blocks above the generated plane.
@@ -887,11 +811,13 @@ pub fn touch_last_played(world_path: &Path) -> Result<(), String> {
     replace_file_atomically(&level_path, &compressed)
 }
 
-// Writes GameType, DayTime and the player's game mode into an existing level.dat.
+// Writes GameType, DayTime, the player's game mode and what the game generates around the
+// area into an existing level.dat.
 pub fn apply_java_world_settings(
     world_path: &Path,
     game_mode: crate::args::GameMode,
     world_time: i64,
+    world_type: crate::args::WorldType,
 ) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
@@ -927,11 +853,14 @@ pub fn apply_java_world_settings(
 
     // Folded into this rewrite rather than a second read/write: both need the post-generation
     // base, which is only known once the terrain has been scaled.
-    raise_superflat_floor(
-        &mut root,
-        crate::world_editor::base_chunk_y(),
-        crate::world_editor::min_y(),
-    );
+    match world_type {
+        crate::args::WorldType::Void => make_void_generator(&mut root),
+        crate::args::WorldType::Flat => raise_superflat_floor(
+            &mut root,
+            crate::world_editor::base_chunk_y(),
+            crate::world_editor::min_y(),
+        ),
+    }
 
     let serialized =
         fastnbt::to_bytes(&root).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
@@ -1185,112 +1114,32 @@ mod tests {
     }
 
     #[test]
-    fn rename_world_moves_directory_and_updates_level_name() {
+    fn only_an_untouched_template_region_is_removed() {
         let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "New Name").unwrap());
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let region = world.join("region").join("r.0.0.mca");
+        assert!(region.is_file());
+        remove_untouched_template_region(&world);
+        assert!(!region.exists(), "the template goes");
 
-        assert_eq!(renamed.file_name().unwrap(), "New Name");
-        assert!(!world.exists());
-        assert!(renamed.exists());
-        assert_eq!(level_name(&renamed), "New Name");
-    }
-
-    #[test]
-    fn rename_world_dedupes_against_other_worlds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world_a = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Alpha")).unwrap());
-        let _world_b = create_new_world_with_name(tmp.path(), Some("Beta")).unwrap();
-
-        // Renaming "Alpha" to the already-taken "Beta" must not clobber it.
-        let renamed = PathBuf::from(rename_world(&world_a, "Beta").unwrap());
-        assert_eq!(renamed.file_name().unwrap(), "Beta (2)");
-        assert_eq!(level_name(&renamed), "Beta (2)");
-    }
-
-    #[test]
-    fn rename_world_to_its_own_name_is_a_no_op() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Same Name")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "Same Name").unwrap());
-        assert_eq!(renamed, world);
-        assert!(renamed.exists());
-        assert_eq!(level_name(&renamed), "Same Name");
-    }
-
-    #[test]
-    fn rename_world_allows_case_only_change() {
-        // On Windows/macOS the new directory "exists" (the filesystem matches
-        // case-insensitively) *and* is the world's own directory, so a plain
-        // path comparison against `exclude` misses it and the world gets
-        // bumped to "... (2)" for merely re-capitalising its own name.
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My World")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "my world").unwrap());
-
-        assert_eq!(renamed.file_name().unwrap(), "my world");
-        assert_eq!(level_name(&renamed), "my world");
-        // Exactly one world directory, not an extra "my world (2)".
-        let dirs: Vec<_> = fs::read_dir(tmp.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_dir())
-            .collect();
-        assert_eq!(
-            dirs.len(),
-            1,
-            "case-only rename must not create a second world"
-        );
-    }
-
-    #[test]
-    fn rename_world_rejects_blank_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
-        assert!(rename_world(&world, "   ").is_err());
-        // Nothing should have moved on failure.
-        assert!(world.exists());
-    }
-
-    #[test]
-    fn rename_world_rejects_name_that_becomes_empty_after_sanitization() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
-        assert!(rename_world(&world, "...  ").is_err());
-        assert!(world.exists());
-        assert_eq!(level_name(&world), "Keep Me");
-    }
-
-    #[test]
-    fn rename_world_rolls_back_the_move_when_level_dat_cannot_be_updated() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
-        // Unreadable as NBT, but still a file, so the up-front validation
-        // passes and the failure lands after the directory has been moved.
-        fs::write(world.join("level.dat"), b"not gzipped nbt").unwrap();
-
-        assert!(rename_world(&world, "New Name").is_err());
-        // An Err must mean nothing moved.
-        assert!(world.exists(), "world should have been moved back");
-        assert!(!tmp.path().join("New Name").exists());
-    }
-
-    #[test]
-    fn rename_world_rejects_nonexistent_directory() {
-        let tmp = tempfile::tempdir().unwrap();
-        let missing = tmp.path().join("Does Not Exist");
-        assert!(rename_world(&missing, "New Name").is_err());
+        let mut written = REGION_TEMPLATE.to_vec();
+        written[8192] ^= 1;
+        fs::write(&region, &written).unwrap();
+        remove_untouched_template_region(&world);
+        assert!(region.exists(), "a region something wrote to stays");
     }
 
     #[test]
     fn apply_java_world_settings_writes_gametype_and_daytime() {
         let tmp = tempfile::tempdir().unwrap();
         let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
-        apply_java_world_settings(&world, crate::args::GameMode::Survival, 13000).unwrap();
+        apply_java_world_settings(
+            &world,
+            crate::args::GameMode::Survival,
+            13000,
+            crate::args::WorldType::Void,
+        )
+        .unwrap();
 
         let raw = fs::read(world.join("level.dat")).unwrap();
         let mut decompressed = Vec::new();
@@ -1392,13 +1241,25 @@ mod tests {
             crate::world_editor::DEFAULT_MAX_Y,
         );
         crate::world_editor::set_base_chunk_y(-62);
-        apply_java_world_settings(&vanilla, crate::args::GameMode::Creative, 6000).unwrap();
+        apply_java_world_settings(
+            &vanilla,
+            crate::args::GameMode::Creative,
+            6000,
+            crate::args::WorldType::Flat,
+        )
+        .unwrap();
         let vanilla_layers = flat_layers(&level_dat_root(&vanilla));
 
         let tall = PathBuf::from(create_new_world(tmp.path()).unwrap());
         crate::world_editor::set_world_bounds(-2032, 2031);
         crate::world_editor::set_base_chunk_y(-1876);
-        apply_java_world_settings(&tall, crate::args::GameMode::Creative, 6000).unwrap();
+        apply_java_world_settings(
+            &tall,
+            crate::args::GameMode::Creative,
+            6000,
+            crate::args::WorldType::Flat,
+        )
+        .unwrap();
         let tall_layers = flat_layers(&level_dat_root(&tall));
 
         crate::world_editor::set_world_bounds(
@@ -1410,6 +1271,52 @@ mod tests {
         assert_eq!(vanilla_layers[0].0, "minecraft:dirt");
         assert_eq!(tall_layers[0], ("minecraft:air".to_string(), 154));
         assert_eq!(tall_layers[1..], vanilla_layers[..]);
+    }
+
+    #[test]
+    fn a_void_world_gets_the_void_preset_whatever_the_floor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        apply_java_world_settings(
+            &world,
+            crate::args::GameMode::Creative,
+            6000,
+            crate::args::WorldType::Void,
+        )
+        .unwrap();
+        let root = level_dat_root(&world);
+        assert_eq!(
+            flat_layers(&root),
+            vec![("minecraft:air".to_string(), 1)],
+            "nothing but air past the area"
+        );
+
+        let mut node = &root;
+        for key in [
+            "Data",
+            "WorldGenSettings",
+            "dimensions",
+            "minecraft:overworld",
+            "generator",
+            "settings",
+        ] {
+            let Value::Compound(map) = node else {
+                panic!("{key} parent not a compound");
+            };
+            node = map.get(key).unwrap();
+        }
+        let Value::Compound(settings) = node else {
+            panic!("settings not a compound");
+        };
+        assert_eq!(
+            settings.get("biome"),
+            Some(&Value::String("minecraft:the_void".to_string()))
+        );
+        assert_eq!(settings.get("features"), Some(&Value::Byte(0)));
+        assert_eq!(
+            settings.get("structure_overrides"),
+            Some(&Value::List(vec![]))
+        );
     }
 
     /// Highest format that still allows the deprecated `formats` key.

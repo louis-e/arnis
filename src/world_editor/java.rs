@@ -176,6 +176,7 @@ impl<'a> WorldEditor<'a> {
             &self.llbbox,
             self.ground.as_deref(),
             self.bake_lighting,
+            self.void_world,
             self.preview.as_deref(),
             self.voxy.as_deref(),
             region_x,
@@ -329,23 +330,28 @@ fn strip_stale_side_chunks(
     }
 }
 
-/// Open (truncating) a fresh `r.X.Z.mca` under `world_dir/region`.
+/// Open (truncating) a fresh `r.X.Z.mca` under `world_dir/region`. A flat world starts
+/// from the template; a void world starts empty, since nothing outside the area is written.
 fn create_region_file(
     world_dir: &std::path::Path,
     region_x: i32,
     region_z: i32,
+    void_world: bool,
 ) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
     let region_dir = world_dir.join("region");
     let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
     std::fs::create_dir_all(&region_dir)?;
 
-    const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
     let mut region_file: File = File::options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(true)
         .open(&out_path)?;
+    if void_world {
+        return Ok(Region::create(region_file)?);
+    }
+    const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
     region_file.write_all(REGION_TEMPLATE)?;
     Ok(Region::from_stream(region_file)?)
 }
@@ -365,6 +371,7 @@ fn write_region_to_disk(
     llbbox: &crate::coordinate_system::geographic::LLBBox,
     ground: Option<&crate::ground::Ground>,
     bake_lighting: bool,
+    void_world: bool,
     preview: Option<&crate::map_renderer::PreviewAccumulator>,
     voxy: Option<&crate::voxy::VoxyWriter>,
     region_x: i32,
@@ -381,7 +388,7 @@ fn write_region_to_disk(
     let mut region = if merge {
         open_region_file_for_merge(world_dir, region_x, region_z)?
     } else {
-        create_region_file(world_dir, region_x, region_z)?
+        create_region_file(world_dir, region_x, region_z, void_world)?
     };
     let mut ser_buffer = Vec::with_capacity(8192);
     let mut written_chunks: Vec<(i32, i32)> = Vec::new();
@@ -390,11 +397,16 @@ fn write_region_to_disk(
     // vs forest vs jungle) at chunk-build time. Cheap to recompute.
     let center_lat = climate_lat.unwrap_or((llbbox.min().lat() + llbbox.max().lat()) * 0.5);
 
-    // Filler chunks all share one set of sections, so they share their light too.
-    let base_sections = get_base_chunk_sections();
+    // Filler chunks all share one set of sections, so they share their light too. A void
+    // world has none: what the area does not touch is left to the void generator.
+    let base_sections = if void_world {
+        Arc::new(Vec::new())
+    } else {
+        get_base_chunk_sections()
+    };
     let (base_min_y, base_max_y) = chunk_section_span(&base_sections);
-    let base_lighting =
-        bake_lighting.then(|| compute_chunk_lighting(&base_sections, (base_min_y, base_max_y)));
+    let base_lighting = (bake_lighting && !void_world)
+        .then(|| compute_chunk_lighting(&base_sections, (base_min_y, base_max_y)));
 
     let mut lod = voxy.map(|writer| {
         let (min_y, max_y) = region_content_span(region_to_modify);
@@ -426,6 +438,11 @@ fn write_region_to_disk(
                     } else {
                         continue;
                     }
+                }
+                // A fresh void region holds only the chunks the area touches; the void
+                // generator makes the rest. A merge stays inside its area anyway.
+                if void_world && !merge && existing.is_none() {
+                    continue;
                 }
 
                 let biome_names = crate::biome::chunk_biome_names(
@@ -585,6 +602,7 @@ pub(crate) struct RegionWriteCtx {
     llbbox: crate::coordinate_system::geographic::LLBBox,
     ground: Option<std::sync::Arc<crate::ground::Ground>>,
     bake_lighting: bool,
+    void_world: bool,
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
     voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
     mode: RegionWriteMode,
@@ -599,6 +617,7 @@ impl RegionWriteCtx {
         llbbox: crate::coordinate_system::geographic::LLBBox,
         ground: Option<std::sync::Arc<crate::ground::Ground>>,
         bake_lighting: bool,
+        void_world: bool,
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
         voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
         mode: RegionWriteMode,
@@ -610,6 +629,7 @@ impl RegionWriteCtx {
             llbbox,
             ground,
             bake_lighting,
+            void_world,
             preview,
             voxy,
             mode,
@@ -629,6 +649,7 @@ impl RegionWriteCtx {
             &self.llbbox,
             self.ground.as_deref(),
             self.bake_lighting,
+            self.void_world,
             self.preview.as_deref(),
             self.voxy.as_deref(),
             region_x,
@@ -2053,6 +2074,7 @@ mod merge_tests {
             dir,
             &llbbox(),
             None,
+            false,
             false,
             None,
             None,

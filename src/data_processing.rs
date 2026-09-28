@@ -562,6 +562,12 @@ pub fn generate_world_with_options(
     let extending = one_world.is_some_and(|run| run.extending);
     let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
 
+    // Before anything reads a footprint: nothing is built on a runway.
+    let dropped = highways::drop_buildings_on_aircraft_pavement(&mut elements, args.scale);
+    if dropped > 0 {
+        println!("  Skipped {dropped} building(s) on runways, taxiways and aprons");
+    }
+
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
         WorldEditor::new_luanti(
@@ -591,6 +597,14 @@ pub fn generate_world_with_options(
     // producing that.
     let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
     editor.set_bake_lighting(args.bake_lighting || wants_voxy);
+    let void_world =
+        world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
+    editor.set_void_world(void_world);
+    if void_world && !extending {
+        // A world made by `create_new_world` starts with the flat template region. The area
+        // rewrites it when it reaches that region; one it misses would stay a grass square.
+        crate::world_utils::remove_untouched_template_region(&output_path);
+    }
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
@@ -1817,6 +1831,7 @@ pub fn generate_world_with_options(
             &output_path,
             args.gamemode,
             args.world_time,
+            args.world_type,
         ) {
             eprintln!("Warning: Failed to apply world settings: {e}");
         }

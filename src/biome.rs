@@ -4,7 +4,7 @@ use crate::climate::Climate;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::ground::Ground;
 use crate::land_cover::{
-    LC_BARE, LC_BUILT_UP, LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND,
+    LC_BARE, LC_BEACH, LC_BUILT_UP, LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND,
     LC_SNOW_ICE, LC_TREE_COVER, LC_WATER, LC_WETLAND,
 };
 use fastnbt::{LongArray, Value};
@@ -58,6 +58,7 @@ pub fn biome_for_class(lc: u8, climate: Climate, lat_deg: f64, water_dist: u8) -
         Climate::Boreal => match lc {
             LC_TREE_COVER | LC_MOSS => "minecraft:taiga",
             LC_WETLAND => "minecraft:swamp",
+            LC_BEACH => "minecraft:snowy_beach",
             _ => "minecraft:snowy_plains",
         },
         Climate::Temperate => biome_temperate(lc, lat_deg, water_dist),
@@ -86,6 +87,7 @@ fn biome_temperate(lc: u8, lat_deg: f64, water_dist: u8) -> &'static str {
         }
         LC_GRASSLAND | LC_CROPLAND | LC_BUILT_UP => "minecraft:plains",
         LC_BARE => "minecraft:desert",
+        LC_BEACH => "minecraft:beach",
         LC_SNOW_ICE => "minecraft:snowy_plains",
         LC_WATER => {
             if water_dist >= 8 {

@@ -44,7 +44,7 @@ pub struct ElevationData {
     pub(crate) blocks_per_meter: f64,
     /// Converts a Minecraft-Y difference into the `8 * tan(incline)` units the
     /// slope thresholds are documented in: `args.scale / blocks_per_meter`.
-    /// 1.0 whenever vertical compression did not fire.
+    /// 1.0 unless the relief was compressed or `--height-multiplier` stretched it.
     pub(crate) slope_correction: f64,
     /// Terrain base actually used: the requested ground level, or lower if the relief
     /// needed the extended floor. Every consumer of the affine must use this, not args.
@@ -188,10 +188,12 @@ pub fn compute_grid_dims_for_world(
 /// The returned ElevationData contains heights in Minecraft Y coordinates.
 ///
 /// `dims` comes from `compute_grid_dims`, so it matches the land cover grid.
+/// `height_multiplier` scales blocks per metre on the vertical axis only.
 #[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
+    height_multiplier: f64,
     ground_level: i32,
     min_ground_level: i32,
     disable_height_limit: bool,
@@ -289,9 +291,12 @@ pub fn fetch_elevation_data(
     bench.mark("elev_landcover_repair");
     emit_gui_progress_update(16.0, "Processing elevation...");
 
+    // The multiplier stretches only the vertical axis. `slope_correction` below still
+    // divides by the horizontal scale, so slopes keep their real incline and a stretched
+    // hillside stays grass instead of turning to rock.
     let (mc_heights, affine) = scale_to_minecraft_with(
         &height_grid,
-        scale,
+        scale * height_multiplier,
         ground_level,
         min_ground_level,
         disable_height_limit,

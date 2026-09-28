@@ -280,6 +280,11 @@ a:hover {
   flex: 0 1 auto;
 }
 
+/* A custom name waiting for the next Start, not a world that exists yet */
+.world-name-label[data-pending] {
+  font-style: italic;
+}
+
 /* Inline editor for the custom world name, swapped in for .world-name-label
    while editing. Sits inside .world-name-row (a sibling of #start-button,
    not nested inside it), so it must not inherit the row's pointer cursor or
