@@ -9,6 +9,7 @@ import {
   cancelSettingsResetConfirm,
   flushSettingsStore,
 } from './settings-store.js';
+import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -47,6 +48,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  // Before the store restores values, so the cards follow the restored ones.
+  initSettingsLayout();
+  initDialogs();
   initVoxyLightingCoupling();
   initCavesFillCoupling();
   refreshHeightLimitRow();
@@ -118,85 +122,9 @@ async function applyLocalization(localization) {
   const localizationElements = {
     "#start-button > span[data-localize='start_generation']": "start_generation",
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
-    "h2[data-localize='customization_settings']": "customization_settings",
-    "span[data-localize='world_scale']": "world_scale",
-    "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
-    "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
-    "span[data-localize='language']": "language",
-    "span[data-localize='generation_mode']": "generation_mode",
-    "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
-    "option[data-localize='mode_geo_only']": "mode_geo_only",
-    "option[data-localize='mode_terrain_only']": "mode_terrain_only",
-    "span[data-localize='terrain']": "terrain",
-    "span[data-localize='interior']": "interior",
-    "span[data-localize='fillground']": "fillground",
-    "span[data-localize='caves']": "caves",
-    "span[data-localize='legacy_trees']": "legacy_trees",
-    "span[data-localize='overture']": "overture",
-    "span[data-localize='three_dmr']": "three_dmr",
-    "span[data-localize='disable_height_limit']": "disable_height_limit",
-    "span[data-localize='aws_only_elevation']": "aws_only_elevation",
-    "span[data-localize='bake_lighting']": "bake_lighting",
-    "span[data-localize='voxy_lod']": "voxy_lod",
-    "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
-    "span[data-localize='map_theme']": "map_theme",
-    "span[data-localize='custom_map_source']": "custom_map_source",
-    "span[data-localize='java_save_path']": "java_save_path",
-    "span[data-localize='bedrock_save_path']": "bedrock_save_path",
-    "span[data-localize='luanti_save_path']": "luanti_save_path",
-    "span[data-localize='rotation_angle']": "rotation_angle",
-    "span[data-localize='canopy_height']": "canopy_height",
-    "span[data-localize='max_tree_size']": "max_tree_size",
-    "button[data-localize='tree_size_small']": "tree_size_small",
-    "button[data-localize='tree_size_medium']": "tree_size_medium",
-    "button[data-localize='tree_size_big']": "tree_size_big",
-    "button[data-localize='tree_size_tall']": "tree_size_tall",
-    "button[data-localize='tree_size_giant']": "tree_size_giant",
-    "span[data-localize='gamemode']": "gamemode",
-    "button[data-localize='gamemode_survival']": "gamemode_survival",
-    "button[data-localize='gamemode_creative']": "gamemode_creative",
-    "button[data-localize='gamemode_spectator']": "gamemode_spectator",
-    "span[data-localize='world_time']": "world_time",
-    "span[data-localize='map_item']": "map_item",
-    "span[data-localize='custom_world_name']": "custom_world_name",
-    "span[data-localize='signage']": "signage",
-    "span[data-localize='mapillary_token']": "mapillary_token",
-    "span[data-localize='facade_precompute']": "facade_precompute",
-    "span[data-localize='facade_mode']": "facade_mode",
-    "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
-    "button[data-localize='facade_mode_photos']": "facade_mode_photos",
-    "div[data-localize='facade_mode_java_only']": "facade_mode_java_only",
-    "button[data-localize='signage_none']": "signage_none",
-    "button[data-localize='signage_basic']": "signage_basic",
-    "button[data-localize='signage_full']": "signage_full",
-    "div[data-localize='settings_section_generation']": "settings_section_generation",
-    "div[data-localize='settings_section_facades']": "settings_section_facades",
-    "span[data-localize='facade_source']": "facade_source",
-    "span[data-localize='facade_detail']": "facade_detail",
-    "button[data-localize='facade_detail_standard']": "facade_detail_standard",
-    "button[data-localize='facade_detail_high']": "facade_detail_high",
-    "button[data-localize='facade_source_off']": "facade_source_off",
-    "button[data-localize='facade_source_preset']": "facade_source_preset",
-    "button[data-localize='facade_source_mapillary']": "facade_source_mapillary",
-    "span[data-localize='enable_luanti']": "enable_luanti",
-    "div[data-localize='settings_section_world']": "settings_section_world",
-    "div[data-localize='settings_section_map']": "settings_section_map",
-    "div[data-localize='settings_section_application']": "settings_section_application",
-    "button[data-localize='facade_precompute_button']": "facade_precompute_button",
-    "span[data-localize='clear_tile_cache']": "clear_tile_cache",
-    "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
-    // Row label only; settings-store.js owns the button text.
-    "span[data-localize='reset_all_settings']": "reset_all_settings",
     ".footer-link": "footer_text",
-    "button[data-localize='license_and_credits']": "license_and_credits",
-    "h2[data-localize='license_and_credits']": "license_and_credits",
-    "button[data-localize='version_info']": "version_info",
-    "h2[data-localize='update_modal_title']": "update_modal_title",
-    "div[data-localize='update_modal_download_note']": "update_modal_download_note",
-    "button[data-localize='update_view_on_github']": "update_view_on_github",
-    "button[data-localize='update_download']": "update_download",
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
@@ -207,6 +135,14 @@ async function applyLocalization(localization) {
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
+
+  // Every text on the settings page and in the dialogs carries its key, and
+  // several appear more than once (a section name is in the sidebar and on the
+  // section itself), so they are localized in one pass rather than selector by
+  // selector.
+  document.querySelectorAll("#settings-modal [data-localize], .dialog [data-localize]").forEach((element) => {
+    localizeElement(localization, { element }, element.dataset.localize);
+  });
 
   // settings-store.js creates these buttons and owns their text.
   localizeSettingsStore(localization);
@@ -225,6 +161,8 @@ async function applyLocalization(localization) {
     try {
       const w = frame.contentWindow;
       if (w && typeof w.renderBboxHint === 'function') w.renderBboxHint();
+      // The toolbar's labels and the search placeholder, same reason.
+      if (w && typeof w.refreshMapToolLabels === 'function') w.refreshMapToolLabels();
     } catch (_) {
       // A frame that is not ours or not loaded yet; the hint renders itself
       // once it is.
@@ -261,6 +199,10 @@ async function initFooter() {
     footerElement.textContent = footerText
       .replace("{year}", currentYear)
       .replace("{version}", version);
+
+    // The About section of the settings page repeats the same line.
+    const aboutVersion = document.getElementById("about-version");
+    if (aboutVersion) aboutVersion.textContent = footerElement.textContent;
   }
 }
 
@@ -331,7 +273,11 @@ async function checkForUpdates() {
 }
 
 function openUpdateModal(opts = {}) {
-  const showDownload = opts.showDownload !== false;
+  const info = latestReleaseInfo;
+  // Version info opened from Settings only reads, unless the release it shows
+  // is newer than this build: then the download is offered there as well.
+  const showDownload =
+    opts.showDownload !== false || !!(info && info.release && info.isNewer);
   const modal = document.getElementById("update-modal");
   if (!modal) return;
   const titleEl = document.getElementById("update-modal-title");
@@ -343,8 +289,12 @@ function openUpdateModal(opts = {}) {
   if (downloadBtn) downloadBtn.style.display = showDownload ? "" : "none";
   if (downloadNote) downloadNote.style.display = showDownload ? "" : "none";
 
-  const info = latestReleaseInfo;
+  const metaEl = document.getElementById("update-modal-meta");
+
   if (!info || !info.release) {
+    titleEl.textContent =
+      (window.localization && window.localization.update_modal_title) || "What's new in Arnis";
+    if (metaEl) metaEl.replaceChildren();
     const fallbackMsg =
       (window.localization && window.localization.update_fetch_failed) ||
       "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly.";
@@ -356,7 +306,9 @@ function openUpdateModal(opts = {}) {
   const rel = info.release;
 
   titleEl.textContent = (rel.name && rel.name.trim()) || rel.tag_name || "Latest release";
+  renderReleaseMeta(metaEl, info, rel);
   bodyEl.innerHTML = renderMarkdown(rel.body || "");
+  bodyEl.scrollTop = 0;
   bodyEl.querySelectorAll("a[href]").forEach((a) => {
     const href = a.getAttribute("href");
     if (!href) return;
@@ -369,7 +321,9 @@ function openUpdateModal(opts = {}) {
   if (downloadBtn && showDownload) {
     const asset = pickAssetForPlatform(rel.assets || [], currentPlatform);
     downloadBtn.disabled = false;
-    downloadBtn.textContent =
+    // Only the label: the button also holds its icon.
+    const label = downloadBtn.querySelector(".dialog-button-label") || downloadBtn;
+    label.textContent =
       (window.localization && window.localization.update_download) || "Download";
     downloadBtn.dataset.downloadUrl = asset ? asset.browser_download_url : rel.html_url;
   }
@@ -393,15 +347,106 @@ async function openVersionInfoModal() {
   openUpdateModal({ showDownload: false });
 }
 
-function closeUpdateModal() {
-  const modal = document.getElementById("update-modal");
-  if (modal) modal.style.display = "none";
+// The line under the release title: its date, then the version, or
+// "3.2.0 → 3.3.0" when it is newer than this build. A localized date and
+// numbers only, so nothing here needs a translation.
+function renderReleaseMeta(metaEl, info, rel) {
+  if (!metaEl) return;
+  metaEl.replaceChildren();
+  const parts = [];
+  const date = formatReleaseDate(rel.published_at);
+  if (date) parts.push(document.createTextNode(date));
+
+  const plain = (v) => String(v || "").replace(/^v/i, "");
+  const remote = plain(info.remoteVersion || rel.tag_name);
+  if (info.isNewer && info.localVersion && remote) {
+    const version = document.createElement("span");
+    const newer = document.createElement("span");
+    newer.className = "is-new";
+    newer.textContent = remote;
+    version.append(`${plain(info.localVersion)} → `, newer);
+    parts.push(version);
+  } else if (remote) {
+    parts.push(document.createTextNode(remote));
+  }
+
+  parts.forEach((part, i) => {
+    if (i > 0) metaEl.append(" · ");
+    metaEl.append(part);
+  });
 }
 
+// The interface language as a locale for dates and numbers, rather than the
+// system one.
+function interfaceLocale() {
+  const lang = localStorage.getItem("arnis-language") || navigator.language;
+  // Arnis files Ukrainian under "ua"; the language tag is "uk".
+  return lang === "ua" ? "uk" : lang;
+}
+
+function formatReleaseDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat(interfaceLocale(), { dateStyle: "long" }).format(date);
+  } catch (_) {
+    return date.toDateString();
+  }
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById("update-modal");
+  if (modal) hideModal(modal);
+}
+
+// Where focus returns to once a dialog closes.
+const modalReturnFocus = new WeakMap();
+
+// Shows a dialog's backdrop and moves focus onto the dialog, so the keyboard
+// acts on it rather than on whatever is behind.
 function showModal(modal) {
+  if (modal.style.display !== "flex") {
+    modalReturnFocus.set(modal, document.activeElement);
+  }
   modal.style.display = "flex";
   modal.style.justifyContent = "center";
   modal.style.alignItems = "center";
+  const dialog = modal.querySelector(".dialog");
+  if (dialog) dialog.focus({ preventScroll: true });
+}
+
+function hideModal(modal) {
+  modal.style.display = "none";
+  const back = modalReturnFocus.get(modal);
+  modalReturnFocus.delete(modal);
+  if (back && document.contains(back) && typeof back.focus === "function") {
+    back.focus({ preventScroll: true });
+  }
+}
+
+// A click on the backdrop closes the dialog, but only when the press started
+// there too: selecting text inside and letting go outside must not close it.
+function closeOnBackdrop(modal, close) {
+  let pressedOnBackdrop = false;
+  modal.addEventListener("pointerdown", (event) => {
+    pressedOnBackdrop = event.target === modal;
+  });
+  modal.addEventListener("click", (event) => {
+    if (pressedOnBackdrop && event.target === modal) close();
+    pressedOnBackdrop = false;
+  });
+}
+
+// License, version info and the 3D preview are read-only, so a click beside
+// them may close them. The consent dialog is left alone: it wants an answer.
+function initDialogs() {
+  const license = document.getElementById("license-modal");
+  const update = document.getElementById("update-modal");
+  const preview3d = document.getElementById("preview3d-modal");
+  if (license) closeOnBackdrop(license, () => window.closeLicense());
+  if (update) closeOnBackdrop(update, closeUpdateModal);
+  if (preview3d) closeOnBackdrop(preview3d, () => window.closePreview3D && window.closePreview3D());
 }
 
 function openUpdateInBrowser() {
@@ -541,10 +586,18 @@ function refreshFacadeSourceRows() {
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
-  const grey = (id, live) => {
+  // A row that belongs to another source is hidden: it has nothing to say
+  // until that source is picked, and the whole Mapillary block greyed out
+  // under Off only buried the rest of the page. A row that belongs to this
+  // source but cannot act yet (no token, wrong format) is greyed instead, so
+  // it is still there to explain itself.
+  const grey = (id, shown, live) => {
     const el = document.getElementById(id);
     const row = el && el.closest('.settings-row');
-    if (row) row.classList.toggle('settings-row-unavailable', !live);
+    if (row) {
+      row.style.display = shown ? '' : 'none';
+      row.classList.toggle('settings-row-unavailable', !live);
+    }
     if (el) {
       el.querySelectorAll('.segment, input, button').forEach((c) => {
         c.disabled = !live;
@@ -552,11 +605,13 @@ function refreshFacadeSourceRows() {
       if (el.tagName === 'INPUT' || el.tagName === 'BUTTON') el.disabled = !live;
     }
   };
-  grey('mapillary-token', source === 'mapillary');
-  grey('facade-mode-group', source === 'mapillary' && !!getMapillaryToken());
+  const mapillary = source === 'mapillary';
+  const token = !!getMapillaryToken();
+  grey('mapillary-token', mapillary, mapillary);
+  grey('facade-mode-group', mapillary, mapillary && token);
   // Panel resolution, so it means nothing where no panels are hung.
-  grey('facade-detail-group', source !== 'off' && java);
-  grey('precompute-facades-button', source === 'mapillary' && !!getMapillaryToken());
+  grey('facade-detail-group', source !== 'off', source !== 'off' && java);
+  grey('precompute-facades-button', mapillary, mapillary && token);
 
   const notice = document.getElementById('facade-java-only-notice');
   if (notice) notice.style.display = java ? 'none' : '';
@@ -1065,41 +1120,49 @@ function initSettings() {
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
 
-  // Open settings modal
+  // Where focus goes back to once the page closes.
+  let focusBeforeSettings = null;
+
+  // Open the settings page
   function openSettings() {
+    focusBeforeSettings = document.activeElement;
     settingsModal.style.display = "flex";
-    settingsModal.style.justifyContent = "center";
-    settingsModal.style.alignItems = "center";
+    syncSettingsLayout();
+    // Focus moves onto the page, so Tab and the arrow keys act on it rather
+    // than on the map behind it.
+    settingsModal.focus({ preventScroll: true });
     // The caches grow with every generation, so the number the panel shows
     // has to be read when the panel opens; measuring it once at startup left
     // it stale for the whole session.
     refreshCacheSize();
   }
 
-  // Close settings modal
+  // Close the settings page
   function closeSettings() {
     settingsModal.style.display = "none";
     // Webview teardown events are not guaranteed, so commit here.
     flushSettingsStore();
     cancelSettingsResetConfirm();
+    if (focusBeforeSettings && typeof focusBeforeSettings.focus === "function") {
+      focusBeforeSettings.focus({ preventScroll: true });
+    }
+    focusBeforeSettings = null;
   }
 
-  // Close settings and license modals on escape key
+  // Escape closes the topmost dialog only. License and version info open on
+  // top of the settings page, so closing them returns to it.
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      if (settingsModal.style.display === "flex") {
-        closeSettings();
-      }
-      
-      const licenseModal = document.getElementById("license-modal");
-      if (licenseModal && licenseModal.style.display === "flex") {
-        closeLicense();
-      }
+    if (event.key !== "Escape") return;
 
-      const updateModal = document.getElementById("update-modal");
-      if (updateModal && updateModal.style.display === "flex") {
-        closeUpdateModal();
-      }
+    const licenseModal = document.getElementById("license-modal");
+    const updateModal = document.getElementById("update-modal");
+    const licenseOpen = licenseModal && licenseModal.style.display === "flex";
+    const updateOpen = updateModal && updateModal.style.display === "flex";
+
+    if (licenseOpen) closeLicense();
+    if (updateOpen) closeUpdateModal();
+    if (!licenseOpen && !updateOpen && settingsModal.style.display === "flex") {
+      closeSettings();
     }
   });
 
@@ -1381,37 +1444,44 @@ function initSettings() {
     const licenseContent = document.getElementById("license-content");
 
     licenseContent.innerHTML = licenseText;
-    licenseModal.style.display = "flex";
-    licenseModal.style.justifyContent = "center";
-    licenseModal.style.alignItems = "center";
+    licenseContent.scrollTop = 0;
+    showModal(licenseModal);
 
-    const threeDmrBlock =
-      `<p><b>3D Model Repository (3DMR):</b></p>` +
-      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
-    licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
+    // The credits only known at runtime go into their own spot in the
+    // "Models, Textures and Fonts" list. Held by reference, so a slow answer
+    // from an earlier opening lands in that opening's detached copy rather
+    // than doubling up in this one.
+    const runtime = licenseContent.querySelector("#license-runtime-credits") || licenseContent;
+    const credit = (title, body) =>
+      `<div class="credit"><h4>${title}</h4>${body}</div>`;
+
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "3D Model Repository (3DMR)",
+      `<p>Landmark models from <a href="https://3dmr.eu" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`
+    ));
 
     // The premade facade set. All CC0, so attribution is a courtesy rather than
     // a condition, but the sources are named because someone should be able to
     // find them and because it says plainly that the pixels are free to ship.
-    const facadeTextureBlock =
-      `<p><b>Preset Building Facade Textures:</b></p>` +
-      `<p style="font-size: 0.9em;">The photographs hung on buildings by the Preset Facades setting, all released under ` +
-      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
-      `<ul style="padding-left: 20px; font-size: 0.9em;">` +
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "Preset Building Facade Textures",
+      `<p>The photographs hung on buildings by the Preset Facades setting, all released under ` +
+      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
+      `<ul>` +
       `<li>Urban building, apartment and shop front photographs by <b>Scouser</b>, from ` +
-      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" style="color: inherit;" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
+      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
       `<li>Tiling facade materials from <b>TextureCan</b>: ` +
-      `<a href="https://www.texturecan.com/details/315/" style="color: inherit;" target="_blank" rel="noopener noreferrer">315</a>, ` +
-      `<a href="https://www.texturecan.com/details/316/" style="color: inherit;" target="_blank" rel="noopener noreferrer">316</a>, ` +
-      `<a href="https://www.texturecan.com/details/357/" style="color: inherit;" target="_blank" rel="noopener noreferrer">357</a>, ` +
-      `<a href="https://www.texturecan.com/details/360/" style="color: inherit;" target="_blank" rel="noopener noreferrer">360</a>, ` +
-      `<a href="https://www.texturecan.com/details/563/" style="color: inherit;" target="_blank" rel="noopener noreferrer">563</a></li>` +
-      `</ul>`;
-    licenseContent.insertAdjacentHTML("beforeend", facadeTextureBlock);
+      `<a href="https://www.texturecan.com/details/315/" target="_blank" rel="noopener noreferrer">315</a>, ` +
+      `<a href="https://www.texturecan.com/details/316/" target="_blank" rel="noopener noreferrer">316</a>, ` +
+      `<a href="https://www.texturecan.com/details/357/" target="_blank" rel="noopener noreferrer">357</a>, ` +
+      `<a href="https://www.texturecan.com/details/360/" target="_blank" rel="noopener noreferrer">360</a>, ` +
+      `<a href="https://www.texturecan.com/details/563/" target="_blank" rel="noopener noreferrer">563</a></li>` +
+      `</ul>`
+    ));
 
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
     const link = (url, text) =>
-      `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+      `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
 
     // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
     // built from street photographs has to name the photographers. The source
@@ -1439,45 +1509,44 @@ function initSettings() {
         ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
         : "";
       mapillaryList =
-        `<p style="font-size: 0.9em;">Photographs used by the last generation:${note}</p>` +
-        `<ul style="padding-left: 20px; font-size: 0.9em;">${lines}</ul>`;
+        `<p>Photographs used by the last generation:${note}</p>` +
+        `<ul>${lines}</ul>`;
     } else {
       mapillaryList =
-        `<p style="font-size: 0.9em;">The photographs a generation used are listed here once it has run.</p>`;
+        `<p>The photographs a generation used are listed here once it has run.</p>`;
     }
-    const mapillaryBlock =
-      `<p><b>Building Facades (Mapillary):</b></p>` +
-      `<p style="font-size: 0.9em;">The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "Building Facades (Mapillary)",
+      `<p>The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
       `${link("https://www.mapillary.com", "Mapillary")}, licensed ` +
       `${link("https://creativecommons.org/licenses/by-sa/4.0/", "CC BY-SA 4.0")}. ` +
       `Share-alike applies to anything you publish that carries them.</p>` +
-      mapillaryList;
-    licenseContent.insertAdjacentHTML("beforeend", mapillaryBlock);
+      mapillaryList
+    ));
 
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
       if (Array.isArray(rows) && rows.length > 0) {
         const items = rows.map(r => {
           const lic = r.license_url
-            ? `<a href="${esc(r.license_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
+            ? `<a href="${esc(r.license_url)}" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
             : esc(r.license);
-          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
+          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
         }).join("");
-        const block =
-          `<p><b>Bundled 3D Models (Wikimedia Commons via Wikidata P4896):</b></p>` +
-          `<p style="font-size: 0.9em;">Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
-          `<ul style="padding-left: 20px;">${items}</ul>`;
-        licenseContent.insertAdjacentHTML("beforeend", block);
+        runtime.insertAdjacentHTML("beforeend", credit(
+          "Bundled 3D Models (Wikimedia Commons via Wikidata P4896)",
+          `<p>Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
+          `<ul>${items}</ul>`
+        ));
       }
     } catch (e) {
       console.warn("Failed to load 3D model attributions:", e);
     }
-
   }
 
   function closeLicense() {
     const licenseModal = document.getElementById("license-modal");
-    licenseModal.style.display = "none";
+    hideModal(licenseModal);
   }
 
   window.openLicense = openLicense;
@@ -1559,12 +1628,16 @@ function initLuantiExperimentalToggle() {
   const bedrockBtn = document.getElementById('format-bedrock');
   if (!toggle || !luantiBtn) return;
 
+  const luantiPathRow = document.getElementById('luanti-save-path-row');
+
   const applyRightmost = (enabled) => {
     luantiBtn.style.display = enabled ? '' : 'none';
     luantiBtn.classList.toggle('format-toggle-btn--rightmost', enabled);
     if (bedrockBtn) {
       bedrockBtn.classList.toggle('format-toggle-btn--rightmost', !enabled);
     }
+    // A save path for a format nobody can pick is only noise.
+    if (luantiPathRow) luantiPathRow.style.display = enabled ? '' : 'none';
   };
 
   const enabled = isLuantiEnabled();
@@ -1663,15 +1736,13 @@ function initTelemetryConsent() {
 
   if (existing === null) {
     // First run: ask for consent
-    modal.style.display = 'flex';
-    modal.style.justifyContent = 'center';
-    modal.style.alignItems = 'center';
+    showModal(modal);
   }
 
   // Expose handlers
   window.acceptTelemetry = () => {
     localStorage.setItem(key, 'true');
-    modal.style.display = 'none';
+    hideModal(modal);
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -1683,7 +1754,7 @@ function initTelemetryConsent() {
 
   window.rejectTelemetry = () => {
     localStorage.setItem(key, 'false');
-    modal.style.display = 'none';
+    hideModal(modal);
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -2033,6 +2104,9 @@ function initTooltips() {
     }
     icon.addEventListener('mouseenter', () => show(icon));
     icon.addEventListener('mouseleave', hide);
+    // The icon sits inside the setting's <label>, whose click would otherwise
+    // flip the switch it belongs to.
+    icon.addEventListener('click', (e) => e.preventDefault());
     icon.addEventListener('focus', () => show(icon));
     icon.addEventListener('blur', hide);
     // Escape closes the tooltip while it's focused.
@@ -2445,7 +2519,13 @@ function setWorldNameLabel(text) {
     label.textContent = text;
   } else {
     label.setAttribute('data-placeholder', 'true');
-    localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+    // Before the first localization pass there is nothing to look the text up
+    // in, and that pass fills the placeholder itself. Looking it up here
+    // instead fetched English, which arrived after the translation and
+    // overwrote it.
+    if (window.localization) {
+      localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+    }
   }
 }
 
