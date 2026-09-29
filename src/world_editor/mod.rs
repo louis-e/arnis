@@ -540,6 +540,12 @@ impl<'a> WorldEditor<'a> {
             .map_or(0, |g| g.cover_class(self.ground_point(x, z)))
     }
 
+    /// RESOLVE ecoregion at (x, z), if the area has one there.
+    #[inline]
+    pub fn ecoregion(&self, x: i32, z: i32) -> Option<crate::ecoregion::Ecoregion> {
+        self.ground.as_ref()?.ecoregion(self.ground_point(x, z))
+    }
+
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
     pub fn is_lc_water(&self, x: i32, z: i32) -> bool {
         self.ground.as_ref().is_some_and(|g| {

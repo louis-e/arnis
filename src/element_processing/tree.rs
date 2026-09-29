@@ -427,6 +427,14 @@ impl LeafPlacer<'_> {
     }
 }
 
+/// Sand beach at (x, z) or a promenade's width away.
+fn near_beach(editor: &WorldEditor, x: i32, z: i32) -> bool {
+    let r = ((12.0 * editor.scale()).round() as i32).clamp(2, 12);
+    [(0, 0), (r, 0), (-r, 0), (0, r), (0, -r)]
+        .iter()
+        .any(|&(dx, dz)| editor.cover_class(x + dx, z + dz) == crate::land_cover::LC_BEACH)
+}
+
 /// Map a chosen `TreeType` to a habitat hint that steers region community selection.
 fn habitat_for_tree_type(t: TreeType) -> crate::trees::region::Habitat {
     use crate::trees::region::Habitat;
@@ -498,6 +506,7 @@ impl Tree {
             false,
             false,
             None,
+            false,
         );
     }
 
@@ -519,10 +528,12 @@ impl Tree {
             false,
             true,
             None,
+            false,
         );
     }
 
     /// Creates a tree of a specific type. allow_on_paved is true only for natural=tree nodes.
+    /// `from_tags`: a leaf type or wetland tag chose the type, so it beats the ecoregion mix.
     pub fn create_of_type(
         editor: &mut WorldEditor,
         (x, y, z): Coord,
@@ -530,6 +541,7 @@ impl Tree {
         building_footprints: Option<&BuildingFootprintBitmap>,
         bridge_surface: Option<&BridgeSurfaceMap>,
         allow_on_paved: bool,
+        from_tags: bool,
     ) {
         Self::build(
             editor,
@@ -540,6 +552,7 @@ impl Tree {
             allow_on_paved,
             false,
             None,
+            from_tags,
         );
     }
 
@@ -560,6 +573,7 @@ impl Tree {
             true,
             true,
             Some(mapped),
+            false,
         );
     }
 
@@ -573,6 +587,7 @@ impl Tree {
         allow_on_paved: bool,
         density_decided: bool,
         mapped: Option<&crate::trees::mapped::MappedTree>,
+        from_tags: bool,
     ) {
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
@@ -675,10 +690,13 @@ impl Tree {
                             crate::trees::tree_library::size_for_height((h * scale).round() as i32)
                         })
                         .or_else(|| editor.canopy_size_hint(x, z));
+                    let eco = editor.ecoregion(x, z);
                     let req = crate::trees::region::MappedRequest {
                         genus: m.genus.as_deref(),
                         conifer: m.conifer,
                         want_size,
+                        eco,
+                        beach: eco.is_some() && near_beach(editor, x, z),
                     };
                     region.pick_mapped(x, z, hint, elev_y, req)
                 }
@@ -687,9 +705,17 @@ impl Tree {
                     // column the trunk lands in.
                     let (hx, hz) =
                         crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
+                    let eco = editor.ecoregion(hx, hz);
                     let req = crate::trees::region::SlotRequest {
                         want_size: editor.canopy_size_hint(hx, hz),
                         density_decided,
+                        eco,
+                        beach: eco.is_some() && near_beach(editor, hx, hz),
+                        tagged: from_tags,
+                        wet_ground: matches!(
+                            editor.cover_class(hx, hz),
+                            crate::land_cover::LC_WETLAND | crate::land_cover::LC_MANGROVES
+                        ),
                     };
                     region.pick_slot(x, z, hint, elev_y, req)
                 }
@@ -1624,12 +1650,28 @@ mod tests {
 
         let mut halo = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         halo.set_strict_bounds(0, 0, 20, 63);
-        Tree::create_of_type(&mut halo, (30, 1, 30), TreeType::Oak, None, None, false);
+        Tree::create_of_type(
+            &mut halo,
+            (30, 1, 30),
+            TreeType::Oak,
+            None,
+            None,
+            false,
+            false,
+        );
         assert!(!has_trunk(&halo));
 
         let mut owner = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         owner.set_strict_bounds(21, 0, 63, 63);
-        Tree::create_of_type(&mut owner, (30, 1, 30), TreeType::Oak, None, None, false);
+        Tree::create_of_type(
+            &mut owner,
+            (30, 1, 30),
+            TreeType::Oak,
+            None,
+            None,
+            false,
+            false,
+        );
         assert!(has_trunk(&owner));
     }
 
@@ -1643,7 +1685,15 @@ mod tests {
         // Scattered tree (allow_on_paved = false) on a paved block: rejected.
         let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         editor.set_block(SMOOTH_STONE, 30, 0, 30, None, None);
-        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, false);
+        Tree::create_of_type(
+            &mut editor,
+            (30, 1, 30),
+            TreeType::Oak,
+            None,
+            None,
+            false,
+            false,
+        );
         assert!(
             !has_trunk(&editor),
             "a scattered tree must not grow on a paved surface"
@@ -1652,7 +1702,15 @@ mod tests {
         // Deliberately-mapped tree (allow_on_paved = true) on the same paved block: allowed.
         let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         editor.set_block(SMOOTH_STONE, 30, 0, 30, None, None);
-        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, true);
+        Tree::create_of_type(
+            &mut editor,
+            (30, 1, 30),
+            TreeType::Oak,
+            None,
+            None,
+            true,
+            false,
+        );
         assert!(
             has_trunk(&editor),
             "a dedicated natural=tree node must stand on paving"
@@ -1661,7 +1719,15 @@ mod tests {
         // Water is off-limits even with allow_on_paved = true.
         let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         editor.set_block(WATER, 30, 0, 30, None, None);
-        Tree::create_of_type(&mut editor, (30, 1, 30), TreeType::Oak, None, None, true);
+        Tree::create_of_type(
+            &mut editor,
+            (30, 1, 30),
+            TreeType::Oak,
+            None,
+            None,
+            true,
+            false,
+        );
         assert!(
             !has_trunk(&editor),
             "trees must never stand on water, even when paving is allowed"
@@ -1713,7 +1779,15 @@ mod sealed_surface_tests {
         let xzbbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
         let mut editor = editor_with_sealed_column(&xzbbox);
 
-        Tree::create_of_type(&mut editor, (16, 0, 16), TreeType::Oak, None, None, true);
+        Tree::create_of_type(
+            &mut editor,
+            (16, 0, 16),
+            TreeType::Oak,
+            None,
+            None,
+            true,
+            false,
+        );
         assert!(
             !column_is_empty(&editor, 16, 16),
             "natural=tree is mapped on purpose and keeps its paving exception"
@@ -1739,7 +1813,15 @@ mod scale_tests {
         let llbbox = LLBBox::new(46.0, 7.7, 46.01, 7.71).unwrap();
         let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         editor.set_projection_info("local", scale);
-        Tree::create_of_type(&mut editor, (16, 0, 16), TreeType::Oak, None, None, false);
+        Tree::create_of_type(
+            &mut editor,
+            (16, 0, 16),
+            TreeType::Oak,
+            None,
+            None,
+            false,
+            false,
+        );
         tree_top(&editor, 16, 16)
     }
 

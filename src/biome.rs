@@ -2,6 +2,7 @@
 
 use crate::climate::Climate;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::ecoregion::{EcoBiome, Ecoregion};
 use crate::ground::Ground;
 use crate::land_cover::{
     LC_BARE, LC_BEACH, LC_BUILT_UP, LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND,
@@ -63,6 +64,43 @@ pub fn biome_for_class(lc: u8, climate: Climate, lat_deg: f64, water_dist: u8) -
         },
         Climate::Temperate => biome_temperate(lc, lat_deg, water_dist),
     }
+}
+
+/// Land biome from the ecoregion where it beats latitude; snowy and arid climates keep theirs.
+pub fn ecoregion_biome(lc: u8, climate: Climate, eco: Option<Ecoregion>) -> Option<&'static str> {
+    use EcoBiome::*;
+    let eco = eco?;
+    if matches!(
+        climate,
+        Climate::HotDesert
+            | Climate::ColdDesert
+            | Climate::Boreal
+            | Climate::Tundra
+            | Climate::IceCap
+    ) {
+        return None;
+    }
+    // Cold deserts and steppes snow in winter, which a savanna never does.
+    let dry_warm = !matches!(climate, Climate::ColdSteppe);
+    Some(match (lc, eco.biome) {
+        (LC_TREE_COVER, MoistTropical) => "minecraft:jungle",
+        (LC_TREE_COVER, DryTropical) => "minecraft:sparse_jungle",
+        (
+            LC_TREE_COVER,
+            TropicalConifer | TemperateBroadleaf | TemperateGrassland | MontaneGrassland
+            | Mediterranean,
+        ) => "minecraft:forest",
+        (LC_TREE_COVER, TemperateConifer | Boreal) => "minecraft:taiga",
+        (LC_TREE_COVER, TropicalGrassland | Desert) if dry_warm => "minecraft:savanna",
+        (LC_SHRUBLAND, MoistTropical | DryTropical) => "minecraft:sparse_jungle",
+        (LC_SHRUBLAND, Mediterranean) if dry_warm => "minecraft:savanna",
+        (LC_SHRUBLAND | LC_GRASSLAND, TropicalGrassland | Desert) if dry_warm => {
+            "minecraft:savanna"
+        }
+        (LC_SHRUBLAND | LC_GRASSLAND, MontaneGrassland) => "minecraft:meadow",
+        (LC_SHRUBLAND, TemperateConifer | Boreal | Tundra) => "minecraft:taiga",
+        _ => return None,
+    })
 }
 
 /// The latitude-driven baseline mapping (temperate behaviour).
@@ -187,6 +225,7 @@ pub fn chunk_biome_names(
                         })
                         .flatten();
                     names[(zi * 4 + xi) as usize] = mountain
+                        .or_else(|| ecoregion_biome(lc, climate, g.ecoregion(coord)))
                         .unwrap_or_else(|| biome_for_class(lc, climate, center_lat_deg, wd));
                 }
             }
@@ -405,6 +444,42 @@ mod tests {
             Some("minecraft:frozen_river")
         );
         assert_eq!(mountain_biome(LC_WATER, t, 12, 50.0, 0), None);
+    }
+
+    #[test]
+    fn ecoregion_beats_latitude_where_it_knows_better() {
+        use crate::ecoregion::lookup;
+        let t = Climate::Temperate;
+        // Central Mexican matorral and Ethiopian montane grasslands: highlands, not jungle.
+        assert_eq!(
+            ecoregion_biome(LC_TREE_COVER, t, lookup(427)),
+            Some("minecraft:savanna")
+        );
+        assert_eq!(
+            ecoregion_biome(LC_GRASSLAND, t, lookup(79)),
+            Some("minecraft:meadow")
+        );
+        // Eastern Mediterranean scrub dries out, its grass keeps the rain.
+        assert_eq!(
+            ecoregion_biome(LC_SHRUBLAND, t, lookup(791)),
+            Some("minecraft:savanna")
+        );
+        assert_eq!(ecoregion_biome(LC_GRASSLAND, t, lookup(791)), None);
+        // Arid climates, water and towns keep their own mapping.
+        assert_eq!(
+            ecoregion_biome(LC_TREE_COVER, Climate::HotDesert, lookup(427)),
+            None
+        );
+        assert_eq!(ecoregion_biome(LC_WATER, t, lookup(427)), None);
+        assert_eq!(ecoregion_biome(LC_BUILT_UP, t, lookup(1)), None);
+        assert_eq!(ecoregion_biome(LC_TREE_COVER, t, None), None);
+        // Great Basin shrub steppe snows in winter: no savanna.
+        assert_eq!(
+            ecoregion_biome(LC_SHRUBLAND, Climate::ColdSteppe, lookup(430)),
+            None
+        );
+        // A lawn inside a flooded-grassland ecoregion (Miami) is no swamp; ESA marks the marsh.
+        assert_eq!(ecoregion_biome(LC_GRASSLAND, t, lookup(581)), None);
     }
 
     #[test]
