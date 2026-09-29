@@ -70,8 +70,8 @@ fn landuse_paints_ground(tags: &HashMap<String, String>) -> bool {
 }
 
 /// Footprint of a ground-filling way, or `None` if it does not reach a ground-fill handler.
-/// Mirrors the landuse/natural/leisure arms of `process_element`; keep both in sync.
-fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
+/// Mirrors the landuse/natural/leisure/place arms of `process_element`; keep both in sync.
+pub(crate) fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     let tags = &way.tags;
     if tags.contains_key("building")
         || tags.contains_key("building:part")
@@ -81,13 +81,23 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     }
     let fills_ground = if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
-    } else if tags.contains_key("natural") {
-        // natural=* + amenity=fountain falls through to the fountain handler.
-        tags.get("amenity").map(String::as_str) != Some("fountain")
+    } else if let Some(natural) = tags.get("natural") {
+        // natural=* + amenity=fountain falls through to the fountain handler,
+        // and a tree row plants a line of trees instead of filling anything.
+        tags.get("amenity").map(String::as_str) != Some("fountain") && natural != "tree_row"
     } else if tags.contains_key("amenity") {
         false
+    } else if tags.contains_key("leisure") {
+        true
     } else {
-        tags.contains_key("leisure")
+        // A square paves its whole footprint, so it has to yield to the lawns and
+        // beds mapped inside it like any other area.
+        tags.get("place").map(String::as_str) == Some("square")
+            && ![
+                "barrier", "waterway", "railway", "aeroway", "man_made", "power",
+            ]
+            .iter()
+            .any(|k| tags.contains_key(*k))
     };
     fills_ground.then(|| ring_area(&way.nodes))
 }
@@ -134,20 +144,22 @@ fn ground_fill_area(element: &ProcessedElement) -> Option<f64> {
         ProcessedElement::Relation(rel) => relation_ground_fill_area(rel)?,
         ProcessedElement::Node(_) => return None,
     };
-    // Degenerate rings render nothing; dropping them keeps a zero area from sorting last and winning.
+    // Degenerate rings render nothing; dropping them keeps a zero area from sorting first and winning.
     (area > 0.0).then_some(area)
 }
 
-/// Reorders ground-filling areas so larger ones render first and smaller ones overwrite them.
+/// Reorders ground-filling areas so smaller ones render first and larger ones fill in around them.
 ///
-/// Elements otherwise render in arbitrary OSM parse order, so a large `landuse=forest` can paint
-/// over a `landuse=meadow` nested inside it. Sorting by descending footprint makes the smallest
-/// (most specific) area the last writer for every block it covers.
+/// Ground blocks are written only where nothing stands yet, so the first area to reach a block
+/// keeps it. Elements otherwise render in arbitrary OSM parse order, so a large `landuse=forest`
+/// or `place=square` can claim the `landuse=farmland` or lawn nested inside it. Sorting by
+/// ascending footprint makes the smallest (most specific) area the first writer for every block
+/// it covers.
 ///
 /// Only the slots already occupied by ground-filling areas are rewritten, so every other element
 /// keeps its index. This stays correct across tiles: a tile renders a subsequence of this global
-/// order, and an area is assigned to every tile it overlaps, so the larger area still precedes the
-/// smaller one inside each tile.
+/// order, and an area is assigned to every tile it overlaps, so the smaller area still precedes the
+/// larger one inside each tile.
 pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     let mut slots: Vec<usize> = Vec::new();
     let mut areas: Vec<f64> = Vec::new();
@@ -165,8 +177,8 @@ pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     // src[k] = compact index of the area that belongs in slots[k].
     let mut src: Vec<usize> = (0..count).collect();
     src.sort_by(|&a, &b| {
-        areas[b]
-            .total_cmp(&areas[a])
+        areas[a]
+            .total_cmp(&areas[b])
             .then_with(|| elements[slots[a]].id().cmp(&elements[slots[b]].id()))
     });
 
@@ -837,7 +849,7 @@ pub fn generate_world_with_options(
         editor.set_tree_pack(Arc::clone(tp));
     }
 
-    // Nested areas render correctly only if the smallest one writes last.
+    // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 
     // Pre-compute all flood fills in parallel for better CPU utilization
@@ -870,6 +882,12 @@ pub fn generate_world_with_options(
         None => Arc::clone(&road_mask),
     };
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
+
+    // Mapped trees, so the canopy map does not plant their crowns a second time.
+    let mapped_trunks = Arc::new(crate::trees::mapped::MappedTrunks::collect(
+        &elements, args.scale,
+    ));
+    editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
 
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
@@ -1108,6 +1126,7 @@ pub fn generate_world_with_options(
                 tile_editor.set_tree_pack(Arc::clone(tp));
             }
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
+            tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
             }
@@ -2020,11 +2039,11 @@ mod tests {
 
     #[test]
     fn no_op_landuse_does_not_displace_real_areas() {
-        // The residential polygon is the largest, but must not take the first area slot.
+        // The residential polygon is the largest, but must not take the last area slot.
         let mut elements = vec![
-            way(1, 10, &[("leisure", "pitch")]),
+            way(1, 100, &[("leisure", "park")]),
             way(2, 500, &[("landuse", "residential")]),
-            way(3, 100, &[("leisure", "park")]),
+            way(3, 10, &[("leisure", "pitch")]),
         ];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![3, 2, 1]);
@@ -2038,13 +2057,30 @@ mod tests {
     }
 
     #[test]
-    fn smaller_area_renders_after_larger_one() {
+    fn smaller_area_renders_before_larger_one() {
         let mut elements = vec![
-            way(1, 10, &[("leisure", "park")]),
-            way(2, 100, &[("landuse", "forest")]),
+            way(1, 100, &[("landuse", "forest")]),
+            way(2, 10, &[("leisure", "park")]),
         ];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![2, 1]);
+    }
+
+    #[test]
+    fn a_square_yields_to_the_lawns_inside_it() {
+        // Parse order puts the older square first; the lawn must still claim its ground.
+        let mut elements = vec![
+            way(1, 60, &[("place", "square")]),
+            way(2, 10, &[("landuse", "grass")]),
+        ];
+        sort_ground_fill_areas(&mut elements);
+        assert_eq!(ids(&elements), vec![2, 1]);
+        assert!(ground_fill_area(&way(3, 10, &[("place", "neighbourhood")])).is_none());
+    }
+
+    #[test]
+    fn tree_rows_are_not_ground_fill() {
+        assert!(ground_fill_area(&way(1, 10, &[("natural", "tree_row")])).is_none());
     }
 
     #[test]
@@ -2058,15 +2094,15 @@ mod tests {
         ];
         sort_ground_fill_areas(&mut elements);
         // Slots 0, 2, 4 held areas; 1 and 3 must not move.
-        assert_eq!(ids(&elements), vec![3, 2, 5, 4, 1]);
+        assert_eq!(ids(&elements), vec![1, 2, 5, 4, 3]);
     }
 
     #[test]
     fn relations_participate_in_the_ordering() {
-        // A big relation must fall behind a small way even though relations parse last.
+        // A small relation must go ahead of a big way even though relations parse last.
         let mut elements = vec![
-            way(1, 10, &[("landuse", "grass")]),
-            relation(2, 100, &[("landuse", "forest")]),
+            way(1, 100, &[("landuse", "forest")]),
+            relation(2, 10, &[("landuse", "meadow")]),
         ];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![2, 1]);

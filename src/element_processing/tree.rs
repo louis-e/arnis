@@ -497,6 +497,7 @@ impl Tree {
             bridge_surface,
             false,
             false,
+            None,
         );
     }
 
@@ -517,6 +518,7 @@ impl Tree {
             bridge_surface,
             false,
             true,
+            None,
         );
     }
 
@@ -537,6 +539,28 @@ impl Tree {
             bridge_surface,
             allow_on_paved,
             false,
+            None,
+        );
+    }
+
+    /// Creates a tree OSM maps: a `natural=tree` node or one tree of a tree row.
+    /// It stands on paving, keeps its mapped position and follows its tags.
+    pub fn create_mapped(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        mapped: &crate::trees::mapped::MappedTree,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+    ) {
+        Self::build(
+            editor,
+            (x, y, z),
+            mapped.kind,
+            building_footprints,
+            bridge_surface,
+            true,
+            true,
+            Some(mapped),
         );
     }
 
@@ -549,6 +573,7 @@ impl Tree {
         bridge_surface: Option<&BridgeSurfaceMap>,
         allow_on_paved: bool,
         density_decided: bool,
+        mapped: Option<&crate::trees::mapped::MappedTree>,
     ) {
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
@@ -616,7 +641,10 @@ impl Tree {
         // Both tree models are fixed block sizes, so at low scale they tower over the world.
         let scale = editor.scale();
         if scale < MICRO_TREE_MAX_SCALE {
-            Self::create_micro(editor, x, base_y, z, &tree, scale, &blacklist);
+            let height_m = mapped
+                .and_then(|m| m.height_m)
+                .unwrap_or(NOMINAL_TREE_HEIGHT_M);
+            Self::create_micro(editor, x, base_y, z, &tree, scale, height_m, &blacklist);
             return;
         }
 
@@ -639,14 +667,35 @@ impl Tree {
             };
             let hint = habitat_for_tree_type(tree_type);
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
-            // Read at the slot, not the request, so the hint describes the
-            // column the trunk lands in.
-            let (hx, hz) = crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
-            let req = crate::trees::region::SlotRequest {
-                want_size: editor.canopy_size_hint(hx, hz),
-                density_decided,
+            let picked = match mapped {
+                Some(m) => {
+                    // A mapped height outranks the canopy map, which blurs neighbouring crowns.
+                    let want_size = m
+                        .height_m
+                        .map(|h| {
+                            crate::trees::tree_library::size_for_height((h * scale).round() as i32)
+                        })
+                        .or_else(|| editor.canopy_size_hint(x, z));
+                    let req = crate::trees::region::MappedRequest {
+                        genus: m.genus.as_deref(),
+                        conifer: m.conifer,
+                        want_size,
+                    };
+                    region.pick_mapped(x, z, hint, elev_y, req)
+                }
+                None => {
+                    // Read at the slot, not the request, so the hint describes the
+                    // column the trunk lands in.
+                    let (hx, hz) =
+                        crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
+                    let req = crate::trees::region::SlotRequest {
+                        want_size: editor.canopy_size_hint(hx, hz),
+                        density_decided,
+                    };
+                    region.pick_slot(x, z, hint, elev_y, req)
+                }
             };
-            if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y, req) {
+            if let Some((sx, sz, idx, rot)) = picked {
                 // A slot across a tile seam would put this tile's trunk on the
                 // neighbour's undergrowth, so the tree keeps to the requested cell.
                 let (sx, sz) = if editor.owns(sx, sz) {
@@ -848,6 +897,7 @@ impl Tree {
 
     /// A few-block shrub that keeps real-world proportions at low scale, reusing the
     /// type's own log/leaf palette so it still reads as forest cover from altitude.
+    #[allow(clippy::too_many_arguments)]
     fn create_micro(
         editor: &mut WorldEditor,
         x: i32,
@@ -855,9 +905,10 @@ impl Tree {
         z: i32,
         tree: &Tree,
         scale: f64,
+        height_m: f64,
         blacklist: &[Block],
     ) {
-        let height = ((NOMINAL_TREE_HEIGHT_M * scale).round() as i32).clamp(1, 8);
+        let height = ((height_m * scale).round() as i32).clamp(1, 8);
         let trunk = (height - 1).max(0);
         for dy in 0..trunk {
             editor.set_block_absolute(tree.log_block, x, base_y + dy, z, None, Some(blacklist));

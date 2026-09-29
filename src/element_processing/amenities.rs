@@ -321,6 +321,10 @@ pub fn generate_amenities(
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 for &(x, z) in flood_area.iter() {
+                    // Planted islands mapped inside the car park keep their own ground.
+                    if editor.nested_area_owns(x, z) {
+                        continue;
+                    }
                     editor.set_block(
                         semirandom_surface(x, z, block_types),
                         x,
@@ -421,7 +425,11 @@ pub fn generate_amenities(
                     let space_length = 8;
                     let period_z = space_length + 5;
                     // Sorted copy + binary search keeps this light on huge lots.
-                    let mut lot: Vec<(i32, i32)> = flood_area.iter().copied().collect();
+                    let mut lot: Vec<(i32, i32)> = flood_area
+                        .iter()
+                        .copied()
+                        .filter(|&(x, z)| !editor.nested_area_owns(x, z))
+                        .collect();
                     lot.sort_unstable();
                     let in_lot = |x: i32, z: i32| lot.binary_search(&(x, z)).is_ok();
                     if let (Some(&min_x), Some(&max_x), Some(&min_z), Some(&max_z)) = (

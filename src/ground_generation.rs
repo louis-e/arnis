@@ -1006,12 +1006,14 @@ pub fn generate_ground_region(
                                 (false, false)
                             };
                             // Placed before the vegetation pass, whose own guard then sees
-                            // the trunk and leaves the column alone.
+                            // the trunk and leaves the column alone. A crown OSM maps as a
+                            // tree already has its trunk.
                             if canopy_tree
                                 && slope <= 4
                                 && ground_allows_trees
                                 && !tunnel_footprint.contains(x, z)
                                 && !editor.block_exists_absolute(x, ground_y + 1, z)
+                                && !editor.under_mapped_crown(x, z)
                             {
                                 tree::Tree::create_from_canopy(
                                     editor,
@@ -1052,7 +1054,10 @@ pub fn generate_ground_region(
                                             30
                                         };
                                         let choice = rng.random_range(0..tree_rate);
-                                        if choice == 0 && !canopy_covered {
+                                        if choice == 0
+                                            && !canopy_covered
+                                            && !editor.under_mapped_crown(x, z)
+                                        {
                                             tree::Tree::create(
                                                 editor,
                                                 (x, 1, z),

@@ -92,6 +92,10 @@ pub fn generate_leisure(
             let mut rng = element_rng(element.id);
 
             for &(x, z) in filled_area.iter() {
+                // A lawn or bed mapped inside a schoolyard keeps its own ground.
+                if leisure_type == "schoolyard" && editor.nested_area_owns(x, z) {
+                    continue;
+                }
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Land-cover water is skipped because a park often spans its
@@ -134,8 +138,8 @@ pub fn generate_leisure(
                         }
                         105..120 => {
                             // Only where land cover says woody, else a park
-                            // canopies its own meadows. 1/1000 for specimens.
-                            if random_choice == 105 || editor.land_cover_backs_trees(x, z) {
+                            // canopies its own meadows.
+                            if editor.land_cover_backs_trees(x, z) {
                                 Tree::create(
                                     editor,
                                     (x, 1, z),
