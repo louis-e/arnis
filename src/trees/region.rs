@@ -86,7 +86,7 @@ struct Community {
     name: String,
     habitat: Habitat,
     species: Vec<Vec<usize>>,
-    /// Genus of each entry in `species`, from the pack's `Genus_species` names.
+    /// Genus of each entry in `species`.
     genera: Vec<String>,
     density: u32,
 }
@@ -112,13 +112,11 @@ pub struct SlotRequest {
     pub density_decided: bool,
 }
 
-/// What OSM says about a tree it maps, as far as the pack can use it.
+/// What OSM says about a mapped tree.
 #[derive(Clone, Copy, Default)]
 pub struct MappedRequest<'a> {
     pub genus: Option<&'a str>,
-    /// Needle-leaved, broadleaved, or unknown.
     pub conifer: Option<bool>,
-    /// Size tier from the mapped height, or else the measured canopy.
     pub want_size: Option<TreeSize>,
 }
 
@@ -201,6 +199,19 @@ fn load_pack(
         default_idx,
         by_habitat,
     }
+}
+
+/// Index lists of the species whose genus passes `keep`.
+fn species_where<'a>(
+    communities: impl IntoIterator<Item = &'a Community>,
+    keep: impl Fn(&str) -> bool,
+) -> Vec<Vec<usize>> {
+    communities
+        .into_iter()
+        .flat_map(|c| c.species.iter().zip(&c.genera))
+        .filter(|(_, genus)| keep(genus))
+        .map(|(sp, _)| sp.clone())
+        .collect()
 }
 
 impl RegionLibrary {
@@ -522,9 +533,8 @@ impl RegionLibrary {
         Some((sx, sz, idx, rot))
     }
 
-    /// Pick the schematic for a tree OSM maps at (x, z). The trunk stays where it was
-    /// mapped and is never thinned out. A pack species of the mapped genus comes
-    /// first, then the community's species of the mapped leaf type.
+    /// A mapped tree keeps its position and is never thinned. Its genus comes first,
+    /// then the community's species of its leaf type.
     pub fn pick_mapped(
         &self,
         x: i32,
@@ -547,21 +557,9 @@ impl RegionLibrary {
             };
             self.pick_in_community(&pool, x, z, req.want_size)
         };
-        let species_where = |communities: &[&Community], keep: &dyn Fn(&str) -> bool| {
-            communities
-                .iter()
-                .flat_map(|c| c.species.iter().zip(&c.genera))
-                .filter(|(_, genus)| keep(genus))
-                .map(|(sp, _)| sp.clone())
-                .collect::<Vec<_>>()
-        };
-        fn all(pack: &Pack) -> Vec<&Community> {
-            pack.communities.iter().collect()
-        }
-
         if let Some(genus) = req.genus {
             for pack in [&self.realm_pack, &self.vanilla_pack] {
-                let same = species_where(&all(pack), &|g| g.eq_ignore_ascii_case(genus));
+                let same = species_where(&pack.communities, |g| g.eq_ignore_ascii_case(genus));
                 if let Some(idx) = pick(same) {
                     return Some((x, z, idx, rot));
                 }
@@ -574,8 +572,8 @@ impl RegionLibrary {
         let idx = match req.conifer {
             Some(conifer) => {
                 let of_type = |g: &str| crate::trees::mapped::is_conifer_genus(g) == conifer;
-                pick(species_where(&[community], &of_type))
-                    .or_else(|| pick(species_where(&all(&self.realm_pack), &of_type)))
+                pick(species_where([community], of_type))
+                    .or_else(|| pick(species_where(&self.realm_pack.communities, of_type)))
                     .or_else(|| self.pick_in_community(community, x, z, req.want_size))
             }
             None => self.pick_in_community(community, x, z, req.want_size),

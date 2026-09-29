@@ -32,7 +32,6 @@ pub fn generate_natural(
                 );
             }
         } else if natural_type == "tree_row" {
-            // A line of trees, not an area: nothing to fill, a tree every few metres.
             if let ProcessedElement::Way(way) = element {
                 let mapped = MappedTree::from_tags(&way.tags, way.id);
                 for (x, z) in tree_row_positions(&way.nodes, editor.scale()) {

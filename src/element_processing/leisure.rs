@@ -92,7 +92,6 @@ pub fn generate_leisure(
             let mut rng = element_rng(element.id);
 
             for &(x, z) in filled_area.iter() {
-                // A lawn or bed mapped inside a schoolyard keeps its own ground.
                 if leisure_type == "schoolyard" && editor.nested_area_owns(x, z) {
                     continue;
                 }

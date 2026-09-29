@@ -71,7 +71,7 @@ fn landuse_paints_ground(tags: &HashMap<String, String>) -> bool {
 
 /// Footprint of a ground-filling way, or `None` if it does not reach a ground-fill handler.
 /// Mirrors the landuse/natural/leisure/place arms of `process_element`; keep both in sync.
-pub(crate) fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
+fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     let tags = &way.tags;
     if tags.contains_key("building")
         || tags.contains_key("building:part")
@@ -82,22 +82,15 @@ pub(crate) fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     let fills_ground = if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
     } else if let Some(natural) = tags.get("natural") {
-        // natural=* + amenity=fountain falls through to the fountain handler,
-        // and a tree row plants a line of trees instead of filling anything.
+        // natural=* + amenity=fountain falls through to the fountain handler.
         tags.get("amenity").map(String::as_str) != Some("fountain") && natural != "tree_row"
     } else if tags.contains_key("amenity") {
         false
     } else if tags.contains_key("leisure") {
         true
     } else {
-        // A square paves its whole footprint, so it has to yield to the lawns and
-        // beds mapped inside it like any other area.
+        // A square paves its footprint and must yield to lawns inside it.
         tags.get("place").map(String::as_str) == Some("square")
-            && ![
-                "barrier", "waterway", "railway", "aeroway", "man_made", "power",
-            ]
-            .iter()
-            .any(|k| tags.contains_key(*k))
     };
     fills_ground.then(|| ring_area(&way.nodes))
 }
@@ -150,11 +143,8 @@ fn ground_fill_area(element: &ProcessedElement) -> Option<f64> {
 
 /// Reorders ground-filling areas so smaller ones render first and larger ones fill in around them.
 ///
-/// Ground blocks are written only where nothing stands yet, so the first area to reach a block
-/// keeps it. Elements otherwise render in arbitrary OSM parse order, so a large `landuse=forest`
-/// or `place=square` can claim the `landuse=farmland` or lawn nested inside it. Sorting by
-/// ascending footprint makes the smallest (most specific) area the first writer for every block
-/// it covers.
+/// Ground blocks are only written where nothing stands yet, so the first area to reach a block
+/// keeps it. Sorting by ascending footprint makes the smallest (most specific) area win.
 ///
 /// Only the slots already occupied by ground-filling areas are rewritten, so every other element
 /// keeps its index. This stays correct across tiles: a tile renders a subsequence of this global
@@ -883,7 +873,6 @@ pub fn generate_world_with_options(
     };
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
-    // Mapped trees, so the canopy map does not plant their crowns a second time.
     let mapped_trunks = Arc::new(crate::trees::mapped::MappedTrunks::collect(
         &elements, args.scale,
     ));

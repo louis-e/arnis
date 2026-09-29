@@ -321,7 +321,6 @@ pub fn generate_amenities(
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 for &(x, z) in flood_area.iter() {
-                    // Planted islands mapped inside the car park keep their own ground.
                     if editor.nested_area_owns(x, z) {
                         continue;
                     }

@@ -366,9 +366,8 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
     way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes")
 }
 
-/// Whether a sealed way is paving that gives way to a smaller area mapped inside
-/// it: a lawn on a plaza, a bed in a car park, a pond in a schoolyard. Pitches,
-/// tracks and playgrounds keep their whole footprint.
+/// Paving that yields to planted areas mapped inside it. Pitches, tracks and
+/// playgrounds keep their whole footprint.
 fn paving_yields_to_nested_areas(way: &ProcessedWay) -> bool {
     (way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes"))
         || way
@@ -376,6 +375,41 @@ fn paving_yields_to_nested_areas(way: &ProcessedWay) -> bool {
             .get("amenity")
             .is_some_and(|v| SEALED_AMENITY.contains(&v.as_str()))
         || way.tags.get("leisure").map(String::as_str) == Some("schoolyard")
+}
+
+const PLANTED_LANDUSE: &[&str] = &[
+    "grass",
+    "flowerbed",
+    "meadow",
+    "greenfield",
+    "village_green",
+    "forest",
+    "orchard",
+    "allotments",
+    "plant_nursery",
+];
+
+/// A lawn, bed, wood or pond, as dispatched by `process_element`.
+fn is_planted_way(way: &ProcessedWay) -> bool {
+    let tags = &way.tags;
+    if ["building", "building:part", "highway"]
+        .iter()
+        .any(|k| tags.contains_key(*k))
+    {
+        return false;
+    }
+    if let Some(landuse) = tags.get("landuse") {
+        return PLANTED_LANDUSE.contains(&landuse.as_str());
+    }
+    if let Some(natural) = tags.get("natural") {
+        return !matches!(natural.as_str(), "tree" | "tree_row")
+            && tags.get("amenity").map(String::as_str) != Some("fountain");
+    }
+    !tags.contains_key("amenity")
+        && matches!(
+            tags.get("leisure").map(String::as_str),
+            Some("park" | "garden")
+        )
 }
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
@@ -617,7 +651,7 @@ impl FloodFillCache {
 
     /// Builds the sealed-surface mask: the road mask plus every cached footprint
     /// of a leisure, amenity or highway area that paves its ground, less the
-    /// smaller areas mapped inside the paving that yields to them.
+    /// planted areas mapped inside paving.
     ///
     /// Returns `None` when no such area contributes a column the roads do not
     /// already own, so the caller can share the road mask instead of paying for a
@@ -628,11 +662,9 @@ impl FloodFillCache {
         elements: &[ProcessedElement],
         roads: &RoadMaskBitmap,
     ) -> Option<SealedSurfaceBitmap> {
-        // Sealed areas that keep their whole footprint, paving that yields to the
-        // areas inside it, and the ground-filling areas that may sit inside paving.
         let mut managed: Vec<&FloodFillResult> = Vec::new();
         let mut paving: Vec<&FloodFillResult> = Vec::new();
-        let mut open: Vec<&FloodFillResult> = Vec::new();
+        let mut planted: Vec<&FloodFillResult> = Vec::new();
         for element in elements {
             let ProcessedElement::Way(w) = element else {
                 continue;
@@ -646,12 +678,8 @@ impl FloodFillCache {
                 } else {
                     managed.push(fill);
                 }
-            } else if crate::data_processing::way_ground_fill_area(w).is_some()
-                && !w.tags.contains_key("place")
-            {
-                // A square names paved ground rather than surfacing it, so the
-                // plaza's own surface stays.
-                open.push(fill);
+            } else if is_planted_way(w) {
+                planted.push(fill);
             }
         }
 
@@ -667,16 +695,15 @@ impl FloodFillCache {
         }
 
         let mut mask = roads.clone();
-        // Paving and the areas inside it, largest first, so every column ends up
-        // with the state of the smallest area over it. An area at least as large as
-        // all the paving goes before every piece of it and changes nothing. On a tie
-        // the paving goes last and keeps the column.
+        // Largest first, so each column takes the state of the smallest area over it.
+        // Anything as large as all the paving changes nothing, and paving wins a tie.
         let largest = paving.iter().map(|f| f.len()).max().unwrap_or(0);
         let mut layers: Vec<(usize, bool, &FloodFillResult)> = paving
             .iter()
             .map(|f| (f.len(), true, *f))
             .chain(
-                open.iter()
+                planted
+                    .iter()
                     .filter(|f| f.len() < largest)
                     .map(|f| (f.len(), false, *f)),
             )

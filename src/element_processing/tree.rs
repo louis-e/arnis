@@ -543,8 +543,7 @@ impl Tree {
         );
     }
 
-    /// Creates a tree OSM maps: a `natural=tree` node or one tree of a tree row.
-    /// It stands on paving, keeps its mapped position and follows its tags.
+    /// A tree OSM maps. It may stand on paving and keeps its mapped position.
     pub fn create_mapped(
         editor: &mut WorldEditor,
         (x, y, z): Coord,
@@ -669,7 +668,7 @@ impl Tree {
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
             let picked = match mapped {
                 Some(m) => {
-                    // A mapped height outranks the canopy map, which blurs neighbouring crowns.
+                    // A mapped height beats the canopy map.
                     let want_size = m
                         .height_m
                         .map(|h| {

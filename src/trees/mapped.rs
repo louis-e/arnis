@@ -2,28 +2,19 @@
 
 use std::collections::HashMap;
 
-use fnv::FnvHashMap;
 use rand::prelude::IndexedRandom;
 
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::TreeType;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 
-/// Spacing of the trees along a tree row, in metres.
 const ROW_SPACING_M: f64 = 8.0;
-
-/// Crown radius of a mapped tree, in metres. The canopy map measures these crowns
-/// too, so nothing else plants a tree inside one.
 const CROWN_RADIUS_M: f64 = 5.0;
 
-/// What OSM says about one mapped tree.
 pub struct MappedTree {
     pub kind: TreeType,
-    /// Botanical genus, capitalised the way `species=*` spells it.
     pub genus: Option<String>,
-    /// Needle-leaved, broadleaved, or unknown.
     pub conifer: Option<bool>,
-    /// `height=*` in metres.
     pub height_m: Option<f64>,
 }
 
@@ -37,7 +28,7 @@ impl MappedTree {
             (Some(pool), _) => pool,
             (None, Some("broadleaved")) => &[Oak, Birch, TallOak],
             (None, Some("needleleaved")) => &[Spruce, Pine],
-            // A named genus that is not a conifer is a broadleaf.
+            // Any named genus not known as a conifer is a broadleaf.
             (None, _) if genus.is_some() => &[Oak, TallOak],
             (None, Some(_)) => &[Oak, Spruce, Birch, TallOak, Pine],
             (None, None) => &[Oak, Spruce, Birch, TallOak],
@@ -62,7 +53,6 @@ impl MappedTree {
     }
 }
 
-/// The genus from `genus`, `species` or `taxon`, else from a known `genus:wikidata`.
 fn genus_from_tags(tags: &HashMap<String, String>) -> Option<String> {
     for key in ["genus", "species", "taxon"] {
         let word = tags.get(key).and_then(|v| {
@@ -84,7 +74,6 @@ fn genus_from_tags(tags: &HashMap<String, String>) -> Option<String> {
     Some(genus.to_string())
 }
 
-/// Genera with needles or scales instead of leaves.
 pub fn is_conifer_genus(genus: &str) -> bool {
     matches!(
         genus,
@@ -126,7 +115,6 @@ pub fn is_conifer_genus(genus: &str) -> bool {
     )
 }
 
-/// The procedural shapes that look like a genus, where one does.
 fn genus_pool(genus: &str) -> Option<&'static [TreeType]> {
     use TreeType::*;
     Some(match genus {
@@ -148,7 +136,7 @@ fn genus_pool(genus: &str) -> Option<&'static [TreeType]> {
     })
 }
 
-/// Whether a way reaches the tree row handler.
+/// Mirrors the dispatch in `process_element`.
 pub fn is_tree_row(tags: &HashMap<String, String>) -> bool {
     tags.get("natural").map(String::as_str) == Some("tree_row")
         && !["building", "building:part", "highway", "landuse"]
@@ -156,8 +144,7 @@ pub fn is_tree_row(tags: &HashMap<String, String>) -> bool {
             .any(|k| tags.contains_key(*k))
 }
 
-/// Trunks along a tree row: both ends and evenly between, about `ROW_SPACING_M`
-/// apart, since a row is drawn from its first tree to its last.
+/// A row is drawn from its first tree to its last, so both ends get one.
 pub fn tree_row_positions(nodes: &[ProcessedNode], scale: f64) -> Vec<(i32, i32)> {
     let pts: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
     let Some(&first) = pts.first() else {
@@ -201,21 +188,19 @@ pub fn tree_row_positions(nodes: &[ProcessedNode], scale: f64) -> Vec<(i32, i32)
     out
 }
 
-/// Where the mapped trees stand, bucketed for crown lookups.
+/// Mapped trunks, so canopy data does not plant their crowns a second time.
 pub struct MappedTrunks {
-    cells: FnvHashMap<(i32, i32), Vec<(i32, i32)>>,
+    /// (cell x, cell z, x, z), sorted by cell.
+    trunks: Vec<(i32, i32, i32, i32)>,
     radius: i32,
 }
 
 impl MappedTrunks {
     pub fn collect(elements: &[ProcessedElement], scale: f64) -> Self {
         let radius = ((CROWN_RADIUS_M * scale).round() as i32).max(1);
-        let mut cells: FnvHashMap<(i32, i32), Vec<(i32, i32)>> = FnvHashMap::default();
+        let mut trunks = Vec::new();
         let mut add = |x: i32, z: i32| {
-            cells
-                .entry((x.div_euclid(radius), z.div_euclid(radius)))
-                .or_default()
-                .push((x, z));
+            trunks.push((x.div_euclid(radius), z.div_euclid(radius), x, z));
         };
         for element in elements {
             match element {
@@ -232,22 +217,24 @@ impl MappedTrunks {
                 _ => {}
             }
         }
-        MappedTrunks { cells, radius }
+        trunks.sort_unstable();
+        trunks.shrink_to_fit();
+        MappedTrunks { trunks, radius }
     }
 
-    /// Whether (x, z) lies under the crown of a mapped tree.
     pub fn under_crown(&self, x: i32, z: i32) -> bool {
+        if self.trunks.is_empty() {
+            return false;
+        }
         let r = self.radius;
         let (cx, cz) = (x.div_euclid(r), z.div_euclid(r));
-        for dx in -1..=1 {
-            for dz in -1..=1 {
-                let Some(trunks) = self.cells.get(&(cx + dx, cz + dz)) else {
-                    continue;
-                };
-                if trunks
-                    .iter()
-                    .any(|&(tx, tz)| (tx - x).pow(2) + (tz - z).pow(2) <= r * r)
-                {
+        for gx in cx - 1..=cx + 1 {
+            let start = self.trunks.partition_point(|t| (t.0, t.1) < (gx, cz - 1));
+            for &(tgx, tgz, tx, tz) in &self.trunks[start..] {
+                if (tgx, tgz) > (gx, cz + 1) {
+                    break;
+                }
+                if (tx - x).pow(2) + (tz - z).pow(2) <= r * r {
                     return true;
                 }
             }

@@ -200,8 +200,7 @@ pub struct WorldEditor<'a> {
     /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
     /// parking); vegetation stays off them. Shared via Arc with the tile editors.
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
-    /// Trunks of the trees OSM maps one by one, so the canopy map does not plant
-    /// their measured crowns a second time. Shared via Arc with the tile editors.
+    /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
@@ -507,8 +506,7 @@ impl<'a> WorldEditor<'a> {
         self.mapped_trunks = Some(trunks);
     }
 
-    /// True if (x, z) lies under the crown of a tree OSM maps, where a tree the
-    /// canopy map or the land cover asks for would be that same tree again.
+    /// True under the crown of a tree OSM maps.
     #[inline]
     pub fn under_mapped_crown(&self, x: i32, z: i32) -> bool {
         self.mapped_trunks
@@ -516,9 +514,8 @@ impl<'a> WorldEditor<'a> {
             .is_some_and(|t| t.under_crown(x, z))
     }
 
-    /// For paving that yields to what is mapped inside it (a plaza, a car park, a
-    /// schoolyard): true where a smaller area inside owns the column, which the
-    /// sealed mask then leaves open. Only meaningful on the paving's own columns.
+    /// On a paving area's own columns: true where a planted area mapped inside it
+    /// owns the column.
     #[inline]
     pub fn nested_area_owns(&self, x: i32, z: i32) -> bool {
         self.sealed_surface

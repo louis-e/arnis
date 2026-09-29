@@ -278,8 +278,7 @@ pub(crate) fn place_scattered_flower(
     }
 }
 
-/// Plants a flower one block above a mapped flower bed. Beds are set out densely,
-/// one variety to a block of the bed, with a little soil left between the plants.
+/// Dense garden flowers for a mapped flower bed, one variety per patch.
 pub(crate) fn place_bed_flower(editor: &mut WorldEditor, x: i32, z: i32) {
     if crate::land_cover::coord_hash(x ^ 0x0BED, z ^ 0x5EED) % 100 < 12 {
         return;

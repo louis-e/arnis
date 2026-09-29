@@ -118,7 +118,7 @@ pub fn generate_barriers(
             let Some(base) = base else {
                 continue;
             };
-            // A hedge line straddles the lawn edge, so give it soil rather than paving.
+            // Hedges stand on soil, not on the paving beside the lawn they edge.
             if hedge
                 && !editor.surface_is_sealed(bx, bz)
                 && base == editor.get_absolute_y(bx, 0, bz)

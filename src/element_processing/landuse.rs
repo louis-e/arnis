@@ -42,7 +42,6 @@ pub fn generate_landuse(
         "military" => GRASS_BLOCK, // Chosen per block by military_ground below
         "railway" => GRAVEL,
         "vineyard" => COARSE_DIRT,
-        // Planted soil, nearly hidden under the flowers placed below.
         "flowerbed" => DIRT,
         "brownfield" => COARSE_DIRT,
         "farmyard" => COARSE_DIRT,

@@ -1006,8 +1006,7 @@ pub fn generate_ground_region(
                                 (false, false)
                             };
                             // Placed before the vegetation pass, whose own guard then sees
-                            // the trunk and leaves the column alone. A crown OSM maps as a
-                            // tree already has its trunk.
+                            // the trunk and leaves the column alone.
                             if canopy_tree
                                 && slope <= 4
                                 && ground_allows_trees
