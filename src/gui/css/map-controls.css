@@ -308,7 +308,11 @@
   outline: none;
 }
 
+/* Out of flow so long results match the box width instead of widening it. */
 #search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
   max-width: none;
   margin-top: 6px;
   border: 1px solid var(--map-border);
