@@ -1345,7 +1345,7 @@ pub(crate) fn area_floor_for(ground: &Ground, args: &Args) -> i32 {
 fn filler_block_for(body: CelestialBody) -> crate::block_definitions::Block {
     match body {
         CelestialBody::Earth => crate::block_definitions::GRASS_BLOCK,
-        CelestialBody::Moon => crate::block_definitions::END_STONE,
+        CelestialBody::Moon => crate::block_definitions::ANDESITE,
         CelestialBody::Mars => crate::block_definitions::RED_TERRACOTTA,
     }
 }

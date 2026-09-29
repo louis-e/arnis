@@ -5,8 +5,9 @@
 //! `scale`. No coordinate-system code needs to know about bodies.
 
 use crate::block_definitions::{
-    Block, BROWN_TERRACOTTA, DIRT, END_STONE, GRANITE, GRASS_BLOCK, GRAVEL, ORANGE_TERRACOTTA,
-    RED_TERRACOTTA, SNOW_BLOCK, TERRACOTTA, WHITE_CONCRETE, WHITE_TERRACOTTA,
+    Block, ANDESITE, BROWN_TERRACOTTA, DIRT, GRANITE, GRASS_BLOCK, GRAVEL,
+    LIGHT_GRAY_CONCRETE_POWDER, ORANGE_TERRACOTTA, RED_TERRACOTTA, SNOW_BLOCK, STONE, TERRACOTTA,
+    WHITE_CONCRETE, WHITE_TERRACOTTA,
 };
 use clap::ValueEnum;
 
@@ -141,9 +142,11 @@ pub fn surface_palette(
 ) -> (Block, Block) {
     match body {
         CelestialBody::Earth => (GRASS_BLOCK, DIRT),
-        // Closest vanilla has to regolith, and one material keeps a body-sized
-        // world uniform enough to stay cheap.
-        CelestialBody::Moon => (END_STONE, END_STONE),
+        // Always stone underneath, so gravel and powder never fall.
+        CelestialBody::Moon => (
+            moon_surface(slope, crate::land_cover::coord_hash(x, z), x, z),
+            STONE,
+        ),
         CelestialBody::Mars => mars_palette(
             slope,
             lat_deg,
@@ -152,6 +155,40 @@ pub fn surface_palette(
             x,
             z,
         ),
+    }
+}
+
+/// Grey regolith with gravel fields and bare rock, rockier on crater walls.
+fn moon_surface(slope: i32, h: u64, x: i32, z: i32) -> Block {
+    if slope > 6 {
+        return match h % 10 {
+            0..=4 => ANDESITE,
+            5..=7 => STONE,
+            _ => GRAVEL,
+        };
+    }
+
+    // Noise pools gravel and rock into patches instead of per-block static.
+    let patch = crate::ground_generation::value_noise_01(x, z, 7);
+    if patch > 0.72 {
+        return match h % 10 {
+            0..=6 => GRAVEL,
+            7..=8 => ANDESITE,
+            _ => LIGHT_GRAY_CONCRETE_POWDER,
+        };
+    }
+    if patch < 0.24 {
+        return match h % 10 {
+            0..=5 => ANDESITE,
+            6..=8 => STONE,
+            _ => GRAVEL,
+        };
+    }
+    match h % 20 {
+        0..=13 => LIGHT_GRAY_CONCRETE_POWDER,
+        14..=16 => GRAVEL,
+        17..=18 => ANDESITE,
+        _ => STONE,
     }
 }
 
@@ -207,12 +244,15 @@ const MARS_POLAR_CAP_LAT: f64 = 74.0;
 /// storage regression test covers every branch that can become bulk terrain.
 #[cfg(test)]
 pub const PLANETARY_SURFACE_BLOCKS: &[Block] = &[
+    ANDESITE,
     BROWN_TERRACOTTA,
     GRANITE,
     GRAVEL,
+    LIGHT_GRAY_CONCRETE_POWDER,
     ORANGE_TERRACOTTA,
     RED_TERRACOTTA,
     SNOW_BLOCK,
+    STONE,
     TERRACOTTA,
     WHITE_CONCRETE,
     WHITE_TERRACOTTA,

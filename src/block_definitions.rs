@@ -460,7 +460,6 @@ impl Block {
             363 => "white_wall_banner",
             364..=365 => "spruce_door",
             366 => "oak_door",
-            367 => "end_stone",
             // Aeroplane livery + jetbridge blocks (bundled .schem props only).
             368 => "purpur_block",
             369 => "purpur_slab",
@@ -563,6 +562,7 @@ impl Block {
             470 => "cactus",
             471 => "grass_block",
             472 => "podzol",
+            473 => "light_gray_concrete_powder",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -1075,8 +1075,6 @@ pub const DEEPSLATE_BRICKS: Block = Block::new(20);
 pub const DIORITE: Block = Block::new(21);
 pub const DIRT: Block = Block::new(22);
 pub const END_STONE_BRICKS: Block = Block::new(23);
-/// The Moon's only ground block. Earth never places it.
-pub const END_STONE: Block = Block::new(367);
 pub const FARMLAND: Block = Block::new(24);
 pub const GLASS: Block = Block::new(25);
 pub const GLOWSTONE: Block = Block::new(26);
@@ -1553,6 +1551,7 @@ pub const LILY_PAD: Block = Block::new(469);
 pub const CACTUS: Block = Block::new(470);
 pub const SNOWY_GRASS_BLOCK: Block = Block::new(471);
 pub const SNOWY_PODZOL: Block = Block::new(472);
+pub const LIGHT_GRAY_CONCRETE_POWDER: Block = Block::new(473);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
