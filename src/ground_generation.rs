@@ -908,7 +908,9 @@ pub fn generate_ground_region(
                                 if y_max > min_y() {
                                     let y_min = (ground_y - depth).max(min_y() + 1);
                                     // Rock faces show their bedding down the whole step.
-                                    if slope > 4 && under_block == STONE {
+                                    // Off Earth the column stays plain stone.
+                                    if slope > 4 && under_block == STONE && planetary_body.is_none()
+                                    {
                                         terrain_surface::fill_strata(editor, x, z, y_min, y_max);
                                     } else {
                                         editor.fill_column_absolute(

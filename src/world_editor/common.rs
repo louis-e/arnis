@@ -2169,7 +2169,7 @@ mod to_section_tests {
         let mut s = SectionToModify::default();
         s.storage.set(5, STONE);
         s.storage.set(0, COBBLESTONE);
-        s.storage.set(2, END_STONE);
+        s.storage.set(2, LIGHT_GRAY_CONCRETE_POWDER);
 
         let (want_blocks, want_indices) = reference_palette(&s);
         let got = s.to_section(0);
@@ -2355,11 +2355,11 @@ mod tests {
         let mut s = BlockStorage::Uniform(AIR);
         s.set(0, STONE);
         assert!(matches!(s, BlockStorage::Dense(_)));
-        s.set(1, END_STONE);
+        s.set(1, LIGHT_GRAY_CONCRETE_POWDER);
         assert!(matches!(s, BlockStorage::Paletted(_)));
         assert_eq!(s.get(0), STONE);
-        assert_eq!(s.get(1), END_STONE);
-        assert_eq!(s.iter().nth(1), Some(END_STONE));
+        assert_eq!(s.get(1), LIGHT_GRAY_CONCRETE_POWDER);
+        assert_eq!(s.iter().nth(1), Some(LIGHT_GRAY_CONCRETE_POWDER));
 
         let mut w = BlockStorage::Uniform(AIR);
         w.set(0, LEVER);

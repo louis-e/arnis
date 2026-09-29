@@ -395,6 +395,13 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "concretePowder",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
         ),
+        "light_gray_concrete_powder" => BedrockBlock::with_states(
+            "concretePowder",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("silver".to_string()),
+            )],
+        ),
         "brown_concrete_powder" => BedrockBlock::with_states(
             "concretePowder",
             vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
