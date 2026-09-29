@@ -127,6 +127,7 @@ const SALT_ORIGIN: u64 = 0x9A7C_4E11_D00D_0001;
 const SALT_DRIFT: u64 = 0x9A7C_4E11_D00D_0002;
 const SALT_SCATTER: u32 = 0x5CA7_7E11;
 const SALT_CLUMP: u32 = 0x00C1_0A9F;
+const SALT_BED: u32 = 0x0BED_F10E;
 
 /// What a patch origin is standing in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -275,6 +276,16 @@ pub(crate) fn place_scattered_flower(
     if crate::ground_generation::patch_noise(x, z, 11, SALT_CLUMP) >= 0.6 {
         editor.set_block(scattered_flower(x, z, setting), x, 1, z, None, None);
     }
+}
+
+/// Dense garden flowers for a mapped flower bed, one variety per patch.
+pub(crate) fn place_bed_flower(editor: &mut WorldEditor, x: i32, z: i32) {
+    if crate::land_cover::coord_hash(x ^ 0x0BED, z ^ 0x5EED) % 100 < 12 {
+        return;
+    }
+    let zone = crate::ground_generation::patch_noise(x, z, 4, SALT_BED);
+    let flower = pick_weighted(GARDEN_FLOWERS, (zone * 999.0) as u32);
+    editor.set_block(flower, x, 1, z, None, None);
 }
 
 fn scattered_flower(x: i32, z: i32, setting: FlowerSetting) -> Block {

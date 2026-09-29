@@ -42,6 +42,7 @@ pub fn generate_landuse(
         "military" => GRASS_BLOCK, // Chosen per block by military_ground below
         "railway" => GRAVEL,
         "vineyard" => COARSE_DIRT,
+        "flowerbed" => DIRT,
         "brownfield" => COARSE_DIRT,
         "farmyard" => COARSE_DIRT,
         "landfill" => {
@@ -191,7 +192,7 @@ pub fn generate_landuse(
                     if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     }
-                } else if (30..33).contains(&random_choice) {
+                } else if (30..33).contains(&random_choice) && editor.land_cover_backs_trees(x, z) {
                     Tree::create(
                         editor,
                         (x, 1, z),
@@ -344,6 +345,9 @@ pub fn generate_landuse(
                     _ => {}
                 }
             }
+            "flowerbed" if editor.check_for_block(x, 0, z, Some(&[DIRT])) => {
+                crate::ground_decoration::place_bed_flower(editor, x, z);
+            }
             "greenfield" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 match rng.random_range(0..200) {
                     0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
@@ -354,7 +358,7 @@ pub fn generate_landuse(
             }
             "meadow" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 let random_choice: i32 = rng.random_range(0..1001);
-                if random_choice < 5 {
+                if random_choice < 5 && editor.land_cover_backs_trees(x, z) {
                     Tree::create(
                         editor,
                         (x, 1, z),
@@ -663,6 +667,49 @@ mod sealed_surface_tests {
         assert!(
             editor.check_for_block(20, 0, 20, Some(&[GRASS_BLOCK])),
             "the forest still paints the ground beside it"
+        );
+    }
+
+    #[test]
+    fn a_flowerbed_is_planted_soil() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        let way = rect_way(3, 5, 5, 34, 34, &[("landuse", "flowerbed")]);
+        generate_landuse(
+            &mut editor,
+            &way,
+            &args,
+            &FloodFillCache::new(),
+            &BuildingFootprintBitmap::new_empty(),
+            &RoadMaskBitmap::new_empty(),
+            &surface,
+        );
+
+        let (mut soil, mut flowers, mut cells) = (0, 0, 0);
+        for x in 10..30 {
+            for z in 10..30 {
+                cells += 1;
+                soil += editor.check_for_block(x, 0, z, Some(&[DIRT])) as i32;
+                flowers +=
+                    editor.block_exists_absolute(x, editor.get_absolute_y(x, 1, z), z) as i32;
+            }
+        }
+        assert_eq!(soil, cells, "the bed is soil, not lawn");
+        assert!(
+            flowers * 10 > cells * 8,
+            "nearly every cell is planted ({flowers}/{cells})"
         );
     }
 

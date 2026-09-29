@@ -96,6 +96,9 @@ pub fn generate_barriers(
             .unwrap_or(barrier_height)
             .max(2); // Minimum height of 2
         let joined = is_connectable(barrier_material);
+        // Only masonry gets a coping.
+        let capped = wall_height > 1 && !matches!(barrier_material, OAK_LEAVES | OAK_FENCE);
+        let hedge = barrier_material == OAK_LEAVES;
 
         let mut cells: Vec<(i32, i32)> = Vec::new();
         for pair in way.nodes.windows(2) {
@@ -115,6 +118,13 @@ pub fn generate_barriers(
             let Some(base) = base else {
                 continue;
             };
+            // Hedges stand on soil, not on the paving beside the lawn they edge.
+            if hedge
+                && !editor.surface_is_sealed(bx, bz)
+                && base == editor.get_absolute_y(bx, 0, bz)
+            {
+                editor.set_block_absolute(GRASS_BLOCK, bx, base, bz, None, None);
+            }
             for y in 1..=wall_height {
                 if joined {
                     place_connected(editor, barrier_material, bx, base + y, bz);
@@ -122,7 +132,7 @@ pub fn generate_barriers(
                     editor.set_block_absolute(barrier_material, bx, base + y, bz, None, None);
                 }
             }
-            if wall_height > 1 {
+            if capped {
                 editor.set_block_absolute(
                     STONE_BRICK_SLAB,
                     bx,
@@ -260,7 +270,7 @@ mod tests {
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::element_processing::bridge_styles::BridgeOutlineIndex;
     use crate::element_processing::bridges::BridgeStructureMap;
-    use crate::element_processing::building_test_support::{tag_map, test_editor};
+    use crate::element_processing::building_test_support::{rect_way, tag_map, test_editor};
     use crate::osm_parser::ProcessedWay;
 
     fn way(id: u64, tags: &[(&str, &str)], points: &[(i32, i32)]) -> ProcessedWay {
@@ -320,5 +330,37 @@ mod tests {
         // Off the deck edge mid-span: not hanging beside it.
         generate_barriers(&mut editor, &fence(4, &[(12, 44), (68, 44)]), &surface);
         assert!(!editor.block_exists_absolute(40, deck_y + 1, 44));
+    }
+
+    fn draw<R>(tags: &[(&str, &str)], read: impl FnOnce(&WorldEditor) -> R) -> R {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let way = ProcessedElement::Way(rect_way(1, 5, 5, 30, 30, tags));
+        generate_barriers(&mut editor, &way, &surface);
+        read(&editor)
+    }
+
+    fn capped(tags: &[(&str, &str)]) -> bool {
+        draw(tags, |editor| {
+            (1..=4).any(|y| editor.check_for_block(15, y, 5, Some(&[STONE_BRICK_SLAB])))
+        })
+    }
+
+    fn on_soil(tags: &[(&str, &str)]) -> bool {
+        draw(tags, |editor| {
+            editor.check_for_block(15, 0, 5, Some(&[GRASS_BLOCK]))
+        })
+    }
+
+    #[test]
+    fn hedges_grow_from_soil_and_only_masonry_gets_a_coping() {
+        assert!(capped(&[("barrier", "wall")]));
+        assert!(!capped(&[("barrier", "hedge")]));
+        assert!(!capped(&[("barrier", "fence"), ("fence_type", "wood")]));
+        assert!(on_soil(&[("barrier", "hedge")]));
+        assert!(!on_soil(&[("barrier", "wall")]));
     }
 }

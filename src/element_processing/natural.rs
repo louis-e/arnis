@@ -7,6 +7,7 @@ use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
+use crate::trees::mapped::{tree_row_positions, MappedTree};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
 
@@ -21,84 +22,27 @@ pub fn generate_natural(
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
-
-                let mut trees_ok_to_generate: Vec<TreeType> = vec![];
-                if let Some(species) = element.tags().get("species") {
-                    if species.contains("Betula") {
-                        trees_ok_to_generate.push(TreeType::Birch);
-                    }
-                    if species.contains("Quercus") {
-                        trees_ok_to_generate.push(TreeType::Oak);
-                    }
-                    if species.contains("Picea") {
-                        trees_ok_to_generate.push(TreeType::Spruce);
-                    }
-                } else if let Some(genus_wikidata) = element.tags().get("genus:wikidata") {
-                    match genus_wikidata.as_str() {
-                        "Q12004" => trees_ok_to_generate.push(TreeType::Birch),
-                        "Q26782" => trees_ok_to_generate.push(TreeType::Oak),
-                        "Q25243" => trees_ok_to_generate.push(TreeType::Spruce),
-                        _ => {
-                            trees_ok_to_generate.push(TreeType::Oak);
-                            trees_ok_to_generate.push(TreeType::Spruce);
-                            trees_ok_to_generate.push(TreeType::Birch);
-                        }
-                    }
-                } else if let Some(genus) = element.tags().get("genus") {
-                    match genus.as_str() {
-                        "Betula" => trees_ok_to_generate.push(TreeType::Birch),
-                        "Quercus" => trees_ok_to_generate.push(TreeType::Oak),
-                        "Picea" => trees_ok_to_generate.push(TreeType::Spruce),
-                        _ => trees_ok_to_generate.push(TreeType::Oak),
-                    }
-                } else if let Some(leaf_type) = element.tags().get("leaf_type") {
-                    match leaf_type.as_str() {
-                        "broadleaved" => {
-                            trees_ok_to_generate.push(TreeType::Oak);
-                            trees_ok_to_generate.push(TreeType::Birch);
-                            trees_ok_to_generate.push(TreeType::TallOak);
-                        }
-                        "needleleaved" => {
-                            trees_ok_to_generate.push(TreeType::Spruce);
-                            trees_ok_to_generate.push(TreeType::Pine);
-                        }
-                        _ => {
-                            trees_ok_to_generate.push(TreeType::Oak);
-                            trees_ok_to_generate.push(TreeType::Spruce);
-                            trees_ok_to_generate.push(TreeType::Birch);
-                            trees_ok_to_generate.push(TreeType::TallOak);
-                            trees_ok_to_generate.push(TreeType::Pine);
-                        }
-                    }
-                } else {
-                    trees_ok_to_generate.push(TreeType::Oak);
-                    trees_ok_to_generate.push(TreeType::Spruce);
-                    trees_ok_to_generate.push(TreeType::Birch);
-                    trees_ok_to_generate.push(TreeType::TallOak);
-                }
-
-                if trees_ok_to_generate.is_empty() {
-                    trees_ok_to_generate.push(TreeType::Oak);
-                    trees_ok_to_generate.push(TreeType::Spruce);
-                    trees_ok_to_generate.push(TreeType::Birch);
-                }
-
-                let mut rng = element_rng(element.id());
-                let tree_type = *trees_ok_to_generate
-                    .choose(&mut rng)
-                    .unwrap_or(&TreeType::Oak);
-
-                // Deliberately-mapped `natural=tree` node: allow it to stand on paving.
-                Tree::create_of_type(
+                let mapped = MappedTree::from_tags(&node.tags, node.id);
+                Tree::create_mapped(
                     editor,
-                    (x, 1, z),
-                    tree_type,
+                    (node.x, 1, node.z),
+                    &mapped,
                     Some(building_footprints),
                     Some(bridge_surface),
-                    true,
                 );
+            }
+        } else if natural_type == "tree_row" {
+            if let ProcessedElement::Way(way) = element {
+                let mapped = MappedTree::from_tags(&way.tags, way.id);
+                for (x, z) in tree_row_positions(&way.nodes, editor.scale()) {
+                    Tree::create_mapped(
+                        editor,
+                        (x, 1, z),
+                        &mapped,
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
+                }
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -107,7 +51,7 @@ pub fn generate_natural(
 
             // Determine block type based on natural tag
             let block_type: Block = match natural_type.as_str() {
-                "scrub" | "grassland" | "wood" | "heath" | "tree_row" => GRASS_BLOCK,
+                "scrub" | "grassland" | "wood" | "heath" => GRASS_BLOCK,
                 "sand" | "dune" => SAND,
                 "beach" | "shoal" => beach_block(element.tags().get("surface")),
                 "water" | "reef" | "bay" => WATER,
@@ -342,7 +286,7 @@ pub fn generate_natural(
                                 continue;
                             }
                             let random_choice = rng.random_range(0..500);
-                            if random_choice == 0 {
+                            if random_choice == 0 && editor.land_cover_backs_trees(x, z) {
                                 Tree::create(
                                     editor,
                                     (x, 1, z),
@@ -370,7 +314,7 @@ pub fn generate_natural(
                                 }
                             }
                         }
-                        "tree_row" | "wood" => {
+                        "wood" => {
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
@@ -542,7 +486,11 @@ pub fn generate_natural(
                                                 if cluster_block == GRASS_BLOCK {
                                                     let vegetation_chance =
                                                         rng.random_range(0..100);
-                                                    if vegetation_chance == 0 {
+                                                    if vegetation_chance == 0
+                                                        && editor.land_cover_backs_trees(
+                                                            cluster_x, cluster_z,
+                                                        )
+                                                    {
                                                         // 1% chance for rare trees
                                                         Tree::create(
                                                             editor,
@@ -659,7 +607,7 @@ pub fn generate_natural(
                                 continue;
                             }
                             let hill_chance = rng.random_range(0..1000);
-                            if hill_chance == 0 {
+                            if hill_chance == 0 && editor.land_cover_backs_trees(x, z) {
                                 // 0.1% chance for rare trees
                                 Tree::create(
                                     editor,

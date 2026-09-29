@@ -366,6 +366,52 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
     way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes")
 }
 
+/// Paving that yields to planted areas mapped inside it. Pitches, tracks and
+/// playgrounds keep their whole footprint.
+fn paving_yields_to_nested_areas(way: &ProcessedWay) -> bool {
+    (way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes"))
+        || way
+            .tags
+            .get("amenity")
+            .is_some_and(|v| SEALED_AMENITY.contains(&v.as_str()))
+        || way.tags.get("leisure").map(String::as_str) == Some("schoolyard")
+}
+
+const PLANTED_LANDUSE: &[&str] = &[
+    "grass",
+    "flowerbed",
+    "meadow",
+    "greenfield",
+    "village_green",
+    "forest",
+    "orchard",
+    "allotments",
+    "plant_nursery",
+];
+
+/// A lawn, bed, wood or pond, as dispatched by `process_element`.
+fn is_planted_way(way: &ProcessedWay) -> bool {
+    let tags = &way.tags;
+    if ["building", "building:part", "highway"]
+        .iter()
+        .any(|k| tags.contains_key(*k))
+    {
+        return false;
+    }
+    if let Some(landuse) = tags.get("landuse") {
+        return PLANTED_LANDUSE.contains(&landuse.as_str());
+    }
+    if let Some(natural) = tags.get("natural") {
+        return !matches!(natural.as_str(), "tree" | "tree_row")
+            && tags.get("amenity").map(String::as_str) != Some("fountain");
+    }
+    !tags.contains_key("amenity")
+        && matches!(
+            tags.get("leisure").map(String::as_str),
+            Some("park" | "garden")
+        )
+}
+
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates (shared via Arc so handler
@@ -505,7 +551,7 @@ impl FloodFillCache {
     /// - landuse -> landuse::generate_landuse
     /// - leisure -> leisure::generate_leisure
     /// - amenity -> amenities::generate_amenities
-    /// - natural (except tree) -> natural::generate_natural
+    /// - natural (except tree and tree_row) -> natural::generate_natural
     /// - highway with area=yes -> highways::generate_highways (area fill)
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         way.tags.contains_key("building")
@@ -516,7 +562,7 @@ impl FloodFillCache {
             || way
                 .tags
                 .get("natural")
-                .map(|v| v != "tree")
+                .map(|v| v != "tree" && v != "tree_row")
                 .unwrap_or(false)
             // Highway areas (like pedestrian plazas) use flood fill when area=yes
             || (way.tags.contains_key("highway")
@@ -604,7 +650,8 @@ impl FloodFillCache {
     }
 
     /// Builds the sealed-surface mask: the road mask plus every cached footprint
-    /// of a leisure, amenity or highway area that paves its ground.
+    /// of a leisure, amenity or highway area that paves its ground, less the
+    /// planted areas mapped inside paving.
     ///
     /// Returns `None` when no such area contributes a column the roads do not
     /// already own, so the caller can share the road mask instead of paying for a
@@ -615,26 +662,63 @@ impl FloodFillCache {
         elements: &[ProcessedElement],
         roads: &RoadMaskBitmap,
     ) -> Option<SealedSurfaceBitmap> {
-        let sealed_fills: Vec<&FloodFillResult> = elements
-            .iter()
-            .filter_map(|e| match e {
-                ProcessedElement::Way(w) if is_sealed_surface_way(w) => self.way_cache.get(&w.id),
-                _ => None,
-            })
-            .collect();
+        let mut managed: Vec<&FloodFillResult> = Vec::new();
+        let mut paving: Vec<&FloodFillResult> = Vec::new();
+        let mut planted: Vec<&FloodFillResult> = Vec::new();
+        for element in elements {
+            let ProcessedElement::Way(w) = element else {
+                continue;
+            };
+            let Some(fill) = self.way_cache.get(&w.id) else {
+                continue;
+            };
+            if is_sealed_surface_way(w) {
+                if paving_yields_to_nested_areas(w) {
+                    paving.push(fill);
+                } else {
+                    managed.push(fill);
+                }
+            } else if is_planted_way(w) {
+                planted.push(fill);
+            }
+        }
 
         // A tagged area whose fill came back empty (degenerate ring, fill timeout) or that
         // sits entirely on columns the roads already own would clone a full second bitmap
         // for nothing, so bail out before allocating. Short-circuits on the first new cell.
-        if !sealed_fills
+        if !managed
             .iter()
+            .chain(&paving)
             .any(|f| f.iter().any(|&(x, z)| roads.is_unset_in_bounds(x, z)))
         {
             return None;
         }
 
         let mut mask = roads.clone();
-        for fill in sealed_fills {
+        // Largest first, so each column takes the state of the smallest area over it.
+        // Anything as large as all the paving changes nothing, and paving wins a tie.
+        let largest = paving.iter().map(|f| f.len()).max().unwrap_or(0);
+        let mut layers: Vec<(usize, bool, &FloodFillResult)> = paving
+            .iter()
+            .map(|f| (f.len(), true, *f))
+            .chain(
+                planted
+                    .iter()
+                    .filter(|f| f.len() < largest)
+                    .map(|f| (f.len(), false, *f)),
+            )
+            .collect();
+        layers.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for (_, paved, fill) in layers {
+            for &(x, z) in fill.iter() {
+                if paved {
+                    mask.set(x, z);
+                } else if !roads.contains(x, z) {
+                    mask.clear(x, z);
+                }
+            }
+        }
+        for fill in managed {
             for &(x, z) in fill.iter() {
                 mask.set(x, z);
             }
@@ -834,6 +918,52 @@ mod tests {
         assert!(sealed.contains(20, 17), "the pitch interior is sealed");
         assert!(!sealed.contains(60, 60), "a meadow is not a sealed surface");
         assert!(!sealed.contains(5, 5), "untouched ground stays open");
+    }
+
+    #[test]
+    fn a_lawn_inside_paving_keeps_its_ground_but_not_inside_a_pitch() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let square = |id, (x0, z0): (i32, i32), side: i32, tags: &[(&str, &str)]| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            ProcessedElement::Way(tagged_way(
+                id,
+                &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)],
+                tags,
+            ))
+        };
+        let elements = vec![
+            square(1, (0, 0), 40, &[("amenity", "parking")]),
+            square(2, (10, 10), 10, &[("landuse", "grass")]),
+            // A car park inside the lawn is paved again.
+            square(3, (12, 12), 3, &[("amenity", "parking")]),
+            square(4, (50, 50), 40, &[("leisure", "pitch")]),
+            square(5, (60, 60), 10, &[("landuse", "grass")]),
+            // Bigger than all the paving, so it cannot open any of it.
+            square(6, (0, 0), 60, &[("landuse", "meadow")]),
+        ];
+
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        roads.set(18, 15);
+        let sealed = cache.collect_sealed_surfaces(&elements, &roads).unwrap();
+
+        assert!(
+            sealed.contains(30, 30),
+            "the car park around the lawn stays paved"
+        );
+        assert!(
+            !sealed.contains(17, 17),
+            "the lawn inside the car park keeps its ground"
+        );
+        assert!(
+            sealed.contains(13, 13),
+            "paving inside the lawn is paved again"
+        );
+        assert!(
+            sealed.contains(18, 15),
+            "a road across the lawn stays sealed"
+        );
+        assert!(sealed.contains(65, 65), "a pitch keeps its whole footprint");
     }
 
     #[test]

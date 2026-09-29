@@ -1424,7 +1424,9 @@ fn generate_highways_internal(
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
             for &(x, z) in filled_area.iter() {
-                editor.set_block(surface_block, x, 0, z, None, None);
+                if !editor.nested_area_owns(x, z) {
+                    editor.set_block(surface_block, x, 0, z, None, None);
+                }
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;

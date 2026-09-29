@@ -86,6 +86,8 @@ struct Community {
     name: String,
     habitat: Habitat,
     species: Vec<Vec<usize>>,
+    /// Genus of each entry in `species`.
+    genera: Vec<String>,
     density: u32,
 }
 
@@ -108,6 +110,14 @@ pub struct SlotRequest {
     pub want_size: Option<TreeSize>,
     /// The caller fixed the density itself, so skip the pack's grove noise.
     pub density_decided: bool,
+}
+
+/// What OSM says about a mapped tree.
+#[derive(Clone, Copy, Default)]
+pub struct MappedRequest<'a> {
+    pub genus: Option<&'a str>,
+    pub conifer: Option<bool>,
+    pub want_size: Option<TreeSize>,
 }
 
 pub struct RegionLibrary {
@@ -136,6 +146,7 @@ fn load_pack(
     let mut communities: Vec<Community> = Vec::new();
     for mc in &m.communities {
         let mut species: Vec<Vec<usize>> = Vec::new();
+        let mut genera: Vec<String> = Vec::new();
         for sp in &mc.species {
             if exclude_palms && is_palm(&sp.name) {
                 continue;
@@ -157,6 +168,7 @@ fn load_pack(
             }
             if !idxs.is_empty() {
                 species.push(idxs);
+                genera.push(sp.name.split('_').next().unwrap_or_default().to_string());
             }
         }
         if !species.is_empty() {
@@ -164,6 +176,7 @@ fn load_pack(
                 name: mc.name.clone(),
                 habitat: Habitat::parse(&mc.habitat),
                 species,
+                genera,
                 density: mc.density,
             });
         }
@@ -186,6 +199,19 @@ fn load_pack(
         default_idx,
         by_habitat,
     }
+}
+
+/// Index lists of the species whose genus passes `keep`.
+fn species_where<'a>(
+    communities: impl IntoIterator<Item = &'a Community>,
+    keep: impl Fn(&str) -> bool,
+) -> Vec<Vec<usize>> {
+    communities
+        .into_iter()
+        .flat_map(|c| c.species.iter().zip(&c.genera))
+        .filter(|(_, genus)| keep(genus))
+        .map(|(sp, _)| sp.clone())
+        .collect()
 }
 
 impl RegionLibrary {
@@ -507,6 +533,54 @@ impl RegionLibrary {
         Some((sx, sz, idx, rot))
     }
 
+    /// A mapped tree keeps its position and is never thinned. Its genus comes first,
+    /// then the community's species of its leaf type.
+    pub fn pick_mapped(
+        &self,
+        x: i32,
+        z: i32,
+        hint: Habitat,
+        elev_y: i32,
+        req: MappedRequest,
+    ) -> Option<(i32, i32, usize, u8)> {
+        let rot = (coord_hash(x ^ 0x5bd1, z ^ 0x9e37) % 4) as u8;
+        let pick = |species: Vec<Vec<usize>>| {
+            if species.is_empty() {
+                return None;
+            }
+            let pool = Community {
+                name: String::new(),
+                habitat: hint,
+                species,
+                genera: Vec::new(),
+                density: 0,
+            };
+            self.pick_in_community(&pool, x, z, req.want_size)
+        };
+        if let Some(genus) = req.genus {
+            for pack in [&self.realm_pack, &self.vanilla_pack] {
+                let same = species_where(&pack.communities, |g| g.eq_ignore_ascii_case(genus));
+                if let Some(idx) = pick(same) {
+                    return Some((x, z, idx, rot));
+                }
+            }
+        }
+
+        let montane =
+            self.is_montane(elev_y) && crate::ground_generation::value_noise_01(x, z, 64) < 0.6;
+        let community = self.pick_community(&self.realm_pack, hint, x, z, montane);
+        let idx = match req.conifer {
+            Some(conifer) => {
+                let of_type = |g: &str| crate::trees::mapped::is_conifer_genus(g) == conifer;
+                pick(species_where([community], of_type))
+                    .or_else(|| pick(species_where(&self.realm_pack.communities, of_type)))
+                    .or_else(|| self.pick_in_community(community, x, z, req.want_size))
+            }
+            None => self.pick_in_community(community, x, z, req.want_size),
+        }?;
+        Some((x, z, idx, rot))
+    }
+
     pub fn report(&self) {
         let (mut s, mut m, mut b, mut t, mut g) = (0u32, 0u32, 0u32, 0u32, 0u32);
         for (_, size, _) in &self.entries {
@@ -600,6 +674,62 @@ mod tests {
             {
                 assert!(idx < lib.entries.len());
             }
+        }
+    }
+
+    /// Entry indices of every pack species whose genus passes `keep`.
+    fn entries_where(lib: &RegionLibrary, keep: impl Fn(&str) -> bool) -> Vec<usize> {
+        [&lib.realm_pack, &lib.vanilla_pack]
+            .iter()
+            .flat_map(|p| &p.communities)
+            .flat_map(|c| c.species.iter().zip(&c.genera))
+            .filter(|(_, g)| keep(g))
+            .flat_map(|(sp, _)| sp.iter().copied())
+            .collect()
+    }
+
+    // A mapped tree is a tree for sure: it is never thinned out and stays where it was mapped.
+    #[test]
+    fn mapped_trees_are_never_dropped_or_moved() {
+        let src = TreePackSource::embedded("eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false).unwrap();
+        for k in 0..2000 {
+            let (x, z) = (k * 37 % 3001 - 1500, k * 91 % 2999 - 1500);
+            let picked = lib.pick_mapped(x, z, Habitat::Lowland, 0, MappedRequest::default());
+            let (sx, sz, idx, _) = picked.expect("a mapped tree always gets a model");
+            assert_eq!((sx, sz), (x, z));
+            assert!(idx < lib.entries.len());
+        }
+    }
+
+    #[test]
+    fn mapped_genus_and_leaf_type_steer_the_model() {
+        let src = TreePackSource::embedded("eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false).unwrap();
+        let tilia = entries_where(&lib, |g| g == "Tilia");
+        let conifers = entries_where(&lib, crate::trees::mapped::is_conifer_genus);
+        assert!(!tilia.is_empty() && !conifers.is_empty());
+        for k in 0..500 {
+            let (x, z) = (k * 13, k * 29);
+            let lime = MappedRequest {
+                genus: Some("Tilia"),
+                conifer: Some(false),
+                want_size: None,
+            };
+            let (_, _, idx, _) = lib.pick_mapped(x, z, Habitat::Lowland, 0, lime).unwrap();
+            assert!(tilia.contains(&idx), "a mapped lime gets a lime");
+
+            // No Robinia in the pack: any broadleaf, but never a conifer.
+            let robinia = MappedRequest {
+                genus: Some("Robinia"),
+                conifer: Some(false),
+                want_size: None,
+            };
+            let (_, _, idx, _) = lib.pick_mapped(x, z, Habitat::Lowland, 0, robinia).unwrap();
+            assert!(
+                !conifers.contains(&idx),
+                "a broadleaf never becomes a conifer"
+            );
         }
     }
 

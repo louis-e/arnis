@@ -200,6 +200,8 @@ pub struct WorldEditor<'a> {
     /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
     /// parking); vegetation stays off them. Shared via Arc with the tile editors.
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
+    /// Mapped tree trunks, shared via Arc with the tile editors.
+    mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -282,6 +284,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            mapped_trunks: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
@@ -334,6 +337,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            mapped_trunks: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
@@ -386,6 +390,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            mapped_trunks: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
@@ -489,10 +494,33 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
-    /// Drops the sealed-surface mask once every vegetation pass is done, so the
-    /// bitmap is not carried into the save phase.
+    /// Drops the sealed-surface mask and the mapped trunks once every vegetation
+    /// pass is done, so neither is carried into the save phase.
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
+        self.mapped_trunks = None;
+    }
+
+    /// Sets the mapped tree trunks (shared across the main and tile editors).
+    pub fn set_mapped_trunks(&mut self, trunks: Arc<crate::trees::mapped::MappedTrunks>) {
+        self.mapped_trunks = Some(trunks);
+    }
+
+    /// True under the crown of a tree OSM maps.
+    #[inline]
+    pub fn under_mapped_crown(&self, x: i32, z: i32) -> bool {
+        self.mapped_trunks
+            .as_ref()
+            .is_some_and(|t| t.under_crown(x, z))
+    }
+
+    /// On a paving area's own columns: true where a planted area mapped inside it
+    /// owns the column.
+    #[inline]
+    pub fn nested_area_owns(&self, x: i32, z: i32) -> bool {
+        self.sealed_surface
+            .as_ref()
+            .is_some_and(|m| !m.contains(x, z))
     }
 
     /// True if a man-made surface owns this column, so scattered vegetation
