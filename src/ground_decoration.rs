@@ -24,6 +24,7 @@ use crate::block_definitions::{
 };
 use crate::climate::Climate;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::ecoregion::{EcoBiome, Ecoregion};
 use crate::ground::Ground;
 use crate::land_cover::{
     LC_BARE, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER, LC_WATER, LC_WETLAND,
@@ -142,6 +143,12 @@ pub(crate) enum Habitat {
     Desert,
     Tundra,
     Wetland,
+    /// Temperate grassland: tall grass, sunflowers and prairie flowers.
+    Prairie,
+    /// Mediterranean scrub: poppies, dry grass and low shrubs.
+    Maquis,
+    /// Tropical grassland: tall grass with the odd dry bush.
+    Savanna,
 }
 
 impl Habitat {
@@ -155,7 +162,16 @@ impl Habitat {
     }
 }
 
-pub(crate) fn habitat(cover: u8, climate: Climate, abs_lat: f64, alpine: bool) -> Option<Habitat> {
+pub(crate) fn habitat(
+    cover: u8,
+    climate: Climate,
+    abs_lat: f64,
+    alpine: bool,
+    eco: Option<Ecoregion>,
+) -> Option<Habitat> {
+    if let Some(h) = eco.and_then(|e| ecoregion_habitat(cover, climate, alpine, e)) {
+        return Some(h);
+    }
     let arid = matches!(climate, Climate::HotDesert | Climate::ColdDesert);
     let dry = matches!(
         climate,
@@ -188,6 +204,39 @@ pub(crate) fn habitat(cover: u8, climate: Climate, abs_lat: f64, alpine: bool) -
         LC_MOSS => Habitat::Tundra,
         LC_WETLAND | LC_MANGROVES => Habitat::Wetland,
         LC_BARE if arid || dry => Habitat::Desert,
+        _ => return None,
+    })
+}
+
+/// Habitat by ecoregion; alpine, arid and snowy ground keeps the climate reading.
+fn ecoregion_habitat(cover: u8, climate: Climate, alpine: bool, eco: Ecoregion) -> Option<Habitat> {
+    use EcoBiome::*;
+    if alpine
+        || matches!(
+            climate,
+            Climate::HotDesert
+                | Climate::ColdDesert
+                | Climate::Boreal
+                | Climate::Tundra
+                | Climate::IceCap
+        )
+    {
+        return None;
+    }
+    let steppe_climate = matches!(climate, Climate::HotSteppe | Climate::ColdSteppe);
+    Some(match (cover, eco.biome) {
+        (LC_TREE_COVER, MoistTropical) => Habitat::Jungle,
+        (LC_TREE_COVER, DryTropical | TropicalGrassland | Mediterranean | Desert) => Habitat::Shrub,
+        (LC_TREE_COVER, TemperateConifer | Boreal | Tundra) => Habitat::Taiga,
+        (
+            LC_TREE_COVER,
+            TemperateBroadleaf | TropicalConifer | TemperateGrassland | MontaneGrassland,
+        ) => Habitat::Forest,
+        (LC_GRASSLAND | LC_SHRUBLAND, TemperateGrassland) if !steppe_climate => Habitat::Prairie,
+        (LC_GRASSLAND | LC_SHRUBLAND, Mediterranean) => Habitat::Maquis,
+        (LC_GRASSLAND | LC_SHRUBLAND, TropicalGrassland) => Habitat::Savanna,
+        (LC_GRASSLAND | LC_SHRUBLAND, MontaneGrassland) => Habitat::Alpine,
+        (LC_GRASSLAND | LC_SHRUBLAND, Desert) => Habitat::Steppe,
         _ => return None,
     })
 }
@@ -230,6 +279,20 @@ const SHRUB_FLOWERS: Palette = &[
 const STEPPE_FLOWERS: Palette = &[(YELLOW_FLOWER, 40), (ALLIUM, 30), (RED_FLOWER, 30)];
 const TUNDRA_FLOWERS: Palette = &[(WHITE_FLOWER, 40), (YELLOW_FLOWER, 30), (OXEYE_DAISY, 30)];
 const WETLAND_FLOWERS: Palette = &[(BLUE_FLOWER, 70), (OXEYE_DAISY, 15), (YELLOW_FLOWER, 15)];
+const PRAIRIE_FLOWERS: Palette = &[
+    (YELLOW_FLOWER, 35),
+    (OXEYE_DAISY, 20),
+    (ALLIUM, 15),
+    (CORNFLOWER, 15),
+    (RED_FLOWER, 10),
+    (ORANGE_TULIP, 5),
+];
+const MAQUIS_FLOWERS: Palette = &[
+    (RED_FLOWER, 35),
+    (YELLOW_FLOWER, 25),
+    (ALLIUM, 20),
+    (WHITE_FLOWER, 20),
+];
 const ALPINE_FLOWERS: Palette = &[
     (WHITE_FLOWER, 30),
     (CORNFLOWER, 20),
@@ -393,6 +456,25 @@ fn features(habitat: Habitat) -> &'static [(Feature, u32)] {
             (TallGrass, 60),
             (Mushrooms, 20),
         ],
+        Habitat::Prairie => &[
+            (TallGrass, 180),
+            (Flowers(PRAIRIE_FLOWERS), 70),
+            (TallFlowers(SUNFLOWERS), 25),
+            (SugarCane, 40),
+        ],
+        Habitat::Maquis => &[
+            (Flowers(MAQUIS_FLOWERS), 60),
+            (TallGrass, 60),
+            (DeadBushes, 40),
+            (SweetBerries, 30),
+            (SugarCane, 30),
+        ],
+        Habitat::Savanna => &[
+            (TallGrass, 220),
+            (DeadBushes, 30),
+            (Flowers(SHRUB_FLOWERS), 20),
+            (SugarCane, 40),
+        ],
     }
 }
 
@@ -419,7 +501,7 @@ struct Site<'g> {
     flat_y: i32,
     climate: Climate,
     abs_lat: f64,
-    /// Cacti are American; everywhere else deserts only get dead bushes.
+    /// Cacti are American: this longitude test stands in where no ecoregion's realm decides.
     cactus_country: bool,
     alpine_from_y: i32,
 }
@@ -447,6 +529,16 @@ impl Site<'_> {
             .cover_class(XZPoint::new(x - self.origin_x, z - self.origin_z))
     }
 
+    fn ecoregion(&self, x: i32, z: i32) -> Option<Ecoregion> {
+        self.ground
+            .ecoregion(XZPoint::new(x - self.origin_x, z - self.origin_z))
+    }
+
+    fn cactus_country(&self, x: i32, z: i32) -> bool {
+        self.ecoregion(x, z)
+            .map_or(self.cactus_country, |e| e.realm.is_americas())
+    }
+
     /// Read from the data grids alone, so an origin outside this pass's bounds
     /// resolves exactly as its own tile resolves it.
     fn habitat(&self, x: i32, z: i32) -> Option<Habitat> {
@@ -461,6 +553,7 @@ impl Site<'_> {
             self.climate,
             self.abs_lat,
             terrain_y >= self.alpine_from_y,
+            self.ecoregion(x, z),
         )
     }
 }
@@ -528,7 +621,7 @@ pub fn decorate_region(
                 let Some(feature) = pick_feature(features(habitat), roll) else {
                     continue;
                 };
-                if matches!(feature, Feature::Cactus) && !site.cactus_country {
+                if matches!(feature, Feature::Cactus) && !site.cactus_country(ox, oz) {
                     continue;
                 }
                 grow_patch(editor, &site, &mut rng, feature, habitat, ox, oz);
@@ -757,25 +850,87 @@ mod tests {
     #[test]
     fn habitats_follow_cover_and_climate() {
         let t = Climate::Temperate;
-        assert_eq!(habitat(LC_GRASSLAND, t, 48.0, false), Some(Habitat::Meadow));
-        assert_eq!(habitat(LC_GRASSLAND, t, 48.0, true), Some(Habitat::Alpine));
         assert_eq!(
-            habitat(LC_TREE_COVER, t, 48.0, false),
+            habitat(LC_GRASSLAND, t, 48.0, false, None),
+            Some(Habitat::Meadow)
+        );
+        assert_eq!(
+            habitat(LC_GRASSLAND, t, 48.0, true, None),
+            Some(Habitat::Alpine)
+        );
+        assert_eq!(
+            habitat(LC_TREE_COVER, t, 48.0, false, None),
             Some(Habitat::Forest)
         );
-        assert_eq!(habitat(LC_TREE_COVER, t, 62.0, false), Some(Habitat::Taiga));
-        assert_eq!(habitat(LC_TREE_COVER, t, 5.0, false), Some(Habitat::Jungle));
         assert_eq!(
-            habitat(LC_GRASSLAND, Climate::HotDesert, 25.0, false),
+            habitat(LC_TREE_COVER, t, 62.0, false, None),
+            Some(Habitat::Taiga)
+        );
+        assert_eq!(
+            habitat(LC_TREE_COVER, t, 5.0, false, None),
+            Some(Habitat::Jungle)
+        );
+        assert_eq!(
+            habitat(LC_GRASSLAND, Climate::HotDesert, 25.0, false, None),
             Some(Habitat::Desert)
         );
-        assert_eq!(habitat(LC_WETLAND, t, 48.0, false), Some(Habitat::Wetland));
         assert_eq!(
-            habitat(crate::land_cover::LC_BUILT_UP, t, 48.0, false),
+            habitat(LC_WETLAND, t, 48.0, false, None),
+            Some(Habitat::Wetland)
+        );
+        assert_eq!(
+            habitat(crate::land_cover::LC_BUILT_UP, t, 48.0, false, None),
             None
         );
         assert_eq!(
-            habitat(crate::land_cover::LC_CROPLAND, t, 48.0, false),
+            habitat(crate::land_cover::LC_CROPLAND, t, 48.0, false, None),
+            None
+        );
+    }
+
+    #[test]
+    fn ecoregions_refine_the_habitat() {
+        use crate::ecoregion::lookup;
+        let t = Climate::Temperate;
+        // Humid Pampas, Eastern Mediterranean and the Serengeti.
+        let pampas = lookup(576);
+        assert_eq!(
+            habitat(LC_GRASSLAND, t, 34.6, false, pampas),
+            Some(Habitat::Prairie)
+        );
+        assert_eq!(
+            habitat(LC_GRASSLAND, Climate::ColdSteppe, 34.6, false, pampas),
+            Some(Habitat::Steppe)
+        );
+        assert_eq!(
+            habitat(LC_SHRUBLAND, t, 32.0, false, lookup(791)),
+            Some(Habitat::Maquis)
+        );
+        assert_eq!(
+            habitat(LC_GRASSLAND, t, 2.8, false, lookup(54)),
+            Some(Habitat::Savanna)
+        );
+        // City lawns in the Everglades ecoregion stay meadow; ESA marks the real marsh.
+        assert_eq!(
+            habitat(LC_GRASSLAND, t, 26.2, false, lookup(581)),
+            Some(Habitat::Meadow)
+        );
+        // Ethiopian highland forest is no jungle, and alpine ground stays alpine.
+        assert_eq!(
+            habitat(LC_TREE_COVER, t, 9.0, false, lookup(79)),
+            Some(Habitat::Forest)
+        );
+        assert_eq!(
+            habitat(LC_GRASSLAND, t, 34.6, true, pampas),
+            Some(Habitat::Alpine)
+        );
+        // Arid climates and unmapped cover keep the climate reading.
+        assert_eq!(
+            habitat(LC_GRASSLAND, Climate::HotDesert, 25.0, false, lookup(791)),
+            Some(Habitat::Desert)
+        );
+        assert_eq!(
+            habitat(crate::land_cover::LC_BUILT_UP, t, 48.0, false, pampas),
             None
         );
     }
@@ -793,6 +948,9 @@ mod tests {
             Habitat::Desert,
             Habitat::Tundra,
             Habitat::Wetland,
+            Habitat::Prairie,
+            Habitat::Maquis,
+            Habitat::Savanna,
         ] {
             let total: u32 = features(h).iter().map(|&(_, w)| w).sum();
             assert!(total < 1000, "{h:?} sums to {total}");

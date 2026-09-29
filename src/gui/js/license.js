@@ -74,6 +74,10 @@ export const licenseText = `
 <h4>Koppen-Geiger Climate Data</h4>
 <p>Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" target="_blank" rel="noopener noreferrer">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>
+<div class="credit">
+<h4>RESOLVE Ecoregions 2017</h4>
+<p>Tree species, biomes and wild plants follow the <a href="https://ecoregions.appspot.com/" target="_blank" rel="noopener noreferrer">RESOLVE Ecoregions 2017</a> map by Dinerstein et al. (2017), "An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm", BioScience 67(6), 534-545. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+</div>
 </div>
 </section>
 

@@ -315,11 +315,13 @@ pub fn generate_ground_region(
         crate::climate::Climate::Boreal => 0.9,
         crate::climate::Climate::Temperate | crate::climate::Climate::TropicalSavanna => 1.0,
     };
-    let forest_fern_share = match crate::ground_decoration::habitat(
+    // Read per chunk, as the ecoregion under the forest can change across the area.
+    let fern_share_at = |x: i32, z: i32| match crate::ground_decoration::habitat(
         land_cover::LC_TREE_COVER,
         climate,
         planetary_lat.abs(),
         false,
+        ground.ecoregion(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z())),
     ) {
         Some(crate::ground_decoration::Habitat::Taiga) => 0.45,
         Some(crate::ground_decoration::Habitat::Jungle) => 0.3,
@@ -333,6 +335,7 @@ pub fn generate_ground_region(
             let chunk_max_x = ((chunk_x << 4) + 15).min(iter_max_x);
             let chunk_min_z = (chunk_z << 4).max(iter_min_z);
             let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
+            let forest_fern_share = fern_share_at((chunk_x << 4) + 8, (chunk_z << 4) + 8);
 
             // Precompute a per-chunk ground-Y cache so subsequent lookups
             // (main column + water-column + depth-fill neighbours, ~20+ per

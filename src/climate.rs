@@ -2,25 +2,36 @@
 
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::geo_grid::TiledGrid;
 use crate::ground_generation::patch_noise;
 use crate::land_cover::{
     coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
     LC_TREE_COVER,
 };
+use std::sync::{LazyLock, OnceLock};
 
-// Global Koppen-Geiger grid, 0.1 deg, 1 byte/cell (class 1..30, 0 = ocean/nodata).
-static KOPPEN: &[u8] = include_bytes!("../assets/climate/koppen_0p1.bin");
-const KOPPEN_COLS: usize = 3600;
-const KOPPEN_ROWS: usize = 1800;
-const KOPPEN_RES: f64 = 0.1;
+// Global Koppen-Geiger grid, 0.1 deg, class 1..30 per cell (0 = ocean/nodata).
+static KOPPEN_BYTES: &[u8] = include_bytes!("../assets/climate/koppen.grid");
+static KOPPEN: LazyLock<Option<TiledGrid>> = LazyLock::new(|| TiledGrid::parse(KOPPEN_BYTES));
+// Decoded tiles stay cached; each is 10 KB and a run touches one or two.
+type KoppenTile = OnceLock<Option<Box<[u8]>>>;
+static KOPPEN_TILES: LazyLock<Vec<KoppenTile>> = LazyLock::new(|| {
+    let tiles = KOPPEN.as_ref().map_or(0, TiledGrid::tile_count);
+    (0..tiles).map(|_| OnceLock::new()).collect()
+});
 
 fn koppen_class(lat: f64, lon: f64) -> u8 {
-    if KOPPEN.len() != KOPPEN_COLS * KOPPEN_ROWS {
+    let Some(grid) = KOPPEN.as_ref() else {
         return 0;
-    }
-    let col = (((lon + 180.0) / KOPPEN_RES).floor() as isize).clamp(0, KOPPEN_COLS as isize - 1);
-    let row = (((90.0 - lat) / KOPPEN_RES).floor() as isize).clamp(0, KOPPEN_ROWS as isize - 1);
-    KOPPEN[row as usize * KOPPEN_COLS + col as usize]
+    };
+    let (col, row) = grid.position(lat, lon);
+    let cell = grid.cell(col, row);
+    let Some(slot) = KOPPEN_TILES.get(grid.tile_of(cell)) else {
+        return 0;
+    };
+    let tile = slot.get_or_init(|| grid.decode(grid.tile_of(cell)).map(Vec::into_boxed_slice));
+    tile.as_deref()
+        .map_or(0, |t| grid.value(t, grid.index_in_tile(cell)) as u8)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -180,9 +191,11 @@ mod tests {
     }
 
     #[test]
-    fn embedded_grid_size_matches() {
+    fn embedded_grid_parses() {
         // If this fails the embedded grid is wrong; koppen_class then safely returns 0.
-        assert_eq!(KOPPEN.len(), KOPPEN_COLS * KOPPEN_ROWS);
+        let grid = KOPPEN.as_ref().expect("koppen.grid");
+        assert_eq!(grid.cells_per_degree().round(), 10.0);
+        assert_eq!(KOPPEN_TILES.len(), 648);
     }
 
     #[test]

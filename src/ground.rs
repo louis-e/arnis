@@ -5,6 +5,7 @@ use crate::coordinate_system::{
     cartesian::{XZBBox, XZPoint},
     geographic::LLBBox,
 };
+use crate::ecoregion::{EcoMap, Ecoregion};
 use crate::elevation::{
     compute_grid_dims, compute_grid_dims_for_world, AffinePolicy, ElevationAffine,
 };
@@ -16,6 +17,7 @@ use crate::projection::WebMercatorProjection;
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use image::{Rgb, RgbImage};
+use std::sync::Arc;
 
 /// Parameters describing the inverse-rotation needed to check whether a world
 /// coordinate falls inside the original (pre-rotation) bounding box.
@@ -57,6 +59,7 @@ pub struct Ground {
     climate: crate::climate::Climate,
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
+    ecoregions: Option<Arc<EcoMap>>,
 }
 
 /// Layout of a run's ground grids. A projected run takes its size from the
@@ -129,6 +132,31 @@ impl GroundFrame {
             Some((lat, _)) => lat,
             None => (bbox.min().lat() + bbox.max().lat()) / 2.0,
         }
+    }
+
+    /// Ecoregions over the area, at the geography the land cover is laid out on.
+    fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
+        let map = match &self.mercator {
+            Some(proj) => {
+                let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false);
+                let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false);
+                EcoMap::build(world_w, world_h, (x0, z0), |gx, gz| {
+                    (
+                        proj.lat_for_z(f64::from(z0) + gz),
+                        proj.lon_for_x(f64::from(x0) + gx),
+                    )
+                })
+            }
+            None => {
+                let (top, left) = (bbox.max().lat(), bbox.min().lng());
+                let (dlat, dlon) = (top - bbox.min().lat(), bbox.max().lng() - left);
+                let (w, h) = (world_w as f64, world_h as f64);
+                EcoMap::build(world_w, world_h, (0, 0), move |gx, gz| {
+                    (top - gz / h * dlat, left + gx / w * dlon)
+                })
+            }
+        };
+        map.map(Arc::new)
     }
 
     /// The padding is dropped when the padded grid would be capped, since the
@@ -251,6 +279,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -305,6 +334,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: frame.climate(bbox),
             body: CelestialBody::Earth,
+            ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
         }
     }
 
@@ -327,6 +357,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -374,6 +405,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -502,6 +534,10 @@ impl Ground {
                         snow_threshold_y,
                         climate: frame.climate(&requested_bbox),
                         body,
+                        ecoregions: body
+                            .is_earth()
+                            .then(|| frame.ecoregions(&requested_bbox, (final_w, final_h)))
+                            .flatten(),
                     }
                 }
                 Err(e) => {
@@ -532,6 +568,10 @@ impl Ground {
                         snow_threshold_y: i32::MAX,
                         climate: frame.climate(&requested_bbox),
                         body,
+                        ecoregions: body
+                            .is_earth()
+                            .then(|| frame.ecoregions(&requested_bbox, plan.final_dims))
+                            .flatten(),
                     }
                 }
             }
@@ -555,6 +595,21 @@ impl Ground {
     #[inline(always)]
     pub fn body(&self) -> CelestialBody {
         self.body
+    }
+
+    /// RESOLVE ecoregion under a ground coordinate, if the area has one there.
+    #[inline]
+    pub fn ecoregion(&self, coord: XZPoint) -> Option<Ecoregion> {
+        self.ecoregions.as_ref()?.at(coord)
+    }
+
+    pub fn ecoregion_map(&self) -> Option<&EcoMap> {
+        self.ecoregions.as_deref()
+    }
+
+    /// Replaces the ecoregion map after the ground was rotated.
+    pub fn set_ecoregion_map(&mut self, map: EcoMap) {
+        self.ecoregions = Some(Arc::new(map));
     }
 
     /// Returns whether land cover data is available
@@ -1437,6 +1492,7 @@ mod tests {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -1721,6 +1777,7 @@ pub(crate) mod test_support {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 }

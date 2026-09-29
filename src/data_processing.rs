@@ -814,6 +814,7 @@ pub fn generate_world_with_options(
         args.scale,
         crate::ground::area_floor_for(&ground, args),
         ground.blocks_per_meter(),
+        ground.ecoregion_map(),
     )
     .map(Arc::new);
     bench.reset();

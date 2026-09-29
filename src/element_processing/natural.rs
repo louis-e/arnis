@@ -137,6 +137,10 @@ pub fn generate_natural(
 
             // If there are natural nodes, flood-fill the area using cache
             if corner_count > 0 {
+                let leaf_type_tagged = matches!(
+                    element.tags().get("leaf_type").map(String::as_str),
+                    Some("broadleaved" | "needleleaved")
+                );
                 let trees_ok_to_generate: Vec<TreeType> = {
                     let mut trees: Vec<TreeType> = vec![];
                     if let Some(leaf_type) = element.tags().get("leaf_type") {
@@ -333,6 +337,7 @@ pub fn generate_natural(
                                     Some(building_footprints),
                                     Some(bridge_surface),
                                     false,
+                                    leaf_type_tagged,
                                 );
                             } else if random_choice == 1 {
                                 crate::ground_decoration::place_scattered_flower(
@@ -426,6 +431,7 @@ pub fn generate_natural(
                                             Some(building_footprints),
                                             Some(bridge_surface),
                                             false,
+                                            true,
                                         );
                                     } else if r < 15 {
                                         place_grass_or_tall(editor, &mut rng, x, z);

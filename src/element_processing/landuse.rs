@@ -61,6 +61,10 @@ pub fn generate_landuse(
     // Get the area of the landuse element using cache
     let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
+    let leaf_type_tagged = matches!(
+        element.tags.get("leaf_type").map(String::as_str),
+        Some("broadleaved" | "needleleaved")
+    );
     // Cherry/FloweringOak only via the random Tree::create pool (rare).
     let trees_ok_to_generate: Vec<TreeType> = {
         let mut trees: Vec<TreeType> = vec![];
@@ -223,6 +227,7 @@ pub fn generate_landuse(
                         Some(building_footprints),
                         Some(bridge_surface),
                         false,
+                        leaf_type_tagged,
                     );
                 } else {
                     let random_choice: i32 = rng.random_range(0..30);
