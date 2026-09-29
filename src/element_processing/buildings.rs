@@ -2648,6 +2648,21 @@ fn infer_building_height(
 /// floor slab row (the "+2" in the wall grammar).
 const GROUND_FLOOR_BONUS: i32 = 2;
 
+/// Tallest `height` tag taken at face value. The tallest building is about
+/// 830 m; values beyond this are usually an elevation mapped into `height`.
+const MAX_PLAUSIBLE_HEIGHT_M: f64 = 1000.0;
+
+/// Parses a `height` tag in meters, dropping values no building can have.
+fn parse_building_height_tag(tags: &HashMap<String, String>) -> Option<f64> {
+    let height = tags
+        .get("height")?
+        .trim_end_matches('m')
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    (height.is_finite() && height <= MAX_PLAUSIBLE_HEIGHT_M).then_some(height)
+}
+
 /// Determines building height from OSM tags, falling back to per-type
 /// inference when the element carries no height data at all.
 #[allow(clippy::too_many_arguments)]
@@ -2692,53 +2707,51 @@ fn calculate_building_height(
     // When min_height is also present, the wall height is height − min_height
     // (OSM `height` is absolute from ground, not relative to min_height).
     let mut has_explicit_height = false;
-    if let Some(height_str) = element.tags.get("height") {
-        if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
-            has_explicit_height = true;
-            has_source = true;
-            let mut is_elevated_part = false;
-            let effective = if let Some(mh_str) = element.tags.get("min_height") {
-                let mh = mh_str
+    if let Some(height) = parse_building_height_tag(&element.tags) {
+        has_explicit_height = true;
+        has_source = true;
+        let mut is_elevated_part = false;
+        let effective = if let Some(mh_str) = element.tags.get("min_height") {
+            let mh = mh_str
+                .trim_end_matches('m')
+                .trim()
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            is_elevated_part = mh > 0.0;
+            (height - mh).max(1.0)
+        } else if min_level > 0 {
+            // `height` is absolute from ground; without a min_height tag
+            // the level-based offset must still come off the wall span,
+            // matching the min_level_offset the part is lifted by.
+            is_elevated_part = true;
+            let offset = (min_level * floor_cycle + GROUND_FLOOR_BONUS) as f64;
+            (height - offset).max(1.0)
+        } else {
+            height
+        };
+        // Parts can be thin slabs (a plinth, a cornice), elevated or not:
+        // they skip the 3-block interior minimum, under a roof as well
+        let is_part = element.tags.contains_key("building:part");
+        let wall_floor: f64 = if is_part { 1.0 } else { 3.0 };
+        let effective = match (
+            element.tags.get("roof:height"),
+            element.tags.get("roof:shape"),
+        ) {
+            (Some(rh), Some(shape)) if shape != "flat" => {
+                // height includes the roof, a tagged roof:height comes off the walls
+                let rh = rh
                     .trim_end_matches('m')
                     .trim()
                     .parse::<f64>()
                     .unwrap_or(0.0);
-                is_elevated_part = mh > 0.0;
-                (height - mh).max(1.0)
-            } else if min_level > 0 {
-                // `height` is absolute from ground; without a min_height tag
-                // the level-based offset must still come off the wall span,
-                // matching the min_level_offset the part is lifted by.
-                is_elevated_part = true;
-                let offset = (min_level * floor_cycle + GROUND_FLOOR_BONUS) as f64;
-                (height - offset).max(1.0)
-            } else {
-                height
-            };
-            // Parts can be thin slabs (a plinth, a cornice), elevated or not:
-            // they skip the 3-block interior minimum, under a roof as well
-            let is_part = element.tags.contains_key("building:part");
-            let wall_floor: f64 = if is_part { 1.0 } else { 3.0 };
-            let effective = match (
-                element.tags.get("roof:height"),
-                element.tags.get("roof:shape"),
-            ) {
-                (Some(rh), Some(shape)) if shape != "flat" => {
-                    // height includes the roof, a tagged roof:height comes off the walls
-                    let rh = rh
-                        .trim_end_matches('m')
-                        .trim()
-                        .parse::<f64>()
-                        .unwrap_or(0.0);
-                    (effective - rh.max(0.0)).max(wall_floor.min(effective))
-                }
-                _ => effective,
-            };
-            building_height = (effective * scale_factor) as i32;
-            building_height = building_height.max(if is_elevated_part || is_part { 1 } else { 3 });
-            if height > 28.0 {
-                is_tall_building = true;
+                (effective - rh.max(0.0)).max(wall_floor.min(effective))
             }
+            _ => effective,
+        };
+        building_height = (effective * scale_factor) as i32;
+        building_height = building_height.max(if is_elevated_part || is_part { 1 } else { 3 });
+        if height > 28.0 {
+            is_tall_building = true;
         }
     }
 
@@ -2975,14 +2988,8 @@ fn generate_roof_only_structure(
     let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
 
     // Determine roof thickness / height.
-    let roof_thickness: i32 = if let Some(h) = element.tags.get("height") {
-        let total = h
-            .trim_end_matches('m')
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|v| (v * scale_factor) as i32)
-            .unwrap_or(5);
+    let roof_thickness: i32 = if let Some(h) = parse_building_height_tag(&element.tags) {
+        let total = (h * scale_factor) as i32;
         // If we already applied a min_height offset, the thickness is just
         // the difference.  Otherwise keep the parsed value.
         if element.tags.contains_key("min_height") {
@@ -12151,6 +12158,20 @@ mod height_tests {
         let way = way_with_tags(&[("height", "2"), ("min_height", "0")]);
         let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 100, 1);
         assert_eq!(h, 3);
+    }
+
+    // An elevation mapped as height (e.g. an alpine hut with height=1640)
+    // is ignored, levels still apply
+    #[test]
+    fn implausible_height_is_ignored() {
+        let way = way_with_tags(&[("height", "1640"), ("building:levels", "2")]);
+        let (h, tall) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 100, 1);
+        assert_eq!(h, 10);
+        assert!(!tall);
+
+        let way = way_with_tags(&[("height", "828")]);
+        let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 100, 1);
+        assert_eq!(h, 828);
     }
 
     #[test]
