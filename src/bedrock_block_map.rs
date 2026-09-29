@@ -1003,9 +1003,41 @@ pub fn to_bedrock_block_with_properties(
     if let Some(cave_block) = convert_cave_block(java_name, props_map) {
         return cave_block;
     }
+    if java_name.ends_with("_wall") {
+        if let Some(props) = props_map {
+            return convert_connected_wall(to_bedrock_block(block), props);
+        }
+    }
 
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
+}
+
+/// Carries Java wall connections over to Bedrock's wall states.
+fn convert_connected_wall(
+    mut wall: BedrockBlock,
+    props: &std::collections::HashMap<String, fastnbt::Value>,
+) -> BedrockBlock {
+    let prop = |key: &str| match props.get(key) {
+        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
+        _ => None,
+    };
+    for side in ["east", "north", "south", "west"] {
+        let connection = match prop(side) {
+            Some("low") => "short",
+            Some("tall") => "tall",
+            _ => "none",
+        };
+        wall.states.insert(
+            format!("wall_connection_type_{side}"),
+            BedrockBlockStateValue::String(connection.to_string()),
+        );
+    }
+    wall.states.insert(
+        "wall_post_bit".to_string(),
+        BedrockBlockStateValue::Bool(prop("up") != Some("false")),
+    );
+    wall
 }
 
 /// Blocks the cave passes place whose Bedrock form differs from Java's. Like the rest of this
@@ -1941,6 +1973,48 @@ mod tests {
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "gray"
         ));
+    }
+
+    #[test]
+    fn joined_walls_keep_their_connections_on_bedrock() {
+        use crate::block_definitions::BRICK_WALL;
+        let props = fastnbt::Value::Compound(std::collections::HashMap::from([
+            (
+                "east".to_string(),
+                fastnbt::Value::String("low".to_string()),
+            ),
+            (
+                "west".to_string(),
+                fastnbt::Value::String("low".to_string()),
+            ),
+            (
+                "north".to_string(),
+                fastnbt::Value::String("none".to_string()),
+            ),
+            (
+                "south".to_string(),
+                fastnbt::Value::String("none".to_string()),
+            ),
+            (
+                "up".to_string(),
+                fastnbt::Value::String("false".to_string()),
+            ),
+        ]));
+        let bedrock = to_bedrock_block_with_properties(BRICK_WALL, Some(&props));
+        let state = |k: &str| bedrock.states.get(k).cloned();
+        assert_eq!(
+            state("wall_connection_type_east"),
+            Some(BedrockBlockStateValue::String("short".to_string()))
+        );
+        assert_eq!(
+            state("wall_connection_type_north"),
+            Some(BedrockBlockStateValue::String("none".to_string()))
+        );
+        assert_eq!(
+            state("wall_post_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        );
+        assert!(bedrock.states.contains_key("wall_block_type"));
     }
 
     #[test]

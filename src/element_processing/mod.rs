@@ -8,6 +8,7 @@ pub mod building_facade;
 #[cfg(test)]
 pub mod building_test_support;
 pub mod buildings;
+pub(crate) mod connected_blocks;
 pub mod doors;
 pub mod emergency;
 pub mod highways;

@@ -1,5 +1,6 @@
 use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::water_depth::{carve_water_column, BigWaterField};
@@ -19,6 +20,7 @@ pub fn generate_water_area_from_way(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     surfaces: &StillWaterSurfaces,
 ) {
     let Some(outers) = way_rings(element) else {
@@ -32,6 +34,7 @@ pub fn generate_water_area_from_way(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         surface,
     );
 }
@@ -46,6 +49,7 @@ fn way_rings(element: &ProcessedWay) -> Option<Vec<Vec<ProcessedNode>>> {
     Some(outers)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_water_areas_from_relation(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
@@ -53,6 +57,7 @@ pub fn generate_water_areas_from_relation(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     surfaces: &StillWaterSurfaces,
 ) {
     let Some((outers, inners)) = relation_rings(element, xzbbox) else {
@@ -66,6 +71,7 @@ pub fn generate_water_areas_from_relation(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         surface,
     );
 }
@@ -170,6 +176,7 @@ fn relation_rings(
     Some((outers, inners))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_water_areas(
     editor: &mut WorldEditor,
     outers: &[Vec<ProcessedNode>],
@@ -177,6 +184,7 @@ fn generate_water_areas(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     still_surface: Option<i32>,
 ) {
     // Calculate polygon bounding box to limit fill area
@@ -227,6 +235,7 @@ fn generate_water_areas(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         still_surface,
     );
 
@@ -696,6 +705,7 @@ fn scanline_fill_water(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     still_surface: Option<i32>,
 ) {
     let edges = PolygonEdges::new(outers, inners);
@@ -707,8 +717,9 @@ fn scanline_fill_water(
         for &(span_start, span_end) in spans.get(z) {
             let (start, end) = (span_start.max(min_x), span_end.min(max_x));
             for x in start..=end {
-                // Keep road/bridge surfaces (carve would overwrite them).
-                if road_mask.contains(x, z) {
+                // Keep road surfaces, except under a raised deck.
+                let on_road = road_mask.contains(x, z);
+                if on_road && !bridge_surface.contains(x, z) {
                     continue;
                 }
                 let ground_y = editor.get_ground_level(x, z);
@@ -736,6 +747,12 @@ fn scanline_fill_water(
                         }
                     }
                 };
+                if on_road
+                    && (!bridge_surface.deck_clears(x, z, water_y)
+                        || bridge_surface.over_grade_way(x, z))
+                {
+                    continue;
+                }
                 // Over a bore, fill down to the terrain but never carve into it.
                 if tunnel_footprint.contains(x, z) {
                     for y in (ground_y + 1).min(water_y)..=water_y {
@@ -809,6 +826,7 @@ mod tests {
             &bwf,
             &road_mask,
             &footprint,
+            &BridgeSurfaceMap::empty(),
             &StillWaterSurfaces(surfaces),
         );
 

@@ -335,6 +335,7 @@ fn process_element(
                         big_water_field,
                         road_mask,
                         tunnel_footprint,
+                        bridge_surface,
                         still_surfaces,
                     );
                 } else {
@@ -347,6 +348,8 @@ fn process_element(
                     rail_tunnel_points,
                     rail_bridge_internal_endpoints,
                     bridge_outlines,
+                    bridge_structures,
+                    bridge_surface,
                     road_mask,
                     building_footprints,
                     rail_mask,
@@ -453,6 +456,7 @@ fn process_element(
                     big_water_field,
                     road_mask,
                     tunnel_footprint,
+                    bridge_surface,
                     still_surfaces,
                 );
             } else if rel.tags.contains_key("natural") {
@@ -886,7 +890,7 @@ pub fn generate_world_with_options(
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
     let bridge_structures =
-        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines);
+        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines, args.scale);
     let bridge_surface =
         bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
 
@@ -1205,6 +1209,7 @@ pub fn generate_world_with_options(
                 &big_water_field,
                 &road_mask,
                 &tunnel_footprint,
+                &bridge_surface,
                 g_min_x,
                 g_max_x,
                 g_min_z,
@@ -1574,6 +1579,7 @@ pub fn generate_world_with_options(
             &big_water_field,
             &road_mask,
             &tunnel_footprint,
+            &bridge_surface,
         );
     }
 

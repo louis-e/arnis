@@ -1300,6 +1300,18 @@ impl WorldToModify {
         )
     }
 
+    /// Stored properties of the block at (x, y, z), if any.
+    #[cfg(test)]
+    pub fn get_properties(&self, x: i32, y: i32, z: i32) -> Option<Arc<Value>> {
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region = self.get_region(chunk_x >> 5, chunk_z >> 5)?;
+        let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
+        let section = chunk.sections.get(&((y >> 4) as i8))?;
+        let index = SectionToModify::index((x & 15) as u8, (y & 15) as u8, (z & 15) as u8);
+        section.properties.get(&index).cloned()
+    }
+
     /// Finds the highest non-AIR block in one column and Y range.
     ///
     /// Column probes are used while placing tree canopies over buildings. The

@@ -49,7 +49,13 @@ pub fn scatter_boats(editor: &mut WorldEditor, min_x: i32, min_z: i32, max_x: i3
                 let az = gz + ((h >> 3) % 7) as i32;
                 // water_distance caps at 15, so a water cell still at 0 is past the cap:
                 // deep open water, not a river or shore. Slots decide independently (tile-invariant).
-                if editor.is_lc_water(ax, az) && editor.water_distance(ax, az) == 0 {
+                // Not under a bridge, where the deck and the water carve would cut the hull.
+                let r = schem.max_extent;
+                let open = || {
+                    (-r..=r)
+                        .all(|dx| (-r..=r).all(|dz| !editor.surface_is_sealed(ax + dx, az + dz)))
+                };
+                if editor.is_lc_water(ax, az) && editor.water_distance(ax, az) == 0 && open() {
                     let base_y = editor.get_water_level(ax, az) - 1;
                     let rot = ((h >> 5) & 3) as u8;
                     place_structure(editor, schem, ax, az, base_y, rot, None);

@@ -619,7 +619,7 @@ mod sealed_surface_tests {
         editor.set_sealed_surface(Arc::new(mask));
 
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
 
         let args = Args::parse_from([
@@ -664,7 +664,7 @@ mod sealed_surface_tests {
         tags: &[(&str, &str)],
     ) -> (usize, usize, usize, usize) {
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], editor, &outlines);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let args = Args::parse_from([
             "arnis",
@@ -784,7 +784,7 @@ mod sealed_surface_tests {
         editor.set_ground(Arc::new(crate::ground::Ground::new_flat(-250)));
 
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
 
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4", "--mode", "geo-only"]);
