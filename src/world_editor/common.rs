@@ -1379,7 +1379,7 @@ impl WorldToModify {
 
     /// Set a block only if the cell is empty (AIR). Thin `#[inline]` wrapper over [`set_with_props_if_absent`].
     #[inline]
-    pub fn set_block_if_absent(&mut self, x: i32, y: i32, z: i32, block: Block) {
+    pub fn set_block_if_absent(&mut self, x: i32, y: i32, z: i32, block: Block) -> bool {
         self.set_with_props_if_absent(
             x,
             y,
@@ -1388,10 +1388,11 @@ impl WorldToModify {
                 block,
                 properties: None,
             },
-        );
+        )
     }
 
     /// Set a block (+ optional NBT) only if the cell is empty (AIR), in one region/chunk/section descent.
+    /// Returns whether it was set.
     #[inline]
     pub fn set_with_props_if_absent(
         &mut self,
@@ -1399,7 +1400,7 @@ impl WorldToModify {
         y: i32,
         z: i32,
         block_with_props: BlockWithProperties,
-    ) {
+    ) -> bool {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
@@ -1412,7 +1413,7 @@ impl WorldToModify {
             .or_default();
 
         if y > world_max_y() {
-            return;
+            return false;
         }
         let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
@@ -1423,14 +1424,16 @@ impl WorldToModify {
         let local_z = (z & 15) as u8;
         let idx = SectionToModify::index(local_x, local_y, local_z);
 
-        if section.storage.get(idx) == AIR {
-            section.storage.set(idx, block_with_props.block);
-            if let Some(props) = block_with_props.properties {
-                section.properties.insert(idx, props);
-            } else {
-                section.properties.remove(&idx);
-            }
+        if section.storage.get(idx) != AIR {
+            return false;
         }
+        section.storage.set(idx, block_with_props.block);
+        if let Some(props) = block_with_props.properties {
+            section.properties.insert(idx, props);
+        } else {
+            section.properties.remove(&idx);
+        }
+        true
     }
 
     /// Fill an entire column (single x, z) from y_min to y_max with the same block,
@@ -1481,6 +1484,45 @@ impl WorldToModify {
                 section.storage.set(idx, block);
                 section.properties.remove(&idx);
             }
+        }
+    }
+
+    /// Fills the air in `y_min..=y_max` of a column with `block_at(y)`, which is asked
+    /// for every height in order, resolving the chunk once instead of per block run.
+    pub fn fill_column_with(
+        &mut self,
+        x: i32,
+        z: i32,
+        y_min: i32,
+        y_max: i32,
+        mut block_at: impl FnMut(i32) -> Block,
+    ) {
+        if y_min > world_max_y() {
+            return;
+        }
+        let (chunk_x, chunk_z) = (x >> 4, z >> 4);
+        let chunk = self
+            .regions
+            .entry((chunk_x >> 5, chunk_z >> 5))
+            .or_default()
+            .chunks
+            .entry((chunk_x & 31, chunk_z & 31))
+            .or_default();
+        let (local_x, local_z) = ((x & 15) as u8, (z & 15) as u8);
+        let y_max = y_max.clamp(min_y(), world_max_y());
+        let mut y = y_min.clamp(min_y(), world_max_y());
+        while y <= y_max {
+            let section = chunk.sections.entry((y >> 4) as i8).or_default();
+            let top = y_max.min(y | 15);
+            for y in y..=top {
+                let block = block_at(y);
+                let idx = SectionToModify::index(local_x, (y & 15) as u8, local_z);
+                if section.storage.get(idx) == AIR {
+                    section.storage.set(idx, block);
+                    section.properties.remove(&idx);
+                }
+            }
+            y = top + 1;
         }
     }
 

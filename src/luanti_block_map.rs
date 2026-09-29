@@ -770,6 +770,12 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         471 => "mcl_core:dirt_with_grass_snow",
         472 => "mcl_core:podzol",
         473 => "mcl_colorblocks:concrete_powder_silver",
+        474 => "mcl_core:snow_2",
+        475 => "mcl_core:snow_3",
+        476 => "mcl_core:snow_4",
+        477 => "mcl_core:snow_5",
+        478 => "mcl_core:snow_6",
+        479 => "mcl_core:snow_7",
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

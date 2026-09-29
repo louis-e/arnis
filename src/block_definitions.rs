@@ -563,6 +563,7 @@ impl Block {
             471 => "grass_block",
             472 => "podzol",
             473 => "light_gray_concrete_powder",
+            474..=479 => "snow",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -918,6 +919,15 @@ impl Block {
             471 | 472 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("snowy".to_string(), Value::String("true".to_string()));
+                map
+            })),
+            // Snow layers two to seven eighths deep.
+            474..=479 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert(
+                    "layers".to_string(),
+                    Value::String((self.id - 472).to_string()),
+                );
                 map
             })),
             // Ripe, so the bush shows its berries.
@@ -1552,6 +1562,16 @@ pub const CACTUS: Block = Block::new(470);
 pub const SNOWY_GRASS_BLOCK: Block = Block::new(471);
 pub const SNOWY_PODZOL: Block = Block::new(472);
 pub const LIGHT_GRAY_CONCRETE_POWDER: Block = Block::new(473);
+/// Snow layers by depth in eighths of a block, one to seven.
+pub const SNOW_LAYERS: [Block; 7] = [
+    SNOW_LAYER,
+    Block::new(474),
+    Block::new(475),
+    Block::new(476),
+    Block::new(477),
+    Block::new(478),
+    Block::new(479),
+];
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

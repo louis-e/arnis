@@ -1031,6 +1031,9 @@ pub fn to_bedrock_block_with_properties(
     if java_name == "sea_pickle" {
         return convert_sea_pickle(props_map);
     }
+    if java_name == "snow" {
+        return convert_snow_layer(props_map);
+    }
     if java_name == "chiseled_bookshelf" {
         return convert_chiseled_bookshelf(props_map);
     }
@@ -1897,6 +1900,26 @@ fn convert_sea_pickle(
     )
 }
 
+/// Convert a Java snow layer; Bedrock counts `height` from zero.
+fn convert_snow_layer(
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let layers = props
+        .and_then(|p| p.get("layers"))
+        .and_then(parse_int_property)
+        .unwrap_or(1);
+    BedrockBlock::with_states(
+        "snow_layer",
+        vec![
+            (
+                "height",
+                BedrockBlockStateValue::Int((layers - 1).clamp(0, 7)),
+            ),
+            ("covered_bit", BedrockBlockStateValue::Bool(false)),
+        ],
+    )
+}
+
 /// Convert a Java chiseled bookshelf, translating `facing` to Bedrock's
 /// `direction` (the legacy S-W-N-E order, same as beds).
 fn convert_chiseled_bookshelf(
@@ -1988,6 +2011,18 @@ fn convert_rail(props: Option<&std::collections::HashMap<String, fastnbt::Value>
 mod tests {
     use super::*;
     use crate::block_definitions::{AIR, GRASS_BLOCK, STONE};
+
+    #[test]
+    fn snow_layers_keep_their_height() {
+        for (i, layer) in crate::block_definitions::SNOW_LAYERS.iter().enumerate() {
+            let bedrock = to_bedrock_block_with_properties(*layer, None);
+            assert_eq!(bedrock.name, "minecraft:snow_layer");
+            assert_eq!(
+                bedrock.states.get("height"),
+                Some(&BedrockBlockStateValue::Int(i as i32))
+            );
+        }
+    }
 
     #[test]
     fn test_simple_blocks() {
