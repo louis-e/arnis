@@ -3,9 +3,13 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridge_styles::{
-    decorate_bridge_above_deck, place_bridge_support_below_deck, BridgePathSample, BridgeStyle,
+    decorate_bridge_above_deck, place_arch_below_deck, place_pier_bent, place_pillar,
+    BridgePathSample, BridgeStyle,
 };
 use crate::element_processing::bridges::{is_bridge_way, BridgeStructureMap, BridgeSurfaceMap};
+use crate::element_processing::connected_blocks::{
+    connected_iron_bars, place_connected, stair_steps,
+};
 use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
     cycleway_palette, get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
@@ -21,6 +25,9 @@ use std::collections::{HashMap, HashSet};
 /// up to 17 samples on the stack. Keep this generous — a `debug_assert`
 /// below catches it if a caller ever exceeds it.
 const MAX_BLOCK_RANGE: usize = 8;
+
+/// Centerline cells between pillars under a raised non-bridge road.
+const OVERPASS_PILLAR_INTERVAL: usize = 8;
 
 /// Median of the ground levels along the road's width-perpendicular
 /// strip at one along-length coordinate. Pure primitive — no along-length
@@ -245,29 +252,9 @@ fn is_pedestrian_way_tags(tags: &HashMap<String, String>) -> bool {
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
-// 4-connected stair fill from `prev` (exclusive) to `curr` (inclusive).
-fn stair_fill_cells(prev: (i32, i32), curr: (i32, i32)) -> Vec<(i32, i32)> {
-    let mut cells = Vec::with_capacity(2);
-    let (mut x, mut z) = prev;
-    while x != curr.0 || z != curr.1 {
-        if x != curr.0 {
-            x += (curr.0 - x).signum();
-            cells.push((x, z));
-        }
-        if z != curr.1 {
-            z += (curr.1 - z).signum();
-            cells.push((x, z));
-        }
-    }
-    if cells.is_empty() {
-        cells.push(curr);
-    }
-    cells
-}
-
 // Absolute base Y for a node feature; deck Y on a bridge, else terrain + layer_boost.
-// `bridge_radius`: 0 = exact (lamps, bus stops, on-road signal head), >0 = nearby (off-road
-// signal pole/bars where the anchor sits next to the deck rather than on it).
+// `bridge_radius`: 0 = exact (lamps, bus stops, on-road signal head), 1 = the deck edge too
+// (a signal pole on the rail cell).
 #[inline]
 fn node_feature_base_y(
     editor: &WorldEditor,
@@ -1152,23 +1139,6 @@ pub fn collect_tunnel_footprint(
     bitmap
 }
 
-/// Iron bars with their side connections spelled out. A generated chunk keeps the stored
-/// blockstate until something triggers a neighbour update, so a run of bars placed with the
-/// default state renders as separate posts instead of a joined railing.
-fn connected_iron_bars(north: bool, south: bool, east: bool, west: bool) -> BlockWithProperties {
-    let flag = |v: bool| fastnbt::Value::String(if v { "true" } else { "false" }.to_string());
-    BlockWithProperties::new(
-        IRON_BARS,
-        Some(fastnbt::Value::Compound(HashMap::from([
-            ("north".to_string(), flag(north)),
-            ("south".to_string(), flag(south)),
-            ("east".to_string(), flag(east)),
-            ("west".to_string(), flag(west)),
-            ("waterlogged".to_string(), flag(false)),
-        ]))),
-    )
-}
-
 fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
     editor.set_block_absolute(SMOOTH_STONE, x, base + 1, z, None, None);
     for dy in 2..=4 {
@@ -1326,8 +1296,10 @@ fn generate_highways_internal(
 
                     match anchor {
                         Some((ax, az)) => {
+                            // The deck edge (rail cell) still holds the pole; further out it
+                            // stands on the terrain.
                             let pole_base =
-                                node_feature_base_y(editor, bridge_surface, ax, az, layer_boost, 4);
+                                node_feature_base_y(editor, bridge_surface, ax, az, layer_boost, 1);
                             editor.set_block_absolute(
                                 COBBLESTONE_WALL,
                                 ax,
@@ -1593,11 +1565,6 @@ fn generate_highways_internal(
                 })
                 .sum::<usize>()
                 + 1;
-            let bridge_internal_ramp_length: usize = {
-                let raw = (total_bresenham_length as f32 * 0.35).clamp(15.0, 50.0) as usize;
-                let cap = (total_bresenham_length / 2).max(1);
-                raw.clamp(1, cap)
-            };
 
             // Descend into the portal; a pure function of way geometry, so tile-stable.
             let tunnel_approach = if tunnel_portals.is_empty() || is_bridge_member || is_bridge_ramp
@@ -1632,9 +1599,10 @@ fn generate_highways_internal(
             let bridge_module = bridge_member
                 .and_then(|m| m.module_idx)
                 .and_then(crate::element_processing::bridge_modules::module_at);
-            let bridge_structure_moduled = bridge_member
-                .map(|m| m.structure_has_module)
-                .unwrap_or(false);
+            let bridge_structure_moduled = bridge_module.is_some();
+            // Cable carriers hang from pylons; other members stand on piers.
+            let bridge_pylons = bridge_member.and_then(|m| m.cable_pylons.as_deref());
+            let bridge_cables_carry_deck = bridge_pylons.is_some();
 
             let is_short_isolated_elevated = !is_bridge_member
                 && !is_bridge_ramp
@@ -1673,6 +1641,9 @@ fn generate_highways_internal(
             // Previous rail cell per side; used to orthogonally connect diagonal steps.
             let mut previous_rail_left: Option<(i32, i32)> = None;
             let mut previous_rail_right: Option<(i32, i32)> = None;
+            // Last parapet cell and wall Y per side, for stepping on ramps.
+            let mut previous_parapet_left: Option<((i32, i32), i32)> = None;
+            let mut previous_parapet_right: Option<((i32, i32), i32)> = None;
 
             for node in &way.nodes {
                 if let Some(prev) = previous_node {
@@ -1776,11 +1747,8 @@ fn generate_highways_internal(
                         bresenham_points.iter().enumerate().skip(skip_first)
                     {
                         let tds = cumulative_distance_from_start + point_index;
-                        let bridge_y_here = bridge_member
-                            .map(|info| {
-                                info.y_at(tds, total_bresenham_length, bridge_internal_ramp_length)
-                            })
-                            .or_else(|| {
+                        let bridge_y_here =
+                            bridge_member.map(|info| info.y_at(tds)).or_else(|| {
                                 bridge_ramp.map(|info| info.y_at(tds, total_bresenham_length))
                             });
 
@@ -2002,7 +1970,8 @@ fn generate_highways_internal(
                                     && !bridge_structure_moduled)
                                     || is_bridge_ramp
                                     || effective_elevation > 0;
-                                if is_elevated_deck && cell_y > 0 {
+                                // Absolute decks can sit below Y=0.
+                                if is_elevated_deck && (use_absolute_y || cell_y > 0) {
                                     // Foundation: stone bricks for everything except wooden boardwalks.
                                     let foundation = if is_bridge_member {
                                         bridge_foundation_block
@@ -2029,73 +1998,92 @@ fn generate_highways_internal(
                                         );
                                     }
 
+                                    let is_center = dx == 0 && dz == 0;
+                                    // Path-index spacing; an (x + z) grid misplaced piers on diagonals.
+                                    let on_pier_step = |interval: usize| {
+                                        interval > 0 && tds % interval == interval / 2
+                                    };
+                                    let blocked = use_absolute_y
+                                        && bridge_surface.support_blocked(set_x, set_z, cell_y);
                                     if is_bridge_member {
-                                        let interval = bridge_style.pillar_interval();
-                                        let is_center = dx == 0 && dz == 0;
-                                        // Beam keeps the legacy (x+z) rule; other styles use
-                                        // path-index so spacing stays consistent on diagonals.
-                                        let is_pillar = is_center
-                                            && interval > 0
-                                            && match bridge_style {
-                                                BridgeStyle::Beam => {
-                                                    (set_x + set_z).rem_euclid(interval as i32) == 0
-                                                }
-                                                _ => tds.is_multiple_of(interval),
-                                            };
-                                        place_bridge_support_below_deck(
-                                            editor,
-                                            bridge_style,
-                                            set_x,
-                                            cell_y,
-                                            set_z,
-                                            centerline_ground_y,
-                                            tds,
-                                            total_bresenham_length,
-                                            use_absolute_y,
-                                            is_center,
-                                            is_pillar,
-                                        );
-                                    } else if use_absolute_y {
-                                        add_highway_support_pillar_absolute(
-                                            editor,
-                                            set_x,
-                                            cell_y,
-                                            set_z,
-                                            dx,
-                                            dz,
-                                            block_range,
-                                        );
-                                    } else {
-                                        add_highway_support_pillar(
-                                            editor,
-                                            set_x,
-                                            cell_y,
-                                            set_z,
-                                            dx,
-                                            dz,
-                                            block_range,
-                                        );
+                                        if bridge_style == BridgeStyle::Arch && !blocked {
+                                            // Per-cell position so overlapping stamps keep the openings.
+                                            let cell_tds = (tds as i32 + along_offset(dx, dz))
+                                                .clamp(0, total_bresenham_length as i32 - 1)
+                                                as usize;
+                                            place_arch_below_deck(
+                                                editor,
+                                                set_x,
+                                                cell_y,
+                                                set_z,
+                                                centerline_ground_y,
+                                                cell_tds,
+                                                total_bresenham_length,
+                                                use_absolute_y,
+                                                is_center,
+                                            );
+                                        }
+                                        if is_center
+                                            && use_absolute_y
+                                            && !bridge_cables_carry_deck
+                                            && on_pier_step(bridge_style.pier_interval(block_range))
+                                        {
+                                            if let Some(perp) = bridge_rail_perp {
+                                                place_pier_bent(
+                                                    editor,
+                                                    bridge_surface,
+                                                    bridge_style,
+                                                    set_x,
+                                                    set_z,
+                                                    cell_y,
+                                                    perp,
+                                                    block_range,
+                                                );
+                                            }
+                                        }
+                                    } else if is_center
+                                        && on_pier_step(OVERPASS_PILLAR_INTERVAL)
+                                        && !blocked
+                                    {
+                                        if use_absolute_y {
+                                            place_pillar(
+                                                editor,
+                                                set_x,
+                                                cell_y,
+                                                set_z,
+                                                STONE_BRICKS,
+                                                true,
+                                            );
+                                        } else {
+                                            add_highway_support_pillar(
+                                                editor, set_x, cell_y, set_z,
+                                            );
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        // Side railings; stair_fill_cells keeps the rail 4-connected on diagonals.
+                        // Side railings; stair_steps keeps the rail 4-connected on diagonals.
                         if let (Some(by), Some((perp_x, perp_z))) =
                             (bridge_y_here, bridge_rail_perp)
                         {
                             // L1-projected stamp extent + 1, so the rail never lands on the deck.
                             let rail_dist =
                                 block_range as f32 * (perp_x.abs() + perp_z.abs()) + 1.0;
-                            for (sign, prev_state) in [
-                                (1.0_f32, &mut previous_rail_left),
-                                (-1.0_f32, &mut previous_rail_right),
+                            for (sign, prev_state, prev_parapet) in [
+                                (1.0_f32, &mut previous_rail_left, &mut previous_parapet_left),
+                                (
+                                    -1.0_f32,
+                                    &mut previous_rail_right,
+                                    &mut previous_parapet_right,
+                                ),
                             ] {
                                 let cx = *x as f32 + perp_x * rail_dist * sign;
                                 let cz = *z as f32 + perp_z * rail_dist * sign;
                                 let rail_cell = (cx.round() as i32, cz.round() as i32);
                                 let cells_to_fill: Vec<(i32, i32)> = match *prev_state {
-                                    Some(prev) => stair_fill_cells(prev, rail_cell),
+                                    Some(prev) => stair_steps(prev, rail_cell),
                                     None => vec![rail_cell],
                                 };
                                 // Boardwalks and module decks bring their own railings.
@@ -2104,7 +2092,14 @@ fn generate_highways_internal(
                                         || bridge_structure_moduled);
                                 if !skip_side_railing {
                                     for (rx, rz) in cells_to_fill {
-                                        if bridge_surface.contains(rx, rz) {
+                                        // Another deck continues the surface at this level.
+                                        if bridge_surface.deck_near(rx, rz, by, 2) {
+                                            *prev_parapet = None;
+                                            continue;
+                                        }
+                                        // No parapet where an approach ramp is back on the ground.
+                                        if is_bridge_ramp && by <= editor.get_ground_level(rx, rz) {
+                                            *prev_parapet = None;
                                             continue;
                                         }
                                         let rail_block = if is_bridge_member {
@@ -2125,30 +2120,33 @@ fn generate_highways_internal(
                                         } else {
                                             STONE_BRICKS
                                         };
-                                        if by > 0 {
-                                            editor.set_block_absolute(
-                                                rail_foundation,
-                                                rx,
-                                                by - 1,
-                                                rz,
-                                                None,
-                                                None,
-                                            );
-                                        }
+                                        editor.set_block_absolute(
+                                            rail_foundation,
+                                            rx,
+                                            by - 1,
+                                            rz,
+                                            None,
+                                            None,
+                                        );
                                         let parapet = if is_bridge_member {
                                             bridge_style.parapet_block()
                                         } else {
                                             Some(BRICK_WALL)
                                         };
                                         if let Some(p) = parapet {
-                                            editor.set_block_absolute(
-                                                p,
-                                                rx,
-                                                by + 1,
-                                                rz,
-                                                None,
-                                                None,
-                                            );
+                                            let top = by + 1;
+                                            place_connected(editor, p, rx, top, rz);
+                                            // Step the parapet where the deck changes height.
+                                            if let Some(((px, pz), prev_top)) = *prev_parapet {
+                                                let adjacent =
+                                                    (px - rx).abs() + (pz - rz).abs() == 1;
+                                                if adjacent && prev_top == top - 1 {
+                                                    place_connected(editor, p, px, top, pz);
+                                                } else if adjacent && prev_top == top + 1 {
+                                                    place_connected(editor, p, rx, prev_top, rz);
+                                                }
+                                            }
+                                            *prev_parapet = Some(((rx, rz), top));
                                         }
                                     }
                                 }
@@ -2250,17 +2248,26 @@ fn generate_highways_internal(
                 if let Some(module) = bridge_module {
                     crate::element_processing::bridge_modules::sweep_module(
                         editor,
+                        bridge_surface,
                         &bridge_path,
                         module,
                     );
-                } else if !bridge_structure_moduled {
+                } else if !bridge_structure_moduled
+                    && (bridge_pylons.is_some()
+                        || !matches!(
+                            bridge_style,
+                            BridgeStyle::Suspension | BridgeStyle::CableStayed
+                        ))
+                {
                     decorate_bridge_above_deck(
                         editor,
+                        bridge_surface,
                         bridge_style,
                         &bridge_path,
                         block_range,
                         bridge_start_is_boundary,
                         bridge_end_is_boundary,
+                        bridge_pylons,
                     );
                 }
             }
@@ -2367,68 +2374,14 @@ fn calculate_point_elevation(
     base_elevation
 }
 
-/// Add support pillars for elevated highways
-fn add_highway_support_pillar(
-    editor: &mut WorldEditor,
-    x: i32,
-    highway_y: i32,
-    z: i32,
-    dx: i32,
-    dz: i32,
-    _block_range: i32, // Keep for future use
-) {
-    // Only add pillars at specific intervals and positions
-    if dx == 0 && dz == 0 && (x + z) % 8 == 0 {
-        // Add pillar from ground to highway level
-        for y in 1..highway_y {
-            editor.set_block(STONE_BRICKS, x, y, z, None, None);
-        }
-
-        // Add pillar base
-        for base_dx in -1..=1 {
-            for base_dz in -1..=1 {
-                editor.set_block(STONE_BRICKS, x + base_dx, 0, z + base_dz, None, None);
-            }
-        }
+/// Support pillar for an elevated highway whose Y is an offset from the ground.
+fn add_highway_support_pillar(editor: &mut WorldEditor, x: i32, highway_y: i32, z: i32) {
+    for y in 1..highway_y {
+        editor.set_block(STONE_BRICKS, x, y, z, None, None);
     }
-}
-
-/// Add support pillars for bridges using absolute Y coordinates
-/// Pillars extend from ground level up to the bridge deck
-fn add_highway_support_pillar_absolute(
-    editor: &mut WorldEditor,
-    x: i32,
-    bridge_deck_y: i32,
-    z: i32,
-    dx: i32,
-    dz: i32,
-    _block_range: i32, // Keep for future use
-) {
-    // Only add pillars at specific intervals and positions
-    if dx == 0 && dz == 0 && (x + z) % 8 == 0 {
-        // Get the actual ground level at this position
-        let ground_y = editor.get_ground_level(x, z);
-
-        // Add pillar from ground up to bridge deck
-        // Only if the bridge is actually above the ground
-        if bridge_deck_y > ground_y {
-            for y in (ground_y + 1)..bridge_deck_y {
-                editor.set_block_absolute(STONE_BRICKS, x, y, z, None, None);
-            }
-
-            // Add pillar base at ground level
-            for base_dx in -1..=1 {
-                for base_dz in -1..=1 {
-                    editor.set_block_absolute(
-                        STONE_BRICKS,
-                        x + base_dx,
-                        ground_y,
-                        z + base_dz,
-                        None,
-                        None,
-                    );
-                }
-            }
+    for base_dx in -1..=1 {
+        for base_dz in -1..=1 {
+            editor.set_block(STONE_BRICKS, x + base_dx, 0, z + base_dz, None, None);
         }
     }
 }
@@ -3410,7 +3363,7 @@ mod tests {
     fn build_ways(editor: &mut WorldEditor, ways: &[ProcessedWay]) {
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
         let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], editor, &outlines);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let empty = CoordinateBitmap::new_empty();
         let mut cells = Vec::new();
@@ -3619,7 +3572,7 @@ mod tests {
         endpoints: &TunnelInternalEndpoints,
     ) -> TunnelPortalMap {
         let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
-        let bridges = BridgeStructureMap::build(&[], editor, &outlines);
+        let bridges = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
         collect_tunnel_portals(elems, editor, &bridges, endpoints, 1.0)
     }
 
@@ -3642,7 +3595,7 @@ mod tests {
         let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
         let portals = test_portals(&editor, &elems, &endpoints);
         let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let empty = CoordinateBitmap::new_empty();
         let mut cells = Vec::new();
@@ -4088,7 +4041,7 @@ mod tests {
         let portals = test_portals(editor, &elems, &endpoints);
         let footprint = collect_tunnel_footprint(&elems, editor, &endpoints, xzbbox, 1.0);
         let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], editor, &outlines);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let empty = CoordinateBitmap::new_empty();
         let mut cells = Vec::new();

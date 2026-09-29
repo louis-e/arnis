@@ -5,6 +5,7 @@ use crate::block_definitions::{
     SEA_PICKLE, SOUL_SAND, STONE, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::LC_WATER;
@@ -396,6 +397,13 @@ pub fn carve_water_column(
     let depth = depth
         .clamp(0, MAX_WATER_DEPTH)
         .min((water_y - min_y() - 2).max(0));
+    // Bridge piers continue down to the bed.
+    if let Some(pier) = editor.support_column(x, z) {
+        for dy in 0..=depth {
+            editor.set_block_absolute(pier, x, water_y - dy, z, None, Some(&[]));
+        }
+        return;
+    }
     for dy in 0..=depth {
         editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
     }
@@ -694,6 +702,7 @@ pub fn carve_lc_water_pass(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     let x1 = bwf.min_x + bwf.width as i32 - 1;
     let z1 = bwf.min_z + bwf.height as i32 - 1;
@@ -704,6 +713,7 @@ pub fn carve_lc_water_pass(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         bwf.min_x,
         x1,
         bwf.min_z,
@@ -722,6 +732,7 @@ pub fn carve_lc_water_region(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     iter_min_x: i32,
     iter_max_x: i32,
     iter_min_z: i32,
@@ -736,8 +747,8 @@ pub fn carve_lc_water_region(
     let z1 = (bwf.min_z + bwf.height as i32 - 1).min(iter_max_z);
     for z in z0..=z1 {
         for x in x0..=x1 {
-            // Keep road/bridge surfaces (causeways, decks); never carve into a tunnel bore.
-            if road_mask.contains(x, z) || tunnel_footprint.contains(x, z) {
+            // Never carve into a tunnel bore.
+            if tunnel_footprint.contains(x, z) {
                 continue;
             }
             let coord = XZPoint::new(x - off_x, z - off_z);
@@ -753,6 +764,13 @@ pub fn carve_lc_water_region(
                     continue;
                 }
                 water_y = ground_y;
+            }
+            // Keep road surfaces, except under a raised deck.
+            if road_mask.contains(x, z)
+                && (!bridge_surface.deck_clears(x, z, water_y)
+                    || bridge_surface.over_grade_way(x, z))
+            {
+                continue;
             }
             carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask, bwf);
         }
@@ -888,6 +906,25 @@ mod tests {
         );
         let empty = RoadMaskBitmap::new(&bbox);
         assert!(!bridge_adjacent(&empty, 10, 10));
+    }
+
+    #[test]
+    fn carving_under_a_pier_runs_the_pier_down_to_the_bed() {
+        use crate::block_definitions::STONE_BRICKS;
+        use crate::coordinate_system::geographic::LLBBox;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor =
+            WorldEditor::new(std::path::PathBuf::from("/dev/null/unused"), &bbox, llbbox);
+        let mask = RoadMaskBitmap::new(&bbox);
+        let bwf = BigWaterField::empty();
+        editor.register_support_column(10, 10, STONE_BRICKS);
+        carve_water_column(&mut editor, 10, 10, 5, 4, &mask, &bwf);
+        carve_water_column(&mut editor, 11, 10, 5, 4, &mask, &bwf);
+        for y in 1..=5 {
+            assert!(editor.check_for_block_absolute(10, y, 10, Some(&[STONE_BRICKS]), None));
+        }
+        assert!(editor.check_for_block_absolute(11, 5, 10, Some(&[WATER]), None));
     }
 
     #[test]

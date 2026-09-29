@@ -211,6 +211,8 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Bridge pier columns and their material, extended to the bed by the water carve.
+    support_columns: FnvHashMap<(i32, i32), Block>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -282,6 +284,7 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
+            support_columns: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -333,6 +336,7 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
+            support_columns: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -384,6 +388,7 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
+            support_columns: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -1132,6 +1137,21 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.insert((x, z), y);
     }
 
+    /// Record a bridge pier or pylon column standing on the terrain at (x, z).
+    #[inline]
+    pub fn register_support_column(&mut self, x: i32, z: i32, block: Block) {
+        self.support_columns.insert((x, z), block);
+    }
+
+    /// Material of the support column standing at (x, z), if any.
+    #[inline]
+    pub fn support_column(&self, x: i32, z: i32) -> Option<Block> {
+        if self.support_columns.is_empty() {
+            return None;
+        }
+        self.support_columns.get(&(x, z)).copied()
+    }
+
     /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).
     pub(crate) fn take_road_surface_overrides(&mut self) -> FnvHashMap<(i32, i32), i32> {
         std::mem::take(&mut self.road_surface_overrides)
@@ -1192,6 +1212,14 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn get_block_absolute(&self, x: i32, absolute_y: i32, z: i32) -> Option<Block> {
         self.world.get_block(x, absolute_y, z)
+    }
+
+    /// Stored properties of the block at an absolute position, if any.
+    #[cfg(test)]
+    pub fn block_properties_absolute(&self, x: i32, absolute_y: i32, z: i32) -> Option<Value> {
+        self.world
+            .get_properties(x, absolute_y, z)
+            .map(|p| p.as_ref().clone())
     }
     #[allow(clippy::too_many_arguments)]
     pub fn place_wall_banner(
