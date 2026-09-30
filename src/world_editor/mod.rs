@@ -2215,14 +2215,17 @@ impl<'a> WorldEditor<'a> {
     /// This is faster than `set_block_absolute` with `None` whitelists/blacklists
     /// because it avoids the double HashMap traversal.
     #[inline]
-    pub fn set_block_if_absent_absolute(&mut self, block: Block, x: i32, absolute_y: i32, z: i32) {
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
+    pub fn set_block_if_absent_absolute(
+        &mut self,
+        block: Block,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+    ) -> bool {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return false;
         }
-        if self.is_region_flushed(x, z) {
-            return;
-        }
-        self.world.set_block_if_absent(x, absolute_y, z, block);
+        self.world.set_block_if_absent(x, absolute_y, z, block)
     }
 
     /// Returns true if a non-AIR block exists at the given absolute coordinates.
@@ -2259,6 +2262,21 @@ impl<'a> WorldEditor<'a> {
         }
         self.world
             .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
+    /// See [`WorldToModify::fill_column_with`].
+    pub fn fill_column_with_absolute(
+        &mut self,
+        x: i32,
+        z: i32,
+        y_min: i32,
+        y_max: i32,
+        block_at: impl FnMut(i32) -> Block,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return;
+        }
+        self.world.fill_column_with(x, z, y_min, y_max, block_at);
     }
 
     /// See [`WorldToModify::bulk_fill_chunk_sections_below`].

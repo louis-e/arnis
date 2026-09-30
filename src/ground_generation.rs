@@ -18,8 +18,8 @@ use crate::block_definitions::{
     AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
     CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS,
     GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
-    MOSS_BLOCK, MUD, OAK_LEAVES, OAK_PLANKS, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE,
-    SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
+    MOSS_BLOCK, MUD, OAK_LEAVES, OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE,
+    SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
     WHITE_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -250,7 +250,7 @@ pub fn generate_ground_region(
     // `Some` only off Earth, where the body's palette replaces land cover and
     // every Earth-only surface pass is off.
     let planetary_body = (!args.body.is_earth()).then_some(args.body);
-    let planetary_lat = args
+    let center_lat = args
         .bbox
         .as_ref()
         .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
@@ -300,7 +300,7 @@ pub fn generate_ground_region(
     let max_chunk_z = iter_max_z >> 4;
 
     // Snow line and the band over which snow thickens into full cover.
-    let snow_line = terrain_surface::SnowLine::new(ground);
+    let snow_line = terrain_surface::SnowLine::new(ground, center_lat, args.rotation);
     // Share of forest-floor grass that grows as ferns, by the habitat the forest is in.
     // Undergrowth thins out with dryness: sparse in deserts, thinner on steppe,
     // full in savanna, temperate and boreal country.
@@ -319,7 +319,7 @@ pub fn generate_ground_region(
     let fern_share_at = |x: i32, z: i32| match crate::ground_decoration::habitat(
         land_cover::LC_TREE_COVER,
         climate,
-        planetary_lat.abs(),
+        center_lat.abs(),
         false,
         ground.ecoregion(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z())),
     ) {
@@ -336,6 +336,17 @@ pub fn generate_ground_region(
             let chunk_min_z = (chunk_z << 4).max(iter_min_z);
             let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
             let forest_fern_share = fern_share_at((chunk_x << 4) + 8, (chunk_z << 4) + 8);
+            // Fallen rock is only looked for where the relief could hold a cliff.
+            let talus_field = (terrain_enabled && planetary_body.is_none())
+                .then(|| {
+                    terrain_surface::TalusField::new(
+                        ground,
+                        chunk_x,
+                        chunk_z,
+                        (xzbbox.min_x(), xzbbox.min_z()),
+                    )
+                })
+                .flatten();
 
             // Precompute a per-chunk ground-Y cache so subsequent lookups
             // (main column + water-column + depth-fill neighbours, ~20+ per
@@ -435,10 +446,10 @@ pub fn generate_ground_region(
 
                     // Slope once per column (used for surface selection and depth), from
                     // unrounded heights so a contour doesn't flicker between tiers.
-                    let slope_f = if terrain_enabled {
-                        ground.slope_exact(coord)
+                    let (slope_f, gradient) = if terrain_enabled {
+                        ground.slope_and_gradient(coord)
                     } else {
-                        0.0
+                        (0.0, (0.0, 0.0))
                     };
                     let slope = slope_f.round() as i32;
 
@@ -600,27 +611,39 @@ pub fn generate_ground_region(
                             if glacier {
                                 snow_depth = terrain_surface::glacier_depth(snow_depth);
                             }
-                            // Convexity costs nine lookups, so only where snow can settle.
                             let snow = if planetary_body.is_some()
                                 || snow_depth < terrain_surface::SNOW_MIN_DEPTH
                             {
                                 terrain_surface::Snow::None
                             } else {
-                                let convexity = ground.convexity(coord);
-                                terrain_surface::snow_cover(snow_depth, slope_f, convexity, x, z)
+                                terrain_surface::snow_cover(
+                                    snow_depth,
+                                    slope_f,
+                                    || ground.convexity(coord),
+                                    snow_line.shade(gradient, slope_f),
+                                    x,
+                                    z,
+                                )
                             };
+
+                            // Below a cliff, from gentle ground up to the talus's own angle.
+                            let talus = match &talus_field {
+                                Some(field)
+                                    if slope <= 6 && terrain_surface::takes_talus(cover_here) =>
+                                {
+                                    field.near(x, z, ground.level_exact(coord))
+                                }
+                                _ => 0.0,
+                            };
+                            let talus_block =
+                                terrain_surface::talus_palette(x, z, talus, cover_here);
 
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if let Some(body) = planetary_body {
                                 // No land cover off Earth, so this replaces the
                                 // whole ESA cascade below.
                                 crate::celestial::surface_palette(
-                                    body,
-                                    slope,
-                                    planetary_lat,
-                                    ground_y,
-                                    x,
-                                    z,
+                                    body, slope, center_lat, ground_y, x, z,
                                 )
                             } else if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
@@ -640,7 +663,9 @@ pub fn generate_ground_region(
                                 // We don't force rock materials onto 21–27° slopes
                                 // any more — that's a normal hiking incline where
                                 // grass and trees belong.
-                                if slope > 4 {
+                                if let Some(p) = talus_block {
+                                    p
+                                } else if slope > 4 {
                                     terrain_surface::steep_palette(x, z, ground_y, slope, cover)
                                 } else if glacier {
                                     terrain_surface::GLACIER_ICE
@@ -739,6 +764,8 @@ pub fn generate_ground_region(
                                         _ => (GRASS_BLOCK, DIRT),
                                     }
                                 }
+                            } else if let Some(p) = talus_block {
+                                p
                             } else if terrain_enabled && slope > 4 {
                                 // No land cover data: the same slope cascade, falling
                                 // through to plain grass for the ≤4 slopes.
@@ -800,9 +827,12 @@ pub fn generate_ground_region(
                                 (surface_block, under_block)
                             };
 
-                            // Full snow cover takes over the surface. The under-block
+                            // Full snow cover takes over the surface, and so does any snow
+                            // on ice, which the game won't hold as a layer. The under-block
                             // stays, so the faces of steps show the rock or ice below.
-                            let surface_block = if snow == terrain_surface::Snow::Block
+                            let surface_block = if (snow == terrain_surface::Snow::Block
+                                || snow != terrain_surface::Snow::None
+                                    && terrain_surface::is_ice(surface_block))
                                 && water_blend <= 0.5
                                 && surface_block != WATER
                             {
@@ -840,6 +870,17 @@ pub fn generate_ground_region(
                                         BLACK_CONCRETE,
                                     ]),
                                 );
+                            } else if talus_block.is_some_and(|(top, _)| top == surface_block) {
+                                // Fallen rock buries a mapped meadow at the wall's foot too,
+                                // never its roads, fields or paths.
+                                editor.set_block_absolute(
+                                    surface_block,
+                                    x,
+                                    ground_y,
+                                    z,
+                                    Some(terrain_surface::TALUS_BURIES),
+                                    None,
+                                );
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
                             }
@@ -847,31 +888,28 @@ pub fn generate_ground_region(
                             // Don't place dirt/under blocks below water surfaces.
                             // OSM water (rivers, lakes) is placed during element processing;
                             // placing dirt underneath would show through shallow water.
-                            let surface_is_water = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z,
-                                Some(&[WATER]),
-                                None,
-                            );
+                            let top = editor.get_block_absolute(x, ground_y, z);
+                            let surface_is_water = top == Some(WATER);
 
-                            // A snow layer where snow only partly covers the ground, and
-                            // over any surface a mapped feature set before full cover
-                            // could. Skip water (placed block or ESA-classified, e.g. a
-                            // steep lake edge where rock sits at ground_y). Pre-existing
-                            // flat OSM stone is intentionally left uncapped here.
+                            // Snow layers, also over any surface a mapped feature set before
+                            // full cover could. Skip water (placed block or ESA-classified,
+                            // e.g. a steep lake edge where rock sits at ground_y). On natural
+                            // ground they rise with the unrounded terrain, while mapped
+                            // surfaces only get a dusting.
                             if snow != terrain_surface::Snow::None
                                 && !surface_is_water
                                 && water_blend <= 0.5
-                                && !editor.check_for_block_absolute(
-                                    x,
-                                    ground_y,
-                                    z,
-                                    Some(&[SNOW_BLOCK]),
-                                    None,
-                                )
                             {
-                                terrain_surface::place_snow_layer(editor, x, ground_y, z);
+                                let eighths =
+                                    if top == Some(surface_block) || top == Some(PACKED_ICE) {
+                                        let rise = terrain_enabled.then(|| {
+                                            ground.level_exact(coord) - f64::from(ground_y) + 0.5
+                                        });
+                                        terrain_surface::snow_eighths(snow, rise)
+                                    } else {
+                                        1
+                                    };
+                                terrain_surface::place_snow(editor, x, ground_y, z, top, eighths);
                             }
 
                             if !surface_is_water {
@@ -911,7 +949,14 @@ pub fn generate_ground_region(
                                     // Off Earth the column stays plain stone.
                                     if slope > 4 && under_block == STONE && planetary_body.is_none()
                                     {
-                                        terrain_surface::fill_strata(editor, x, z, y_min, y_max);
+                                        terrain_surface::fill_strata(
+                                            editor,
+                                            x,
+                                            z,
+                                            y_min,
+                                            y_max,
+                                            slope > 6,
+                                        );
                                     } else {
                                         editor.fill_column_absolute(
                                             under_block,

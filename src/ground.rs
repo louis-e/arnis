@@ -906,10 +906,11 @@ impl Ground {
 
     /// `slope` from unrounded heights. Same units, but without the jitter of
     /// whole-block steps, which flips columns along a contour between the
-    /// material tiers and draws stripes on hillsides.
-    pub fn slope_exact(&self, coord: XZPoint) -> f64 {
+    /// material tiers and draws stripes on hillsides. Also returns the rise across
+    /// the column along x and along z from the same samples, in blocks.
+    pub fn slope_and_gradient(&self, coord: XZPoint) -> (f64, (f64, f64)) {
         if !self.elevation_enabled {
-            return 0.0;
+            return (0.0, (0.0, 0.0));
         }
 
         const STEP: i32 = 4;
@@ -922,7 +923,8 @@ impl Ground {
         let max_val = samples.iter().copied().fold(f64::MIN, f64::max);
         let min_val = samples.iter().copied().fold(f64::MAX, f64::min);
         let raw = max_val - min_val;
-        (raw * self.slope_units(((min_val + max_val) * 0.5).round() as i32)).max(0.0)
+        let slope = (raw * self.slope_units(((min_val + max_val) * 0.5).round() as i32)).max(0.0);
+        (slope, (samples[0] - samples[1], samples[3] - samples[2]))
     }
 
     /// How far the ground sits below its surroundings: the mean height eight
@@ -969,6 +971,13 @@ impl Ground {
             return None;
         }
         self.elevation_data.as_ref().map(|d| d.affine())
+    }
+
+    /// Turns a height step in blocks over a run in blocks into the real incline.
+    pub(crate) fn slope_correction(&self) -> f64 {
+        self.elevation_data
+            .as_ref()
+            .map_or(1.0, |d| d.slope_correction)
     }
 
     /// Vertical blocks per real-world metre, 1.0 without elevation (or with zero
