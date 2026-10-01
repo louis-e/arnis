@@ -1428,14 +1428,26 @@ const BLUR_CHUNKS: usize = 10;
 #[inline]
 fn blur_line(len: usize, kernel: &[f64], half: i32, get: impl Fn(usize) -> f64) -> Vec<f64> {
     let line_len = len as i32;
+    let vals: Vec<f64> = (0..len).map(get).collect();
+    let bad = prefix_counts(&vals, |v| !v.is_finite());
+    // Same additions in the same order as the edge path's `wsum`, so interior output is bit-identical.
+    let full_wsum = kernel.iter().fold(0.0, |acc, &k| acc + k);
+    let h = half as usize;
     (0..len)
         .map(|i| {
+            if i >= h && i + h < len && bad[i + h + 1] == bad[i - h] {
+                let mut sum = 0.0;
+                for (&k, &v) in kernel.iter().zip(&vals[i - h..=i + h]) {
+                    sum += v * k;
+                }
+                return sum / full_wsum;
+            }
             let mut sum = 0.0;
             let mut wsum = 0.0;
             for (j, &k) in kernel.iter().enumerate() {
                 let idx = i as i32 + j as i32 - half;
                 if idx >= 0 && idx < line_len {
-                    let v = get(idx as usize);
+                    let v = vals[idx as usize];
                     if v.is_finite() {
                         sum += v * k;
                         wsum += k;
@@ -1468,12 +1480,23 @@ fn gaussian_blur_vertical_in_place(
         let x1 = (x0 + col_chunk).min(w);
         let blurred: Vec<(usize, Vec<f64>)> = {
             let src: &[Vec<f64>] = after_h;
+            // Columns are gathered eight at a time: one cache line per row instead of one per cell.
+            const GROUP: usize = 8;
             (x0..x1)
+                .step_by(GROUP)
+                .collect::<Vec<_>>()
                 .into_par_iter()
-                .map(|x| {
-                    let column: Vec<f64> = src.iter().map(|row| row[x]).collect();
-                    let col = blur_line(column.len(), kernel, half, |i| column[i]);
-                    (x, col)
+                .flat_map_iter(|gx| {
+                    let gw = GROUP.min(x1 - gx);
+                    let mut cols: Vec<Vec<f64>> = vec![Vec::with_capacity(src.len()); gw];
+                    for row in src {
+                        for (c, col) in cols.iter_mut().enumerate() {
+                            col.push(row[gx + c]);
+                        }
+                    }
+                    cols.into_iter().enumerate().map(move |(c, column)| {
+                        (gx + c, blur_line(column.len(), kernel, half, |i| column[i]))
+                    })
                 })
                 .collect()
         };

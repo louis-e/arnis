@@ -119,6 +119,21 @@ static SHADED_PALETTE: Lazy<Vec<PaletteEntry>> = Lazy::new(|| {
 /// Returns the opaque map color id (base * 4 + shade) perceptually closest to the given RGB.
 /// Exact palette colors short-circuit; everything else is matched in Oklab.
 pub fn nearest_map_color(r: u8, g: u8, b: u8) -> u8 {
+    // Pure in its input, and map renders repeat the same few colors thousands of times.
+    thread_local! {
+        static MEMO: std::cell::RefCell<fnv::FnvHashMap<u32, u8>> =
+            std::cell::RefCell::new(fnv::FnvHashMap::default());
+    }
+    let key = u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b);
+    if let Some(id) = MEMO.with(|m| m.borrow().get(&key).copied()) {
+        return id;
+    }
+    let id = nearest_map_color_uncached(r, g, b);
+    MEMO.with(|m| m.borrow_mut().insert(key, id));
+    id
+}
+
+fn nearest_map_color_uncached(r: u8, g: u8, b: u8) -> u8 {
     let lab = rgb_to_oklab(r, g, b);
     let mut best_id = 4u8;
     let mut best_dist = f32::MAX;

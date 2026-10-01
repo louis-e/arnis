@@ -9,7 +9,7 @@ use crate::floodfill::{flood_fill_area, MAX_FLOOD_FILL_AREA};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 /// Shared, reference-counted flood fill result.
@@ -416,7 +416,8 @@ fn is_planted_way(way: &ProcessedWay) -> bool {
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates (shared via Arc so handler
     /// fetches are O(1) refcount bumps instead of deep clones).
-    way_cache: FnvHashMap<u64, FloodFillResult>,
+    /// Releasable through `&self`, so tile threads can free fills mid-run.
+    way_cache: FnvHashMap<u64, Mutex<Option<FloodFillResult>>>,
 }
 
 impl FloodFillCache {
@@ -485,15 +486,29 @@ impl FloodFillCache {
             } else {
                 Arc::new(filled)
             };
-            cache.way_cache.insert(id, entry);
+            cache.way_cache.insert(id, Mutex::new(Some(entry)));
         }
 
         cache
     }
 
-    /// Cached fill for a way id, None when absent (no computation).
-    pub fn get_cached(&self, way_id: u64) -> Option<&FloodFillResult> {
-        self.way_cache.get(&way_id)
+    /// Cached fill for a way id, None when absent or released (no computation).
+    pub fn get_cached(&self, way_id: u64) -> Option<FloodFillResult> {
+        self.way_cache
+            .get(&way_id)
+            .and_then(|e| e.lock().unwrap_or_else(|p| p.into_inner()).clone())
+    }
+
+    /// Whether a fill was precomputed for this way id, released or not.
+    pub fn contains(&self, way_id: u64) -> bool {
+        self.way_cache.contains_key(&way_id)
+    }
+
+    /// Frees a way's fill once nothing reads it again; `get_cached` is None afterwards.
+    pub fn release(&self, way_id: u64) {
+        if let Some(e) = self.way_cache.get(&way_id) {
+            e.lock().unwrap_or_else(|p| p.into_inner()).take();
+        }
     }
 
     /// Gets cached flood fill result for a way, or computes it if not cached.
@@ -507,10 +522,10 @@ impl FloodFillCache {
         way: &ProcessedWay,
         timeout: Option<&Duration>,
     ) -> FloodFillResult {
-        if let Some(cached) = self.way_cache.get(&way.id) {
+        if let Some(cached) = self.get_cached(way.id) {
             // Cheap refcount bump — the underlying Vec is shared between the
             // cache and the caller.
-            Arc::clone(cached)
+            cached
         } else {
             // Fallback: compute on demand for synthetic/combined ways from relations.
             // These are rare (only relations with tag-inherited members), so the
@@ -637,7 +652,7 @@ impl FloodFillCache {
                 if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
                     && !crate::element_processing::buildings::is_underground_building(&way.tags)
                 {
-                    if let Some(cached) = self.way_cache.get(&way.id) {
+                    if let Some(cached) = self.get_cached(way.id) {
                         for &(x, z) in cached.iter() {
                             footprints.set(x, z);
                         }
@@ -662,14 +677,14 @@ impl FloodFillCache {
         elements: &[ProcessedElement],
         roads: &RoadMaskBitmap,
     ) -> Option<SealedSurfaceBitmap> {
-        let mut managed: Vec<&FloodFillResult> = Vec::new();
-        let mut paving: Vec<&FloodFillResult> = Vec::new();
-        let mut planted: Vec<&FloodFillResult> = Vec::new();
+        let mut managed: Vec<FloodFillResult> = Vec::new();
+        let mut paving: Vec<FloodFillResult> = Vec::new();
+        let mut planted: Vec<FloodFillResult> = Vec::new();
         for element in elements {
             let ProcessedElement::Way(w) = element else {
                 continue;
             };
-            let Some(fill) = self.way_cache.get(&w.id) else {
+            let Some(fill) = self.get_cached(w.id) else {
                 continue;
             };
             if is_sealed_surface_way(w) {
@@ -700,12 +715,12 @@ impl FloodFillCache {
         let largest = paving.iter().map(|f| f.len()).max().unwrap_or(0);
         let mut layers: Vec<(usize, bool, &FloodFillResult)> = paving
             .iter()
-            .map(|f| (f.len(), true, *f))
+            .map(|f| (f.len(), true, f))
             .chain(
                 planted
                     .iter()
                     .filter(|f| f.len() < largest)
-                    .map(|f| (f.len(), false, *f)),
+                    .map(|f| (f.len(), false, f)),
             )
             .collect();
         layers.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));

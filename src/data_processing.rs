@@ -25,7 +25,7 @@ use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 /// Generation options that can be passed separately from CLI Args
@@ -209,7 +209,7 @@ fn release_finished_fills(
 /// mutable state is the per-tile `editor` and `rail_tunnel_points`.
 ///
 /// Element suppression (3D-model / building-outline) and flood-fill cache
-/// eviction are handled by the caller; the cache is shared immutably in the
+/// eviction are handled by the caller; the cache is shared across tiles in the
 /// parallel path and must not be mutated here.
 #[allow(clippy::too_many_arguments)]
 fn process_element(
@@ -1001,6 +1001,49 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
+        // Free each fill after the last tile that reads it: its ways, relation members and part siblings.
+        let tile_fill_ids: Vec<Vec<u64>> = tile_assignments
+            .iter()
+            .map(|elems| {
+                let mut ids: Vec<u64> = Vec::new();
+                let mut add = |id: u64| {
+                    ids.push(id);
+                    for seed in [part_groups.get(&id).copied().unwrap_or(id), id] {
+                        let key = crate::osm_parser::seed_without_hint(seed);
+                        if let Some(members) = group_members.get(&key) {
+                            ids.extend_from_slice(members);
+                        }
+                    }
+                };
+                for &idx in elems {
+                    match &elements[idx] {
+                        ProcessedElement::Way(way) => add(way.id),
+                        ProcessedElement::Relation(rel) => {
+                            add(rel.id);
+                            for member in &rel.members {
+                                add(member.way.id);
+                            }
+                        }
+                        ProcessedElement::Node(_) => {}
+                    }
+                }
+                ids.retain(|&id| flood_fill_cache.contains(id));
+                ids.sort_unstable();
+                ids.dedup();
+                ids
+            })
+            .collect();
+        let fill_readers: FnvHashMap<u64, AtomicU32> = {
+            let mut counts: FnvHashMap<u64, u32> = FnvHashMap::default();
+            for &id in tile_fill_ids.iter().flatten() {
+                *counts.entry(id).or_default() += 1;
+            }
+            counts
+                .into_iter()
+                .map(|(id, n)| (id, AtomicU32::new(n)))
+                .collect()
+        };
+
         // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
         // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
         // are kept via region deferral.
@@ -1167,6 +1210,12 @@ pub fn generate_world_with_options(
                     &group_members,
                     &still_surfaces,
                 );
+            }
+
+            for id in &tile_fill_ids[tile_idx] {
+                if fill_readers[id].fetch_sub(1, Ordering::AcqRel) == 1 {
+                    flood_fill_cache.release(*id);
+                }
             }
 
             // Per-tile ground + ore + ESA-water over strict bounds (parallel);
@@ -1540,7 +1589,7 @@ pub fn generate_world_with_options(
             );
 
             // Release flood fill cache entries for memory optimization.
-            // (Skipped in the parallel path where the cache is shared immutably.)
+            // (The parallel path releases per tile instead.)
             release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
             // Element is dropped here, freeing its memory immediately.
         }
