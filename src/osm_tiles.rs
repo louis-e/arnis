@@ -25,9 +25,15 @@ const ZOOM: u8 = 13;
 /// Degrees per stored coordinate unit in the tile payload. Must match arnis-tiles.
 const COORD_SCALE: f64 = 1e6;
 
-/// Way vertices carry no OSM id, so one is minted per coordinate from here. Real node ids are
-/// far below this.
-const SYNTHETIC_ID_BASE: u64 = 1 << 62;
+/// Base of the ids packed from way vertex coordinates, below the clipper's invented ids.
+const SYNTHETIC_ID_BASE: u64 = 1 << 61;
+
+/// Same coordinate, same id in every bbox; facade walls match on it.
+fn coordinate_node_id((lat, lon): (i32, i32)) -> u64 {
+    let lat = (i64::from(lat) + MAX_LAT_E6) as u64;
+    let lon = (i64::from(lon) + MAX_LON_E6) as u64;
+    SYNTHETIC_ID_BASE | (lat << 29) | lon
+}
 
 /// Refuse a tile that decompresses to more than this.
 const MAX_TILE_BYTES: u64 = 256 * 1024 * 1024;
@@ -185,7 +191,21 @@ struct Collected {
 pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     println!("{} Fetching data from the tile archive...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
+    let (data, tiles_read, bytes) = read_tiles(bbox, base_url)?;
+    println!(
+        "Read {tiles_read} tiles ({:.1} MB) from the archive",
+        bytes as f64 / 1e6
+    );
+    emit_gui_progress_update(5.0, "");
+    Ok(data)
+}
 
+/// [`fetch_data_from_tiles`] without progress output.
+pub fn fetch_data_from_tiles_quietly(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
+    read_tiles(bbox, base_url).map(|(data, _, _)| data)
+}
+
+fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
     let client = client()?;
     let manifest = manifest(&client, base_url)?;
     if manifest.zoom != ZOOM {
@@ -276,16 +296,10 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
         }
     }
 
-    println!(
-        "Read {tiles_read} tiles ({:.1} MB) from the archive",
-        bytes as f64 / 1e6
-    );
-    emit_gui_progress_update(5.0, "");
-
     if tiles_read == 0 {
         return Err("the tile archive has no data for this area".into());
     }
-    Ok(assemble(collected, &bbox))
+    Ok((assemble(collected, &bbox), tiles_read, bytes))
 }
 
 fn absorb(payload: &[u8], out: &mut Collected) -> Result<()> {
@@ -462,10 +476,10 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
 
     let mut nodes: Vec<(u64, NodeBody)> = nodes.into_iter().collect();
     nodes.sort_unstable_by_key(|n| n.0);
-    // One id per distinct coordinate, so junctions share a node and a ring closes on itself.
-    let mut coord_ids: HashMap<(i32, i32), u64> = HashMap::new();
+    // Lowest tagged node per coordinate; on a vertex it takes the coordinate id.
+    let mut tagged_at: HashMap<(i32, i32), u64> = HashMap::new();
     for (id, (lat, lon, _)) in &nodes {
-        coord_ids.entry((*lat, *lon)).or_insert(*id);
+        tagged_at.entry((*lat, *lon)).or_insert(*id);
     }
 
     let mut ways: Vec<DecWay> = ways
@@ -475,21 +489,22 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
         .collect();
     ways.sort_unstable_by_key(|w| w.0);
 
-    let mut next_synthetic = SYNTHETIC_ID_BASE;
     let mut emitted: Vec<(u64, i32, i32)> = Vec::new();
+    let mut seen: HashSet<(i32, i32)> = HashSet::new();
     let mut vertex_nodes: HashSet<u64> = HashSet::new();
     let mut way_elements: Vec<OsmElement> = Vec::with_capacity(ways.len());
     for (id, closed, tags, points) in ways {
         let mut refs: Vec<u64> = Vec::with_capacity(points.len() + 1);
         for p in &points {
-            let nid = *coord_ids.entry(*p).or_insert_with(|| {
-                let id = next_synthetic;
-                next_synthetic += 1;
-                emitted.push((id, p.0, p.1));
-                id
-            });
-            if nid < SYNTHETIC_ID_BASE {
-                vertex_nodes.insert(nid);
+            // Never a tagged node's own id: which ones a read sees depends on its tiles.
+            let nid = coordinate_node_id(*p);
+            if seen.insert(*p) {
+                match tagged_at.get(p) {
+                    Some(&tagged) => {
+                        vertex_nodes.insert(tagged);
+                    }
+                    None => emitted.push((nid, p.0, p.1)),
+                }
             }
             refs.push(nid);
         }
@@ -518,6 +533,11 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
         if !area.contains(lat, lon) && !vertex_nodes.contains(&id) {
             continue;
         }
+        let id = if vertex_nodes.contains(&id) {
+            coordinate_node_id((lat, lon))
+        } else {
+            id
+        };
         elements.push(OsmElement {
             r#type: "node".into(),
             id,
@@ -906,7 +926,7 @@ mod tests {
     }
 
     fn ids_of(data: &OsmData, kind: &str) -> Vec<u64> {
-        data.elements_for_test()
+        data.elements()
             .iter()
             .filter(|e| e.r#type == kind)
             .map(|e| e.id)
@@ -1024,33 +1044,32 @@ mod tests {
         );
         let data = assemble(c, &test_bbox());
         let tagged: Vec<u64> = data
-            .elements_for_test()
+            .elements()
             .iter()
             .filter(|e| e.r#type == "node" && e.tags.is_some())
             .map(|e| e.id)
             .collect();
-        assert_eq!(tagged, vec![5, 6]);
+        let at = |lat| coordinate_node_id((lat, 500));
+        assert_eq!(tagged, vec![at(500), at(-50_000)]);
     }
 
-    // Two nodes on one coordinate: the way must pick the same one on every run, which a
-    // hash-map walk did not.
+    // Two nodes on one coordinate: the vertex always takes the lowest one's tags.
     #[test]
     fn a_shared_coordinate_resolves_to_the_lowest_id() {
+        let vertex = coordinate_node_id((500, 500));
         for _ in 0..8 {
             let mut c = Collected::default();
             for id in [40, 30, 50] {
                 c.nodes
-                    .insert(id, (500, 500, vec![("entrance".into(), "yes".into())]));
+                    .insert(id, (500, 500, vec![("ref".into(), id.to_string())]));
             }
             way_at(&mut c, 1, &[("building", "yes")], &[(500, 500), (600, 600)]);
             let data = assemble(c, &test_bbox());
-            assert_eq!(ids_of(&data, "node")[..3], [30, 40, 50]);
-            let way = data
-                .elements_for_test()
-                .iter()
-                .find(|e| e.r#type == "way")
-                .unwrap();
-            assert_eq!(way.nodes.as_ref().unwrap()[0], 30);
+            assert_eq!(ids_of(&data, "node")[..3], [vertex, 40, 50]);
+            let node = data.elements().iter().find(|e| e.id == vertex).unwrap();
+            assert_eq!(node.tags.as_ref().unwrap()["ref"], "30");
+            let way = data.elements().iter().find(|e| e.r#type == "way").unwrap();
+            assert_eq!(way.nodes.as_ref().unwrap()[0], vertex);
         }
     }
 
@@ -1068,7 +1087,7 @@ mod tests {
             ),
         );
         let data = assemble(c, &test_bbox());
-        let els = data.elements_for_test();
+        let els = data.elements();
         let way = els.iter().find(|e| e.r#type == "way").expect("way missing");
         let refs = way.nodes.as_ref().expect("way has no refs");
         assert_eq!(refs.first(), refs.last(), "ring must close on one node");
@@ -1098,7 +1117,7 @@ mod tests {
         );
         let data = assemble(c, &test_bbox());
         let mut refs: Vec<(u64, Vec<u64>)> = data
-            .elements_for_test()
+            .elements()
             .iter()
             .filter(|e| e.r#type == "way")
             .map(|e| (e.id, e.nodes.clone().unwrap_or_default()))
@@ -1110,5 +1129,60 @@ mod tests {
             refs[1].1.first(),
             "shared point, one node"
         );
+    }
+
+    #[test]
+    fn a_vertex_keeps_its_id_across_boxes() {
+        let vertex_ids = |extra: bool, bbox: LLBBox| {
+            let mut c = Collected::default();
+            if extra {
+                way_at(
+                    &mut c,
+                    1,
+                    &[("highway", "service")],
+                    &[(100, 100), (200, 200)],
+                );
+                // A tagged node on the ring, fetched only by the wider read.
+                c.nodes
+                    .insert(3, (300, 300, vec![("entrance".into(), "yes".into())]));
+            }
+            way_at(
+                &mut c,
+                9,
+                &[("building", "yes")],
+                &[(300, 300), (300, 400), (400, 400)],
+            );
+            let data = assemble(c, &bbox);
+            let way = data.elements().iter().find(|e| e.id == 9).unwrap();
+            way.nodes.clone().unwrap()
+        };
+        let wide = LLBBox::new(-0.01, -0.01, 0.01, 0.01).unwrap();
+        let ids = vertex_ids(false, test_bbox());
+        assert_eq!(ids, vertex_ids(true, wide));
+        for id in ids {
+            assert!(id >= SYNTHETIC_ID_BASE);
+            assert!(
+                !crate::clipping::is_invented_node_id(id),
+                "reads as clipped"
+            );
+        }
+    }
+
+    #[test]
+    fn coordinate_ids_are_distinct_and_cover_the_globe() {
+        let corners = [
+            (-90_000_000, -180_000_000),
+            (-90_000_000, 180_000_000),
+            (90_000_000, -180_000_000),
+            (90_000_000, 180_000_000),
+            (0, 0),
+            (0, 1),
+            (1, 0),
+        ];
+        let ids: HashSet<u64> = corners.iter().map(|&p| coordinate_node_id(p)).collect();
+        assert_eq!(ids.len(), corners.len());
+        assert!(ids
+            .iter()
+            .all(|&id| id >= SYNTHETIC_ID_BASE && !crate::clipping::is_invented_node_id(id)));
     }
 }

@@ -1883,6 +1883,8 @@ fn gui_start_generation(
             if args.skip_objects() {
                 // Generate ground data (terrain) for terrain-only mode
                 let mut ground = ground::generate_ground_data(&args, bbox);
+                // Matches run_cli.
+                ground.mark_beaches();
 
                 // Create empty parsed_elements and xzbbox for terrain-only mode
                 let mut parsed_elements = Vec::new();

@@ -38,17 +38,17 @@
 //! image. Mapillary's own example, `[Madeira, Portugal] by [nunocaldeira]`, is
 //! a place name too.
 //!
-//! The OSM half of `prefetch.py` is [`fetch_osm`]: a buildings-only Overpass
-//! query over the wider margin, because a building outside the box can still
+//! The OSM half of `prefetch.py` is [`fetch_osm`]: a buildings-only fetch
+//! over the wider margin, because a building outside the box can still
 //! occlude one inside it. It is deliberately separate from [`fetch_metadata`],
 //! since a caller that already has Arnis's own parsed elements does not need it
-//! and an Overpass outage must not cost the much slower imagery fetch.
+//! and an OSM outage must not cost the much slower imagery fetch.
 //!
 //! The cache layout and everything on-disk is [`super::cache`].
 
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -59,6 +59,7 @@ use serde_json::Value;
 
 use crate::coordinate_system::geographic::LLBBox;
 use crate::net::request_permit;
+use crate::osm_parser::{OsmData, OsmElement};
 use crate::progress::{emit_gui_progress_update, MESSAGE_ONLY};
 
 use super::api;
@@ -103,16 +104,6 @@ const CHUNK_BYTES: usize = 64 * 1024;
 /// 66 at 16. Twelve leaves four of the global 16 in `net::request_permit`.
 pub const DEFAULT_PARALLEL: usize = 12;
 
-/// Overpass mirrors, the Arnis one first. Same list and same order as the rest
-/// of Arnis uses, so its server sees one client.
-const OVERPASS_MIRRORS: [&str; 5] = [
-    "https://api.arnismc.com/overpass/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
-    "https://lz4.overpass-api.de/api/interpreter",
-    "https://z.overpass-api.de/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-];
-
 // --------------------------------------------------------------------------- configuration
 
 /// Where the Graph API lives. A field rather than a constant only so the tests
@@ -123,6 +114,8 @@ pub struct Endpoints {
     pub images: String,
     /// The single image entity; `{id}` is appended.
     pub image: String,
+    /// Tile archive base URL; `None` skips it.
+    pub osm_tiles: Option<String>,
     pub overpass: Vec<String>,
 }
 
@@ -131,7 +124,8 @@ impl Default for Endpoints {
         Self {
             images: "https://graph.mapillary.com/images".to_string(),
             image: "https://graph.mapillary.com".to_string(),
-            overpass: OVERPASS_MIRRORS.iter().map(|s| s.to_string()).collect(),
+            osm_tiles: Some(crate::osm_tiles::DEFAULT_OSM_TILES_URL.to_string()),
+            overpass: vec![crate::retrieve_data::ARNIS_OVERPASS_URL.to_string()],
         }
     }
 }
@@ -1431,13 +1425,24 @@ fn vec3(v: Option<&Value>) -> Option<[f64; 3]> {
 
 // --------------------------------------------------------------------------- OSM
 
-/// Buildings in the bbox plus the OSM margin, from the first Overpass mirror
-/// that answers.
+/// Buildings in the bbox plus the OSM margin, from the tile archive, else Overpass.
 ///
 /// The wider margin is not generosity: a building outside the world box still
 /// occludes one inside it, and the line of sight test needs it as geometry.
+/// Walls match the world by node id, so this must read the source the world reads.
 pub fn fetch_osm(cfg: &FetchConfig) -> Result<Value, String> {
     let b = pad_bbox(cfg.bbox, cfg.osm_margin_m);
+    if let Some(url) = cfg.endpoints.osm_tiles.as_deref().filter(|u| !u.is_empty()) {
+        let archive = LLBBox::new(b.min_lat, b.min_lon, b.max_lat, b.max_lon)
+            .and_then(|bbox| crate::osm_tiles::fetch_data_from_tiles_quietly(bbox, url));
+        match archive {
+            Ok(data) => return Ok(buildings_as_overpass_json(&data, b)),
+            Err(e) => eprintln!("Note: facade buildings not read from the tile archive ({e})"),
+        }
+    }
+    if cfg.endpoints.overpass.is_empty() {
+        return Err("no OSM source for the facade buildings".to_string());
+    }
     // The bbox goes in the global header rather than on each statement: the
     // Arnis proxy, which is first in the mirror list, refuses a query without
     // one ("Query must include a global [bbox:south,west,north,east] header")
@@ -1477,6 +1482,97 @@ pub fn fetch_osm(cfg: &FetchConfig) -> Result<Value, String> {
         eprintln!("Note: Overpass mirror failed, trying the next ({last})");
     }
     Err(format!("every Overpass mirror failed; last: {last}"))
+}
+
+/// Buildings of `data` that reach into `bbox`, shaped like the Overpass answer.
+fn buildings_as_overpass_json(data: &OsmData, bbox: BBox) -> Value {
+    let is_building =
+        |el: &OsmElement| el.tags.as_ref().is_some_and(|t| t.contains_key("building"));
+    let coords: HashMap<u64, (f64, f64)> = data
+        .elements()
+        .iter()
+        .filter_map(|el| Some((el.id, (el.lat?, el.lon?))))
+        .collect();
+    let way_nodes: HashMap<u64, &[u64]> = data
+        .elements()
+        .iter()
+        .filter(|el| el.r#type == "way")
+        .map(|el| (el.id, el.nodes.as_deref().unwrap_or_default()))
+        .collect();
+    let reaches_box = |way_ids: &mut dyn Iterator<Item = u64>| {
+        let (mut lat0, mut lon0, mut lat1, mut lon1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for id in way_ids {
+            for (lat, lon) in way_nodes
+                .get(&id)
+                .into_iter()
+                .flat_map(|n| n.iter())
+                .filter_map(|n| coords.get(n))
+            {
+                (lat0, lon0) = (lat0.min(*lat), lon0.min(*lon));
+                (lat1, lon1) = (lat1.max(*lat), lon1.max(*lon));
+            }
+        }
+        lat0 <= bbox.max_lat && lat1 >= bbox.min_lat && lon0 <= bbox.max_lon && lon1 >= bbox.min_lon
+    };
+    let mut ways: HashSet<u64> = HashSet::new();
+    let mut relations = Vec::new();
+    for el in data.elements() {
+        match el.r#type.as_str() {
+            "way" if is_building(el) && reaches_box(&mut std::iter::once(el.id)) => {
+                ways.insert(el.id);
+            }
+            "relation"
+                if is_building(el)
+                    && reaches_box(
+                        &mut el
+                            .members
+                            .iter()
+                            .filter(|m| m.r#type == "way")
+                            .map(|m| m.r#ref),
+                    ) =>
+            {
+                ways.extend(
+                    el.members
+                        .iter()
+                        .filter(|m| m.r#type == "way")
+                        .map(|m| m.r#ref),
+                );
+                relations.push(serde_json::json!({
+                    "type": "relation",
+                    "id": el.id,
+                    "members": el.members.iter().map(|m| serde_json::json!({
+                        "type": m.r#type, "ref": m.r#ref, "role": m.r#role,
+                    })).collect::<Vec<_>>(),
+                    "tags": el.tags,
+                }));
+            }
+            _ => {}
+        }
+    }
+    let mut nodes: HashSet<u64> = HashSet::new();
+    let mut way_json = Vec::new();
+    for el in data.elements() {
+        if el.r#type == "way" && ways.contains(&el.id) {
+            let refs = el.nodes.as_deref().unwrap_or_default();
+            nodes.extend(refs.iter().copied());
+            way_json.push(serde_json::json!({
+                "type": "way", "id": el.id, "nodes": refs, "tags": el.tags,
+            }));
+        }
+    }
+    let mut elements: Vec<Value> = data
+        .elements()
+        .iter()
+        .filter(|el| el.r#type == "node" && nodes.contains(&el.id))
+        .filter_map(|el| {
+            Some(serde_json::json!({
+                "type": "node", "id": el.id, "lat": el.lat?, "lon": el.lon?,
+            }))
+        })
+        .collect();
+    elements.extend(way_json);
+    elements.extend(relations);
+    serde_json::json!({ "elements": elements })
 }
 
 /// Imagery metadata and the OSM buildings, in that order.
@@ -1519,6 +1615,84 @@ fn report(done: &AtomicUsize, total: usize, what: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn element(kind: &str, id: u64, tags: &[(&str, &str)]) -> OsmElement {
+        OsmElement {
+            r#type: kind.to_string(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: None,
+            tags: (!tags.is_empty()).then(|| {
+                tags.iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            }),
+            members: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn archive_buildings_take_the_overpass_shape() {
+        let mut elements = Vec::new();
+        for id in 1..=7 {
+            let mut n = element("node", id, &[]);
+            n.lat = Some(48.0 + id as f64 * 1e-5);
+            n.lon = Some(11.0);
+            elements.push(n);
+        }
+        let ring = |a, b, c| Some(vec![a, b, c, a]);
+        let mut house = element("way", 10, &[("building", "house")]);
+        house.nodes = ring(1, 2, 3);
+        let mut outer = element("way", 11, &[]);
+        outer.nodes = ring(4, 5, 6);
+        let mut road = element("way", 12, &[("highway", "service")]);
+        road.nodes = Some(vec![6, 7]);
+        let mut hall = element(
+            "relation",
+            20,
+            &[("building", "yes"), ("type", "multipolygon")],
+        );
+        hall.members = vec![crate::osm_parser::OsmMember {
+            r#type: "way".into(),
+            r#ref: 11,
+            r#role: "outer".into(),
+        }];
+        for id in [8, 9] {
+            let mut n = element("node", id, &[]);
+            n.lat = Some(30.0 + id as f64 * 1e-5);
+            n.lon = Some(30.0);
+            elements.push(n);
+        }
+        let mut far = element("way", 13, &[("building", "yes")]);
+        far.nodes = Some(vec![8, 9, 8]);
+        elements.extend([house, outer, road, hall, far]);
+
+        let json = buildings_as_overpass_json(
+            &OsmData::from_elements(elements),
+            BBox::new(47.0, 10.0, 49.0, 12.0),
+        );
+        let ids = |kind: &str| -> Vec<i64> {
+            json["elements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == kind)
+                .map(|e| e["id"].as_i64().unwrap())
+                .collect()
+        };
+        assert_eq!(ids("way"), vec![10, 11]);
+        assert_eq!(ids("relation"), vec![20]);
+        assert_eq!(ids("node"), vec![1, 2, 3, 4, 5, 6]);
+        let rel = json["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["type"] == "relation")
+            .unwrap();
+        assert_eq!(rel["members"][0]["ref"], 11);
+        assert_eq!(rel["members"][0]["role"], "outer");
+    }
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::AtomicBool;
@@ -1654,6 +1828,7 @@ mod tests {
         cfg.endpoints = Endpoints {
             images: format!("{}/images", server.base),
             image: server.base.clone(),
+            osm_tiles: None,
             overpass: vec![format!("{}/overpass", server.base)],
         };
         cfg.limits = Limits {

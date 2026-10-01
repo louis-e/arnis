@@ -19,9 +19,15 @@ pub fn set_progress_suppressed(suppressed: bool) {
     if suppressed {
         SUPPRESS_COUNT.fetch_add(1, Ordering::Relaxed);
     } else {
-        let _ = SUPPRESS_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-            Some(v.saturating_sub(1))
-        });
+        let mut v = SUPPRESS_COUNT.load(Ordering::Relaxed);
+        while let Err(now) = SUPPRESS_COUNT.compare_exchange_weak(
+            v,
+            v.saturating_sub(1),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            v = now;
+        }
     }
 }
 
