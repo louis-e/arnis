@@ -476,10 +476,10 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
 
     let mut nodes: Vec<(u64, NodeBody)> = nodes.into_iter().collect();
     nodes.sort_unstable_by_key(|n| n.0);
-    // One id per distinct coordinate, so junctions share a node and a ring closes on itself.
-    let mut coord_ids: HashMap<(i32, i32), u64> = HashMap::new();
+    // Lowest tagged node per coordinate; on a vertex it takes the coordinate id.
+    let mut tagged_at: HashMap<(i32, i32), u64> = HashMap::new();
     for (id, (lat, lon, _)) in &nodes {
-        coord_ids.entry((*lat, *lon)).or_insert(*id);
+        tagged_at.entry((*lat, *lon)).or_insert(*id);
     }
 
     let mut ways: Vec<DecWay> = ways
@@ -490,18 +490,21 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
     ways.sort_unstable_by_key(|w| w.0);
 
     let mut emitted: Vec<(u64, i32, i32)> = Vec::new();
+    let mut seen: HashSet<(i32, i32)> = HashSet::new();
     let mut vertex_nodes: HashSet<u64> = HashSet::new();
     let mut way_elements: Vec<OsmElement> = Vec::with_capacity(ways.len());
     for (id, closed, tags, points) in ways {
         let mut refs: Vec<u64> = Vec::with_capacity(points.len() + 1);
         for p in &points {
-            let nid = *coord_ids.entry(*p).or_insert_with(|| {
-                let id = coordinate_node_id(*p);
-                emitted.push((id, p.0, p.1));
-                id
-            });
-            if nid < SYNTHETIC_ID_BASE {
-                vertex_nodes.insert(nid);
+            // Never a tagged node's own id: which ones a read sees depends on its tiles.
+            let nid = coordinate_node_id(*p);
+            if seen.insert(*p) {
+                match tagged_at.get(p) {
+                    Some(&tagged) => {
+                        vertex_nodes.insert(tagged);
+                    }
+                    None => emitted.push((nid, p.0, p.1)),
+                }
             }
             refs.push(nid);
         }
@@ -530,6 +533,11 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
         if !area.contains(lat, lon) && !vertex_nodes.contains(&id) {
             continue;
         }
+        let id = if vertex_nodes.contains(&id) {
+            coordinate_node_id((lat, lon))
+        } else {
+            id
+        };
         elements.push(OsmElement {
             r#type: "node".into(),
             id,
@@ -1041,24 +1049,27 @@ mod tests {
             .filter(|e| e.r#type == "node" && e.tags.is_some())
             .map(|e| e.id)
             .collect();
-        assert_eq!(tagged, vec![5, 6]);
+        let at = |lat| coordinate_node_id((lat, 500));
+        assert_eq!(tagged, vec![at(500), at(-50_000)]);
     }
 
-    // Two nodes on one coordinate: the way must pick the same one on every run, which a
-    // hash-map walk did not.
+    // Two nodes on one coordinate: the vertex always takes the lowest one's tags.
     #[test]
     fn a_shared_coordinate_resolves_to_the_lowest_id() {
+        let vertex = coordinate_node_id((500, 500));
         for _ in 0..8 {
             let mut c = Collected::default();
             for id in [40, 30, 50] {
                 c.nodes
-                    .insert(id, (500, 500, vec![("entrance".into(), "yes".into())]));
+                    .insert(id, (500, 500, vec![("ref".into(), id.to_string())]));
             }
             way_at(&mut c, 1, &[("building", "yes")], &[(500, 500), (600, 600)]);
             let data = assemble(c, &test_bbox());
-            assert_eq!(ids_of(&data, "node")[..3], [30, 40, 50]);
+            assert_eq!(ids_of(&data, "node")[..3], [vertex, 40, 50]);
+            let node = data.elements().iter().find(|e| e.id == vertex).unwrap();
+            assert_eq!(node.tags.as_ref().unwrap()["ref"], "30");
             let way = data.elements().iter().find(|e| e.r#type == "way").unwrap();
-            assert_eq!(way.nodes.as_ref().unwrap()[0], 30);
+            assert_eq!(way.nodes.as_ref().unwrap()[0], vertex);
         }
     }
 
@@ -1131,6 +1142,9 @@ mod tests {
                     &[("highway", "service")],
                     &[(100, 100), (200, 200)],
                 );
+                // A tagged node on the ring, fetched only by the wider read.
+                c.nodes
+                    .insert(3, (300, 300, vec![("entrance".into(), "yes".into())]));
             }
             way_at(
                 &mut c,
