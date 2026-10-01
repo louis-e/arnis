@@ -118,9 +118,7 @@ impl OsmData {
         }
     }
 
-    /// Raw elements, for tests that build a dataset outside the Overpass path.
-    #[cfg(test)]
-    pub fn elements_for_test(&self) -> &[OsmElement] {
+    pub fn elements(&self) -> &[OsmElement] {
         &self.elements
     }
 

@@ -24,6 +24,9 @@ fn url_host(url: &str) -> String {
         .to_string()
 }
 
+/// The only Overpass instance Arnis queries.
+pub const ARNIS_OVERPASS_URL: &str = "https://api.arnismc.com/overpass/api/interpreter";
+
 /// User agent for OSM-facing requests (Overpass, Nominatim).
 ///
 /// The build hash rides in the comment field so `Arnis/<version>` stays the
@@ -236,13 +239,9 @@ pub fn fetch_data_from_file(
     }
 }
 
-/// The OSM source for a run: the tile archive, falling back to Overpass.
-///
-/// Both front-ends go through here; deciding separately is how the GUI kept querying Overpass
-/// after the CLI had moved to the archive.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 /// Coarse bucket for an archive miss. Only the category is reported: the error text can name a
 /// tile, which locates the user to a few kilometres.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 fn fallback_reason(e: &str) -> &'static str {
     const BUCKETS: [(&str, &str); 12] = [
         ("has no data for this area", "no_data_for_area"),
@@ -265,6 +264,10 @@ fn fallback_reason(e: &str) -> &'static str {
         .unwrap_or("other")
 }
 
+/// The OSM source for a run: the tile archive, falling back to Overpass.
+///
+/// Both front-ends go through here; deciding separately is how the GUI kept querying Overpass
+/// after the CLI had moved to the archive.
 pub fn fetch_osm_data(
     bbox: LLBBox,
     debug: bool,
@@ -309,7 +312,7 @@ pub fn fetch_data_from_overpass(
     // the fallback. The public instances are deliberately gone: arnis was blocked from
     // overpass-api.de for using more than its share (#1347), and failing over to the small
     // volunteer instances would only move the problem onto someone else.
-    let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";
+    let arnis_api_server = ARNIS_OVERPASS_URL;
     let api_servers: Vec<&str> = vec![];
     let fallback_api_servers: Vec<&str> = vec![];
 
