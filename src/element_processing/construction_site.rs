@@ -117,18 +117,21 @@ struct Site<'a> {
 }
 
 impl Site<'_> {
-    /// A site cell with nothing built on it.
+    /// A cell of site ground with nothing built on it. Water and paving the site
+    /// kept are not site ground.
     fn open(&self, editor: &WorldEditor, x: i32, z: i32) -> bool {
         self.cells.contains(&(x, z))
             && !self.footprints.contains(x, z)
             && !editor.surface_is_sealed(x, z)
             && !editor.is_lc_water(x, z)
+            && editor.check_for_block(x, 0, z, Some(SITE_GROUND))
             && !editor.block_exists_absolute(x, editor.get_absolute_y(x, 1, z), z)
     }
 
-    /// The first block above the ground under a rigid prop, or None if any cell is
-    /// taken or the ground steps by more than one block.
-    fn level_base(&self, editor: &WorldEditor, cells: &[(i32, i32)]) -> Option<i32> {
+    /// Levels the ground under a rigid prop and returns the first block above it, or
+    /// None if any cell is taken or the ground steps by more than one block. The prop
+    /// stands at the highest cell's level, with the lower cells filled up to it.
+    fn level_pad(&self, editor: &mut WorldEditor, cells: &[(i32, i32)]) -> Option<i32> {
         let mut lo = i32::MAX;
         let mut hi = i32::MIN;
         for &(x, z) in cells {
@@ -139,7 +142,15 @@ impl Site<'_> {
             lo = lo.min(y);
             hi = hi.max(y);
         }
-        (hi - lo <= 1).then_some(lo)
+        if hi - lo > 1 {
+            return None;
+        }
+        for &(x, z) in cells {
+            for y in editor.get_absolute_y(x, 1, z)..hi {
+                editor.set_block_absolute(COARSE_DIRT, x, y, z, None, None);
+            }
+        }
+        Some(hi)
     }
 }
 
@@ -214,6 +225,7 @@ fn place_fence(editor: &mut WorldEditor, element: &ProcessedWay, site: &Site) {
         if site.footprints.contains(x, z)
             || editor.surface_is_sealed(x, z)
             || editor.is_lc_water(x, z)
+            || editor.check_for_block(x, 0, z, Some(&[WATER]))
         {
             continue;
         }
@@ -305,7 +317,7 @@ fn place_stockpile(
     cells: &[(i32, i32, i32, i32)],
     rolls: &mut Rolls,
 ) {
-    let Some(base) = site.level_base(editor, &xz(cells)) else {
+    let Some(base) = site.level_pad(editor, &xz(cells)) else {
         return;
     };
     let material = [
@@ -331,7 +343,7 @@ fn place_timber(
     turned: bool,
     rolls: &mut Rolls,
 ) {
-    let Some(base) = site.level_base(editor, &xz(cells)) else {
+    let Some(base) = site.level_pad(editor, &xz(cells)) else {
         return;
     };
     let wood = if rolls.next(2) == 0 {
@@ -361,13 +373,13 @@ fn place_foundation(
     across: i32,
     rolls: &mut Rolls,
 ) {
-    let Some(base) = site.level_base(editor, &xz(cells)) else {
+    let Some(base) = site.level_pad(editor, &xz(cells)) else {
         return;
     };
     let tall_bars = rolls.next(2) == 0;
     for &(x, z, u, v) in cells {
         let edge = u == 0 || v == 0 || u == along - 1 || v == across - 1;
-        editor.set_block(LIGHT_GRAY_CONCRETE, x, 0, z, Some(SITE_GROUND), None);
+        editor.set_block_absolute(LIGHT_GRAY_CONCRETE, x, base - 1, z, Some(SITE_GROUND), None);
         if edge {
             editor.set_block_absolute(SPRUCE_SLAB, x, base, z, None, None);
         } else if u % 2 == 1 && v % 2 == 1 {
@@ -391,7 +403,7 @@ fn place_box(
     rolls: &mut Rolls,
     cabin: bool,
 ) {
-    let Some(base) = site.level_base(editor, &xz(cells)) else {
+    let Some(base) = site.level_pad(editor, &xz(cells)) else {
         return;
     };
     let wall = if cabin {
@@ -440,7 +452,7 @@ fn place_scaffold(
     along: i32,
     rolls: &mut Rolls,
 ) {
-    let Some(base) = site.level_base(editor, &xz(cells)) else {
+    let Some(base) = site.level_pad(editor, &xz(cells)) else {
         return;
     };
     // Height per slice along the run, a random walk between 2 and 7.
@@ -593,6 +605,9 @@ mod tests {
                 .collect(),
             footprints: &footprints,
         };
+        for &(x, z) in &site.cells {
+            editor.set_block(COARSE_DIRT, x, 0, z, None, None);
+        }
         let mut shapes = std::collections::HashSet::new();
         for i in 0..20 {
             let mut rolls = Rolls(coord_hash(i, 99));
@@ -620,6 +635,77 @@ mod tests {
         assert!(
             shapes.iter().any(|&(_, stepped)| stepped),
             "none step in height"
+        );
+    }
+
+    #[test]
+    fn a_prop_over_a_step_stands_level_on_the_higher_ground() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(30.0, 30.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let footprints = BuildingFootprintBitmap::new_empty();
+        let site = Site {
+            cells: (0..30).flat_map(|x| (0..30).map(move |z| (x, z))).collect(),
+            footprints: &footprints,
+        };
+        // Ground one block higher from x = 6 on.
+        for &(x, z) in &site.cells {
+            if x >= 6 {
+                editor.register_road_surface_y(x, z, 1);
+            }
+            editor.set_block(COARSE_DIRT, x, 0, z, None, None);
+        }
+        let cells = rect(3, 5, 6, 3, false);
+        place_box(&mut editor, &site, &cells, 6, 3, &mut Rolls(7), false);
+        for &(x, z, u, v) in &cells {
+            let wall = u == 0 || u == 5 || v == 0 || v == 2;
+            assert_eq!(
+                editor.block_exists_absolute(x, 2, z),
+                wall,
+                "walls start at the higher level at ({x}, {z})"
+            );
+            assert!(
+                editor.block_exists_absolute(x, 1, z),
+                "no gap under the box at ({x}, {z})"
+            );
+        }
+    }
+
+    #[test]
+    fn props_and_fence_keep_off_water_the_site_kept() {
+        let xzbbox = Box::leak(Box::new(
+            XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap(),
+        ));
+        let mut editor = test_editor(xzbbox);
+        let way = rect_way(7, 10, 10, 100, 100, &[("landuse", "construction")]);
+        let area: Vec<(i32, i32)> = (10..=100)
+            .flat_map(|x| (10..=100).map(move |z| (x, z)))
+            .collect();
+        // A pond across the west half, then site ground on the rest.
+        for &(x, z) in &area {
+            let block = if x < 55 {
+                WATER
+            } else {
+                ground_block(x, z, false)
+            };
+            editor.set_block(block, x, 0, z, None, None);
+        }
+        furnish(
+            &mut editor,
+            &way,
+            &area,
+            &BuildingFootprintBitmap::new_empty(),
+        );
+        for x in 10..55 {
+            for z in 10..=100 {
+                assert!(
+                    !editor.block_exists_absolute(x, 1, z),
+                    "something stands on the pond at ({x}, {z})"
+                );
+            }
+        }
+        assert!(
+            editor.check_for_block(100, 1, 50, Some(&[IRON_BARS])),
+            "dry side fenced"
         );
     }
 }

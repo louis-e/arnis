@@ -307,7 +307,9 @@ pub fn generate_parking_garage(
     };
     plan.core = find_core(&plan);
 
-    // The tagged height includes a parapet over the top deck.
+    // The height spans the decks and the parapet over the top one, with at least one
+    // deck above the ground. The stair tower and roof lamps rise above it, like the
+    // rooftop equipment of other buildings.
     let decks = ((building_height - 2) / LEVEL).max(1);
     let top = base_y + decks * LEVEL;
     let facade = facade_for(seed);

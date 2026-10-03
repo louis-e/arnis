@@ -175,8 +175,8 @@ pub fn generate_landuse(
         if landuse_tag == "traffic_island" {
             editor.set_block(actual_block, x, 1, z, None, None);
         } else if landuse_tag == "construction" {
-            // Roads and paved yards running through the site keep their surface.
-            if !editor.surface_is_sealed(x, z) {
+            // Roads, paved yards and water in the site keep their surface.
+            if !is_protected {
                 let ground = construction_site::ground_block(x, z, site_arid);
                 editor.set_block(ground, x, 0, z, None, Some(&[SPONGE]));
             }
