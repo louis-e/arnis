@@ -1762,12 +1762,28 @@ pub(crate) mod test_support {
         world_height: usize,
     ) -> Ground {
         let (gw, gh) = (land_cover.width, land_cover.height);
+        ground_with_land_cover_and_heights(
+            land_cover,
+            vec![vec![0.0f32; gw]; gh],
+            world_width,
+            world_height,
+        )
+    }
+
+    /// `ground_with_land_cover_and_elevation` over the given terrain, in blocks.
+    pub(crate) fn ground_with_land_cover_and_heights(
+        land_cover: LandCoverData,
+        heights: Vec<Vec<f32>>,
+        world_width: usize,
+        world_height: usize,
+    ) -> Ground {
+        let (gw, gh) = (land_cover.width, land_cover.height);
         Ground {
             elevation_enabled: true,
             extended_ceiling: false,
             ground_level: 0,
             elevation_data: Some(ElevationData {
-                heights: vec![vec![0.0f32; gw]; gh],
+                heights,
                 width: gw,
                 height: gh,
                 world_width,
