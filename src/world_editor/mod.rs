@@ -546,6 +546,15 @@ impl<'a> WorldEditor<'a> {
         self.ground.as_ref()?.ecoregion(self.ground_point(x, z))
     }
 
+    /// True where the land cover keeps (x, z) as land too steep to hold water, like a gorge wall.
+    pub fn is_steep_land(&self, x: i32, z: i32) -> bool {
+        self.ground.as_ref().is_some_and(|g| {
+            let p = self.ground_point(x, z);
+            let cover = g.cover_class(p);
+            cover != 0 && cover != crate::land_cover::LC_WATER && g.slope(p) > 4
+        })
+    }
+
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
     pub fn is_lc_water(&self, x: i32, z: i32) -> bool {
         self.ground.as_ref().is_some_and(|g| {

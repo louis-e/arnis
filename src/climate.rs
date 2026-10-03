@@ -121,11 +121,11 @@ impl Climate {
                 }
             }
             Climate::HotSteppe if bare => {
-                pick(&[(0.5, (SAND, SANDSTONE)), (1.0, (COARSE_DIRT, DIRT))])
+                pick(&[(0.35, (SAND, SANDSTONE)), (1.0, (COARSE_DIRT, DIRT))])
             }
             Climate::HotSteppe => pick(&[
-                (0.3, (SAND, SANDSTONE)),
-                (0.6, (COARSE_DIRT, DIRT)),
+                (0.15, (SAND, SANDSTONE)),
+                (0.5, (COARSE_DIRT, DIRT)),
                 (1.0, (GRASS_BLOCK, DIRT)),
             ]),
             Climate::ColdDesert if bare => pick(&[

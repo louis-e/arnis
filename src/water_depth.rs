@@ -253,7 +253,7 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
 }
 
 /// In-place two-sweep chamfer-3-4 DT. Input: 0 = shore, `DT_MAX` = water seed.
-fn chamfer_3_4_dt(d: &mut [u8], w: usize, h: usize) {
+pub(crate) fn chamfer_3_4_dt(d: &mut [u8], w: usize, h: usize) {
     let step = |v: u8, add: u8| v.saturating_add(add);
     for j in 0..h {
         for i in 0..w {
