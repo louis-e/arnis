@@ -355,7 +355,7 @@ fn level_water_surfaces(
     let bank_dist: std::cell::OnceCell<Vec<u8>> = std::cell::OnceCell::new();
     let wall_step = slope_step(m_per_cell);
     let fall_reach = ((FALL_REACH_M / m_per_cell).round() as u16).max(1);
-    let level_run = ((LEVEL_RUN_M / m_per_cell).round() as usize).max(2);
+    let level_run = (LEVEL_RUN_M / m_per_cell).max(2.0);
     // Local surface of each cell of a flowing body, and the count of channel walls that left it.
     let mut flowing_surfaces = |heights: &[Vec<f64>],
                                 cells: &[(usize, usize)],
@@ -917,14 +917,12 @@ struct Walk {
 /// Walk from `(x, y)` away from its nearest bank for at most `step` cells, staying in `body`.
 fn walk_from_bank(bank_dist: &[u8], body: &[u64], w: usize, x: usize, y: usize, step: i64) -> Walk {
     let h = bank_dist.len() / w;
-    let mut walk = Walk {
-        end: (x, y),
-        run: 0.0,
-        mid: (x, y),
-        mid_run: 0.0,
-    };
-    for i in 0..step {
-        let (cx, cy) = walk.end;
+    // Where each step ended and the length walked by then; `slope_step` allows at most 16.
+    let mut path = [((x, y), 0.0f64); 16];
+    let mut taken = 0;
+    let (mut cx, mut cy) = (x, y);
+    let mut run = 0.0;
+    while taken < (step as usize).min(path.len()) {
         let cur = f64::from(bank_dist[cy * w + cx]);
         // Gain per unit length, so diagonal steps do not drift along the channel.
         let mut best: Option<(f64, usize, usize, f64)> = None;
@@ -961,13 +959,23 @@ fn walk_from_bank(bank_dist: &[u8], body: &[u64], w: usize, x: usize, y: usize, 
         let Some((_, nx, ny, len)) = best else {
             break;
         };
-        walk.end = (nx, ny);
-        walk.run += len;
-        if i < step / 2 {
-            (walk.mid, walk.mid_run) = (walk.end, walk.run);
-        }
+        (cx, cy) = (nx, ny);
+        run += len;
+        path[taken] = ((cx, cy), run);
+        taken += 1;
     }
-    walk
+    // Halfway along the steps taken, so a walk that ends early still has two halves.
+    let (mid, mid_run) = if taken >= 2 {
+        path[taken / 2 - 1]
+    } else {
+        ((x, y), 0.0)
+    };
+    Walk {
+        end: (cx, cy),
+        run,
+        mid,
+        mid_run,
+    }
 }
 
 /// Drop the walls of `cells` no chain of walls ties to land, as a wall hangs from its bank.
@@ -1019,8 +1027,8 @@ fn keep_anchored_walls(
     }
 }
 
-/// Whether `run` cells of level water at or above `(x, y)` lie on its way to the nearest bank,
-/// where a wall rises to the bank. `falling` marks the cells that fall away from their bank.
+/// Whether level water `run` cells long, at or above `(x, y)`, lies on its way to the nearest
+/// bank, where a wall rises to the bank. `falling` marks the cells that fall away from their bank.
 fn under_level_water(
     heights: &[Vec<f64>],
     lc_grid: &[Vec<u8>],
@@ -1028,17 +1036,17 @@ fn under_level_water(
     falling: &[u64],
     x: usize,
     y: usize,
-    run: usize,
+    run: f64,
 ) -> bool {
     let h = heights.len();
     let w = heights[0].len();
     let here = heights[y][x];
     let (mut cx, mut cy) = (x, y);
-    let mut level = 0;
+    let mut level = 0.0;
     // Bank distance falls every step, so the walk ends.
     loop {
         let cur = bank_dist[cy * w + cx];
-        let mut best: Option<(f64, usize, usize)> = None;
+        let mut best: Option<(f64, usize, usize, f64)> = None;
         for (dx, dy) in [
             (1i32, 0i32),
             (-1, 0),
@@ -1066,10 +1074,10 @@ fn under_level_water(
             };
             let drop = f64::from(cur - d) / len;
             if best.is_none_or(|b| drop > b.0) {
-                best = Some((drop, nx, ny));
+                best = Some((drop, nx, ny, len));
             }
         }
-        let Some((_, nx, ny)) = best else {
+        let Some((_, nx, ny, len)) = best else {
             return false;
         };
         let idx = ny * w + nx;
@@ -1078,7 +1086,7 @@ fn under_level_water(
         }
         let is_level =
             lc_grid[ny][nx] == LC_WATER && !get_bit(falling, idx) && heights[ny][nx] >= here;
-        level = if is_level { level + 1 } else { 0 };
+        level = if is_level { level + len } else { 0.0 };
         if level >= run {
             return true;
         }
@@ -3430,6 +3438,30 @@ mod tests {
         let (mut heights, lc) = v_channel(0.0);
         let surface = level_water_surfaces(&mut heights, &lc, 1.0);
         assert!((40..61).all(|z| surface[z][200]));
+    }
+
+    #[test]
+    fn a_seam_along_a_narrow_river_is_no_wall() {
+        // Walks across a 7 m river end early; the step is on one half of them only.
+        let (w, h) = (400usize, 100usize);
+        let mut heights = vec![vec![0.0; w]; h];
+        let mut lc = vec![vec![LC_GRASSLAND; w]; h];
+        for (z, (row, lc_row)) in heights.iter_mut().zip(lc.iter_mut()).enumerate() {
+            for (x, (v, c)) in row.iter_mut().zip(lc_row.iter_mut()).enumerate() {
+                let bed = 500.0 - x as f64 * 0.03;
+                *v = if (47..54).contains(&z) {
+                    *c = LC_WATER;
+                    bed + if z < 49 { 1.5 } else { 0.0 }
+                } else {
+                    bed + 10.0
+                };
+            }
+        }
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert!(
+            surface[47][200] && surface[48][200],
+            "the seam's high side is water"
+        );
     }
 
     #[test]

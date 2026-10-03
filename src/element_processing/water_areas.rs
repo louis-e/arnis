@@ -710,7 +710,7 @@ fn climbs_to_water(editor: &WorldEditor, spans: &SpanRows, x: i32, z: i32) -> bo
                     }
                     let (nx, nz) = (cx + dx, cz + dz);
                     let ny = editor.get_ground_level(nx, nz);
-                    // The river above may be mapped as a polygon of its own.
+                    // Water outside the polygon counts: the river above is often its own polygon.
                     if ny >= y && editor.is_lc_water(nx, nz) {
                         return true;
                     }
