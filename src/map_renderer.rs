@@ -515,6 +515,7 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("mangrove_leaves", Rgb([69, 123, 38])),
         ("cherry_leaves", Rgb([228, 177, 197])),
         ("azalea_leaves", Rgb([71, 96, 37])),
+        ("flowering_azalea_leaves", Rgb([100, 104, 62])),
         ("stone_bricks", Rgb([122, 122, 122])),
         ("stone_brick_slab", Rgb([122, 122, 122])),
         ("stone_brick_stairs", Rgb([122, 122, 122])),

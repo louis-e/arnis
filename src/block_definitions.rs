@@ -564,6 +564,7 @@ impl Block {
             472 => "podzol",
             473 => "light_gray_concrete_powder",
             474..=479 => "snow",
+            480 => "flowering_azalea_leaves",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -795,7 +796,9 @@ impl Block {
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
-            231 => Some(Value::Compound({
+            // Cherry, mangrove, azalea and flowering azalea leaves; persistent so a
+            // trunkless bush does not decay.
+            231 | 233 | 234 | 480 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
@@ -1562,6 +1565,7 @@ pub const CACTUS: Block = Block::new(470);
 pub const SNOWY_GRASS_BLOCK: Block = Block::new(471);
 pub const SNOWY_PODZOL: Block = Block::new(472);
 pub const LIGHT_GRAY_CONCRETE_POWDER: Block = Block::new(473);
+pub const FLOWERING_AZALEA_LEAVES: Block = Block::new(480);
 /// Snow layers by depth in eighths of a block, one to seven.
 pub const SNOW_LAYERS: [Block; 7] = [
     SNOW_LAYER,
