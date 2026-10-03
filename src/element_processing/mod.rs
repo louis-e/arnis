@@ -19,6 +19,7 @@ pub mod landuse;
 pub mod leisure;
 pub mod man_made;
 pub mod natural;
+pub mod parking_garage;
 pub mod power;
 pub mod railways;
 pub mod signage;

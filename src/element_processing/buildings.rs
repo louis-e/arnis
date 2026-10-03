@@ -2861,71 +2861,6 @@ fn generate_bicycle_parking_shed(
     }
 }
 
-/// Generates a multi-storey parking building structure
-fn generate_parking_building(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    cached_floor_area: &[(i32, i32)],
-    building_height: i32,
-) {
-    let building_height = building_height.max(16);
-
-    for level in 0..=(building_height / 4) {
-        let current_level_y = level * 4;
-
-        // Build walls
-        for node in &element.nodes {
-            let x = node.x;
-            let z = node.z;
-            for y in (current_level_y + 1)..=(current_level_y + 4) {
-                editor.set_block(STONE_BRICKS, x, y, z, None, None);
-            }
-        }
-
-        // Fill the floor area for each level
-        for &(x, z) in cached_floor_area {
-            let floor_block = if level == 0 {
-                SMOOTH_STONE
-            } else {
-                COBBLESTONE
-            };
-            editor.set_block(floor_block, x, current_level_y, z, None, None);
-        }
-    }
-
-    // Outline for each level
-    for level in 0..=(building_height / 4) {
-        let current_level_y = level * 4;
-        let mut prev_outline = None;
-
-        for node in &element.nodes {
-            let x = node.x;
-            let z = node.z;
-
-            if let Some((prev_x, prev_z)) = prev_outline {
-                let outline_points =
-                    bresenham_line(prev_x, current_level_y, prev_z, x, current_level_y, z);
-
-                for (bx, _, bz) in outline_points {
-                    editor.set_block(
-                        SMOOTH_STONE,
-                        bx,
-                        current_level_y,
-                        bz,
-                        Some(&[COBBLESTONE, COBBLESTONE_WALL]),
-                        None,
-                    );
-                    editor.set_block(STONE_BRICK_SLAB, bx, current_level_y + 2, bz, None, None);
-                    if bx % 2 == 0 {
-                        editor.set_block(COBBLESTONE_WALL, bx, current_level_y + 1, bz, None, None);
-                    }
-                }
-            }
-            prev_outline = Some((x, z));
-        }
-    }
-}
-
 /// Generates a roof-only structure (covered walkway, etc.)
 fn generate_roof_only_structure(
     editor: &mut WorldEditor,
@@ -7439,7 +7374,13 @@ pub fn generate_buildings(
                     cached_footprint_size,
                     group_seed,
                 );
-                generate_parking_building(editor, element, &cached_floor_area, height);
+                crate::element_processing::parking_garage::generate_parking_garage(
+                    editor,
+                    &cached_floor_area,
+                    height,
+                    start_y_offset + abs_terrain_offset,
+                    group_seed,
+                );
                 return None;
             }
             "roof" => {
@@ -7474,7 +7415,13 @@ pub fn generate_buildings(
                 cached_footprint_size,
                 group_seed,
             );
-            generate_parking_building(editor, element, &cached_floor_area, height);
+            crate::element_processing::parking_garage::generate_parking_garage(
+                editor,
+                &cached_floor_area,
+                height,
+                start_y_offset + abs_terrain_offset,
+                group_seed,
+            );
             return None;
         }
     }
