@@ -132,8 +132,12 @@ pub fn generate_leisure(
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
                         90..105 => {
-                            // Oak leaves
-                            editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                            crate::element_processing::bush::place_bush(
+                                editor,
+                                x,
+                                z,
+                                crate::element_processing::bush::BushKind::Garden,
+                            );
                         }
                         105..120 => {
                             // Only where land cover says woody, else a park
