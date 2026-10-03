@@ -597,8 +597,9 @@ fn run_cli() {
         println!("  No additional buildings from Overture Maps for this area");
     }
 
-    parsed_elements
-        .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+    parsed_elements.sort_by_cached_key(|element: &osm_parser::ProcessedElement| {
+        osm_parser::get_priority(element)
+    });
     bench.mark("sort_priority");
 
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.

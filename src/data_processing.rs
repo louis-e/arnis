@@ -25,7 +25,7 @@ use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 /// Generation options that can be passed separately from CLI Args
@@ -201,6 +201,67 @@ fn release_finished_fills(
     }
 }
 
+/// Fill ids each tile can read, and how many tiles read each one. A tile reads the fills of
+/// its ways, of its relations' members, and of their building-part siblings, which
+/// `get_cached` serves with no recompute fallback, so none of them may be missed.
+fn tile_fill_readers(
+    tile_assignments: &[Vec<usize>],
+    elements: &[ProcessedElement],
+    part_groups: &PartGroups,
+    group_members: &FnvHashMap<u64, Vec<u64>>,
+    cached: impl Fn(u64) -> bool,
+) -> (Vec<Vec<u64>>, FnvHashMap<u64, AtomicU32>) {
+    let tile_fill_ids: Vec<Vec<u64>> = tile_assignments
+        .iter()
+        .map(|elems| {
+            let mut ids: Vec<u64> = Vec::new();
+            let mut add = |id: u64| {
+                ids.push(id);
+                for seed in [part_groups.get(&id).copied().unwrap_or(id), id] {
+                    let key = crate::osm_parser::seed_without_hint(seed);
+                    if let Some(members) = group_members.get(&key) {
+                        ids.extend_from_slice(members);
+                    }
+                }
+            };
+            for &idx in elems {
+                match &elements[idx] {
+                    ProcessedElement::Way(way) => add(way.id),
+                    ProcessedElement::Relation(rel) => {
+                        add(rel.id);
+                        for member in &rel.members {
+                            add(member.way.id);
+                        }
+                    }
+                    ProcessedElement::Node(_) => {}
+                }
+            }
+            ids.retain(|&id| cached(id));
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        })
+        .collect();
+    let mut counts: FnvHashMap<u64, u32> = FnvHashMap::default();
+    for &id in tile_fill_ids.iter().flatten() {
+        *counts.entry(id).or_default() += 1;
+    }
+    let readers = counts
+        .into_iter()
+        .map(|(id, n)| (id, AtomicU32::new(n)))
+        .collect();
+    (tile_fill_ids, readers)
+}
+
+/// Drops one finished tile's hold on its fills, freeing each fill it was the last to read.
+fn release_tile_fills(ids: &[u64], readers: &FnvHashMap<u64, AtomicU32>, cache: &FloodFillCache) {
+    for id in ids {
+        if readers[id].fetch_sub(1, Ordering::AcqRel) == 1 {
+            cache.release(*id);
+        }
+    }
+}
+
 /// Process a single element by dispatching to the appropriate element processor.
 ///
 /// Extracted from the main loop so the same dispatch runs in both the sequential
@@ -209,7 +270,7 @@ fn release_finished_fills(
 /// mutable state is the per-tile `editor` and `rail_tunnel_points`.
 ///
 /// Element suppression (3D-model / building-outline) and flood-fill cache
-/// eviction are handled by the caller; the cache is shared immutably in the
+/// eviction are handled by the caller; the cache is shared across tiles in the
 /// parallel path and must not be mutated here.
 #[allow(clippy::too_many_arguments)]
 fn process_element(
@@ -1001,6 +1062,14 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
+        let (tile_fill_ids, fill_readers) = tile_fill_readers(
+            &tile_assignments,
+            &elements,
+            &part_groups,
+            &group_members,
+            |id| flood_fill_cache.contains(id),
+        );
+
         // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
         // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
         // are kept via region deferral.
@@ -1168,6 +1237,8 @@ pub fn generate_world_with_options(
                     &still_surfaces,
                 );
             }
+
+            release_tile_fills(&tile_fill_ids[tile_idx], &fill_readers, &flood_fill_cache);
 
             // Per-tile ground + ore + ESA-water over strict bounds (parallel);
             // neighbour reads use the editor halo from intersection assignment.
@@ -1540,7 +1611,7 @@ pub fn generate_world_with_options(
             );
 
             // Release flood fill cache entries for memory optimization.
-            // (Skipped in the parallel path where the cache is shared immutably.)
+            // (The parallel path releases per tile instead.)
             release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
             // Element is dropped here, freeing its memory immediately.
         }
@@ -1951,6 +2022,87 @@ mod tests {
                 way: Arc::new(square(id + 1000, size, &[])),
             }],
         })
+    }
+
+    fn building(id: u64) -> ProcessedElement {
+        way(id, 10, &[("building", "yes")])
+    }
+
+    /// Releases tiles in order and reports, after each, which of `watch` are still cached.
+    fn release_in_order(
+        elements: &[ProcessedElement],
+        assignments: &[Vec<usize>],
+        part_groups: &PartGroups,
+        group_members: &FnvHashMap<u64, Vec<u64>>,
+        watch: &[u64],
+    ) -> Vec<Vec<bool>> {
+        let cache = FloodFillCache::precompute(elements, None);
+        let (tile_ids, readers) =
+            tile_fill_readers(assignments, elements, part_groups, group_members, |id| {
+                cache.contains(id)
+            });
+        (0..assignments.len())
+            .map(|t| {
+                release_tile_fills(&tile_ids[t], &readers, &cache);
+                watch
+                    .iter()
+                    .map(|&id| cache.get_cached(id).is_some())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fill_shared_by_tiles_survives_until_last_tile() {
+        let elements = vec![building(1), building(2)];
+        let states = release_in_order(
+            &elements,
+            &[vec![0, 1], vec![0], vec![]],
+            &PartGroups::new(),
+            &FnvHashMap::default(),
+            &[1, 2],
+        );
+        assert_eq!(
+            states,
+            vec![vec![true, false], vec![false, false], vec![false, false]]
+        );
+    }
+
+    #[test]
+    fn relation_member_fill_counts_the_relation_tile() {
+        // Way 1001 is both its own element and the relation's outer member.
+        let mut member = building(1001);
+        let rel = relation(1, 10, &[("type", "multipolygon"), ("landuse", "grass")]);
+        if let (ProcessedElement::Way(w), ProcessedElement::Relation(r)) = (&mut member, &rel) {
+            w.nodes = r.members[0].way.nodes.clone();
+        }
+        let elements = vec![member, rel];
+        let states = release_in_order(
+            &elements,
+            &[vec![0], vec![1]],
+            &PartGroups::new(),
+            &FnvHashMap::default(),
+            &[1001],
+        );
+        assert_eq!(states, vec![vec![true], vec![false]]);
+    }
+
+    #[test]
+    fn part_sibling_fill_waits_for_every_sibling_tile() {
+        // Parts 10 and 11 of one building in different tiles each read the other's fill.
+        let seed = 77u64;
+        let part_groups: PartGroups = [(10, seed), (11, seed)].into_iter().collect();
+        let mut group_members: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+        group_members.insert(crate::osm_parser::seed_without_hint(seed), vec![10, 11]);
+        let elements = vec![building(10), building(11)];
+        let states = release_in_order(
+            &elements,
+            &[vec![0], vec![1]],
+            &part_groups,
+            &group_members,
+            &[10, 11],
+        );
+        assert_eq!(states, vec![vec![true, true], vec![false, false]]);
     }
 
     fn ids(elements: &[ProcessedElement]) -> Vec<u64> {
