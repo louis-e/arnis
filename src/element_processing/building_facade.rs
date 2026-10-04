@@ -7,6 +7,7 @@ use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::bresenham::bresenham_line;
 use crate::element_processing::buildings::{compute_outward_normal, outward_side};
+use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::ProcessedWay;
 
@@ -62,6 +63,8 @@ pub struct BuildingContext<'a> {
     pub building_footprints: &'a CoordinateBitmap,
     /// group_seed -> sorted member way ids; only groups with >= 2 members.
     pub group_members: &'a FnvHashMap<u64, Vec<u64>>,
+    /// Tenants and surrounding areas per building, for interiors.
+    pub interior_uses: &'a InteriorUseIndex,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -430,6 +433,7 @@ mod tests {
                 road_mask: road,
                 building_footprints: footprints,
                 group_members: &self.groups,
+                interior_uses: InteriorUseIndex::empty(),
             }
         }
     }

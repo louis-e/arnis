@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::building_facade::BuildingContext;
+use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::element_processing::*;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::ground::Ground;
@@ -297,6 +298,7 @@ fn process_element(
     part_groups: &PartGroups,
     group_members: &FnvHashMap<u64, Vec<u64>>,
     still_surfaces: &water_areas::StillWaterSurfaces,
+    interior_uses: &InteriorUseIndex,
 ) {
     let signage = editor.signage_enabled();
     match element {
@@ -324,6 +326,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    interior_uses,
                 };
                 let anchor =
                     buildings::generate_buildings(editor, way, args, None, None, &ctx, group_seed);
@@ -503,6 +506,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
             } else if rel.tags.contains_key("water")
@@ -911,6 +915,13 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
+    // Tenants and surrounding areas per building, for interiors furnished by use.
+    let interior_uses = if args.interior {
+        InteriorUseIndex::build(&elements, &clip_bbox)
+    } else {
+        InteriorUseIndex::default()
+    };
+
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
     let building_passages =
@@ -1235,6 +1246,7 @@ pub fn generate_world_with_options(
                     &part_groups,
                     &group_members,
                     &still_surfaces,
+                    &interior_uses,
                 );
             }
 
@@ -1608,6 +1620,7 @@ pub fn generate_world_with_options(
                 &part_groups,
                 &group_members,
                 &still_surfaces,
+                &interior_uses,
             );
 
             // Release flood fill cache entries for memory optimization.
