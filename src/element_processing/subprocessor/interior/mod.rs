@@ -172,7 +172,7 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
                     furnish(&mut c, zone, unit.use_, &ctx);
                 }
                 c.focus(0);
-                c.light_up(req.floor_block);
+                c.light_up(req.floor_block, req.floor_levels.get(i + 1).is_some());
             }
         }
         // A ladder up through the ceiling to the next storey.
@@ -1518,5 +1518,25 @@ mod tests {
             over_cafe,
             "the hall furnishes its upper floor above the pavilion"
         );
+    }
+
+    #[test]
+    fn flat_roofs_keep_their_lights_inside() {
+        // Heights that leave a low top storey under a roof laid in the floor block.
+        let mut id = 40;
+        for height in ["7", "8", "12", "13"] {
+            for building in ["office", "apartments", "yes"] {
+                id += 1;
+                let tags = [("building", building), ("height", height)];
+                let (xz, elements) = one(sized(id, 24, 18, &tags), vec![]);
+                let editor = build(&xz, &elements);
+                let way = way_of(&elements);
+                let roof = *floor_rows(&editor, way, 20).last().unwrap();
+                assert!(
+                    !has(&blocks_at(&editor, way, roof), GLOWSTONE),
+                    "{tags:?}: glowstone in the roof at {roof}"
+                );
+            }
+        }
     }
 }
