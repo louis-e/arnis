@@ -2341,6 +2341,7 @@ function handleBboxInput() {
     if (input === "") {
       // Empty input - revert to map selection if available
       customBBoxValid = false;
+      bboxInputError = false;
       selectedBBox = mapSelectedBBox;
       
       // Clear the info text only if no map selection exists
@@ -2394,6 +2395,7 @@ function handleBboxInput() {
 
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
+        bboxInputError = false;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
 
@@ -2410,6 +2412,7 @@ function handleBboxInput() {
         } else {
           selectedBBox = mapSelectedBBox;
         }
+        bboxInputError = true;
         setBboxSelectionInfo(bboxSelectionInfo, "error_coordinates_out_of_range", "#fecc44");
       }
     } else {
@@ -2421,6 +2424,7 @@ function handleBboxInput() {
       } else {
         selectedBBox = mapSelectedBBox;
       }
+      bboxInputError = true;
       setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
     // The Precompute button next to this field turns on the selection, and the
@@ -2442,23 +2446,12 @@ function handleBboxInput() {
 const BODY_RADIUS_M = { earth: 6371000, moon: 1737400, mars: 3396000 };
 
 function calculateBBoxSize(lat1, lng1, lat2, lng2) {
-  // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
   // Real ground, not an Earth-sized overestimate: a lunar box reads 13x too large.
   const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
-
-  const latDistance = toRad(lat2 - lat1);
-  const lngDistance = toRad(lng2 - lng1);
-
-  const a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(lngDistance / 2) * Math.sin(lngDistance / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  // Width and height of the box
-  const height = R * latDistance;
-  const width = R * lngDistance;
-
+  // Width at the middle latitude, as the world is built and as the CLI's area_km2 measures.
+  const height = R * toRad(lat2 - lat1);
+  const width = R * toRad(lng2 - lng1) * Math.cos(toRad((lat1 + lat2) / 2));
   return Math.abs(width * height);
 }
 
@@ -2489,6 +2482,7 @@ const AREA_THRESHOLDS = {
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
+let bboxInputError = false;  // The coordinate field holds input that did not validate
 
 /**
  * Displays the appropriate bbox size status message based on area thresholds
@@ -2518,7 +2512,8 @@ function earthScaleFactor() {
 
 // Re-runs the size status, e.g. after a body switch or scale change moves the tier.
 function refreshBboxSelectionInfo() {
-  if (!mapSelectedBBox) return;
+  // An error about the typed coordinates stays until the field is fixed.
+  if (!mapSelectedBBox || bboxInputError) return;
   const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
   displayBboxSizeStatus(
     document.getElementById("bbox-selection-info"),
@@ -2547,6 +2542,7 @@ function displayBboxInfoText(bboxText) {
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
+  bboxInputError = false;
 
   // Reset rotation when bbox changes
   if (typeof window.updateRotation === 'function') {
