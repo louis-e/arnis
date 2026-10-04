@@ -15,23 +15,20 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Override per run with `--osm-tiles-url`. Reads AOT1 and AOT2 archives alike, so a re-bake is
-/// published here under new dated filenames and switched to by archives.json, with no release.
+/// Reads AOT1 and AOT2 alike, so a re-bake is swapped in here via archives.json without a release.
 pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnisproject.com/v1";
 
 /// Archive zoom. Must match `arnis-tiles`; a mismatch means every lookup misses.
 const ZOOM: u8 = 13;
 
-/// Degrees per coordinate unit, OSM's own precision. AOT2 stores exactly this; AOT1 stored 1e-6
-/// and is scaled up on read.
+/// Degrees per coordinate unit, OSM's own 1e-7; AOT1's 1e-6 is scaled up on read.
 const COORD_SCALE: f64 = 1e7;
 
 /// Base of the ids packed from way vertex coordinates, below the clipper's invented ids.
 const SYNTHETIC_ID_BASE: u64 = 1 << 61;
 
-/// Same coordinate, same id in every bbox; facade walls match on it. Latitude is packed whole
-/// and longitude modulo 2^30 units (107 degrees): 1e-7 needs 63 bits for the globe, and two
-/// coordinates over 100 degrees apart never meet in one bbox.
+/// Same coordinate, same id in every bbox; facade walls match on it. Longitude wraps every 107
+/// degrees, since the globe at 1e-7 needs 63 bits and no bbox is that wide.
 fn coordinate_node_id((lat, lon): (i32, i32)) -> u64 {
     let lat = (i64::from(lat) + MAX_LAT_E7) as u64;
     let lon = i64::from(lon).rem_euclid(1 << 30) as u64;
@@ -52,12 +49,11 @@ const CELL_ZOOM: u8 = 6;
 const MAX_LAT_E7: i64 = 900_000_000;
 const MAX_LON_E7: i64 = 1_800_000_000;
 
-/// Whole relations sit at this tile id plus the relation id: the first zoom 20 id, past every
-/// zoom 13 tile the archive holds.
+/// Whole relations sit at this tile id plus the relation id (the first zoom 20 id).
 const RELATION_TILE_BASE: u64 = ((1 << 40) - 1) / 3;
 
 /// A whole relation larger than this on the wire stays partial rather than being fetched.
-const MAX_RECORD_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Per-kind record cap. Far above a real tile; stops a corrupt one from outgrowing its payload.
 const MAX_RECORDS: u64 = 1 << 24;
@@ -189,8 +185,7 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
     Ok(parsed)
 }
 
-/// Drops the cache of every archive the index no longer lists. Archive files are immutable and
-/// a re-bake publishes new ones, so the old caches would otherwise pile up until a manual clear.
+/// Deletes caches of archives the index no longer lists; a re-bake publishes new files.
 fn prune_stale(dir: &std::path::Path, keep: &HashSet<&str>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -280,6 +275,8 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
     // Relation id -> the opened archives whose tiles carried it.
     let mut seen_in: HashMap<u64, Vec<usize>> = HashMap::new();
     let mut opened: Vec<Archive> = Vec::new();
+    // Only AOT2 archives hold whole relations; AOT1 ones are not searched for them.
+    let mut aot2: Vec<bool> = Vec::new();
     for entry in manifest.archives.iter().filter(|a| a.covers(&cells, &bbox)) {
         if !entry.file_is_safe() {
             return Err(format!(
@@ -308,12 +305,14 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
             .collect();
 
         let k = opened.len();
+        let mut is_aot2 = false;
         for entry in fetched {
             let (on_wire, plain) = entry?;
             if plain.is_empty() {
                 continue;
             }
             bytes += on_wire;
+            is_aot2 |= plain.starts_with(b"AOT2");
             let tile = decode(&plain)?;
             for r in &tile.relations {
                 let list = seen_in.entry(r.0).or_default();
@@ -325,15 +324,15 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
             tiles_read += 1;
         }
         opened.push(archive);
+        aot2.push(is_aot2);
     }
 
     if tiles_read == 0 {
         return Err("the tile archive has no data for this area".into());
     }
 
-    // A tile only holds the members that touch it, so a lake reaching past the bbox's tiles
-    // arrives as a few shore pieces; Overpass returned every member. Whole relations are
-    // stored once per archive, and fetched for the ones this bbox actually uses.
+    // A tile only holds the members touching it, so a lake arrives as a few shore pieces;
+    // fetch the whole relation for those the bbox uses, as Overpass returned them.
     let area = Extent::around(&bbox);
     let partial: Vec<u64> = collected
         .relations
@@ -350,17 +349,23 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
         .map(|(id, _)| *id)
         .collect();
     let mut records = 0usize;
+    let mut skipped: Vec<String> = Vec::new();
     for (k, archive) in opened.iter_mut().enumerate() {
+        if !aot2[k] {
+            continue;
+        }
         let mut located = Vec::new();
         for rid in &partial {
             if !seen_in.get(rid).is_some_and(|l| l.contains(&k)) {
                 continue;
             }
             let id = RELATION_TILE_BASE + rid;
-            if let Some(loc) = archive.locate_id(&client, id)? {
-                if u64::from(loc.length) <= MAX_RECORD_BYTES {
+            match archive.locate_id(&client, id) {
+                Ok(Some(loc)) if u64::from(loc.length) <= MAX_RECORD_BYTES => {
                     located.push((id, loc));
                 }
+                Ok(_) => {}
+                Err(e) => skipped.push(e),
             }
         }
         let archive = &*archive;
@@ -371,18 +376,36 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
                 unpack(raw, &format!("relation {}", id - RELATION_TILE_BASE))
             })
             .collect();
+        // Best effort: one bad or oversized record must not send the whole area to Overpass.
         for entry in fetched {
-            let (on_wire, plain) = entry?;
-            if plain.is_empty() {
-                continue;
+            match entry.and_then(|(on_wire, plain)| {
+                Ok((
+                    on_wire,
+                    (!plain.is_empty()).then(|| decode(&plain)).transpose()?,
+                ))
+            }) {
+                Ok((_, None)) => {}
+                Ok((on_wire, Some(tile))) => {
+                    bytes += on_wire;
+                    absorb(tile, &mut collected);
+                    records += 1;
+                }
+                Err(e) => skipped.push(e),
             }
-            bytes += on_wire;
-            absorb(decode(&plain)?, &mut collected);
-            records += 1;
         }
     }
     if records > 0 {
         println!("Completed {records} relations that reach past the bbox's tiles");
+    }
+    if let Some(first) = skipped.first() {
+        eprintln!(
+            "{}",
+            format!(
+                "Warning: {} relations left partial ({first})",
+                skipped.len()
+            )
+            .yellow()
+        );
     }
 
     Ok((assemble(collected, &bbox), tiles_read, bytes))
@@ -1053,7 +1076,7 @@ mod tests {
         assert!(decode(b"NOPE0000").is_err());
     }
 
-    /// Covers the coordinates the tests below use (degrees x 1e6 in the tens).
+    /// Covers the coordinates the tests below use (coordinate units in the tens).
     fn test_bbox() -> LLBBox {
         LLBBox::new(0.0, 0.0, 0.001, 0.001).unwrap()
     }

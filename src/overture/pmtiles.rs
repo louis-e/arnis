@@ -555,8 +555,7 @@ impl Archive {
         decompress(self.header.tile_compression, raw, MAX_TILE_BYTES)
     }
 
-    /// [`Archive::tile`] for an entry found with [`Archive::locate_id`], capped at `max` bytes
-    /// on the wire.
+    /// [`Archive::tile`] for a [`Archive::locate_id`] entry, at most `max` bytes on the wire.
     pub fn entry(
         &self,
         client: &Client,
