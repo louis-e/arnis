@@ -179,10 +179,29 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
     if let Some(p) = &cached {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(p, &body);
+            prune_stale(
+                dir,
+                &parsed.archives.iter().map(|a| a.file.as_str()).collect(),
+            );
         }
-        let _ = std::fs::write(p, &body);
     }
     Ok(parsed)
+}
+
+/// Drops the cache of every archive the index no longer lists. Archive files are immutable and
+/// a re-bake publishes new ones, so the old caches would otherwise pile up until a manual clear.
+fn prune_stale(dir: &std::path::Path, keep: &HashSet<&str>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+        let listed = e.file_name().to_str().is_some_and(|n| keep.contains(n));
+        if is_dir && !listed {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 /// Decoded tiles for one bbox, before they become [`OsmData`].
@@ -995,6 +1014,21 @@ mod tests {
         let mut legacy = wide.clone();
         legacy.cells = Vec::new();
         assert!(legacy.covers(&wanted, &munich));
+    }
+
+    #[test]
+    fn caches_of_archives_no_longer_listed_are_dropped() {
+        let dir = std::env::temp_dir().join(format!("arnis-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["europe-20260919.pmtiles", "europe-20261018.pmtiles"] {
+            std::fs::create_dir_all(dir.join(d).join("t")).unwrap();
+        }
+        std::fs::write(dir.join("archives.json"), b"{}").unwrap();
+        prune_stale(&dir, &["europe-20261018.pmtiles"].into_iter().collect());
+        assert!(!dir.join("europe-20260919.pmtiles").exists());
+        assert!(dir.join("europe-20261018.pmtiles").exists());
+        assert!(dir.join("archives.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
