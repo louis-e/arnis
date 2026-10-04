@@ -257,6 +257,7 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
                 ("update_bit", BedrockBlockStateValue::Bool(false)),
             ],
         ),
+        "melon" => BedrockBlock::simple("melon_block"),
         "flowering_azalea_leaves" => BedrockBlock::with_states(
             "azalea_leaves_flowered",
             vec![

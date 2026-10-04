@@ -10,7 +10,9 @@ use crate::element_processing::building_facade::{
     MIN_FACADE_FOOTPRINT,
 };
 use crate::element_processing::historic;
-use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
+use crate::element_processing::subprocessor::interior::{
+    generate_building_interior, plan_interior, Entry, InteriorRequest, PlanInputs,
+};
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{
     ArchEra, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
@@ -115,6 +117,9 @@ pub(crate) struct HolePolygon {
 /// Walls and floors below this height are removed at tunnel=building_passage
 /// highway coordinates, creating a ground-level opening through the building.
 pub(crate) const BUILDING_PASSAGE_HEIGHT: i32 = 4;
+
+/// Smallest footprint, in cells, that gets an interior.
+const MIN_INTERIOR_CELLS: usize = 24;
 
 /// Accent block options for building decoration
 const ACCENT_BLOCK_OPTIONS: [Block; 6] = [
@@ -3348,6 +3353,113 @@ fn plan_synthetic_entrance(
         canopy,
         lantern,
     })
+}
+
+/// A street door for each unit of a shared ground floor that has none, on the wall
+/// in front of the unit nearest its anchor.
+fn plan_unit_entrances(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    facade: &FacadePlan,
+    building_passages: &CoordinateBitmap,
+    group_seed: u64,
+    anchors: &[(i32, i32)],
+    existing: &[EntrancePlan],
+) -> Vec<EntrancePlan> {
+    if !config.is_ground_level
+        || config.has_garage_door
+        || config.has_single_door
+        || matches!(
+            config.condition,
+            BuildingCondition::Construction | BuildingCondition::Ruined
+        )
+        || facade.segments.is_empty()
+    {
+        return Vec::new();
+    }
+    let unit_of = |x: i32, z: i32| -> usize {
+        anchors
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, a)| {
+                let (dx, dz) = ((x - a.0) as i64, (z - a.1) as i64);
+                dx * dx + dz * dz
+            })
+            .map(|(k, _)| k)
+            .unwrap_or(0)
+    };
+    let mut doors: Vec<(i32, i32)> = existing.iter().map(|p| (p.x, p.z)).collect();
+    let mut served = vec![false; anchors.len()];
+    for p in existing {
+        served[unit_of(p.x - p.normal.0, p.z - p.normal.1)] = true;
+    }
+    let style = door_style_for(config.category, config.wall_block, group_seed);
+    let mut out = Vec::new();
+    for (unit, anchor) in anchors.iter().enumerate() {
+        if served[unit] {
+            continue;
+        }
+        // Street walls first, then the nearest column to the anchor.
+        // (wall rank, distance squared), door column, segment.
+        type Pick = ((u8, i64), (i32, i32), usize);
+        let mut best: Option<Pick> = None;
+        for (i, seg) in facade.segments.iter().enumerate() {
+            let Some(seg) = seg else {
+                continue;
+            };
+            let rank = match seg.class {
+                FacadeClass::Street => 0,
+                FacadeClass::Open => 1,
+                FacadeClass::Rear => 2,
+                FacadeClass::Party => continue,
+            };
+            let (Some(a), Some(b)) = (element.nodes.get(i), element.nodes.get(i + 1)) else {
+                continue;
+            };
+            let points: Vec<(i32, i32)> = bresenham_line(a.x, 0, a.z, b.x, 0, b.z)
+                .into_iter()
+                .map(|(x, _, z)| (x, z))
+                .collect();
+            if seg.len < 4 || points.len() < 5 {
+                continue;
+            }
+            for &(x, z) in &points[2..points.len() - 2] {
+                if building_passages.contains(x, z) || facade.is_party(x, z) {
+                    continue;
+                }
+                if unit_of(x - seg.normal.0, z - seg.normal.1) != unit {
+                    continue;
+                }
+                if doors
+                    .iter()
+                    .any(|&(dx, dz)| (dx - x).abs() + (dz - z).abs() < 3)
+                {
+                    continue;
+                }
+                let d = ((x - anchor.0) as i64).pow(2) + ((z - anchor.1) as i64).pow(2);
+                if best.as_ref().is_none_or(|(k, _, _)| (rank, d) < *k) {
+                    best = Some(((rank, d), (x, z), i));
+                }
+            }
+        }
+        if let Some((_, (x, z), i)) = best {
+            let Some(seg) = facade.segments[i].as_ref() else {
+                continue;
+            };
+            doors.push((x, z));
+            out.push(EntrancePlan {
+                x,
+                z,
+                normal: seg.normal,
+                tangent: seg.tangent,
+                double: false,
+                style,
+                canopy: false,
+                lantern: false,
+            });
+        }
+    }
+    out
 }
 
 /// Oriented, styled doors at mapped entrance/door nodes on the outline,
@@ -7016,6 +7128,7 @@ fn generate_floors_and_ceilings(
     config: &BuildingConfig,
     generate_non_flat_roof: bool,
     building_passages: &CoordinateBitmap,
+    open_hall: bool,
 ) -> HashSet<(i32, i32)> {
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let ceiling_light_block = if config.is_abandoned_building {
@@ -7046,12 +7159,14 @@ fn generate_floors_and_ceilings(
             );
         }
 
-        // Set intermediate ceilings with light fixtures
-        if config.building_height > config.floor_cycle {
-            for h in (config.start_y_offset + config.grammar_anchor() + config.floor_cycle
-                ..config.start_y_offset + config.building_height)
+        // Set intermediate ceilings with light fixtures; a furnished hall is one room
+        let top = config.start_y_offset + config.building_height;
+        let mut top_floor = config.start_y_offset;
+        if config.building_height > config.floor_cycle && !open_hall {
+            for h in (config.start_y_offset + config.grammar_anchor() + config.floor_cycle..top)
                 .step_by(config.floor_cycle as usize)
             {
+                top_floor = h;
                 // Skip intermediate ceilings below passage opening
                 if is_passage && h <= config.start_y_offset + passage_height {
                     continue;
@@ -7064,12 +7179,19 @@ fn generate_floors_and_ceilings(
                 };
                 editor.set_block_absolute(block, x, h + config.abs_terrain_offset, z, None, None);
             }
-        } else if x % 3 == 0 && z % 3 == 0 && !is_passage {
-            // Single floor building with ceiling light (skip in passage)
+        }
+        // The top storey has no slab above for lights, so they hang in its top row.
+        let top_headroom = top - top_floor;
+        let under_passage = is_passage && top <= config.start_y_offset + passage_height;
+        if x % 3 == 0
+            && z % 3 == 0
+            && !under_passage
+            && (top_headroom >= 3 || top_floor == config.start_y_offset)
+        {
             editor.set_block_absolute(
                 ceiling_light_block,
                 x,
-                config.start_y_offset + config.building_height + config.abs_terrain_offset,
+                top + config.abs_terrain_offset,
                 z,
                 None,
                 None,
@@ -7806,6 +7928,62 @@ pub fn generate_buildings(
         None => effective_building_height,
     };
 
+    // Interior uses per storey, planned before doors and floors: shared shop floors
+    // get a door per shop, open halls lose their storey ceilings.
+    let storey_levels = calculate_floor_levels(
+        start_y_offset,
+        effective_building_height,
+        config.floor_cycle,
+        config.grammar_anchor(),
+    );
+    let interior_plan = (args.interior
+        && cached_floor_area.len() >= MIN_INTERIOR_CELLS
+        && !matches!(
+            building_type,
+            "garage"
+                | "garages"
+                | "carport"
+                | "shed"
+                | "parking"
+                | "roof"
+                | "bridge"
+                | "greenhouse"
+                | "glasshouse"
+                | "silo"
+                | "storage_tank"
+                | "transformer_tower"
+                | "water_tower"
+                | "service"
+                | "toilets"
+                | "bunker"
+                | "container"
+                | "outbuilding"
+                | "allotment_house"
+                | "boathouse"
+                | "pavilion"
+        )
+        && !matches!(
+            config.condition,
+            BuildingCondition::Construction | BuildingCondition::Ruined
+        ))
+    .then(|| {
+        plan_interior(&PlanInputs {
+            tags: &element.tags,
+            building_type,
+            floors: storey_levels.len(),
+            min_level,
+            elevated: !config.is_ground_level,
+            footprint: cached_floor_area.len(),
+            center: (
+                (bounds.min_x + bounds.max_x) / 2,
+                (bounds.min_z + bounds.max_z) / 2,
+            ),
+            tenants: ctx.interior_uses.tenants(element.id),
+            area: ctx.interior_uses.area(element.id),
+        })
+    });
+    let open_hall = interior_plan.as_ref().is_some_and(|p| p.open_hall);
+
     // Entrances are planned before the decoration passes so their columns
     // stay clear of shutters, sills and pilasters.
     let mut entrance_plans = plan_mapped_entrances(element, &config, &facade, group_seed);
@@ -7815,6 +7993,24 @@ pub fn generate_buildings(
         {
             entrance_plans.push(plan);
         }
+    }
+    // Shops sharing the ground floor each get a street door of their own.
+    if let Some(units) = interior_plan
+        .as_ref()
+        .and_then(|p| p.floors.first())
+        .filter(|units| units.len() >= 2)
+    {
+        let anchors: Vec<(i32, i32)> = units.iter().map(|u| u.anchor).collect();
+        let extra = plan_unit_entrances(
+            element,
+            &config,
+            &facade,
+            effective_passages,
+            group_seed,
+            &anchors,
+            &entrance_plans,
+        );
+        entrance_plans.extend(extra);
     }
     for plan in &entrance_plans {
         let leaves = if plan.double { 2 } else { 1 };
@@ -7927,6 +8123,7 @@ pub fn generate_buildings(
             &config,
             style.generate_roof,
             effective_passages,
+            open_hall,
         );
 
         // Build tunnel side walls: for each interior coordinate that borders a
@@ -7956,39 +8153,49 @@ pub fn generate_buildings(
         }
 
         // Generate interior features
-        if args.interior {
-            let skip_interior = matches!(
-                building_type,
-                "garage" | "shed" | "parking" | "roof" | "bridge"
-            ) || matches!(
-                config.condition,
-                BuildingCondition::Construction | BuildingCondition::Ruined
-            );
-
-            if !skip_interior && cached_floor_area.len() > 100 {
-                let floor_levels = calculate_floor_levels(
+        if let Some(plan) = &interior_plan {
+            let floor_levels = if open_hall {
+                vec![start_y_offset]
+            } else {
+                storey_levels
+            };
+            // The cell inside each leaf of every ground-level door.
+            let entrances: Vec<Entry> = if config.is_ground_level {
+                entrance_plans
+                    .iter()
+                    .flat_map(|p| {
+                        let leaves = if p.double { 2 } else { 1 };
+                        (0..leaves).map(move |t| Entry {
+                            cell: (
+                                p.x + p.tangent.0 * t - p.normal.0,
+                                p.z + p.tangent.1 * t - p.normal.1,
+                            ),
+                            inward: (-p.normal.0, -p.normal.1),
+                        })
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            generate_building_interior(
+                editor,
+                &InteriorRequest {
+                    footprint: &cached_floor_area,
+                    floor_levels: &floor_levels,
                     start_y_offset,
-                    effective_building_height,
-                    config.floor_cycle,
-                    config.grammar_anchor(),
-                );
-                generate_building_interior(
-                    editor,
-                    &cached_floor_area,
-                    bounds.min_x,
-                    bounds.min_z,
-                    bounds.max_x,
-                    bounds.max_z,
-                    start_y_offset,
-                    effective_building_height,
-                    style.wall_block,
-                    &floor_levels,
+                    building_height: effective_building_height,
                     abs_terrain_offset,
-                    is_abandoned_building,
-                    effective_passages,
-                    has_sloped_roof,
-                );
-            }
+                    wall_block: style.wall_block,
+                    plan,
+                    abandoned: is_abandoned_building,
+                    passages: effective_passages,
+                    entrances: &entrances,
+                    bounds: ((bounds.min_x, bounds.min_z), (bounds.max_x, bounds.max_z)),
+                    claims: ctx.interior_uses.claims(element.id),
+                    floor_block: config.floor_block,
+                    seed: group_seed,
+                },
+            );
         }
     }
 
@@ -13240,6 +13447,8 @@ mod facade_integration_tests {
             road_mask: road,
             building_footprints: footprints,
             group_members: &groups,
+            interior_uses:
+                crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
         generate_buildings(editor, way, args, None, None, &ctx, way.id);
     }
@@ -13708,6 +13917,8 @@ mod facade_integration_tests {
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &groups,
+                interior_uses:
+                    crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
             };
             generate_buildings(editor, &way, &args, None, Some(&hole), &ctx, way.id);
         };
@@ -13864,6 +14075,8 @@ mod facade_dump {
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &groups,
+                interior_uses:
+                    crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
             };
             generate_buildings(&mut editor, &way, &args, None, None, &ctx, way.id);
 
@@ -14015,6 +14228,8 @@ mod doorstep_tests {
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
+            interior_uses:
+                crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
         generate_buildings(&mut editor, &way, &args, None, None, &ctx, way.id);
 

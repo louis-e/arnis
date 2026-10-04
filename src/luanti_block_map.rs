@@ -777,6 +777,12 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         478 => "mcl_core:snow_6",
         479 => "mcl_core:snow_7",
         480 => "mcl_trees:leaves_azalea",
+        481 => "mcl_beds:bed_white_bottom",
+        482 => "mcl_lectern:lectern",
+        483 => "mcl_cake:cake",
+        484 => "mcl_farming:melon",
+        485 => "mcl_loom:loom",
+        486 => "mcl_smithing_table:table",
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

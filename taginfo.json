@@ -1168,7 +1168,27 @@
         },
         {
             "key": "level",
-            "description": "Used to handle building levels and elevation. Negative values are ignored."
+            "description": "Used to handle building levels and elevation, and to place shops, offices and practices on their storey when interiors are generated. Negative values are ignored."
+        },
+        {
+            "key": "shop",
+            "description": "Used to furnish the storey or unit a shop occupies when interiors are generated, with shelving, counters and wares matching what it sells."
+        },
+        {
+            "key": "office",
+            "description": "Used to furnish offices with desks, a reception and meeting rooms when interiors are generated."
+        },
+        {
+            "key": "craft",
+            "description": "Used to furnish workshops with workbenches and tools when interiors are generated."
+        },
+        {
+            "key": "healthcare",
+            "description": "Used to furnish practices with reception, waiting area and treatment rooms when interiors are generated."
+        },
+        {
+            "key": "religion",
+            "description": "Used to choose between pews and prayer carpets when furnishing places of worship."
         }
     ]
 }
