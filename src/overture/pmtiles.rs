@@ -459,7 +459,11 @@ impl Archive {
         x: u32,
         y: u32,
     ) -> Result<Option<TileLocation>> {
-        let tile_id = zxy_to_tile_id(z, x, y)?;
+        self.locate_id(client, zxy_to_tile_id(z, x, y)?)
+    }
+
+    /// [`Archive::locate`] by raw tile id, for entries that are not map tiles.
+    pub fn locate_id(&mut self, client: &Client, tile_id: u64) -> Result<Option<TileLocation>> {
         let mut entries: &[Entry] = &self.root;
         // Owned storage for a leaf that was just read, so the borrow above can
         // be rebound to it.
@@ -547,6 +551,31 @@ impl Archive {
                 .join(x.to_string())
                 .join(format!("{y}.bin"))
         });
+        let raw = self.read_cached(client, location.offset, u64::from(location.length), path)?;
+        decompress(self.header.tile_compression, raw, MAX_TILE_BYTES)
+    }
+
+    /// [`Archive::tile`] for a [`Archive::locate_id`] entry, at most `max` bytes on the wire.
+    pub fn entry(
+        &self,
+        client: &Client,
+        tile_id: u64,
+        location: TileLocation,
+        max: u64,
+    ) -> Result<Vec<u8>> {
+        if location.length == 0 {
+            return Ok(Vec::new());
+        }
+        if u64::from(location.length) > max {
+            return Err(format!(
+                "entry {tile_id} claims {} bytes, past the {max} cap",
+                location.length
+            ));
+        }
+        let path = self
+            .cache_dir
+            .as_ref()
+            .map(|d| d.join("id").join(format!("{tile_id}.bin")));
         let raw = self.read_cached(client, location.offset, u64::from(location.length), path)?;
         decompress(self.header.tile_compression, raw, MAX_TILE_BYTES)
     }

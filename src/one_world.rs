@@ -3,7 +3,7 @@
 //! The world pins a Web Mercator frame (origin and scale in the manifest next
 //! to `level.dat`). Every requested area is snapped outward to whole chunks in
 //! that frame and written into the existing region files, so areas generated
-//! at different times line up block for block. See `docs/one_world.md`.
+//! at different times line up block for block.
 
 use crate::args::Args;
 use crate::coordinate_system::cartesian::XZBBox;

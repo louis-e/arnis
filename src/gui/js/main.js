@@ -1202,6 +1202,7 @@ function initSettings() {
   }
 
   slider.addEventListener("input", refreshScaleDisplay);
+  slider.addEventListener("input", refreshBboxSelectionInfo);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -2340,6 +2341,7 @@ function handleBboxInput() {
     if (input === "") {
       // Empty input - revert to map selection if available
       customBBoxValid = false;
+      bboxInputError = false;
       selectedBBox = mapSelectedBBox;
       
       // Clear the info text only if no map selection exists
@@ -2393,6 +2395,7 @@ function handleBboxInput() {
 
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
+        bboxInputError = false;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
 
@@ -2409,6 +2412,7 @@ function handleBboxInput() {
         } else {
           selectedBBox = mapSelectedBBox;
         }
+        bboxInputError = true;
         setBboxSelectionInfo(bboxSelectionInfo, "error_coordinates_out_of_range", "#fecc44");
       }
     } else {
@@ -2420,6 +2424,7 @@ function handleBboxInput() {
       } else {
         selectedBBox = mapSelectedBBox;
       }
+      bboxInputError = true;
       setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
     // The Precompute button next to this field turns on the selection, and the
@@ -2441,23 +2446,12 @@ function handleBboxInput() {
 const BODY_RADIUS_M = { earth: 6371000, moon: 1737400, mars: 3396000 };
 
 function calculateBBoxSize(lat1, lng1, lat2, lng2) {
-  // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
   // Real ground, not an Earth-sized overestimate: a lunar box reads 13x too large.
   const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
-
-  const latDistance = toRad(lat2 - lat1);
-  const lngDistance = toRad(lng2 - lng1);
-
-  const a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(lngDistance / 2) * Math.sin(lngDistance / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  // Width and height of the box
-  const height = R * latDistance;
-  const width = R * lngDistance;
-
+  // Width at the middle latitude, as the world is built and as the CLI's area_km2 measures.
+  const height = R * toRad(lat2 - lat1);
+  const width = R * toRad(lng2 - lng1) * Math.cos(toRad((lat1 + lat2) / 2));
   return Math.abs(width * height);
 }
 
@@ -2470,15 +2464,17 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-// Selection-size warnings, in true square metres of ground. Measured timings and
-// world sizes, square selections:
-//   Earth 1km2 18s/19MB | 4km2 25s/70MB | 9km2 39s/154MB | 25km2 47s/415MB
+// Selection-size warnings, in square metres of ground at world scale 1. Measured
+// timings, peak memory and world sizes, square selections over central Munich:
+//   Earth 9km2 8s/1.1GB/146MB | 25km2 20s/1.7GB/399MB | 85km2 66s/3.6GB/1.3GB
+//         150km2 111s/5.1GB/2.3GB, so about 1.6GB plus 0.023GB per km2
 //   Moon  2deg 5s/4MB | 5deg 9s/16MB | 10deg 21s/36MB | 20deg 68s/144MB
 //   Mars  2deg 5s/4MB | 5deg 9s/16MB | 10deg 20s/36MB | 20deg 51s/100MB
-// Earth keeps its long-standing tiers, which guard memory more than the clock.
-// The Moon and Mars tiers land near one, three and nine minutes.
+// The Earth tiers guard memory more than the clock: about 4GB, 6GB (fine on an
+// 8GB machine) and 13GB. The Moon and Mars tiers land near one, three and nine
+// minutes.
 const AREA_THRESHOLDS = {
-  earth: { extensive: 44e6, large: 85e6, extreme: 500e6 },
+  earth: { extensive: 100e6, large: 200e6, extreme: 500e6 },
   moon: { extensive: 3e11, large: 1e12, extreme: 3e12 },
   mars: { extensive: 1.5e12, large: 5e12, extreme: 1.5e13 }
 };
@@ -2486,6 +2482,7 @@ const AREA_THRESHOLDS = {
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
+let bboxInputError = false;  // The coordinate field holds input that did not validate
 
 /**
  * Displays the appropriate bbox size status message based on area thresholds
@@ -2494,6 +2491,7 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
+  selectedSize *= earthScaleFactor();
   if (selectedSize > t.extreme) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
   } else if (selectedSize > t.large) {
@@ -2505,9 +2503,17 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   }
 }
 
-// Re-runs the size status, e.g. after a body switch changes which tiers apply.
+// Blocks, and so memory, grow with the square of the scale; Moon and Mars use a fixed one.
+function earthScaleFactor() {
+  if (selectedCelestialBody !== 'earth') return 1;
+  const s = parseFloat(document.getElementById("scale-value-slider")?.value);
+  return isFinite(s) && s > 0 ? s * s : 1;
+}
+
+// Re-runs the size status, e.g. after a body switch or scale change moves the tier.
 function refreshBboxSelectionInfo() {
-  if (!mapSelectedBBox) return;
+  // An error about the typed coordinates stays until the field is fixed.
+  if (!mapSelectedBBox || bboxInputError) return;
   const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
   displayBboxSizeStatus(
     document.getElementById("bbox-selection-info"),
@@ -2536,6 +2542,7 @@ function displayBboxInfoText(bboxText) {
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
+  bboxInputError = false;
 
   // Reset rotation when bbox changes
   if (typeof window.updateRotation === 'function') {

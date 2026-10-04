@@ -49,7 +49,7 @@ GUI Build: ```cargo run --release```<br>
 | `geo-only` | OSM objects on flat ground |
 | `terrain-only` | Real elevation terrain, no objects at all (skips the OpenStreetMap query and the Overture fetch entirely, so `--overture` has no effect) |
 
-`--one-world` generates into one persistent Java world that every later run extends (see [docs/one_world.md](docs/one_world.md)); `--output-dir` is then the saves folder and `--world-name` picks the world in it:
+`--one-world` generates into one persistent Java world that every later run extends; `--output-dir` is then the saves folder and `--world-name` picks the world in it:
 
 ```
 cargo run --release --no-default-features -- --one-world --output-dir="C:/YOUR_PATH/.minecraft/saves" --world-name="My City" --bbox="min_lat,min_lng,max_lat,max_lng"
