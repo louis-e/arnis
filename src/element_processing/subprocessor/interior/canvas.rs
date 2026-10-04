@@ -559,8 +559,14 @@ impl<'e, 'w> Canvas<'e, 'w> {
 
     /// Chandeliers in tall rooms, and a light wherever a room has none nearby.
     /// Each cell decides from its own neighbourhood, so tiles agree.
-    pub fn light_up(&mut self, slab: Block) {
+    pub fn light_up(&mut self, slab: Block, slab_above: bool) {
         let headroom = self.headroom();
+        // Low rooms sink lights into a slab, under the roof into their own floor.
+        let sunk = if slab_above {
+            self.top + 1
+        } else {
+            self.floor_y
+        };
         let open: Vec<(i32, i32)> = self
             .cells_all()
             .into_iter()
@@ -573,7 +579,7 @@ impl<'e, 'w> Canvas<'e, 'w> {
             .iter()
             .copied()
             .filter(|&(x, z)| {
-                [self.top, self.top + 1].iter().any(|&y| {
+                [self.top, sunk].iter().any(|&y| {
                     self.editor
                         .get_block_absolute(x, y, z)
                         .is_some_and(is_light)
@@ -627,7 +633,7 @@ impl<'e, 'w> Canvas<'e, 'w> {
                     .set_block_absolute(GLOWSTONE, x, self.top, z, None, None);
             } else {
                 self.editor
-                    .set_block_absolute(GLOWSTONE, x, self.top + 1, z, Some(&[slab]), None);
+                    .set_block_absolute(GLOWSTONE, x, sunk, z, Some(&[slab]), None);
             }
         }
     }
