@@ -2,10 +2,13 @@
 //! lines stop short of a crossing carriageway, stop and give-way lines, and pedestrian
 //! crossings painted across the road.
 
+use crate::block_definitions::Block;
 use crate::bresenham::bresenham_line;
 use crate::clipping::is_invented_node_id;
 use crate::decals::region::SignRegion;
-use crate::element_processing::highways::{highway_block_range, lane_marking_count};
+use crate::element_processing::highways::{
+    highway_block_range, lane_marking_count, surface_palette,
+};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::HashMap;
@@ -26,9 +29,9 @@ pub enum CrossMark {
     Stop,
     /// Broken line where traffic yields.
     GiveWay,
-    /// Zebra bars over three rows centred on the point.
+    /// One row of zebra bars.
     Zebra,
-    /// Two edge lines of a crossing, two rows either side of the point; `true` is broken.
+    /// One edge line of a crossing; `true` is broken.
     CrossingLines(bool),
 }
 
@@ -44,12 +47,7 @@ pub struct TransverseMark {
 impl TransverseMark {
     /// Whether the row at path index `tds` belongs to this mark.
     pub fn covers(&self, tds: u32) -> bool {
-        let d = tds.abs_diff(self.t);
-        match self.kind {
-            CrossMark::Stop | CrossMark::GiveWay => d == 0,
-            CrossMark::Zebra => d <= 1,
-            CrossMark::CrossingLines(_) => d == 2,
-        }
+        tds == self.t
     }
 }
 
@@ -105,9 +103,15 @@ pub struct CarriagewayClip {
     uz: f32,
     half: f32,
     reach: f32,
+    palette: &'static [Block],
 }
 
 impl CarriagewayClip {
+    /// Surface blocks of the crossed road, which crossing paint may replace.
+    pub fn palette(&self) -> &'static [Block] {
+        self.palette
+    }
+
     pub fn contains(&self, x: i32, z: i32) -> bool {
         let dx = x as f32 - self.x;
         let dz = z as f32 - self.z;
@@ -138,6 +142,7 @@ struct Road<'a> {
     oneway: i8,
     half: i32,
     marked: bool,
+    palette: &'static [Block],
     /// Path index of each node.
     node_t: Vec<u32>,
 }
@@ -355,9 +360,7 @@ fn signal_crossings_have_lines(elements: &[ProcessedElement]) -> Option<bool> {
         let tags = element.tags();
         let crossing = tags.get("highway").map(String::as_str) == Some("crossing")
             || tags.get("footway").map(String::as_str) == Some("crossing");
-        let signalled = tags.get("crossing").map(String::as_str) == Some("traffic_signals")
-            || tags.get("crossing:signals").map(String::as_str) == Some("yes");
-        if !crossing || !signalled {
+        if !crossing || !is_signalled(tags) {
             continue;
         }
         match tags.get("crossing:markings").map(String::as_str) {
@@ -367,6 +370,12 @@ fn signal_crossings_have_lines(elements: &[ProcessedElement]) -> Option<bool> {
         }
     }
     (lines + zebras > 0).then_some(lines > zebras)
+}
+
+/// A crossing controlled by signals, in either tagging.
+fn is_signalled(tags: &HashMap<String, String>) -> bool {
+    tags.get("crossing").map(String::as_str) == Some("traffic_signals")
+        || tags.get("crossing:signals").map(String::as_str) == Some("yes")
 }
 
 fn is_signal(node: &ProcessedNode) -> bool {
@@ -450,9 +459,12 @@ impl RoadMarkingIndex {
             return Some(CrossingPaint::Zebra);
         }
         match crossing {
-            Some("traffic_signals") if self.signal_crossing_lines => {
-                Some(CrossingPaint::Lines { broken: true })
-            }
+            Some("zebra") => Some(CrossingPaint::Zebra),
+            _ if is_signalled(tags) => Some(if self.signal_crossing_lines {
+                CrossingPaint::Lines { broken: true }
+            } else {
+                CrossingPaint::Zebra
+            }),
             Some(_) => Some(CrossingPaint::Zebra),
             None => untagged,
         }
@@ -511,6 +523,7 @@ impl RoadMarkingIndex {
                     oneway: oneway_sign(highway, &way.tags),
                     half: highway_block_range(highway, &way.tags, scale),
                     marked: lane_marking_count(highway, &way.tags) >= 2,
+                    palette: surface_palette(highway, &way.tags),
                     node_t: node_path_index(way),
                 });
             } else if index.crossing_way_paint(&way.tags).is_some() {
@@ -559,21 +572,18 @@ impl RoadMarkingIndex {
         let mut crossing_reach: FnvHashMap<u64, u32> = FnvHashMap::default();
 
         // Crossing ways: clip their paint to the carriageways they cross, keep lane lines off them.
-        // Edge lines sit a row outside a crossing's width, zebra bars within it.
-        let way_reach: Vec<u32> = crossing_ways
+        // Zebra bars fill a crossing's rendered width; edge lines sit a row outside it.
+        let paint_half: Vec<f32> = crossing_ways
             .iter()
-            .map(|w| match index.crossing_way_paint(&w.tags) {
-                Some(CrossingPaint::Lines { .. }) => 3,
-                _ => 2,
+            .map(|w| {
+                let half = highway_block_range("footway", &w.tags, scale) as f32;
+                match index.crossing_way_paint(&w.tags) {
+                    Some(CrossingPaint::Lines { .. }) => half + 1.0,
+                    _ => half,
+                }
             })
             .collect();
         for (node_id, crossers) in &crossing_arms {
-            let base = crossers
-                .iter()
-                .map(|&(ci, _)| way_reach[ci])
-                .max()
-                .unwrap_or(2);
-            crossing_reach.entry(*node_id).or_insert(base);
             for &(ri, ni) in &road_arms[node_id] {
                 let road = &roads[ri];
                 let Some((ux, uz)) = way_dir_at(&road.way.nodes, ni) else {
@@ -582,6 +592,11 @@ impl RoadMarkingIndex {
                 let node = &road.way.nodes[ni];
                 let half = road.half as f32 * (ux.abs() + uz.abs()) + 0.5;
                 for &(ci, cni) in crossers {
+                    // An oblique crossing runs further along the road before it reaches the kerb.
+                    let cos = way_dir_at(&crossing_ways[ci].nodes, cni)
+                        .map_or(0.0, |(cx, cz)| (cx * ux + cz * uz).abs());
+                    let sin = (1.0 - cos * cos).sqrt().max(0.25);
+                    let span = (road.half as f32 * cos + paint_half[ci]) / sin;
                     index
                         .crossings
                         .entry(crossing_ways[ci].id)
@@ -592,17 +607,11 @@ impl RoadMarkingIndex {
                             ux,
                             uz,
                             half,
-                            reach: road.half as f32 + 4.0,
+                            reach: span + 1.0,
+                            palette: road.palette,
                         });
-                    if !road.marked {
-                        continue;
-                    }
-                    // An oblique crossing covers more of the road's length.
-                    let cos = way_dir_at(&crossing_ways[ci].nodes, cni)
-                        .map_or(0.0, |(cx, cz)| (cx * ux + cz * uz).abs());
-                    let sin = (1.0 - cos * cos).sqrt().max(0.3);
-                    let reach = base + (road.half as f32 * cos / sin).ceil() as u32;
-                    index.add_gap(road, road.node_t[ni], reach);
+                    let reach = span.ceil() as u32 + 1;
+                    index.clear_around(&roads, &road_arms, ri, ni, reach as usize);
                     let r = crossing_reach.entry(*node_id).or_insert(reach);
                     *r = (*r).max(reach);
                 }
@@ -610,23 +619,20 @@ impl RoadMarkingIndex {
         }
 
         // Signal-controlled crossings, one road position each: (road, node, reach, id).
-        let signalled = |tags: &HashMap<String, String>| {
-            tags.get("crossing").map(String::as_str) == Some("traffic_signals")
-                || tags.get("crossing:signals").map(String::as_str) == Some("yes")
-        };
         let mut signal_crossings: Vec<(usize, usize, u32, u64)> = Vec::new();
         for (node_id, crossers) in &crossing_arms {
             let &(ri, ni) = &road_arms[node_id][0];
-            if signalled(&roads[ri].way.nodes[ni].tags)
+            let signalled = is_signalled(&roads[ri].way.nodes[ni].tags)
                 || crossers
                     .iter()
-                    .any(|&(ci, _)| signalled(&crossing_ways[ci].tags))
-            {
-                signal_crossings.push((ri, ni, crossing_reach[node_id], *node_id));
+                    .any(|&(ci, _)| is_signalled(&crossing_ways[ci].tags));
+            if let (true, Some(&reach)) = (signalled, crossing_reach.get(node_id)) {
+                signal_crossings.push((ri, ni, reach, *node_id));
             }
         }
 
-        // Crossings mapped only as a node on the road.
+        // Crossings mapped only as a node on the road, painted row by row so a crossing at
+        // a way split lands on both ways.
         let near_crossing = (8.0 * scale).max(2.0) as u32;
         for (ri, road) in roads.iter().enumerate() {
             let crossing_ts: Vec<u32> = road
@@ -641,7 +647,10 @@ impl RoadMarkingIndex {
                 .map(|(_, &t)| t)
                 .collect();
             for (ni, node) in road.way.nodes.iter().enumerate() {
-                if node.tags.is_empty() || crossing_arms.contains_key(&node.id) {
+                if node.tags.is_empty()
+                    || crossing_arms.contains_key(&node.id)
+                    || crossing_reach.contains_key(&node.id)
+                {
                     continue;
                 }
                 let Some(paint) = index.crossing_node_paint(node) else {
@@ -659,21 +668,38 @@ impl RoadMarkingIndex {
                 {
                     continue;
                 }
-                let (kind, reach) = match paint {
-                    CrossingPaint::Zebra => (CrossMark::Zebra, 2),
-                    CrossingPaint::Lines { broken } => (CrossMark::CrossingLines(broken), 3),
+                let (kind, rows, reach): (CrossMark, &[i32], u32) = match paint {
+                    CrossingPaint::Zebra => (CrossMark::Zebra, &[-1, 0, 1], 2),
+                    CrossingPaint::Lines { broken } => {
+                        (CrossMark::CrossingLines(broken), &[-2, 2], 3)
+                    }
                 };
-                index.add_gap(road, t, reach);
+                index.clear_around(&roads, &road_arms, ri, ni, reach as usize);
+                let ahead = arm_cells(&roads, &road_arms, ri, ni, 1, 3);
+                let behind = arm_cells(&roads, &road_arms, ri, ni, -1, 3);
+                for &row in rows {
+                    let cell = if row >= 0 {
+                        ahead.get(row as usize)
+                    } else {
+                        behind.get(row.unsigned_abs() as usize)
+                    };
+                    if let Some(c) = cell {
+                        index
+                            .ways
+                            .entry(roads[c.road].way.id)
+                            .or_default()
+                            .marks
+                            .push(TransverseMark {
+                                t: c.t,
+                                kind,
+                                side: 0,
+                            });
+                    }
+                }
                 crossing_reach.insert(node.id, reach);
-                if signalled(&node.tags) && signal_crossings.iter().all(|c| c.3 != node.id) {
+                if is_signalled(&node.tags) {
                     signal_crossings.push((ri, ni, reach, node.id));
                 }
-                index
-                    .ways
-                    .entry(road.way.id)
-                    .or_default()
-                    .marks
-                    .push(TransverseMark { t, kind, side: 0 });
             }
         }
 
@@ -791,13 +817,45 @@ impl RoadMarkingIndex {
         }
     }
 
-    fn add_gap(&mut self, road: &Road, t: u32, reach: u32) {
-        let last = *road.node_t.last().unwrap_or(&0);
-        self.ways
-            .entry(road.way.id)
-            .or_default()
-            .gaps
-            .push((t.saturating_sub(reach), (t + reach).min(last)));
+    /// Keeps lane lines off `reach` cells either side of node `ni`, across plain joints.
+    fn clear_around(
+        &mut self,
+        roads: &[Road],
+        joins: &FnvHashMap<u64, Vec<(usize, usize)>>,
+        ri: usize,
+        ni: usize,
+        reach: usize,
+    ) {
+        for dir in [1i8, -1] {
+            let cells = arm_cells(roads, joins, ri, ni, dir, reach + 1);
+            self.clear_cells(roads, &cells);
+        }
+    }
+
+    /// Keeps lane lines off a run of arm cells, one gap per way it crosses.
+    fn clear_cells(&mut self, roads: &[Road], cells: &[ArmCell]) {
+        let mut run_start = 0;
+        for s in 1..=cells.len() {
+            if s < cells.len() && cells[s].road == cells[run_start].road {
+                continue;
+            }
+            let first = &cells[run_start];
+            if roads[first.road].marked {
+                let last = &cells[s - 1];
+                // The joint cell is this way's end node too.
+                let start = if run_start > 0 {
+                    (first.t as i64 - first.dir as i64).max(0) as u32
+                } else {
+                    first.t
+                };
+                self.ways
+                    .entry(roads[first.road].way.id)
+                    .or_default()
+                    .gaps
+                    .push((start.min(last.t), start.max(last.t)));
+            }
+            run_start = s;
+        }
     }
 
     /// Carries the dash rhythm from way to way along each painted line, so a split way
@@ -935,15 +993,16 @@ impl RoadMarkingIndex {
                 if roads[a.road].ring {
                     // A ring carries on into the ring, however tight it turns.
                     return (0..arms.len())
-                        .filter(|&j| arms[j].road != a.road && roads[arms[j].road].ring)
+                        .filter(|&j| j != i && roads[arms[j].road].ring)
                         .min_by(|&j, &k| {
                             let dj = a.unit.0 * arms[j].unit.0 + a.unit.1 * arms[j].unit.1;
                             let dk = a.unit.0 * arms[k].unit.0 + a.unit.1 * arms[k].unit.1;
                             dj.total_cmp(&dk)
                         });
                 }
+                // A way running through the node carries on into its own other arm.
                 (0..arms.len())
-                    .filter(|&j| arms[j].road != a.road)
+                    .filter(|&j| j != i)
                     .filter_map(|j| {
                         let dot = a.unit.0 * arms[j].unit.0 + a.unit.1 * arms[j].unit.1;
                         if dot > -0.5 {
@@ -960,7 +1019,7 @@ impl RoadMarkingIndex {
         for (i, c) in continuation.iter().enumerate() {
             if let Some(j) = *c {
                 let (a, b) = (&arms[i], &arms[j]);
-                if i < j && continuation[j] == Some(i) {
+                if i < j && continuation[j] == Some(i) && a.road != b.road {
                     links.push((
                         a.road,
                         roads[a.road].node_t[a.node],
@@ -988,6 +1047,8 @@ impl RoadMarkingIndex {
             b.rank > a.rank || (b.rank == a.rank && through(j) && !through(i))
         };
 
+        let signed_at = |k: usize| matches!(controls[k], Some(Control::Stop | Control::GiveWay));
+
         // Arms whose carriageway this arm's paint has to keep off.
         let suppressors: Vec<u16> = (0..arms.len())
             .map(|i| {
@@ -1004,6 +1065,12 @@ impl RoadMarkingIndex {
                         true
                     } else if (b.link && !a.link) || (b.rank == 0 && a.rank > 0) {
                         // Slip roads and driveways never break a road's line.
+                        false
+                    } else if signed_at(i) {
+                        // A mapped sign makes its approach yield to every street.
+                        true
+                    } else if signed_at(j) && through(i) {
+                        // The road running through keeps its line past a signed approach.
                         false
                     } else {
                         signalised
@@ -1144,29 +1211,8 @@ impl RoadMarkingIndex {
             }
 
             // No lane lines from the junction up to the mark, per way the arm runs over.
-            let mut run_start = 0;
-            for s in 1..=end {
-                let split = s == end || arm.cells[s].road != arm.cells[run_start].road;
-                if !split {
-                    continue;
-                }
-                let first = &arm.cells[run_start];
-                if roads[first.road].marked {
-                    let last = &arm.cells[s - 1];
-                    // The joint cell is this way's end node too.
-                    let start = if run_start > 0 {
-                        (first.t as i64 - first.dir as i64).max(0) as u32
-                    } else {
-                        first.t
-                    };
-                    self.ways
-                        .entry(roads[first.road].way.id)
-                        .or_default()
-                        .gaps
-                        .push((start.min(last.t), start.max(last.t)));
-                }
-                run_start = s;
-            }
+            let end = end.min(arm.cells.len());
+            self.clear_cells(roads, &arm.cells[..end]);
 
             if let (Some(kind), Some(s)) = (needs[i], mark_at) {
                 let c = &arm.cells[s];
@@ -1441,9 +1487,175 @@ mod tests {
         )];
         let index = build(&elements);
         let marks = index.way(1).expect("crossing painted");
-        assert_eq!(marks.marks[0].kind, CrossMark::Zebra);
-        assert_eq!(marks.marks[0].t, 40);
+        let rows: Vec<(u32, CrossMark)> = marks.marks.iter().map(|m| (m.t, m.kind)).collect();
+        assert_eq!(
+            rows,
+            vec![
+                (39, CrossMark::Zebra),
+                (40, CrossMark::Zebra),
+                (41, CrossMark::Zebra)
+            ]
+        );
         assert!(marks.in_gap(38) && marks.in_gap(42) && !marks.in_gap(43));
+    }
+
+    #[test]
+    fn a_crossing_at_a_way_split_paints_both_ways() {
+        // The crossing is one cell before the first way ends; its far edge line is on the next.
+        let lines = [
+            ("highway", "crossing"),
+            ("crossing", "marked"),
+            ("crossing:markings", "lines"),
+        ];
+        let elements = vec![
+            way(
+                1,
+                vec![plain(10, 0, 50), node(2, 39, 50, &lines), plain(3, 40, 50)],
+                &[("highway", "secondary")],
+            ),
+            way(
+                2,
+                vec![plain(3, 40, 50), plain(11, 100, 50)],
+                &[("highway", "secondary")],
+            ),
+        ];
+        let index = build(&elements);
+        let near = index.way(1).expect("first way");
+        assert_eq!(near.marks.len(), 1);
+        assert_eq!(near.marks[0].t, 37);
+        let far = index.way(2).expect("second way");
+        assert_eq!(far.marks.len(), 1);
+        assert_eq!(far.marks[0].t, 1);
+        assert!(far.in_gap(2) && !far.in_gap(3));
+    }
+
+    #[test]
+    fn crossing_signals_alone_mark_a_signalised_crossing() {
+        let elements = vec![way(
+            1,
+            vec![
+                plain(10, 0, 50),
+                node(
+                    2,
+                    60,
+                    50,
+                    &[("highway", "crossing"), ("crossing:signals", "yes")],
+                ),
+                plain(11, 140, 50),
+            ],
+            &[("highway", "secondary")],
+        )];
+        let index = build(&elements);
+        let marks = &index.way(1).expect("painted").marks;
+        assert!(marks.iter().any(|m| m.kind == CrossMark::Zebra));
+        assert_eq!(
+            marks.iter().filter(|m| m.kind == CrossMark::Stop).count(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_wide_crossing_keeps_the_lane_lines_further_off() {
+        let elements = vec![
+            way(
+                1,
+                vec![plain(10, 0, 50), plain(2, 40, 50), plain(11, 100, 50)],
+                &[("highway", "secondary")],
+            ),
+            way(
+                5,
+                vec![plain(20, 40, 35), plain(2, 40, 50), plain(21, 40, 65)],
+                &[
+                    ("highway", "footway"),
+                    ("footway", "crossing"),
+                    ("crossing", "zebra"),
+                    ("width", "8"),
+                ],
+            ),
+        ];
+        let index = build(&elements);
+        // Half-width 4 plus a clear row either side of the node.
+        let marks = index.way(1).expect("gap");
+        assert!(marks.in_gap(35) && marks.in_gap(45) && !marks.in_gap(46));
+    }
+
+    #[test]
+    fn an_oblique_crossing_is_clipped_at_the_kerb_not_short_of_it() {
+        // About 20 degrees off the road: the crossing meets the kerb far along it.
+        let elements = vec![
+            way(
+                1,
+                vec![plain(10, 0, 50), plain(2, 60, 50), plain(11, 120, 50)],
+                &[("highway", "secondary")],
+            ),
+            way(
+                5,
+                vec![plain(20, 33, 40), plain(2, 60, 50), plain(21, 87, 60)],
+                &[
+                    ("highway", "footway"),
+                    ("footway", "crossing"),
+                    ("crossing", "zebra"),
+                ],
+            ),
+        ];
+        let index = build(&elements);
+        let clips = index.crossing_clips(5).expect("clipped");
+        let half = highway_block_range("secondary", &HashMap::new(), 1.0);
+        // The crossing centreline where it reaches the kerb.
+        let x = 60 + (half as f32 * 2.7).round() as i32;
+        assert!(clips.iter().any(|c| c.contains(x, 50 + half)));
+        assert!(!clips.iter().any(|c| c.contains(x, 50 + half + 1)));
+    }
+
+    #[test]
+    fn an_unsplit_road_runs_through_like_a_split_one() {
+        let elements = vec![
+            way(
+                1,
+                vec![plain(10, 0, 100), plain(1, 100, 100), plain(11, 200, 100)],
+                &[("highway", "secondary")],
+            ),
+            way(
+                3,
+                vec![plain(12, 100, 0), plain(1, 100, 100)],
+                &[("highway", "secondary")],
+            ),
+        ];
+        let index = build(&elements);
+        assert!(no_gaps(&index, 1));
+        let side = index.way(3).expect("the side road is cut");
+        assert_eq!(side.marks[0].kind, CrossMark::GiveWay);
+    }
+
+    #[test]
+    fn a_mapped_stop_sign_overrides_road_class() {
+        // A primary ends in a stop sign at a tertiary running through.
+        let elements = vec![
+            way(
+                1,
+                vec![
+                    plain(10, 100, 0),
+                    node(5, 100, 90, &[("highway", "stop")]),
+                    plain(1, 100, 100),
+                ],
+                &[("highway", "primary")],
+            ),
+            way(
+                2,
+                vec![plain(11, 0, 100), plain(1, 100, 100)],
+                &[("highway", "tertiary")],
+            ),
+            way(
+                3,
+                vec![plain(1, 100, 100), plain(12, 200, 100)],
+                &[("highway", "tertiary")],
+            ),
+        ];
+        let index = build(&elements);
+        let primary = index.way(1).expect("the primary stops");
+        assert_eq!(primary.marks[0].kind, CrossMark::Stop);
+        assert!(primary.in_gap(100));
+        assert!(no_gaps(&index, 2) && no_gaps(&index, 3));
     }
 
     #[test]

@@ -234,10 +234,34 @@ const CYCLEWAY_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
-/// True when the way should render as a pedestrian walkway
-/// rather than asphalt.
-fn is_pedestrian_way(element: &ProcessedElement) -> bool {
-    is_pedestrian_way_tags(element.tags())
+/// Blocks a highway way is surfaced with: by type, then `surface=*`, with paved sidewalks
+/// in smooth stone and bicycle paths in red. Shared with the paint prescan.
+pub(crate) fn surface_palette(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+) -> &'static [Block] {
+    if highway_type == "cycleway" {
+        if let Some(red) = cycleway_palette(tags) {
+            return red;
+        }
+    }
+    let surface = tags.get("surface").map(String::as_str);
+    // Concrete or paved sidewalks read as uniform grey, not an asphalt speckle.
+    if is_pedestrian_way_tags(tags)
+        && matches!(surface, Some("concrete" | "paving_stones" | "sett"))
+    {
+        return &[SMOOTH_STONE];
+    }
+    if let Some(blocks) = surface.and_then(get_blocks_for_surface) {
+        return blocks;
+    }
+    match highway_type {
+        "footway" | "pedestrian" | "service" | "steps" => &[GRAY_CONCRETE],
+        "path" => &[DIRT_PATH],
+        // Sand trap for runaway vehicles.
+        "escape" => &[SAND],
+        _ => DEFAULT_ROAD_MIX,
+    }
 }
 
 fn is_pedestrian_way_tags(tags: &HashMap<String, String>) -> bool {
@@ -1443,9 +1467,6 @@ fn generate_highways_internal(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            // Default surface mix. Overridden below based on highway_type or
-            // an explicit surface=* tag via `get_blocks_for_surface`.
-            let mut block_types: &[Block] = DEFAULT_ROAD_MIX;
             let scale_factor = args.scale;
 
             // Reuse the function-level layer resolution (already normalised
@@ -1457,17 +1478,6 @@ fn generate_highways_internal(
                 if level.parse::<i32>().unwrap_or(0) < 0 {
                     return;
                 }
-            }
-
-            // Surface palette per highway type; width is resolved by
-            // highway_block_range below so renderer and prescan stay in sync.
-            match highway_type.as_str() {
-                "footway" | "pedestrian" | "service" | "steps" => {
-                    block_types = &[GRAY_CONCRETE];
-                }
-                "path" => block_types = &[DIRT_PATH],
-                "escape" => block_types = &[SAND], // sand trap for runaway vehicles
-                _ => {}
             }
 
             let ProcessedElement::Way(way) = element else {
@@ -1492,40 +1502,15 @@ fn generate_highways_internal(
             let bridge_foundation_block = bridge_style.foundation_block();
             let bridge_rail_block_choice = bridge_style.rail_block();
 
-            // Optional surface override via the OSM `surface=*` tag. Applies to
-            // all road types; for single-block surfaces like concrete or sand
-            // the mix degenerates to that one block, so `semirandom_surface`
-            // always returns the same value.
-            if let Some(blocks) = element
-                .tags()
-                .get("surface")
-                .and_then(|s| get_blocks_for_surface(s))
-            {
-                block_types = blocks;
-            }
-
-            // Pedestrian walkways tagged with a paved surface render as
-            // smooth stone, overriding the `surface=*` palette. Real-world
-            // sidewalks in concrete or paving stones read as uniformly grey
-            // from a distance, not as an asphalt speckle, so this gives
-            // them a distinct look from the roads they run alongside.
-            if is_pedestrian_way(element)
-                && matches!(
-                    element.tags().get("surface").map(|s| s.as_str()),
-                    Some("concrete" | "paving_stones" | "sett")
-                )
-            {
-                block_types = &[SMOOTH_STONE];
-            }
-
-            // Bicycle paths are red wherever they are paved.
-            let mut surface_protect = ROAD_PROTECTED_SURFACES;
-            if highway_type == "cycleway" {
-                if let Some(red) = cycleway_palette(&way.tags) {
-                    block_types = red;
-                    surface_protect = CYCLEWAY_PROTECTED_SURFACES;
-                }
-            }
+            // Surface palette; width is resolved by highway_block_range below so
+            // renderer and prescan stay in sync.
+            let block_types = surface_palette(highway_type, &way.tags);
+            let surface_protect =
+                if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
+                    CYCLEWAY_PROTECTED_SURFACES
+                } else {
+                    ROAD_PROTECTED_SURFACES
+                };
 
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
@@ -1549,7 +1534,11 @@ fn generate_highways_internal(
                 lane_lines(highway_type, &way.tags, block_range, markings)
             };
             let (dash_on, dash_period) = dash_pattern(highway_type, &way.tags, scale_factor);
-            let way_marks = markings.way(way.id);
+            let way_marks = if renders_as_highway_tunnel(way) {
+                None
+            } else {
+                markings.way(way.id)
+            };
             // A line across one half of the road stops beside the centre line.
             let centre_span = lines.iter().filter(|l| l.centre).fold(None, |span, l| {
                 let (lo, hi) = span.unwrap_or((l.offset, l.offset));
@@ -1641,8 +1630,15 @@ fn generate_highways_internal(
             // Painted pedestrian crossing, kept to the carriageways it runs over.
             let crossing_paint = markings.crossing_way_paint(element.tags());
             let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
-            let on_carriageway = |cx: i32, cz: i32| {
-                crossing_clips.is_none_or(|clips| clips.iter().any(|c| c.contains(cx, cz)))
+            // Surface of the carriageway under a crossing cell; None off the road.
+            let carriageway_at = |cx: i32, cz: i32| -> Option<&'static [Block]> {
+                match crossing_clips {
+                    None => Some(DEFAULT_ROAD_MIX),
+                    Some(clips) => clips
+                        .iter()
+                        .find(|c| c.contains(cx, cz))
+                        .map(|c| c.palette()),
+                }
             };
 
             // Iterate over nodes to create the highway
@@ -1875,24 +1871,22 @@ fn generate_highways_internal(
                                 }
 
                                 // A crossing on the road is painted on the road's own
-                                // asphalt mix, not the footway's grey.
-                                let crossing_here =
-                                    crossing_paint.filter(|_| on_carriageway(set_x, set_z));
-                                if let Some(paint) = crossing_here {
+                                // surface, not the footway's grey.
+                                let crossing_here = crossing_paint
+                                    .and_then(|p| carriageway_at(set_x, set_z).map(|r| (p, r)));
+                                if let Some((paint, road)) = crossing_here {
                                     let along = if dir_horizontal { set_x } else { set_z };
                                     let on_stripe =
                                         paint == CrossingPaint::Zebra && along.rem_euclid(2) == 0;
                                     if on_stripe {
-                                        // White bar. Whitelist the mix we
-                                        // place for the non-bar cells so the
-                                        // bar only replaces zebra background.
+                                        // A bar only replaces the road under it, whichever was first.
                                         if use_absolute_y {
                                             editor.set_block_absolute(
                                                 WHITE_CONCRETE,
                                                 set_x,
                                                 cell_y,
                                                 set_z,
-                                                Some(DEFAULT_ROAD_MIX),
+                                                Some(road),
                                                 None,
                                             );
                                         } else {
@@ -1901,13 +1895,12 @@ fn generate_highways_internal(
                                                 set_x,
                                                 cell_y,
                                                 set_z,
-                                                Some(DEFAULT_ROAD_MIX),
+                                                Some(road),
                                                 None,
                                             );
                                         }
                                     } else {
-                                        // Non-bar cell: asphalt mix.
-                                        let bg = semirandom_surface(set_x, set_z, DEFAULT_ROAD_MIX);
+                                        let bg = semirandom_surface(set_x, set_z, road);
                                         if use_absolute_y {
                                             editor.set_block_absolute(
                                                 bg, set_x, cell_y, set_z, None, None,
@@ -2180,8 +2173,8 @@ fn generate_highways_internal(
                                     } else {
                                         (*x + off, *z)
                                     };
-                                    if on_carriageway(sx, sz) {
-                                        paint(editor, WHITE_CONCRETE, sx, sz, DEFAULT_ROAD_MIX);
+                                    if let Some(road) = carriageway_at(sx, sz) {
+                                        paint(editor, WHITE_CONCRETE, sx, sz, road);
                                     }
                                 }
                             }
@@ -3807,6 +3800,38 @@ mod tests {
             }
         }
         assert!((10..190).any(|x| white(x, 48)));
+    }
+
+    #[test]
+    fn crossing_paint_lands_on_a_brick_road_in_either_order() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 100.0).unwrap();
+        let road = way_through(
+            1,
+            &[(10, 10, 50), (2, 100, 50), (11, 190, 50)],
+            &[("highway", "secondary"), ("surface", "bricks")],
+        );
+        let crossing = way_through(
+            2,
+            &[(20, 100, 30), (2, 100, 50), (21, 100, 70)],
+            &[
+                ("highway", "footway"),
+                ("footway", "crossing"),
+                ("crossing", "traffic_signals"),
+                ("crossing:markings", "lines"),
+            ],
+        );
+        for ways in [
+            [road.clone(), crossing.clone()],
+            [crossing.clone(), road.clone()],
+        ] {
+            let mut editor = test_editor(&xzbbox);
+            build_marked_ways(&mut editor, &ways);
+            // Edge lines a row outside the crossing, on bricks rather than asphalt.
+            assert!(editor.check_for_block(98, 0, 52, Some(&[WHITE_CONCRETE])));
+            assert!(editor.check_for_block(102, 0, 52, Some(&[WHITE_CONCRETE])));
+            assert!(editor.check_for_block(100, 0, 52, Some(&[BRICK])));
+            assert!(!editor.check_for_block(100, 0, 52, Some(DEFAULT_ROAD_MIX)));
+        }
     }
 
     fn straight_tunnel(tags: &[(&str, &str)]) -> ProcessedWay {
