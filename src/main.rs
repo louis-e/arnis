@@ -360,21 +360,24 @@ fn run_cli() {
     }
     let args = args;
 
-    // Heads-up for very large areas: generation is long and memory-heavy, and big
-    // requests load the public OpenStreetMap / elevation servers. Non-blocking.
+    // Heads-up for very large areas: long, memory-heavy (about 6 GB here, the GUI's "very
+    // large" tier) and heavy on the public elevation servers. Non-blocking.
     {
-        const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
+        const MAX_RECOMMENDED_AREA_KM2: f64 = 200.0;
         // area_km2 assumes Earth's radius, so a Moon bbox reads 13x too large.
         let r = args.body.scale_ratio();
         let area_km2 = effective_bbox.area_km2() * r * r;
+        // Blocks, and with them memory, grow with the square of the world scale.
+        let at_scale_1 = area_km2 * args.scale * args.scale;
         // Earth only: the coarse fixed scale makes a large area the normal case.
-        if args.body.is_earth() && area_km2 > MAX_RECOMMENDED_AREA_KM2 {
+        if args.body.is_earth() && at_scale_1 > MAX_RECOMMENDED_AREA_KM2 {
             eprintln!(
-                "{} Large area selected (~{:.0} km²). Generation may take a long time and \
-                 use many GB of memory, and places heavy load on public OpenStreetMap and \
-                 elevation servers. Use a smaller area if this was unintended.",
+                "{} Large area selected (~{:.0} km² at scale {:.2}). Generation may take \
+                 several minutes, use many GB of memory and place heavy load on public \
+                 elevation servers. Use a smaller area or scale if this was unintended.",
                 "Note:".yellow().bold(),
-                area_km2
+                area_km2,
+                args.scale
             );
         }
     }

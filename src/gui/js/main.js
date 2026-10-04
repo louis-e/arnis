@@ -1202,6 +1202,7 @@ function initSettings() {
   }
 
   slider.addEventListener("input", refreshScaleDisplay);
+  slider.addEventListener("input", refreshBboxSelectionInfo);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -2470,15 +2471,17 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-// Selection-size warnings, in true square metres of ground. Measured timings and
-// world sizes, square selections:
-//   Earth 1km2 18s/19MB | 4km2 25s/70MB | 9km2 39s/154MB | 25km2 47s/415MB
+// Selection-size warnings, in square metres of ground at world scale 1. Measured
+// timings, peak memory and world sizes, square selections over central Munich:
+//   Earth 9km2 8s/1.1GB/146MB | 25km2 20s/1.7GB/399MB | 85km2 66s/3.6GB/1.3GB
+//         150km2 111s/5.1GB/2.3GB, so about 1.6GB plus 0.023GB per km2
 //   Moon  2deg 5s/4MB | 5deg 9s/16MB | 10deg 21s/36MB | 20deg 68s/144MB
 //   Mars  2deg 5s/4MB | 5deg 9s/16MB | 10deg 20s/36MB | 20deg 51s/100MB
-// Earth keeps its long-standing tiers, which guard memory more than the clock.
-// The Moon and Mars tiers land near one, three and nine minutes.
+// The Earth tiers guard memory more than the clock: about 4GB, 6GB (fine on an
+// 8GB machine) and 13GB. The Moon and Mars tiers land near one, three and nine
+// minutes.
 const AREA_THRESHOLDS = {
-  earth: { extensive: 44e6, large: 85e6, extreme: 500e6 },
+  earth: { extensive: 100e6, large: 200e6, extreme: 500e6 },
   moon: { extensive: 3e11, large: 1e12, extreme: 3e12 },
   mars: { extensive: 1.5e12, large: 5e12, extreme: 1.5e13 }
 };
@@ -2494,6 +2497,7 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
+  selectedSize *= earthScaleFactor();
   if (selectedSize > t.extreme) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
   } else if (selectedSize > t.large) {
@@ -2505,7 +2509,14 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   }
 }
 
-// Re-runs the size status, e.g. after a body switch changes which tiers apply.
+// Blocks, and so memory, grow with the square of the scale; Moon and Mars use a fixed one.
+function earthScaleFactor() {
+  if (selectedCelestialBody !== 'earth') return 1;
+  const s = parseFloat(document.getElementById("scale-value-slider")?.value);
+  return isFinite(s) && s > 0 ? s * s : 1;
+}
+
+// Re-runs the size status, e.g. after a body switch or scale change moves the tier.
 function refreshBboxSelectionInfo() {
   if (!mapSelectedBBox) return;
   const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
