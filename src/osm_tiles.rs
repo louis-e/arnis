@@ -15,8 +15,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Override per run with `--osm-tiles-url`. The version prefix is the format: v2 is AOT2.
-pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnisproject.com/v2";
+/// Override per run with `--osm-tiles-url`. Reads AOT1 and AOT2 archives alike, so a re-bake is
+/// published here under new dated filenames and switched to by archives.json, with no release.
+pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnisproject.com/v1";
 
 /// Archive zoom. Must match `arnis-tiles`; a mismatch means every lookup misses.
 const ZOOM: u8 = 13;
