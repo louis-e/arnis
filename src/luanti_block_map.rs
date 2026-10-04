@@ -115,6 +115,24 @@ fn conv_door(props: Option<&Value>, id: u16, species: &str) -> LuantiNode {
     }
 }
 
+/// Beds: the foot is the bottom node and the head the top one, both turned towards
+/// the head. The red bed ids carry their part and facing as default properties.
+fn conv_bed(block: Block, props: Option<&Value>, colour: &str) -> LuantiNode {
+    let defaults = block.properties();
+    let props = props.or(defaults.as_ref());
+    let head = prop_eq(props, "part", "head");
+    let name = match (colour, head) {
+        ("white", false) => "mcl_beds:bed_white_bottom",
+        ("white", true) => "mcl_beds:bed_white_top",
+        (_, false) => "mcl_beds:bed_red_bottom",
+        (_, true) => "mcl_beds:bed_red_top",
+    };
+    LuantiNode {
+        name,
+        param2: facing_to_facedir(prop_str(props, "facing").unwrap_or("north")),
+    }
+}
+
 fn conv_trapdoor(props: Option<&Value>, closed: &'static str, open: &'static str) -> LuantiNode {
     let facing = prop_str(props, "facing").unwrap_or("north");
     let is_open = prop_eq(props, "open", "true");
@@ -410,7 +428,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         158 => "mcl_noteblock:noteblock",
         159 => "mcl_deepslate:deepslatepolishedwall",
         160 => "mcl_brewing:stand_000",
-        161 | 162 | 165..=168 | 294 | 295 => "mcl_beds:bed_red_bottom",
+        161 | 162 | 165..=168 | 294 | 295 => return conv_bed(block, props, "red"),
         163 => "mcl_core:glass_black",
         164 => "mcl_stairs:slab_andesite_smooth",
         169 => "mcl_core:glass_grey",
@@ -777,7 +795,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         478 => "mcl_core:snow_6",
         479 => "mcl_core:snow_7",
         480 => "mcl_trees:leaves_azalea",
-        481 => "mcl_beds:bed_white_bottom",
+        481 => return conv_bed(block, props, "white"),
         482 => "mcl_lectern:lectern",
         483 => "mcl_cake:cake",
         484 => "mcl_farming:melon",
@@ -791,7 +809,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_definitions::STONE;
+    use crate::block_definitions::{RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE, WHITE_BED};
+    use std::collections::HashMap;
 
     /// Blocks Mineclonia has no node for, so they can only fall back. Keep this
     /// list short: every entry is a block that exports as plain stone.
@@ -800,6 +819,21 @@ mod tests {
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
     /// a block without a Mineclonia node fails here instead of in someone's map.
+    #[test]
+    fn beds_export_head_and_foot_facing_their_head() {
+        let foot = to_mineclonia_node(RED_BED_EAST_FOOT, None);
+        let head = to_mineclonia_node(RED_BED_EAST_HEAD, None);
+        assert_eq!(foot.name, "mcl_beds:bed_red_bottom");
+        assert_eq!(head.name, "mcl_beds:bed_red_top");
+        assert_eq!((foot.param2, head.param2), (1, 1));
+        let props = Value::Compound(HashMap::from([
+            ("facing".to_string(), Value::String("south".to_string())),
+            ("part".to_string(), Value::String("head".to_string())),
+        ]));
+        let white = to_mineclonia_node(WHITE_BED, Some(&props));
+        assert_eq!((white.name, white.param2), ("mcl_beds:bed_white_top", 2));
+    }
+
     #[test]
     fn every_block_maps_to_a_mineclonia_node() {
         let mut unmapped = Vec::new();

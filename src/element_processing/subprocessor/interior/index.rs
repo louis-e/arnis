@@ -15,7 +15,15 @@ pub struct InteriorUseIndex {
     tenants: FnvHashMap<u64, Vec<Tenant>>,
     areas: FnvHashMap<u64, Use>,
     /// Smaller ground-level outlines overlapping a building, whose cells it leaves to them.
-    claims: FnvHashMap<u64, Vec<Vec<(i32, i32)>>>,
+    claims: FnvHashMap<u64, Vec<Claim>>,
+}
+
+/// A smaller building standing on another's floor, up to its own height.
+#[derive(Clone, Debug)]
+pub struct Claim {
+    pub ring: Vec<(i32, i32)>,
+    /// Height of its top in metres; one storey when untagged.
+    pub top_m: f64,
 }
 
 struct Outline {
@@ -26,6 +34,19 @@ struct Outline {
     /// Stands on the ground rather than starting at an upper level.
     ground: bool,
     area: i64,
+    top_m: f64,
+}
+
+/// Height of an outline's top in metres from its tags, one storey when untagged.
+fn top_metres(tags: &HashMap<String, String>) -> f64 {
+    let number = |key: &str| {
+        tags.get(key)
+            .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+            .filter(|v| *v > 0.0)
+    };
+    number("height")
+        .or_else(|| number("building:levels").map(|l| l * 3.0 + 2.0))
+        .unwrap_or(4.0)
 }
 
 /// Starts above the ground, like a tower part on a podium.
@@ -63,10 +84,11 @@ impl Outline {
             max,
             ground: !elevated(tags),
             area: twice_area.abs(),
+            top_m: top_metres(tags),
         })
     }
 
-    /// Shares floor with `other`: a corner of either lies inside the other.
+    /// Shares floor with `other`: a corner of either lies inside the other, or edges cross.
     fn overlaps(&self, other: &Outline) -> bool {
         self.min.0 <= other.max.0
             && other.min.0 <= self.max.0
@@ -79,7 +101,13 @@ impl Outline {
                 || self
                     .ring
                     .iter()
-                    .any(|&(x, z)| point_in_ring(x, z, &other.ring)))
+                    .any(|&(x, z)| point_in_ring(x, z, &other.ring))
+                || self.ring.windows(2).any(|a| {
+                    other
+                        .ring
+                        .windows(2)
+                        .any(|b| segments_cross(a[0], a[1], b[0], b[1]))
+                }))
     }
 
     fn contains(&self, x: i32, z: i32) -> bool {
@@ -103,6 +131,14 @@ impl Outline {
     fn bbox_area(&self) -> i64 {
         (self.max.0 - self.min.0 + 1) as i64 * (self.max.1 - self.min.1 + 1) as i64
     }
+}
+
+/// True when the segments properly cross, each splitting the other's ends.
+fn segments_cross(a: (i32, i32), b: (i32, i32), c: (i32, i32), d: (i32, i32)) -> bool {
+    let side = |p: (i32, i32), q: (i32, i32), r: (i32, i32)| {
+        ((q.0 - p.0) as i64 * (r.1 - p.1) as i64 - (q.1 - p.1) as i64 * (r.0 - p.0) as i64).signum()
+    };
+    side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0
 }
 
 /// True when a cell lies inside a ring or on its outline.
@@ -239,7 +275,7 @@ impl InteriorUseIndex {
     }
 
     /// Outlines whose cells a building leaves to them.
-    pub fn claims(&self, building_id: u64) -> &[Vec<(i32, i32)>] {
+    pub fn claims(&self, building_id: u64) -> &[Claim] {
         self.claims
             .get(&building_id)
             .map(Vec::as_slice)
@@ -276,11 +312,10 @@ impl InteriorUseIndex {
                     && (other.area, other.id) < (o.area, o.id)
                     && o.overlaps(other)
                 {
-                    index
-                        .claims
-                        .entry(o.id)
-                        .or_default()
-                        .push(other.ring.clone());
+                    index.claims.entry(o.id).or_default().push(Claim {
+                        ring: other.ring.clone(),
+                        top_m: other.top_m,
+                    });
                 }
             }
         }
@@ -312,7 +347,7 @@ impl InteriorUseIndex {
                     if !rings.iter().any(|r| r.contains(cx, cz)) {
                         continue;
                     }
-                    let candidate = (area_rank(use_), -ring.bbox_area(), use_);
+                    let candidate = (area_rank(use_), -ring.area, use_);
                     let better = best_area
                         .get(&o.id)
                         .is_none_or(|b| (candidate.0, candidate.1) > (b.0, b.1));
@@ -454,6 +489,33 @@ mod tests {
             index.claims(1).len(),
             1,
             "the mall leaves the pavilion its floor"
+        );
+    }
+
+    #[test]
+    fn crossing_outlines_overlap_without_a_corner_inside() {
+        let xz = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let elements = vec![
+            ProcessedElement::Way(rect_way(1, 10, 30, 90, 40, &[("building", "yes")])),
+            ProcessedElement::Way(rect_way(
+                2,
+                45,
+                10,
+                55,
+                60,
+                &[("building", "yes"), ("building:levels", "2")],
+            )),
+        ];
+        let index = InteriorUseIndex::build(&elements, &xz);
+        let claims = index.claims(1);
+        assert_eq!(
+            claims.len(),
+            1,
+            "the smaller cross bar claims the shared floor"
+        );
+        assert_eq!(
+            claims[0].top_m, 8.0,
+            "two storeys of three metres plus the base"
         );
     }
 }

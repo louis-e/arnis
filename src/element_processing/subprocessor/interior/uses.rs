@@ -33,6 +33,7 @@ pub enum Eatery {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Faith {
     Christian,
+    Jewish,
     Muslim,
     Other,
 }
@@ -195,11 +196,19 @@ fn goods_for_shop(value: &str) -> Goods {
     }
 }
 
+/// The `religion` tag, else what the building type implies.
 fn faith(tags: &HashMap<String, String>) -> Faith {
     match tag(tags, "religion") {
         Some("muslim") => Faith::Muslim,
-        Some("christian") | Some("jewish") | None => Faith::Christian,
+        Some("jewish") => Faith::Jewish,
+        Some("christian") => Faith::Christian,
         Some(_) => Faith::Other,
+        None => match tag(tags, "building") {
+            Some("mosque") => Faith::Muslim,
+            Some("synagogue") => Faith::Jewish,
+            Some("temple" | "shrine") => Faith::Other,
+            _ => Faith::Christian,
+        },
     }
 }
 
@@ -450,11 +459,17 @@ pub fn plan_interior(input: &PlanInputs) -> InteriorPlan {
 
     let mut per_floor: Vec<Vec<Unit>> = vec![Vec::new(); floors];
     let top = floors as i32 - 1;
+    // A guessed storey count is often too low, so a higher level is only rejected when
+    // the outline's own height is mapped.
+    let height_mapped = ["building:levels", "height"]
+        .iter()
+        .any(|k| input.tags.contains_key(*k));
     // Tenants of an elevated part only count when their level says they are in it.
     let floor_of = |level: Option<i32>| -> Option<usize> {
         match level {
             _ if input.elevated && input.min_level == 0 => None,
             Some(l) if l < input.min_level => None,
+            Some(l) if height_mapped && l - input.min_level > top => None,
             Some(l) => Some((l - input.min_level).min(top) as usize),
             None if input.elevated => None,
             None => Some(0),
@@ -607,6 +622,25 @@ mod tests {
     }
 
     #[test]
+    fn synagogues_and_mosques_keep_their_faith_without_a_religion_tag() {
+        assert_eq!(
+            use_from_building_type("synagogue", &tags(&[("building", "synagogue")])),
+            Some(Use::Worship(Faith::Jewish))
+        );
+        assert_eq!(
+            use_from_building_type("mosque", &tags(&[("building", "mosque")])),
+            Some(Use::Worship(Faith::Muslim))
+        );
+        assert_eq!(
+            use_from_tags(&tags(&[
+                ("amenity", "place_of_worship"),
+                ("religion", "jewish")
+            ])),
+            Some(Use::Worship(Faith::Jewish))
+        );
+    }
+
+    #[test]
     fn levels_parse_from_their_first_value() {
         assert_eq!(parse_level("1"), Some(1));
         assert_eq!(parse_level("0;1"), Some(0));
@@ -732,6 +766,21 @@ mod tests {
             area: None,
         });
         assert!(p.floors.iter().flatten().all(|u| u.use_ == Use::Home));
+    }
+
+    #[test]
+    fn a_level_above_a_mapped_outline_belongs_elsewhere() {
+        let high = [tenant(Use::Clinic, 2, Some(5))];
+        let p = plan(
+            &[("building", "apartments"), ("building:levels", "2")],
+            2,
+            200,
+            &high,
+        );
+        assert!(p.floors.iter().flatten().all(|u| u.use_ == Use::Home));
+        // Without mapped levels the storey count is a guess, and the tenant stays.
+        let p = plan(&[("building", "apartments")], 2, 200, &high);
+        assert_eq!(uses(&p)[1], vec![Use::Clinic]);
     }
 
     #[test]

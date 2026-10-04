@@ -8192,6 +8192,7 @@ pub fn generate_buildings(
                     entrances: &entrances,
                     bounds: ((bounds.min_x, bounds.min_z), (bounds.max_x, bounds.max_z)),
                     claims: ctx.interior_uses.claims(element.id),
+                    scale: args.scale,
                     floor_block: config.floor_block,
                     seed: group_seed,
                 },

@@ -46,23 +46,35 @@ pub(super) fn worship(c: &mut Canvas, zone: u16, faith: Faith, ctx: &FloorCtx) {
                 }
             }
         }
-        Faith::Christian | Faith::Other => {
-            // Altar, with a lectern to one side.
+        Faith::Christian | Faith::Jewish | Faith::Other => {
             let altar_v = back - 2;
-            for du in -1..=1 {
-                let (x, z) = f.world(mid + du, altar_v);
-                let block = if du == 0 {
-                    CHISELED_QUARTZ_BLOCK
-                } else {
-                    QUARTZ_BLOCK
-                };
-                if c.put(x, 1, z, block) && du != 0 {
-                    c.put(x, 2, z, LANTERN);
+            if faith == Faith::Jewish {
+                // The ark on the far wall, the reading desk in front of it.
+                for du in -1..=1 {
+                    let (x, z) = f.world(mid + du, back);
+                    c.stack(x, z, &[DARK_OAK_PLANKS, DARK_OAK_PLANKS]);
                 }
-            }
-            if w >= 7 {
-                let (x, z) = f.world(mid + 3, altar_v - 1);
-                c.put_with(x, 1, z, facing_block(LECTERN, f.front()));
+                let (x, z) = f.world(mid, back);
+                c.put(x, 3, z, LANTERN);
+                let (x, z) = f.world(mid, altar_v);
+                c.put_with(x, 1, z, facing_block(LECTERN, f.back()));
+            } else {
+                // Altar, with a lectern to one side.
+                for du in -1..=1 {
+                    let (x, z) = f.world(mid + du, altar_v);
+                    let block = if du == 0 {
+                        CHISELED_QUARTZ_BLOCK
+                    } else {
+                        QUARTZ_BLOCK
+                    };
+                    if c.put(x, 1, z, block) && du != 0 {
+                        c.put(x, 2, z, LANTERN);
+                    }
+                }
+                if w >= 7 {
+                    let (x, z) = f.world(mid + 3, altar_v - 1);
+                    c.put_with(x, 1, z, facing_block(LECTERN, f.front()));
+                }
             }
             match faith {
                 Faith::Christian if headroom >= 5 => {
@@ -92,7 +104,7 @@ pub(super) fn worship(c: &mut Canvas, zone: u16, faith: Faith, ctx: &FloorCtx) {
                 }
                 if aisle(u) {
                     c.put(x, 1, z, RED_CARPET);
-                } else if faith == Faith::Christian
+                } else if matches!(faith, Faith::Christian | Faith::Jewish)
                     && v >= 2
                     && v < altar_v - 2
                     && v % 2 == 0

@@ -9,7 +9,7 @@ mod residential;
 pub mod uses;
 
 pub use canvas::Entry;
-pub use index::InteriorUseIndex;
+pub use index::{Claim, InteriorUseIndex};
 pub use uses::{plan_interior, InteriorPlan, PlanInputs};
 
 use crate::block_definitions::*;
@@ -42,7 +42,9 @@ pub struct InteriorRequest<'a> {
     /// Corners of the outline's bounding box.
     pub bounds: ((i32, i32), (i32, i32)),
     /// Smaller buildings standing on this one's floor, which furnish it themselves.
-    pub claims: &'a [Vec<(i32, i32)>],
+    pub claims: &'a [Claim],
+    /// Blocks per metre, to compare storeys with claim heights.
+    pub scale: f64,
     /// The slab between storeys, which a light may replace.
     pub floor_block: Block,
     pub seed: u64,
@@ -70,13 +72,28 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
     let abs = req.abs_terrain_offset;
     let ((min_x, min_z), (max_x, max_z)) = req.bounds;
     let floors = req.floor_levels.len();
-    // Floor shared with a smaller building belongs to that building's interior.
-    let own: Vec<(i32, i32)> = req
+    // Floor shared with a smaller building belongs to it up to that building's top.
+    let claimed_to: Vec<f64> = req
         .footprint
         .iter()
-        .copied()
-        .filter(|&(x, z)| !req.claims.iter().any(|ring| index::covers(ring, x, z)))
+        .map(|&(x, z)| {
+            req.claims
+                .iter()
+                .filter(|claim| index::covers(&claim.ring, x, z))
+                .map(|claim| claim.top_m)
+                .fold(0.0, f64::max)
+        })
         .collect();
+    let own_at = |floor_rel: i32| -> Vec<(i32, i32)> {
+        let floor_m = (floor_rel - req.start_y_offset) as f64 / req.scale.max(0.01);
+        req.footprint
+            .iter()
+            .zip(&claimed_to)
+            .filter(|(_, &top)| top <= floor_m + 1.0)
+            .map(|(&cell, _)| cell)
+            .collect()
+    };
+    let own = own_at(req.start_y_offset);
     if own.is_empty() {
         return;
     }
@@ -113,7 +130,8 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
         {
             let in_passage = floor_rel < passage_top;
             let skip = |x: i32, z: i32| in_passage && req.passages.contains(x, z);
-            let mut c = Canvas::new(editor, &own, floor_y, top, req.wall_block, &skip);
+            let storey = own_at(floor_rel);
+            let mut c = Canvas::new(editor, &storey, floor_y, top, req.wall_block, &skip);
             if let Some((cell, n)) = shaft {
                 shaft_open = c.walkable(cell.0, cell.1);
                 c.keep(cell.0, cell.1);
@@ -1458,5 +1476,47 @@ mod tests {
                 "{kind}"
             );
         }
+    }
+
+    #[test]
+    fn a_pavilion_claims_only_the_storeys_it_reaches() {
+        let hall = sized(
+            2,
+            40,
+            30,
+            &[("building", "retail"), ("building:levels", "3")],
+        );
+        let cafe = rect_way(
+            3,
+            30,
+            20,
+            40,
+            28,
+            &[
+                ("building", "yes"),
+                ("amenity", "cafe"),
+                ("building:levels", "1"),
+            ],
+        );
+        let xz = XZBBox::rect_from_xz_lengths(90.0, 90.0).unwrap();
+        let elements = vec![
+            ProcessedElement::Way(hall.clone()),
+            ProcessedElement::Way(cafe),
+        ];
+        let editor = build(&xz, &elements);
+        let rows = floor_rows(&editor, &hall, 20);
+        let upper = rows[1] + 1;
+        let stock = [BARREL, HAY_BALE, PUMPKIN, COMPOSTER];
+        let over_cafe = (31..40)
+            .flat_map(|x| (21..28).map(move |z| (x, z)))
+            .any(|(x, z)| {
+                editor
+                    .get_block_absolute(x, upper, z)
+                    .is_some_and(|b| stock.contains(&b))
+            });
+        assert!(
+            over_cafe,
+            "the hall furnishes its upper floor above the pavilion"
+        );
     }
 }
