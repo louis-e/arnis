@@ -28,11 +28,43 @@ const COORD_SCALE: f64 = 1e7;
 const SYNTHETIC_ID_BASE: u64 = 1 << 61;
 
 /// Same coordinate, same id in every bbox; facade walls match on it. Longitude wraps every 107
-/// degrees, since the globe at 1e-7 needs 63 bits and no bbox is that wide.
+/// degrees because the globe at 1e-7 needs 63 bits; [`NodeIds`] keeps such pairs apart.
 fn coordinate_node_id((lat, lon): (i32, i32)) -> u64 {
     let lat = (i64::from(lat) + MAX_LAT_E7) as u64;
     let lon = i64::from(lon).rem_euclid(1 << 30) as u64;
     SYNTHETIC_ID_BASE | (lat << 30) | lon
+}
+
+/// A latitude field no coordinate packs to (they stop at 1.8e9), for spill ids.
+const SPILL_LAT: u64 = (1 << 31) - 1;
+
+/// Vertex ids for one read. A coordinate whose packed id another coordinate already holds (same
+/// latitude, longitude 2^30 units apart) gets a spill id, so distinct vertices never merge.
+#[derive(Default)]
+struct NodeIds {
+    owner: HashMap<u64, (i32, i32)>,
+    spilled: HashMap<(i32, i32), u64>,
+}
+
+impl NodeIds {
+    /// The id for `p`, and whether this is the first time `p` came up.
+    fn get(&mut self, p: (i32, i32)) -> (u64, bool) {
+        let id = coordinate_node_id(p);
+        match self.owner.get(&id) {
+            None => {
+                self.owner.insert(id, p);
+                (id, true)
+            }
+            Some(q) if *q == p => (id, false),
+            Some(_) => {
+                let next = SYNTHETIC_ID_BASE | (SPILL_LAT << 30) | self.spilled.len() as u64;
+                match self.spilled.entry(p) {
+                    std::collections::hash_map::Entry::Occupied(e) => (*e.get(), false),
+                    std::collections::hash_map::Entry::Vacant(e) => (*e.insert(next), true),
+                }
+            }
+        }
+    }
 }
 
 /// Refuse a tile that decompresses to more than this.
@@ -611,15 +643,15 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
     ways.sort_unstable_by_key(|w| w.0);
 
     let mut emitted: Vec<(u64, i32, i32)> = Vec::new();
-    let mut seen: HashSet<(i32, i32)> = HashSet::new();
+    let mut ids = NodeIds::default();
     let mut vertex_nodes: HashSet<u64> = HashSet::new();
     let mut way_elements: Vec<OsmElement> = Vec::with_capacity(ways.len());
     for (id, closed, tags, points) in ways {
         let mut refs: Vec<u64> = Vec::with_capacity(points.len() + 1);
         for p in &points {
             // Never a tagged node's own id: which ones a read sees depends on its tiles.
-            let nid = coordinate_node_id(*p);
-            if seen.insert(*p) {
+            let (nid, first) = ids.get(*p);
+            if first {
                 match tagged_at.get(p) {
                     Some(&tagged) => {
                         vertex_nodes.insert(tagged);
@@ -655,7 +687,7 @@ fn assemble(c: Collected, bbox: &LLBBox) -> OsmData {
             continue;
         }
         let id = if vertex_nodes.contains(&id) {
-            coordinate_node_id((lat, lon))
+            ids.get((lat, lon)).0
         } else {
             id
         };
@@ -1322,6 +1354,44 @@ mod tests {
                 "reads as clipped"
             );
         }
+    }
+
+    // Same latitude, longitude exactly 2^30 units apart: the one pair the packing cannot tell
+    // apart. A wide bbox or a whole relation can bring both into one read.
+    #[test]
+    fn coordinates_107_degrees_apart_stay_separate_vertices() {
+        let far = 1 << 30;
+        assert_eq!(coordinate_node_id((0, 0)), coordinate_node_id((0, far)));
+        let mut c = Collected::default();
+        c.ways.insert(
+            1,
+            (
+                false,
+                vec![("highway".into(), "residential".into())],
+                vec![(0, 0), (5, 5), (0, far)],
+            ),
+        );
+        let data = assemble(c, &LLBBox::new(0.0, 0.0, 0.001, 108.0).unwrap());
+        let refs = data
+            .elements()
+            .iter()
+            .find(|e| e.r#type == "way")
+            .and_then(|e| e.nodes.clone())
+            .unwrap();
+        assert_eq!(refs.len(), 3);
+        assert_ne!(refs[0], refs[2]);
+        let lon_of = |id: u64| {
+            data.elements()
+                .iter()
+                .find(|e| e.r#type == "node" && e.id == id)
+                .and_then(|e| e.lon)
+                .unwrap()
+        };
+        assert_eq!(lon_of(refs[0]), 0.0);
+        assert!((lon_of(refs[2]) - far as f64 / COORD_SCALE).abs() < 1e-9);
+        assert!(refs
+            .iter()
+            .all(|&id| id >= SYNTHETIC_ID_BASE && !crate::clipping::is_invented_node_id(id)));
     }
 
     #[test]
