@@ -15,24 +15,26 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Override per run with `--osm-tiles-url`. The version prefix is part of it: a re-bake is
-/// published beside the old one, so a run in flight never sees half of each.
-pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnisproject.com/v1";
+/// Override per run with `--osm-tiles-url`. The version prefix is the format: v2 is AOT2.
+pub const DEFAULT_OSM_TILES_URL: &str = "https://tiles.arnisproject.com/v2";
 
 /// Archive zoom. Must match `arnis-tiles`; a mismatch means every lookup misses.
 const ZOOM: u8 = 13;
 
-/// Degrees per stored coordinate unit in the tile payload. Must match arnis-tiles.
-const COORD_SCALE: f64 = 1e6;
+/// Degrees per coordinate unit, OSM's own precision. AOT2 stores exactly this; AOT1 stored 1e-6
+/// and is scaled up on read.
+const COORD_SCALE: f64 = 1e7;
 
 /// Base of the ids packed from way vertex coordinates, below the clipper's invented ids.
 const SYNTHETIC_ID_BASE: u64 = 1 << 61;
 
-/// Same coordinate, same id in every bbox; facade walls match on it.
+/// Same coordinate, same id in every bbox; facade walls match on it. Latitude is packed whole
+/// and longitude modulo 2^30 units (107 degrees): 1e-7 needs 63 bits for the globe, and two
+/// coordinates over 100 degrees apart never meet in one bbox.
 fn coordinate_node_id((lat, lon): (i32, i32)) -> u64 {
-    let lat = (i64::from(lat) + MAX_LAT_E6) as u64;
-    let lon = (i64::from(lon) + MAX_LON_E6) as u64;
-    SYNTHETIC_ID_BASE | (lat << 29) | lon
+    let lat = (i64::from(lat) + MAX_LAT_E7) as u64;
+    let lon = i64::from(lon).rem_euclid(1 << 30) as u64;
+    SYNTHETIC_ID_BASE | (lat << 30) | lon
 }
 
 /// Refuse a tile that decompresses to more than this.
@@ -46,8 +48,15 @@ const MAX_TILES: usize = 4096;
 /// archives to read one.
 const CELL_ZOOM: u8 = 6;
 
-const MAX_LAT_E6: i64 = 90_000_000;
-const MAX_LON_E6: i64 = 180_000_000;
+const MAX_LAT_E7: i64 = 900_000_000;
+const MAX_LON_E7: i64 = 1_800_000_000;
+
+/// Whole relations sit at this tile id plus the relation id: the first zoom 20 id, past every
+/// zoom 13 tile the archive holds.
+const RELATION_TILE_BASE: u64 = ((1 << 40) - 1) / 3;
+
+/// A whole relation larger than this on the wire stays partial rather than being fetched.
+const MAX_RECORD_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Per-kind record cap. Far above a real tile; stops a corrupt one from outgrowing its payload.
 const MAX_RECORDS: u64 = 1 << 24;
@@ -248,6 +257,9 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
         .map(|(x, y)| (y >> shift) * side + (x >> shift))
         .collect();
 
+    // Relation id -> the opened archives whose tiles carried it.
+    let mut seen_in: HashMap<u64, Vec<usize>> = HashMap::new();
+    let mut opened: Vec<Archive> = Vec::new();
     for entry in manifest.archives.iter().filter(|a| a.covers(&cells, &bbox)) {
         if !entry.file_is_safe() {
             return Err(format!(
@@ -271,39 +283,106 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
             .par_iter()
             .map(|(x, y, loc)| {
                 let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
-                if raw.is_empty() {
-                    return Ok((0, Vec::new()));
-                }
-                let on_wire = raw.len() as u64;
-                // Archives set tile_compression=none, so the baker's zstd frame is still here.
-                let plain = zstd::stream::decode_all(&raw[..])
-                    .map_err(|e| format!("tile {ZOOM}/{x}/{y} is not readable: {e}"))?;
-                if plain.len() as u64 > MAX_TILE_BYTES {
-                    return Err(format!("tile {ZOOM}/{x}/{y} expands past the size cap"));
-                }
-                Ok((on_wire, plain))
+                unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))
             })
             .collect();
 
+        let k = opened.len();
         for entry in fetched {
             let (on_wire, plain) = entry?;
             if plain.is_empty() {
                 continue;
             }
             bytes += on_wire;
-            absorb(&plain, &mut collected)?;
+            let tile = decode(&plain)?;
+            for r in &tile.relations {
+                let list = seen_in.entry(r.0).or_default();
+                if list.last() != Some(&k) {
+                    list.push(k);
+                }
+            }
+            absorb(tile, &mut collected);
             tiles_read += 1;
         }
+        opened.push(archive);
     }
 
     if tiles_read == 0 {
         return Err("the tile archive has no data for this area".into());
     }
+
+    // A tile only holds the members that touch it, so a lake reaching past the bbox's tiles
+    // arrives as a few shore pieces; Overpass returned every member. Whole relations are
+    // stored once per archive, and fetched for the ones this bbox actually uses.
+    let area = Extent::around(&bbox);
+    let partial: Vec<u64> = collected
+        .relations
+        .iter()
+        .filter(|(_, (_, members))| {
+            members.iter().any(|(m, _)| !collected.ways.contains_key(m))
+                && members
+                    .iter()
+                    .filter_map(|(m, _)| collected.ways.get(m))
+                    .filter_map(|(_, _, pts)| Extent::of(pts))
+                    .reduce(Extent::union)
+                    .is_some_and(|e| e.intersects(&area))
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    let mut records = 0usize;
+    for (k, archive) in opened.iter_mut().enumerate() {
+        let mut located = Vec::new();
+        for rid in &partial {
+            if !seen_in.get(rid).is_some_and(|l| l.contains(&k)) {
+                continue;
+            }
+            let id = RELATION_TILE_BASE + rid;
+            if let Some(loc) = archive.locate_id(&client, id)? {
+                if u64::from(loc.length) <= MAX_RECORD_BYTES {
+                    located.push((id, loc));
+                }
+            }
+        }
+        let archive = &*archive;
+        let fetched: Vec<Result<(u64, Vec<u8>)>> = located
+            .par_iter()
+            .map(|(id, loc)| {
+                let raw = archive.entry(&client, *id, *loc, MAX_RECORD_BYTES)?;
+                unpack(raw, &format!("relation {}", id - RELATION_TILE_BASE))
+            })
+            .collect();
+        for entry in fetched {
+            let (on_wire, plain) = entry?;
+            if plain.is_empty() {
+                continue;
+            }
+            bytes += on_wire;
+            absorb(decode(&plain)?, &mut collected);
+            records += 1;
+        }
+    }
+    if records > 0 {
+        println!("Completed {records} relations that reach past the bbox's tiles");
+    }
+
     Ok((assemble(collected, &bbox), tiles_read, bytes))
 }
 
-fn absorb(payload: &[u8], out: &mut Collected) -> Result<()> {
-    let tile = decode(payload)?;
+/// Archives set tile_compression=none, so the baker's zstd frame is still around the payload.
+fn unpack(raw: Vec<u8>, what: &str) -> Result<(u64, Vec<u8>)> {
+    if raw.is_empty() {
+        return Ok((0, Vec::new()));
+    }
+    let on_wire = raw.len() as u64;
+    let plain =
+        zstd::stream::decode_all(&raw[..]).map_err(|e| format!("{what} is not readable: {e}"))?;
+    if plain.len() as u64 > MAX_TILE_BYTES {
+        return Err(format!("{what} expands past the size cap"));
+    }
+    Ok((on_wire, plain))
+}
+
+fn absorb(tile: DecodedTile, out: &mut Collected) {
     for n in tile.nodes {
         out.nodes.entry(n.0).or_insert((n.1, n.2, n.3));
     }
@@ -313,15 +392,14 @@ fn absorb(payload: &[u8], out: &mut Collected) -> Result<()> {
     for r in tile.relations {
         out.relations.entry(r.0).or_insert((r.1, r.2));
     }
-    Ok(())
 }
 
-/// Degrees x 1e6 past the bbox that still count as inside it: enough for an element the
-/// projection rounds onto the edge row, and far less than a tile. The parser clips to the
+/// Coordinate units past the bbox that still count as inside it (~110 m): enough for an element
+/// the projection rounds onto the edge row, and far less than a tile. The parser clips to the
 /// bbox itself, so this only decides what it gets to see.
-const EDGE_MARGIN_E6: i64 = 1_000;
+const EDGE_MARGIN: i64 = 10_000;
 
-/// Lat/lon extent in the payload's degrees x 1e6.
+/// Lat/lon extent in coordinate units.
 #[derive(Clone, Copy)]
 struct Extent {
     min_lat: i32,
@@ -350,16 +428,16 @@ impl Extent {
 
     /// The bbox plus the edge margin.
     fn around(bbox: &LLBBox) -> Self {
-        let e6 = |v: f64, round: fn(f64) -> f64| round(v * COORD_SCALE) as i64;
-        let lat_lo = e6(bbox.min().lat(), f64::floor) - EDGE_MARGIN_E6;
-        let lat_hi = e6(bbox.max().lat(), f64::ceil) + EDGE_MARGIN_E6;
-        let lon_lo = e6(bbox.min().lng(), f64::floor) - EDGE_MARGIN_E6;
-        let lon_hi = e6(bbox.max().lng(), f64::ceil) + EDGE_MARGIN_E6;
+        let units = |v: f64, round: fn(f64) -> f64| round(v * COORD_SCALE) as i64;
+        let lat_lo = units(bbox.min().lat(), f64::floor) - EDGE_MARGIN;
+        let lat_hi = units(bbox.max().lat(), f64::ceil) + EDGE_MARGIN;
+        let lon_lo = units(bbox.min().lng(), f64::floor) - EDGE_MARGIN;
+        let lon_hi = units(bbox.max().lng(), f64::ceil) + EDGE_MARGIN;
         Extent {
-            min_lat: lat_lo.max(-MAX_LAT_E6) as i32,
-            min_lon: lon_lo.max(-MAX_LON_E6) as i32,
-            max_lat: lat_hi.min(MAX_LAT_E6) as i32,
-            max_lon: lon_hi.min(MAX_LON_E6) as i32,
+            min_lat: lat_lo.max(-MAX_LAT_E7) as i32,
+            min_lon: lon_lo.max(-MAX_LON_E7) as i32,
+            max_lat: lat_hi.min(MAX_LAT_E7) as i32,
+            max_lon: lon_hi.min(MAX_LON_E7) as i32,
         }
     }
 
@@ -647,7 +725,7 @@ fn step(acc: &mut i64, r: &mut Reader<'_>) -> Result<i64> {
     Ok(*acc)
 }
 
-/// Stored coordinates are degrees x 1e6. Out-of-globe values reach `LLPoint::new` downstream,
+/// Coordinates in 1e-7 degrees. Out-of-globe values reach `LLPoint::new` downstream,
 /// which panics rather than returning, so they are rejected here.
 fn coord(v: i64, limit: i64) -> Result<i32> {
     if !(-limit..=limit).contains(&v) {
@@ -666,9 +744,16 @@ fn oid(v: i64) -> Result<u64> {
 }
 
 fn decode(buf: &[u8]) -> Result<DecodedTile> {
-    if buf.len() < 4 || &buf[..4] != b"AOT1" {
-        return Err("not an Arnis tile payload".into());
-    }
+    let scale: i64 = match buf.get(..4) {
+        Some(b"AOT2") => 1,
+        Some(b"AOT1") => 10,
+        _ => return Err("not an Arnis tile payload".into()),
+    };
+    let up = |v: i64, limit: i64| {
+        v.checked_mul(scale)
+            .ok_or_else(|| "tile coordinate out of range".to_string())
+            .and_then(|v| coord(v, limit))
+    };
     let mut r = Reader { buf, pos: 4 };
 
     let n_strings = r.uvarint()?;
@@ -711,8 +796,8 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
     let (mut id, mut lat, mut lon) = (0i64, 0i64, 0i64);
     for _ in 0..n_nodes {
         let nid = oid(step(&mut id, &mut r)?)?;
-        let y = coord(step(&mut lat, &mut r)?, MAX_LAT_E6)?;
-        let x = coord(step(&mut lon, &mut r)?, MAX_LON_E6)?;
+        let y = up(step(&mut lat, &mut r)?, MAX_LAT_E7)?;
+        let x = up(step(&mut lon, &mut r)?, MAX_LON_E7)?;
         let tags = read_tags(&mut r)?;
         tile.nodes.push((nid, y, x, tags));
     }
@@ -733,8 +818,8 @@ fn decode(buf: &[u8]) -> Result<DecodedTile> {
         let mut pts = Vec::with_capacity(n_pts as usize);
         let (mut a, mut o) = (0i64, 0i64);
         for _ in 0..n_pts {
-            let y = coord(step(&mut a, &mut r)?, MAX_LAT_E6)?;
-            let x = coord(step(&mut o, &mut r)?, MAX_LON_E6)?;
+            let y = up(step(&mut a, &mut r)?, MAX_LAT_E7)?;
+            let x = up(step(&mut o, &mut r)?, MAX_LON_E7)?;
             pts.push((y, x));
         }
         tile.ways.push((wid, closed, tags, pts));
@@ -830,8 +915,8 @@ mod tests {
         uvar(((v << 1) ^ (v >> 63)) as u64, out);
     }
 
-    fn node_tile(deltas: &[(i64, i64, i64)]) -> Vec<u8> {
-        let mut buf = b"AOT1".to_vec();
+    fn node_tile_as(magic: &[u8; 4], deltas: &[(i64, i64, i64)]) -> Vec<u8> {
+        let mut buf = magic.to_vec();
         buf.push(0);
         uvar(deltas.len() as u64, &mut buf);
         for (id, lat, lon) in deltas {
@@ -845,6 +930,19 @@ mod tests {
         buf
     }
 
+    fn node_tile(deltas: &[(i64, i64, i64)]) -> Vec<u8> {
+        node_tile_as(b"AOT2", deltas)
+    }
+
+    // The v1 archives are AOT1 at 1e-6; they still read, at the same place.
+    #[test]
+    fn aot1_payloads_are_scaled_to_full_precision() {
+        let v1 = decode(&node_tile_as(b"AOT1", &[(7, 48_137_154, 11_575_382)])).unwrap();
+        let v2 = decode(&node_tile(&[(7, 481_371_540, 115_753_820)])).unwrap();
+        assert_eq!(v1.nodes[0].1, v2.nodes[0].1);
+        assert_eq!(v1.nodes[0].2, v2.nodes[0].2);
+    }
+
     fn decode_err(buf: &[u8]) -> String {
         match decode(buf) {
             Err(e) => e,
@@ -856,13 +954,13 @@ mod tests {
     // returning, so the decoder has to be the thing that says no.
     #[test]
     fn out_of_range_coordinates_are_refused() {
-        let err = decode_err(&node_tile(&[(1, 200_000_000, 0)]));
+        let err = decode_err(&node_tile(&[(1, 2_000_000_000, 0)]));
         assert!(err.contains("out of range"), "{err}");
     }
 
     #[test]
     fn delta_overflow_is_refused() {
-        let err = decode_err(&node_tile(&[(1, MAX_LAT_E6, 0), (1, i64::MAX, 0)]));
+        let err = decode_err(&node_tile(&[(1, MAX_LAT_E7, 0), (1, i64::MAX, 0)]));
         assert!(err.contains("overflow"), "{err}");
     }
 
@@ -1171,10 +1269,10 @@ mod tests {
     #[test]
     fn coordinate_ids_are_distinct_and_cover_the_globe() {
         let corners = [
-            (-90_000_000, -180_000_000),
-            (-90_000_000, 180_000_000),
-            (90_000_000, -180_000_000),
-            (90_000_000, 180_000_000),
+            (-900_000_000, -1_800_000_000),
+            (-900_000_000, 1_799_999_999),
+            (900_000_000, -1_800_000_000),
+            (900_000_000, 1_799_999_999),
             (0, 0),
             (0, 1),
             (1, 0),
@@ -1184,5 +1282,63 @@ mod tests {
         assert!(ids
             .iter()
             .all(|&id| id >= SYNTHETIC_ID_BASE && !crate::clipping::is_invented_node_id(id)));
+    }
+
+    // Every 1e-7 step in a bbox-sized patch gets its own id, across the antimeridian too.
+    #[test]
+    fn neighbouring_coordinates_never_share_an_id() {
+        for &(lat0, lon0) in &[
+            (481_371_540i64, 115_753_820i64),
+            (-170_000_000, 1_799_999_990),
+            (0, -5),
+        ] {
+            let mut ids = HashSet::new();
+            for dlat in 0..20 {
+                for dlon in 0..20 {
+                    let lon =
+                        (lon0 + dlon + 1_800_000_000).rem_euclid(3_600_000_000) - 1_800_000_000;
+                    assert!(ids.insert(coordinate_node_id(((lat0 + dlat) as i32, lon as i32))));
+                }
+            }
+        }
+        // Far enough apart to share the low bits is far past any bbox.
+        assert_ne!(
+            coordinate_node_id((0, 0)),
+            coordinate_node_id((0, 999_999_999))
+        );
+    }
+
+    // A lake's whole record fills in the shore pieces a tile alone did not carry.
+    #[test]
+    fn a_whole_relation_completes_the_members_a_tile_lacked() {
+        let mut c = Collected::default();
+        let lake = (
+            vec![("natural".to_string(), "water".to_string())],
+            vec![(1, "outer".to_string()), (2, "outer".to_string())],
+        );
+        absorb(
+            DecodedTile {
+                ways: vec![(1, false, vec![], vec![(0, 0), (0, 10)])],
+                relations: vec![(9, lake.0.clone(), lake.1.clone())],
+                ..DecodedTile::default()
+            },
+            &mut c,
+        );
+        assert!(!c.ways.contains_key(&2));
+        absorb(
+            DecodedTile {
+                ways: vec![
+                    (1, false, vec![], vec![(0, 0), (0, 10)]),
+                    (2, false, vec![], vec![(0, 10), (0, 0)]),
+                ],
+                relations: vec![(9, lake.0, lake.1)],
+                ..DecodedTile::default()
+            },
+            &mut c,
+        );
+        assert!(c.relations[&9]
+            .1
+            .iter()
+            .all(|(m, _)| c.ways.contains_key(m)));
     }
 }
