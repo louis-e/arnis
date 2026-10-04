@@ -445,13 +445,24 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
 
 /// Archives set tile_compression=none, so the baker's zstd frame is still around the payload.
 fn unpack(raw: Vec<u8>, what: &str) -> Result<(u64, Vec<u8>)> {
+    unpack_within(raw, what, MAX_TILE_BYTES)
+}
+
+/// Stops decoding one byte past `cap`: checking only afterwards let a hostile frame expand to
+/// whatever it liked first.
+fn unpack_within(raw: Vec<u8>, what: &str, cap: u64) -> Result<(u64, Vec<u8>)> {
+    use std::io::Read;
     if raw.is_empty() {
         return Ok((0, Vec::new()));
     }
     let on_wire = raw.len() as u64;
-    let plain =
-        zstd::stream::decode_all(&raw[..]).map_err(|e| format!("{what} is not readable: {e}"))?;
-    if plain.len() as u64 > MAX_TILE_BYTES {
+    let mut plain = Vec::new();
+    zstd::Decoder::new(&raw[..])
+        .map_err(|e| format!("{what} is not readable: {e}"))?
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut plain)
+        .map_err(|e| format!("{what} is not readable: {e}"))?;
+    if plain.len() as u64 > cap {
         return Err(format!("{what} expands past the size cap"));
     }
     Ok((on_wire, plain))
@@ -1084,6 +1095,18 @@ mod tests {
         assert!(dir.join("europe-20261018.pmtiles").exists());
         assert!(dir.join("archives.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_frame_expanding_past_the_cap_is_refused() {
+        let bomb = zstd::encode_all(&vec![0u8; 100_000][..], 19).unwrap();
+        assert!(bomb.len() < 1_000);
+        let err = unpack_within(bomb.clone(), "tile", 10_000).unwrap_err();
+        assert!(err.contains("size cap"), "{err}");
+        assert_eq!(
+            unpack_within(bomb, "tile", 100_000).unwrap().1.len(),
+            100_000
+        );
     }
 
     #[test]
