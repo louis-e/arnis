@@ -1630,15 +1630,13 @@ fn generate_highways_internal(
             // Painted pedestrian crossing, kept to the carriageways it runs over.
             let crossing_paint = markings.crossing_way_paint(element.tags());
             let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
-            // Surface of the carriageway under a crossing cell; None off the road.
+            // Surface of the carriageway under a crossing cell; None off the road, and
+            // everywhere for a crossing that shares no node with a road.
             let carriageway_at = |cx: i32, cz: i32| -> Option<&'static [Block]> {
-                match crossing_clips {
-                    None => Some(DEFAULT_ROAD_MIX),
-                    Some(clips) => clips
-                        .iter()
-                        .find(|c| c.contains(cx, cz))
-                        .map(|c| c.palette()),
-                }
+                crossing_clips?
+                    .iter()
+                    .find(|c| c.contains(cx, cz))
+                    .map(|c| c.palette())
             };
 
             // Iterate over nodes to create the highway
@@ -3800,6 +3798,31 @@ mod tests {
             }
         }
         assert!((10..190).any(|x| white(x, 48)));
+    }
+
+    #[test]
+    fn a_crossing_with_no_road_node_paints_nothing() {
+        // Mapped across the road without sharing its node: nowhere known to be carriageway.
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 100.0).unwrap();
+        let road = way_along(1, (10, 50), (190, 50), &[("highway", "residential")]);
+        let crossing = way_along(
+            2,
+            (100, 30),
+            (100, 70),
+            &[
+                ("highway", "footway"),
+                ("footway", "crossing"),
+                ("crossing", "zebra"),
+            ],
+        );
+        let mut editor = test_editor(&xzbbox);
+        build_marked_ways(&mut editor, &[road, crossing]);
+        for z in 30..=70 {
+            assert!(
+                !editor.check_for_block(100, 0, z, Some(&[WHITE_CONCRETE])),
+                "z={z}"
+            );
+        }
     }
 
     #[test]
