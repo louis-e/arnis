@@ -175,7 +175,7 @@ const MODULE_STREET_BLOCK: Block = CYAN_TERRACOTTA;
 
 /// Road surface and lane paint on a segment's street row.
 fn is_street_block(block: Block) -> bool {
-    block == MODULE_STREET_BLOCK || block == WHITE_CONCRETE
+    block == MODULE_STREET_BLOCK || block == WHITE_CONCRETE || block == YELLOW_CONCRETE
 }
 
 /// Parapets, posts and signs along a deck edge.
