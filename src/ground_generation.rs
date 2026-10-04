@@ -20,7 +20,7 @@ use crate::block_definitions::{
     GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
     MOSS_BLOCK, MUD, OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE,
     SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
-    WHITE_CONCRETE,
+    WHITE_CONCRETE, YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
@@ -863,6 +863,7 @@ pub fn generate_ground_region(
                                         GRAY_CONCRETE,
                                         LIGHT_GRAY_CONCRETE,
                                         WHITE_CONCRETE,
+                                        YELLOW_CONCRETE,
                                         DIRT_PATH,
                                         STONE_BRICKS,
                                         BRICK,
@@ -1403,6 +1404,7 @@ pub fn generate_ground_region(
                             GRAY_CONCRETE,
                             LIGHT_GRAY_CONCRETE,
                             WHITE_CONCRETE,
+                            YELLOW_CONCRETE,
                             DIRT_PATH,
                             WATER,
                         ]),

@@ -278,6 +278,7 @@ fn process_element(
     element: &ProcessedElement,
     args: &Args,
     highway_connectivity: &highways::HighwayConnectivityMap,
+    road_markings: &road_markings::RoadMarkingIndex,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &CoordinateBitmap,
     building_passages: &CoordinateBitmap,
@@ -347,6 +348,7 @@ fn process_element(
                     tunnel_portals,
                     tunnel_footprint,
                     tunnel_cells,
+                    road_markings,
                 );
                 if signage {
                     signage::generate_highway_way_signage(editor, way, building_footprints);
@@ -475,6 +477,7 @@ fn process_element(
                     tunnel_portals,
                     tunnel_footprint,
                     tunnel_cells,
+                    road_markings,
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
@@ -890,6 +893,14 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
+    let road_markings = road_markings::RoadMarkingIndex::build(
+        &elements,
+        args.scale,
+        crate::decals::region::SignRegion::detect(
+            (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
+            (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+        ),
+    );
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
     let mut rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
@@ -1213,6 +1224,7 @@ pub fn generate_world_with_options(
                     element,
                     args,
                     &highway_connectivity,
+                    &road_markings,
                     &flood_fill_cache,
                     &building_footprints,
                     &building_passages,
@@ -1589,6 +1601,7 @@ pub fn generate_world_with_options(
                 &element,
                 args,
                 &highway_connectivity,
+                &road_markings,
                 &flood_fill_cache,
                 &building_footprints,
                 &building_passages,
@@ -1623,6 +1636,7 @@ pub fn generate_world_with_options(
 
     // Keep road_mask alive for the LC_WATER carve below.
     drop(highway_connectivity);
+    drop(road_markings);
     drop(flood_fill_cache);
 
     // True when ground (and the ore/water post-passes) run on the merged editor:

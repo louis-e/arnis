@@ -11,6 +11,7 @@ use crate::element_processing::connected_blocks::{
     connected_iron_bars, place_connected, stair_steps,
 };
 use crate::element_processing::get_nearest_non_road_block;
+use crate::element_processing::road_markings::{self, CrossMark, CrossingPaint, RoadMarkingIndex};
 use crate::element_processing::surfaces::{
     cycleway_palette, get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
 };
@@ -182,8 +183,8 @@ const DEFAULT_ROAD_MIX: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
 /// - `GRAY_CONCRETE_POWDER`, `CYAN_TERRACOTTA`: the default asphalt mix,
 ///   preserved so two asphalt roads overlapping produce a consistent
 ///   surface instead of re-rolling the hash per pass.
-/// - `WHITE_CONCRETE`: preserves lane stripes and zebra crossings from
-///   being erased when a later road pass crosses them.
+/// - `WHITE_CONCRETE`, `YELLOW_CONCRETE`: preserve lane stripes and zebra
+///   crossings from being erased when a later road pass crosses them.
 /// - `BLACK_CONCRETE`: not produced by highways directly, but widely
 ///   placed by other element processors — schoolyards in `leisure.rs`,
 ///   gas-station / parking forecourts in `amenities.rs`, some landuse
@@ -199,6 +200,7 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     GRAY_CONCRETE_POWDER,
     CYAN_TERRACOTTA,
     WHITE_CONCRETE,
+    YELLOW_CONCRETE,
     // Bridge module furniture must survive parallel side-deck ways.
     WARPED_STAIRS,
     WARPED_TRAPDOOR,
@@ -219,6 +221,7 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
 const CYCLEWAY_PROTECTED_SURFACES: &[Block] = &[
     BLACK_CONCRETE,
     WHITE_CONCRETE,
+    YELLOW_CONCRETE,
     WARPED_STAIRS,
     WARPED_TRAPDOOR,
     WARPED_SLAB,
@@ -284,6 +287,7 @@ pub fn generate_highways(
     tunnel_portals: &TunnelPortalMap,
     tunnel_footprint: &CoordinateBitmap,
     tunnel_cells: &mut Vec<HighwayTunnelCell>,
+    markings: &RoadMarkingIndex,
 ) {
     if let ProcessedElement::Way(way) = element {
         // A way with no room to be bored falls through and renders at grade.
@@ -311,6 +315,7 @@ pub fn generate_highways(
         bridge_surface,
         tunnel_portals,
         tunnel_footprint,
+        markings,
     );
 }
 
@@ -1020,6 +1025,7 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
         BLACK_CONCRETE,
         LIGHT_GRAY_CONCRETE,
         WHITE_CONCRETE,
+        YELLOW_CONCRETE,
         GRASS_BLOCK,
         DIRT,
         COARSE_DIRT,
@@ -1254,6 +1260,7 @@ fn generate_highways_internal(
     bridge_surface: &BridgeSurfaceMap,
     tunnel_portals: &TunnelPortalMap,
     tunnel_footprint: &CoordinateBitmap,
+    markings: &RoadMarkingIndex,
 ) {
     // Shared `indoor=yes` / layer parsing for the whole function. Indoor
     // highways must never produce elevated geometry (they sit inside
@@ -1534,17 +1541,20 @@ fn generate_highways_internal(
                 place_way_lamps(editor, way, block_range, road_mask);
             }
 
-            // Lane-marking count; lane_markings=no drops the dividers, not the width.
-            const MAX_LANES: i32 = 16;
-            let mut lanes = way
-                .tags
-                .get("lanes")
-                .and_then(|l| l.parse::<i32>().ok())
-                .unwrap_or_else(|| highway_default_lanes(highway_type))
-                .clamp(1, MAX_LANES);
-            if way.tags.get("lane_markings").map(|s| s.as_str()) == Some("no") {
-                lanes = 1;
-            }
+            // Lane lines; lane_markings=no drops them, not the width. A tunnel with no room
+            // to bore runs at grade across the streets above it, so it stays unpainted.
+            let lines = if renders_as_highway_tunnel(way) {
+                Vec::new()
+            } else {
+                lane_lines(highway_type, &way.tags, block_range, markings)
+            };
+            let (dash_on, dash_period) = dash_pattern(highway_type, &way.tags, scale_factor);
+            let way_marks = markings.way(way.id);
+            // A line across one half of the road stops beside the centre line.
+            let centre_span = lines.iter().filter(|l| l.centre).fold(None, |span, l| {
+                let (lo, hi) = span.unwrap_or((l.offset, l.offset));
+                Some((lo.min(l.offset), hi.max(l.offset)))
+            });
 
             // Elevation based on layer (already normalised; `LAYER_HEIGHT_STEP`
             // is defined at the top of this function).
@@ -1628,14 +1638,12 @@ fn generate_highways_internal(
 
             let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize;
 
-            // Check if this is a marked zebra crossing (only depends on tags, compute once)
-            let is_zebra_crossing = highway_type == "footway"
-                && element.tags().get("footway").map(|s| s.as_str()) == Some("crossing")
-                && !matches!(
-                    element.tags().get("crossing").map(|s| s.as_str()),
-                    Some("no" | "unmarked")
-                )
-                && element.tags().get("crossing:markings").map(|s| s.as_str()) != Some("no");
+            // Painted pedestrian crossing, kept to the carriageways it runs over.
+            let crossing_paint = markings.crossing_way_paint(element.tags());
+            let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
+            let on_carriageway = |cx: i32, cz: i32| {
+                crossing_clips.is_none_or(|clips| clips.iter().any(|c| c.contains(cx, cz)))
+            };
 
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
@@ -1687,34 +1695,12 @@ fn generate_highways_internal(
                     // `ground_generation` fills terrain all the way up to
                     // the deck and bridges become giant embankments.
 
-                    // Variables to manage dashed line pattern
-                    let mut stripe_length: i32 = 0;
-                    let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
-                    let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
-
-                    // Segment-constants for multi-lane divider placement.
-                    // Computed once here instead of at every bresenham point:
-                    // `seg_len` needs a sqrt and all the perpendicular-unit-
-                    // vector math is identical across the whole segment.
-                    // `None` means there are no inner dividers to draw (either
-                    // a single-lane road or a degenerate zero-length segment).
-                    let lane_divider_geom = if lanes >= 2 {
+                    // Unit direction of this segment for paint; None when zero-length.
+                    let paint_axes = {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
                         let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
-                        if seg_len > 0.0 {
-                            let road_width_blocks = (2 * block_range + 1) as f32;
-                            Some((
-                                -dz_seg / seg_len,                // perp_x
-                                dx_seg / seg_len,                 // perp_z
-                                road_width_blocks / lanes as f32, // lane_width
-                                road_width_blocks / 2.0,          // half_width
-                            ))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                        (seg_len > 0.0).then(|| (dx_seg / seg_len, dz_seg / seg_len))
                     };
 
                     // Unit perpendicular for this segment, used by bridge rail placement.
@@ -1888,19 +1874,14 @@ fn generate_highways_internal(
                                     editor.register_road_surface_y(set_x, set_z, cell_y);
                                 }
 
-                                // Zebra crossing logic. Background uses the
-                                // default asphalt mix (not the footway's own
-                                // surface), matching main's pre-rebase
-                                // behaviour — a zebra crossing is painted on
-                                // the underlying road, so it reads more
-                                // naturally against the road mix than the
-                                // footway's single grey.
-                                if is_zebra_crossing {
-                                    let on_stripe = if dir_horizontal {
-                                        set_x % 2 < 1
-                                    } else {
-                                        set_z % 2 < 1
-                                    };
+                                // A crossing on the road is painted on the road's own
+                                // asphalt mix, not the footway's grey.
+                                let crossing_here =
+                                    crossing_paint.filter(|_| on_carriageway(set_x, set_z));
+                                if let Some(paint) = crossing_here {
+                                    let along = if dir_horizontal { set_x } else { set_z };
+                                    let on_stripe =
+                                        paint == CrossingPaint::Zebra && along.rem_euclid(2) == 0;
                                     if on_stripe {
                                         // White bar. Whitelist the mix we
                                         // place for the non-bar cells so the
@@ -2162,86 +2143,108 @@ fn generate_highways_internal(
                             }
                         }
 
-                        // Draw inner-lane dividers as dashed white lines.
-                        // For `lanes == 2` this reproduces the previous
-                        // single-centerline stripe; higher `lanes` values
-                        // produce `lanes - 1` evenly-spaced dividers across
-                        // the road width. Each divider is offset
-                        // perpendicular to the segment travel direction and
-                        // rides at the same terrain-aware Y as the adjacent
-                        // road cell (reuses `row_medians` so the per-cell
-                        // flat cross-section is preserved).
-                        if let Some((perp_x, perp_z, lane_width, half_width)) = lane_divider_geom {
-                            if stripe_length < dash_length {
-                                for l in 1..lanes {
-                                    // Signed perpendicular offset of this
-                                    // divider from the centerline.
-                                    let perp_dist = l as f32 * lane_width - half_width;
-                                    let stripe_x = (*x as f32 + perp_x * perp_dist).round() as i32;
-                                    let stripe_z = (*z as f32 + perp_z * perp_dist).round() as i32;
+                        // Paint rides at the Y of the road cell under it; clamped because a
+                        // rounded cell can land one outside the stamp on diagonals.
+                        let paint = |editor: &mut WorldEditor,
+                                     block: Block,
+                                     sx: i32,
+                                     sz: i32,
+                                     over: &[Block]| {
+                            let sy = if let Some(by) = bridge_y_here {
+                                by
+                            } else if let Some(ay) = approach_at(sx - *x, sz - *z) {
+                                ay
+                            } else if flatten_width {
+                                let axial = if dir_horizontal { sx - *x } else { sz - *z };
+                                let idx = (axial + block_range).clamp(0, 2 * block_range);
+                                row_medians[idx as usize] + offset
+                            } else {
+                                offset
+                            };
+                            // Only over a road surface, so paint never lands on a neighbour.
+                            if use_absolute_y {
+                                editor.set_block_absolute(block, sx, sy, sz, Some(over), None);
+                            } else {
+                                editor.set_block(block, sx, sy, sz, Some(over), None);
+                            }
+                        };
 
-                                    // Y follows the perpendicular median
-                                    // at this divider's axial position in
-                                    // the cross-section (same rule as the
-                                    // road cells). Clamp because the
-                                    // rounded (stripe_x, stripe_z) could
-                                    // land 1 cell outside the stamp on
-                                    // diagonals.
-                                    let stripe_y = if let Some(by) = bridge_y_here {
-                                        by
-                                    } else if let Some(ay) =
-                                        approach_at(stripe_x - *x, stripe_z - *z)
-                                    {
-                                        // Follow the carriageway, else stripes hang at grade.
-                                        ay
-                                    } else if flatten_width {
-                                        let axial = if dir_horizontal {
-                                            stripe_x - *x
-                                        } else {
-                                            stripe_z - *z
-                                        };
-                                        let idx = (axial + block_range).clamp(0, 2 * block_range)
-                                            as usize;
-                                        row_medians[idx] + offset
+                        // Edge lines of a signalised crossing, one cell outside its width.
+                        if let Some(CrossingPaint::Lines { broken }) = crossing_paint {
+                            let along = if dir_horizontal { *x } else { *z };
+                            if !broken || along.rem_euclid(2) == 0 {
+                                for side in [-1, 1] {
+                                    let off = side * (block_range + 1);
+                                    let (sx, sz) = if dir_horizontal {
+                                        (*x, *z + off)
                                     } else {
-                                        offset
+                                        (*x + off, *z)
                                     };
-
-                                    // Whitelist on the actual road
-                                    // surface so dividers appear on
-                                    // non-default `surface=*` roads too
-                                    // (hardcoding the default mix caused
-                                    // markings to vanish on e.g.
-                                    // concrete/asphalt-tagged highways).
-                                    if use_absolute_y {
-                                        editor.set_block_absolute(
-                                            WHITE_CONCRETE,
-                                            stripe_x,
-                                            stripe_y,
-                                            stripe_z,
-                                            Some(block_types),
-                                            None,
-                                        );
-                                    } else {
-                                        editor.set_block(
-                                            WHITE_CONCRETE,
-                                            stripe_x,
-                                            stripe_y,
-                                            stripe_z,
-                                            Some(block_types),
-                                            None,
-                                        );
+                                    if on_carriageway(sx, sz) {
+                                        paint(editor, WHITE_CONCRETE, sx, sz, DEFAULT_ROAD_MIX);
                                     }
                                 }
                             }
+                        }
 
-                            // Advance dash state once per centerline cell so
-                            // the on/off pattern still reads as dashes, not
-                            // solid lines (the original bug in early PR
-                            // iterations).
-                            stripe_length += 1;
-                            if stripe_length >= dash_length + gap_length {
-                                stripe_length = 0;
+                        if let Some((ux, uz)) = paint_axes {
+                            let (perp_x, perp_z) = (-uz, ux);
+                            let t = tds as u32;
+                            // Lane lines, dashed by path position so curves and short
+                            // segments keep the rhythm.
+                            if !way_marks.is_some_and(|m| m.in_gap(t)) {
+                                let phase = way_marks.map_or(t as i64, |m| m.dash_phase(t));
+                                let dash = phase.rem_euclid(dash_period as i64) < dash_on as i64;
+                                for line in lines.iter().filter(|l| l.solid || dash) {
+                                    // Offset rounded on its own, so lines sit symmetrically.
+                                    let sx = *x + (perp_x * line.offset).round() as i32;
+                                    let sz = *z + (perp_z * line.offset).round() as i32;
+                                    paint(editor, line.block, sx, sz, block_types);
+                                }
+                            }
+
+                            // Stop and give-way lines and crossings, one row across the
+                            // road per centerline cell.
+                            for mark in way_marks
+                                .map_or(&[][..], |m| m.marks.as_slice())
+                                .iter()
+                                .filter(|m| m.covers(t))
+                            {
+                                let reach = block_range as f32 * (perp_x.abs() + perp_z.abs());
+                                let spacing = perp_x.abs() + perp_z.abs();
+                                let r = block_range + 1;
+                                for dx in -r..=r {
+                                    for dz in -r..=r {
+                                        let s = dx as f32 * ux + dz as f32 * uz;
+                                        let p = dx as f32 * perp_x + dz as f32 * perp_z;
+                                        let on_side = match (mark.side, centre_span) {
+                                            (1, Some((_, hi))) => p > hi + 0.5,
+                                            (-1, Some((lo, _))) => p < lo - 0.5,
+                                            (1, None) => p > -0.5,
+                                            (-1, None) => p < 0.5,
+                                            _ => true,
+                                        };
+                                        if s.abs() > 0.5 || p.abs() > reach + 0.01 || !on_side {
+                                            continue;
+                                        }
+                                        let (sx, sz) = (*x + dx, *z + dz);
+                                        // Bars run with the road, alternating across it.
+                                        let bar = (((sx as f32 * perp_x + sz as f32 * perp_z)
+                                            / spacing)
+                                            .floor()
+                                            as i32)
+                                            .rem_euclid(2)
+                                            == 0;
+                                        let white = match mark.kind {
+                                            CrossMark::Stop => true,
+                                            CrossMark::GiveWay | CrossMark::Zebra => bar,
+                                            CrossMark::CrossingLines(broken) => !broken || bar,
+                                        };
+                                        if white {
+                                            paint(editor, WHITE_CONCRETE, sx, sz, block_types);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2856,6 +2859,162 @@ pub(crate) fn highway_default_lanes(highway_type: &str) -> i32 {
     }
 }
 
+/// Lanes the paint divides a way into; 1 means no lane lines.
+pub(crate) fn lane_marking_count(highway_type: &str, tags: &HashMap<String, String>) -> i32 {
+    let painted = tags.get("lane_markings").map(String::as_str);
+    if painted == Some("no") {
+        return 1;
+    }
+    let lanes = tags
+        .get("lanes")
+        .and_then(|l| l.parse::<i32>().ok())
+        // Most roundabouts are a single unmarked lane unless tagged otherwise.
+        .unwrap_or_else(|| {
+            if road_markings::is_roundabout(tags) {
+                1
+            } else {
+                highway_default_lanes(highway_type)
+            }
+        })
+        .clamp(1, 16);
+    // Side streets, parking aisles and tracks are rarely painted, even with two lanes.
+    let minor = matches!(
+        highway_type,
+        "residential" | "living_street" | "service" | "track"
+    );
+    if minor && lanes < 3 && painted != Some("yes") {
+        return 1;
+    }
+    lanes
+}
+
+/// A lane line, as a signed offset from the centreline in the way's right-hand perpendicular.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LaneLine {
+    offset: f32,
+    solid: bool,
+    block: Block,
+    /// Keeps opposing traffic apart.
+    centre: bool,
+}
+
+/// Lane lines across a carriageway `2 * block_range + 1` wide. Lanes are counted from the
+/// left of the way's direction, so the line between opposing traffic sits after the
+/// backward lanes, or after the forward ones where traffic keeps left.
+fn lane_lines(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    block_range: i32,
+    markings: &RoadMarkingIndex,
+) -> Vec<LaneLine> {
+    let lanes = lane_marking_count(highway_type, tags);
+    if lanes < 2 {
+        return Vec::new();
+    }
+    let two_way = road_markings::oneway_sign(highway_type, tags) == 0;
+    let width = (2 * block_range + 1) as f32;
+    let lane_width = width / lanes as f32;
+    let parse = |k: &str| tags.get(k).and_then(|v| v.parse::<i32>().ok());
+    // Lines between opposing traffic, either side of a shared turn lane if there is one.
+    let both = parse("lanes:both_ways").unwrap_or(0).max(0);
+    let separators: Vec<i32> = if !two_way {
+        Vec::new()
+    } else if let (Some(fw), Some(bw)) = (parse("lanes:forward"), parse("lanes:backward")) {
+        let left = if markings.drives_on_left { fw } else { bw };
+        if fw + bw + both == lanes && left > 0 && left + both < lanes {
+            (left..=left + both).collect()
+        } else {
+            Vec::new()
+        }
+    } else if (lanes - both) % 2 == 0 && lanes > both + 1 {
+        let left = (lanes - both) / 2;
+        (left..=left + both).collect()
+    } else {
+        Vec::new()
+    };
+    let at = |l: i32| l as f32 * lane_width - width / 2.0;
+    // A double yellow line needs a clear cell between its halves and room either side.
+    let double = markings.yellow_centre && separators.len() == 1 && lane_width >= 3.5;
+    let centre = |l: i32| {
+        let line = |offset: f32| LaneLine {
+            offset,
+            centre: true,
+            // Wide roads and North America keep opposing traffic apart with a solid line.
+            solid: lanes >= 4 || markings.yellow_centre,
+            block: if markings.yellow_centre {
+                YELLOW_CONCRETE
+            } else {
+                WHITE_CONCRETE
+            },
+        };
+        if double {
+            vec![line(at(l) - 1.0), line(at(l) + 1.0)]
+        } else {
+            vec![line(at(l))]
+        }
+    };
+    // Every lane keeps two clear cells between its lines, else only the centre is painted.
+    if width + 1.0 < 3.0 * lanes as f32 {
+        return separators.into_iter().flat_map(centre).collect();
+    }
+    (1..lanes)
+        .flat_map(|l| {
+            if separators.contains(&l) {
+                centre(l)
+            } else {
+                vec![LaneLine {
+                    offset: at(l),
+                    solid: false,
+                    block: WHITE_CONCRETE,
+                    centre: false,
+                }]
+            }
+        })
+        .collect()
+}
+
+/// Dash and period of broken lane lines, in path cells: 3 m on, 6 m off in town and
+/// twice that on fast roads, the proportions most countries paint.
+fn dash_pattern(highway_type: &str, tags: &HashMap<String, String>, scale: f64) -> (u32, u32) {
+    let (on, off) = if is_fast_road(highway_type, tags) {
+        (6.0, 12.0)
+    } else {
+        (3.0, 6.0)
+    };
+    let on = (on * scale).round().max(1.0) as u32;
+    let off = (off * scale).round().max(1.0) as u32;
+    (on, on + off)
+}
+
+/// Motorways, and roads posted at 70 km/h or more or tagged as rural.
+fn is_fast_road(highway_type: &str, tags: &HashMap<String, String>) -> bool {
+    if matches!(
+        highway_type,
+        "motorway" | "trunk" | "motorway_link" | "trunk_link"
+    ) {
+        return true;
+    }
+    if let Some(speed) = tags.get("maxspeed") {
+        let digits: String = speed.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(v) = digits.parse::<f64>() {
+            let kmh = if speed.contains("mph") { v * 1.609 } else { v };
+            return kmh >= 70.0;
+        }
+        if speed == "none" {
+            return true;
+        }
+    }
+    [
+        "maxspeed",
+        "maxspeed:type",
+        "source:maxspeed",
+        "zone:traffic",
+    ]
+    .iter()
+    .filter_map(|k| tags.get(*k))
+    .any(|v| v.contains("rural") || v.contains("motorway") || v.contains("nsl"))
+}
+
 /// Canonical road half-width in blocks. Single source of truth shared by the
 /// renderer and the prescan/bitmap/bridge consumers, so they never disagree.
 pub(crate) fn highway_block_range(
@@ -3389,6 +3548,7 @@ mod tests {
                 &TunnelPortalMap::default(),
                 &empty,
                 &mut cells,
+                &RoadMarkingIndex::default(),
             );
         }
     }
@@ -3423,6 +3583,230 @@ mod tests {
             assert!(editor.check_for_block(100, 0, 49, Some(asphalt)));
             assert!(!editor.check_for_block(100, 0, 49, Some(red)));
         }
+    }
+
+    /// A way over explicit nodes, so ways can share junction nodes.
+    fn way_through(id: u64, nodes: &[(u64, i32, i32)], tags: &[(&str, &str)]) -> ProcessedWay {
+        ProcessedWay {
+            id,
+            nodes: nodes
+                .iter()
+                .map(|&(nid, x, z)| ProcessedNode {
+                    id: nid,
+                    tags: StdMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    /// Renders `ways` with road paint resolved over all of them, as a real run does.
+    fn build_marked_ways(editor: &mut WorldEditor, ways: &[ProcessedWay]) {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let elements: Vec<ProcessedElement> =
+            ways.iter().cloned().map(ProcessedElement::Way).collect();
+        let markings =
+            RoadMarkingIndex::build(&elements, 1.0, crate::decals::region::SignRegion::Europe);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        let mut cells = Vec::new();
+        for element in &elements {
+            generate_highways(
+                editor,
+                element,
+                &args,
+                &HighwayConnectivityMap::new(),
+                &FloodFillCache::new(),
+                &empty,
+                &structures,
+                &surface,
+                &TunnelInternalEndpoints::default(),
+                &TunnelPortalMap::default(),
+                &empty,
+                &mut cells,
+                &markings,
+            );
+        }
+    }
+
+    #[test]
+    fn crossroads_keep_lane_lines_out_of_the_junction_box() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let tags = [("highway", "secondary")];
+        let ways = [
+            way_through(1, &[(10, 10, 100), (1, 100, 100)], &tags),
+            way_through(2, &[(1, 100, 100), (11, 190, 100)], &tags),
+            way_through(3, &[(12, 100, 10), (1, 100, 100)], &tags),
+            way_through(4, &[(1, 100, 100), (13, 100, 190)], &tags),
+        ];
+        let mut editor = test_editor(&xzbbox);
+        build_marked_ways(&mut editor, &ways);
+        let half = highway_block_range("secondary", &HashMap::new(), 1.0);
+        for x in 100 - half..=100 + half {
+            for z in 100 - half..=100 + half {
+                assert!(
+                    !editor.check_for_block(x, 0, z, Some(&[WHITE_CONCRETE])),
+                    "paint in the junction box at ({x}, {z})"
+                );
+            }
+        }
+        // Further out the centre line is still dashed.
+        let painted = (20..80)
+            .filter(|&x| editor.check_for_block(x, 0, 100, Some(&[WHITE_CONCRETE])))
+            .count();
+        assert!(painted > 10 && painted < 40, "{painted} painted cells");
+    }
+
+    #[test]
+    fn a_zebra_stays_on_the_carriageway() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 100.0).unwrap();
+        let road = way_through(
+            1,
+            &[(10, 10, 50), (2, 100, 50), (11, 190, 50)],
+            &[("highway", "secondary")],
+        );
+        let crossing = way_through(
+            2,
+            &[(20, 100, 30), (2, 100, 50), (21, 100, 70)],
+            &[
+                ("highway", "footway"),
+                ("footway", "crossing"),
+                ("crossing", "zebra"),
+            ],
+        );
+        let half = highway_block_range("secondary", &HashMap::new(), 1.0);
+        for ways in [
+            [road.clone(), crossing.clone()],
+            [crossing.clone(), road.clone()],
+        ] {
+            let mut editor = test_editor(&xzbbox);
+            build_marked_ways(&mut editor, &ways);
+            let white = |x: i32, z: i32| editor.check_for_block(x, 0, z, Some(&[WHITE_CONCRETE]));
+            // Bars along the road on every other row, nothing past the kerb.
+            assert!(white(100, 50) && !white(100, 51) && white(100, 52));
+            for z in (30..50 - half).chain(51 + half..=70) {
+                assert!(!white(100, z), "zebra off the road at z={z}");
+            }
+            // The centre line stops short of the crossing.
+            assert!(!white(102, 50) && !white(98, 50));
+        }
+    }
+
+    #[test]
+    fn lane_lines_follow_direction_and_region() {
+        let tags = |kv: &[(&str, &str)]| -> HashMap<String, String> {
+            kv.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let europe = RoadMarkingIndex::default();
+        let mut america = RoadMarkingIndex::default();
+        america.yellow_centre = true;
+        let four = lane_lines("primary", &tags(&[("lanes", "4")]), 7, &europe);
+        assert_eq!(four.len(), 3);
+        assert!(!four[0].solid && four[1].solid && !four[2].solid);
+        assert_eq!(four[1].offset, 0.0);
+
+        let two = lane_lines("secondary", &HashMap::new(), 4, &europe);
+        assert!(two.len() == 1 && !two[0].solid && two[0].block == WHITE_CONCRETE);
+        // A double yellow line, one clear cell between its halves.
+        let two = lane_lines("secondary", &HashMap::new(), 4, &america);
+        assert_eq!(two.len(), 2);
+        assert!(two.iter().all(|l| l.solid && l.block == YELLOW_CONCRETE));
+        assert_eq!((two[0].offset, two[1].offset), (-1.0, 1.0));
+        // Too tight for two: a single one.
+        let six = lane_lines("primary", &tags(&[("lanes", "6")]), 8, &america);
+        assert_eq!(six.iter().filter(|l| l.block == YELLOW_CONCRETE).count(), 1);
+
+        // Eight lanes in 17 cells would leave lanes one cell wide: only the centre line.
+        let eight = lane_lines("primary", &tags(&[("lanes", "8")]), 8, &europe);
+        assert_eq!(eight.len(), 1);
+        assert_eq!(eight[0].offset, 0.0);
+
+        let oneway = lane_lines(
+            "primary",
+            &tags(&[("lanes", "3"), ("oneway", "yes")]),
+            5,
+            &europe,
+        );
+        assert!(oneway.len() == 2 && oneway.iter().all(|l| !l.solid));
+
+        // A shared left-turn lane in the middle is edged by centre lines on both sides.
+        let turn = lane_lines(
+            "primary",
+            &tags(&[
+                ("lanes", "5"),
+                ("lanes:forward", "2"),
+                ("lanes:backward", "2"),
+                ("lanes:both_ways", "1"),
+            ]),
+            8,
+            &america,
+        );
+        let yellow: Vec<usize> = (0..turn.len())
+            .filter(|&i| turn[i].block == YELLOW_CONCRETE)
+            .collect();
+        assert_eq!(yellow, vec![1, 2]);
+
+        assert!(lane_lines("residential", &tags(&[("lanes", "2")]), 2, &europe).is_empty());
+    }
+
+    #[test]
+    fn dashes_are_longer_on_fast_roads() {
+        let tags = |kv: &[(&str, &str)]| -> HashMap<String, String> {
+            kv.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        assert_eq!(dash_pattern("secondary", &HashMap::new(), 1.0), (3, 9));
+        assert_eq!(dash_pattern("motorway", &HashMap::new(), 1.0), (6, 18));
+        assert_eq!(
+            dash_pattern("primary", &tags(&[("maxspeed", "100")]), 1.0),
+            (6, 18)
+        );
+        assert_eq!(
+            dash_pattern("primary", &tags(&[("maxspeed", "30 mph")]), 1.0),
+            (3, 9)
+        );
+        assert_eq!(
+            dash_pattern("secondary", &tags(&[("maxspeed", "DE:rural")]), 1.0),
+            (6, 18)
+        );
+    }
+
+    #[test]
+    fn lane_lines_sit_symmetrically_at_any_coordinate() {
+        // Three lanes in nine cells put the lines on half cells; both sides must round
+        // the same way wherever the road is.
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 100.0).unwrap();
+        let road = way_along(
+            1,
+            (10, 50),
+            (190, 50),
+            &[
+                ("highway", "secondary"),
+                ("oneway", "yes"),
+                ("lanes", "3"),
+                ("width", "8"),
+            ],
+        );
+        let mut editor = test_editor(&xzbbox);
+        build_marked_ways(&mut editor, &[road]);
+        let white = |x: i32, z: i32| editor.check_for_block(x, 0, z, Some(&[WHITE_CONCRETE]));
+        for x in 10..190 {
+            assert_eq!(white(x, 48), white(x, 52), "lines out of step at x={x}");
+            for z in [46, 47, 49, 50, 51, 53, 54] {
+                assert!(!white(x, z), "paint inside a lane at ({x}, {z})");
+            }
+        }
+        assert!((10..190).any(|x| white(x, 48)));
     }
 
     fn straight_tunnel(tags: &[(&str, &str)]) -> ProcessedWay {
@@ -3621,6 +4005,7 @@ mod tests {
                 &portals,
                 &empty,
                 &mut cells,
+                &RoadMarkingIndex::default(),
             );
         }
         crate::ground_generation::generate_ground_region(
@@ -4067,6 +4452,7 @@ mod tests {
                 &portals,
                 &footprint,
                 &mut cells,
+                &RoadMarkingIndex::default(),
             );
         }
         crate::ground_generation::generate_ground_region(
