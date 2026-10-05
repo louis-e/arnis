@@ -811,6 +811,107 @@ pub fn touch_last_played(world_path: &Path) -> Result<(), String> {
     replace_file_atomically(&level_path, &compressed)
 }
 
+/// DataVersion of 26.1, which keeps dimensions under `dimensions/` and maps under
+/// `data/minecraft/maps/`. The game moves an older world there when it first opens it.
+pub const DIMENSION_FOLDERS_DATA_VERSION: i32 = 4772;
+
+/// Where a Java world keeps its overworld chunks and its maps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorldLayout {
+    /// Before 26.1, and every world Arnis creates.
+    #[default]
+    Legacy,
+    /// 26.1 and later.
+    Dimensions,
+}
+
+impl WorldLayout {
+    /// The layout `level.dat` declares. An unreadable one counts as legacy.
+    pub fn of(world: &Path) -> Self {
+        match level_data_version(world) {
+            Some(v) if v >= DIMENSION_FOLDERS_DATA_VERSION => WorldLayout::Dimensions,
+            _ => WorldLayout::Legacy,
+        }
+    }
+
+    /// Folder holding the overworld's `region/`, `entities/` and `poi/`.
+    pub fn overworld_dir(self, world: &Path) -> PathBuf {
+        match self {
+            WorldLayout::Legacy => world.to_path_buf(),
+            WorldLayout::Dimensions => world.join("dimensions").join("minecraft").join("overworld"),
+        }
+    }
+
+    /// Folder holding the map files and the map id counter.
+    pub fn maps_dir(self, world: &Path) -> PathBuf {
+        match self {
+            WorldLayout::Legacy => world.join("data"),
+            WorldLayout::Dimensions => world.join("data").join("minecraft").join("maps"),
+        }
+    }
+}
+
+fn read_gzip_nbt(path: &Path) -> Result<Value, String> {
+    let raw = fs::read(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    let mut decompressed = Vec::new();
+    GzDecoder::new(raw.as_slice())
+        .read_to_end(&mut decompressed)
+        .map_err(|e| format!("Failed to decompress {}: {e}", path.display()))?;
+    fastnbt::from_bytes(&decompressed)
+        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+}
+
+fn write_gzip_nbt(path: &Path, value: &Value) -> Result<(), String> {
+    let serialized = fastnbt::to_bytes(value)
+        .map_err(|e| format!("Failed to serialize {}: {e}", path.display()))?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized)
+        .map_err(|e| format!("Failed to compress {}: {e}", path.display()))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| format!("Failed to compress {}: {e}", path.display()))?;
+    replace_file_atomically(path, &compressed)
+        .map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+/// `Data.DataVersion` of a world's `level.dat`.
+pub(crate) fn level_data_version(world: &Path) -> Option<i32> {
+    let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
+        return None;
+    };
+    match root.get("Data") {
+        Some(Value::Compound(data)) => match data.get("DataVersion") {
+            Some(Value::Int(v)) => Some(*v),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The singleplayer player's file in a 26.1+ world, named by `Data.singleplayer_uuid`.
+fn singleplayer_file(
+    world: &Path,
+    data: &std::collections::HashMap<String, Value>,
+) -> Option<PathBuf> {
+    let Some(Value::IntArray(uuid)) = data.get("singleplayer_uuid") else {
+        return None;
+    };
+    if uuid.len() != 4 {
+        return None;
+    }
+    let hex: String = uuid.iter().map(|w| format!("{:08x}", *w as u32)).collect();
+    let name = format!(
+        "{}-{}-{}-{}-{}.dat",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    );
+    Some(world.join("players").join("data").join(name))
+}
+
 // Writes GameType, DayTime, the player's game mode and what the game generates around the
 // area into an existing level.dat.
 pub fn apply_java_world_settings(
@@ -924,32 +1025,30 @@ pub fn set_spawn_in_level_dat(
         }
     };
 
-    data.insert("SpawnX".to_string(), Value::Int(spawn_x));
-    data.insert("SpawnY".to_string(), Value::Int(spawn_y));
-    data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+    // 1.21.9+ keeps the spawn in a `spawn` compound.
+    if let Some(Value::Compound(spawn)) = data.get_mut("spawn") {
+        spawn.insert(
+            "pos".to_string(),
+            Value::IntArray(fastnbt::IntArray::new(vec![spawn_x, spawn_y, spawn_z])),
+        );
+        spawn.insert(
+            "dimension".to_string(),
+            Value::String("minecraft:overworld".to_string()),
+        );
+    } else {
+        data.insert("SpawnX".to_string(), Value::Int(spawn_x));
+        data.insert("SpawnY".to_string(), Value::Int(spawn_y));
+        data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+    }
 
-    // Update player position if Player compound exists
+    // 26.1+ keeps the player in a file of their own.
+    let player_file = if data.contains_key("Player") {
+        None
+    } else {
+        singleplayer_file(world_path, data)
+    };
     if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-        // The spawn is in the overworld, wherever the player logged out.
-        if player.contains_key("Dimension") {
-            player.insert(
-                "Dimension".to_string(),
-                Value::String("minecraft:overworld".to_string()),
-            );
-        }
-        if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-            if pos.len() >= 3 {
-                if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
-                    *pos_x = spawn_x as f64;
-                }
-                if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
-                    *pos_y = spawn_y as f64;
-                }
-                if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
-                    *pos_z = spawn_z as f64;
-                }
-            }
-        }
+        move_player(player, spawn_x, spawn_y, spawn_z);
     }
 
     // Serialize, compress, and write back
@@ -967,12 +1066,135 @@ pub fn set_spawn_in_level_dat(
     replace_file_atomically(&level_path, &compressed_data)
         .map_err(|e| format!("Failed to write updated level.dat: {e}"))?;
 
+    if let Some(path) = player_file.filter(|p| p.is_file()) {
+        let mut player = read_gzip_nbt(&path)?;
+        if let Value::Compound(ref mut player) = player {
+            move_player(player, spawn_x, spawn_y, spawn_z);
+        }
+        write_gzip_nbt(&path, &player)?;
+    }
+
     Ok(())
+}
+
+/// Puts a player at the spawn, in the overworld wherever they logged out.
+fn move_player(
+    player: &mut std::collections::HashMap<String, Value>,
+    spawn_x: i32,
+    spawn_y: i32,
+    spawn_z: i32,
+) {
+    if player.contains_key("Dimension") {
+        player.insert(
+            "Dimension".to_string(),
+            Value::String("minecraft:overworld".to_string()),
+        );
+    }
+    if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+        for (slot, v) in pos.iter_mut().zip([spawn_x, spawn_y, spawn_z]) {
+            if let Value::Double(ref mut p) = slot {
+                *p = v as f64;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn a_spawn_move_follows_a_world_minecraft_has_upgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(dir.path()).unwrap());
+        assert_eq!(WorldLayout::of(&world), WorldLayout::Legacy);
+
+        // What 26.3 leaves: the spawn in a compound and the player in a file of their own.
+        let mut level = read_gzip_nbt(&world.join("level.dat")).unwrap();
+        let Value::Compound(ref mut root) = level else {
+            panic!("level root");
+        };
+        let Some(Value::Compound(data)) = root.get_mut("Data") else {
+            panic!("level data");
+        };
+        for key in ["Player", "SpawnX", "SpawnY", "SpawnZ"] {
+            data.remove(key);
+        }
+        data.insert("DataVersion".to_string(), Value::Int(5023));
+        let spawn = HashMap::from([
+            (
+                "pos".to_string(),
+                Value::IntArray(fastnbt::IntArray::new(vec![0, 0, 0])),
+            ),
+            (
+                "dimension".to_string(),
+                Value::String("minecraft:overworld".to_string()),
+            ),
+        ]);
+        data.insert("spawn".to_string(), Value::Compound(spawn));
+        let uuid = vec![-993932354, 1062356475, -1621421405, -1681526930];
+        data.insert(
+            "singleplayer_uuid".to_string(),
+            Value::IntArray(fastnbt::IntArray::new(uuid)),
+        );
+        write_gzip_nbt(&world.join("level.dat"), &level).unwrap();
+        let player_path = world.join("players/data/c4c1cbbe-3f52-45fb-9f5b-12a39bc5ef6e.dat");
+        fs::create_dir_all(player_path.parent().unwrap()).unwrap();
+        let player = HashMap::from([
+            (
+                "Pos".to_string(),
+                Value::List(vec![
+                    Value::Double(1.0),
+                    Value::Double(2.0),
+                    Value::Double(3.0),
+                ]),
+            ),
+            (
+                "Dimension".to_string(),
+                Value::String("minecraft:the_nether".to_string()),
+            ),
+        ]);
+        write_gzip_nbt(&player_path, &Value::Compound(player)).unwrap();
+        assert_eq!(WorldLayout::of(&world), WorldLayout::Dimensions);
+        assert_eq!(
+            WorldLayout::Dimensions.overworld_dir(&world),
+            world.join("dimensions/minecraft/overworld")
+        );
+
+        set_spawn_in_level_dat(&world, 100, 64, -200).unwrap();
+
+        let Value::Compound(root) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
+            panic!("level root");
+        };
+        let Some(Value::Compound(data)) = root.get("Data") else {
+            panic!("level data");
+        };
+        let Some(Value::Compound(spawn)) = data.get("spawn") else {
+            panic!("spawn");
+        };
+        let Some(Value::IntArray(pos)) = spawn.get("pos") else {
+            panic!("spawn pos");
+        };
+        assert_eq!(&pos[..], &[100, 64, -200]);
+        assert!(!data.contains_key("SpawnX"));
+
+        let Value::Compound(player) = read_gzip_nbt(&player_path).unwrap() else {
+            panic!("player");
+        };
+        assert_eq!(
+            player.get("Pos"),
+            Some(&Value::List(vec![
+                Value::Double(100.0),
+                Value::Double(64.0),
+                Value::Double(-200.0)
+            ]))
+        );
+        assert_eq!(
+            player.get("Dimension"),
+            Some(&Value::String("minecraft:overworld".to_string()))
+        );
+    }
 
     fn level_name(world: &Path) -> String {
         let raw = fs::read(world.join("level.dat")).unwrap();

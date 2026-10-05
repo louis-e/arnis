@@ -265,7 +265,8 @@ pub struct WorldEditor<'a> {
     strict_bounds: Option<(i32, i32, i32, i32)>,
     /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
     frame_cells: FnvHashSet<(i32, i32, i32)>,
-    merge_into_existing: bool,
+    /// Set for a One World run: merge into the world's existing regions.
+    merge_into_existing: Option<crate::world_utils::WorldLayout>,
     climate_anchor: Option<(f64, f64)>,
     metadata_extent: Option<(XZBBox, LLBBox)>,
 }
@@ -312,7 +313,7 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
-            merge_into_existing: false,
+            merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
         }
@@ -365,7 +366,7 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
-            merge_into_existing: false,
+            merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
         }
@@ -418,14 +419,14 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
-            merge_into_existing: false,
+            merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
         }
     }
 
-    pub fn set_merge_into_existing(&mut self, merge: bool) {
-        self.merge_into_existing = merge;
+    pub fn set_merge_into_existing(&mut self, layout: crate::world_utils::WorldLayout) {
+        self.merge_into_existing = Some(layout);
     }
 
     pub fn set_climate_anchor(&mut self, lat: f64, lon: f64) {
@@ -441,15 +442,15 @@ impl<'a> WorldEditor<'a> {
     }
 
     pub(crate) fn region_write_mode(&self) -> java::RegionWriteMode {
-        if self.merge_into_existing {
-            java::RegionWriteMode::Merge {
+        match self.merge_into_existing {
+            Some(layout) => java::RegionWriteMode::Merge {
                 min_x: self.xzbbox.min_x(),
                 min_z: self.xzbbox.min_z(),
                 max_x: self.xzbbox.max_x(),
                 max_z: self.xzbbox.max_z(),
-            }
-        } else {
-            java::RegionWriteMode::Fresh
+                layout,
+            },
+            None => java::RegionWriteMode::Fresh,
         }
     }
 
