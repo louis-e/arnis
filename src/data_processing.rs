@@ -685,7 +685,7 @@ pub fn generate_world_with_options(
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     if let Some(run) = one_world {
-        editor.set_merge_into_existing(true);
+        editor.set_merge_into_existing(crate::world_utils::WorldLayout::of(&run.world_dir));
         editor.set_climate_anchor(run.origin_lat, run.origin_lon);
         // metadata.json describes the whole world, not this area alone.
         if let Ok(Some(manifest)) = crate::one_world::Manifest::load(&run.world_dir) {
@@ -788,7 +788,8 @@ pub fn generate_world_with_options(
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
     let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
     let first_decal_id = if one_world.is_some() {
-        let next = crate::map_item::next_map_id(&output_path.join("data"));
+        let layout = crate::world_utils::WorldLayout::of(&output_path);
+        let next = crate::map_item::next_map_id(&layout.maps_dir(&output_path));
         next + if wants_map_item {
             2
         } else if place_branding {

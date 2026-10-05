@@ -42,7 +42,7 @@
   border: 1px solid var(--map-border);
   border-radius: 9px;
   background: var(--map-surface);
-  background-clip: padding-box;
+  background-clip: border-box;
   -webkit-backdrop-filter: blur(10px) saturate(120%);
   backdrop-filter: blur(10px) saturate(120%);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
@@ -225,7 +225,7 @@
   border: 1px solid var(--map-border);
   border-radius: 9px;
   background: var(--map-surface);
-  background-clip: padding-box;
+  background-clip: border-box;
   -webkit-backdrop-filter: blur(10px) saturate(120%);
   backdrop-filter: blur(10px) saturate(120%);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
