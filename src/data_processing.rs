@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::building_facade::BuildingContext;
+use crate::element_processing::store_brands::StoreBrand;
 use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::element_processing::*;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
@@ -927,9 +928,17 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
-    // Tenants and surrounding areas per building, for interiors furnished by use.
+    // Tenant uses are built for interiors. When interiors are off, only build the
+    // lighter brand lookup if the OSM extract contains a recognized chain business.
+    let has_branded_business = elements.iter().any(|element| match element {
+        ProcessedElement::Node(node) => StoreBrand::from_tags(&node.tags).is_some(),
+        ProcessedElement::Way(way) => StoreBrand::from_tags(&way.tags).is_some(),
+        ProcessedElement::Relation(_) => false,
+    });
     let interior_uses = if args.interior {
         InteriorUseIndex::build(&elements, &clip_bbox)
+    } else if has_branded_business {
+        InteriorUseIndex::build_brands(&elements, &clip_bbox)
     } else {
         InteriorUseIndex::default()
     };
