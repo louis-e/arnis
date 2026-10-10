@@ -987,18 +987,21 @@
                 </div>
 
                 <div class="settings-row setting-tile">
-                  <label for="aws-only-elevation-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-history"></use></svg>
+                  <label for="elevation-source-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-mountain"></use></svg>
                     <span class="setting-text">
                       <span class="setting-heading">
-                        <span data-localize="aws_only_elevation">Legacy Terrain</span>
-                        <span class="tooltip-icon" data-tooltip="Use the legacy AWS Terrain Tiles source (~30m) instead of the high-resolution Mapterhorn terrain. Escape hatch if the primary elevation sources are unreachable; lower terrain detail.">?</span>
+                        <span>Terrain source</span>
+                        <span class="tooltip-icon" data-tooltip="Mapterhorn provides high-resolution global terrain and falls back to AWS when needed. AWS Terrain Tiles are a coarser (~30m) legacy source.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="aws_only_elevation_desc">Older, coarser elevation source for when the default fails.</span>
+                      <span class="setting-desc">Choose the elevation source used for this generation.</span>
                     </span>
                   </label>
                   <div class="settings-control">
-                    <input type="checkbox" class="switch" id="aws-only-elevation-toggle" name="aws-only-elevation-toggle">
+                    <select id="elevation-source-select" name="elevation-source-select" class="settings-select">
+                      <option value="mapterhorn" selected>Mapterhorn (recommended)</option>
+                      <option value="aws">AWS Terrain Tiles (~30m)</option>
+                    </select>
                   </div>
                 </div>
 

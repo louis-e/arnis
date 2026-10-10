@@ -54,7 +54,7 @@ const SETTINGS = [
   { id: 'facade-mode-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-mode' },
   { id: 'facade-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-facade-detail' },
   { id: 'disable-height-limit-toggle', kind: 'checkbox', store: OWN },
-  { id: 'aws-only-elevation-toggle', kind: 'checkbox', store: OWN },
+  { id: 'elevation-source-select', kind: 'select', store: OWN },
   { id: 'bake-lighting-toggle', kind: 'checkbox', store: OWN },
   { id: 'voxy-lod-toggle', kind: 'checkbox', store: OWN },
   { id: 'scale-value-slider', kind: 'number', store: OWN },
@@ -129,8 +129,15 @@ function readStored() {
     return {};
   }
 
-  const values = parsed.values;
+  let values = parsed.values;
   if (!values || typeof values !== 'object' || Array.isArray(values)) return {};
+
+  // Preserve the former Legacy Terrain switch when upgrading to the source selector.
+  if (!Object.prototype.hasOwnProperty.call(values, 'elevation-source-select')
+    && typeof values['aws-only-elevation-toggle'] === 'boolean') {
+    values = { ...values, 'elevation-source-select': values['aws-only-elevation-toggle'] ? 'aws' : 'mapterhorn' };
+    delete values['aws-only-elevation-toggle'];
+  }
   return values;
 }
 

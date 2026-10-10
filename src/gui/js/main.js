@@ -496,7 +496,7 @@ const EARTH_ONLY_SETTINGS = [
   'canopy-height-toggle',
   'legacy-trees-toggle',
   'scale-value-slider',
-  'aws-only-elevation-toggle',
+  'elevation-source-select',
   'disable-height-limit-toggle',
   // Off Earth the body's own imagery is the only basemap, so neither the
   // Earth theme picker nor a custom Earth tile source has anything to act on.
@@ -2983,7 +2983,7 @@ function pinControl(id, value) {
 function restoreNaturalRows() {
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('height-multiplier-slider', true);
-  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('elevation-source-select', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('voxy-lod-toggle', true);
   setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
@@ -3012,7 +3012,7 @@ function applyOneWorldPins(info) {
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false);
     setSettingsRowAvailable('height-multiplier-slider', false);
-    setSettingsRowAvailable('aws-only-elevation-toggle', false);
+    setSettingsRowAvailable('elevation-source-select', false);
   }
 }
 
@@ -3339,7 +3339,7 @@ async function startGeneration() {
     var heightLimitToggle = document.getElementById("disable-height-limit-toggle");
     // Disabled means unsupported for this body or format, so never send a stale tick.
     var disable_height_limit = !heightLimitToggle.disabled && heightLimitToggle.checked;
-    var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
+    var aws_only_elevation = document.getElementById("elevation-source-select").value === "aws";
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
