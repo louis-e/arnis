@@ -608,6 +608,28 @@ fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
 }
 
+/// Caps concurrent tile editors to a conservative share of currently available RAM.
+///
+/// A tile editor covers a 512-block region plus its halo; reserve roughly two regions per
+/// worker and leave most free RAM for the world state, flood-fill caches, and the OS. This
+/// reduces peak working memory on high-core, low-memory machines without penalizing machines
+/// with unknown memory or enough headroom.
+fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: bool) -> usize {
+    let pool_threads = pool_threads.max(1);
+    if available_mb == 0 {
+        return pool_threads;
+    }
+
+    const TILE_RAM_BUDGET_PERCENT: u64 = 20;
+    const REGIONS_PER_TILE_ESTIMATE: u64 = 2;
+    let per_tile_mb = crate::world_editor::per_region_estimate_mb(fillground)
+        .max(1)
+        .saturating_mul(REGIONS_PER_TILE_ESTIMATE);
+    let tile_budget_mb = available_mb.saturating_mul(TILE_RAM_BUDGET_PERCENT) / 100;
+    let memory_bound = (tile_budget_mb / per_tile_mb).max(1);
+    pool_threads.min(usize::try_from(memory_bound).unwrap_or(usize::MAX))
+}
+
 /// Free RAM in MB.
 fn available_memory_mb() -> u64 {
     let mut sys = sysinfo::System::new();
@@ -1077,12 +1099,6 @@ pub fn generate_world_with_options(
         // Tiles are processed in batches (one tile per rayon thread) to cap peak memory.
         // Without batching, all tile WorldToModify structs would be in memory at once,
         // which can exceed RAM for large areas and cause disk thrashing.
-        let tile_batch_size = rayon::current_num_threads().max(1);
-        println!(
-            "  Processing {} tiles across {tile_batch_size} threads...",
-            tiles.len()
-        );
-
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
         let (tile_fill_ids, fill_readers) = tile_fill_readers(
@@ -1099,6 +1115,15 @@ pub fn generate_world_with_options(
         // Read at the decision point: the precompute above allocates heavily, and an
         // optimistic figure would skip streaming in exactly the runs that need it.
         let available_mb = available_memory_mb();
+        let tile_batch_size = tile_processing_threads(
+            rayon::current_num_threads(),
+            available_mb,
+            args.fillground,
+        );
+        println!(
+            "  Processing {} tiles across {tile_batch_size} threads...",
+            tiles.len()
+        );
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
 
