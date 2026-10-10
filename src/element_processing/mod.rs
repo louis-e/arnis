@@ -25,6 +25,7 @@ pub mod railways;
 pub mod road_markings;
 pub mod signage;
 pub mod sport_pitches;
+pub mod store_brands;
 pub mod subprocessor;
 mod surfaces;
 pub mod tourisms;

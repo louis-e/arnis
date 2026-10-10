@@ -3,6 +3,7 @@
 use super::uses::{parse_level, use_from_area, use_from_tags, Tenant, Use};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::buildings::relation_outer_rings;
+use crate::element_processing::store_brands::StoreBrand;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode};
 use fnv::FnvHashMap;
 use std::collections::HashMap;
@@ -13,6 +14,7 @@ const BUCKET: i32 = 32;
 #[derive(Default)]
 pub struct InteriorUseIndex {
     tenants: FnvHashMap<u64, Vec<Tenant>>,
+    brands: FnvHashMap<u64, Vec<StoreBrand>>,
     areas: FnvHashMap<u64, Use>,
     /// Smaller ground-level outlines overlapping a building, whose cells it leaves to them.
     claims: FnvHashMap<u64, Vec<Claim>>,
@@ -270,6 +272,14 @@ impl InteriorUseIndex {
             .unwrap_or(&[])
     }
 
+    /// A chain identity shared by all named businesses mapped to this outline.
+    /// Mixed-use malls deliberately return no single brand.
+    pub fn brand(&self, building_id: u64) -> Option<StoreBrand> {
+        let brands = self.brands.get(&building_id)?;
+        let brand = *brands.first()?;
+        brands.iter().all(|&other| other == brand).then_some(brand)
+    }
+
     pub fn area(&self, building_id: u64) -> Option<Use> {
         self.areas.get(&building_id).copied()
     }
@@ -283,6 +293,15 @@ impl InteriorUseIndex {
     }
 
     pub fn build(elements: &[ProcessedElement], xzbbox: &XZBBox) -> Self {
+        Self::build_with_mode(elements, xzbbox, true)
+    }
+
+    /// Build the footprint-to-brand lookup when interior furnishing is disabled.
+    pub fn build_brands(elements: &[ProcessedElement], xzbbox: &XZBBox) -> Self {
+        Self::build_with_mode(elements, xzbbox, false)
+    }
+
+    fn build_with_mode(elements: &[ProcessedElement], xzbbox: &XZBBox, interiors: bool) -> Self {
         let mut outlines = Vec::new();
         for element in elements {
             match element {
@@ -303,6 +322,49 @@ impl InteriorUseIndex {
         let grid = Grid::new(outlines);
 
         let mut index = Self::default();
+        let add_brand = |index: &mut Self, brand: StoreBrand, x: i32, z: i32| {
+            let around: Vec<&Outline> = grid.containing(x, z).collect();
+            let ground = around
+                .iter()
+                .filter(|o| o.ground)
+                .min_by_key(|o| (o.area, o.id))
+                .map(|o| o.id);
+            for outline in around {
+                if !outline.ground || Some(outline.id) == ground {
+                    index.brands.entry(outline.id).or_default().push(brand);
+                }
+            }
+        };
+        if !interiors {
+            for element in elements {
+                match element {
+                    ProcessedElement::Node(node) => {
+                        if let Some(brand) = StoreBrand::from_tags(&node.tags) {
+                            add_brand(&mut index, brand, node.x, node.z);
+                        }
+                    }
+                    ProcessedElement::Way(way)
+                        if !is_building(&way.tags) && closed(&way.nodes) =>
+                    {
+                        let Some(brand) = StoreBrand::from_tags(&way.tags) else {
+                            continue;
+                        };
+                        let Some(outline) = Outline::new(way.id, &way.nodes, &way.tags) else {
+                            continue;
+                        };
+                        let (x, z) = outline.center();
+                        if grid
+                            .containing(x, z)
+                            .any(|building| building.bbox_area() > outline.bbox_area())
+                        {
+                            add_brand(&mut index, brand, x, z);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return index;
+        }
         // Where outlines overlap on the ground, the smaller one furnishes the shared
         // floor: a kiosk inside a mall outline, a tower part standing in its podium.
         for o in grid.outlines.iter().filter(|o| o.ground) {
@@ -321,7 +383,12 @@ impl InteriorUseIndex {
         }
         // A POI belongs to the smallest ground building around it, as that one furnishes
         // the floor there, and to any raised part above it that its level may reach.
-        let add_tenant = |index: &mut Self, use_: Use, x: i32, z: i32, level: Option<i32>| {
+        let add_tenant = |index: &mut Self,
+                          use_: Use,
+                          x: i32,
+                          z: i32,
+                          level: Option<i32>,
+                          brand: Option<StoreBrand>| {
             let around: Vec<&Outline> = grid.containing(x, z).collect();
             let ground = around
                 .iter()
@@ -330,11 +397,19 @@ impl InteriorUseIndex {
                 .map(|o| o.id);
             for o in around {
                 if !o.ground || Some(o.id) == ground {
+                    if let Some(brand) = brand {
+                        index.brands.entry(o.id).or_default().push(brand);
+                    }
                     index
                         .tenants
                         .entry(o.id)
                         .or_default()
-                        .push(Tenant { use_, x, z, level });
+                        .push(Tenant {
+                            use_,
+                            x,
+                            z,
+                            level,
+                        });
                 }
             }
         };
@@ -363,7 +438,14 @@ impl InteriorUseIndex {
                 ProcessedElement::Node(node) => {
                     if let Some(use_) = use_from_tags(&node.tags) {
                         let level = node.tags.get("level").and_then(|l| parse_level(l));
-                        add_tenant(&mut index, use_, node.x, node.z, level);
+                        add_tenant(
+                            &mut index,
+                            use_,
+                            node.x,
+                            node.z,
+                            level,
+                            StoreBrand::from_tags(&node.tags),
+                        );
                     }
                 }
                 ProcessedElement::Way(way) if !is_building(&way.tags) && closed(&way.nodes) => {
@@ -378,7 +460,14 @@ impl InteriorUseIndex {
                             .any(|b| b.bbox_area() > outline.bbox_area());
                         if fits_inside {
                             let level = way.tags.get("level").and_then(|l| parse_level(l));
-                            add_tenant(&mut index, use_, cx, cz, level);
+                            add_tenant(
+                                &mut index,
+                                use_,
+                                cx,
+                                cz,
+                                level,
+                                StoreBrand::from_tags(&way.tags),
+                            );
                             continue;
                         }
                     }
