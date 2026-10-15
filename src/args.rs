@@ -43,15 +43,36 @@ pub struct Args {
     #[arg(long, default_value_t = 1.0, allow_hyphen_values = true, value_parser = parse_scale)]
     pub scale: f64,
 
+    /// Multiplies terrain height: 2.0 makes hills twice as tall, 0.5 half as tall.
+    /// Buildings and trees keep their size. Relief that no longer fits the build
+    /// height is compressed to fit, as it is at 1.0.
+    #[arg(long, default_value_t = 1.0, value_parser = parse_height_multiplier)]
+    pub height_multiplier: f64,
+
     /// Celestial body to generate. moon and mars use NASA PDS elevation at a fixed
     /// low scale and have no OSM data, so every object option is ignored.
     #[arg(long, value_enum, default_value_t = crate::celestial::CelestialBody::Earth)]
     pub body: crate::celestial::CelestialBody,
 
     /// Projection mode for coordinate mapping.
-    /// local: each generation starts at Minecraft (0,0). The only supported mode.
+    /// local: each generation starts at Minecraft (0,0) (default).
+    /// web_mercator: Web Mercator centred on the bbox.
     #[arg(long, default_value = "local")]
     pub projection: crate::projection::ProjectionKind,
+
+    /// Generate into one persistent Java world that every later run extends.
+    /// --output-dir is then the saves folder. The first run fixes scale, ground
+    /// level, terrain mode and build height; rotation must be 0.
+    #[arg(long, default_value_t = false)]
+    pub one_world: bool,
+
+    /// Name of the world folder for --one-world (default "Arnis One World").
+    #[arg(long)]
+    pub world_name: Option<String>,
+
+    /// Set by `one_world::prepare`.
+    #[arg(skip)]
+    pub one_world_run: Option<crate::one_world::RunContext>,
 
     /// Ground level to use in the Minecraft world
     #[arg(long, default_value_t = -62, allow_hyphen_values = true)]
@@ -76,6 +97,41 @@ pub struct Args {
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false)]
     pub fillground: bool,
+
+    /// Carve Minecraft-style caves into the filled ground: vanilla 1.21 noise caves and
+    /// tunnel carvers, flooded pools and underground rivers, a lava sea at the bottom of the
+    /// world, vanilla ores and eight themed cave biomes. Implies --fillground. Caves need rock
+    /// to carve into: at the default ground level they only appear under terrain that rises
+    /// above the lowest point of the area.
+    #[arg(long, default_value_t = false)]
+    pub caves: bool,
+
+    /// Directory of a cave asset pack (cave_pack.json plus Sponge .schem formations such as
+    /// ice spikes, dripstone columns and amethyst clusters) stamped into --caves. Defaults to
+    /// a `cave-pack` directory next to the executable when one exists; without either, caves
+    /// keep their procedural decoration only.
+    #[arg(long = "cave-asset-pack", value_name = "DIR")]
+    pub cave_asset_pack: Option<PathBuf>,
+
+    /// Per-biome cave theme amounts as comma-separated `name=percent` pairs. Names: lush,
+    /// dripstone, deepdark, mushroom, ice, amethyst, volcanic, coral. 100 is the default
+    /// share, 0 turns the biome off, 200 roughly doubles its area. Depth and terrain gates
+    /// (volcanic at the bottom, ice under mountains, coral in flooded pools) always apply.
+    /// Example: --cave-biomes lush=150,deepdark=0,amethyst=60
+    #[arg(long = "cave-biomes", value_name = "LIST")]
+    pub cave_biomes: Option<String>,
+
+    /// Render the cave biome layout for --bbox and exit without generating a world: writes
+    /// `<PREFIX>-upper.png` (upper caves) and `<PREFIX>-deep.png` (deep caves), transparent
+    /// where the cave is plain rock, and prints a `ZONEMAP {json}` line with each theme's
+    /// share. Honours --scale and --cave-biomes, so it matches what --caves will carve.
+    #[arg(long = "cave-zone-map", value_name = "PREFIX")]
+    pub cave_zone_map: Option<PathBuf>,
+
+    /// Blocks per output pixel for --cave-zone-map (1-512). Omitted picks a fine step that
+    /// keeps the image within 1536 pixels.
+    #[arg(long = "cave-zone-map-step", value_name = "BLOCKS")]
+    pub cave_zone_map_step: Option<u32>,
 
     /// Use the legacy procedural trees instead of the bundled schematic tree pack.
     /// Schematic trees are on by default; this flag opts out.
@@ -118,6 +174,14 @@ pub struct Args {
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
 
+    /// Base URL of the Arnis OSM tile archive, read instead of Overpass.
+    #[arg(long = "osm-tiles-url", default_value = crate::osm_tiles::DEFAULT_OSM_TILES_URL)]
+    pub osm_tiles_url: String,
+
+    /// Query Overpass directly and skip the tile archive.
+    #[arg(long, default_value_t = false)]
+    pub no_tile_archive: bool,
+
     /// Spawn point latitude (optional, must be within bbox)
     #[arg(long, allow_hyphen_values = true)]
     pub spawn_lat: Option<f64>,
@@ -136,7 +200,7 @@ pub struct Args {
     pub disable_height_limit: bool,
 
     /// Use only the legacy AWS Terrain Tiles source (~30m) instead of
-    /// Mapterhorn and the regional high-resolution providers.
+    /// Mapterhorn.
     #[arg(long, default_value_t = false)]
     pub aws_only_elevation: bool,
 
@@ -170,6 +234,10 @@ pub struct Args {
     /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
     #[arg(long, default_value_t = DEFAULT_WORLD_TIME, value_parser = clap::value_parser!(i64).range(0..24000))]
     pub world_time: i64,
+
+    /// Java only: what the game generates around the area, empty void or a flat grass plain
+    #[arg(long = "world-type", value_enum, default_value_t = WorldType::Void)]
+    pub world_type: WorldType,
 
     /// Readable image signs, Java only. `basic` covers public signage: street names,
     /// traffic signs, transit stops, information boards and billboards. `full` adds
@@ -400,6 +468,27 @@ pub fn validate_scale(scale: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// Range of `--height-multiplier`. Past 10 even a gentle hill outgrows vanilla build height.
+pub const MIN_HEIGHT_MULTIPLIER: f64 = 0.1;
+pub const MAX_HEIGHT_MULTIPLIER: f64 = 10.0;
+
+pub fn validate_height_multiplier(multiplier: f64) -> Result<(), String> {
+    if !(MIN_HEIGHT_MULTIPLIER..=MAX_HEIGHT_MULTIPLIER).contains(&multiplier) {
+        return Err(format!(
+            "Terrain height multiplier must be between {MIN_HEIGHT_MULTIPLIER} and {MAX_HEIGHT_MULTIPLIER} (got {multiplier})."
+        ));
+    }
+    Ok(())
+}
+
+fn parse_height_multiplier(arg: &str) -> Result<f64, String> {
+    let multiplier: f64 = arg
+        .parse()
+        .map_err(|_| format!("`{arg}` is not a number"))?;
+    validate_height_multiplier(multiplier)?;
+    Ok(multiplier)
+}
+
 fn parse_scale(arg: &str) -> Result<f64, String> {
     let scale: f64 = arg
         .parse()
@@ -505,6 +594,24 @@ impl FacadeMode {
     }
 }
 
+/// What a Java world generates past the area Arnis wrote.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum WorldType {
+    /// Nothing: the area is an island in the void.
+    Void,
+    /// A superflat grass plain at the area's ground level.
+    Flat,
+}
+
+impl WorldType {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "flat" => WorldType::Flat,
+            _ => WorldType::Void,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
 pub enum GameMode {
     Survival,
@@ -555,6 +662,8 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.interior = false;
     args.legacy_trees = false;
     args.aws_only_elevation = false;
+    // The cave passes dress an Earth underground: lush moss, rivers, coral reefs.
+    args.caves = false;
     // Terrain only means no walls, so neither facade source has anything to
     // hang a photograph on. Cleared rather than left set so the run does not
     // pay for a Mapillary fetch or a resource pack it cannot use.
@@ -598,13 +707,28 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
     }
 
-    // Never shipped working: X gets a cos(lat) factor and Z does not, so the world comes out
-    // stretched north-south by 1/cos(lat) against both the elevation grid and its own
-    // east-west scale. Still parsed so an old command line gets this instead of a parse error.
-    if args.projection == crate::projection::ProjectionKind::WebMercator {
-        return Err(
-            "--projection web_mercator was experimental and never worked: it stretches the world north-south by 1/cos(latitude) (about 1.5x at 47 degrees), so objects come out elongated and misaligned with the terrain. Use --projection local."
-                .to_string(),
+    if args.one_world {
+        if args.bedrock || args.luanti {
+            return Err("--one-world is available for Java Edition worlds only.".to_string());
+        }
+        if !args.body.is_earth() {
+            return Err("--one-world is available for Earth only.".to_string());
+        }
+        if args.rotation.abs() > f64::EPSILON {
+            return Err(
+                "--one-world keeps the world aligned to real-world coordinates; --rotation must be 0."
+                    .to_string(),
+            );
+        }
+        if args.mapillary_probe {
+            return Err("--one-world and --mapillary-probe do not combine.".to_string());
+        }
+    } else if args.world_name.is_some() {
+        return Err("--world-name only applies to --one-world.".to_string());
+    }
+    if args.projection == crate::projection::ProjectionKind::WebMercator && !args.one_world {
+        println!(
+            "Note: --projection web_mercator centres the world on the bbox; scale is exact at the centre latitude only."
         );
     }
 
@@ -694,6 +818,38 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         }
     }
 
+    let cave_preview = args.cave_zone_map.is_some();
+    if let Some(spec) = &args.cave_biomes {
+        crate::caves::decoration::BiomeAmounts::parse(spec)
+            .map_err(|e| format!("--cave-biomes: {e}"))?;
+        if !args.caves && !cave_preview {
+            return Err("--cave-biomes only applies to --caves or --cave-zone-map.".to_string());
+        }
+    }
+    if let Some(dir) = &args.cave_asset_pack {
+        if !args.caves {
+            return Err("--cave-asset-pack only applies to --caves.".to_string());
+        }
+        if !dir.join("cave_pack.json").is_file() {
+            return Err(format!(
+                "--cave-asset-pack: {} has no cave_pack.json.",
+                dir.display()
+            ));
+        }
+    }
+    if args.cave_zone_map_step.is_some() && !cave_preview {
+        return Err("--cave-zone-map-step only applies to --cave-zone-map.".to_string());
+    }
+    if cave_preview {
+        if args.bbox.is_none() {
+            return Err("--cave-zone-map needs --bbox.".to_string());
+        }
+        // The images are laid out on the unrotated bbox, so a rotated world would not match.
+        if args.rotation != 0.0 {
+            return Err("--cave-zone-map does not support --rotation.".to_string());
+        }
+    }
+
     // A bounding box is required unless a local --file supplies one to derive it from.
     // Terrain-only mode ignores --file (it never loads OSM objects), so it always needs --bbox.
     if args.bbox.is_none() {
@@ -731,8 +887,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
-    } else if args.mapillary_probe {
-        // The probe writes no world, so it needs no output directory.
+    } else if args.mapillary_probe || cave_preview {
+        // The probe and the cave preview write no world, so they need no output directory.
     } else {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.
@@ -857,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn web_mercator_projection_is_rejected() {
+    fn web_mercator_projection_is_accepted() {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
         let parse = |extra: &[&str]| {
@@ -867,12 +1023,50 @@ mod tests {
         };
 
         assert!(validate_args(&parse(&["--projection", "local"])).is_ok());
-        let err = validate_args(&parse(&["--projection", "web_mercator"])).unwrap_err();
-        assert!(err.contains("--projection local"), "unhelpful error: {err}");
-        // Not just the terrain path: geo-only is distorted too.
-        assert!(
-            validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_err()
+        assert!(validate_args(&parse(&["--projection", "web_mercator"])).is_ok());
+        assert!(validate_args(&parse(&["--projection", "mercator", "--mode", "geo-only"])).is_ok());
+    }
+
+    #[test]
+    fn height_multiplier_defaults_to_real_height_and_is_bounded() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::try_parse_from(cmd.iter())
+        };
+
+        assert_eq!(parse(&[]).unwrap().height_multiplier, 1.0);
+        assert_eq!(
+            parse(&["--height-multiplier", "2.5"])
+                .unwrap()
+                .height_multiplier,
+            2.5
         );
+        for bad in ["0", "0.05", "11", "NaN", "inf", "tall"] {
+            assert!(
+                parse(&["--height-multiplier", bad]).is_err(),
+                "accepted {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_world_is_java_earth_and_unrotated() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+
+        assert!(validate_args(&parse(&["--one-world"])).is_ok());
+        assert!(validate_args(&parse(&["--one-world", "--world-name", "Home"])).is_ok());
+        assert!(validate_args(&parse(&["--one-world", "--bedrock"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--luanti"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--rotation", "15"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--body", "moon"])).is_err());
+        assert!(validate_args(&parse(&["--world-name", "Home"])).is_err());
     }
 
     #[test]

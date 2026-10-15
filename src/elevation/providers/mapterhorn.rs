@@ -7,12 +7,12 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
-use crate::elevation::providers::fixed_tile::MAX_TILES_PER_FETCH;
+use crate::elevation::providers::tile_math::MAX_TILES_PER_FETCH;
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
-use super::fixed_tile::{bbox_dimensions_m, blend_finite_samples};
+use super::tile_math::{bbox_dimensions_m, blend_finite_samples};
 
 const MAPTERHORN_URL: &str = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 /// 512px tiles, so one zoom lower fetches the same ground resolution as AWS 256px.
@@ -55,10 +55,6 @@ pub struct Mapterhorn;
 impl ElevationProvider for Mapterhorn {
     fn name(&self) -> &'static str {
         "mapterhorn"
-    }
-
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        None
     }
 
     fn native_resolution_m(&self) -> f64 {
@@ -1060,5 +1056,32 @@ mod tests {
             "finite {finite}/{total}"
         );
         assert!(min > 300.0 && max < 1200.0, "range {min}..{max}");
+    }
+
+    // Run manually: cargo test test_live_vancouver -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_live_vancouver_uses_hrdem_without_spikes() {
+        // UBC and Point Grey at 1:1, the area a USGS request left flat with spikes.
+        // Canada's HRDEM stops at z15, so the z16 request falls back a level per tile.
+        let bbox = LLBBox::new(49.215467, -123.266945, 49.280852, -123.177338).unwrap();
+        let raw = Mapterhorn.fetch_raw(&bbox, 6510, 7280).unwrap();
+
+        let (mut min, mut max) = (f64::MAX, f64::MIN);
+        let mut finite = 0usize;
+        for &v in raw.heights_meters.iter().flatten() {
+            if v.is_finite() {
+                finite += 1;
+                min = min.min(v);
+                max = max.max(v);
+            }
+        }
+        println!("finite {finite}, range {min:.1}..{max:.1} m");
+        assert!(finite > 6510 * 7280 / 2, "finite {finite}");
+        assert!(min > -60.0 && max < 250.0, "range {min}..{max}");
+        assert!(
+            max > 60.0,
+            "Point Grey rises well above the shore, got {max}"
+        );
     }
 }

@@ -1,0 +1,846 @@
+1	1	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Congo Basin Rainforest*2;^afr:AFR - Mountain Rainforest*3	Albertine Rift montane forests
+2	1	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Congo Basin Rainforest*2;^afr:AFR - Mountain Rainforest*3	Cameroon Highlands forests
+3	1	AT	afr	afr:AFR - Congo Basin Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Central Congolian lowland forests
+4	1	AT	afr	afr:AFR - Malagasy Rainforest*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Comoros forests
+5	1	AT	afr	afr:AFR - Congo Basin Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Congolian coastal forests
+6	1	AT	afr	afr:AFR - Guinean West African Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Cross-Niger transition forests
+7	1	AT	afr	afr:AFR - Congo Basin Rainforest*4;afr:AFR - Guinean West African Rainforest*1;afr:AFR - African Fan Palms*1	Cross-Sanaga-Bioko coastal forests
+8	1	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Congo Basin Rainforest*2;^afr:AFR - Mountain Rainforest*3	East African montane forests
+9	1	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Congo Basin Rainforest*2;^afr:AFR - Mountain Rainforest*3	Eastern Arc forests
+10	1	AT	afr	afr:AFR - Congo Basin Rainforest*3;afr:AFR - African Fan Palms*2;~afr:AFR - African Fan Palms*3	Eastern Congolian swamp forests
+11	1	AT	afr	afr:AFR - Guinean West African Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Eastern Guinean forests
+12	1	AT	afr	afr:AFR - Mountain Rainforest*4;afr:AFR - East African Savanna*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;^afr:AFR - Mountain Rainforest*3	Ethiopian montane forests
+13	1	AT	afr	afr:AFR - Malagasy Rainforest*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Granitic Seychelles forests
+14	1	AT	afr	afr:AFR - Guinean West African Rainforest*4;afr:AFR - African Fan Palms*1;^afr:AFR - Mountain Rainforest*3	Guinean montane forests
+15	1	AT	afr	afr:AFR - Mountain Rainforest*4;afr:AFR - Fevertree Acacias*1;^afr:AFR - Mountain Rainforest*2	Knysna-Amatole montane forests
+16	1	AT	afr	afr:AFR - Mountain Rainforest*2;afr:AFR - South African Veld!Adansonia!Colophospermum*2;afr:AFR - Fevertree Acacias*1	Kwazulu Natal-Cape coastal forests
+17	1	AT	afr	afr:AFR - Malagasy Rainforest*5;afr:AFR - African Fan Palms*1;^afr:AFR - Malagasy Highlands*2	Madagascar humid forests
+18	1	AT	afr	afr:AFR - Malagasy Rainforest*3;afr:AFR - Malagasy Highlands*2;^afr:AFR - Malagasy Highlands*3	Madagascar subhumid forests
+19	1	AT	afr	afr:AFR - Fevertree Acacias*2;afr:AFR - South African Veld*2;afr:AFR - East African Savanna*1;~afr:AFR - Fevertree Acacias*2	Maputaland coastal forests and woodlands
+20	1	AT	afr	afr:AFR - Malagasy Rainforest*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Mascarene forests
+21	1	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Congo Basin Rainforest*2;^afr:AFR - Mountain Rainforest*3	Mount Cameroon and Bioko montane forests
+22	1	AT	afr	afr:AFR - Guinean West African Rainforest*3;afr:AFR - African Fan Palms*2;~afr:AFR - African Fan Palms*3	Niger Delta swamp forests
+23	1	AT	afr	afr:AFR - Guinean West African Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Nigerian lowland forests
+24	1	AT	afr	afr:AFR - Congo Basin Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Northeast Congolian lowland forests
+25	1	AT	afr	afr:AFR - East African Savanna*3;afr:AFR - Congo Basin Rainforest*1;afr:AFR - African Fan Palms*1;aus:AUS - Coconut Palms*1	Northern Swahili coastal forests
+26	1	AT	afr	afr:AFR - Congo Basin Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Northwest Congolian lowland forests
+27	1	AT	afr	afr:AFR - Congo Basin Rainforest*3;aus:AUS - Coconut Palms*1	São Tomé, Príncipe, and Annobón forests
+28	1	AT	afr	afr:AFR - East African Savanna*3;afr:AFR - Congo Basin Rainforest*1;afr:AFR - African Fan Palms*1;aus:AUS - Coconut Palms*1	Southern Swahili coastal forests and woodlands
+29	1	AT	afr	afr:AFR - Congo Basin Rainforest*3;afr:AFR - African Fan Palms*2;~afr:AFR - African Fan Palms*3	Western Congolian swamp forests
+30	1	AT	afr	afr:AFR - Guinean West African Rainforest*5;afr:AFR - African Fan Palms*1;~afr:AFR - African Fan Palms*2	Western Guinean lowland forests
+31	2	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	Cape Verde Islands dry forests
+32	2	AT	afr	afr:AFR - Malagasy Dry Forest*5;afr:AFR - Malagasy Spiny Forest*1	Madagascar dry deciduous forests
+33	2	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*4;afr:AFR - Congo Basin Rainforest*1	Zambezian evergreen dry forests
+34	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*3;afr:AFR - South African Veld*2	Angolan mopane woodlands
+35	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Angolan scarp savanna and woodlands
+36	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Angolan wet miombo woodlands
+37	7	AT	afr	afr:AFR - East African Savanna!Adansonia*1;aus:AUS - Pacific Island Beach Forest*1	Ascension scrub and grasslands
+38	7	AT	afr	afr:AFR - South African Veld*5;afr:AFR - Fevertree Acacias*1	Central bushveld
+39	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Central Zambezian wet miombo woodlands
+40	7	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3;afr:AFR - Mountain Rainforest*1;^afr:AFR - Mountain Rainforest*2	Drakensberg Escarpment savanna and thicket
+41	7	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3;afr:AFR - Mountain Rainforest*1;^afr:AFR - Mountain Rainforest*2	Drakensberg grasslands
+42	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Dry miombo woodlands
+43	7	AT	afr	afr:AFR - Sudanian Savanna*5;afr:AFR - African Fan Palms*1	East Sudanian savanna
+44	7	AT	afr	afr:AFR - Sudanian Savanna*3;afr:AFR - Guinean West African Rainforest*2;afr:AFR - African Fan Palms*1	Guinean forest-savanna
+45	7	AT	afr	afr:AFR - East African Savanna*5;afr:AFR - Fevertree Acacias*1;~afr:AFR - Fevertree Acacias*2	Horn of Africa xeric bushlands
+46	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Itigi-Sumbu thicket
+47	7	AT	afr	afr:AFR - South African Veld*5;afr:AFR - Fevertree Acacias*1	Kalahari Acacia woodlands
+48	7	AT	afr	afr:AFR - South African Veld*5;afr:AFR - Fevertree Acacias*1	Limpopo lowveld
+49	7	AT	afr	afr:AFR - Sudanian Savanna*3;afr:AFR - Guinean West African Rainforest*2;afr:AFR - African Fan Palms*1	Mandara Plateau woodlands
+50	7	AT	afr	afr:AFR - East African Savanna*5;afr:AFR - Fevertree Acacias*1;~afr:AFR - Fevertree Acacias*2	Masai xeric grasslands and shrublands
+51	7	AT	afr	afr:AFR - East African Savanna*5;afr:AFR - Fevertree Acacias*1;~afr:AFR - Fevertree Acacias*2	Northern Acacia-Commiphora bushlands and thickets
+52	7	AT	afr	afr:AFR - Sudanian Savanna*2;afr:AFR - Congo Basin Rainforest*3;afr:AFR - African Fan Palms*1	Northern Congolian Forest-Savanna
+53	7	AT	afr	afr:AFR - Sahelian Scrub and Semidesert*5;afr:AFR - Sudanian Savanna*1;afr:AFR - African Fan Palms*1	Sahelian Acacia savanna
+54	7	AT	afr	afr:AFR - East African Savanna*5;afr:AFR - Fevertree Acacias*1;~afr:AFR - Fevertree Acacias*2	Serengeti volcanic grasslands
+55	7	AT	afr	afr:AFR - East African Savanna*5;afr:AFR - Fevertree Acacias*1;~afr:AFR - Fevertree Acacias*2	Somali Acacia-Commiphora bushlands and thickets
+56	7	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna!Adansonia*1	South Arabian fog woodlands, shrublands, and dune
+57	7	AT	afr	afr:AFR - East African Savanna*5;afr:AFR - Fevertree Acacias*1;~afr:AFR - Fevertree Acacias*2	Southern Acacia-Commiphora bushlands and thickets
+58	7	AT	afr	afr:AFR - Sudanian Savanna*2;afr:AFR - Congo Basin Rainforest*3;afr:AFR - African Fan Palms*1	Southern Congolian forest-savanna
+59	7	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna!Adansonia*1	Southwest Arabian montane woodlands and grasslands
+60	7	AT	afr	afr:AFR - East African Savanna!Adansonia*1;aus:AUS - Pacific Island Beach Forest*1	St. Helena scrub and woodlands
+61	7	AT	afr	afr:AFR - East African Savanna*2;afr:AFR - Congo Basin Rainforest*2;afr:AFR - Fevertree Acacias*1	Victoria Basin forest-savanna
+62	7	AT	afr	afr:AFR - Sudanian Savanna*5;afr:AFR - African Fan Palms*1	West Sudanian savanna
+63	7	AT	afr	afr:AFR - Sudanian Savanna*2;afr:AFR - Congo Basin Rainforest*3;afr:AFR - African Fan Palms*1	Western Congolian forest-savanna
+64	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Zambezian Baikiaea woodlands
+65	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*3;afr:AFR - South African Veld*2	Zambezian mopane woodlands
+66	7	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*5;afr:AFR - South African Veld*1	Zambezian-Limpopo mixed woodlands
+67	8	AT	aus	aus:AUS - New Zealand South Island*1	Amsterdam-Saint Paul Islands temperate grasslands
+68	8	AT	aus	aus:AUS - New Zealand South Island*1	Tristan Da Cunha-Gough Islands shrub and grasslands
+69	9	AT	afr	afr:AFR - East African Savanna*3;afr:AFR - Fevertree Acacias*1	East African halophytics
+70	9	AT	afr	afr:AFR - South African Veld*3;afr:AFR - African Fan Palms*1	Etosha Pan halophytics
+71	9	AT	afr	afr:AFR - Sahelian Scrub and Semidesert*3;afr:AFR - African Fan Palms*2;afr:AFR - Sudanian Savanna*1;~afr:AFR - African Fan Palms*2	Inner Niger Delta flooded savanna
+72	9	AT	afr	afr:AFR - Sahelian Scrub and Semidesert*3;afr:AFR - African Fan Palms*2;afr:AFR - Sudanian Savanna*1;~afr:AFR - African Fan Palms*2	Lake Chad flooded savanna
+73	9	AT	afr	afr:AFR - South African Veld*3;afr:AFR - African Fan Palms*1	Makgadikgadi halophytics
+74	9	AT	afr	afr:AFR - Sudanian Savanna*2;afr:AFR - African Fan Palms*2;~afr:AFR - African Fan Palms*3	Sudd flooded grasslands
+75	9	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*2;afr:AFR - Fevertree Acacias*2;afr:AFR - African Fan Palms*1;~afr:AFR - Fevertree Acacias*2	Zambezian coastal flooded savanna
+76	9	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*2;afr:AFR - Fevertree Acacias*2;afr:AFR - African Fan Palms*1;~afr:AFR - Fevertree Acacias*2	Zambezian flooded grasslands
+77	10	AT	afr	afr:AFR - Central-Southern African Miombo Woodlands*2;afr:AFR - Mountain Rainforest*2;^afr:AFR - Mountain Rainforest*2	Angolan montane forest-grassland
+78	10	AT	afr	afr:AFR - Mountain Rainforest*3;^afr:AFR - Mountain Rainforest*2	East African montane moorlands
+79	10	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - East African Savanna*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*2;^afr:AFR - Mountain Rainforest*2	Ethiopian montane grasslands and woodlands
+80	10	AT	afr	afr:AFR - Mountain Rainforest*3;^afr:AFR - Mountain Rainforest*2	Ethiopian montane moorlands
+81	10	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;sam:SAM - Pampas*1	Highveld grasslands
+82	10	AT	afr	afr:AFR - Sudanian Savanna*3;^afr:AFR - Mountain Rainforest*2	Jos Plateau forest-grassland
+83	10	AT	afr	afr:AFR - Malagasy Highlands*3	Madagascar ericoid thickets
+84	10	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Central-Southern African Miombo Woodlands*2;^afr:AFR - Mountain Rainforest*2	Mulanje Montane forest-grassland
+85	10	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Central-Southern African Miombo Woodlands*2;^afr:AFR - Mountain Rainforest*2	Nyanga-Chimanimani Montane forest-grassland
+86	10	AT	afr	afr:AFR - Mountain Rainforest*3;^afr:AFR - Mountain Rainforest*2	Rwenzori-Virunga montane moorlands
+87	10	AT	afr	afr:AFR - Mountain Rainforest*3;afr:AFR - Central-Southern African Miombo Woodlands*2;^afr:AFR - Mountain Rainforest*2	Southern Rift Montane forest-grassland
+88	12	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*2;afr:AFR - Mountain Rainforest*1	Albany thickets
+89	12	AT	afr	afr:AFR - Mountain Rainforest*2;eur:EUR - Western Mediterranean*2;^afr:AFR - Mountain Rainforest*2	Fynbos shrubland
+90	12	AT	afr	afr:AFR - Mountain Rainforest*2;eur:EUR - Western Mediterranean*2;^afr:AFR - Mountain Rainforest*2	Renosterveld shrubland
+91	13	AT	aus	aus:AUS - Pacific Island Beach Forest*2;afr:AFR - East African Savanna!Adansonia*1	Aldabra Island xeric scrub
+92	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna*2	Djibouti xeric shrublands
+93	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna*2	Eritrean coastal desert
+94	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Gariep Karoo
+95	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna*2	Hobyo grasslands and shrublands
+96	13	AT	aus	aus:AUS - Pacific Island Beach Forest*2;afr:AFR - East African Savanna!Adansonia*1	Ile Europa and Bassas da India xeric scrub
+97	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Kalahari xeric savanna
+98	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Kaokoveld desert
+99	13	AT	afr	afr:AFR - Malagasy Spiny Forest*5;afr:AFR - Malagasy Dry Forest*1	Madagascar spiny thickets
+100	13	AT	afr	afr:AFR - Malagasy Spiny Forest*5;afr:AFR - Malagasy Dry Forest*1	Madagascar succulent woodlands
+101	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Nama Karoo shrublands
+102	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Namaqualand-Richtersveld steppe
+103	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Namib Desert
+104	13	AT	afr	afr:AFR - South African Veld*3;afr:AFR - Central-Southern African Miombo Woodlands*1	Namibian savanna woodlands
+105	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - East African Savanna!Adansonia*1	Socotra Island xeric shrublands
+106	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna*2	Somali montane xeric woodlands
+107	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna!Adansonia*1;afr:AFR - Canary Island Date Palms*1	Southwest Arabian coastal xeric shrublands
+108	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna!Adansonia*1;afr:AFR - Canary Island Date Palms*1	Southwest Arabian Escarpment shrublands and woodlands
+109	13	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - East African Savanna!Adansonia*1;afr:AFR - Canary Island Date Palms*1	Southwest Arabian highland xeric scrub
+110	13	AT	afr	afr:AFR - South African Veld!Adansonia!Colophospermum*3	Succulent Karoo xeric shrublands
+111	14	AT	afr	afr:AFR - Congo Basin Rainforest*2;afr:AFR - African Fan Palms*1;aus:AUS - Coconut Palms*1;~sam:SAM - Mangroves!Schinus*4	Central African mangroves
+112	14	AT	afr	afr:AFR - East African Savanna*2;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Mangroves!Nypa!Phoenix*3;~aus:AUS - Grey Mangroves*1	East African mangroves
+113	14	AT	afr	afr:AFR - Guinean West African Rainforest*2;afr:AFR - African Fan Palms*1;aus:AUS - Coconut Palms*1;~sam:SAM - Mangroves!Schinus*4	Guinean mangroves
+114	14	AT	afr	afr:AFR - Malagasy Dry Forest*2;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Mangroves!Nypa!Phoenix*3;~aus:AUS - Grey Mangroves*1	Madagascar mangroves
+115	14	AT	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*1;~aus:AUS - Grey Mangroves*4	Red Sea mangroves
+116	14	AT	afr	afr:AFR - Fevertree Acacias*1;afr:AFR - South African Veld*1;~ind:IND - Southeast Asian Mangroves!Nypa!Phoenix*2;~aus:AUS - Grey Mangroves*2	Southern Africa mangroves
+117	11	AN			Adelie Land tundra
+118	11	AN			Central South Antarctic Peninsula tundra
+119	11	AN			Dronning Maud Land tundra
+120	11	AN			East Antarctic tundra
+121	11	AN			Ellsworth Land tundra
+122	11	AN			Ellsworth Mountains tundra
+123	11	AN			Enderby Land tundra
+124	11	AN			Marie Byrd Land tundra
+125	11	AN			North Victoria Land tundra
+126	11	AN			Northeast Antarctic Peninsula tundra
+127	11	AN			Northwest Antarctic Peninsula tundra
+128	11	AN			Prince Charles Mountains tundra
+129	11	AN			Scotia Sea Islands tundra
+130	11	AN			South Antarctic Peninsula tundra
+131	11	AN			South Orkney Islands tundra
+132	11	AN			South Victoria Land tundra
+133	11	AN			Southern Indian Ocean Islands tundra
+134	11	AN			Transantarctic Mountains tundra
+135	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Admiralty Islands lowland rain forests
+136	1	AA	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1	Banda Sea Islands moist deciduous forests
+137	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Biak-Numfoor rain forests
+138	1	AA	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1	Buru rain forests
+139	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*2;aus:AUS - Queensland Wet Tropics Rainforest*1;^aus:AUS - Queensland Wet Tropics Rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*1	Central Range Papuan montane rain forests
+140	1	AA	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1	Halmahera rain forests
+141	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*2;aus:AUS - Queensland Wet Tropics Rainforest*1;^aus:AUS - Queensland Wet Tropics Rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*1	Huon Peninsula montane rain forests
+142	1	AA	aus	aus:AUS - Subtropical Coastal Rainforest*3;aus:AUS - Pacific Island Beach Forest*1	Lord Howe Island subtropical forests
+143	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Louisiade Archipelago rain forests
+144	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	New Britain-New Ireland lowland rain forests
+145	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*2;aus:AUS - Queensland Wet Tropics Rainforest*1;^aus:AUS - Queensland Wet Tropics Rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*1	New Britain-New Ireland montane rain forests
+146	1	AA	aus	aus:AUS - Queensland Wet Tropics Rainforest*2;aus:AUS - Fiji*1;aus:AUS - Pacific Island Beach Forest*1	New Caledonia rain forests
+147	1	AA	aus	aus:AUS - Queensland Wet Tropics Rainforest*2;aus:AUS - Subtropical Coastal Rainforest*1;aus:AUS - Pacific Island Beach Forest*1	Norfolk Island subtropical forests
+148	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Northern New Guinea lowland rain and freshwater swamp forests
+149	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*2;aus:AUS - Queensland Wet Tropics Rainforest*1;^aus:AUS - Queensland Wet Tropics Rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*1	Northern New Guinea montane rain forests
+150	1	AA	aus	aus:AUS - Queensland Wet Tropics Rainforest*5;aus:AUS - Subtropical Coastal Rainforest*1;aus:AUS - Coconut Palms*1	Queensland tropical rain forests
+151	1	AA	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1	Seram rain forests
+152	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Solomon Islands rain forests
+153	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Southeast Papuan rain forests
+154	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Southern New Guinea freshwater swamp forests
+155	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Southern New Guinea lowland rain forests
+156	1	AA	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1	Sulawesi lowland rain forests
+157	1	AA	ind	ind:IND - Philippines and Maluku Islands Forest*3;^ind:IND - Southeast Asian Subtropical Mountain Forest*1	Sulawesi montane rain forests
+158	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Trobriand Islands rain forests
+159	1	AA	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Vanuatu rain forests
+160	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*2;aus:AUS - Queensland Wet Tropics Rainforest*1;^aus:AUS - Queensland Wet Tropics Rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*1	Vogelkop montane rain forests
+161	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Vogelkop-Aru lowland rain forests
+162	1	AA	ind	ind:IND - New Guinea Lowland Rainforest*5;aus:AUS - Coconut Palms*1	Yapen rain forests
+163	2	AA	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*2;aus:AUS - Northern Territory Savanna!Adansonia*2;ind:IND - Borassus Palms*1	Lesser Sundas deciduous forests
+164	2	AA	aus	aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Fiji*1;aus:AUS - Queensland Wet Tropics Rainforest*1	New Caledonia dry forests
+165	2	AA	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*2;aus:AUS - Northern Territory Savanna!Adansonia*2;ind:IND - Borassus Palms*1	Sumba deciduous forests
+166	2	AA	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*2;aus:AUS - Northern Territory Savanna!Adansonia*2;ind:IND - Borassus Palms*1	Timor and Wetar deciduous forests
+167	4	AA	aus	aus:AUS - New Zealand South Island*2;aus:AUS - New Zealand North Island*1	Chatham Island temperate forests
+168	4	AA	aus	aus:AUS - Temperate Eucalypt Forest (New South Wales)*3;aus:AUS - Sydney-area Subtropical Forest*2;aus:AUS - Subtropical Coastal Rainforest*2;~aus:AUS - Riverside trees*2	Eastern Australian temperate forests
+169	4	AA	aus	aus:AUS - New Zealand South Island*5	Fiordland temperate forests
+170	4	AA	aus	aus:AUS - New Zealand South Island*5	Nelson Coast temperate forests
+171	4	AA	aus	aus:AUS - New Zealand North Island*5;aus:AUS - New Zealand Kauri Forest*1	New Zealand North Island temperate forests
+172	4	AA	aus	aus:AUS - New Zealand South Island*5	New Zealand South Island temperate forests
+173	4	AA	aus	aus:AUS - New Zealand Kauri Forest*3;aus:AUS - New Zealand North Island*3	Northland temperate kauri forests
+174	4	AA	aus	aus:AUS - New Zealand South Island*5	Rakiura Island temperate forests
+175	4	AA	aus	aus:AUS - New Zealand South Island*5	Richmond temperate forests
+176	4	AA	aus	aus:AUS - Temperate Eucalypt Forest (Victoria)*4;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2;^aus:AUS - Mountain Ash Temperate Rainforest*2	Southeast Australia temperate forests
+177	4	AA	aus	aus:AUS - Tasmanian Highlands*4;aus:AUS - Tasmanian Lowland Temperate Rainforest*1	Tasmanian Central Highland forests
+178	4	AA	aus	aus:AUS - Tasmanian Lowland Temperate Rainforest*3;aus:AUS - Temperate Eucalypt Forest (Victoria)*2;^aus:AUS - Tasmanian Highlands*2	Tasmanian temperate forests
+179	4	AA	aus	aus:AUS - Tasmanian Lowland Temperate Rainforest*3;aus:AUS - Tasmanian Highlands*2;^aus:AUS - Tasmanian Highlands*2	Tasmanian temperate rain forests
+180	4	AA	aus	aus:AUS - New Zealand South Island*5	Westland temperate forests
+181	7	AA	aus	aus:AUS - Northern Territory Savanna*5;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2	Arnhem Land tropical savanna
+182	7	AA	aus	aus:AUS - Queensland Brigalow Savanna*3;aus:AUS - Temperate Eucalypt Forest (New South Wales)*1;~aus:AUS - Riverside trees*2	Brigalow tropical savanna
+183	7	AA	aus	aus:AUS - Northern Territory Savanna*5;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2	Cape York Peninsula tropical savanna
+184	7	AA	aus	aus:AUS - Northern Territory Savanna*5;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2	Carpentaria tropical savanna
+185	7	AA	aus	aus:AUS - Northern Territory Savanna*5;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2	Einasleigh upland savanna
+186	7	AA	aus	aus:AUS - Northern Territory Savanna*5;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2	Kimberly tropical savanna
+187	7	AA	aus	aus:AUS - Riverside trees*2;aus:AUS - Mulga Shrubland*1;aus:AUS - Queensland Brigalow Savanna*1	Mitchell Grass Downs
+188	7	AA	aus	aus:AUS - Northern Territory Savanna!Adansonia*2;ind:IND - New Guinea Lowland Rainforest*1	Trans Fly savanna and grasslands
+189	7	AA	aus	aus:AUS - Northern Territory Savanna*5;aus:AUS - Riverside trees*1;~aus:AUS - Riverside trees*2	Victoria Plains tropical savanna
+190	8	AA	aus	aus:AUS - New Zealand South Island*2;eur:EUR - Misc. Deciduous forest*1;eur:EUR - Swamp and riparian forest*1	Canterbury-Otago tussock grasslands
+191	8	AA	aus	aus:AUS - Mulga Shrubland*4;aus:AUS - Riverside trees*1	Eastern Australia mulga shrublands
+192	8	AA	aus	aus:AUS - Temperate Eucalypt Forest (New South Wales)*2;aus:AUS - Riverside trees*2;aus:AUS - Mallee and Scrub*1;~aus:AUS - Riverside trees*2	Southeast Australia temperate savanna
+193	10	AA	aus	aus:AUS - Mountain Ash Temperate Rainforest*2;aus:AUS - Tasmanian Highlands*1	Australian Alps montane grasslands
+194	10	AA	aus	aus:AUS - New Zealand South Island*2	New Zealand South Island montane grasslands
+195	10	AA	ind	ind:IND - New Guinea Lowland Rainforest*1;aus:AUS - Queensland Wet Tropics Rainforest*1	Papuan Central Range sub-alpine grasslands
+196	11	AA	aus	aus:AUS - New Zealand South Island*2	Antipodes Subantarctic Islands tundra
+197	12	AA	aus	aus:AUS - Mallee and Scrub*2;aus:AUS - Mulga Shrubland*1;aus:AUS - Central Desert*1	Coolgardie woodlands
+198	12	AA	aus	aus:AUS - Mallee and Scrub*4;aus:AUS - Riverside trees*1	Esperance mallee
+199	12	AA	aus	aus:AUS - Mallee and Scrub*4;aus:AUS - Riverside trees*1	Eyre and York mallee
+200	12	AA	aus	aus:AUS - Temperate Eucalypt Forest (Victoria)*3;aus:AUS - Riverside trees*2;aus:AUS - Mallee and Scrub*1;~aus:AUS - Riverside trees*2	Flinders-Lofty montane woodlands
+201	12	AA	aus	aus:AUS - Mallee and Scrub*4;aus:AUS - Riverside trees*1	Hampton mallee and woodlands
+202	12	AA	aus	aus:AUS - Jarrah-Karri Temperate Rainforest*5;aus:AUS - Swan Coast Scrublands*1	Jarrah-Karri forest and shrublands
+203	12	AA	aus	aus:AUS - Mallee and Scrub*3;aus:AUS - Riverside trees*2;~aus:AUS - Riverside trees*3	Murray-Darling woodlands and mallee
+204	12	AA	aus	aus:AUS - Temperate Eucalypt Forest (Victoria)*3;aus:AUS - Riverside trees*1	Naracoorte woodlands
+205	12	AA	aus	aus:AUS - Swan Coast Scrublands*2;aus:AUS - Mallee and Scrub*1;aus:AUS - Mulga Shrubland*1	Southwest Australia savanna
+206	12	AA	aus	aus:AUS - Swan Coast Scrublands*4;aus:AUS - Jarrah-Karri Temperate Rainforest*2;~aus:AUS - Riverside trees*2	Southwest Australia woodlands
+207	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Carnarvon xeric shrublands
+208	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Central Ranges xeric scrub
+209	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Gibson desert
+210	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Great Sandy-Tanami desert
+211	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Great Victoria desert
+212	13	AA	aus	aus:AUS - Mallee and Scrub*2;aus:AUS - Mulga Shrubland*1	Nullarbor Plains xeric shrublands
+213	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Pilbara shrublands
+214	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Simpson desert
+215	13	AA	aus	aus:AUS - Central Desert*3;aus:AUS - Mulga Shrubland*2;~aus:AUS - Riverside trees*2	Tirari-Sturt stony desert
+216	13	AA	aus	aus:AUS - Mulga Shrubland*4;aus:AUS - Central Desert*1	Western Australian Mulga shrublands
+217	14	AA	ind	ind:IND - New Guinea Lowland Rainforest*2;aus:AUS - Coconut Palms*1;~aus:AUS - Grey Mangroves*2;~ind:IND - Southeast Asian Mangroves*2	New Guinea mangroves
+218	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Andaman Islands rain forests
+219	1	IM	ind	ind:IND - Borneo Rainforest*5;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Borneo lowland rain forests
+220	1	IM	ind	ind:IND - Borneo Rainforest*3;^ind:IND - Southeast Asian Subtropical Mountain Forest*2	Borneo montane rain forests
+221	1	IM	ind	ind:IND - Borneo Rainforest*5;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Borneo peat swamp forests
+222	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;ind:IND - Ganges River area rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*2;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Brahmaputra Valley semi-evergreen forests
+223	1	IM	ind	ind:IND - Southeast Asia Rainforest*4	Cardamom Mountains rain forests
+224	1	IM	ind	ind:IND - Southeast Asian Riparian & Wetland Flora*3;ind:IND - Southeast Asia Rainforest*2;ind:IND - Southeast Asia Tropical Dry Forest*1;ind:IND - Banana Trees*1;aus:AUS - Coconut Palms*1;ind:IND - Borassus Palms*1	Chao Phraya freshwater swamp forests
+225	1	IM	ind	ind:IND - Southeast Asian Riparian & Wetland Flora*3;ind:IND - Southeast Asia Rainforest*2;ind:IND - Southeast Asia Tropical Dry Forest*1;ind:IND - Banana Trees*1;aus:AUS - Coconut Palms*1;ind:IND - Borassus Palms*1	Chao Phraya lowland moist deciduous forests
+226	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;ind:IND - Ganges River area rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*2;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Chin Hills-Arakan Yoma montane forests
+227	1	IM	aus	aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2;ind:IND - Southeast Asia Rainforest*1	Christmas and Cocos Islands tropical forests
+228	1	IM	ind	ind:IND - North-Central Indian Tropical Dry Forest*2;ind:IND - Ganges River area rainforest*2;ind:IND - Deccan Plateau Tropical Dry Forest*1	East Deccan moist deciduous forests
+229	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*3;ind:IND - Southeast Asian Subtropical Mountain Forest*2	Eastern Java-Bali montane rain forests
+230	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*4;ind:IND - Banana Trees*1;aus:AUS - Coconut Palms*1;ind:IND - Betel Nut Palms*1	Eastern Java-Bali rain forests
+231	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Greater Negros-Panay rain forests
+232	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*3;aus:AUS - Coconut Palms*1	Hainan Island monsoon rain forests
+233	1	IM	ind	ind:IND - Himalayan Broadleaf and Pine Forest*3;ind:IND - Ganges River area rainforest*1;^ind:IND - Himalayan Coniferous Forest*2	Himalayan subtropical broadleaf forests
+234	1	IM	ind	ind:IND - Irrawaddy Valley Tropical Deciduous Forest*4;ind:IND - Southeast Asia Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Irrawaddy freshwater swamp forests
+235	1	IM	ind	ind:IND - Irrawaddy Valley Tropical Deciduous Forest*4;ind:IND - Southeast Asia Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Irrawaddy moist deciduous forests
+236	1	IM	ind	ind:IND - Jiangnan Subtropical Laurel Forest*5;ind:IND - South China and Vietnam Subtropical Rainforest*1;~ind:IND - Chinese Water Cypress*2;^ind:IND - South China Montane Laurel Forest*2	Jian Nan subtropical evergreen forests
+237	1	IM	ind	ind:IND - Southeast Asia Rainforest*2;ind:IND - Irrawaddy Valley Tropical Deciduous Forest*2;ind:IND - Southeast Asia Tropical Dry Forest*1;^ind:IND - Southeast Asian Subtropical Mountain Forest*2	Kayah-Karen montane rain forests
+238	1	IM	ind	ind:IND - Ganges River area rainforest*4;ind:IND - Southeast Asian Riparian & Wetland Flora*2;ind:IND - Borassus Palms*1;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Lower Gangetic Plains moist deciduous forests
+239	1	IM	ind	ind:IND - Southeast Asia Rainforest*2;ind:IND - Irrawaddy Valley Tropical Deciduous Forest*2;ind:IND - Southeast Asia Tropical Dry Forest*1;^ind:IND - Southeast Asian Subtropical Mountain Forest*2	Luang Prabang montane rain forests
+240	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*3;^ind:IND - Southeast Asian Subtropical Mountain Forest*1;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Luzon montane rain forests
+241	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Luzon rain forests
+242	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*5;ind:IND - Betel Nut Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2;ind:IND - Deccan Plateau Tropical Dry Forest*1	Malabar Coast moist forests
+243	1	IM	aus	aus:AUS - Coconut Palms*3;aus:AUS - Pacific Island Beach Forest*2	Maldives-Lakshadweep-Chagos Archipelago tropical moist forests
+244	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;ind:IND - Ganges River area rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*2;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Meghalaya subtropical forests
+245	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*4;ind:IND - Malay Peninsula Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Mentawai Islands rain forests
+246	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*3;^ind:IND - Southeast Asian Subtropical Mountain Forest*1;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Mindanao montane rain forests
+247	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Mindanao-Eastern Visayas rain forests
+248	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Mindoro rain forests
+249	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;ind:IND - Ganges River area rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*2;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Mizoram-Manipur-Kachin rain forests
+250	1	IM	ind	ind:IND - Irrawaddy Valley Tropical Deciduous Forest*4;ind:IND - Southeast Asia Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Myanmar coastal rain forests
+251	1	IM	asn	asn:ASN - Southern Japanese Forest*3;ind:IND - South China and Vietnam Subtropical Rainforest*1;aus:AUS - Pacific Island Beach Forest*1	Nansei Islands subtropical evergreen forests
+252	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Nicobar Islands rain forests
+253	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*5;ind:IND - Betel Nut Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2;ind:IND - Deccan Plateau Tropical Dry Forest*1	North Western Ghats moist deciduous forests
+254	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*5;ind:IND - Betel Nut Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	North Western Ghats montane rain forests
+255	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*4;ind:IND - Southeast Asia Rainforest*1	Northern Annamites rain forests
+256	1	IM	ind	ind:IND - Southeast Asia Rainforest*2;ind:IND - Irrawaddy Valley Tropical Deciduous Forest*2;ind:IND - Southeast Asia Tropical Dry Forest*1;^ind:IND - Southeast Asian Subtropical Mountain Forest*2	Northern Indochina subtropical forests
+257	1	IM	ind	ind:IND - Southeast Asia Tropical Dry Forest*3;ind:IND - Southeast Asia Rainforest*1;ind:IND - Borassus Palms*1	Northern Khorat Plateau moist deciduous forests
+258	1	IM	ind	ind:IND - Southeast Asia Rainforest*2;ind:IND - Irrawaddy Valley Tropical Deciduous Forest*2;ind:IND - Southeast Asia Tropical Dry Forest*1;^ind:IND - Southeast Asian Subtropical Mountain Forest*2	Northern Thailand-Laos moist deciduous forests
+259	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;ind:IND - Ganges River area rainforest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*2;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Northern Triangle subtropical forests
+260	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*4;ind:IND - Southeast Asia Rainforest*1	Northern Vietnam lowland rain forests
+261	1	IM	ind	ind:IND - North-Central Indian Tropical Dry Forest*2;ind:IND - Ganges River area rainforest*2;ind:IND - Deccan Plateau Tropical Dry Forest*1	Orissa semi-evergreen forests
+262	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Palawan rain forests
+263	1	IM	ind	ind:IND - Malay Peninsula Rainforest*2;ind:IND - Southeast Asian Subtropical Mountain Forest*2	Peninsular Malaysian montane rain forests
+264	1	IM	ind	ind:IND - Malay Peninsula Rainforest*5;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Peninsular Malaysian peat swamp forests
+265	1	IM	ind	ind:IND - Malay Peninsula Rainforest*5;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Peninsular Malaysian rain forests
+266	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*3;ind:IND - Southeast Asian Riparian & Wetland Flora*2;ind:IND - Banana Trees*1	Red River freshwater swamp forests
+267	1	IM	aus	aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*1	South China Sea Islands
+268	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*5;ind:IND - Banana Trees*1;~ind:IND - Chinese Water Cypress*2;^ind:IND - South China Montane Laurel Forest*2	South China-Vietnam subtropical evergreen forests
+269	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*2;ind:IND - Jiangnan Subtropical Laurel Forest*2;asn:ASN - Southern Japanese Forest*1;^ind:IND - South China Montane Laurel Forest*2	South Taiwan monsoon rain forests
+270	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*5;ind:IND - Betel Nut Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	South Western Ghats moist deciduous forests
+271	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*5;ind:IND - Betel Nut Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	South Western Ghats montane rain forests
+272	1	IM	ind	ind:IND - Southeast Asian Subtropical Mountain Forest*2;ind:IND - Himalayan Broadleaf and Pine Forest*2;ind:IND - Southeast Asia Rainforest*1	Southern Annamites montane rain forests
+273	1	IM	ind	ind:IND - Borneo Rainforest*5;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Southwest Borneo freshwater swamp forests
+274	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*3;aus:AUS - Coconut Palms*1;ind:IND - Betel Nut Palms*1	Sri Lanka lowland rain forests
+275	1	IM	ind	ind:IND - Malabar Coast Moist Tropical Forest*3	Sri Lanka montane rain forests
+276	1	IM	ind	ind:IND - Philippines and Maluku Islands Forest*5;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Sulu Archipelago rain forests
+277	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*4;ind:IND - Malay Peninsula Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Sumatran freshwater swamp forests
+278	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*4;ind:IND - Malay Peninsula Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Sumatran lowland rain forests
+279	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*3;ind:IND - Southeast Asian Subtropical Mountain Forest*2	Sumatran montane rain forests
+280	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*4;ind:IND - Malay Peninsula Rainforest*1;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Sumatran peat swamp forests
+281	1	IM	ind	ind:IND - Borneo Rainforest*5;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Sundaland heath forests
+282	1	IM	ind	ind:IND - Ganges River area rainforest*4;ind:IND - Southeast Asian Riparian & Wetland Flora*2;ind:IND - Borassus Palms*1;aus:AUS - Coconut Palms*1;ind:IND - Banana Trees*1	Sundarbans freshwater swamp forests
+283	1	IM	ind	ind:IND - South China and Vietnam Subtropical Rainforest*2;ind:IND - Jiangnan Subtropical Laurel Forest*2;asn:ASN - Southern Japanese Forest*1;^ind:IND - South China Montane Laurel Forest*2	Taiwan subtropical evergreen forests
+284	1	IM	ind	ind:IND - Southeast Asia Rainforest*3;ind:IND - Malay Peninsula Rainforest*2;aus:AUS - Coconut Palms*1	Tenasserim-South Thailand semi-evergreen rain forests
+285	1	IM	ind	ind:IND - Southeast Asian Riparian & Wetland Flora*3;ind:IND - Southeast Asia Tropical Dry Forest*1;ind:IND - Borassus Palms*2;aus:AUS - Coconut Palms*1	Tonle Sap freshwater swamp forests
+286	1	IM	ind	ind:IND - Southeast Asian Riparian & Wetland Flora*3;ind:IND - Southeast Asia Tropical Dry Forest*1;ind:IND - Borassus Palms*2;aus:AUS - Coconut Palms*1	Tonle Sap-Mekong peat swamp forests
+287	1	IM	ind	ind:IND - Ganges River area rainforest*4;ind:IND - North-Central Indian Tropical Dry Forest*2;~ind:IND - Southeast Asian Riparian & Wetland Flora*2	Upper Gangetic Plains moist deciduous forests
+288	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*3;ind:IND - Southeast Asian Subtropical Mountain Forest*2	Western Java montane rain forests
+289	1	IM	ind	ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*4;ind:IND - Banana Trees*1;aus:AUS - Coconut Palms*1;ind:IND - Betel Nut Palms*1	Western Java rain forests
+290	2	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*4;ind:IND - North-Central Indian Tropical Dry Forest*1;ind:IND - Borassus Palms*1	Central Deccan Plateau dry deciduous forests
+291	2	IM	ind	ind:IND - Southeast Asia Tropical Dry Forest*4;ind:IND - Borassus Palms*1	Central Indochina dry forests
+292	2	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*4;ind:IND - North-Central Indian Tropical Dry Forest*1;ind:IND - Borassus Palms*1	Chhota-Nagpur dry deciduous forests
+293	2	IM	ind	ind:IND - Sri Lanka-Tamil Nadu Tropical Dry Forest*4;ind:IND - Borassus Palms*1;aus:AUS - Coconut Palms*1	East Deccan dry-evergreen forests
+294	2	IM	ind	ind:IND - Southeast Asia Tropical Dry Forest*3;ind:IND - Irrawaddy Valley Tropical Deciduous Forest*1;ind:IND - Borassus Palms*1	Irrawaddy dry forests
+295	2	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*2;ind:IND - Deccan Plateau Thornscrub*2;ind:IND - North-Central Indian Tropical Dry Forest*1	Khathiar-Gir dry deciduous forests
+296	2	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*4;ind:IND - North-Central Indian Tropical Dry Forest*1;ind:IND - Borassus Palms*1	Narmada Valley dry deciduous forests
+297	2	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*4;ind:IND - North-Central Indian Tropical Dry Forest*1;ind:IND - Borassus Palms*1	North Deccan dry deciduous forests
+298	2	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*4;ind:IND - North-Central Indian Tropical Dry Forest*1;ind:IND - Borassus Palms*1	South Deccan Plateau dry deciduous forests
+299	2	IM	ind	ind:IND - Southeast Asia Tropical Dry Forest*4;ind:IND - Southeast Asia Rainforest*1;ind:IND - Borassus Palms*1	Southeast Indochina dry evergreen forests
+300	2	IM	ind	ind:IND - Southeast Asia Tropical Dry Forest*4;ind:IND - Borassus Palms*1	Southern Vietnam lowland dry forests
+301	2	IM	ind	ind:IND - Sri Lanka-Tamil Nadu Tropical Dry Forest*4;ind:IND - Borassus Palms*1;aus:AUS - Coconut Palms*1	Sri Lanka dry-zone dry evergreen forests
+302	3	IM	ind	ind:IND - Himalayan Broadleaf and Pine Forest*5;^ind:IND - Himalayan Coniferous Forest*1	Himalayan subtropical pine forests
+303	3	IM	ind	ind:IND - Himalayan Broadleaf and Pine Forest*3;ind:IND - Philippines and Maluku Islands Forest*1	Luzon tropical pine forests
+304	3	IM	ind	ind:IND - Himalayan Broadleaf and Pine Forest*3;ind:IND - Southeast Asian Subtropical Mountain Forest*1	Northeast India-Myanmar pine forests
+305	3	IM	ind	ind:IND - Himalayan Broadleaf and Pine Forest*2;ind:IND - Sumatra-Java-Lesser Sunda Islands Forests*2	Sumatran tropical pine forests
+306	4	IM	ind	ind:IND - Southeast Asian Subtropical Mountain Forest*2;ind:IND - Himalayan Broadleaf and Pine Forest*2;ind:IND - Himalayan Coniferous Forest*1;^ind:IND - Himalayan Coniferous Forest*2	Eastern Himalayan broadleaf forests
+307	4	IM	ind	ind:IND - Southeast Asian Subtropical Mountain Forest*2;ind:IND - Himalayan Broadleaf and Pine Forest*2;ind:IND - Himalayan Coniferous Forest*1;^ind:IND - Himalayan Coniferous Forest*2	Northern Triangle temperate forests
+308	4	IM	ind	ind:IND - Himalayan Broadleaf and Pine Forest*2;ind:IND - Southeast Asian Subtropical Mountain Forest*1;ind:IND - Himalayan Coniferous Forest*1;~asn:ASN- Weeping Willows*2;^ind:IND - Himalayan Coniferous Forest*2	Western Himalayan broadleaf forests
+309	5	IM	ind	ind:IND - Himalayan Coniferous Forest*5	Eastern Himalayan subalpine conifer forests
+310	5	IM	ind	ind:IND - Himalayan Coniferous Forest*5	Western Himalayan subalpine conifer forests
+311	7	IM	ind	ind:IND - Ganges River area rainforest*3;ind:IND - Southeast Asian Riparian & Wetland Flora*1	Terai-Duar savanna and grasslands
+312	9	IM	ind	ind:IND - Thar Desert Scrub*3;ind:IND - Deccan Plateau Thornscrub*1	Rann of Kutch seasonal salt marsh
+313	10	IM	ind	ind:IND - Southeast Asian Subtropical Mountain Forest*2;ind:IND - Borneo Rainforest*1	Kinabalu montane alpine meadows
+314	13	IM	ind	ind:IND - Deccan Plateau Thornscrub*3;ind:IND - Thar Desert Scrub*1;ind:IND - Deccan Plateau Tropical Dry Forest*1	Aravalli west thorn scrub forests
+315	13	IM	ind	ind:IND - Deccan Plateau Thornscrub*4;ind:IND - Deccan Plateau Tropical Dry Forest*1;ind:IND - Borassus Palms*1	Deccan thorn scrub forests
+316	13	IM	ind	ind:IND - Deccan Plateau Tropical Dry Forest*2;ind:IND - Borassus Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Mangroves*4	Godavari-Krishna mangroves
+317	13	IM	ind	ind:IND - Thar Desert Scrub*3;ind:IND - Deccan Plateau Thornscrub*1;ind:IND - Deccan Plateau Tropical Dry Forest*1	Indus Valley desert
+318	13	IM	ind	ind:IND - Thar Desert Scrub*3;ind:IND - Deccan Plateau Thornscrub*1;ind:IND - Deccan Plateau Tropical Dry Forest*1	Thar desert
+319	14	IM	ind	ind:IND - Southeast Asian Riparian & Wetland Flora*2;ind:IND - Southeast Asia Tropical Dry Forest*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Mangroves*4	Indochina mangroves
+320	14	IM	ind	ind:IND - Thar Desert Scrub*2;afr:AFR - Canary Island Date Palms*1;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Mangroves!Nypa*4	Indus River Delta-Arabian Sea mangroves
+321	14	IM	ind	ind:IND - Irrawaddy Valley Tropical Deciduous Forest*2;ind:IND - Southeast Asian Riparian & Wetland Flora*1;~ind:IND - Southeast Asian Mangroves*4	Myanmar Coast mangroves
+322	14	IM	ind	ind:IND - Borneo Rainforest*2;aus:AUS - Coconut Palms*1;~ind:IND - Southeast Asian Mangroves*4	Sunda Shelf mangroves
+323	14	IM	ind	ind:IND - Ganges River area rainforest*2;ind:IND - Southeast Asian Riparian & Wetland Flora*2;~ind:IND - Southeast Asian Mangroves*4	Sundarbans mangroves
+324	2	NA	wna	wna:WNA - baja california*2;wna:WNA - desert*1;ena:ENA - Caribbean Tropical Dry Forest*2	Sonoran-Sinaloan subtropical dry forest
+325	3	NA	ena	ena:ENA - Tropical Beach*2;ena:ENA - Pine-Hemlock Coniferous Forest!Abies!Pinus!Tsuga*1;ena:ENA - Southern Pine Flatwoods*1	Bermuda subtropical conifer forests
+326	3	NA	wna	wna:WNA - california broadleaf forest*2;wna:WNA - pinyon pine*2;wna:WNA - giant sequoia*2	Sierra Madre Occidental pine-oak forests
+327	3	NA	wna	wna:WNA - california broadleaf forest*2;wna:WNA - pinyon pine*2;wna:WNA - giant sequoia*2	Sierra Madre Oriental pine-oak forests
+328	4	NA	ena	ena:ENA - Appalachian Hardwoods*2;ena:ENA - Canadian & New England Hardwoods*2;ena:ENA - Pine-Hemlock Coniferous Forest*1;^ena:ENA - Pine-Hemlock Coniferous Forest*2	Allegheny Highlands forests
+329	4	NA	ena	ena:ENA - Appalachian Hardwoods*5;ena:ENA - Pine-Hemlock Coniferous Forest*1;~ena:ENA - River & Lowland Hardwoods*2;^ena:ENA - Pine-Hemlock Coniferous Forest*2	Appalachian mixed mesophytic forests
+330	4	NA	ena	ena:ENA - Appalachian Hardwoods*3;ena:ENA - Southern Pine Flatwoods*2;ena:ENA - Southern Coastal Plain Hardwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Appalachian Piedmont forests
+331	4	NA	ena	ena:ENA - Appalachian Hardwoods*5;ena:ENA - Pine-Hemlock Coniferous Forest*1;~ena:ENA - River & Lowland Hardwoods*2;^ena:ENA - Pine-Hemlock Coniferous Forest*2	Appalachian-Blue Ridge forests
+332	4	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Southern Pine Flatwoods*1;~ena:ENA - River & Lowland Hardwoods*2	East Central Texas forests
+333	4	NA	ena	ena:ENA - Canadian & New England Hardwoods*2;ena:ENA - Pine-Hemlock Coniferous Forest*2;wna:WNA - birch-aspen*1;wna:WNA - canadian taiga*1	Eastern Canadian Forest-Boreal transition
+334	4	NA	ena	ena:ENA - Canadian & New England Hardwoods*3;ena:ENA - Pine-Hemlock Coniferous Forest*1;ena:ENA - Midwestern Hardwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Eastern Great Lakes lowland forests
+335	4	NA	ena	ena:ENA - Canadian & New England Hardwoods*2;ena:ENA - Pine-Hemlock Coniferous Forest*2;wna:WNA - birch-aspen*1	Gulf of St. Lawrence lowland forests
+336	4	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Appalachian Hardwoods*2;ena:ENA - Southern Pine Flatwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Interior Plateau US Hardwood Forests
+337	4	NA	ena	ena:ENA - River & Lowland Hardwoods*3;ena:ENA - Southern Coastal Plain Hardwoods*2;~ena:ENA - Swamp*3	Mississippi lowland forests
+338	4	NA	ena	ena:ENA - Canadian & New England Hardwoods*3;ena:ENA - Pine-Hemlock Coniferous Forest*3;wna:WNA - birch-aspen*1;^ena:ENA - Pine-Hemlock Coniferous Forest*2	New England-Acadian forests
+339	4	NA	ena	ena:ENA - Appalachian Hardwoods*3;ena:ENA - Canadian & New England Hardwoods*2;ena:ENA - Pine-Hemlock Coniferous Forest*1;~ena:ENA - River & Lowland Hardwoods*2	Northeast US Coastal forests
+340	4	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Appalachian Hardwoods*2;ena:ENA - Southern Pine Flatwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Ozark Highlands mixed forests
+341	4	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Appalachian Hardwoods*2;ena:ENA - Southern Pine Flatwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Ozark Mountain forests
+342	4	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Canadian & New England Hardwoods*2;~ena:ENA - River & Lowland Hardwoods*2	Southern Great Lakes forests
+343	4	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Canadian & New England Hardwoods*1;wna:WNA - birch-aspen*1;~ena:ENA - River & Lowland Hardwoods*2	Upper Midwest US forest-savanna transition
+344	4	NA	ena	ena:ENA - Canadian & New England Hardwoods*2;ena:ENA - Pine-Hemlock Coniferous Forest*2;wna:WNA - birch-aspen*1;wna:WNA - canadian taiga*1;~wna:WNA - canadian taiga*2	Western Great Lakes forests
+345	5	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1;^wna:WNA - canadian taiga*2	Alberta-British Columbia foothills forests
+346	5	NA	wna	wna:WNA - giant sequoia*3;wna:WNA - pinyon pine*2;wna:WNA - birch-aspen*1	Arizona Mountains forests
+347	5	NA	ena	ena:ENA - Southern Pine Flatwoods*2;ena:ENA - Pine-Hemlock Coniferous Forest*1;ena:ENA - Appalachian Hardwoods*1	Atlantic coastal pine barrens
+348	5	NA	wna	wna:WNA - giant sequoia*2;wna:WNA - temperate rainforest*1;wna:WNA - birch-aspen*1	Blue Mountains forests
+349	5	NA	wna	wna:WNA - temperate rainforest*5;~wna:WNA - temperate rainforest*1	British Columbia coastal conifer forests
+350	5	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1;^wna:WNA - canadian taiga*2	Central British Columbia Mountain forests
+351	5	NA	wna	wna:WNA - temperate rainforest*5;~wna:WNA - temperate rainforest*1	Central Pacific Northwest coastal forests
+352	5	NA	wna	wna:WNA - temperate rainforest*3;wna:WNA - giant sequoia*1;wna:WNA - california broadleaf forest*1	Central-Southern Cascades Forests
+353	5	NA	wna	wna:WNA - birch-aspen*2;wna:WNA - canadian taiga*2;wna:WNA - giant sequoia*1;^wna:WNA - canadian taiga*2;^wna:WNA - bristlecone pine*1	Colorado Rockies forests
+354	5	NA	wna	wna:WNA - giant sequoia*3;wna:WNA - temperate rainforest*1;wna:WNA - pinyon pine*1	Eastern Cascades forests
+355	5	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1;^wna:WNA - canadian taiga*2	Fraser Plateau and Basin conifer forests
+356	5	NA	wna	wna:WNA - pinyon pine*3;wna:WNA - bristlecone pine*1;wna:WNA - birch-aspen*1;^wna:WNA - bristlecone pine*2	Great Basin montane forests
+357	5	NA	wna	wna:WNA - temperate rainforest*3;wna:WNA - giant sequoia*1;wna:WNA - california broadleaf forest*1	Klamath-Siskiyou forests
+358	5	NA	wna	wna:WNA - temperate rainforest*3;^wna:WNA - temperate rainforest*1;^wna:WNA - canadian taiga*1	North Cascades conifer forests
+359	5	NA	wna	wna:WNA - temperate rainforest*3;wna:WNA - california broadleaf forest*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Northern California coastal forests
+360	5	NA	wna	wna:WNA - temperate rainforest*5;~wna:WNA - temperate rainforest*1	Northern Pacific Alaskan coastal forests
+361	5	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1;^wna:WNA - canadian taiga*2	Northern Rockies conifer forests
+362	5	NA	wna	wna:WNA - giant sequoia*2;wna:WNA - temperate rainforest*1;wna:WNA - birch-aspen*1	Okanogan dry forests
+363	5	NA	ena	ena:ENA - Southern Pine Flatwoods*4;ena:ENA - Southern Coastal Plain Hardwoods*1;~ena:ENA - Swamp*2	Piney Woods
+364	5	NA	wna	wna:WNA - temperate rainforest*5;~wna:WNA - temperate rainforest*1	Puget lowland forests
+365	5	NA	wna	wna:WNA - temperate rainforest*5;~wna:WNA - temperate rainforest*1	Queen Charlotte Islands conifer forests
+366	5	NA	wna	wna:WNA - giant sequoia*4;wna:WNA - california broadleaf forest*1;^wna:WNA - giant sequoia*2	Sierra Nevada forests
+367	5	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1;^wna:WNA - canadian taiga*2	South Central Rockies forests
+368	5	NA	wna	wna:WNA - birch-aspen*2;wna:WNA - pinyon pine*1;wna:WNA - canadian taiga*1;wna:WNA - giant sequoia*1;^wna:WNA - canadian taiga*2	Wasatch and Uinta montane forests
+369	6	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1	Alaska Peninsula montane taiga
+370	6	NA	wna	wna:WNA - canadian taiga*3;ena:ENA - Pine-Hemlock Coniferous Forest*2;wna:WNA - birch-aspen*2	Central Canadian Shield forests
+371	6	NA	wna	wna:WNA - canadian taiga*2;wna:WNA - birch-aspen*2;wna:WNA - temperate rainforest*1	Cook Inlet taiga
+372	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Copper Plateau taiga
+373	6	NA	wna	wna:WNA - canadian taiga*3;ena:ENA - Pine-Hemlock Coniferous Forest*2;wna:WNA - birch-aspen*2	Eastern Canadian forests
+374	6	NA	wna	wna:WNA - canadian taiga*3;ena:ENA - Pine-Hemlock Coniferous Forest*2;wna:WNA - birch-aspen*2	Eastern Canadian Shield taiga
+375	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Interior Alaska-Yukon lowland taiga
+376	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Mid-Canada Boreal Plains forests
+377	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Midwest Canadian Shield forests
+378	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Muskwa-Slave Lake taiga
+379	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Northern Canadian Shield taiga
+380	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Northern Cordillera forests
+381	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Northwest Territories taiga
+382	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Southern Hudson Bay taiga
+383	6	NA	wna	wna:WNA - canadian taiga*4;wna:WNA - birch-aspen*2	Watson Highlands taiga
+384	7	NA	ena	ena:ENA - Southern Coastal Plain Hardwoods*3;ena:ENA - River & Lowland Hardwoods*1;ena:ENA - Tropical Beach*1	Western Gulf coastal grasslands
+385	8	NA	wna	wna:WNA - california broadleaf forest*3;wna:WNA - Fremont's cottonwood*1;~wna:WNA - Fremont's cottonwood*2	California Central Valley grasslands
+386	8	NA	wna	wna:WNA - birch-aspen*4;wna:WNA - canadian taiga*1;ena:ENA - Canadian & New England Hardwoods*1	Canadian Aspen forests and parklands
+387	8	NA	ena	ena:ENA - Midwestern Hardwoods*4;~ena:ENA - River & Lowland Hardwoods*2	Central US forest-grasslands transition
+388	8	NA	ena	ena:ENA - Midwestern Hardwoods*4;~ena:ENA - River & Lowland Hardwoods*3	Central Tallgrass prairie
+389	8	NA	wna	wna:WNA - Fremont's cottonwood*2;ena:ENA - Midwestern Hardwoods*2;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Central-Southern US mixed grasslands
+390	8	NA	ena	ena:ENA - Midwestern Hardwoods*3;ena:ENA - Southern Pine Flatwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Cross-Timbers savanna-woodland
+391	8	NA	ena	ena:ENA - Southern Coastal Plain Hardwoods*2;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Midwestern Hardwoods*1	Edwards Plateau savanna
+392	8	NA	ena	ena:ENA - Midwestern Hardwoods*4;~ena:ENA - River & Lowland Hardwoods*3	Flint Hills tallgrass prairie
+393	8	NA	ena	ena:ENA - Southern Pine Flatwoods*3;ena:ENA - Southern Coastal Plain Hardwoods*2;~ena:ENA - Swamp*2	Mid-Atlantic US coastal savannas
+394	8	NA	wna	wna:WNA - birch-aspen*2;wna:WNA - Fremont's cottonwood*1;~wna:WNA - Fremont's cottonwood*2	Montana Valley and Foothill grasslands
+395	8	NA	wna	wna:WNA - Fremont's cottonwood*2;ena:ENA - Midwestern Hardwoods*2;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Nebraska Sand Hills mixed grasslands
+396	8	NA	wna	wna:WNA - Fremont's cottonwood*2;ena:ENA - Midwestern Hardwoods*2;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Northern Shortgrass prairie
+397	8	NA	ena	ena:ENA - Midwestern Hardwoods*2;wna:WNA - birch-aspen*2;~ena:ENA - River & Lowland Hardwoods*2	Northern Tallgrass prairie
+398	8	NA	wna	wna:WNA - birch-aspen*1;wna:WNA - giant sequoia*1;wna:WNA - temperate rainforest*1	Palouse prairie
+399	8	NA	ena	ena:ENA - Southern Pine Flatwoods*4;ena:ENA - Southern Coastal Plain Hardwoods*2;~ena:ENA - Swamp*2	Southeast US conifer savannas
+400	8	NA	fl	fl:FL - Broadleaf Forest*3;fl:FL - Pine & Conifer*1;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Southern Coastal Plain Hardwoods*1;~fl:FL - Wetland & Coastal*2;~ena:ENA - Swamp*1	Southeast US mixed woodlands and savannas
+401	8	NA	ena	ena:ENA - Midwestern Hardwoods*2;ena:ENA - Southern Coastal Plain Hardwoods*1;ena:ENA - Southern Pine Flatwoods*1;~ena:ENA - River & Lowland Hardwoods*2	Texas blackland prairies
+402	8	NA	wna	wna:WNA - Fremont's cottonwood*2;ena:ENA - Midwestern Hardwoods*2;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Western shortgrass prairie
+403	8	NA	wna	wna:WNA - temperate rainforest*3;wna:WNA - california broadleaf forest*2	Willamette Valley oak savanna
+404	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Ahklun and Kilbuck Upland Tundra
+405	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Alaska-St. Elias Range tundra
+406	11	NA	wna	wna:WNA - birch-aspen*1	Aleutian Islands tundra
+407	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Arctic coastal tundra
+408	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Arctic foothills tundra
+409	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Beringia lowland tundra
+410	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Beringia upland tundra
+411	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Brooks-British Range tundra
+412	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Canadian High Arctic tundra
+413	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Canadian Low Arctic tundra
+414	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Canadian Middle Arctic Tundra
+415	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Davis Highlands tundra
+416	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Interior Yukon-Alaska alpine tundra
+417	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Kalaallit Nunaat Arctic steppe
+418	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Kalaallit Nunaat High Arctic tundra
+419	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Ogilvie-MacKenzie alpine tundra
+420	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Pacific Coastal Mountain icefields and tundra
+421	11	NA	wna	wna:WNA - canadian taiga*1;wna:WNA - birch-aspen*1	Torngat Mountain tundra
+422	12	NA	wna	wna:WNA - california broadleaf forest*3;wna:WNA - mexican fan palms*2;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;~wna:WNA - Fremont's cottonwood*2	California coastal sage and chaparral
+423	12	NA	wna	wna:WNA - california broadleaf forest*4;wna:WNA - giant sequoia*1;~wna:WNA - Fremont's cottonwood*2	California interior chaparral and woodlands
+424	12	NA	wna	wna:WNA - california broadleaf forest*3;wna:WNA - giant sequoia*1;wna:WNA - pinyon pine*1	California montane chaparral and woodlands
+425	12	NA	wna	wna:WNA - california broadleaf forest*3;wna:WNA - temperate rainforest*1;wna:WNA - giant sequoia*1	Santa Lucia Montane Chaparral & Woodlands
+426	13	NA	wna	wna:WNA - baja california*5;wna:WNA - mexican fan palms*1	Baja California desert
+427	13	NA	wna	wna:WNA - california broadleaf forest*2;wna:WNA - pinyon pine*1;wna:WNA - joshua trees*1;aus:AUS - Riverside trees*1;afr:AFR - Canary Island Date Palms*1	Central Mexican matorral
+428	13	NA	wna	wna:WNA - joshua trees*2;wna:WNA - desert!Carnegiea*1;wna:WNA - pinyon pine*1;~wna:WNA - Fremont's cottonwood*2	Chihuahuan desert
+429	13	NA	wna	wna:WNA - pinyon pine*4;wna:WNA - Fremont's cottonwood*1;~wna:WNA - Fremont's cottonwood*2	Colorado Plateau shrublands
+430	13	NA	wna	wna:WNA - pinyon pine*2;wna:WNA - Fremont's cottonwood*1;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Great Basin shrub steppe
+431	13	NA	wna	wna:WNA - baja california*5;wna:WNA - mexican fan palms*1	Gulf of California xeric scrub
+432	13	NA	wna	wna:WNA - joshua trees*2;wna:WNA - pinyon pine*2;wna:WNA - desert!Carnegiea*1	Meseta Central matorral
+433	13	NA	wna	wna:WNA - joshua trees*3;wna:WNA - mexican fan palms*1;~wna:WNA - Fremont's cottonwood*2	Mojave desert
+434	13	NA	wna	wna:WNA - pinyon pine*2;wna:WNA - Fremont's cottonwood*1;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Snake-Columbia shrub steppe
+435	13	NA	wna	wna:WNA - desert*5;wna:WNA - mexican fan palms*1;~wna:WNA - Fremont's cottonwood*2	Sonoran desert
+436	13	NA	wna	wna:WNA - desert!Carnegiea*2;ena:ENA - Southern Coastal Plain Hardwoods*1;wna:WNA - joshua trees*1;~wna:WNA - Fremont's cottonwood*2	Tamaulipan matorral
+437	13	NA	wna	wna:WNA - desert!Carnegiea*2;ena:ENA - Southern Coastal Plain Hardwoods*1;wna:WNA - joshua trees*1;~wna:WNA - Fremont's cottonwood*2	Tamaulipan mezquital
+438	13	NA	wna	wna:WNA - pinyon pine*2;wna:WNA - Fremont's cottonwood*1;wna:WNA - birch-aspen*1;~wna:WNA - Fremont's cottonwood*2	Wyoming Basin shrub steppe
+439	1	NT	sam	sam:SAM - Mata Atlantica*5;sam:SAM - Palm Trees*1;^sam:SAM - Parana Araucaria Forest*2	Alto Paraná Atlantic forests
+440	1	NT	sam	sam:SAM - Parana Araucaria Forest*5;sam:SAM - Mata Atlantica*2	Araucaria moist forests
+441	1	NT	sam	sam:SAM - Restinga*5;sam:SAM - Mata Atlantica*2;aus:AUS - Coconut Palms*1	Atlantic Coast restingas
+442	1	NT	sam	sam:SAM - Mata Atlantica*5;sam:SAM - Palm Trees*1;^sam:SAM - Parana Araucaria Forest*2	Bahia coastal forests
+443	1	NT	sam	sam:SAM - Mata Atlantica*5;sam:SAM - Palm Trees*1;^sam:SAM - Parana Araucaria Forest*2	Bahia interior forests
+444	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*3;sam:SAM - Amazonian Dry-ground Forest*1;^sam:SAM - Northern Andean Mountain Forest*2	Bolivian Yungas
+445	1	NT	sam	sam:SAM - Mata Atlantica*5;sam:SAM - Palm Trees*1;^sam:SAM - Parana Araucaria Forest*2	Caatinga Enclaves moist forests
+446	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Caqueta moist forests
+447	1	NT	sam	sam:SAM - Colombia-Panamanian Lowland Rainforest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Catatumbo moist forests
+448	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Colombia-Panamanian Lowland Rainforest*1;sam:SAM - Quindio Wax Palms*1;^sam:SAM - Northern Andean Mountain Forest*2	Cauca Valley montane forests
+449	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Tropical Beach*1	Cayos Miskitos-San Andrés and Providencia moist forests
+450	1	NT	ena	ena:ENA - Central American Rainforest*5	Central American Atlantic moist forests
+451	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Central American montane forests
+452	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Chiapas montane forests
+453	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Chimalapas montane forests
+454	1	NT	sam	sam:SAM - Colombia-Panamanian Lowland Rainforest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Chocó-Darién moist forests
+455	1	NT	ena	ena:ENA - Central American Rainforest*5	Cocos Island moist forests
+456	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Palm Trees*1	Cordillera La Costa montane forests
+457	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Colombia-Panamanian Lowland Rainforest*1;^sam:SAM - Northern Andean Mountain Forest*2	Cordillera Oriental montane forests
+458	1	NT	ena	ena:ENA - Central American Rainforest*5	Costa Rican seasonal moist forests
+459	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Cuban moist forests
+460	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Colombia-Panamanian Lowland Rainforest*1;sam:SAM - Quindio Wax Palms*1;^sam:SAM - Northern Andean Mountain Forest*2	Eastern Cordillera Real montane forests
+461	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Eastern Panamanian montane forests
+462	1	NT	sam	sam:SAM - Restinga*2;aus:AUS - Coconut Palms*1	Fernando de Noronha-Atol das Rocas moist forests
+463	1	NT	sam	sam:SAM - Amazonian River & Swamp*3;sam:SAM - Guyanan Rainforest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Guianan freshwater swamp forests
+464	1	NT	sam	sam:SAM - Guyanan Rainforest*3;sam:SAM - Northern Andean Mountain Forest*1	Guianan Highlands moist forests
+465	1	NT	sam	sam:SAM - Guyanan Rainforest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Guianan lowland moist forests
+466	1	NT	sam	sam:SAM - Guyanan Rainforest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Guianan piedmont moist forests
+467	1	NT	sam	sam:SAM - Amazonian River & Swamp*4;sam:SAM - Amazonian Dry-ground Forest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Gurupa várzea
+468	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Hispaniolan moist forests
+469	1	NT	sam	sam:SAM - Amazonian River & Swamp*4;sam:SAM - Amazonian Dry-ground Forest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Iquitos várzea
+470	1	NT	ena	ena:ENA - Central American Rainforest*5	Isthmian-Atlantic moist forests
+471	1	NT	ena	ena:ENA - Central American Rainforest*5	Isthmian-Pacific moist forests
+472	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Jamaican moist forests
+473	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Japurá-Solimões-Negro moist forests
+474	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Juruá-Purus moist forests
+475	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Leeward Islands moist forests
+476	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Madeira-Tapajós moist forests
+477	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Quindio Wax Palms*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;^sam:SAM - Northern Andean Mountain Forest*2	Magdalena Valley montane forests
+478	1	NT	sam	sam:SAM - Colombia-Panamanian Lowland Rainforest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Magdalena-Urabá moist forests
+479	1	NT	sam	sam:SAM - Caatinga!Attalea*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Marañón dry forests
+480	1	NT	sam	sam:SAM - Amazonian River & Swamp*4;sam:SAM - Amazonian Dry-ground Forest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Marajó várzea
+481	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*2;sam:SAM - Cerrado*2	Mato Grosso tropical dry forests
+482	1	NT	sam	sam:SAM - Amazonian River & Swamp*4;sam:SAM - Amazonian Dry-ground Forest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Monte Alegre várzea
+483	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Napo moist forests
+484	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Negro-Branco moist forests
+485	1	NT	sam	sam:SAM - Restinga*5;sam:SAM - Mata Atlantica*2;aus:AUS - Coconut Palms*1	Northeast Brazil restingas
+486	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Colombia-Panamanian Lowland Rainforest*1;sam:SAM - Quindio Wax Palms*1;^sam:SAM - Northern Andean Mountain Forest*2	Northwest Andean montane forests
+487	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Oaxacan montane forests
+488	1	NT	sam	sam:SAM - Amazonian River & Swamp*3;sam:SAM - Guyanan Rainforest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Orinoco Delta swamp forests
+489	1	NT	ena	ena:ENA - Central American Rainforest*2;~ena:ENA - Caribbean Mangroves*3	Pantanos de Centla
+490	1	NT	sam	sam:SAM - Guyanan Rainforest*3;sam:SAM - Northern Andean Mountain Forest*1	Pantepui forests & shrublands
+491	1	NT	sam	sam:SAM - Mata Atlantica*5;sam:SAM - Palm Trees*1;^sam:SAM - Parana Araucaria Forest*2	Pernambuco coastal forests
+492	1	NT	sam	sam:SAM - Mata Atlantica*5;sam:SAM - Palm Trees*1;^sam:SAM - Parana Araucaria Forest*2	Pernambuco interior forests
+493	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*3;sam:SAM - Amazonian Dry-ground Forest*1;^sam:SAM - Northern Andean Mountain Forest*2	Peruvian Yungas
+494	1	NT	ena	ena:ENA - Central American Rainforest*5	Petén-Veracruz moist forests
+495	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Puerto Rican moist forests
+496	1	NT	sam	sam:SAM - Amazonian River & Swamp*4;sam:SAM - Amazonian Dry-ground Forest*2;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Purus várzea
+497	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Purus-Madeira moist forests
+498	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Rio Negro campinarana
+499	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Colombia-Panamanian Lowland Rainforest*1;^sam:SAM - Northern Andean Mountain Forest*2	Santa Marta montane forests
+500	1	NT	sam	sam:SAM - Mata Atlantica*4;sam:SAM - Parana Araucaria Forest*1;sam:SAM - Palm Trees*1;~sam:SAM - Restinga*2;^sam:SAM - Parana Araucaria Forest*2	Serra do Mar coastal forests
+501	1	NT	ena	ena:ENA - Central American Rainforest*5	Sierra de los Tuxtlas
+502	1	NT	ena	ena:ENA - Central American Rainforest*5	Sierra Madre de Chiapas moist forests
+503	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Solimões-Japurá moist forests
+504	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*2;sam:SAM - Gran Chaco*1;^sam:SAM - Northern Andean Mountain Forest*2	Southern Andean Yungas
+505	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Southwest Amazon moist forests
+506	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Talamancan montane forests
+507	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Tapajós-Xingu moist forests
+508	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Tocantins/Pindare moist forests
+509	1	NT	sam	sam:SAM - Restinga*2;aus:AUS - Coconut Palms*1	Trindade-Martin Vaz Islands tropical forests
+510	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Trinidad and Tobago moist forest
+511	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Uatumã-Trombetas moist forests
+512	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Ucayali moist forests
+513	1	NT	sam	sam:SAM - Northern Andean Mountain Forest*4;sam:SAM - Colombia-Panamanian Lowland Rainforest*1;^sam:SAM - Northern Andean Mountain Forest*2	Venezuelan Andes montane forests
+514	1	NT	ena	ena:ENA - Central American Rainforest*5	Veracruz moist forests
+515	1	NT	ena	ena:ENA - Central American Rainforest*2;wna:WNA - california broadleaf forest*1;wna:WNA - giant sequoia*1;sam:SAM - Northern Andean Mountain Forest*1;^wna:WNA - giant sequoia*2	Veracruz montane forests
+516	1	NT	sam	sam:SAM - Colombia-Panamanian Lowland Rainforest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Western Ecuador moist forests
+517	1	NT	ena	ena:ENA - Central American Rainforest*3;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Windward Islands moist forests
+518	1	NT	sam	sam:SAM - Amazonian Dry-ground Forest*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*3	Xingu-Tocantins-Araguaia moist forests
+519	1	NT	ena	ena:ENA - Central American Rainforest*5	Yucatán moist forests
+520	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Apure-Villavicencio dry forests
+521	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1	Bajío dry forests
+522	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1;wna:WNA - baja california*1	Balsas dry forests
+523	2	NT	sam	sam:SAM - Gran Chaco*2;sam:SAM - Pampas*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Bolivian montane dry forests
+524	2	NT	sam	sam:SAM - Caatinga*2;sam:SAM - Mata Atlantica*2;sam:SAM - Cerrado*1	Brazilian Atlantic dry forests
+525	2	NT	sam	sam:SAM - Caatinga*5	Caatinga
+526	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Cauca Valley dry forests
+527	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1	Central American dry forests
+528	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1	Chiapas Depression dry forests
+529	2	NT	sam	sam:SAM - Gran Chaco*2;sam:SAM - Cerrado*2;sam:SAM - Humid Chaco*1	Chiquitano dry forests
+530	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*5;ena:ENA - Tropical Beach*1	Cuban dry forests
+531	2	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*2;sam:SAM - Gran Chaco*1;ena:ENA - Caribbean Tropical Dry Forest*1	Ecuadorian dry forests
+532	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*5;ena:ENA - Tropical Beach*1	Hispaniolan dry forests
+533	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1;wna:WNA - baja california*1	Islas Revillagigedo dry forests
+534	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1;wna:WNA - baja california*1	Jalisco dry forests
+535	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*5;ena:ENA - Tropical Beach*1	Jamaican dry forests
+536	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Lara-Falcón dry forests
+537	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*5;ena:ENA - Tropical Beach*1	Lesser Antillean dry forests
+538	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Magdalena Valley dry forests
+539	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Maracaibo dry forests
+540	2	NT	sam	sam:SAM - Palm Trees*3;sam:SAM - Cerrado*1;sam:SAM - Amazonian Dry-ground Forest*1	Maranhão Babaçu forests
+541	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1	Panamanian dry forests
+542	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Patía valley dry forests
+543	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*5;ena:ENA - Tropical Beach*1	Puerto Rican dry forests
+544	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1;wna:WNA - baja california*1	Sierra de la Laguna dry forests
+545	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1;wna:WNA - baja california*1	Sinaloan dry forests
+546	2	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*2;sam:SAM - Colombia-Panamanian Lowland Rainforest*2;sam:SAM - Southern Caribbean Thorn Scrub*1	Sinú Valley dry forests
+547	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1;wna:WNA - baja california*1	Southern Pacific dry forests
+548	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*5;ena:ENA - Tropical Beach*1	Trinidad and Tobago dry forest
+549	2	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*2;sam:SAM - Gran Chaco*1;ena:ENA - Caribbean Tropical Dry Forest*1	Tumbes-Piura dry forests
+550	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1	Veracruz dry forests
+551	2	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*4;ena:ENA - Central American Rainforest*1	Yucatán dry forests
+552	3	NT	ena	ena:ENA - Florida Pine Rockland*3;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Bahamian pineyards
+553	3	NT	wna	wna:WNA - california broadleaf forest*2;wna:WNA - giant sequoia*2;ena:ENA - Central American Rainforest*1	Central American pine-oak forests
+554	3	NT	ena	ena:ENA - Florida Pine Rockland*3;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Cuban pine forests
+555	3	NT	ena	ena:ENA - Florida Pine Rockland*3;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Caribbean Tropical Dry Forest*1;ena:ENA - Tropical Beach*1	Hispaniolan pine forests
+556	3	NT	wna	wna:WNA - giant sequoia*2;wna:WNA - california broadleaf forest*2	Sierra de la Laguna pine-oak forests
+557	3	NT	wna	wna:WNA - california broadleaf forest*2;wna:WNA - giant sequoia*2;ena:ENA - Central American Rainforest*1	Sierra Madre de Oaxaca pine-oak forests
+558	3	NT	wna	wna:WNA - california broadleaf forest*2;wna:WNA - giant sequoia*2;ena:ENA - Central American Rainforest*1	Sierra Madre del Sur pine-oak forests
+559	3	NT	wna	wna:WNA - california broadleaf forest*2;wna:WNA - giant sequoia*2;wna:WNA - pinyon pine*1;aus:AUS - Riverside trees*1	Trans-Mexican Volcanic Belt pine-oak forests
+560	4	NT	sam	sam:SAM - Valdivian Laurel-leaf Forest*2	Juan Fernández Islands temperate forests
+561	4	NT	sam	sam:SAM - Tierra del Fuego*4;sam:SAM - Tierra del Fuego Krummholz*1;^sam:SAM - Tierra del Fuego Krummholz*2	Magellanic subpolar forests
+562	4	NT	sam	sam:SAM - Valdivian Laurel-leaf Forest*2	San Félix-San Ambrosio Islands temperate forests
+563	4	NT	sam	sam:SAM - Valdivian Laurel-leaf Forest*5;sam:SAM - Chilean Araucaria-Nothofagus Forest*1;sam:SAM - Chilean Cypresses*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;^sam:SAM - Chilean Araucaria-Nothofagus Forest*2	Valdivian temperate forests
+564	7	NT	ena	ena:ENA - Florida Pine Rockland!Serenoa*2;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Central American Rainforest*1	Belizian pine savannas
+565	7	NT	sam	sam:SAM - Cerrado*2;sam:SAM - Palm Trees*2;~sam:SAM - Amazonian River & Swamp*2	Beni savanna
+566	7	NT	sam	sam:SAM - Cerrado*3;sam:SAM - Mata Atlantica*1	Campos Rupestres montane savanna
+567	7	NT	sam	sam:SAM - Cerrado*5;sam:SAM - Palm Trees*1;~sam:SAM - Palm Trees*2	Cerrado
+568	7	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*1	Clipperton Island shrub and grasslands
+569	7	NT	sam	sam:SAM - Gran Chaco*5	Dry Chaco
+570	7	NT	sam	sam:SAM - Cerrado*2;sam:SAM - Palm Trees*1;sam:SAM - Guyanan Rainforest*1	Guianan savanna
+571	7	NT	sam	sam:SAM - Humid Chaco*5;sam:SAM - Palm Trees*1	Humid Chaco
+572	7	NT	sam	sam:SAM - Colombia-Venezuelan Llanos*5;sam:SAM - Palm Trees*1;~sam:SAM - Amazonian River & Swamp*2	Llanos
+573	7	NT	ena	ena:ENA - Florida Pine Rockland!Serenoa*2;ena:ENA - Southern Pine Flatwoods*1;ena:ENA - Central American Rainforest*1	Miskito pine forests
+574	7	NT	sam	sam:SAM - Pampas*4;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Uruguayan savanna
+575	8	NT	sam	sam:SAM - Gran Chaco*2;sam:SAM - Pampas*2;sam:SAM - Humid Chaco*1	Espinal
+576	8	NT	sam	sam:SAM - Pampas*5;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Humid Pampas
+577	8	NT	sam	sam:SAM - Gran Chaco!Schinopsis*1;eur:EUR - Swamp and riparian forest*1;sam:SAM - Pampas*1	Low Monte
+578	8	NT	eur	sam:SAM - Tierra del Fuego Krummholz*1;eur:EUR - Swamp and riparian forest*2	Patagonian steppe
+579	9	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*2;ena:ENA - Tropical Beach*1;~ena:ENA - Caribbean Mangroves*3	Cuban wetlands
+580	9	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*2;ena:ENA - Tropical Beach*1;~ena:ENA - Caribbean Mangroves*3	Enriquillo wetlands
+581	9	NT	fl	fl:FL - Broadleaf Forest*3;fl:FL - Wetland & Coastal*2;fl:FL - Pine & Conifer*1;~fl:FL - Wetland & Coastal*3;~ena:ENA - Caribbean Mangroves*1	Everglades flooded grasslands
+582	9	NT	sam	sam:SAM - Colombia-Panamanian Lowland Rainforest*1;sam:SAM - Palm Trees*1;sam:SAM - Southern Caribbean Thorn Scrub*1;~sam:SAM - Mangroves*3	Guayaquil flooded grasslands
+583	9	NT	sam	sam:SAM - Amazonian River & Swamp*2;sam:SAM - Palm Trees*2;sam:SAM - Colombia-Venezuelan Llanos*1	Orinoco wetlands
+584	9	NT	sam	sam:SAM - Pantanal*5;sam:SAM - Palm Trees*1;sam:SAM - Cerrado*1	Pantanal
+585	9	NT	sam	sam:SAM - Pantanal*2;sam:SAM - Humid Chaco*2;sam:SAM - Pampas*1	Paraná flooded savanna
+586	9	NT	sam	sam:SAM - Humid Chaco*2;sam:SAM - Pampas*2;sam:SAM - Palm Trees*1	Southern Cone Mesopotamian savanna
+587	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Central Andean dry puna
+588	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Central Andean puna
+589	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Central Andean wet puna
+590	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*2;sam:SAM - Quindio Wax Palms*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Cordillera Central páramo
+591	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*2;sam:SAM - Quindio Wax Palms*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Cordillera de Merida páramo
+592	10	NT	sam	sam:SAM - Gran Chaco!Schinopsis*1;sam:SAM - Chilean Matorral*1	High Monte
+593	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*2;sam:SAM - Quindio Wax Palms*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Northern Andean páramo
+594	10	NT	sam	sam:SAM - Northern Andean Mountain Forest*2;sam:SAM - Quindio Wax Palms*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1	Santa Marta páramo
+595	10	NT	sam	sam:SAM - Chilean Araucaria-Nothofagus Forest*1;sam:SAM - Tierra del Fuego Krummholz*1	Southern Andean steppe
+596	12	NT	sam	sam:SAM - Chilean Matorral*4;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;sam:SAM - Pampas*1	Chilean Matorral
+597	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*4;sam:SAM - Caatinga!Attalea!Acrocomia*1	Araya and Paria xeric scrub
+598	13	NT	sam	sam:SAM - Chilean Matorral*1;afr:AFR - Canary Island Date Palms*1	Atacama desert
+599	13	NT	ena	sam:SAM - Southern Caribbean Thorn Scrub*2;ena:ENA - Caribbean Tropical Dry Forest*2;ena:ENA - Tropical Beach*1	Caribbean shrublands
+600	13	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*3;ena:ENA - Tropical Beach*1	Cuban cactus scrub
+601	13	NT	sam	sam:SAM - Caatinga!Attalea!Acrocomia*1;sam:SAM - Southern Caribbean Thorn Scrub*1;ena:ENA - Caribbean Tropical Dry Forest*1	Galápagos Islands xeric scrub
+602	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*4;sam:SAM - Caatinga!Attalea!Acrocomia*1	Guajira-Barranquilla xeric scrub
+603	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*4;sam:SAM - Caatinga!Attalea!Acrocomia*1	La Costa xeric shrublands
+604	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*1	Malpelo Island xeric scrub
+605	13	NT	ena	ena:ENA - Caribbean Tropical Dry Forest*2;wna:WNA - baja california*1	Motagua Valley thornscrub
+606	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*4;sam:SAM - Caatinga!Attalea!Acrocomia*1	Paraguaná xeric scrub
+607	13	NT	wna	wna:WNA - baja california*4;wna:WNA - mexican fan palms*1	San Lucan xeric scrub
+608	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*1;sam:SAM - Chilean Matorral*1;sam:SAM - Pampas*1;afr:AFR - Canary Island Date Palms*1	Sechura desert
+609	13	NT	sam	sam:SAM - Southern Caribbean Thorn Scrub*1	St. Peter and St. Paul Rocks
+610	13	NT	wna	wna:WNA - baja california!Foqueria*2;wna:WNA - joshua trees*1;ena:ENA - Caribbean Tropical Dry Forest*1	Tehuacán Valley matorral
+611	14	NT	sam	sam:SAM - Restinga*2;sam:SAM - Palm Trees*1;~sam:SAM - Mangroves*4	Amazon-Orinoco-Southern Caribbean mangroves
+612	14	NT	ena	ena:ENA - Tropical Beach*2;ena:ENA - Caribbean Tropical Dry Forest*2;~ena:ENA - Caribbean Mangroves*4	Bahamian-Antillean mangroves
+613	14	NT	ena	ena:ENA - Tropical Beach*2;ena:ENA - Caribbean Tropical Dry Forest*2;~ena:ENA - Caribbean Mangroves*4	Mesoamerican Gulf-Caribbean mangroves
+614	14	NT	ena	ena:ENA - Tropical Beach*2;ena:ENA - Caribbean Tropical Dry Forest*2;~ena:ENA - Caribbean Mangroves*4	Northern Mesoamerican Pacific mangroves
+615	14	NT	sam	sam:SAM - Restinga*2;sam:SAM - Palm Trees*1;~sam:SAM - Mangroves*4	South American Pacific mangroves
+616	14	NT	sam	sam:SAM - Restinga*2;sam:SAM - Palm Trees*1;~sam:SAM - Mangroves*4	Southern Atlantic Brazilian mangroves
+617	14	NT	ena	ena:ENA - Tropical Beach*2;ena:ENA - Caribbean Tropical Dry Forest*2;~ena:ENA - Caribbean Mangroves*4	Southern Mesoamerican Pacific mangroves
+618	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Carolines tropical moist forests
+619	1	OC	aus	aus:AUS - Coconut Palms*3;aus:AUS - Pacific Island Beach Forest*2	Central Polynesian tropical moist forests
+620	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Cook Islands tropical moist forests
+621	1	OC	aus	aus:AUS - Coconut Palms*3;aus:AUS - Pacific Island Beach Forest*2	Eastern Micronesia tropical moist forests
+622	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Fiji tropical moist forests
+623	1	OC	aus	aus:AUS - Hawaiian Rainforest*4;aus:AUS - Coconut Palms*1;aus:AUS - Pacific Island Beach Forest*1	Hawai'i tropical moist forests
+624	1	OC	aus	aus:AUS - New Zealand North Island*2;aus:AUS - Pacific Island Beach Forest*1	Kermadec Islands subtropical moist forests
+625	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Marquesas tropical moist forests
+626	1	OC	asn	asn:ASN - Southern Japanese Forest*2;aus:AUS - Pacific Island Beach Forest*1	Ogasawara subtropical moist forests
+627	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Palau tropical moist forests
+628	1	OC	aus	aus:AUS - Pacific Island Beach Forest*1;aus:AUS - Coconut Palms*1	Rapa Nui and Sala y Gómez subtropical forests
+629	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Samoan tropical moist forests
+630	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Society Islands tropical moist forests
+631	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Tongan tropical moist forests
+632	1	OC	aus	aus:AUS - Coconut Palms*3;aus:AUS - Pacific Island Beach Forest*2	Tuamotu tropical moist forests
+633	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Tubuai tropical moist forests
+634	1	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Western Polynesian tropical moist forests
+635	2	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Fiji tropical dry forests
+636	2	OC	aus	aus:AUS - Hawaiian Rainforest*2;aus:AUS - Coconut Palms*2;aus:AUS - Pacific Island Beach Forest*2	Hawai'i tropical dry forests
+637	2	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Marianas tropical dry forests
+638	2	OC	aus	aus:AUS - Fiji*3;aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Coconut Palms*2	Yap tropical dry forests
+639	7	OC	aus	aus:AUS - Hawaiian Rainforest*2	Hawai'i tropical high shrublands
+640	7	OC	aus	aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Hawaiian Rainforest*1;aus:AUS - Coconut Palms*1	Hawai'i tropical low shrublands
+641	7	OC	aus	aus:AUS - Pacific Island Beach Forest*2;aus:AUS - Hawaiian Rainforest*1;aus:AUS - Coconut Palms*1	Northwest Hawai'i scrub
+642	1	PA	ind	ind:IND - Jiangnan Subtropical Laurel Forest*3;ind:IND - South China Montane Laurel Forest*2;ind:IND - Yunnanese Lowland Subtropical Forest*1	Guizhou Plateau broadleaf and mixed forests
+643	1	PA	ind	ind:IND - Yunnanese Lowland Subtropical Forest*4;ind:IND - South China Montane Laurel Forest*2;^ind:IND - Southeast Asian Subtropical Mountain Forest*2;^ind:IND - Himalayan Broadleaf and Pine Forest*1	Yunnan Plateau subtropical evergreen forests
+644	4	PA	eur	eur:EUR - Beech-yew Alpine foothills*3;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Oak forest!Quercus_suber!Quercus_coccifera*1;^eur:EUR - Balkan coniferous forest*2	Appenine deciduous montane forests
+645	4	PA	eur	eur:EUR - Western Mediterranean*3;asn:ASN - Japanese Temperate Rainforest*1	Azores temperate mixed forests
+646	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Open woodlands!Quercus_coccifera*2;eur:EUR - Eastern Mediterranean*1;~eur:EUR - Swamp and riparian forest*1;^eur:EUR - Balkan coniferous forest*2	Balkan mixed forests
+647	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Bialowieza forest*2;eur:EUR - Birch and aspen*2;eur:EUR - Scandinavian taiga (mature)*1;~eur:EUR - Swamp and riparian forest*2	Baltic mixed forests
+648	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Oak forest!Quercus_suber!Quercus_coccifera*2;eur:EUR - Birch and aspen*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;~eur:EUR - Swamp and riparian forest*2;^eur:EUR - Beech-yew Alpine foothills*2	Cantabrian mixed forests
+649	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Dark oak or walnut*1;eur:EUR - Beech-yew Alpine foothills*1;~eur:EUR - Swamp and riparian forest*2	Caspian Hyrcanian mixed forests
+650	4	PA	eur	eur:EUR - Misc. Deciduous forest*2;eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Balkan coniferous forest*1;^eur:EUR - Alpine forest (mature)*1;^eur:EUR - Balkan coniferous forest*1	Caucasus mixed forests
+651	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Open woodlands!Quercus_coccifera*2;eur:EUR - Birch and aspen*1;~eur:EUR - Swamp and riparian forest*2	Celtic broadleaf forests
+652	4	PA	eur	eur:EUR - Middle East montane conifer forest*2;eur:EUR - Open woodlands!Quercus_coccifera*2;asn:ASN - Zagros Mountain forest-steppe*1;~eur:EUR - Swamp and riparian forest*2	Central Anatolian steppe and woodlands
+653	4	PA	asn	asn:ASN - Yellow River Plain*3;asn:ASN - Gobi Desert Shrubs!Quercus*1;^asn:ASN - Central Chinese Mountain Forest*1	Central China Loess Plateau mixed forests
+654	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Bialowieza forest*2;eur:EUR - Birch and aspen*2;eur:EUR - Scandinavian taiga (mature)*1;eur:EUR - Open woodlands!Quercus_coccifera*1;~eur:EUR - Swamp and riparian forest*2	Central European mixed forests
+655	4	PA	asn	asn:ASN - Korean Deciduous Forest*5;asn:ASN - Cherry Grove*1;^asn:ASN - Manchu-Ussur-Korean Mixed Forest*1	Central Korean deciduous forests
+656	4	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*4;^asn:ASN - Far Eastern Taiga*2	Changbai Mountains mixed forests
+657	4	PA	asn	asn:ASN - Yangtze River Plain*4;ind:IND - Jiangnan Subtropical Laurel Forest*2;asn:ASN- Weeping Willows*1;~asn:ASN- Weeping Willows*2;~ind:IND - Chinese Water Cypress*1	Changjiang Plain evergreen forests
+658	4	PA	eur	eur:EUR - Eastern Mediterranean*2;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Middle East montane conifer forest*1;eur:EUR - Open woodlands!Quercus_coccifera*1	Crimean Submediterranean forest complex
+659	4	PA	asn	asn:ASN - Central Chinese Mountain Forest*2;asn:ASN - Yangtze River Plain*2;ind:IND - Jiangnan Subtropical Laurel Forest*1	Daba Mountains evergreen forests
+660	4	PA	eur	eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Balkan coniferous forest*2;eur:EUR - Misc. Deciduous forest*2;^eur:EUR - Balkan coniferous forest*2	Dinaric Mountains mixed forests
+661	4	PA	eur	eur:EUR - Open woodlands!Quercus_coccifera*3;eur:EUR - Birch and aspen*2;eur:EUR - Misc. Deciduous forest*2;~eur:EUR - Swamp and riparian forest*2	East European forest steppe
+662	4	PA	eur	eur:EUR - Open woodlands!Quercus_coccifera*2;asn:ASN - Zagros Mountain forest-steppe*2;eur:EUR - Middle East montane conifer forest*1	Eastern Anatolian deciduous forests
+663	4	PA	eur	eur:EUR - Misc. Deciduous forest*4;eur:EUR - Open woodlands!Quercus_coccifera*2;eur:EUR - Birch and aspen*1;eur:EUR - Dark oak or walnut*1;~eur:EUR - Swamp and riparian forest*2	English Lowlands beech forests
+664	4	PA	eur	eur:EUR - Misc. Deciduous forest*4;eur:EUR - Open woodlands!Quercus_coccifera*2;eur:EUR - Bialowieza forest*1;eur:EUR - Birch and aspen*1;~eur:EUR - Swamp and riparian forest*2	European Atlantic mixed forests
+665	4	PA	eur	eur:EUR - Misc. Deciduous forest*3;eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Dark oak or walnut*1;^eur:EUR - Balkan coniferous forest*2	Euxine-Colchic broadleaf forests
+666	4	PA	asn	asn:ASN - Hokkaido Mixed Forest*5;asn:ASN - Birch Forest*1;^asn:ASN - Far Eastern Taiga*1	Hokkaido deciduous forests
+667	4	PA	asn	asn:ASN - Yellow River Plain*5;asn:ASN- Weeping Willows*1;~asn:ASN- Weeping Willows*2;^asn:ASN - Central Chinese Mountain Forest*1	Huang He Plain mixed forests
+668	4	PA	eur	eur:EUR - Western Mediterranean*3;afr:AFR - Canary Island Date Palms*1	Madeira evergreen forests
+669	4	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*4;asn:ASN - Birch Forest*1;^asn:ASN - Far Eastern Taiga*2	Manchurian mixed forests
+670	4	PA	asn	asn:ASN - Southern Japanese Forest*3;asn:ASN - Japanese Temperate Rainforest*2	Nihonkai evergreen forests
+671	4	PA	asn	asn:ASN - Honshu Broadleaf Forest*4;asn:ASN - Japanese Temperate Rainforest*1;^asn:ASN - Hokkaido Mixed Forest*1	Nihonkai montane deciduous forests
+672	4	PA	eur	eur:EUR - Birch and aspen*3;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Bialowieza forest*1;~eur:EUR - Swamp and riparian forest*2	North Atlantic moist mixed forests
+673	4	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*2;asn:ASN - Yellow River Plain*2;asn:ASN - Birch Forest*1	Northeast China Plain deciduous forests
+674	4	PA	eur	eur:EUR - Open woodlands!Quercus_coccifera*3;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Dark oak or walnut*1;~eur:EUR - Swamp and riparian forest*3	Pannonian mixed forests
+675	4	PA	eur	eur:EUR - Misc. Deciduous forest*2;eur:EUR - Open woodlands!Quercus_coccifera*2;eur:EUR - Dark oak or walnut*1;eur:EUR - Swamp and riparian forest*1;~eur:EUR - Swamp and riparian forest*3	Po Basin mixed forests
+676	4	PA	eur	eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Alpine forest (mature)*2;^eur:EUR - Alpine forest (short)*2;^eur:EUR - Alpine forest (mature)*1	Pyrenees conifer and mixed forests
+677	4	PA	asn	asn:ASN - Central Chinese Mountain Forest*3;asn:ASN - Yellow River Plain*2;^asn:ASN - Central Chinese Mountain Forest*2	Qin Ling Mountains deciduous forests
+678	4	PA	eur	eur:EUR - Balkan coniferous forest*3;eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Misc. Deciduous forest*1;^eur:EUR - Balkan coniferous forest*2	Rodope montane mixed forests
+679	4	PA	eur	eur:EUR - Bialowieza forest*3;eur:EUR - Birch and aspen*3;eur:EUR - Scandinavian taiga (mature)*2;eur:EUR - Misc. Deciduous forest*1;~eur:EUR - Swamp and riparian forest*2	Sarmatic mixed forests
+680	4	PA	asn	asn:ASN - Yangtze River Plain*3;ind:IND - Jiangnan Subtropical Laurel Forest*2;^asn:ASN - Central Chinese Mountain Forest*2	Sichuan Basin evergreen broadleaf forests
+681	4	PA	asn	asn:ASN - Southern Japanese Forest*3;asn:ASN - Korean Deciduous Forest*2	Southern Korea evergreen forests
+682	4	PA	asn	asn:ASN - Southern Japanese Forest*4;asn:ASN - Japanese Temperate Rainforest*2;asn:ASN - Cherry Grove*1;^asn:ASN - Honshu Broadleaf Forest*2	Taiheiyo evergreen forests
+683	4	PA	asn	asn:ASN - Honshu Broadleaf Forest*4;asn:ASN - Japanese Temperate Rainforest*1;^asn:ASN - Japanese Temperate Rainforest*2	Taiheiyo montane deciduous forests
+684	4	PA	asn	asn:ASN - Central-Asian Riverside Tugay Forest*4;asn:ASN - Gobi Desert Shrubs!Quercus*2	Tarim Basin deciduous forests and steppe
+685	4	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*4;asn:ASN - Far Eastern Taiga*1;asn:ASN - Birch Forest*1	Ussuri broadleaf and mixed forests
+686	4	PA	eur	eur:EUR - Misc. Deciduous forest*4;eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Bialowieza forest*1;eur:EUR - Open woodlands!Quercus_coccifera*1;eur:EUR - Dark oak or walnut*1;~eur:EUR - Swamp and riparian forest*2;^eur:EUR - Alpine forest (mature)*2	Western European broadleaf forests
+687	4	PA	asn	asn:ASN - Birch Forest*4;asn:ASN - Siberian Taiga*2	Western Siberian hemiboreal forests
+688	4	PA	asn	asn:ASN - Zagros Mountain forest-steppe*5;asn:ASN- Balochistan Xeric woodland*1	Zagros Mountains forest steppe
+689	5	PA	eur	eur:EUR - Alpine forest (mature)*3;eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Birch and aspen*1;~eur:EUR - Swamp and riparian forest*2;^eur:EUR - Alpine forest (mature)*3;^eur:EUR - Alpine forest (short)*2	Alps conifer and mixed forests
+690	5	PA	asn	asn:ASN - Siberian Taiga*3;asn:ASN - Birch Forest*2;^asn:ASN - Siberian Taiga*2	Altai montane forest and forest steppe
+691	5	PA	eur	eur:EUR - Scandinavian taiga (mature)*3;eur:EUR - Birch and aspen*2;^eur:EUR - Scandinavian taiga (short)*2	Caledon conifer forests
+692	5	PA	eur	eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Alpine forest (mature)*2;eur:EUR - Misc. Deciduous forest*2;eur:EUR - Bialowieza forest*1;^eur:EUR - Alpine forest (mature)*2;^eur:EUR - Alpine forest (short)*1	Carpathian montane forests
+693	5	PA	asn	asn:ASN - Far Eastern Taiga*4;asn:ASN - Birch Forest*2	Da Hinggan-Dzhagdy Mountains conifer forests
+694	5	PA	ind	ind:IND - Himalayan Coniferous Forest*3;ind:IND - Himalayan Broadleaf and Pine Forest*2	East Afghan montane conifer forests
+695	5	PA	asn	asn:ASN - Zagros Mountain forest-steppe*3;asn:ASN- Balochistan Xeric woodland*1;eur:EUR - Middle East montane conifer forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Elburz Range forest steppe
+696	5	PA	asn	asn:ASN - High Mountain Krummholz*2;asn:ASN - Siberian Taiga*1;asn:ASN - Gobi Desert Shrubs!Quercus*1	Helanshan montane conifer forests
+697	5	PA	ind	ind:IND - Himalayan Coniferous Forest*3;ind:IND - South China Montane Laurel Forest*1;^ind:IND - Himalayan Coniferous Forest*2	Hengduan Mountains subalpine conifer forests
+698	5	PA	asn	asn:ASN - Hokkaido Mixed Forest*3;asn:ASN - Far Eastern Taiga*2;^asn:ASN - Bonsai-esque weathered trees*1	Hokkaido montane conifer forests
+699	5	PA	asn	asn:ASN - Hokkaido Mixed Forest*2;asn:ASN - Honshu Broadleaf Forest*2;asn:ASN - Japanese Temperate Rainforest*1;^asn:ASN - Bonsai-esque weathered trees*3	Honshu alpine conifer forests
+700	5	PA	asn	asn:ASN - Siberian Taiga*3;asn:ASN - Birch Forest*1	Khangai Mountains conifer forests
+701	5	PA	eur	eur:EUR - Middle East montane conifer forest*3;eur:EUR - Western Mediterranean*2;^eur:EUR - Middle East montane conifer forest*2	Mediterranean conifer and mixed forests
+702	5	PA	ind	ind:IND - Himalayan Coniferous Forest*4;ind:IND - Himalayan Broadleaf and Pine Forest*1	Northeast Himalayan subalpine conifer forests
+703	5	PA	eur	eur:EUR - Balkan coniferous forest*2;eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Middle East montane conifer forest*2;eur:EUR - Misc. Deciduous forest*1	Northern Anatolian conifer and deciduous forests
+704	5	PA	ind	ind:IND - Himalayan Coniferous Forest*3;ind:IND - Southeast Asian Subtropical Mountain Forest*2;ind:IND - Yunnanese Lowland Subtropical Forest*1	Nujiang Langcang Gorge alpine conifer and mixed forests
+705	5	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - High Mountain Krummholz*2;asn:ASN - Birch Forest*1	Qilian Mountains conifer forests
+706	5	PA	asn	asn:ASN - Central Chinese Mountain Forest*4;^asn:ASN - High Mountain Krummholz*1	Qionglai-Minshan conifer forests
+707	5	PA	asn	asn:ASN - Siberian Taiga*4;asn:ASN - Birch Forest*1	Sayan montane conifer forests
+708	5	PA	eur	eur:EUR - Scandinavian taiga (mature)*3;eur:EUR - Birch and aspen*3;eur:EUR - Misc. Deciduous forest*1;^eur:EUR - Scandinavian taiga (short)*2	Scandinavian coastal conifer forests
+709	5	PA	asn	asn:ASN - Siberian Taiga*3;asn:ASN - Birch Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2;^asn:ASN - Siberian Taiga*2;^asn:ASN - High Mountain Krummholz*1	Tian Shan montane conifer forests
+710	6	PA	asn	asn:ASN - Far Eastern Taiga*4;asn:ASN - Siberian Taiga*1;asn:ASN - Birch Forest*1	East Siberian taiga
+711	6	PA	eur	eur:EUR - Birch and aspen*4;eur:EUR - Scandinavian taiga (short)*1	Iceland boreal birch forests and alpine tundra
+712	6	PA	asn	asn:ASN - Birch Forest*3;asn:ASN - Far Eastern Taiga*2	Kamchatka taiga
+713	6	PA	asn	asn:ASN - Birch Forest*3;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Kamchatka-Kurile meadows and sparse forests
+714	6	PA	asn	asn:ASN - Far Eastern Taiga*4;asn:ASN - Siberian Taiga*1;asn:ASN - Birch Forest*1	Northeast Siberian taiga
+715	6	PA	asn	asn:ASN - Far Eastern Taiga*4;asn:ASN - Birch Forest*1	Okhotsk-Manchurian taiga
+716	6	PA	asn	asn:ASN - Far Eastern Taiga*3;asn:ASN - Hokkaido Mixed Forest*1	Sakhalin Island taiga
+717	6	PA	eur	eur:EUR - Scandinavian taiga (mature)*4;eur:EUR - Birch and aspen*3;eur:EUR - Scandinavian taiga (short)*1;eur:EUR - Bialowieza forest*1;~eur:EUR - Swamp and riparian forest*2	Scandinavian and Russian taiga
+718	6	PA	asn	asn:ASN - Siberian Taiga*3;asn:ASN - Far Eastern Taiga*1;asn:ASN - Birch Forest*1	Trans-Baikal conifer forests
+719	6	PA	eur	eur:EUR - Scandinavian taiga (mature)*3;eur:EUR - Birch and aspen*2;^eur:EUR - Scandinavian taiga (short)*2	Urals montane forest and taiga
+720	6	PA	asn	asn:ASN - Siberian Taiga*4;asn:ASN - Birch Forest*2	West Siberian taiga
+721	8	PA	asn	asn:ASN - Zagros Mountain forest-steppe*2;asn:ASN- Balochistan Xeric woodland*1;eur:EUR - Dark oak or walnut*1;asn:ASN - Central-Asian Riverside Tugay Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Alai-Western Tian Shan steppe
+722	8	PA	ind	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*1	Al-Hajar foothill xeric woodlands and shrublands
+723	8	PA	asn	asn:ASN- Balochistan Xeric woodland*2;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*1	Al-Hajar montane woodlands and shrublands
+724	8	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*2;asn:ASN - Birch Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Altai steppe and semi-desert
+725	8	PA	eur	eur:EUR - Middle East montane conifer forest*1;eur:EUR - Open woodlands!Quercus_coccifera*1;asn:ASN - Zagros Mountain forest-steppe*1;~eur:EUR - Swamp and riparian forest*2	Central Anatolian steppe
+726	8	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - Birch Forest*2;asn:ASN - Gobi Desert Shrubs!Quercus*1	Daurian forest steppe
+727	8	PA	asn	asn:ASN - Zagros Mountain forest-steppe*2;asn:ASN - Birch Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Eastern Anatolian montane steppe
+728	8	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*2;asn:ASN - Birch Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Emin Valley steppe
+729	8	PA	eur	eur:EUR - Birch and aspen*1	Faroe Islands boreal grasslands
+730	8	PA	asn	asn:ASN - Zagros Mountain forest-steppe*2;asn:ASN- Balochistan Xeric woodland*2;eur:EUR - Dark oak or walnut*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Gissaro-Alai open woodlands
+731	8	PA	asn	asn:ASN - Birch Forest*4;asn:ASN - Siberian Taiga*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Kazakh forest steppe
+732	8	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Gobi Desert Shrubs!Quercus*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Kazakh steppe
+733	8	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Gobi Desert Shrubs!Quercus*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Kazakh upland steppe
+734	8	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*2;asn:ASN - Birch Forest*1;asn:ASN - Yellow River Plain*1;~asn:ASN- Weeping Willows*2	Mongolian-Manchurian grassland
+735	8	PA	eur	eur:EUR - Open woodlands!Quercus_coccifera*3;eur:EUR - Birch and aspen*1;eur:EUR - Dark oak or walnut*1;~eur:EUR - Swamp and riparian forest*3	Pontic steppe
+736	8	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - Birch Forest*1;asn:ASN - Gobi Desert Shrubs!Quercus*1	Sayan Intermontane steppe
+737	8	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - Birch Forest*2;asn:ASN - Gobi Desert Shrubs!Quercus*1	Selenge-Orkhon forest steppe
+738	8	PA	asn	asn:ASN - Birch Forest*3;asn:ASN - Siberian Taiga*2	South Siberian forest steppe
+739	8	PA	asn	asn:ASN - Zagros Mountain forest-steppe*2;asn:ASN- Balochistan Xeric woodland*1;eur:EUR - Eastern Mediterranean*1;~asn:ASN - Mesopotamian river and wetland forest*2	Syrian xeric grasslands and shrublands
+740	8	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*2;eur:EUR - Dark oak or walnut*1;asn:ASN - Birch Forest*1;asn:ASN - Central-Asian Riverside Tugay Forest*1;^asn:ASN - Siberian Taiga*2	Tian Shan foothill arid steppe
+741	9	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*2;asn:ASN - Birch Forest*2;~asn:ASN- Weeping Willows*2	Amur meadow steppe
+742	9	PA	asn	asn:ASN - Yellow River Plain*2;asn:ASN- Weeping Willows*1;asn:ASN - Central-Asian Riverside Tugay Forest*1;~asn:ASN- Weeping Willows*2	Bohai Sea saline meadow
+743	9	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*2;asn:ASN - Birch Forest*2;~asn:ASN- Weeping Willows*2	Nenjiang River grassland
+744	9	PA	afr	afr:AFR - Canary Island Date Palms*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;aus:AUS - Riverside trees*1;~asn:ASN - Mesopotamian river and wetland forest*2	Nile Delta flooded savanna
+745	9	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*1;afr:AFR - Canary Island Date Palms*1	Saharan halophytics
+746	9	PA	asn	asn:ASN - Manchu-Ussur-Korean Mixed Forest*2;asn:ASN - Birch Forest*2;~asn:ASN- Weeping Willows*2	Suiphun-Khanka meadows and forest meadows
+747	9	PA	asn	asn:ASN - Mesopotamian river and wetland forest*3;afr:AFR - Canary Island Date Palms*2	Tigris-Euphrates alluvial salt marsh
+748	9	PA	asn	asn:ASN - Yellow River Plain*2;asn:ASN- Weeping Willows*1;asn:ASN - Central-Asian Riverside Tugay Forest*1;~asn:ASN- Weeping Willows*2	Yellow Sea saline meadow
+749	10	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - Birch Forest*1	Altai alpine meadow and tundra
+750	10	PA	asn	asn:ASN - High Mountain Krummholz*3;~asn:ASN - Central-Asian Riverside Tugay Forest*1	Central Tibetan Plateau alpine steppe
+751	10	PA	ind	ind:IND - Himalayan Coniferous Forest*3;asn:ASN - High Mountain Krummholz*1	Eastern Himalayan alpine shrub and meadows
+752	10	PA	asn	asn:ASN- Balochistan Xeric woodland*2;asn:ASN - High Mountain Krummholz*1	Ghorat-Hazarajat alpine meadow
+753	10	PA	asn	asn:ASN- Balochistan Xeric woodland*2;asn:ASN - High Mountain Krummholz*1	Hindu Kush alpine meadow
+754	10	PA	asn	asn:ASN - High Mountain Krummholz*3;~asn:ASN - Central-Asian Riverside Tugay Forest*1	Karakoram-West Tibetan Plateau alpine steppe
+755	10	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - Birch Forest*1	Khangai Mountains alpine meadow
+756	10	PA	asn	asn:ASN - Zagros Mountain forest-steppe*2;asn:ASN- Balochistan Xeric woodland*2	Kopet Dag woodlands and forest steppe
+757	10	PA	asn	asn:ASN - Zagros Mountain forest-steppe*2;asn:ASN- Balochistan Xeric woodland*2	Kuh Rud and Eastern Iran montane woodlands
+758	10	PA	eur	eur:EUR - Middle East montane conifer forest*2;asn:ASN- Balochistan Xeric woodland*1;afr:AFR - Maghreb Mediterranean*1	Mediterranean High Atlas juniper steppe
+759	10	PA	asn	asn:ASN - High Mountain Krummholz*3;~asn:ASN - Central-Asian Riverside Tugay Forest*1	North Tibetan Plateau-Kunlun Mountains alpine desert
+760	10	PA	ind	ind:IND - Himalayan Coniferous Forest*3;asn:ASN - High Mountain Krummholz*1	Northwestern Himalayan alpine shrub and meadows
+761	10	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Yellow River Plain*1	Ordos Plateau steppe
+762	10	PA	asn	asn:ASN - High Mountain Krummholz*3;~asn:ASN - Central-Asian Riverside Tugay Forest*1	Pamir alpine desert and tundra
+763	10	PA	asn	asn:ASN - High Mountain Krummholz*2;asn:ASN - Siberian Taiga*1	Qilian Mountains subalpine meadows
+764	10	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - Birch Forest*1	Sayan alpine meadows and tundra
+765	10	PA	asn	asn:ASN - High Mountain Krummholz*2;asn:ASN - Central-Asian Riverside Tugay Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Southeast Tibet shrublands and meadows
+766	10	PA	asn	asn:ASN- Balochistan Xeric woodland*2;asn:ASN - High Mountain Krummholz*1	Sulaiman Range alpine meadows
+767	10	PA	asn	asn:ASN - Siberian Taiga*2;asn:ASN - High Mountain Krummholz*1;asn:ASN - Birch Forest*1	Tian Shan montane steppe and meadows
+768	10	PA	asn	asn:ASN - High Mountain Krummholz*3;~asn:ASN - Central-Asian Riverside Tugay Forest*1	Tibetan Plateau alpine shrublands and meadows
+769	10	PA	ind	ind:IND - Himalayan Coniferous Forest*3;asn:ASN - High Mountain Krummholz*1	Western Himalayan alpine shrub and meadows
+770	10	PA	asn	asn:ASN - High Mountain Krummholz*2;asn:ASN - Central-Asian Riverside Tugay Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Yarlung Zanbo arid steppe
+771	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Cherskii-Kolyma mountain tundra
+772	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Chukchi Peninsula tundra
+773	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Kamchatka tundra
+774	11	PA	eur	eur:EUR - Birch and aspen*3;eur:EUR - Scandinavian taiga (short)*1	Kola Peninsula tundra
+775	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Northeast Siberian coastal tundra
+776	11	PA	eur	eur:EUR - Birch and aspen*3;eur:EUR - Scandinavian taiga (short)*1	Northwest Russian-Novaya Zemlya tundra
+777	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Novosibirsk Islands Arctic desert
+778	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Russian Arctic desert
+779	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Russian Bering tundra
+780	11	PA	eur	eur:EUR - Birch and aspen*5;eur:EUR - Scandinavian taiga (short)*1	Scandinavian Montane Birch forest and grasslands
+781	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Taimyr-Central Siberian tundra
+782	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Trans-Baikal Bald Mountain tundra
+783	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Wrangel Island Arctic desert
+784	11	PA	asn	asn:ASN - Birch Forest*2;asn:ASN - Far Eastern Taiga*1;^asn:ASN - Bonsai-esque weathered trees*1	Yamal-Gydan tundra
+785	12	PA	eur	eur:EUR - Eastern Mediterranean*5;eur:EUR - Middle East montane conifer forest*1;afr:AFR - Canary Island Date Palms*1;^eur:EUR - Middle East montane conifer forest*2	Aegean and Western Turkey sclerophyllous and mixed forests
+786	12	PA	eur	eur:EUR - Middle East montane conifer forest*3;eur:EUR - Balkan coniferous forest*1;eur:EUR - Open woodlands!Quercus_coccifera*1	Anatolian conifer and deciduous mixed forests
+787	12	PA	afr	afr:AFR - Canary Island Date Palms*3;eur:EUR - Western Mediterranean*2;^eur:EUR - Middle East montane conifer forest*2	Canary Islands dry woodlands and forests
+788	12	PA	eur	eur:EUR - Western Mediterranean*2;eur:EUR - Balkan coniferous forest*2;eur:EUR - Beech-yew Alpine foothills*1	Corsican montane broadleaf and mixed forests
+789	12	PA	eur	eur:EUR - Eastern Mediterranean*4;afr:AFR - Canary Island Date Palms*1;^eur:EUR - Middle East montane conifer forest*2	Crete Mediterranean forests
+790	12	PA	eur	eur:EUR - Eastern Mediterranean*3;eur:EUR - Middle East montane conifer forest*2;afr:AFR - Canary Island Date Palms*1	Cyprus Mediterranean forests
+791	12	PA	eur	eur:EUR - Eastern Mediterranean*5;eur:EUR - Middle East montane conifer forest*1;afr:AFR - Canary Island Date Palms*1;^eur:EUR - Middle East montane conifer forest*2	Eastern Mediterranean conifer-broadleaf forests
+792	12	PA	eur	eur:EUR - Balkan coniferous forest*2;eur:EUR - Western Mediterranean*2;eur:EUR - Middle East montane conifer forest*1	Iberian conifer forests
+793	12	PA	eur	eur:EUR - Western Mediterranean*3;eur:EUR - Oak forest*2;eur:EUR - Eastern Mediterranean*1;~eur:EUR - Swamp and riparian forest*2;^eur:EUR - Balkan coniferous forest*2	Iberian sclerophyllous and semi-deciduous forests
+794	12	PA	eur	eur:EUR - Misc. Deciduous forest*2;eur:EUR - Open woodlands!Quercus_coccifera*2;eur:EUR - Eastern Mediterranean*1;^eur:EUR - Balkan coniferous forest*2	Illyrian deciduous forests
+795	12	PA	eur	eur:EUR - Western Mediterranean*4;eur:EUR - Eastern Mediterranean*2;eur:EUR - Oak forest*1;afr:AFR - Canary Island Date Palms*1;~eur:EUR - Swamp and riparian forest*2	Italian sclerophyllous and semi-deciduous forests
+796	12	PA	afr	afr:AFR - Maghreb Mediterranean*5;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*1	Mediterranean Acacia-Argania dry woodlands and succulent thickets
+797	12	PA	afr	afr:AFR - Maghreb Mediterranean*2;eur:EUR - Western Mediterranean*2;eur:EUR - Eastern Mediterranean*1;afr:AFR - Canary Island Date Palms*1	Mediterranean dry woodlands and steppe
+798	12	PA	eur	eur:EUR - Western Mediterranean*4;eur:EUR - Oak forest*1;afr:AFR - Canary Island Date Palms*1;afr:AFR - Maghreb Mediterranean*1;^eur:EUR - Middle East montane conifer forest*2	Mediterranean woodlands and forests
+799	12	PA	eur	eur:EUR - Western Mediterranean*4;eur:EUR - Oak forest*1;eur:EUR - Eastern Mediterranean*1;afr:AFR - Canary Island Date Palms*1;~eur:EUR - Swamp and riparian forest*2	Northeast Spain and Southern France Mediterranean forests
+800	12	PA	eur	eur:EUR - Misc. Deciduous forest*2;eur:EUR - Oak forest!Quercus_suber!Quercus_coccifera*2;eur:EUR - Birch and aspen*1;eur:EUR - Western Mediterranean*1;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;^eur:EUR - Alpine forest (short)*2	Northwest Iberian montane forests
+801	12	PA	eur	eur:EUR - Balkan coniferous forest*3;eur:EUR - Beech-yew Alpine foothills*1;eur:EUR - Eastern Mediterranean*1;eur:EUR - Misc. Deciduous forest*1	Pindus Mountains mixed forests
+802	12	PA	eur	eur:EUR - Beech-yew Alpine foothills*2;eur:EUR - Western Mediterranean*2;eur:EUR - Balkan coniferous forest*1;eur:EUR - Misc. Deciduous forest*1	South Apennine mixed montane forests
+803	12	PA	eur	eur:EUR - Western Mediterranean*3;eur:EUR - Eastern Mediterranean*1;afr:AFR - Canary Island Date Palms*1	Southeast Iberian shrubs and woodlands
+804	12	PA	eur	eur:EUR - Middle East montane conifer forest*4;eur:EUR - Eastern Mediterranean*1	Southern Anatolian montane conifer and deciduous forests
+805	12	PA	eur	eur:EUR - Western Mediterranean*4;eur:EUR - Oak forest*2;aus:AUS - Temperate Eucalypt Forest (Victoria)*1;~eur:EUR - Swamp and riparian forest*2	Southwest Iberian Mediterranean sclerophyllous and mixed forests
+806	12	PA	eur	eur:EUR - Western Mediterranean*3;eur:EUR - Eastern Mediterranean*2;afr:AFR - Canary Island Date Palms*1	Tyrrhenian-Adriatic sclerophyllous and mixed forests
+807	13	PA	asn	asn:ASN- Balochistan Xeric woodland*3;asn:ASN - Zagros Mountain forest-steppe*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Afghan Mountains semi-desert
+808	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Alashan Plateau semi-desert
+809	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	Arabian desert
+810	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	Arabian sand desert
+811	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	Arabian-Persian Gulf coastal plain desert
+812	13	PA	eur	eur:EUR - Eastern Mediterranean*2;asn:ASN - Central-Asian Riverside Tugay Forest*1;asn:ASN - Zagros Mountain forest-steppe*1	Azerbaijan shrub desert and steppe
+813	13	PA	asn	asn:ASN- Balochistan Xeric woodland*3;asn:ASN - Zagros Mountain forest-steppe*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Badghyz and Karabil semi-desert
+814	13	PA	asn	asn:ASN- Balochistan Xeric woodland*4;asn:ASN - Zagros Mountain forest-steppe*1	Baluchistan xeric woodlands
+815	13	PA	asn	asn:ASN - Central-Asian Riverside Tugay Forest*2;asn:ASN - Gobi Desert Shrubs!Quercus*2	Caspian lowland desert
+816	13	PA	asn	asn:ASN- Balochistan Xeric woodland*3;asn:ASN - Zagros Mountain forest-steppe*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Central Afghan Mountains xeric woodlands
+817	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Central Asian northern desert
+818	13	PA	asn	asn:ASN - Central-Asian Riverside Tugay Forest*5	Central Asian riparian woodlands
+819	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*2;asn:ASN - Central-Asian Riverside Tugay Forest*1;~asn:ASN - Central-Asian Riverside Tugay Forest*3	Central Asian southern desert
+820	13	PA	asn	asn:ASN - Zagros Mountain forest-steppe*3;asn:ASN- Balochistan Xeric woodland*1;asn:ASN - Central-Asian Riverside Tugay Forest*1;eur:EUR - Middle East montane conifer forest*1	Central Persian desert basins
+821	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	East Arabian fog shrublands and sand desert
+822	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	East Sahara Desert
+823	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	East Saharan montane xeric woodlands
+824	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Eastern Gobi desert steppe
+825	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Gobi Lakes Valley desert steppe
+826	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Great Lakes Basin desert steppe
+827	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Junggar Basin semi-desert
+828	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Kazakh semi-desert
+829	13	PA	asn	asn:ASN - Central-Asian Riverside Tugay Forest*2;asn:ASN - Zagros Mountain forest-steppe*1;asn:ASN - Gobi Desert Shrubs!Quercus*1	Kopet Dag semi-desert
+830	13	PA	asn	asn:ASN - Mesopotamian river and wetland forest*2;afr:AFR - Canary Island Date Palms*2;ind:IND - Thar Desert Scrub*1	Mesopotamian shrub desert
+831	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	North Arabian desert
+832	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	North Arabian highland shrublands
+833	13	PA	afr	afr:AFR - Maghreb Mediterranean*2;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*1;afr:AFR - Canary Island Date Palms*1;eur:EUR - Western Mediterranean*1	North Saharan Xeric Steppe and Woodland
+834	13	PA	asn	asn:ASN- Balochistan Xeric woodland*3;asn:ASN - Zagros Mountain forest-steppe*1;~asn:ASN - Central-Asian Riverside Tugay Forest*2	Paropamisus xeric woodlands
+835	13	PA	asn	asn:ASN - Gobi Desert Shrubs!Quercus*3;asn:ASN - Central-Asian Riverside Tugay Forest*1	Qaidam Basin semi-desert
+836	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;ind:IND - Thar Desert Scrub*1;afr:AFR - Canary Island Date Palms*1	Red Sea coastal desert
+837	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	Red Sea-Arabian Desert shrublands
+838	13	PA	ind	ind:IND - Thar Desert Scrub*2;asn:ASN- Balochistan Xeric woodland*1;afr:AFR - Canary Island Date Palms*1	Registan-North Pakistan sandy desert
+839	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	Saharan Atlantic coastal desert
+840	13	PA	afr	ind:IND - Thar Desert Scrub*3;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*2;afr:AFR - Canary Island Date Palms*2	South Arabian plains and plateau desert
+841	13	PA	afr	ind:IND - Thar Desert Scrub*2;afr:AFR - Canary Island Date Palms*2;afr:AFR - Sahelian Scrub and Semidesert!Adansonia*1	South Iran Nubo-Sindian desert and semi-desert
+842	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	South Sahara desert
+843	13	PA	asn	asn:ASN - Central-Asian Riverside Tugay Forest*3;asn:ASN - Gobi Desert Shrubs!Quercus*2	Taklimakan desert
+844	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	Tibesti-Jebel Uweinat montane xeric woodlands
+845	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	West Sahara desert
+846	13	PA	afr	afr:AFR - Sahelian Scrub and Semidesert!Adansonia*3;afr:AFR - Canary Island Date Palms*1	West Saharan montane xeric woodlands

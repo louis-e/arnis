@@ -307,6 +307,24 @@ fn is_transparent_block(name: &str) -> bool {
             | "dandelion"
             | "blue_orchid"
             | "azure_bluet"
+            | "cornflower"
+            | "oxeye_daisy"
+            | "allium"
+            | "lily_of_the_valley"
+            | "red_tulip"
+            | "orange_tulip"
+            | "white_tulip"
+            | "pink_tulip"
+            | "sunflower"
+            | "lilac"
+            | "rose_bush"
+            | "peony"
+            | "sweet_berry_bush"
+            | "fern"
+            | "large_fern"
+            | "brown_mushroom"
+            | "red_mushroom"
+            | "sugar_cane"
             | "iron_bars"
             | "ladder"
             | "scaffolding"
@@ -497,6 +515,7 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("mangrove_leaves", Rgb([69, 123, 38])),
         ("cherry_leaves", Rgb([228, 177, 197])),
         ("azalea_leaves", Rgb([71, 96, 37])),
+        ("flowering_azalea_leaves", Rgb([100, 104, 62])),
         ("stone_bricks", Rgb([122, 122, 122])),
         ("stone_brick_slab", Rgb([122, 122, 122])),
         ("stone_brick_stairs", Rgb([122, 122, 122])),
@@ -855,6 +874,9 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("brown_bed", Rgb([114, 72, 41])),
         ("green_bed", Rgb([85, 110, 28])),
         ("red_bed", Rgb([161, 39, 35])),
+        ("cake", Rgb([236, 228, 222])),
+        ("loom", Rgb([142, 118, 92])),
+        ("smithing_table", Rgb([58, 58, 70])),
         ("black_bed", Rgb([21, 21, 26])),
         ("oak_trapdoor", Rgb([162, 130, 78])),
         ("spruce_trapdoor", Rgb([115, 85, 49])),

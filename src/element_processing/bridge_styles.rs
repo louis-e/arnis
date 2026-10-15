@@ -1,5 +1,7 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::connected_blocks::{cross_cells, four_connected_line, stair_steps};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -31,11 +33,33 @@ impl BridgeStyle {
         }
     }
 
-    pub fn pillar_interval(self) -> usize {
+    /// Centerline cells between pier bents; 0 when the style carries its deck otherwise.
+    pub fn pier_interval(self, half_width: i32) -> usize {
         match self {
             BridgeStyle::Boardwalk => BOARDWALK_POST_INTERVAL,
-            _ => BEAM_PILLAR_INTERVAL,
+            // Spandrel walls and springer piers carry arches.
+            BridgeStyle::Arch => 0,
+            BridgeStyle::Truss => TRUSS_PIER_INTERVAL,
+            // Approaches only; carriers hang from their pylons.
+            BridgeStyle::Suspension | BridgeStyle::CableStayed => CABLE_FALLBACK_PIER_INTERVAL,
+            BridgeStyle::Beam | BridgeStyle::Covered => {
+                if half_width <= 2 {
+                    BEAM_PILLAR_INTERVAL
+                } else {
+                    WIDE_BEAM_PIER_INTERVAL
+                }
+            }
         }
+    }
+
+    /// True when a lone way of this style hangs from its own pylons.
+    pub fn cables_carry_deck(
+        self,
+        path_len: usize,
+        start_is_boundary: bool,
+        end_is_boundary: bool,
+    ) -> bool {
+        !default_pylons(self, path_len, start_is_boundary, end_is_boundary).is_empty()
     }
 }
 
@@ -243,6 +267,9 @@ fn resolve_bridge_style_from_pair(structure: Option<&str>, bridge: Option<&str>)
 }
 
 const BEAM_PILLAR_INTERVAL: usize = 8;
+const WIDE_BEAM_PIER_INTERVAL: usize = 12;
+const TRUSS_PIER_INTERVAL: usize = 32;
+const CABLE_FALLBACK_PIER_INTERVAL: usize = 24;
 const BOARDWALK_POST_INTERVAL: usize = 4;
 const ARCH_SPAN: usize = 20;
 const ARCH_RISE_FRACTION: f32 = 0.85;
@@ -256,7 +283,8 @@ const SUSPENSION_TOWER_MAX_HEIGHT: i32 = 32;
 const SUSPENSION_HANGER_INTERVAL: usize = 4;
 const SUSPENSION_TOWER_INSET_FRAC: f32 = 0.12;
 const SUSPENSION_MIN_LENGTH: usize = 18;
-const SUSPENSION_INTER_PYLON_SPACING: usize = 100;
+// Two towers except on very long spans.
+const SUSPENSION_INTER_PYLON_SPACING: usize = 1000;
 const SUSPENSION_MAX_PYLONS: usize = 5;
 const CABLE_STAYED_TOWER_BASE_HEIGHT: i32 = 12;
 const CABLE_STAYED_TOWER_HEIGHT_DIVISOR: usize = 5;
@@ -274,6 +302,15 @@ fn suspension_tower_height(total: usize) -> i32 {
     (SUSPENSION_TOWER_BASE_HEIGHT + extra).min(SUSPENSION_TOWER_MAX_HEIGHT)
 }
 
+/// Pylon inset from each end, or None when the span is too short to hang cables from.
+fn suspension_inset(total: usize) -> Option<usize> {
+    if total < SUSPENSION_MIN_LENGTH {
+        return None;
+    }
+    let inset = (((total as f32) * SUSPENSION_TOWER_INSET_FRAC) as usize).max(2);
+    (inset * 2 + 2 <= total).then_some(inset)
+}
+
 fn suspension_pylon_count(total: usize) -> usize {
     (2 + total / SUSPENSION_INTER_PYLON_SPACING).min(SUSPENSION_MAX_PYLONS)
 }
@@ -283,11 +320,10 @@ fn cable_stayed_tower_height(total: usize) -> i32 {
     (CABLE_STAYED_TOWER_BASE_HEIGHT + extra).min(CABLE_STAYED_TOWER_MAX_HEIGHT)
 }
 
-/// Below-deck support for one cell. Caller decides centerline / pillar-grid hits.
+/// Arch spandrel fill for one deck cell, plus springer piers on the centerline.
 #[allow(clippy::too_many_arguments)]
-pub fn place_bridge_support_below_deck(
+pub fn place_arch_below_deck(
     editor: &mut WorldEditor,
-    style: BridgeStyle,
     set_x: i32,
     cell_y: i32,
     set_z: i32,
@@ -296,41 +332,76 @@ pub fn place_bridge_support_below_deck(
     total: usize,
     use_absolute_y: bool,
     is_centerline: bool,
-    is_pillar_position: bool,
 ) {
-    match style {
-        BridgeStyle::Arch => {
-            place_arch_spandrel_cell(
-                editor,
-                set_x,
-                cell_y,
-                set_z,
-                centerline_ground_y,
-                tds,
-                total,
-                use_absolute_y,
-            );
-            if is_centerline {
-                let (start, span) = arch_segment(tds, total);
-                if tds == start || tds + 1 == start + span {
-                    place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, true);
-                }
-            }
-        }
-        BridgeStyle::Boardwalk => {
-            if is_centerline && is_pillar_position {
-                place_pillar(editor, set_x, cell_y, set_z, OAK_LOG, false);
-            }
-        }
-        _ => {
-            if is_centerline && is_pillar_position {
-                place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, true);
-            }
+    place_arch_spandrel_cell(
+        editor,
+        set_x,
+        cell_y,
+        set_z,
+        centerline_ground_y,
+        tds,
+        total,
+        use_absolute_y,
+    );
+    if is_centerline {
+        let (start, span) = arch_segment(tds, total);
+        if tds == start || tds + 1 == start + span {
+            place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, true);
         }
     }
 }
 
-fn place_pillar(
+/// One pier across the deck; columns over a road, track or lower deck are left out.
+#[allow(clippy::too_many_arguments)]
+pub fn place_pier_bent(
+    editor: &mut WorldEditor,
+    surface: &BridgeSurfaceMap,
+    style: BridgeStyle,
+    x: i32,
+    z: i32,
+    deck_y: i32,
+    perp: (f32, f32),
+    half_width: i32,
+) {
+    let at = |off: i32| {
+        (
+            (x as f32 + perp.0 * off as f32).round() as i32,
+            (z as f32 + perp.1 * off as f32).round() as i32,
+        )
+    };
+    let (body, footing, mut cells): (Block, bool, Vec<(i32, i32)>) = match style {
+        BridgeStyle::Boardwalk if half_width >= 1 => {
+            (OAK_LOG, false, vec![at(-half_width), at(half_width)])
+        }
+        BridgeStyle::Boardwalk => (OAK_LOG, false, vec![at(0)]),
+        BridgeStyle::Truss => (
+            STONE_BRICKS,
+            true,
+            cross_cells(x, z, perp, -half_width, half_width),
+        ),
+        _ => {
+            let edge = half_width - 1;
+            let offsets = match half_width {
+                ..=2 => vec![0],
+                3..=4 => vec![-edge, edge],
+                _ => vec![-edge, 0, edge],
+            };
+            (STONE_BRICKS, true, offsets.into_iter().map(at).collect())
+        }
+    };
+    cells.dedup();
+    for (px, pz) in cells {
+        if !surface.support_blocked(px, pz, deck_y) {
+            place_pillar(editor, px, deck_y, pz, body, footing);
+        }
+    }
+}
+
+/// Deck rows above the ground below which a pier gets a 3x3 footing.
+const PIER_FOOTING_MIN_HEIGHT: i32 = 5;
+
+/// Pier column from the terrain to the deck; a water carve later extends it to the bed.
+pub(crate) fn place_pillar(
     editor: &mut WorldEditor,
     x: i32,
     deck_y: i32,
@@ -339,13 +410,15 @@ fn place_pillar(
     with_base: bool,
 ) {
     let ground_y = editor.get_ground_level(x, z);
-    if deck_y <= ground_y {
+    // The foundation row under the deck already rests on the terrain.
+    if deck_y - ground_y <= 2 {
         return;
     }
     for y in (ground_y + 1)..deck_y {
         editor.set_block_absolute(body, x, y, z, None, None);
     }
-    if with_base {
+    editor.register_support_column(x, z, body);
+    if with_base && deck_y - ground_y >= PIER_FOOTING_MIN_HEIGHT {
         for bx in -1..=1 {
             for bz in -1..=1 {
                 editor.set_block_absolute(body, x + bx, ground_y, z + bz, None, None);
@@ -406,43 +479,146 @@ fn place_arch_spandrel_cell(
             editor.set_block(STONE_BRICKS, set_x, fy, set_z, None, Some(&[WATER]));
         }
     }
+    // Springer walls continue to the bed in a river.
+    if use_absolute_y && arch_under_y <= centerline_ground_y + 1 {
+        editor.register_support_column(set_x, set_z, STONE_BRICKS);
+    }
 }
 
 /// One centerline sample: (x, deck_y, z, unit_perp).
 pub type BridgePathSample = (i32, i32, i32, (f32, f32));
 
-/// Above-deck decoration; no-op for Beam/Arch/Boardwalk.
+/// Deck sides facing open air; a side against another deck gets no truss, pylon or wall.
+#[derive(Clone, Copy)]
+struct OpenSides {
+    left: bool,
+    right: bool,
+}
+
+impl OpenSides {
+    fn of(surface: &BridgeSurfaceMap, path: &[BridgePathSample], block_range: i32) -> Self {
+        let (mut left, mut right) = (0usize, 0usize);
+        for &(cx, cy, cz, perp) in path {
+            let (l, r) = side_offsets(cx, cz, perp, block_range);
+            left += side_faces_open(surface, l, perp, cy) as usize;
+            right += side_faces_open(surface, r, (-perp.0, -perp.1), cy) as usize;
+        }
+        // Decided per member so the truss isn't ragged.
+        Self {
+            left: left * 2 >= path.len(),
+            right: right * 2 >= path.len(),
+        }
+    }
+
+    fn pick<T>(self, left: T, right: T) -> impl Iterator<Item = T> {
+        self.indexed(left, right).map(|(_, v)| v)
+    }
+
+    /// Open sides with their index (0 left, 1 right).
+    fn indexed<T>(self, left: T, right: T) -> impl Iterator<Item = (usize, T)> {
+        [(self.left, left), (self.right, right)]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, (open, v))| open.then_some((i, v)))
+    }
+}
+
+/// True when no deck continues outward from the edge at (x, z).
+pub(crate) fn side_faces_open(
+    surface: &BridgeSurfaceMap,
+    (x, z): (i32, i32),
+    outward: (f32, f32),
+    deck_y: i32,
+) -> bool {
+    (0..=2).all(|k| {
+        let px = (x as f32 + outward.0 * k as f32).round() as i32;
+        let pz = (z as f32 + outward.1 * k as f32).round() as i32;
+        !surface.deck_near(px, pz, deck_y, 2)
+    })
+}
+
+/// Pylon path indices for a lone cable-carried way; empty when it can't carry itself.
+pub fn default_pylons(
+    style: BridgeStyle,
+    total: usize,
+    start_is_boundary: bool,
+    end_is_boundary: bool,
+) -> Vec<usize> {
+    match style {
+        BridgeStyle::Suspension if start_is_boundary && end_is_boundary => {
+            let Some(inset) = suspension_inset(total) else {
+                return Vec::new();
+            };
+            let n_pylons = suspension_pylon_count(total);
+            let (first, last) = (inset, total - 1 - inset);
+            // Evenly distribute pylons between the two boundary insets.
+            (0..n_pylons)
+                .map(|i| first + (last - first) * i / (n_pylons - 1).max(1))
+                .collect()
+        }
+        BridgeStyle::CableStayed if total >= CABLE_STAYED_MIN_LENGTH => {
+            // Twin pylons split the deck so their cable fans don't cross.
+            if total >= CABLE_STAYED_TWIN_PYLON_LENGTH {
+                vec![total / 3, (2 * total) / 3]
+            } else {
+                vec![total / 2]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Above-deck decoration. `pylon_points` puts cable pylons where the main span has them.
+#[allow(clippy::too_many_arguments)]
 pub fn decorate_bridge_above_deck(
     editor: &mut WorldEditor,
+    surface: &BridgeSurfaceMap,
     style: BridgeStyle,
     path: &[BridgePathSample],
     block_range: i32,
     start_is_boundary: bool,
     end_is_boundary: bool,
+    pylon_points: Option<&[(i32, i32)]>,
 ) {
     if path.len() < 4 {
         return;
     }
+    let sides = OpenSides::of(surface, path, block_range);
+    let pylons = || -> Vec<usize> {
+        let mut pylons = match pylon_points {
+            Some(points) => points
+                .iter()
+                .filter_map(|&(px, pz)| {
+                    (0..path.len()).min_by_key(|&i| {
+                        let (x, _, z, _) = path[i];
+                        (x - px).pow(2) + (z - pz).pow(2)
+                    })
+                })
+                .collect(),
+            None => default_pylons(style, path.len(), start_is_boundary, end_is_boundary),
+        };
+        pylons.sort_unstable();
+        pylons.dedup();
+        pylons
+    };
     match style {
         BridgeStyle::Truss => decorate_truss(
             editor,
             path,
             block_range,
+            sides,
             start_is_boundary,
             end_is_boundary,
         ),
-        BridgeStyle::Suspension => decorate_suspension(
-            editor,
-            path,
-            block_range,
-            start_is_boundary,
-            end_is_boundary,
-        ),
-        BridgeStyle::CableStayed => decorate_cable_stayed(editor, path, block_range),
+        BridgeStyle::Suspension => decorate_suspension(editor, path, block_range, sides, &pylons()),
+        BridgeStyle::CableStayed => {
+            decorate_cable_stayed(editor, path, block_range, sides, &pylons())
+        }
         BridgeStyle::Covered => decorate_covered(
             editor,
             path,
             block_range,
+            sides,
             start_is_boundary,
             end_is_boundary,
         ),
@@ -460,35 +636,48 @@ fn side_offsets(cx: i32, cz: i32, perp: (f32, f32), block_range: i32) -> ((i32, 
     ((lx, lz), (rx, rz))
 }
 
+/// Per-side trail of edge cells, so chords, cables and walls stay joined on diagonal decks.
+#[derive(Default)]
+struct SideRuns {
+    prev: [Option<(i32, i32)>; 2],
+}
+
+impl SideRuns {
+    /// Cells from the side's previous edge cell up to `cell`.
+    fn step(&mut self, side: usize, cell: (i32, i32)) -> Vec<(i32, i32)> {
+        let cells = match self.prev[side] {
+            Some(p) if p != cell => stair_steps(p, cell),
+            _ => vec![cell],
+        };
+        self.prev[side] = Some(cell);
+        cells
+    }
+}
+
+/// Cells from `a` to `b` without corner-to-corner steps.
+fn span_cells(a: (i32, i32), b: (i32, i32)) -> Vec<(i32, i32)> {
+    let line: Vec<(i32, i32)> = bresenham_line(a.0, 0, a.1, b.0, 0, b.1)
+        .into_iter()
+        .map(|(x, _, z)| (x, z))
+        .collect();
+    four_connected_line(&line)
+}
+
 fn decorate_truss(
     editor: &mut WorldEditor,
     path: &[BridgePathSample],
     block_range: i32,
+    sides: OpenSides,
     start_is_boundary: bool,
     end_is_boundary: bool,
 ) {
     let last = path.len() - 1;
+    let mut runs = SideRuns::default();
     for (tds, &(cx, cy, cz, perp)) in path.iter().enumerate() {
-        // Leave entry/exit clear at group boundaries only; mid-group seams stay closed.
-        if (tds == 0 && start_is_boundary) || (tds == last && end_is_boundary) {
-            continue;
-        }
         let (left, right) = side_offsets(cx, cz, perp, block_range);
+        // Leave entry/exit clear at group boundaries only; mid-group seams stay closed.
+        let open_end = (tds == 0 && start_is_boundary) || (tds == last && end_is_boundary);
         let top_y = cy + 1 + TRUSS_TOP_HEIGHT;
-        // Bottom and top chord at every cell.
-        editor.set_block_absolute(IRON_BLOCK, left.0, cy + 1, left.1, None, None);
-        editor.set_block_absolute(IRON_BLOCK, right.0, cy + 1, right.1, None, None);
-        editor.set_block_absolute(IRON_BLOCK, left.0, top_y, left.1, None, None);
-        editor.set_block_absolute(IRON_BLOCK, right.0, top_y, right.1, None, None);
-
-        // Vertical posts.
-        if tds.is_multiple_of(TRUSS_POST_INTERVAL) {
-            for h in 1..=TRUSS_TOP_HEIGHT {
-                editor.set_block_absolute(IRON_BLOCK, left.0, cy + 1 + h, left.1, None, None);
-                editor.set_block_absolute(IRON_BLOCK, right.0, cy + 1 + h, right.1, None, None);
-            }
-        }
-
         // Warren-style sawtooth diagonal: 0,1,2,3,4,3,2,1 over period 8.
         let p = tds % TRUSS_DIAGONAL_PERIOD;
         let half = TRUSS_DIAGONAL_PERIOD / 2;
@@ -498,12 +687,26 @@ fn decorate_truss(
             TRUSS_DIAGONAL_PERIOD - p
         } as i32;
         let diag_y = cy + 1 + dh.min(TRUSS_TOP_HEIGHT);
-        editor.set_block_absolute(IRON_BLOCK, left.0, diag_y, left.1, None, None);
-        editor.set_block_absolute(IRON_BLOCK, right.0, diag_y, right.1, None, None);
+        for (side, (sx, sz)) in sides.indexed(left, right) {
+            let run = runs.step(side, (sx, sz));
+            if open_end {
+                continue;
+            }
+            for (rx, rz) in run {
+                editor.set_block_absolute(IRON_BLOCK, rx, cy + 1, rz, None, None);
+                editor.set_block_absolute(IRON_BLOCK, rx, top_y, rz, None, None);
+            }
+            if tds.is_multiple_of(TRUSS_POST_INTERVAL) {
+                for h in 1..=TRUSS_TOP_HEIGHT {
+                    editor.set_block_absolute(IRON_BLOCK, sx, cy + 1 + h, sz, None, None);
+                }
+            }
+            editor.set_block_absolute(IRON_BLOCK, sx, diag_y, sz, None, None);
+        }
 
-        // Portal-style top cross-bracing every TRUSS_PORTAL_INTERVAL cells.
-        if tds.is_multiple_of(TRUSS_PORTAL_INTERVAL) {
-            for (bx, _, bz) in bresenham_line(left.0, top_y, left.1, right.0, top_y, right.1) {
+        // Portal bracing only across a deck trussed on both sides.
+        if !open_end && sides.left && sides.right && tds.is_multiple_of(TRUSS_PORTAL_INTERVAL) {
+            for (bx, bz) in span_cells(left, right) {
                 editor.set_block_absolute(IRON_BLOCK, bx, top_y, bz, None, None);
             }
         }
@@ -514,39 +717,21 @@ fn decorate_suspension(
     editor: &mut WorldEditor,
     path: &[BridgePathSample],
     block_range: i32,
-    start_is_boundary: bool,
-    end_is_boundary: bool,
+    sides: OpenSides,
+    pylons: &[usize],
 ) {
-    // Skip mid-group ways so we don't hang cables off phantom internal towers.
-    if !start_is_boundary || !end_is_boundary {
-        return;
-    }
     let total = path.len();
-    if total < SUSPENSION_MIN_LENGTH {
+    let (Some(&first_p), Some(&last_p)) = (pylons.first(), pylons.last()) else {
         return;
-    }
+    };
     let last_idx = total - 1;
-    let inset = (((total as f32) * SUSPENSION_TOWER_INSET_FRAC) as usize).max(2);
-    if inset * 2 + 2 > total {
-        return;
-    }
     let height = suspension_tower_height(total);
-    let n_pylons = suspension_pylon_count(total);
-    let first = inset;
-    let last = last_idx - inset;
-    // Evenly distribute pylons between the two boundary insets.
-    let pylons: Vec<usize> = (0..n_pylons)
-        .map(|i| first + (last - first) * i / (n_pylons - 1).max(1))
-        .collect();
 
-    for &p in &pylons {
-        let (cx, _, cz, perp) = path[p];
-        let (left, right) = side_offsets(cx, cz, perp, block_range);
-        let deck_y = path[p].1;
-        place_pylon(editor, left.0, left.1, deck_y, height);
-        place_pylon(editor, right.0, right.1, deck_y, height);
-        place_pylon_crossbeam(editor, left, right, deck_y + height);
+    for &p in pylons {
+        let (cx, deck_y, cz, perp) = path[p];
+        place_pylon_pair(editor, (cx, cz), perp, block_range, deck_y, height, sides);
     }
+    let sided = |left: (i32, i32), right: (i32, i32)| sides.pick(left, right).collect::<Vec<_>>();
 
     // One catenary cable per inter-pylon span.
     let dip = (height - 2) as f32;
@@ -561,6 +746,7 @@ fn decorate_suspension(
         let cy_b = path[b].1;
         let top_a = cy_a + height;
         let top_b = cy_b + height;
+        let mut runs = SideRuns::default();
         for (tds, sample) in path.iter().enumerate().take(b + 1).skip(a) {
             let &(cx, cy, cz, perp) = sample;
             let (left, right) = side_offsets(cx, cz, perp, block_range);
@@ -572,130 +758,102 @@ fn decorate_suspension(
             } else {
                 CHAIN_X
             };
-            editor.set_block_absolute(chain, left.0, cable_y, left.1, None, None);
-            editor.set_block_absolute(chain, right.0, cable_y, right.1, None, None);
-
             let on_hanger_step = (tds - a).is_multiple_of(SUSPENSION_HANGER_INTERVAL);
-            if on_hanger_step && tds != a && tds != b {
-                for hy in (cy + 2)..cable_y {
-                    editor.set_block_absolute(IRON_BARS, left.0, hy, left.1, None, None);
-                    editor.set_block_absolute(IRON_BARS, right.0, hy, right.1, None, None);
+            for (side, (sx, sz)) in sides.indexed(left, right) {
+                for (rx, rz) in runs.step(side, (sx, sz)) {
+                    editor.set_block_absolute(chain, rx, cable_y, rz, None, None);
+                }
+                if on_hanger_step && tds != a && tds != b {
+                    for hy in (cy + 2)..cable_y {
+                        editor.set_block_absolute(IRON_BARS, sx, hy, sz, None, None);
+                    }
                 }
             }
         }
     }
 
     // Anchor cables from end pylons to deck endpoints.
-    let first_p = pylons[0];
-    let last_p = *pylons.last().unwrap();
-    let (cx_f, cy_f, cz_f, perp_f) = path[first_p];
-    let (left_f, right_f) = side_offsets(cx_f, cz_f, perp_f, block_range);
-    let top_f = cy_f + height;
-    let (cx_s, cy_s, cz_s, perp_s) = path[0];
-    let (left_s, right_s) = side_offsets(cx_s, cz_s, perp_s, block_range);
-    draw_cable(
-        editor,
-        left_f.0,
-        top_f,
-        left_f.1,
-        left_s.0,
-        cy_s + 1,
-        left_s.1,
-    );
-    draw_cable(
-        editor,
-        right_f.0,
-        top_f,
-        right_f.1,
-        right_s.0,
-        cy_s + 1,
-        right_s.1,
-    );
-
-    let (cx_l, cy_l, cz_l, perp_l) = path[last_p];
-    let (left_l, right_l) = side_offsets(cx_l, cz_l, perp_l, block_range);
-    let top_l = cy_l + height;
-    let (cx_e, cy_e, cz_e, perp_e) = path[last_idx];
-    let (left_e, right_e) = side_offsets(cx_e, cz_e, perp_e, block_range);
-    draw_cable(
-        editor,
-        left_l.0,
-        top_l,
-        left_l.1,
-        left_e.0,
-        cy_e + 1,
-        left_e.1,
-    );
-    draw_cable(
-        editor,
-        right_l.0,
-        top_l,
-        right_l.1,
-        right_e.0,
-        cy_e + 1,
-        right_e.1,
-    );
+    let anchors = [(first_p, 0), (last_p, last_idx)];
+    for (pylon, end) in anchors {
+        if pylon == end {
+            continue;
+        }
+        let (cx_p, cy_p, cz_p, perp_p) = path[pylon];
+        let (left_p, right_p) = side_offsets(cx_p, cz_p, perp_p, block_range);
+        let (cx_e, cy_e, cz_e, perp_e) = path[end];
+        let (left_e, right_e) = side_offsets(cx_e, cz_e, perp_e, block_range);
+        for (top, foot) in sided(left_p, right_p)
+            .into_iter()
+            .zip(sided(left_e, right_e))
+        {
+            draw_cable(
+                editor,
+                top.0,
+                cy_p + height,
+                top.1,
+                foot.0,
+                cy_e + 1,
+                foot.1,
+            );
+        }
+    }
 }
 
-fn decorate_cable_stayed(editor: &mut WorldEditor, path: &[BridgePathSample], block_range: i32) {
+fn decorate_cable_stayed(
+    editor: &mut WorldEditor,
+    path: &[BridgePathSample],
+    block_range: i32,
+    sides: OpenSides,
+    pylons: &[usize],
+) {
     let total = path.len();
-    if total < CABLE_STAYED_MIN_LENGTH {
+    if pylons.is_empty() {
         return;
     }
     let last_idx = total - 1;
     let height = cable_stayed_tower_height(total);
-    // Twin pylons split the deck in half so cables don't cross between them.
-    let pylons: Vec<usize> = if total >= CABLE_STAYED_TWIN_PYLON_LENGTH {
-        vec![total / 3, (2 * total) / 3]
-    } else {
-        vec![total / 2]
-    };
-    let split = total / 2;
 
     for (idx, &t_tds) in pylons.iter().enumerate() {
         let (cx_t, cy_t, cz_t, perp_t) = path[t_tds];
         let (left_t, right_t) = side_offsets(cx_t, cz_t, perp_t, block_range);
         let top_y = cy_t + height;
-        place_pylon(editor, left_t.0, left_t.1, cy_t, height);
-        place_pylon(editor, right_t.0, right_t.1, cy_t, height);
-        place_pylon_crossbeam(editor, left_t, right_t, top_y);
+        place_pylon_pair(
+            editor,
+            (cx_t, cz_t),
+            perp_t,
+            block_range,
+            cy_t,
+            height,
+            sides,
+        );
+        let tops: Vec<(i32, i32)> = sides.pick(left_t, right_t).collect();
 
-        let (anchor_lo, anchor_hi) = if pylons.len() == 1 {
-            (0usize, total)
-        } else if idx == 0 {
-            (0usize, split)
-        } else {
-            (split, total)
-        };
+        // Each pylon's fan ends halfway to its neighbour, so fans never cross.
+        let anchor_lo = idx
+            .checked_sub(1)
+            .map_or(0, |prev| (pylons[prev] + t_tds) / 2);
+        let anchor_hi = pylons
+            .get(idx + 1)
+            .map_or(total, |&next| (t_tds + next) / 2);
 
-        let mut tds = anchor_lo + CABLE_STAYED_ANCHOR_INTERVAL;
-        while tds < anchor_hi {
-            let gap = tds.abs_diff(t_tds);
-            if gap < CABLE_STAYED_MIN_GAP || tds == 0 || tds == last_idx {
-                tds += CABLE_STAYED_ANCHOR_INTERVAL;
-                continue;
-            }
+        // Symmetric fan around the pylon.
+        let anchors = (1..)
+            .map(|k| k * CABLE_STAYED_ANCHOR_INTERVAL)
+            .take_while(|&d| d < total)
+            .flat_map(|d| [t_tds.checked_sub(d), Some(t_tds + d)])
+            .flatten()
+            .filter(|&tds| {
+                (anchor_lo..anchor_hi).contains(&tds)
+                    && tds != 0
+                    && tds < last_idx
+                    && tds.abs_diff(t_tds) >= CABLE_STAYED_MIN_GAP
+            });
+        for tds in anchors {
             let (cx_a, cy_a, cz_a, perp_a) = path[tds];
             let (left_a, right_a) = side_offsets(cx_a, cz_a, perp_a, block_range);
-            draw_cable(
-                editor,
-                left_t.0,
-                top_y,
-                left_t.1,
-                left_a.0,
-                cy_a + 1,
-                left_a.1,
-            );
-            draw_cable(
-                editor,
-                right_t.0,
-                top_y,
-                right_t.1,
-                right_a.0,
-                cy_a + 1,
-                right_a.1,
-            );
-            tds += CABLE_STAYED_ANCHOR_INTERVAL;
+            for (top, foot) in tops.iter().zip(sides.pick(left_a, right_a)) {
+                draw_cable(editor, top.0, top_y, top.1, foot.0, cy_a + 1, foot.1);
+            }
         }
     }
 }
@@ -704,6 +862,7 @@ fn decorate_covered(
     editor: &mut WorldEditor,
     path: &[BridgePathSample],
     block_range: i32,
+    sides: OpenSides,
     start_is_boundary: bool,
     end_is_boundary: bool,
 ) {
@@ -712,41 +871,81 @@ fn decorate_covered(
         return;
     }
     let last = total - 1;
+    let mut runs = SideRuns::default();
     for (tds, &(cx, cy, cz, perp)) in path.iter().enumerate() {
-        if start_is_boundary && tds < COVERED_END_CLEAR {
-            continue;
-        }
-        if end_is_boundary && tds + COVERED_END_CLEAR > last {
-            continue;
-        }
         let (left, right) = side_offsets(cx, cz, perp, block_range);
-        for h in 1..=COVERED_WALL_HEIGHT {
-            let block = if h == 2 && tds % COVERED_WINDOW_INTERVAL == 0 {
-                GLASS
-            } else {
-                DARK_OAK_PLANKS
-            };
-            editor.set_block_absolute(block, left.0, cy + h, left.1, None, None);
-            editor.set_block_absolute(block, right.0, cy + h, right.1, None, None);
+        let open_end = (start_is_boundary && tds < COVERED_END_CLEAR)
+            || (end_is_boundary && tds + COVERED_END_CLEAR > last);
+        for (side, sample) in sides.indexed(left, right) {
+            let run = runs.step(side, sample);
+            if open_end {
+                continue;
+            }
+            for cell in run {
+                for h in 1..=COVERED_WALL_HEIGHT {
+                    let window = h == 2 && cell == sample && tds % COVERED_WINDOW_INTERVAL == 0;
+                    let block = if window { GLASS } else { DARK_OAK_PLANKS };
+                    editor.set_block_absolute(block, cell.0, cy + h, cell.1, None, None);
+                }
+            }
         }
-        // Roof spans deck width plus walls.
+        if open_end {
+            continue;
+        }
         let roof_y = cy + COVERED_WALL_HEIGHT + 1;
-        let extent = block_range + 1;
-        for offset in -extent..=extent {
-            let rx = (cx as f32 + perp.0 * offset as f32).round() as i32;
-            let rz = (cz as f32 + perp.1 * offset as f32).round() as i32;
+        for (rx, rz) in span_cells(left, right) {
             editor.set_block_absolute(DARK_OAK_PLANKS, rx, roof_y, rz, None, None);
         }
     }
 }
 
-fn place_pylon(editor: &mut WorldEditor, x: i32, z: i32, deck_y: i32, height: i32) {
-    // 1x1 column avoids road-edge overlap on bridges with negative perp components.
-    let ground_y = editor.get_ground_level(x, z);
-    let base_y = ground_y.min(deck_y);
+/// Pylons on the open sides at one path sample, joined by a crossbeam when both stand.
+#[allow(clippy::too_many_arguments)]
+fn place_pylon_pair(
+    editor: &mut WorldEditor,
+    (cx, cz): (i32, i32),
+    perp: (f32, f32),
+    block_range: i32,
+    deck_y: i32,
+    height: i32,
+    sides: OpenSides,
+) {
+    let (left, right) = side_offsets(cx, cz, perp, block_range);
+    let (px, pz) = perp;
+    for (base, outward) in sides.pick((left, (px, pz)), (right, (-px, -pz))) {
+        place_pylon(editor, base, outward, deck_y, height);
+    }
+    if sides.left && sides.right {
+        place_pylon_crossbeam(editor, left, right, deck_y + height);
+    }
+}
+
+/// A 2x2 tower grown outward from the deck edge, from the ground up.
+fn place_pylon(
+    editor: &mut WorldEditor,
+    (x, z): (i32, i32),
+    outward: (f32, f32),
+    deck_y: i32,
+    height: i32,
+) {
+    let along = (outward.1, -outward.0);
     let top_y = deck_y + height;
-    for y in (base_y + 1)..=top_y {
-        editor.set_block_absolute(SMOOTH_STONE, x, y, z, None, None);
+    let mut cells: Vec<(i32, i32)> = Vec::with_capacity(4);
+    for (a, b) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+        let cell = (
+            (x as f32 + outward.0 * a + along.0 * b).round() as i32,
+            (z as f32 + outward.1 * a + along.1 * b).round() as i32,
+        );
+        if !cells.contains(&cell) {
+            cells.push(cell);
+        }
+    }
+    for (px, pz) in cells {
+        let base_y = editor.get_ground_level(px, pz).min(deck_y);
+        for y in (base_y + 1)..=top_y {
+            editor.set_block_absolute(SMOOTH_STONE, px, y, pz, None, None);
+        }
+        editor.register_support_column(px, pz, SMOOTH_STONE);
     }
 }
 
@@ -756,8 +955,8 @@ fn place_pylon_crossbeam(
     right: (i32, i32),
     top_y: i32,
 ) {
-    for (cx, cy, cz) in bresenham_line(left.0, top_y, left.1, right.0, top_y, right.1) {
-        editor.set_block_absolute(SMOOTH_STONE, cx, cy, cz, None, None);
+    for (cx, cz) in span_cells(left, right) {
+        editor.set_block_absolute(SMOOTH_STONE, cx, top_y, cz, None, None);
     }
 }
 

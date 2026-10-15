@@ -257,6 +257,14 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
                 ("update_bit", BedrockBlockStateValue::Bool(false)),
             ],
         ),
+        "melon" => BedrockBlock::simple("melon_block"),
+        "flowering_azalea_leaves" => BedrockBlock::with_states(
+            "azalea_leaves_flowered",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
 
         // Slabs and stairs share their name/state handling with the
         // property-aware path so both entry points stay in sync.
@@ -354,6 +362,30 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             )],
         ),
 
+        // The other small flowers share red_flower too, told apart by flower_type.
+        "cornflower" | "oxeye_daisy" | "allium" | "lily_of_the_valley" | "red_tulip"
+        | "orange_tulip" | "white_tulip" | "pink_tulip" => BedrockBlock::with_states(
+            "red_flower",
+            vec![(
+                "flower_type",
+                BedrockBlockStateValue::String(red_flower_type(java_name).to_string()),
+            )],
+        ),
+
+        "sunflower" | "lilac" | "rose_bush" | "peony" => convert_double_plant(java_name, None),
+        "sweet_berry_bush" => BedrockBlock::with_states(
+            "sweet_berry_bush",
+            vec![("growth", BedrockBlockStateValue::Int(3))],
+        ),
+        "pumpkin" => BedrockBlock::with_states(
+            "pumpkin",
+            vec![("direction", BedrockBlockStateValue::Int(0))],
+        ),
+        "lily_pad" => BedrockBlock::simple("waterlily"),
+        "cactus" => {
+            BedrockBlock::with_states("cactus", vec![("age", BedrockBlockStateValue::Int(0))])
+        }
+
         // Concrete colors (Bedrock uses a single block with color state)
         "white_concrete" => BedrockBlock::with_states(
             "concrete",
@@ -370,6 +402,13 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "gray_concrete_powder" => BedrockBlock::with_states(
             "concretePowder",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
+        ),
+        "light_gray_concrete_powder" => BedrockBlock::with_states(
+            "concretePowder",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("silver".to_string()),
+            )],
         ),
         "brown_concrete_powder" => BedrockBlock::with_states(
             "concretePowder",
@@ -985,7 +1024,10 @@ pub fn to_bedrock_block_with_properties(
     if matches!(java_name, "wheat" | "carrots" | "potatoes") {
         return convert_crop(java_name, props_map);
     }
-    if matches!(java_name, "tall_grass" | "large_fern") {
+    if matches!(
+        java_name,
+        "tall_grass" | "large_fern" | "sunflower" | "lilac" | "rose_bush" | "peony"
+    ) {
         return convert_double_plant(java_name, props_map);
     }
     if java_name == "tall_seagrass" {
@@ -997,12 +1039,181 @@ pub fn to_bedrock_block_with_properties(
     if java_name == "sea_pickle" {
         return convert_sea_pickle(props_map);
     }
+    if java_name == "snow" {
+        return convert_snow_layer(props_map);
+    }
     if java_name == "chiseled_bookshelf" {
         return convert_chiseled_bookshelf(props_map);
+    }
+    if let Some(cave_block) = convert_cave_block(java_name, props_map) {
+        return cave_block;
+    }
+    if java_name.ends_with("_wall") {
+        if let Some(props) = props_map {
+            return convert_connected_wall(to_bedrock_block(block), props);
+        }
     }
 
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
+}
+
+/// Carries Java wall connections over to Bedrock's wall states.
+fn convert_connected_wall(
+    mut wall: BedrockBlock,
+    props: &std::collections::HashMap<String, fastnbt::Value>,
+) -> BedrockBlock {
+    let prop = |key: &str| match props.get(key) {
+        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
+        _ => None,
+    };
+    for side in ["east", "north", "south", "west"] {
+        let connection = match prop(side) {
+            Some("low") => "short",
+            Some("tall") => "tall",
+            _ => "none",
+        };
+        wall.states.insert(
+            format!("wall_connection_type_{side}"),
+            BedrockBlockStateValue::String(connection.to_string()),
+        );
+    }
+    wall.states.insert(
+        "wall_post_bit".to_string(),
+        BedrockBlockStateValue::Bool(prop("up") != Some("false")),
+    );
+    wall
+}
+
+/// Blocks the cave passes place whose Bedrock form differs from Java's. Like the rest of this
+/// file, the older Bedrock names (`coral_block` with a colour state) are used; the game
+/// upgrades them on load.
+fn convert_cave_block(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> Option<BedrockBlock> {
+    use BedrockBlockStateValue::{Bool, Int, String as Str};
+    let prop = |key: &str| match props.and_then(|p| p.get(key)) {
+        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
+        _ => None,
+    };
+    let is_true = |key: &str| prop(key) == Some("true");
+    // Bedrock's facing_direction order: down, up, north, south, west, east.
+    let facing_direction = |facing: Option<&str>| match facing {
+        Some("down") => 0,
+        Some("north") => 2,
+        Some("south") => 3,
+        Some("west") => 4,
+        Some("east") => 5,
+        _ => 1,
+    };
+    let coral_color = |species: &str| match species {
+        "tube" => "blue",
+        "brain" => "pink",
+        "bubble" => "purple",
+        "fire" => "red",
+        _ => "yellow",
+    };
+
+    Some(match java_name {
+        "pointed_dripstone" => BedrockBlock::with_states(
+            "pointed_dripstone",
+            vec![
+                (
+                    "dripstone_thickness",
+                    Str(match prop("thickness").unwrap_or("tip") {
+                        "tip_merge" => "merge".to_string(),
+                        other => other.to_string(),
+                    }),
+                ),
+                ("hanging", Bool(prop("vertical_direction") == Some("down"))),
+            ],
+        ),
+        // One bit per covered face: down, up, south, west, north, east.
+        "glow_lichen" | "sculk_vein" => {
+            let bits = ["down", "up", "south", "west", "north", "east"]
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| is_true(face))
+                .fold(0, |acc, (i, _)| acc | (1 << i));
+            // 0 would cover every face; a face-less block lies on the floor.
+            let bits = if bits == 0 { 1 } else { bits };
+            BedrockBlock::with_states(java_name, vec![("multi_face_direction_bits", Int(bits))])
+        }
+        // Bedrock splits the vines by berries and by head/body rather than using a state.
+        "cave_vines" | "cave_vines_plant" => {
+            let name = match (java_name == "cave_vines", is_true("berries")) {
+                (true, true) => "cave_vines_head_with_berries",
+                (false, true) => "cave_vines_body_with_berries",
+                _ => "cave_vines",
+            };
+            BedrockBlock::with_states(name, vec![("growing_plant_age", Int(25))])
+        }
+        "amethyst_cluster"
+        | "small_amethyst_bud"
+        | "medium_amethyst_bud"
+        | "large_amethyst_bud" => BedrockBlock::with_states(
+            java_name,
+            vec![("facing_direction", Int(facing_direction(prop("facing"))))],
+        ),
+        "big_dripleaf" | "big_dripleaf_stem" => BedrockBlock::with_states(
+            "big_dripleaf",
+            vec![
+                ("big_dripleaf_head", Bool(java_name == "big_dripleaf")),
+                ("big_dripleaf_tilt", Str("none".to_string())),
+                ("direction", Int(0)),
+            ],
+        ),
+        "small_dripleaf" => BedrockBlock::with_states(
+            "small_dripleaf_block",
+            vec![
+                ("upper_block_bit", Bool(prop("half") == Some("upper"))),
+                ("direction", Int(0)),
+            ],
+        ),
+        "basalt" => convert_log(java_name, props),
+        // All six faces show the cap (14) or the stem (15).
+        "red_mushroom_block" | "brown_mushroom_block" => {
+            BedrockBlock::with_states(java_name, vec![("huge_mushroom_bits", Int(14))])
+        }
+        "mushroom_stem" => {
+            BedrockBlock::with_states("mushroom_stem", vec![("huge_mushroom_bits", Int(15))])
+        }
+        name if name.ends_with("_coral_block") => {
+            let dead = name.starts_with("dead_");
+            let species = name
+                .trim_start_matches("dead_")
+                .trim_end_matches("_coral_block");
+            BedrockBlock::with_states(
+                "coral_block",
+                vec![
+                    ("coral_color", Str(coral_color(species).to_string())),
+                    ("dead_bit", Bool(dead)),
+                ],
+            )
+        }
+        name if name.ends_with("_coral_fan") => BedrockBlock::with_states(
+            "coral_fan",
+            vec![
+                (
+                    "coral_color",
+                    Str(coral_color(name.trim_end_matches("_coral_fan")).to_string()),
+                ),
+                ("coral_fan_direction", Int(0)),
+            ],
+        ),
+        name if name.ends_with("_coral") => BedrockBlock::with_states(
+            "coral",
+            vec![
+                (
+                    "coral_color",
+                    Str(coral_color(name.trim_end_matches("_coral")).to_string()),
+                ),
+                ("dead_bit", Bool(false)),
+            ],
+        ),
+        _ => return None,
+    })
 }
 
 /// Convert Java stair block to Bedrock format with proper orientation.
@@ -1590,10 +1801,13 @@ fn convert_double_plant(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let plant_type = if java_name == "large_fern" {
-        "fern"
-    } else {
-        "grass"
+    let plant_type = match java_name {
+        "large_fern" => "fern",
+        "sunflower" => "sunflower",
+        "lilac" => "syringa",
+        "rose_bush" => "rose",
+        "peony" => "paeonia",
+        _ => "grass",
     };
 
     BedrockBlock::with_states(
@@ -1609,6 +1823,21 @@ fn convert_double_plant(
             ),
         ],
     )
+}
+
+/// Legacy `flower_type` of the small flowers Bedrock folds into `red_flower`.
+fn red_flower_type(java_name: &str) -> &'static str {
+    match java_name {
+        "cornflower" => "cornflower",
+        "oxeye_daisy" => "oxeye",
+        "allium" => "allium",
+        "lily_of_the_valley" => "lily_of_the_valley",
+        "red_tulip" => "tulip_red",
+        "orange_tulip" => "tulip_orange",
+        "white_tulip" => "tulip_white",
+        "pink_tulip" => "tulip_pink",
+        _ => "poppy",
+    }
 }
 
 /// Convert Java `tall_seagrass` to Bedrock's `seagrass`, which encodes both
@@ -1675,6 +1904,26 @@ fn convert_sea_pickle(
             // dead_bit marks a pickle that is NOT underwater; Arnis only places
             // them submerged.
             ("dead_bit", BedrockBlockStateValue::Bool(false)),
+        ],
+    )
+}
+
+/// Convert a Java snow layer; Bedrock counts `height` from zero.
+fn convert_snow_layer(
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let layers = props
+        .and_then(|p| p.get("layers"))
+        .and_then(parse_int_property)
+        .unwrap_or(1);
+    BedrockBlock::with_states(
+        "snow_layer",
+        vec![
+            (
+                "height",
+                BedrockBlockStateValue::Int((layers - 1).clamp(0, 7)),
+            ),
+            ("covered_bit", BedrockBlockStateValue::Bool(false)),
         ],
     )
 }
@@ -1772,6 +2021,18 @@ mod tests {
     use crate::block_definitions::{AIR, GRASS_BLOCK, STONE};
 
     #[test]
+    fn snow_layers_keep_their_height() {
+        for (i, layer) in crate::block_definitions::SNOW_LAYERS.iter().enumerate() {
+            let bedrock = to_bedrock_block_with_properties(*layer, None);
+            assert_eq!(bedrock.name, "minecraft:snow_layer");
+            assert_eq!(
+                bedrock.states.get("height"),
+                Some(&BedrockBlockStateValue::Int(i as i32))
+            );
+        }
+    }
+
+    #[test]
     fn test_simple_blocks() {
         let bedrock = to_bedrock_block(STONE);
         assert_eq!(bedrock.name, "minecraft:stone");
@@ -1807,6 +2068,48 @@ mod tests {
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "gray"
         ));
+    }
+
+    #[test]
+    fn joined_walls_keep_their_connections_on_bedrock() {
+        use crate::block_definitions::BRICK_WALL;
+        let props = fastnbt::Value::Compound(std::collections::HashMap::from([
+            (
+                "east".to_string(),
+                fastnbt::Value::String("low".to_string()),
+            ),
+            (
+                "west".to_string(),
+                fastnbt::Value::String("low".to_string()),
+            ),
+            (
+                "north".to_string(),
+                fastnbt::Value::String("none".to_string()),
+            ),
+            (
+                "south".to_string(),
+                fastnbt::Value::String("none".to_string()),
+            ),
+            (
+                "up".to_string(),
+                fastnbt::Value::String("false".to_string()),
+            ),
+        ]));
+        let bedrock = to_bedrock_block_with_properties(BRICK_WALL, Some(&props));
+        let state = |k: &str| bedrock.states.get(k).cloned();
+        assert_eq!(
+            state("wall_connection_type_east"),
+            Some(BedrockBlockStateValue::String("short".to_string()))
+        );
+        assert_eq!(
+            state("wall_connection_type_north"),
+            Some(BedrockBlockStateValue::String("none".to_string()))
+        );
+        assert_eq!(
+            state("wall_post_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        );
+        assert!(bedrock.states.contains_key("wall_block_type"));
     }
 
     #[test]
@@ -2119,12 +2422,18 @@ mod tests {
     #[test]
     fn test_double_plants_keep_their_half() {
         use crate::block_definitions::{
-            LARGE_FERN_LOWER, LARGE_FERN_UPPER, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+            LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, PEONY_LOWER, PEONY_UPPER,
+            ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SUNFLOWER_LOWER, SUNFLOWER_UPPER, TALL_GRASS_BOTTOM,
+            TALL_GRASS_TOP,
         };
 
         for (lower, upper, plant) in [
             (TALL_GRASS_BOTTOM, TALL_GRASS_TOP, "grass"),
             (LARGE_FERN_LOWER, LARGE_FERN_UPPER, "fern"),
+            (SUNFLOWER_LOWER, SUNFLOWER_UPPER, "sunflower"),
+            (LILAC_LOWER, LILAC_UPPER, "syringa"),
+            (ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, "rose"),
+            (PEONY_LOWER, PEONY_UPPER, "paeonia"),
         ] {
             for (block, is_upper) in [(lower, false), (upper, true)] {
                 let bedrock = to_bedrock_block_with_properties(block, None);
@@ -2141,6 +2450,24 @@ mod tests {
                     "wrong half for {plant} (upper={is_upper})"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_small_flowers_fold_into_red_flower() {
+        use crate::block_definitions::{CORNFLOWER, OXEYE_DAISY, PINK_TULIP};
+
+        for (block, flower_type) in [
+            (CORNFLOWER, "cornflower"),
+            (OXEYE_DAISY, "oxeye"),
+            (PINK_TULIP, "tulip_pink"),
+        ] {
+            let bedrock = to_bedrock_block_with_properties(block, None);
+            assert_eq!(bedrock.name, "minecraft:red_flower");
+            assert!(matches!(
+                bedrock.states.get("flower_type"),
+                Some(BedrockBlockStateValue::String(t)) if t == flower_type
+            ));
         }
     }
 

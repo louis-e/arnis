@@ -14,9 +14,10 @@
   const MINI_MAX_AREA_M2 = 500000000;
   // Mirrors BUILDINGS_MAX_AREA_M2 in preview_3d.rs.
   const BUILDINGS_MAX_AREA_M2 = 10000000;
-  // Arnis palette: panel gray hosts the mini, modal gray hosts the expanded view.
+  // The base plate fades into what hosts the view: the panel gray for the
+  // mini, the expanded view's dark viewport (#preview3d-map in preview3d.css).
   const PANEL_BG = "#575757";
-  const MODAL_BG = "#717171";
+  const MODAL_BG = "#262626";
   // Terrain outside the bbox fades onto a flat plate over this fraction of the
   // bbox span, replacing the stretched clamp-to-edge look with a clean base.
   const EDGE_FADE_FRAC = 0.12;
@@ -306,10 +307,9 @@
   }
 
   async function fetchTerrain(bboxText) {
-    // Follow the Legacy terrain toggle for the AWS-vs-global choice; the
-    // preview uses global-only tiles and skips regional providers, so it
-    // approximates rather than exactly matches generation. The toggle is
-    // part of the cache key so flipping it refetches.
+    // Follow the Legacy terrain toggle for the AWS-vs-Mapterhorn choice, the
+    // same source generation uses. The toggle is part of the cache key so
+    // flipping it refetches.
     const legacyToggle = document.getElementById("aws-only-elevation-toggle");
     const awsOnly = !!(legacyToggle && legacyToggle.checked);
     const cacheKey = bboxText + "|" + awsOnly;
@@ -940,8 +940,9 @@
     const buildingsGated = bboxAreaM2(bboxText) > BUILDINGS_MAX_AREA_M2;
     bToggle.disabled = true;
     bToggle.checked = !buildingsGated;
+    const loc = window.localization || {};
     bToggle.parentElement.title = buildingsGated
-      ? "Area too large for the buildings overlay (max 10 km²)"
+      ? loc.preview3d_buildings_too_large || "Area too large for the buildings overlay (max 10 km²)"
       : "";
     modalView = { map: map, gen: d.gen };
     attachBuildings(modalView, bboxText);
@@ -949,19 +950,39 @@
     gcDatasets();
   }
 
+  // Where focus goes back to once the viewer closes, as with the other dialogs
+  // (showModal/hideModal in main.js).
+  let focusBeforeModal = null;
+
   // Clicking the mini preview reuses the cached payload for an instant
   // modal open (same data, bigger canvas).
   window.expandPreview3D = function () {
     if (!payloadCache.data) return;
     const modal = document.getElementById("preview3d-modal");
+    if (!isModalOpen()) focusBeforeModal = document.activeElement;
     modal.style.display = "flex";
+    // Keyboard focus into the dialog, off the map behind it.
+    const dialog = modal.querySelector(".dialog");
+    if (dialog) dialog.focus({ preventScroll: true });
     setStatus(null);
     openModalWithData(payloadCache.data, payloadCache.data.bboxText);
     loadBuildings(payloadCache.data.bboxText);
   };
 
   window.closePreview3D = function () {
-    document.getElementById("preview3d-modal").style.display = "none";
+    const modal = document.getElementById("preview3d-modal");
+    const focusInside = modal.contains(document.activeElement);
+    modal.style.display = "none";
+    // Back to what had focus before it opened. If that is gone (or was the
+    // page itself), at least do not leave focus on a control now hidden.
+    const back = focusBeforeModal;
+    focusBeforeModal = null;
+    if (back && back !== document.body && document.contains(back) &&
+        typeof back.focus === "function") {
+      back.focus({ preventScroll: true });
+    } else if (focusInside) {
+      document.activeElement.blur();
+    }
     disposeView(modalView);
     modalView = null;
     gcDatasets();

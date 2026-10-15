@@ -87,11 +87,11 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
 
     let _mute = ProgressMute::new();
 
-    // Previews skip the regional providers; Mapterhorn is global and fast.
+    // The same source as a real run, so the preview shows the terrain it will get.
     let source_mode = if aws_only {
         crate::elevation::SourceMode::AwsOnly
     } else {
-        crate::elevation::SourceMode::GlobalOnly
+        crate::elevation::SourceMode::Auto
     };
 
     // ground_level 0 keeps the meter->Y affine trivially invertible below; passing the same
@@ -99,6 +99,7 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
     let elevation = fetch_elevation_data(
         &bbox,
         preview_scale,
+        1.0,
         0,
         0,
         false,
@@ -106,6 +107,8 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
         None,
         source_mode,
         false,
+        compute_grid_dims(&bbox, preview_scale),
+        crate::elevation::AffinePolicy::Fit,
     )
     .map_err(|e| format!("Elevation fetch failed: {e}"))?;
 

@@ -6,6 +6,7 @@ use include_dir::{include_dir, Dir};
 
 use crate::args::Args;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::ecoregion::{self, EcoMap};
 use crate::trees::region::RegionLibrary;
 use crate::trees::tree_library::SizeFilter;
 
@@ -26,6 +27,11 @@ impl TreePackSource {
         TreePackSource {
             realm: realm.to_string(),
         }
+    }
+
+    /// Pack directory, as ecoregion tree mixes name it.
+    pub fn code(&self) -> &str {
+        &self.realm
     }
 
     pub fn realm_manifest(&self) -> Option<Cow<'static, [u8]>> {
@@ -68,13 +74,14 @@ pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
     "vanilla-plus"
 }
 
-/// Load the region tree pack (realm from bbox center), or None for legacy procedural trees.
+/// Load the pack of the area's main ecoregion (else by bbox centre), or None for legacy trees.
 pub fn load(
     args: &Args,
     bbox: LLBBox,
     scale: f64,
     ground_level: i32,
     blocks_per_meter: f64,
+    ecoregions: Option<&EcoMap>,
 ) -> Option<RegionLibrary> {
     if args.legacy_trees {
         return None;
@@ -82,10 +89,25 @@ pub fn load(
     let sizes = SizeFilter::up_to(args.max_tree_size);
     let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
     let lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-    let realm = realm_for_latlon(lat, lon);
+    let mapped: Vec<(u16, &'static str)> = ecoregions
+        .map(EcoMap::by_area)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(id, _)| ecoregion::tree_mix(id).map(|(pack, _)| (id, pack)))
+        .collect();
+    let realm = mapped
+        .first()
+        .map_or_else(|| realm_for_latlon(lat, lon), |&(_, pack)| pack);
     let source = TreePackSource::embedded(realm);
-    // No palms outside the subtropics (the wide ena realm also spans the Caribbean).
-    let exclude_palms = lat.abs() > 35.0;
+    let ids: Vec<u16> = mapped.iter().map(|&(id, _)| id).collect();
+    // Palms stay loaded if any part of the area grows them; the ecoregion gates each cell.
+    let abs_lat = lat.abs();
+    let unmapped_palms = ecoregions.is_none_or(EcoMap::has_gaps) && abs_lat <= 35.0;
+    let exclude_palms = !unmapped_palms
+        && !ids
+            .iter()
+            .filter_map(|&id| ecoregion::lookup(id))
+            .any(|eco| ecoregion::palms_belong(eco, abs_lat));
 
     match RegionLibrary::load(
         &source,
@@ -95,8 +117,18 @@ pub fn load(
         sizes,
         exclude_palms,
     ) {
-        Ok(lib) => {
+        Ok(mut lib) => {
+            // Micro trees below this scale never stamp a model, so nothing to resolve.
+            if scale >= crate::element_processing::tree::MICRO_TREE_MAX_SCALE {
+                lib.attach_ecoregions(&ids, abs_lat);
+            }
             lib.report();
+            if let Some(name) = ids.first().and_then(|&id| ecoregion::name(id)) {
+                match ids.len() {
+                    1 => println!("  ecoregion: {name}"),
+                    n => println!("  ecoregion: {name} (+{} more in the area)", n - 1),
+                }
+            }
             Some(lib)
         }
         Err(e) => {

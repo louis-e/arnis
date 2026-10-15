@@ -450,6 +450,17 @@ function validateStringAsBounds(bounds) {
             parseFloat(splitBounds[1]) < parseFloat(splitBounds[3])))
 }
 
+// Interface text for the map. This page is an iframe of index.html (same
+// origin) and the locale is loaded by the top document, so the strings are
+// read through the parent; the English covers the moment before they arrive.
+function mapText(key, fallback) {
+    var loc = window.localization
+        || (window.parent && window.parent !== window && window.parent.localization)
+        || null;
+    return (loc && typeof loc[key] === 'string' && loc[key]) || fallback;
+}
+window.mapText = mapText;
+
 $(document).ready(function () {
     /* 
     **
@@ -875,23 +886,16 @@ $(document).ready(function () {
     var selectedEarthTheme = savedTheme;
 
     var BODY_CYCLE = ['earth', 'moon', 'mars'];
-    var BODY_LABELS = {
-        earth: 'Earth',
-        moon: 'Moon (NASA terrain only, 1 block = 200 m)',
-        mars: 'Mars (NASA terrain only, 1 block = 500 m)'
-    };
     var _bodyToggleBtn = null;
 
-    // Icon and tooltip carry the whole state: which world is selected and which
-    // one the next click brings.
+    // Icon and tooltip carry the whole state: which world is selected, and
+    // (in the tooltip) its block size off Earth.
     function syncBodyToggleButton() {
         if (!_bodyToggleBtn) return;
-        var next = BODY_CYCLE[(BODY_CYCLE.indexOf(currentBody) + 1) % BODY_CYCLE.length];
         BODY_CYCLE.forEach(function (b) {
             _bodyToggleBtn.classList.toggle('body-' + b, b === currentBody);
         });
-        _bodyToggleBtn.title = 'World: ' + BODY_LABELS[currentBody] +
-            '\nClick to switch to ' + next.charAt(0).toUpperCase() + next.slice(1);
+        refreshToolLabel(_bodyToggleBtn);
     }
 
     // Driven by the world toggle in the map toolbar. Earth is restored on every
@@ -935,12 +939,78 @@ $(document).ready(function () {
 
     applyBasemap();
 
-    // World overlay state
+    // World overlay state. For a One World the data carries `areas` and the
+    // overlay is a layer group.
     var worldOverlay = null;
     var worldOverlayData = null;
     var worldOverlayEnabled = false;
     var worldPreviewAvailable = false;
     var sliderControl = null;
+    // One World: the user hid the areas, and the world they were hidden for.
+    var oneWorldOverlayHidden = false;
+    // Slider positions: a One World shows its areas opaque unless told otherwise.
+    var overlayOpacity = { world: 50, oneWorld: 100 };
+    var oneWorldFittedPath = null;
+
+    function setWorldOverlayOpacity(value) {
+        if (!worldOverlay) return;
+        if (typeof worldOverlay.setOpacity === 'function') {
+            worldOverlay.setOpacity(value);
+            return;
+        }
+        worldOverlay.eachLayer(function (layer) {
+            if (typeof layer.setOpacity === 'function') {
+                layer.setOpacity(value);
+            } else if (typeof layer.setStyle === 'function') {
+                layer.setStyle({
+                    opacity: Math.min(1, value + 0.3),
+                    fillOpacity: layer.options.arnisFill ? value * 0.15 : 0
+                });
+            }
+        });
+    }
+
+    function buildWorldOverlay(data, opacityValue) {
+        if (!data.areas) {
+            var bounds = L.latLngBounds([data.min_lat, data.min_lon], [data.max_lat, data.max_lon]);
+            return L.imageOverlay(data.image_base64, bounds, {
+                opacity: opacityValue,
+                interactive: false,
+                zIndex: 500
+            });
+        }
+        var group = L.layerGroup();
+        data.areas.forEach(function (area, index) {
+            var b = L.latLngBounds([area.min_lat, area.min_lon], [area.max_lat, area.max_lon]);
+            if (area.image_base64) {
+                group.addLayer(L.imageOverlay(area.image_base64, b, {
+                    opacity: opacityValue,
+                    interactive: false,
+                    zIndex: 500 + index
+                }));
+            }
+            // Filled only where there is no image to show.
+            group.addLayer(L.rectangle(b, {
+                color: '#fecc44',
+                weight: 1,
+                opacity: Math.min(1, opacityValue + 0.3),
+                fillColor: '#fecc44',
+                fillOpacity: area.image_base64 ? 0 : opacityValue * 0.15,
+                arnisFill: !area.image_base64,
+                interactive: false
+            }));
+        });
+        return group;
+    }
+
+    function oneWorldBounds(areas) {
+        var bounds = null;
+        areas.forEach(function (area) {
+            var b = L.latLngBounds([area.min_lat, area.min_lon], [area.max_lat, area.max_lon]);
+            bounds = bounds ? bounds.extend(b) : b;
+        });
+        return bounds;
+    }
 
     // Create the opacity slider as a proper Leaflet control
     var SliderControl = L.Control.extend({
@@ -959,9 +1029,9 @@ $(document).ready(function () {
             slider.title = 'Overlay Opacity';
 
             L.DomEvent.on(slider, 'input', function(e) {
-                if (worldOverlay) {
-                    worldOverlay.setOpacity(e.target.value / 100);
-                }
+                var kind = worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
+                overlayOpacity[kind] = Number(e.target.value);
+                setWorldOverlayOpacity(e.target.value / 100);
             });
 
             // Prevent all map interactions
@@ -993,7 +1063,6 @@ $(document).ready(function () {
             var toggleBtn = document.createElement('a');
             toggleBtn.className = 'leaflet-draw-edit-preview disabled';
             toggleBtn.href = '#';
-            toggleBtn.title = 'Show World Preview (not available yet)';
             toggleBtn.id = 'world-preview-btn';
 
             toggleBtn.addEventListener('click', function(e) {
@@ -1001,10 +1070,12 @@ $(document).ready(function () {
                 e.stopPropagation();
                 if (worldPreviewAvailable) {
                     toggleWorldOverlay();
+                    oneWorldOverlayHidden = !worldOverlayEnabled;
                 }
             });
 
             editToolbar.appendChild(toggleBtn);
+            refreshToolLabel(toggleBtn);
 
             // Add the slider control to the map
             sliderControl = new SliderControl();
@@ -1023,10 +1094,6 @@ $(document).ready(function () {
         if (worldOverlayEnabled) {
             // Show overlay
             var data = worldOverlayData;
-            var bounds = L.latLngBounds(
-                [data.min_lat, data.min_lon],
-                [data.max_lat, data.max_lon]
-            );
 
             if (worldOverlay) {
                 map.removeLayer(worldOverlay);
@@ -1035,16 +1102,12 @@ $(document).ready(function () {
             var opacity = document.getElementById('world-preview-opacity');
             var opacityValue = opacity ? opacity.value / 100 : 0.5;
 
-            worldOverlay = L.imageOverlay(data.image_base64, bounds, {
-                opacity: opacityValue,
-                interactive: false,
-                zIndex: 500
-            });
+            worldOverlay = buildWorldOverlay(data, opacityValue);
             worldOverlay.addTo(map);
 
             if (btn) {
                 btn.classList.add('active');
-                btn.title = 'Hide World Preview';
+                refreshToolLabel(btn);
             }
             if (sliderContainer) {
                 sliderContainer.style.display = 'block';
@@ -1057,7 +1120,7 @@ $(document).ready(function () {
             }
             if (btn) {
                 btn.classList.remove('active');
-                btn.title = 'Show World Preview';
+                refreshToolLabel(btn);
             }
             if (sliderContainer) {
                 sliderContainer.style.display = 'none';
@@ -1075,10 +1138,12 @@ $(document).ready(function () {
         }
         worldOverlayData = data;
         worldPreviewAvailable = true;
+        var slider = document.getElementById('world-preview-opacity');
+        if (slider) slider.value = String(overlayOpacity[data.areas ? 'oneWorld' : 'world']);
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('disabled');
-            btn.title = 'Show World Preview';
+            refreshToolLabel(btn);
         }
     }
 
@@ -1098,7 +1163,7 @@ $(document).ready(function () {
         if (btn) {
             btn.classList.add('disabled');
             btn.classList.remove('active');
-            btn.title = 'Show World Preview (not available yet)';
+            refreshToolLabel(btn);
         }
         if (sliderContainer) {
             sliderContainer.style.display = 'none';
@@ -1185,6 +1250,20 @@ $(document).ready(function () {
 
         var data = worldOverlayData;
 
+        // One World: same projection as src/projection/web_mercator.rs.
+        if (data.areas) {
+            var R = 6371000.0;
+            var rad = Math.PI / 180;
+            var k = data.scale * Math.cos(data.origin_lat * rad);
+            var mercY = function (latDeg) {
+                return R * Math.log(Math.tan(Math.PI / 4 + latDeg * rad / 2));
+            };
+            var x = Math.floor(R * (lng - data.origin_lon) * rad * k);
+            var z = Math.floor(-(mercY(lat) - mercY(data.origin_lat)) * k);
+            // Terrain can be anywhere from Y -2014 to 2016, so land on the top block.
+            return { x: x, y: 100, z: z, command: '/spreadplayers ' + x + ' ' + z + ' 0 1 false @s' };
+        }
+
         // Check if Minecraft coordinate bounds are available (not all zeros)
         if (data.min_mc_x === 0 && data.max_mc_x === 0 && 
             data.min_mc_z === 0 && data.max_mc_z === 0) {
@@ -1220,7 +1299,7 @@ $(document).ready(function () {
         var coords = calculateMinecraftCoords(lat, lng);
         if (!coords) return;
 
-        var tpCommand = '/tp ' + coords.x + ' ' + coords.y + ' ' + coords.z;
+        var tpCommand = coords.command || ('/tp ' + coords.x + ' ' + coords.y + ' ' + coords.z);
 
         // Copy to clipboard using modern API with fallback
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1271,8 +1350,10 @@ $(document).ready(function () {
             var lat = e.latlng.lat;
             var lng = e.latlng.lng;
 
-            if (lat >= data.min_lat && lat <= data.max_lat &&
-                lng >= data.min_lon && lng <= data.max_lon) {
+            var inside = function (b) {
+                return lat >= b.min_lat && lat <= b.max_lat && lng >= b.min_lon && lng <= b.max_lon;
+            };
+            if (data.areas ? data.areas.some(inside) : inside(data)) {
                 showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng);
             }
         }
@@ -1375,6 +1456,35 @@ $(document).ready(function () {
         // Handle world changed (disable preview)
         if (event.data && event.data.type === 'worldChanged') {
             disableWorldPreview();
+        }
+
+        // One World: every generated area. An empty list clears them.
+        if (event.data && event.data.type === 'oneWorldOverlays') {
+            var areas = event.data.areas || [];
+            var worldPath = event.data.world_path || null;
+            if (worldPath !== oneWorldFittedPath) oneWorldOverlayHidden = false;
+            disableWorldPreview();
+            if (areas.length > 0) {
+                enableWorldPreview({
+                    areas: areas,
+                    origin_lat: event.data.origin_lat,
+                    origin_lon: event.data.origin_lon,
+                    scale: event.data.scale
+                });
+                if (worldPreviewAvailable && !oneWorldOverlayHidden) {
+                    toggleWorldOverlay();
+                }
+                if (worldPath !== oneWorldFittedPath) {
+                    var bounds = oneWorldBounds(areas);
+                    if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
+                }
+            }
+            oneWorldFittedPath = areas.length > 0 ? worldPath : null;
+        }
+
+        // One World keeps rotation at 0.
+        if (event.data && event.data.type === 'setRotationLocked') {
+            setRotationLocked(!!event.data.locked);
         }
 
         // Handle rotation preview angle update (store it for preview-skip logic)
@@ -1504,6 +1614,196 @@ $(document).ready(function () {
     });
     map.addControl(drawControl);
 
+    // ========== Toolbar labels and tooltips ==========
+    // Every button says what it is and what it does, and the ones that depend
+    // on the selection say why they cannot be used yet. The text is shown in
+    // the map's own tooltip beside the button: the browser's title bubble is
+    // slow, plain and was English only. The state lives in this file, so each
+    // button is described from it rather than from a string set elsewhere.
+    var BODY_METRES_PER_BLOCK = { moon: 200, mars: 500 };
+    var toolTip = document.createElement('div');
+    toolTip.className = 'map-tool-tip';
+    toolTip.setAttribute('role', 'tooltip');
+    map.getContainer().appendChild(toolTip);
+    var toolTipFor = null;
+
+    function describeTool(btn) {
+        var c = btn.classList;
+        if (c.contains('leaflet-draw-draw-rectangle')) {
+            return {
+                name: mapText('map_tool_area', 'Select area'),
+                desc: mapText('map_tool_area_desc', 'Drag over the map to choose what gets generated.')
+            };
+        }
+        if (c.contains('leaflet-draw-draw-polyline')) {
+            return {
+                name: mapText('map_tool_rotation', 'Rotation angle'),
+                desc: mapText('map_tool_rotation_desc', 'Draw a line along a street to line the world up with it.'),
+                note: _rotationLocked ? mapText('map_tool_rotation_one_world', 'Off in One World mode.') : ''
+            };
+        }
+        if (c.contains('leaflet-draw-draw-marker')) {
+            return {
+                name: mapText('map_tool_spawn', 'Spawn point'),
+                desc: mapText('map_tool_spawn_desc', 'Click where players start in the world.')
+            };
+        }
+        if (c.contains('leaflet-draw-edit-remove')) {
+            return {
+                name: mapText('map_tool_clear', 'Clear selection'),
+                desc: mapText('map_tool_clear_desc', 'Removes the selected area and the spawn point.'),
+                note: drawnItems.getLayers().length ? '' : mapText('map_tool_clear_empty', 'Nothing is selected yet.')
+            };
+        }
+        if (btn.id === 'world-preview-btn') {
+            return {
+                name: mapText('map_tool_world_preview', 'World preview'),
+                desc: mapText('map_tool_world_preview_desc', 'Lays the generated world over the map.'),
+                note: worldPreviewAvailable ? '' : mapText('map_tool_world_preview_unavailable', 'Available after generating a world.')
+            };
+        }
+        if (btn.id === 'terrain-preview-btn') {
+            var terrainNote = '';
+            if (c.contains('disabled')) {
+                terrainNote = currentBody !== 'earth'
+                    ? mapText('map_tool_terrain_earth_only', 'Only available on Earth.')
+                    : mapText('map_tool_terrain_select', 'Select an area of up to 500 km² first.');
+            }
+            return {
+                name: mapText('map_tool_terrain', '3D terrain preview'),
+                desc: mapText('map_tool_terrain_desc', "Shows the selected area's terrain in 3D."),
+                note: terrainNote
+            };
+        }
+        if (btn.id === 'body-toggle-btn') {
+            var bodyName = mapText('body_' + currentBody,
+                currentBody.charAt(0).toUpperCase() + currentBody.slice(1));
+            var metres = BODY_METRES_PER_BLOCK[currentBody];
+            return {
+                name: mapText('celestial_body', 'World') + ': ' + bodyName,
+                desc: mapText('map_tool_body_desc', 'Click to switch between Earth, the Moon and Mars.'),
+                note: metres
+                    ? mapText('map_tool_body_scale', 'NASA terrain only, 1 block = {m} m.').replace('{m}', metres)
+                    : ''
+            };
+        }
+        return null;
+    }
+
+    function showToolTip(btn) {
+        var d = describeTool(btn);
+        if (!d) {
+            hideToolTip();
+            return;
+        }
+        toolTip.textContent = '';
+        var name = document.createElement('strong');
+        name.textContent = d.name;
+        var desc = document.createElement('span');
+        desc.textContent = d.desc;
+        toolTip.appendChild(name);
+        toolTip.appendChild(desc);
+        if (d.note) {
+            var note = document.createElement('span');
+            note.className = 'map-tool-tip-note';
+            note.textContent = d.note;
+            toolTip.appendChild(note);
+        }
+        var mapRect = map.getContainer().getBoundingClientRect();
+        var r = btn.getBoundingClientRect();
+        // Centred on the button, but kept inside the map: the top button sits
+        // close to its edge, and the map clips what hangs over.
+        var half = toolTip.offsetHeight / 2;
+        var centre = r.top - mapRect.top + r.height / 2;
+        centre = Math.max(half + 6, Math.min(centre, mapRect.height - half - 6));
+        toolTip.style.left = (r.right - mapRect.left + 10) + 'px';
+        toolTip.style.top = centre + 'px';
+        toolTip.classList.add('is-visible');
+        toolTipFor = btn;
+    }
+
+    function hideToolTip() {
+        toolTip.classList.remove('is-visible');
+        toolTipFor = null;
+    }
+
+    // The accessible name follows the same description, and an open tooltip
+    // follows a state change under the pointer (e.g. the selection cleared).
+    function refreshToolLabel(btn) {
+        if (!btn) return;
+        btn.removeAttribute('title');
+        var d = describeTool(btn);
+        if (d) btn.setAttribute('aria-label', d.note ? d.name + '. ' + d.note : d.name);
+        if (btn === toolTipFor) showToolTip(btn);
+    }
+    window.refreshMapToolLabel = refreshToolLabel;
+
+    // Whether this user has ever selected an area. The hint at the bottom of
+    // the map and the outline on the area tool teach that one step; once it
+    // has been done they stay away, across restarts too. Storage that throws
+    // (blocked, private) simply keeps teaching. The key is written out in both
+    // functions: they are hoisted, and may run before a variable here is set.
+    function areaToolLearned() {
+        try {
+            return localStorage.getItem('arnis-area-selected-once') === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function markAreaToolLearned() {
+        try {
+            localStorage.setItem('arnis-area-selected-once', 'true');
+        } catch (e) {
+            // Not remembered; the hint returns next time, which is harmless.
+        }
+    }
+
+    // Until the first area is selected, the tool that draws one is outlined.
+    function refreshAreaToolAttention() {
+        var areaBtn = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-rectangle');
+        if (!areaBtn) return;
+        var hasArea = false;
+        drawnItems.eachLayer(function (l) {
+            if (l instanceof L.Rectangle) hasArea = true;
+        });
+        areaBtn.classList.toggle('map-tool-attention', !hasArea && !areaToolLearned());
+    }
+    drawnItems.on('layeradd layerremove', refreshAreaToolAttention);
+
+    // Every label again, for a language change. Also the search placeholder,
+    // the other piece of text on the map that is always visible.
+    function refreshMapToolLabels() {
+        document.querySelectorAll('.leaflet-draw-toolbar a').forEach(refreshToolLabel);
+        var search = document.getElementById('city-search');
+        if (search) search.placeholder = mapText('map_search_placeholder', 'Search for a city...');
+    }
+    window.refreshMapToolLabels = refreshMapToolLabels;
+
+    (function bindToolTips() {
+        var drawRoot = document.querySelector('.leaflet-draw');
+        if (!drawRoot) return;
+        var buttonOf = function (target) {
+            return target && target.closest ? target.closest('.leaflet-draw-toolbar a') : null;
+        };
+        drawRoot.addEventListener('mouseover', function (e) {
+            var btn = buttonOf(e.target);
+            if (btn && btn !== toolTipFor) showToolTip(btn);
+        });
+        drawRoot.addEventListener('mouseout', function (e) {
+            var btn = buttonOf(e.target);
+            if (btn && !(e.relatedTarget && btn.contains(e.relatedTarget))) hideToolTip();
+        });
+        drawRoot.addEventListener('focusin', function (e) {
+            var btn = buttonOf(e.target);
+            if (btn) showToolTip(btn);
+        });
+        drawRoot.addEventListener('focusout', hideToolTip);
+        // Out of the way once a tool is picked, so it does not cover the map
+        // about to be drawn on.
+        drawRoot.addEventListener('mousedown', hideToolTip);
+    })();
+
     // ========== Custom Angle Line Tool ==========
     // A simple 2-click tool: click start point, click end point, done.
     // Uses a transparent overlay to capture clicks even on top of drawn layers.
@@ -1608,6 +1908,18 @@ $(document).ready(function () {
         }
     }
 
+    var _rotationLocked = false;
+
+    function setRotationLocked(locked) {
+        _rotationLocked = locked;
+        if (locked && _angleToolActive) stopAngleTool();
+        if (_angleToolBtn) {
+            _angleToolBtn.classList.toggle('leaflet-disabled', locked);
+            _angleToolBtn.setAttribute('aria-disabled', locked ? 'true' : 'false');
+            refreshToolLabel(_angleToolBtn);
+        }
+    }
+
     // Inject the angle tool button into the top draw toolbar (alongside rectangle & marker)
     (function addAngleToolButton() {
         var drawToolbar = document.querySelector('.leaflet-draw-toolbar.leaflet-draw-toolbar-top');
@@ -1615,7 +1927,6 @@ $(document).ready(function () {
 
         var btn = L.DomUtil.create('a', 'leaflet-draw-draw-polyline');
         btn.href = '#';
-        btn.title = 'Set rotation angle';
 
         L.DomEvent
             .on(btn, 'click', L.DomEvent.stopPropagation)
@@ -1623,6 +1934,7 @@ $(document).ready(function () {
             .on(btn, 'dblclick', L.DomEvent.stopPropagation)
             .on(btn, 'click', L.DomEvent.preventDefault)
             .on(btn, 'click', function() {
+                if (_rotationLocked) return;
                 if (_angleToolActive) {
                     stopAngleTool();
                 } else {
@@ -1632,6 +1944,7 @@ $(document).ready(function () {
             });
 
         _angleToolBtn = btn;
+        if (_rotationLocked) setRotationLocked(true);
 
         // Insert before the marker (spawn) button so it's: rectangle | angle | marker
         var markerBtn = drawToolbar.querySelector('.leaflet-draw-draw-marker');
@@ -1642,7 +1955,8 @@ $(document).ready(function () {
         }
     })();
 
-    // Add hint overlay at bottom-center of map when no bbox is selected
+    // Hint at the bottom-center of the map, shown until the first area is
+    // selected (see areaToolLearned)
     var hintDiv = document.createElement('div');
     hintDiv.className = 'bbox-hint-overlay';
     // This script runs inside the map iframe, and the locale is loaded by the
@@ -1660,6 +1974,7 @@ $(document).ready(function () {
     }
     renderBboxHint();
     window.renderBboxHint = renderBboxHint;
+    if (areaToolLearned()) hintDiv.style.display = 'none';
     map.getContainer().appendChild(hintDiv);
 
     // Add world preview button to the edit toolbar after drawControl is added
@@ -1676,7 +1991,7 @@ $(document).ready(function () {
         function syncState() {
             var has = drawnItems.getLayers().length > 0;
             btn.classList.toggle('leaflet-disabled', !has);
-            btn.title = has ? 'Delete selection' : 'No selection to delete';
+            refreshToolLabel(btn);
         }
         drawnItems.on('layeradd layerremove', syncState);
         syncState();
@@ -1751,6 +2066,11 @@ $(document).ready(function () {
         _bodyToggleBtn = btn;
         syncBodyToggleButton();
     })();
+
+    // Leaflet.draw's own buttons came with English titles; every button is
+    // labelled from its description now.
+    refreshMapToolLabels();
+    refreshAreaToolAttention();
     /*
     **
     **  create bounds layer
@@ -1895,8 +2215,10 @@ $(document).ready(function () {
         // instanceof, not layerType: restore paths fire rectangles as "polygon"
         var isRectangle = e.layer instanceof L.Rectangle;
 
-        // Hide the hint overlay when a bbox area is drawn
+        // The first area ever selected retires the hint for good. Recorded
+        // before the layer is added below, whose layeradd refreshes the outline.
         if (isRectangle) {
+            markAreaToolLearned();
             var hint = document.querySelector('.bbox-hint-overlay');
             if (hint) hint.style.display = 'none';
         }
@@ -1974,12 +2296,13 @@ $(document).ready(function () {
             drawnItems.removeLayer(l);
         });
 
-        // Show hint overlay again if no rectangles remain
+        // No area left: the hint only comes back for someone who has never
+        // selected one.
         var hasRectangle = false;
         drawnItems.eachLayer(function(layer) {
             if (layer instanceof L.Rectangle) hasRectangle = true;
         });
-        if (!hasRectangle) {
+        if (!hasRectangle && !areaToolLearned()) {
             var hint = document.querySelector('.bbox-hint-overlay');
             if (hint) hint.style.display = '';
         }
@@ -2125,11 +2448,8 @@ function updateTerrainPreviewButton() {
         ok = area > 0 && area <= TERRAIN_PREVIEW_MAX_AREA_M2;
     }
     btn.classList.toggle('disabled', !ok);
-    btn.title = ok
-        ? 'Render 3D terrain preview'
-        : (window._currentBody !== 'earth'
-            ? 'The 3D terrain preview is only available for Earth'
-            : 'Select an area (up to 500 km²) to enable the 3D terrain preview');
+    // The tooltip explains the disabled state; see describeTool.
+    if (typeof window.refreshMapToolLabel === 'function') window.refreshMapToolLabel(btn);
 }
 
 // Expose marker coordinates to the parent window

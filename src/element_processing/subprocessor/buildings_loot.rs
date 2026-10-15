@@ -21,6 +21,7 @@ struct LootItem {
 }
 
 struct Theme {
+    kind: LootTheme,
     weight: u32,
     items: &'static [LootItem],
 }
@@ -29,6 +30,7 @@ struct Theme {
 const THEMES: &[Theme] = &[
     // Food and kitchen.
     Theme {
+        kind: LootTheme::Food,
         weight: 25,
         items: &[
             LootItem {
@@ -113,6 +115,7 @@ const THEMES: &[Theme] = &[
     },
     // Junk and flavour.
     Theme {
+        kind: LootTheme::Mixed,
         weight: 20,
         items: &[
             LootItem {
@@ -185,6 +188,7 @@ const THEMES: &[Theme] = &[
     },
     // Building resources.
     Theme {
+        kind: LootTheme::Resources,
         weight: 18,
         items: &[
             LootItem {
@@ -239,6 +243,7 @@ const THEMES: &[Theme] = &[
     },
     // Tools and utility.
     Theme {
+        kind: LootTheme::Tools,
         weight: 15,
         items: &[
             LootItem {
@@ -299,6 +304,7 @@ const THEMES: &[Theme] = &[
     },
     // Valuables and treasure.
     Theme {
+        kind: LootTheme::Valuables,
         weight: 12,
         items: &[
             LootItem {
@@ -347,6 +353,7 @@ const THEMES: &[Theme] = &[
     },
     // Adventure gear.
     Theme {
+        kind: LootTheme::Mixed,
         weight: 10,
         items: &[
             LootItem {
@@ -401,11 +408,41 @@ fn pick_item(theme: &Theme, rng: &mut impl Rng) -> &'static LootItem {
     &theme.items[theme.items.len() - 1]
 }
 
+/// What a chest mostly holds. `Mixed` is the household spread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LootTheme {
+    Mixed,
+    Food,
+    Resources,
+    Tools,
+    Valuables,
+}
+
+/// Weight multiplier for the favoured theme.
+const FAVOURED_FACTOR: u32 = 6;
+
 /// Deterministic per-chest loot keyed on world coords; a few scattered stacks per chest.
 pub fn chest_loot(x: i32, z: i32, salt: u32) -> Vec<HashMap<String, Value>> {
+    themed_chest_loot(x, z, salt, LootTheme::Mixed)
+}
+
+/// `chest_loot` leaning towards one theme, for shops, stores and vaults.
+pub fn themed_chest_loot(
+    x: i32,
+    z: i32,
+    salt: u32,
+    theme: LootTheme,
+) -> Vec<HashMap<String, Value>> {
+    let weight = |t: &Theme| {
+        if theme != LootTheme::Mixed && t.kind == theme {
+            t.weight * FAVOURED_FACTOR
+        } else {
+            t.weight
+        }
+    };
     let mut rng = coord_rng(x, z, salt as u64 ^ 0x1007_C0DE);
     let rolls = rng.random_range(3..=8);
-    let theme_total: u32 = THEMES.iter().map(|t| t.weight).sum::<u32>() + EMPTY_WEIGHT;
+    let theme_total: u32 = THEMES.iter().map(weight).sum::<u32>() + EMPTY_WEIGHT;
 
     let mut used = [false; CHEST_SLOTS];
     let mut out = Vec::new();
@@ -418,12 +455,13 @@ pub fn chest_loot(x: i32, z: i32, salt: u32) -> Vec<HashMap<String, Value>> {
         pick -= EMPTY_WEIGHT;
 
         let mut chosen = &THEMES[0];
-        for theme in THEMES {
-            if pick < theme.weight {
-                chosen = theme;
+        for candidate in THEMES {
+            let w = weight(candidate);
+            if pick < w {
+                chosen = candidate;
                 break;
             }
-            pick -= theme.weight;
+            pick -= w;
         }
 
         let item = pick_item(chosen, &mut rng);

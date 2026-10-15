@@ -110,7 +110,21 @@ fn is_passable_cover(name: &str) -> bool {
             | "poppy"
             | "blue_orchid"
             | "azure_bluet"
+            | "cornflower"
+            | "oxeye_daisy"
+            | "allium"
+            | "lily_of_the_valley"
+            | "sweet_berry_bush"
+            | "sunflower"
+            | "lilac"
+            | "rose_bush"
+            | "peony"
+            | "brown_mushroom"
+            | "red_mushroom"
+            | "sugar_cane"
+            | "lily_pad"
     ) || name.ends_with("_carpet")
+        || name.ends_with("_tulip")
 }
 
 /// Quotes `s` as a JSON string literal for a sign text component.
@@ -186,6 +200,8 @@ pub struct WorldEditor<'a> {
     /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
     /// parking); vegetation stays off them. Shared via Arc with the tile editors.
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
+    /// Mapped tree trunks, shared via Arc with the tile editors.
+    mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -197,6 +213,8 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Bridge pier columns and their material, extended to the bed by the water carve.
+    support_columns: FnvHashMap<(i32, i32), Block>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -224,6 +242,9 @@ pub struct WorldEditor<'a> {
     luanti_game: LuantiGame,
     /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
     bake_lighting: bool,
+    /// Java: leave every chunk outside the area unwritten for the void generator,
+    /// instead of filling it with the flat ground plane.
+    void_world: bool,
     /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
@@ -244,6 +265,10 @@ pub struct WorldEditor<'a> {
     strict_bounds: Option<(i32, i32, i32, i32)>,
     /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
     frame_cells: FnvHashSet<(i32, i32, i32)>,
+    /// Set for a One World run: merge into the world's existing regions.
+    merge_into_existing: Option<crate::world_utils::WorldLayout>,
+    climate_anchor: Option<(f64, f64)>,
+    metadata_extent: Option<(XZBBox, LLBBox)>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -260,8 +285,10 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            mapped_trunks: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
+            support_columns: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -275,6 +302,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
+            void_world: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -285,6 +313,9 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            merge_into_existing: None,
+            climate_anchor: None,
+            metadata_extent: None,
         }
     }
 
@@ -307,8 +338,10 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            mapped_trunks: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
+            support_columns: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -322,6 +355,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
+            void_world: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -332,6 +366,9 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            merge_into_existing: None,
+            climate_anchor: None,
+            metadata_extent: None,
         }
     }
 
@@ -354,8 +391,10 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            mapped_trunks: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
+            support_columns: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -369,6 +408,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: ground_level,
             luanti_game: game,
             bake_lighting: false,
+            void_world: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -379,6 +419,38 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            merge_into_existing: None,
+            climate_anchor: None,
+            metadata_extent: None,
+        }
+    }
+
+    pub fn set_merge_into_existing(&mut self, layout: crate::world_utils::WorldLayout) {
+        self.merge_into_existing = Some(layout);
+    }
+
+    pub fn set_climate_anchor(&mut self, lat: f64, lon: f64) {
+        self.climate_anchor = Some((lat, lon));
+    }
+
+    pub fn set_metadata_extent(&mut self, xzbbox: XZBBox, llbbox: LLBBox) {
+        self.metadata_extent = Some((xzbbox, llbbox));
+    }
+
+    pub(crate) fn climate_lat(&self) -> Option<f64> {
+        self.climate_anchor.map(|(lat, _)| lat)
+    }
+
+    pub(crate) fn region_write_mode(&self) -> java::RegionWriteMode {
+        match self.merge_into_existing {
+            Some(layout) => java::RegionWriteMode::Merge {
+                min_x: self.xzbbox.min_x(),
+                min_z: self.xzbbox.min_z(),
+                max_x: self.xzbbox.max_x(),
+                max_z: self.xzbbox.max_z(),
+                layout,
+            },
+            None => java::RegionWriteMode::Fresh,
         }
     }
 
@@ -423,10 +495,33 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
-    /// Drops the sealed-surface mask once every vegetation pass is done, so the
-    /// bitmap is not carried into the save phase.
+    /// Drops the sealed-surface mask and the mapped trunks once every vegetation
+    /// pass is done, so neither is carried into the save phase.
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
+        self.mapped_trunks = None;
+    }
+
+    /// Sets the mapped tree trunks (shared across the main and tile editors).
+    pub fn set_mapped_trunks(&mut self, trunks: Arc<crate::trees::mapped::MappedTrunks>) {
+        self.mapped_trunks = Some(trunks);
+    }
+
+    /// True under the crown of a tree OSM maps.
+    #[inline]
+    pub fn under_mapped_crown(&self, x: i32, z: i32) -> bool {
+        self.mapped_trunks
+            .as_ref()
+            .is_some_and(|t| t.under_crown(x, z))
+    }
+
+    /// On a paving area's own columns: true where a planted area mapped inside it
+    /// owns the column.
+    #[inline]
+    pub fn nested_area_owns(&self, x: i32, z: i32) -> bool {
+        self.sealed_surface
+            .as_ref()
+            .is_some_and(|m| !m.contains(x, z))
     }
 
     /// True if a man-made surface owns this column, so scattered vegetation
@@ -436,6 +531,29 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface
             .as_ref()
             .is_some_and(|m| m.contains(x, z))
+    }
+
+    /// ESA land-cover class at (x, z), or 0 where there is no land cover.
+    #[inline]
+    pub fn cover_class(&self, x: i32, z: i32) -> u8 {
+        self.ground
+            .as_ref()
+            .map_or(0, |g| g.cover_class(self.ground_point(x, z)))
+    }
+
+    /// RESOLVE ecoregion at (x, z), if the area has one there.
+    #[inline]
+    pub fn ecoregion(&self, x: i32, z: i32) -> Option<crate::ecoregion::Ecoregion> {
+        self.ground.as_ref()?.ecoregion(self.ground_point(x, z))
+    }
+
+    /// True where the land cover keeps (x, z) as land too steep to hold water, like a gorge wall.
+    pub fn is_steep_land(&self, x: i32, z: i32) -> bool {
+        self.ground.as_ref().is_some_and(|g| {
+            let p = self.ground_point(x, z);
+            let cover = g.cover_class(p);
+            cover != 0 && cover != crate::land_cover::LC_WATER && g.slope(p) > 4
+        })
     }
 
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
@@ -513,6 +631,11 @@ impl<'a> WorldEditor<'a> {
         self.bake_lighting = enabled;
     }
 
+    /// Java: write only the chunks the area touches and leave the rest to a void generator.
+    pub fn set_void_world(&mut self, enabled: bool) {
+        self.void_world = enabled;
+    }
+
     pub fn set_game_settings(&mut self, mode: crate::args::GameMode, world_time: i64) {
         self.game_mode = mode;
         self.world_time = world_time;
@@ -541,6 +664,7 @@ impl<'a> WorldEditor<'a> {
 
     /// True if this editor is the single owner of (x, z): always for the main editor, and
     /// inside the strict tile bounds for a tile editor.
+    #[inline]
     pub fn owns(&self, x: i32, z: i32) -> bool {
         match self.strict_bounds {
             None => true,
@@ -929,8 +1053,12 @@ impl<'a> WorldEditor<'a> {
             self.llbbox,
             self.ground.clone(),
             self.bake_lighting,
+            self.void_world,
             self.preview.clone(),
             self.voxy.clone(),
+            self.region_write_mode(),
+            self.climate_lat(),
+            (self.ground_origin_x, self.ground_origin_z),
         )
     }
 
@@ -986,7 +1114,10 @@ impl<'a> WorldEditor<'a> {
 
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
-        crate::climate::Climate::classify(&self.llbbox)
+        match self.climate_anchor {
+            Some((lat, lon)) => crate::climate::Climate::classify_at(lat, lon),
+            None => crate::climate::Climate::classify(&self.llbbox),
+        }
     }
 
     /// Get the effective ground level at a world coordinate.
@@ -1050,6 +1181,21 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.insert((x, z), y);
     }
 
+    /// Record a bridge pier or pylon column standing on the terrain at (x, z).
+    #[inline]
+    pub fn register_support_column(&mut self, x: i32, z: i32, block: Block) {
+        self.support_columns.insert((x, z), block);
+    }
+
+    /// Material of the support column standing at (x, z), if any.
+    #[inline]
+    pub fn support_column(&self, x: i32, z: i32) -> Option<Block> {
+        if self.support_columns.is_empty() {
+            return None;
+        }
+        self.support_columns.get(&(x, z)).copied()
+    }
+
     /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).
     pub(crate) fn take_road_surface_overrides(&mut self) -> FnvHashMap<(i32, i32), i32> {
         std::mem::take(&mut self.road_surface_overrides)
@@ -1111,6 +1257,14 @@ impl<'a> WorldEditor<'a> {
     pub fn get_block_absolute(&self, x: i32, absolute_y: i32, z: i32) -> Option<Block> {
         self.world.get_block(x, absolute_y, z)
     }
+
+    /// Stored properties of the block at an absolute position, if any.
+    #[cfg(test)]
+    pub fn block_properties_absolute(&self, x: i32, absolute_y: i32, z: i32) -> Option<Value> {
+        self.world
+            .get_properties(x, absolute_y, z)
+            .map(|p| p.as_ref().clone())
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn place_wall_banner(
         &mut self,
@@ -1170,6 +1324,46 @@ impl<'a> WorldEditor<'a> {
             }
             Entry::Vacant(entry) => {
                 entry.insert(Value::List(vec![Value::Compound(be)]));
+            }
+        }
+    }
+
+    /// Schedules a fluid tick so a worldgen-placed water or lava source flows on first chunk
+    /// load. Without one the source sits frozen until some unrelated neighbour update pokes it.
+    /// Java only: Bedrock and Luanti have no such list.
+    pub fn schedule_fluid_tick(&mut self, fluid: Block, x: i32, y: i32, z: i32) {
+        if self.format != WorldFormat::JavaAnvil {
+            return;
+        }
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return;
+        }
+        let id = if fluid == LAVA {
+            "minecraft:lava"
+        } else {
+            "minecraft:water"
+        };
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region = self.world.get_or_create_region(chunk_x >> 5, chunk_z >> 5);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+        // `t` is the delay in ticks and `p` the priority; 0 fires on the first tick.
+        let tick = HashMap::from([
+            ("i".to_string(), Value::String(id.to_string())),
+            ("x".to_string(), Value::Int(x)),
+            ("y".to_string(), Value::Int(y)),
+            ("z".to_string(), Value::Int(z)),
+            ("t".to_string(), Value::Int(0)),
+            ("p".to_string(), Value::Int(0)),
+        ]);
+        match chunk.other.entry("fluid_ticks".to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(tick));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(tick)]));
             }
         }
     }
@@ -1863,6 +2057,12 @@ impl<'a> WorldEditor<'a> {
         if self.is_region_flushed(x, z) {
             return;
         }
+        // A tile's halo repeats what the owning tile draws there, and the merge lets
+        // it in wherever the owner left air: on its water, under its trunks. The owner
+        // draws its own undergrowth, so the halo keeps none.
+        if !self.owns(x, z) && crate::ground_decoration::is_undergrowth(block_with_props.block) {
+            return;
+        }
 
         // None/None is the dominant pattern; skip the redundant get_block() read.
         if override_whitelist.is_none() && override_blacklist.is_none() {
@@ -2025,14 +2225,17 @@ impl<'a> WorldEditor<'a> {
     /// This is faster than `set_block_absolute` with `None` whitelists/blacklists
     /// because it avoids the double HashMap traversal.
     #[inline]
-    pub fn set_block_if_absent_absolute(&mut self, block: Block, x: i32, absolute_y: i32, z: i32) {
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
+    pub fn set_block_if_absent_absolute(
+        &mut self,
+        block: Block,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+    ) -> bool {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return false;
         }
-        if self.is_region_flushed(x, z) {
-            return;
-        }
-        self.world.set_block_if_absent(x, absolute_y, z, block);
+        self.world.set_block_if_absent(x, absolute_y, z, block)
     }
 
     /// Returns true if a non-AIR block exists at the given absolute coordinates.
@@ -2069,6 +2272,21 @@ impl<'a> WorldEditor<'a> {
         }
         self.world
             .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
+    /// See [`WorldToModify::fill_column_with`].
+    pub fn fill_column_with_absolute(
+        &mut self,
+        x: i32,
+        z: i32,
+        y_min: i32,
+        y_max: i32,
+        block_at: impl FnMut(i32) -> Block,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return;
+        }
+        self.world.fill_column_with(x, z, y_min, y_max, block_at);
     }
 
     /// See [`WorldToModify::bulk_fill_chunk_sections_below`].
@@ -2134,11 +2352,8 @@ impl<'a> WorldEditor<'a> {
                     };
                     eprintln!("{}", user_msg);
                     #[cfg(feature = "gui")]
-                    {
-                        send_log(LogLevel::Error, &user_msg);
-                        emit_gui_error(&user_msg);
-                    }
-                    return Err(e);
+                    emit_gui_error(&user_msg);
+                    return Err(user_msg.into());
                 }
                 self.finish_voxy();
             }
@@ -2159,11 +2374,8 @@ impl<'a> WorldEditor<'a> {
                     let user_msg = format!("Failed to save Luanti world: {}", e);
                     eprintln!("{}", user_msg);
                     #[cfg(feature = "gui")]
-                    {
-                        send_log(LogLevel::Error, &user_msg);
-                        emit_gui_error(&user_msg);
-                    }
-                    return Err(e);
+                    emit_gui_error(&user_msg);
+                    return Err(user_msg.into());
                 }
             }
         }
@@ -2201,10 +2413,7 @@ impl<'a> WorldEditor<'a> {
             let user_msg = format!("Failed to save Bedrock world: {error}");
             eprintln!("{user_msg}");
             #[cfg(feature = "gui")]
-            {
-                send_log(LogLevel::Error, &user_msg);
-                emit_gui_error(&user_msg);
-            }
+            emit_gui_error(&user_msg);
             return Err(user_msg.into());
         }
         Ok(())
@@ -2247,16 +2456,20 @@ impl<'a> WorldEditor<'a> {
             )
         })?;
 
+        let (xzbbox, llbbox) = match &self.metadata_extent {
+            Some((xz, ll)) => (xz.clone(), *ll),
+            None => (self.xzbbox.clone(), self.llbbox),
+        };
         let metadata = WorldMetadata {
-            min_mc_x: self.xzbbox.min_x(),
-            max_mc_x: self.xzbbox.max_x(),
-            min_mc_z: self.xzbbox.min_z(),
-            max_mc_z: self.xzbbox.max_z(),
+            min_mc_x: xzbbox.min_x(),
+            max_mc_x: xzbbox.max_x(),
+            min_mc_z: xzbbox.min_z(),
+            max_mc_z: xzbbox.max_z(),
 
-            min_geo_lat: self.llbbox.min().lat(),
-            max_geo_lat: self.llbbox.max().lat(),
-            min_geo_lon: self.llbbox.min().lng(),
-            max_geo_lon: self.llbbox.max().lng(),
+            min_geo_lat: llbbox.min().lat(),
+            max_geo_lat: llbbox.max().lat(),
+            min_geo_lon: llbbox.min().lng(),
+            max_geo_lon: llbbox.max().lng(),
 
             projection: self.projection.clone(),
             scale: self.scale,
@@ -2591,8 +2804,12 @@ mod eviction_guard_tests {
             LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
             None,
             false,
+            false,
             None,
             None,
+            java::RegionWriteMode::Fresh,
+            None,
+            (0, 0),
         )
     }
 
@@ -2603,6 +2820,47 @@ mod eviction_guard_tests {
         let section = chunk.sections.entry(0).or_default();
         section.storage.set(0, SMOOTH_STONE);
         region
+    }
+
+    /// Chunks stored in a written region file.
+    fn stored_chunks(path: &std::path::Path) -> usize {
+        let file = std::fs::File::open(path).unwrap();
+        let mut region = fastanvil::Region::from_stream(file).unwrap();
+        (0..32)
+            .flat_map(|x| (0..32).map(move |z| (x, z)))
+            .filter(|&(x, z)| region.read_chunk(x, z).unwrap().is_some())
+            .count()
+    }
+
+    #[test]
+    fn a_void_world_writes_only_the_chunks_the_area_touches() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("region").join("r.0.0.mca");
+        let write = |void_world: bool| {
+            java::RegionWriteCtx::new(
+                dir.path().to_path_buf(),
+                LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
+                None,
+                false,
+                void_world,
+                None,
+                None,
+                java::RegionWriteMode::Fresh,
+                None,
+                (0, 0),
+            )
+            .write(0, 0, &flush_test_region())
+            .unwrap();
+        };
+
+        write(false);
+        assert_eq!(stored_chunks(&path), 1024, "a flat world fills the region");
+        write(true);
+        assert_eq!(
+            stored_chunks(&path),
+            1,
+            "a void world leaves the rest to the void generator"
+        );
     }
 
     #[test]
@@ -2736,6 +2994,33 @@ mod eviction_guard_tests {
         }
         assert_eq!(uuids.len(), 2);
         assert_ne!(uuids[0], uuids[1], "same cell, different face, same UUID");
+    }
+
+    /// The owning tile draws its own undergrowth; a halo copy would land on its
+    /// water and under its trunks. Wood, leaves and ground still pass.
+    #[test]
+    fn a_tile_halo_keeps_no_undergrowth() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        editor.set_strict_bounds(0, 0, 31, 63);
+        for (x, block) in [
+            (10, GRASS),
+            (40, GRASS),
+            (41, CORNFLOWER),
+            (42, OAK_LOG),
+            (43, OAK_LEAVES),
+        ] {
+            editor.set_block_absolute(block, x, 1, 10, None, None);
+        }
+        assert!(
+            editor.block_exists_absolute(10, 1, 10),
+            "owned undergrowth stays"
+        );
+        assert!(!editor.block_exists_absolute(40, 1, 10));
+        assert!(!editor.block_exists_absolute(41, 1, 10));
+        assert!(editor.block_exists_absolute(42, 1, 10), "halo wood passes");
+        assert!(editor.block_exists_absolute(43, 1, 10), "halo leaves pass");
     }
 
     #[test]

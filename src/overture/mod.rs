@@ -27,7 +27,7 @@
 
 mod cache;
 mod mvt;
-mod pmtiles;
+pub(crate) mod pmtiles;
 mod tiles;
 
 pub use cache::{cache_root, clear_overture_cache};
@@ -108,6 +108,23 @@ const RELEASE_FALLBACK_SLOTS: usize = 2;
 /// OSM IDs are sequential positive u64 (currently up to ~12 billion, well under 2^34).
 /// Setting bit 63 guarantees no collision.
 const OVERTURE_ID_HIGH_BIT: u64 = 0x8000_0000_0000_0000;
+
+/// Overture footprints known to be false positives of the ML building
+/// extraction: temporary structures caught by one imagery pass that OSM
+/// never mapped, so the dedupe against OSM cannot catch them. Keyed on the
+/// GERS id, which Overture keeps stable across releases.
+const OVERTURE_SKIP_IDS: &[&str] = &[
+    // Königsplatz, Munich: a 17 x 25 m stage/tent footprint on the square in
+    // front of the Propyläen (Microsoft ML Buildings, imagery of 2019-07).
+    "f8c0757e-c059-49e4-9757-7e278751926f",
+];
+
+/// Whether a footprint is a known false positive. Both transports ask this,
+/// each before its own budget cap, so a skipped footprint never reaches the
+/// world and never costs a real building its slot.
+pub(super) fn is_skipped_footprint(id: &str) -> bool {
+    OVERTURE_SKIP_IDS.contains(&id)
+}
 
 /// Budget of Overture footprints, as a rate per km² of the requested area plus a
 /// floor and a ceiling. The cap exists so a large request cannot exhaust memory.
@@ -509,11 +526,11 @@ pub struct OvertureData {
 /// conflated heights survive in `hints`.
 pub fn fetch_overture_buildings(
     bbox: &LLBBox,
-    scale: f64,
+    projection: &crate::projection::ProjectionSpec,
     source: OvertureSource,
     debug: bool,
 ) -> OvertureData {
-    match fetch_overture_buildings_inner(bbox, scale, source, debug) {
+    match fetch_overture_buildings_inner(bbox, projection, source, debug) {
         Ok(data) => data,
         Err(e) => {
             eprintln!(
@@ -870,6 +887,9 @@ fn collect_from_parquet(
                             continue;
                         }
                     }
+                    if is_skipped_footprint(&building.id) {
+                        continue;
+                    }
                     all_buildings.push(building);
                 }
             }
@@ -913,7 +933,7 @@ fn collect_from_parquet(
 
 fn fetch_overture_buildings_inner(
     bbox: &LLBBox,
-    scale: f64,
+    projection: &crate::projection::ProjectionSpec,
     source: OvertureSource,
     debug: bool,
 ) -> Result<OvertureData, Box<dyn std::error::Error>> {
@@ -936,16 +956,45 @@ fn fetch_overture_buildings_inner(
     }
 
     // Convert to ProcessedElements and clip to xzbbox (matching OSM clipping)
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(bbox, scale)?;
+    let (coord_transformer, xzbbox) = projection.transformer(bbox)?;
+    let clip_bbox = projection.clip_bbox(&xzbbox);
 
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
         .take(budget)
         .filter_map(|building| {
+            if debug {
+                // One line per footprint, so a stray one can be found and listed above.
+                let n = building.exterior_ring.len().max(1) as f64;
+                let (lng, lat) = building
+                    .exterior_ring
+                    .iter()
+                    .fold((0.0, 0.0), |(x, y), &(lng, lat)| (x + lng / n, y + lat / n));
+                println!(
+                    "Overture building {} {}/{} h={:?} at {lat:.6},{lng:.6}",
+                    building.id,
+                    building.subtype.as_deref().unwrap_or("-"),
+                    building.class.as_deref().unwrap_or("-"),
+                    building.height,
+                );
+            }
             let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
-            let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
+            let clipped = clip_way_to_bbox(&way.nodes, &clip_bbox);
             if clipped.len() < 3 {
                 return None;
+            }
+            if projection.clip_pad > 0 {
+                let min_x = clipped.iter().map(|n| n.x).min().unwrap_or(0);
+                let max_x = clipped.iter().map(|n| n.x).max().unwrap_or(0);
+                let min_z = clipped.iter().map(|n| n.z).min().unwrap_or(0);
+                let max_z = clipped.iter().map(|n| n.z).max().unwrap_or(0);
+                if max_x < xzbbox.min_x()
+                    || min_x > xzbbox.max_x()
+                    || max_z < xzbbox.min_z()
+                    || min_z > xzbbox.max_z()
+                {
+                    return None;
+                }
             }
             way.nodes = clipped;
             Some(ProcessedElement::Way(way))

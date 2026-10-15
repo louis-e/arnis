@@ -92,13 +92,19 @@ pub fn generate_leisure(
             let mut rng = element_rng(element.id);
 
             for &(x, z) in filled_area.iter() {
+                if leisure_type == "schoolyard" && editor.nested_area_owns(x, z) {
+                    continue;
+                }
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Land-cover water is skipped because a park often spans its
                 // own lake, and the carve after this leaves plants floating. A pitch
                 // or path inside the park is drawn after it, so its columns still
-                // read as grass here and only the mask tells them apart.
+                // read as grass here and only the mask tells them apart. Halo cells
+                // are left to the tile that owns them, whose own random sequence
+                // decides what grows there.
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
+                    && editor.owns(x, z)
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                     && !editor.surface_is_sealed(x, z)
                     && !editor.is_lc_water(x, z)
@@ -108,28 +114,35 @@ pub fn generate_leisure(
                     match random_choice {
                         0..30 => {
                             // Plants
-                            let plant_choice = match random_choice {
-                                0..5 => RED_FLOWER,
-                                5..10 => YELLOW_FLOWER,
-                                10..16 => BLUE_FLOWER,
-                                16..22 => WHITE_FLOWER,
-                                22..30 => FERN,
-                                _ => unreachable!(),
+                            let setting = if leisure_type == "nature_reserve" {
+                                crate::ground_decoration::FlowerSetting::Meadow
+                            } else {
+                                crate::ground_decoration::FlowerSetting::Garden
                             };
-                            editor.set_block(plant_choice, x, 1, z, None, None);
+                            if random_choice < 22 {
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor, x, z, setting,
+                                );
+                            } else {
+                                editor.set_block(FERN, x, 1, z, None, None);
+                            }
                         }
                         30..90 => {
                             // Grass
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
                         90..105 => {
-                            // Oak leaves
-                            editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                            crate::element_processing::bush::place_bush(
+                                editor,
+                                x,
+                                z,
+                                crate::element_processing::bush::BushKind::Garden,
+                            );
                         }
                         105..120 => {
                             // Only where land cover says woody, else a park
-                            // canopies its own meadows. 1/1000 for specimens.
-                            if random_choice == 105 || editor.land_cover_backs_trees(x, z) {
+                            // canopies its own meadows.
+                            if editor.land_cover_backs_trees(x, z) {
                                 Tree::create(
                                     editor,
                                     (x, 1, z),
@@ -152,17 +165,15 @@ pub fn generate_leisure(
 
             if leisure_type == "pitch" {
                 // Clear park/ground vegetation scattered onto the pitch before marking.
-                let vegetation: &[Block] = &[
-                    GRASS,
-                    FERN,
-                    RED_FLOWER,
-                    YELLOW_FLOWER,
-                    BLUE_FLOWER,
-                    WHITE_FLOWER,
-                    OAK_LEAVES,
-                ];
                 for &(x, z) in filled_area.iter() {
-                    editor.set_block(AIR, x, 1, z, Some(vegetation), None);
+                    editor.set_block(
+                        AIR,
+                        x,
+                        1,
+                        z,
+                        Some(crate::ground_decoration::LOOSE_PLANTS),
+                        None,
+                    );
                 }
                 crate::element_processing::sport_pitches::draw_pitch_markings(
                     editor,

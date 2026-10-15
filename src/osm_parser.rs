@@ -1,7 +1,6 @@
 use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
@@ -80,14 +79,14 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
 // Raw data from OSM
 
 #[derive(Debug, Deserialize)]
-struct OsmMember {
-    r#type: String,
-    r#ref: u64,
-    r#role: String,
+pub struct OsmMember {
+    pub r#type: String,
+    pub r#ref: u64,
+    pub r#role: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct OsmElement {
+pub struct OsmElement {
     pub r#type: String,
     pub id: u64,
     pub lat: Option<f64>,
@@ -109,6 +108,18 @@ impl OsmData {
     /// Returns true if there are no elements in the OSM data
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
+    }
+
+    /// Dataset assembled outside the Overpass path (the tile archive), bypassing serde.
+    pub fn from_elements(elements: Vec<OsmElement>) -> Self {
+        OsmData {
+            elements,
+            remark: None,
+        }
+    }
+
+    pub fn elements(&self) -> &[OsmElement] {
+        &self.elements
     }
 
     /// Object-free dataset, used by terrain-only runs that never query Overpass.
@@ -799,12 +810,29 @@ pub fn arch_era_from_hint(hint: StyleHint) -> ArchEra {
     }
 }
 
+fn way_touches_rect(nodes: &[ProcessedNode], rect: &XZBBox) -> bool {
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_z = i32::MAX;
+    let mut max_z = i32::MIN;
+    for n in nodes {
+        min_x = min_x.min(n.x);
+        max_x = max_x.max(n.x);
+        min_z = min_z.min(n.z);
+        max_z = max_z.max(n.z);
+    }
+    !nodes.is_empty()
+        && max_x >= rect.min_x()
+        && min_x <= rect.max_x()
+        && max_z >= rect.min_z()
+        && min_z <= rect.max_z()
+}
+
 pub fn parse_osm_data(
     osm_data: OsmData,
     bbox: LLBBox,
-    scale: f64,
     debug: bool,
-    projection: crate::projection::ProjectionKind,
+    projection: &crate::projection::ProjectionSpec,
 ) -> (
     Vec<ProcessedElement>,
     XZBBox,
@@ -817,22 +845,18 @@ pub fn parse_osm_data(
     // Deserialize the JSON data into the OSMData structure
     let data = SplitOsmData::from_raw_osm_data(osm_data);
 
-    let (coord_transformer, xzbbox) = match projection {
-        crate::projection::ProjectionKind::WebMercator => {
-            let origin_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-            let origin_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-            let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, scale);
-            CoordTransformer::with_projection(&bbox, scale, &proj)
-        }
-        crate::projection::ProjectionKind::Local => {
-            CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
-        }
-    }
-    // Panics rather than exits: the GUI calls this from a Tauri blocking task, where an
-    // exit would take the whole app down. Bad scales are rejected up front by validate_scale.
-    .unwrap_or_else(|e| {
-        panic!("Error in defining coordinate transformation:\n{e}");
-    });
+    let (coord_transformer, xzbbox) = projection
+        .transformer(&bbox)
+        // Panics rather than exits: the GUI calls this from a Tauri blocking task, where an
+        // exit would take the whole app down. Bad scales are rejected up front by validate_scale.
+        .unwrap_or_else(|e| {
+            panic!("Error in defining coordinate transformation:\n{e}");
+        });
+    // Ways lying only in the clip margin cannot put a block into the world.
+    let clip_bbox = projection.clip_bbox(&xzbbox);
+    let touches_world = |nodes: &[ProcessedNode]| -> bool {
+        projection.clip_pad <= 0 || way_touches_rect(nodes, &xzbbox)
+    };
 
     if debug {
         println!("Total elements: {}", data.total_count());
@@ -956,10 +980,10 @@ pub fn parse_osm_data(
         ways_map.insert(element.id, Arc::clone(&way));
 
         // Clip way nodes for standalone way processing (not relations)
-        let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+        let clipped_nodes = clip_way_to_bbox(&way.nodes, &clip_bbox);
 
         // Skip ways that are completely outside the bbox (empty after clipping)
-        if clipped_nodes.is_empty() {
+        if clipped_nodes.is_empty() || !touches_world(&clipped_nodes) {
             continue;
         }
 
@@ -1017,6 +1041,31 @@ pub fn parse_osm_data(
             && relation_type == Some("multipolygon");
         let keep_unclipped = is_water_relation || is_building_multipolygon;
 
+        // Natural, landuse and leisure areas are filled one outer member at a time. A ring
+        // split over several ways closes only once they are joined, and clipping each way
+        // on its own cuts them apart at the bbox edge, so such a relation arrived as open
+        // pieces that filled to nothing and left just an outline: the big beach and dune
+        // relations are mapped this way. Relations whose members are all closed skip this.
+        if !keep_unclipped
+            && relation_type == Some("multipolygon")
+            && is_filled_area_relation(tags)
+            && element.members.iter().any(|m| {
+                m.r#type == "way"
+                    && area_member_role(&m.role).is_some()
+                    && ways_map.get(&m.r#ref).is_some_and(|w| !is_closed_way(w))
+            })
+        {
+            let members = assemble_area_rings(element.id, &element.members, &ways_map, &xzbbox);
+            if !members.is_empty() {
+                processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
+                    id: element.id,
+                    members,
+                    tags: filter_tags(tags.clone()),
+                }));
+            }
+            continue;
+        }
+
         let members: Vec<ProcessedMember> = element
             .members
             .iter()
@@ -1063,7 +1112,7 @@ pub fn parse_osm_data(
                 let final_way = if keep_unclipped {
                     way
                 } else {
-                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &clip_bbox);
                     if clipped_nodes.is_empty() {
                         return None;
                     }
@@ -1761,6 +1810,106 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     false
 }
 
+/// Relations whose outer members are filled as areas: natural, landuse and leisure.
+fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
+    tags.contains_key("natural") || tags.contains_key("landuse") || tags.contains_key("leisure")
+}
+
+/// Outer or inner, the two roles a multipolygon ring can have.
+fn area_member_role(role: &str) -> Option<ProcessedMemberRole> {
+    let role = role.trim();
+    if role.eq_ignore_ascii_case("outer") || role.eq_ignore_ascii_case("outline") {
+        Some(ProcessedMemberRole::Outer)
+    } else if role.eq_ignore_ascii_case("inner") {
+        Some(ProcessedMemberRole::Inner)
+    } else {
+        None
+    }
+}
+
+fn is_closed_way(way: &ProcessedWay) -> bool {
+    match (way.nodes.first(), way.nodes.last()) {
+        (Some(first), Some(last)) => {
+            way.nodes.len() >= 3
+                && (first.id == last.id || (first.x == last.x && first.z == last.z))
+        }
+        _ => false,
+    }
+}
+
+/// Id of a ring assembled from a relation's member ways. Bit 61 is past every OSM way id
+/// and bit 63, which Overture ids carry, stays clear, so it collides with neither.
+fn assembled_ring_id(relation_id: u64, inner: bool, index: usize) -> u64 {
+    (1 << 61)
+        | ((relation_id & ((1 << 45) - 1)) << 16)
+        | (u64::from(inner) << 15)
+        | (index as u64 & 0x7FFF)
+}
+
+/// Joins a multipolygon's member ways into closed rings, clips every ring to the bbox and
+/// returns them as synthetic member ways. Pieces that still do not close are dropped: filled
+/// they would make a wedge, and drawn they would be a stray outline around nothing.
+fn assemble_area_rings(
+    relation_id: u64,
+    members: &[OsmMember],
+    ways_map: &HashMap<u64, Arc<ProcessedWay>>,
+    xzbbox: &XZBBox,
+) -> Vec<ProcessedMember> {
+    let mut outers: Vec<Vec<ProcessedNode>> = Vec::new();
+    let mut inners: Vec<Vec<ProcessedNode>> = Vec::new();
+    for member in members {
+        if member.r#type != "way" {
+            continue;
+        }
+        let rings = match area_member_role(&member.role) {
+            Some(ProcessedMemberRole::Outer) => &mut outers,
+            Some(_) => &mut inners,
+            None => continue,
+        };
+        if let Some(way) = ways_map.get(&member.r#ref) {
+            if way.nodes.len() >= 2 {
+                rings.push(way.nodes.clone());
+            }
+        }
+    }
+    crate::element_processing::merge_way_segments(&mut outers);
+    crate::element_processing::merge_way_segments(&mut inners);
+
+    let mut assembled = Vec::new();
+    for (role, rings) in [
+        (ProcessedMemberRole::Outer, outers),
+        (ProcessedMemberRole::Inner, inners),
+    ] {
+        for (index, mut ring) in rings.into_iter().enumerate() {
+            let (Some(first), Some(last)) = (ring.first(), ring.last()) else {
+                continue;
+            };
+            if first.id != last.id {
+                // merge_way_segments joins ends up to a block apart, as the clipper leaves them.
+                if ring.len() < 3 || (first.x - last.x).abs() > 1 || (first.z - last.z).abs() > 1 {
+                    continue;
+                }
+                let first = first.clone();
+                ring.push(first);
+            }
+            let nodes = clip_way_to_bbox(&ring, xzbbox);
+            if nodes.len() < 4 {
+                continue;
+            }
+            let inner = role == ProcessedMemberRole::Inner;
+            assembled.push(ProcessedMember {
+                role: role.clone(),
+                way: Arc::new(ProcessedWay {
+                    id: assembled_ring_id(relation_id, inner, index),
+                    tags: HashMap::new(),
+                    nodes,
+                }),
+            });
+        }
+    }
+    assembled
+}
+
 const PRIORITY_ORDER: [&str; 6] = [
     "entrance", "building", "highway", "waterway", "water", "barrier",
 ];
@@ -2348,6 +2497,54 @@ mod osm_xml_tests {
     <tag k="type" v="multipolygon"/>
   </relation>
 </osm>"#;
+
+    // A beach mapped as a multipolygon whose outer ring is split over two ways, with one of
+    // the joins outside the bbox, as the Baltic beaches are.
+    const SPLIT_BEACH: &str = r#"<osm version="0.6">
+  <bounds minlat="54.800" minlon="18.370" maxlat="54.810" maxlon="18.390"/>
+  <node id="1" lat="54.802" lon="18.385"/>
+  <node id="2" lat="54.802" lon="18.395"/>
+  <node id="3" lat="54.804" lon="18.395"/>
+  <node id="4" lat="54.804" lon="18.385"/>
+  <way id="20"><nd ref="1"/><nd ref="2"/><nd ref="3"/></way>
+  <way id="21"><nd ref="3"/><nd ref="4"/><nd ref="1"/></way>
+  <relation id="30">
+    <member type="way" ref="20" role="outer"/>
+    <member type="way" ref="21" role="outer"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="natural" v="beach"/>
+    <tag k="surface" v="sand"/>
+  </relation>
+</osm>"#;
+
+    #[test]
+    fn a_split_area_relation_arrives_as_one_closed_ring() {
+        let (data, bounds) = parse(SPLIT_BEACH);
+        let (elements, _, _, _) = parse_osm_data(
+            data,
+            bounds.unwrap(),
+            false,
+            &crate::projection::ProjectionSpec::local(1.0),
+        );
+        let rel = elements
+            .iter()
+            .find_map(|e| match e {
+                ProcessedElement::Relation(r) if r.id == 30 => Some(r),
+                _ => None,
+            })
+            .expect("the beach relation is kept");
+        assert_eq!(rel.members.len(), 1, "two open ways make one ring");
+        assert_eq!(rel.members[0].role, ProcessedMemberRole::Outer);
+        let ring = &rel.members[0].way.nodes;
+        let (first, last) = (&ring[0], ring.last().unwrap());
+        assert_eq!((first.x, first.z), (last.x, last.z), "the ring is closed");
+        assert!(rel.members[0].way.id >= 1 << 61, "the ring has its own id");
+        let coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
+        assert!(
+            !crate::floodfill::flood_fill_area(&coords, None).is_empty(),
+            "the ring fills, instead of leaving an outline"
+        );
+    }
 
     #[test]
     fn parses_bounds_into_llbbox() {

@@ -1,0 +1,962 @@
+/* Settings page: a full-window view with a section sidebar on the left and
+   one scrolling column of section cards on the right.
+
+   Neutral greys only (the --ui-* tokens in styles.css, shared with the
+   dialogs), so the page reads as part of Arnis rather than a themed overlay.
+   Yellow means "selected" or "on": the active section, the chosen card, a
+   switch that is on, the active segment. Everything else stays grey.
+
+   Every rule is scoped under .settings-page. That keeps it clear of the other
+   modals, and it is also needed for specificity: the generic dark-mode
+   `button:active` and `button:hover` rules in styles.css are (0,1,1) and would
+   otherwise beat a single class. */
+
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 20001;
+  /* openSettings() switches this to flex */
+  display: flex;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  text-align: left;
+  line-height: 1.4;
+  animation: settings-enter 0.16s ease-out;
+}
+
+.settings-page:focus {
+  outline: none;
+}
+
+@keyframes settings-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page {
+    animation: none;
+  }
+}
+
+/* Resets the generic `button` rule (margin, shadow, radius, dark fill) for
+   every button on the page; each component then styles its own. */
+.settings-page button {
+  margin: 0;
+  box-shadow: none;
+  font-family: inherit;
+}
+
+.settings-page :focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+/* Sidebar */
+
+.settings-sidebar {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 18px 12px 14px;
+  box-sizing: border-box;
+  background: var(--ui-sidebar);
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.settings-brand img {
+  display: block;
+  width: 148px;
+  height: auto;
+  margin: 2px auto 0;
+}
+
+.settings-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-nav::-webkit-scrollbar {
+  width: 0;
+}
+
+.settings-page .settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ui-text);
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-page .settings-nav-item:hover,
+.settings-page .settings-nav-item:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-nav-item .icon {
+  color: var(--ui-muted);
+}
+
+.settings-nav-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-nav-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+/* Up to two lines, for the longer translations */
+.settings-nav-sub {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--ui-faint);
+}
+
+.settings-page .settings-nav-item.active {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+
+.settings-nav-item.active .icon,
+.settings-nav-item.active .settings-nav-sub {
+  color: rgba(28, 28, 28, 0.72);
+}
+
+/* Marks a section that holds a setting changed from its default. Out of the
+   flow, so it costs the subtitle no width. */
+.settings-nav-dot {
+  position: absolute;
+  top: 10px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ui-accent);
+  visibility: hidden;
+}
+
+.settings-nav-item.has-modified .settings-nav-dot {
+  visibility: visible;
+}
+
+.settings-nav-item.active .settings-nav-dot {
+  background: var(--ui-on-accent);
+}
+
+/* Reset all settings. Text and disabled state belong to settings-store.js. */
+.settings-page .settings-reset-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ui-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.settings-reset-button .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-page .settings-reset-button:hover:not(:disabled):not(.is-confirming),
+.settings-page .settings-reset-button:active:not(:disabled):not(.is-confirming) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: #5a5a5a;
+}
+
+.settings-page .settings-reset-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Waiting for the second click */
+.settings-page .settings-reset-button.is-confirming {
+  background: rgba(207, 102, 121, 0.85);
+  border-color: var(--ui-danger);
+  color: #ffffff;
+}
+
+/* Main column */
+
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  padding: 16px 28px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.settings-topbar-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+}
+
+.settings-topbar-icon .icon {
+  width: 24px;
+  height: 24px;
+}
+
+.settings-topbar-text {
+  min-width: 0;
+}
+
+.settings-topbar h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.settings-topbar p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ui-muted);
+}
+
+.settings-page .settings-close {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ui-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-page .settings-close:hover,
+.settings-page .settings-close:active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ui-text);
+}
+
+.settings-close .icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* The scrolling column. Positioned so a section's offsetTop is measured from
+   here, which is what the sidebar scrolls by. */
+.settings-page .settings-scrollable {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: relative;
+}
+
+.settings-page .settings-scrollable::-webkit-scrollbar {
+  width: 10px;
+}
+
+.settings-page .settings-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-page .settings-scrollable::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 2px solid var(--ui-bg);
+  border-radius: 10px;
+}
+
+.settings-page .settings-scrollable::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(254, 204, 68, 0.6);
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 20px 28px 32px;
+}
+
+/* Sections */
+
+.settings-section {
+  padding: 18px;
+  border: 1px solid var(--ui-card-border);
+  border-radius: 12px;
+  background: var(--ui-card);
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.settings-section-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ui-text);
+}
+
+.settings-section-head h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.settings-section-head p {
+  margin: 1px 0 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ui-muted);
+}
+
+/* Settings: tiles in a two-column grid, wide rows across both */
+
+.setting-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.setting-grid > .is-wide,
+.setting-grid > .settings-notice {
+  grid-column: 1 / -1;
+}
+
+.settings-page .setting-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  border: 1px solid var(--ui-tile-border);
+  border-radius: 10px;
+  background: var(--ui-tile);
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.2s ease;
+}
+
+.settings-page .setting-tile:hover {
+  background: var(--ui-tile-hover);
+}
+
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+label[for].setting-label {
+  cursor: pointer;
+}
+
+.setting-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--ui-muted);
+}
+
+.setting-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.setting-desc {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ui-muted);
+}
+
+.settings-page .settings-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.setting-value {
+  min-width: 44px;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A setting chosen from cards: heading on top, the cards underneath */
+.settings-page .setting-choice {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.setting-choice > .setting-label {
+  margin-bottom: 8px;
+}
+
+/* A row that does not apply to the current world or format */
+.settings-row-unavailable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.segmented-disabled {
+  pointer-events: none;
+}
+
+/* Notices: status lines and explanations under a setting */
+.settings-page .settings-notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--ui-accent);
+  border-radius: 4px 8px 8px 4px;
+  background: rgba(254, 204, 68, 0.06);
+  font-size: 12.5px;
+  color: var(--ui-muted);
+}
+
+/* A notice that reports an outcome rather than warning about one. Same green
+   and warm red the cache button flashes, so the panel speaks one language. */
+.settings-page .settings-notice.is-success {
+  border-left-color: #4caf50;
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.settings-page .settings-notice.is-error {
+  border-left-color: var(--ui-danger);
+  background: rgba(207, 102, 121, 0.08);
+}
+
+/* Tooltip icon, secondary to the description under each setting */
+.tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--ui-muted, #c0c0c0);
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: help;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tooltip-icon:hover,
+.tooltip-icon:focus-visible {
+  background-color: rgba(254, 204, 68, 0.3);
+  color: var(--primary-accent);
+}
+
+/* Per-setting revert button, next to the setting name. Same 16px round box
+   as the tooltip icon so they read as a pair. Hidden with visibility, not
+   display, so the heading cannot shift while a slider is dragged. */
+.settings-page .setting-revert {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.settings-row.is-modified .setting-revert {
+  visibility: visible;
+  opacity: 1;
+}
+
+.settings-page .setting-revert:hover {
+  background: rgba(254, 204, 68, 0.3);
+}
+
+.setting-revert svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  fill: rgba(254, 204, 68, 0.8);
+  transition: fill 0.15s ease;
+}
+
+.setting-revert:hover svg {
+  fill: var(--primary-accent);
+}
+
+/* Segmented control: a compact pill group for short, fixed choices */
+.settings-page .segmented-control {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 9px;
+  background: var(--ui-field);
+}
+
+.settings-page .segmented-control .segment {
+  all: unset;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-radius: 6px;
+  color: var(--ui-text);
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-page .segmented-control .segment:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.settings-page .segmented-control .segment:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 1px;
+}
+
+.settings-page .segmented-control .segment.active {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  font-weight: 600;
+}
+
+/* One segment the selected world format cannot show, next to ones it can. */
+.settings-page .segmented-control .segment:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.settings-page .segmented-control .segment:disabled:hover {
+  background: none;
+}
+
+/* Choice cards: the same segmented group, laid out as cards with an icon,
+   a name and one line on what it gives you. */
+.settings-page .choice-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.settings-page .choice-cards .segment {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 14px 40px 13px 14px;
+  border: 1px solid var(--ui-tile-border);
+  border-radius: 10px;
+  background: var(--ui-tile);
+  white-space: normal;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-page .choice-cards .segment:hover {
+  background: var(--ui-tile-hover);
+}
+
+.choice-cards .segment .icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 5px;
+  color: var(--ui-muted);
+}
+
+.choice-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.choice-desc {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ui-muted);
+}
+
+/* Radio mark in the corner */
+.choice-cards .segment::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid #6b6b6b;
+  border-radius: 50%;
+}
+
+.settings-page .choice-cards .segment.active {
+  border-color: var(--ui-accent);
+  background: rgba(254, 204, 68, 0.07);
+  box-shadow: inset 0 0 0 1px var(--ui-accent);
+  color: var(--ui-text);
+  font-weight: inherit;
+}
+
+.choice-cards .segment.active .icon,
+.choice-cards .segment.active .choice-title {
+  color: var(--ui-accent);
+}
+
+.choice-cards .segment.active::after {
+  border-color: var(--ui-accent);
+  background: radial-gradient(circle, var(--ui-accent) 0 3.5px, transparent 4px);
+}
+
+/* Fields */
+.settings-page input[type="text"],
+.settings-page input[type="password"],
+.settings-page input[type="number"],
+.settings-page .settings-select {
+  box-sizing: border-box;
+  width: 300px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 8px;
+  background-color: var(--ui-field);
+  color: var(--ui-text);
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-page input[type="text"]:focus,
+.settings-page input[type="password"]:focus,
+.settings-page input[type="number"]:focus,
+.settings-page .settings-select:focus {
+  outline: none;
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px rgba(254, 204, 68, 0.18);
+}
+
+.settings-page input::placeholder {
+  color: var(--ui-faint);
+}
+
+.settings-page .settings-select {
+  width: 220px;
+  padding-right: 32px;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23b8b8b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.settings-page .settings-select option {
+  background: #2c2c2c;
+  color: #f2f2f2;
+}
+
+.settings-page input[type="range"] {
+  width: 240px;
+  margin: 0;
+  accent-color: var(--ui-accent);
+  cursor: pointer;
+}
+
+/* Rotation angle */
+.settings-page .rotation-control {
+  gap: 6px;
+}
+
+.settings-page .rotation-control input[type="number"] {
+  width: 90px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.rotation-unit {
+  font-weight: 700;
+  color: var(--ui-muted);
+}
+
+/* Save path: field and browse button joined into one control */
+.settings-page .save-path-control {
+  gap: 0;
+}
+
+.settings-page input.save-path-input {
+  width: 340px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.settings-page .save-path-browse {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--ui-field-border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: var(--ui-field);
+  color: var(--ui-accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.settings-page .save-path-browse:hover,
+.settings-page .save-path-browse:active {
+  background: rgba(254, 204, 68, 0.14);
+}
+
+.save-path-browse .icon {
+  width: 17px;
+  height: 17px;
+}
+
+/* How much disk the caches hold, just left of the Clear button. Muted so it
+   reads as information about the button rather than a second control. */
+.cache-size {
+  font-size: 12.5px;
+  color: var(--ui-muted);
+  white-space: nowrap;
+}
+
+/* Small outline buttons inside a row (Clear, Precompute). Success and error
+   are a brief fill flash rather than a separate status label, so the row
+   never reflows. */
+.settings-page .clear-cache-button {
+  min-width: 84px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--ui-accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ui-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  /* `color` is included so the flash fades the text back with the fill. */
+  transition: background-color 0.4s ease, color 0.4s ease, border-color 0.4s ease, opacity 0.2s ease;
+}
+
+.settings-page .clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error),
+.settings-page .clear-cache-button:active:not(:disabled):not(.is-success):not(.is-error) {
+  background: rgba(254, 204, 68, 0.14);
+}
+
+.settings-page .clear-cache-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-page .clear-cache-button.is-success {
+  background: rgba(76, 175, 80, 0.85);
+  border-color: #4caf50;
+  color: #ffffff;
+}
+
+.settings-page .clear-cache-button.is-error {
+  background: rgba(207, 102, 121, 0.85);
+  border-color: var(--ui-danger);
+  color: #ffffff;
+}
+
+/* About */
+.settings-about {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  padding: 16px;
+  border: 1px solid var(--ui-tile-border);
+  border-radius: 10px;
+  background: var(--ui-tile);
+}
+
+.settings-about-version {
+  margin-right: auto;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.settings-about-actions,
+.settings-about-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-about-links {
+  flex-basis: 100%;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.settings-page .settings-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 8px;
+  background: var(--ui-field);
+  color: var(--ui-text);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-page .settings-action-button:hover,
+.settings-page .settings-action-button:active {
+  border-color: var(--ui-accent);
+  background: rgba(254, 204, 68, 0.1);
+}
+
+.settings-action-button .icon {
+  width: 17px;
+  height: 17px;
+  color: var(--ui-accent);
+}
+
+.github-link,
+.buymeacoffee-link,
+.discord-link {
+  display: inline-block;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.github-link:hover,
+.buymeacoffee-link:hover,
+.discord-link:hover {
+  transform: translateY(-1px);
+  opacity: 0.85;
+}
+
+.github-logo,
+.buymeacoffee-logo,
+.discord-logo {
+  display: block;
+  width: auto;
+  height: 34px;
+  border-radius: 8px;
+}
+
+/* Narrow windows (the app's minimum is 1000px): a slimmer sidebar and
+   tighter gutters keep two tile columns. */
+@media (max-width: 1100px) {
+  .settings-sidebar {
+    width: 232px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .settings-content {
+    padding: 18px 20px 28px;
+  }
+
+  .settings-topbar {
+    padding: 14px 20px 12px;
+  }
+
+  .settings-page input[type="text"],
+  .settings-page input[type="password"] {
+    width: 260px;
+  }
+
+  .settings-page input.save-path-input {
+    width: 280px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page * {
+    transition: none !important;
+  }
+}

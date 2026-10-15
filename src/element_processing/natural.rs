@@ -1,11 +1,14 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::climate::Climate;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::bush::{self, place_bush, BushKind};
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
+use crate::trees::mapped::{tree_row_positions, MappedTree};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
 
@@ -20,102 +23,38 @@ pub fn generate_natural(
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
-
-                let mut trees_ok_to_generate: Vec<TreeType> = vec![];
-                if let Some(species) = element.tags().get("species") {
-                    if species.contains("Betula") {
-                        trees_ok_to_generate.push(TreeType::Birch);
-                    }
-                    if species.contains("Quercus") {
-                        trees_ok_to_generate.push(TreeType::Oak);
-                    }
-                    if species.contains("Picea") {
-                        trees_ok_to_generate.push(TreeType::Spruce);
-                    }
-                } else if let Some(genus_wikidata) = element.tags().get("genus:wikidata") {
-                    match genus_wikidata.as_str() {
-                        "Q12004" => trees_ok_to_generate.push(TreeType::Birch),
-                        "Q26782" => trees_ok_to_generate.push(TreeType::Oak),
-                        "Q25243" => trees_ok_to_generate.push(TreeType::Spruce),
-                        _ => {
-                            trees_ok_to_generate.push(TreeType::Oak);
-                            trees_ok_to_generate.push(TreeType::Spruce);
-                            trees_ok_to_generate.push(TreeType::Birch);
-                        }
-                    }
-                } else if let Some(genus) = element.tags().get("genus") {
-                    match genus.as_str() {
-                        "Betula" => trees_ok_to_generate.push(TreeType::Birch),
-                        "Quercus" => trees_ok_to_generate.push(TreeType::Oak),
-                        "Picea" => trees_ok_to_generate.push(TreeType::Spruce),
-                        _ => trees_ok_to_generate.push(TreeType::Oak),
-                    }
-                } else if let Some(leaf_type) = element.tags().get("leaf_type") {
-                    match leaf_type.as_str() {
-                        "broadleaved" => {
-                            trees_ok_to_generate.push(TreeType::Oak);
-                            trees_ok_to_generate.push(TreeType::Birch);
-                            trees_ok_to_generate.push(TreeType::TallOak);
-                        }
-                        "needleleaved" => {
-                            trees_ok_to_generate.push(TreeType::Spruce);
-                            trees_ok_to_generate.push(TreeType::Pine);
-                        }
-                        _ => {
-                            trees_ok_to_generate.push(TreeType::Oak);
-                            trees_ok_to_generate.push(TreeType::Spruce);
-                            trees_ok_to_generate.push(TreeType::Birch);
-                            trees_ok_to_generate.push(TreeType::TallOak);
-                            trees_ok_to_generate.push(TreeType::Pine);
-                        }
-                    }
-                } else {
-                    trees_ok_to_generate.push(TreeType::Oak);
-                    trees_ok_to_generate.push(TreeType::Spruce);
-                    trees_ok_to_generate.push(TreeType::Birch);
-                    trees_ok_to_generate.push(TreeType::TallOak);
-                }
-
-                if trees_ok_to_generate.is_empty() {
-                    trees_ok_to_generate.push(TreeType::Oak);
-                    trees_ok_to_generate.push(TreeType::Spruce);
-                    trees_ok_to_generate.push(TreeType::Birch);
-                }
-
-                let mut rng = element_rng(element.id());
-                let tree_type = *trees_ok_to_generate
-                    .choose(&mut rng)
-                    .unwrap_or(&TreeType::Oak);
-
-                // Deliberately-mapped `natural=tree` node: allow it to stand on paving.
-                Tree::create_of_type(
+                let mapped = MappedTree::from_tags(&node.tags, node.id);
+                Tree::create_mapped(
                     editor,
-                    (x, 1, z),
-                    tree_type,
+                    (node.x, 1, node.z),
+                    &mapped,
                     Some(building_footprints),
                     Some(bridge_surface),
-                    true,
                 );
+            }
+        } else if natural_type == "tree_row" {
+            if let ProcessedElement::Way(way) = element {
+                let mapped = MappedTree::from_tags(&way.tags, way.id);
+                for (x, z) in tree_row_positions(&way.nodes, editor.scale()) {
+                    Tree::create_mapped(
+                        editor,
+                        (x, 1, z),
+                        &mapped,
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
+                }
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
             let mut corner_count: i32 = 0;
             let mut current_natural: Vec<(i32, i32)> = vec![];
-            let binding: String = "".to_string();
 
             // Determine block type based on natural tag
             let block_type: Block = match natural_type.as_str() {
-                "scrub" | "grassland" | "wood" | "heath" | "tree_row" => GRASS_BLOCK,
+                "scrub" | "grassland" | "wood" | "heath" => GRASS_BLOCK,
                 "sand" | "dune" => SAND,
-                "beach" | "shoal" => {
-                    let surface = element.tags().get("natural").unwrap_or(&binding);
-                    match surface.as_str() {
-                        "gravel" => GRAVEL,
-                        _ => SAND,
-                    }
-                }
+                "beach" | "shoal" => beach_block(element.tags().get("surface")),
                 "water" | "reef" | "bay" => WATER,
                 "bare_rock" => STONE,
                 "blockfield" => COBBLESTONE,
@@ -199,6 +138,10 @@ pub fn generate_natural(
 
             // If there are natural nodes, flood-fill the area using cache
             if corner_count > 0 {
+                let leaf_type_tagged = matches!(
+                    element.tags().get("leaf_type").map(String::as_str),
+                    Some("broadleaved" | "needleleaved")
+                );
                 let trees_ok_to_generate: Vec<TreeType> = {
                     let mut trees: Vec<TreeType> = vec![];
                     if let Some(leaf_type) = element.tags().get("leaf_type") {
@@ -252,7 +195,16 @@ pub fn generate_natural(
                 ];
 
                 let mut wetland_puddles: Vec<(i32, i32)> = Vec::new();
+                let arid = natural_type == "sand"
+                    && matches!(
+                        editor.climate(),
+                        Climate::HotDesert
+                            | Climate::HotSteppe
+                            | Climate::ColdDesert
+                            | Climate::ColdSteppe
+                    );
 
+                let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
                     // Roads, paths and paved areas keep their own surface. Checked
                     // by mask because a gravel or dirt road is not in the block list.
@@ -271,7 +223,7 @@ pub fn generate_natural(
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
                         "beach" | "sand" | "dune" | "shoal" => {
-                            editor.set_block(SAND, x, 0, z, None, None);
+                            editor.set_block(block_type, x, 0, z, None, None);
                         }
                         "glacier" => {
                             editor.set_block(PACKED_ICE, x, 0, z, None, None);
@@ -297,6 +249,20 @@ pub fn generate_natural(
                     if editor.check_for_block(x, 0, z, Some(&[WATER])) {
                         continue;
                     }
+                    // Only this tile's own cells get plants and trees: a neighbouring
+                    // tile's halo copy draws its own random sequence, so its plants and
+                    // trees would land on this tile's water and under its trunks. Wetland
+                    // puddles are positional, so halo cells still record them, and the
+                    // ring and cane around a puddle just across the seam come out whole.
+                    if !editor.owns(x, z) {
+                        if natural_type == "wetland"
+                            && wetland_puddle_cell(element.tags(), x, z)
+                            && try_place_wetland_puddle(editor, x, z)
+                        {
+                            wetland_puddles.push((x, z));
+                        }
+                        continue;
+                    }
                     match natural_type.as_str() {
                         "grassland" => {
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
@@ -315,7 +281,7 @@ pub fn generate_natural(
                                 if random_choice <= 2 {
                                     editor.set_block(COBBLESTONE, x, 0, z, None, None);
                                 } else if random_choice < 6 {
-                                    editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                                    place_bush(editor, x, z, BushKind::Low);
                                 } else {
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                 }
@@ -326,7 +292,7 @@ pub fn generate_natural(
                                 continue;
                             }
                             let random_choice = rng.random_range(0..500);
-                            if random_choice == 0 {
+                            if random_choice == 0 && editor.land_cover_backs_trees(x, z) {
                                 Tree::create(
                                     editor,
                                     (x, 1, z),
@@ -334,18 +300,14 @@ pub fn generate_natural(
                                     Some(bridge_surface),
                                 );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Meadow,
+                                );
                             } else if random_choice < 40 {
-                                editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                                if random_choice < 15 {
-                                    editor.set_block(OAK_LEAVES, x, 2, z, None, None);
-                                }
+                                place_bush(editor, x, z, BushKind::Wild);
                             } else if random_choice < 300 {
                                 if random_choice < 250 {
                                     editor.set_block(GRASS, x, 1, z, None, None);
@@ -355,7 +317,7 @@ pub fn generate_natural(
                                 }
                             }
                         }
-                        "tree_row" | "wood" => {
+                        "wood" => {
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
@@ -374,21 +336,23 @@ pub fn generate_natural(
                                     Some(building_footprints),
                                     Some(bridge_surface),
                                     false,
+                                    leaf_type_tagged,
                                 );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Forest,
+                                );
                             } else if random_choice <= 12 {
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }
+                        // Dead bushes belong to deserts; coastal dunes elsewhere stay bare.
                         "sand"
-                            if editor.check_for_block(x, 0, z, Some(&[SAND]))
+                            if arid
+                                && editor.check_for_block(x, 0, z, Some(&[SAND]))
                                 && rng.random_range(0..100) == 1 =>
                         {
                             editor.set_block(DEAD_BUSH, x, 1, z, None, None);
@@ -419,7 +383,7 @@ pub fn generate_natural(
                             }
                             // Positional wet/dry mosaic; puddle cells take water and skip vegetation
                             let wet = wetland_wet_zone(x, z);
-                            if wet && wetland_puddle_noise(x, z) {
+                            if wetland_puddle_cell(element.tags(), x, z) {
                                 if try_place_wetland_puddle(editor, x, z) {
                                     wetland_puddles.push((x, z));
                                 }
@@ -466,6 +430,7 @@ pub fn generate_natural(
                                             Some(building_footprints),
                                             Some(bridge_surface),
                                             false,
+                                            true,
                                         );
                                     } else if r < 15 {
                                         place_grass_or_tall(editor, &mut rng, x, z);
@@ -526,7 +491,11 @@ pub fn generate_natural(
                                                 if cluster_block == GRASS_BLOCK {
                                                     let vegetation_chance =
                                                         rng.random_range(0..100);
-                                                    if vegetation_chance == 0 {
+                                                    if vegetation_chance == 0
+                                                        && editor.land_cover_backs_trees(
+                                                            cluster_x, cluster_z,
+                                                        )
+                                                    {
                                                         // 1% chance for rare trees
                                                         Tree::create(
                                                             editor,
@@ -541,10 +510,12 @@ pub fn generate_natural(
                                                             None,
                                                         );
                                                     } else if vegetation_chance < 25 {
-                                                        // 10% chance for oak leaves
-                                                        editor.set_block(
-                                                            OAK_LEAVES, cluster_x, 1, cluster_z,
-                                                            None, None,
+                                                        // 10% chance for a low bush
+                                                        place_bush(
+                                                            editor,
+                                                            cluster_x,
+                                                            cluster_z,
+                                                            BushKind::Low,
                                                         );
                                                     }
                                                 }
@@ -593,14 +564,26 @@ pub fn generate_natural(
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                 } else if vegetation_chance < 25 {
                                     // 5% chance for small shrubs
-                                    editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                                    place_bush(editor, x, z, BushKind::Low);
                                 }
                             }
                         }
                         "shrubbery" => {
-                            // Manicured shrubs and decorative vegetation
-                            editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                            editor.set_block(OAK_LEAVES, x, 2, z, None, None);
+                            // Manicured shrubs, one species per bed
+                            let species = *shrubbery_species.get_or_insert_with(|| {
+                                let anchor = way.nodes.first().map_or((x, z), |n| (n.x, n.z));
+                                bush::shrubbery_species(editor, anchor.0, anchor.1)
+                            });
+                            for y in 1..=2 {
+                                editor.set_block(
+                                    bush::shrubbery_leaf(species, x, y, z),
+                                    x,
+                                    y,
+                                    z,
+                                    None,
+                                    None,
+                                );
+                            }
                         }
                         "tundra" => {
                             // Treeless habitat with low vegetation, mosses, lichens
@@ -643,7 +626,7 @@ pub fn generate_natural(
                                 continue;
                             }
                             let hill_chance = rng.random_range(0..1000);
-                            if hill_chance == 0 {
+                            if hill_chance == 0 && editor.land_cover_backs_trees(x, z) {
                                 // 0.1% chance for rare trees
                                 Tree::create(
                                     editor,
@@ -653,13 +636,12 @@ pub fn generate_natural(
                                 );
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
-                                let flower_block = match rng.random_range(1..=4) {
-                                    1 => RED_FLOWER,
-                                    2 => BLUE_FLOWER,
-                                    3 => YELLOW_FLOWER,
-                                    _ => WHITE_FLOWER,
-                                };
-                                editor.set_block(flower_block, x, 1, z, None, None);
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Meadow,
+                                );
                             } else if hill_chance < 600 {
                                 // 55% chance for grass
                                 editor.set_block(GRASS, x, 1, z, None, None);
@@ -731,7 +713,7 @@ pub fn generate_natural(
                     for &(px, pz) in &wetland_puddles {
                         for &(dx, dz) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                             let (nx, nz) = (px + dx, pz + dz);
-                            if !area.contains(nx, nz) {
+                            if !area.contains(nx, nz) || !editor.owns(nx, nz) {
                                 continue;
                             }
                             if crate::land_cover::coord_hash(
@@ -804,6 +786,16 @@ pub fn generate_natural_from_relation(
     }
 }
 
+/// Ground of a `natural=beach` or `shoal`, from its `surface=*`: sand unless mapped otherwise.
+fn beach_block(surface: Option<&String>) -> Block {
+    match surface.map(String::as_str) {
+        Some("gravel" | "fine_gravel" | "pebblestone" | "pebbles" | "shingle" | "stones") => GRAVEL,
+        Some("rock" | "stone" | "bare_rock") => STONE,
+        Some("mud") => MUD,
+        _ => SAND,
+    }
+}
+
 /// Vary a rock block type per-coordinate for natural rock areas.
 /// Uses coord_hash for deterministic, spatially-coherent variation.
 fn vary_rock_block(base: Block, x: i32, z: i32) -> Block {
@@ -826,6 +818,15 @@ fn vary_rock_block(base: Block, x: i32, z: i32) -> Block {
 }
 
 // Wet/dry mosaic gate for wetland cells, positional so it is seam-safe
+/// A cell of a water-bearing wetland that holds a puddle; positional, so every
+/// tile reaching the cell agrees.
+fn wetland_puddle_cell(tags: &std::collections::HashMap<String, String>, x: i32, z: i32) -> bool {
+    let wetland_type = tags.get("wetland").map(String::as_str).unwrap_or("");
+    !matches!(wetland_type, "wet_meadow" | "fen" | "tidalflat")
+        && wetland_wet_zone(x, z)
+        && wetland_puddle_noise(x, z)
+}
+
 fn wetland_wet_zone(x: i32, z: i32) -> bool {
     crate::ground_generation::value_noise_01(x + 11, z + 7, 28) > 0.55
 }
@@ -896,5 +897,76 @@ mod tests {
         assert!(!try_place_wetland_puddle(&mut editor, 4, 4));
         assert!(try_place_wetland_puddle(&mut editor, 5, 5));
         assert!(editor.check_for_block(5, 0, 5, Some(&[WATER])));
+    }
+
+    #[test]
+    fn a_beach_takes_its_ground_from_the_surface_tag() {
+        let surface = |s: &str| Some(s.to_string());
+        assert_eq!(beach_block(None), SAND);
+        assert_eq!(beach_block(surface("sand").as_ref()), SAND);
+        for pebbles in ["gravel", "pebblestone", "shingle", "fine_gravel"] {
+            assert_eq!(beach_block(surface(pebbles).as_ref()), GRAVEL, "{pebbles}");
+        }
+        assert_eq!(beach_block(surface("rock").as_ref()), STONE);
+    }
+
+    /// Renders one natural area over x/z 5..=54 at the given place and returns the editor.
+    fn render_natural(llbbox: LLBBox, tags: &[(&str, &str)]) -> WorldEditor<'static> {
+        use crate::element_processing::bridge_styles::BridgeOutlineIndex;
+        use crate::element_processing::bridges::BridgeStructureMap;
+        use crate::element_processing::building_test_support::rect_way;
+        use clap::Parser as _;
+
+        let xzbbox = Box::leak(Box::new(XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap()));
+        let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        let way = rect_way(9, 5, 5, 54, 54, tags);
+        generate_natural(
+            &mut editor,
+            &ProcessedElement::Way(way),
+            &args,
+            &FloodFillCache::new(),
+            &BuildingFootprintBitmap::new_empty(),
+            &surface,
+        );
+        editor
+    }
+
+    fn count(editor: &WorldEditor, y: i32, blocks: &[Block]) -> usize {
+        (10..50)
+            .flat_map(|x| (10..50).map(move |z| (x, z)))
+            .filter(|&(x, z)| editor.check_for_block(x, y, z, Some(blocks)))
+            .count()
+    }
+
+    #[test]
+    fn a_gravel_beach_is_gravel_and_a_plain_beach_is_sand() {
+        let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let gravel = render_natural(place, &[("natural", "beach"), ("surface", "gravel")]);
+        assert_eq!(count(&gravel, 0, &[GRAVEL]), 1600);
+        let sand = render_natural(place, &[("natural", "beach")]);
+        assert_eq!(count(&sand, 0, &[SAND]), 1600);
+    }
+
+    #[test]
+    fn dead_bushes_grow_on_desert_sand_but_not_on_coastal_sand() {
+        let baltic = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let coast = render_natural(baltic, &[("natural", "sand")]);
+        assert_eq!(count(&coast, 1, &[DEAD_BUSH]), 0);
+
+        let sahara = LLBBox::new(25.0, 25.0, 25.01, 25.01).unwrap();
+        let desert = render_natural(sahara, &[("natural", "sand")]);
+        assert!(count(&desert, 1, &[DEAD_BUSH]) > 0);
     }
 }

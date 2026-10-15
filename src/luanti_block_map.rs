@@ -1,5 +1,6 @@
 use crate::block_definitions::Block;
 use fastnbt::Value;
+use once_cell::sync::Lazy;
 
 /* * This file contains data converted from MC2MT.
  * Original C++ Source Copyright (C) 2016 rollerozxa
@@ -114,6 +115,24 @@ fn conv_door(props: Option<&Value>, id: u16, species: &str) -> LuantiNode {
     }
 }
 
+/// Beds: the foot is the bottom node and the head the top one, both turned towards
+/// the head. The red bed ids carry their part and facing as default properties.
+fn conv_bed(block: Block, props: Option<&Value>, colour: &str) -> LuantiNode {
+    let defaults = block.properties();
+    let props = props.or(defaults.as_ref());
+    let head = prop_eq(props, "part", "head");
+    let name = match (colour, head) {
+        ("white", false) => "mcl_beds:bed_white_bottom",
+        ("white", true) => "mcl_beds:bed_white_top",
+        (_, false) => "mcl_beds:bed_red_bottom",
+        (_, true) => "mcl_beds:bed_red_top",
+    };
+    LuantiNode {
+        name,
+        param2: facing_to_facedir(prop_str(props, "facing").unwrap_or("north")),
+    }
+}
+
 fn conv_trapdoor(props: Option<&Value>, closed: &'static str, open: &'static str) -> LuantiNode {
     let facing = prop_str(props, "facing").unwrap_or("north");
     let is_open = prop_eq(props, "open", "true");
@@ -148,6 +167,94 @@ fn conv_slab(props: Option<&Value>, bottom: &'static str, top: &'static str) -> 
         top
     } else {
         bottom
+    };
+    LuantiNode { name, param2: 0 }
+}
+
+/// Java `facing` of a block growing out of a surface (amethyst buds) → Luanti wallmounted
+/// param2, which names the surface it hangs on: 0 = y+, 1 = y-, 2 = x+, 3 = x-, 4 = z+,
+/// 5 = z-. The surface is opposite the facing, and MC's -Z (north) is Luanti's +Z.
+fn facing_to_wallmounted(facing: &str) -> u8 {
+    match facing {
+        "down" => 0,
+        "up" => 1,
+        "west" => 2,
+        "east" => 3,
+        "south" => 4,
+        "north" => 5,
+        _ => 1,
+    }
+}
+
+/// A multiface block on the first face it covers → wallmounted param2 (see above; here the
+/// property already names the surface).
+fn multiface_to_wallmounted(props: Option<&Value>) -> u8 {
+    for (face, param2) in [
+        ("down", 1),
+        ("up", 0),
+        ("east", 2),
+        ("west", 3),
+        ("north", 4),
+        ("south", 5),
+    ] {
+        if prop_eq(props, face, "true") {
+            return param2;
+        }
+    }
+    1
+}
+
+/// Mineclonia registers one glow lichen node per face set, named by the covered faces in
+/// n, w, s, e, u, d order (`mcl_core:glow_lichen_nu`). Indexed by those six bits.
+static GLOW_LICHEN_NODES: Lazy<Vec<String>> = Lazy::new(|| {
+    (0..64u8)
+        .map(|bits| {
+            let mut name = String::from("mcl_core:glow_lichen_");
+            for (i, letter) in ['n', 'w', 's', 'e', 'u', 'd'].into_iter().enumerate() {
+                if bits & (1 << i) != 0 {
+                    name.push(letter);
+                }
+            }
+            name
+        })
+        .collect()
+});
+
+fn conv_glow_lichen(props: Option<&Value>) -> LuantiNode {
+    let mut bits = 0usize;
+    for (i, face) in ["north", "west", "south", "east", "up", "down"]
+        .into_iter()
+        .enumerate()
+    {
+        if prop_eq(props, face, "true") {
+            bits |= 1 << i;
+        }
+    }
+    // No face set has no node; lie on the floor.
+    if bits == 0 {
+        bits = 1 << 5;
+    }
+    LuantiNode {
+        name: GLOW_LICHEN_NODES[bits].as_str(),
+        param2: 0,
+    }
+}
+
+/// Pointed dripstone: Mineclonia's `top` nodes hang from the ceiling, `bottom` ones stand on
+/// the floor, and its stage names are Java's `thickness` values.
+fn conv_pointed_dripstone(props: Option<&Value>) -> LuantiNode {
+    let hanging = prop_eq(props, "vertical_direction", "down");
+    let name = match (hanging, prop_str(props, "thickness").unwrap_or("tip")) {
+        (true, "tip_merge") => "mcl_dripstone:dripstone_top_tip_merge",
+        (true, "frustum") => "mcl_dripstone:dripstone_top_frustum",
+        (true, "middle") => "mcl_dripstone:dripstone_top_middle",
+        (true, "base") => "mcl_dripstone:dripstone_top_base",
+        (true, _) => "mcl_dripstone:dripstone_top_tip",
+        (false, "tip_merge") => "mcl_dripstone:dripstone_bottom_tip_merge",
+        (false, "frustum") => "mcl_dripstone:dripstone_bottom_frustum",
+        (false, "middle") => "mcl_dripstone:dripstone_bottom_middle",
+        (false, "base") => "mcl_dripstone:dripstone_bottom_base",
+        (false, _) => "mcl_dripstone:dripstone_bottom_tip",
     };
     LuantiNode { name, param2: 0 }
 }
@@ -321,7 +428,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         158 => "mcl_noteblock:noteblock",
         159 => "mcl_deepslate:deepslatepolishedwall",
         160 => "mcl_brewing:stand_000",
-        161 | 162 | 165..=168 | 294 | 295 => "mcl_beds:bed_red_bottom",
+        161 | 162 | 165..=168 | 294 | 295 => return conv_bed(block, props, "red"),
         163 => "mcl_core:glass_black",
         164 => "mcl_stairs:slab_andesite_smooth",
         169 => "mcl_core:glass_grey",
@@ -545,7 +652,6 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         363 => "mcl_banners:hanging_banner", // WHITE_WALL_BANNER
         364 | 365 => return conv_door(props, block.id(), "spruce"),
         366 => return conv_door(props, block.id(), "oak"),
-        367 => "mcl_end:end_stone", // END_STONE
         // Aeroplane livery + jetbridge blocks.
         368 => "mcl_end:purpur_block",
         369 => "mcl_stairs:slab_purpur_block",
@@ -571,6 +677,130 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         382 => "mcl_core:coalblock",
         383 => "mcl_stairs:slab_blackstone",
         384 => return conv_door(props, block.id(), "iron"),
+        // Cave worldgen (--caves).
+        385 => "mcl_core:lava_source",
+        386 => "mcl_core:obsidian",
+        387 => "mcl_core:ice",
+        388 => "mcl_core:blue_ice",
+        389 => "mcl_powder_snow:powder_snow",
+        390 => "mcl_amethyst:calcite",
+        391 => "mcl_amethyst:amethyst_block",
+        392 => "mcl_amethyst:budding_amethyst_block",
+        393..=396 => {
+            let name = match block.id() {
+                393 => "mcl_amethyst:amethyst_cluster",
+                394 => "mcl_amethyst:small_amethyst_bud",
+                395 => "mcl_amethyst:medium_amethyst_bud",
+                _ => "mcl_amethyst:large_amethyst_bud",
+            };
+            let facing = prop_str(props, "facing").unwrap_or("up");
+            return LuantiNode {
+                name,
+                param2: facing_to_wallmounted(facing),
+            };
+        }
+        397 => "mcl_blackstone:basalt",
+        398 => "mcl_blackstone:basalt_smooth",
+        399 => "mcl_dripstone:dripstone_block",
+        400 => return conv_pointed_dripstone(props),
+        401 => "mcl_sculk:sculk",
+        402 => {
+            return LuantiNode {
+                name: "mcl_sculk:vein",
+                param2: multiface_to_wallmounted(props),
+            }
+        }
+        403 => "mcl_sculk:catalyst",
+        404 => "mcl_sculk:sensor",
+        405 => "mcl_sculk:shrieker",
+        406 => return conv_glow_lichen(props),
+        407 => "mcl_lush_caves:moss_carpet",
+        // Cave vines and their plant segments share one node, lit when they carry berries.
+        408 | 409 => {
+            if prop_eq(props, "berries", "true") {
+                "mcl_lush_caves:cave_vines_lit"
+            } else {
+                "mcl_lush_caves:cave_vines"
+            }
+        }
+        410 => "mcl_lush_caves:spore_blossom",
+        411 => "mcl_lush_caves:azalea",
+        412 => "mcl_lush_caves:azalea_flowering",
+        413 => "mcl_lush_caves:dripleaf_big",
+        414 => "mcl_lush_caves:dripleaf_big_stem",
+        415 => "mcl_lush_caves:dripleaf_small_stem",
+        416 => "mcl_lush_caves:dripleaf_small",
+        417 => "mcl_core:mycelium",
+        418 => "mcl_mushrooms:mushroom_red",
+        419 => "mcl_mushrooms:mushroom_brown",
+        420 => "mcl_mushrooms:red_mushroom_block_cap_111111",
+        421 => "mcl_mushrooms:brown_mushroom_block_cap_111111",
+        422 => "mcl_mushrooms:brown_mushroom_block_stem_full",
+        423 => "mcl_crimson:shroomlight",
+        424 => "mcl_ocean:tube_coral_block",
+        425 => "mcl_ocean:brain_coral_block",
+        426 => "mcl_ocean:bubble_coral_block",
+        427 => "mcl_ocean:fire_coral_block",
+        428 => "mcl_ocean:horn_coral_block",
+        429 => "mcl_ocean:dead_tube_coral_block",
+        430 => "mcl_ocean:dead_brain_coral_block",
+        431 => "mcl_ocean:dead_bubble_coral_block",
+        432 => "mcl_ocean:dead_fire_coral_block",
+        433 => "mcl_ocean:dead_horn_coral_block",
+        // Mineclonia corals and fans are rooted: a coral block with the plant drawn above it.
+        434 => "mcl_ocean:tube_coral",
+        435 => "mcl_ocean:brain_coral",
+        436 => "mcl_ocean:bubble_coral",
+        437 => "mcl_ocean:fire_coral",
+        438 => "mcl_ocean:horn_coral",
+        439 => "mcl_ocean:tube_coral_fan",
+        440 => "mcl_ocean:brain_coral_fan",
+        441 => "mcl_ocean:bubble_coral_fan",
+        442 => "mcl_ocean:fire_coral_fan",
+        443 => "mcl_ocean:horn_coral_fan",
+        444 => "mcl_deepslate:deepslate_with_coal",
+        445 => "mcl_deepslate:deepslate_with_iron",
+        446 => "mcl_deepslate:deepslate_with_copper",
+        447 => "mcl_deepslate:deepslate_with_gold",
+        448 => "mcl_deepslate:deepslate_with_redstone",
+        449 => "mcl_deepslate:deepslate_with_lapis",
+        450 => "mcl_deepslate:deepslate_with_diamond",
+        451 => "mcl_flowers:cornflower",
+        452 => "mcl_flowers:oxeye_daisy",
+        453 => "mcl_flowers:allium",
+        454 => "mcl_flowers:lily_of_the_valley",
+        455 => "mcl_flowers:tulip_red",
+        456 => "mcl_flowers:tulip_orange",
+        457 => "mcl_flowers:tulip_white",
+        458 => "mcl_flowers:tulip_pink",
+        459 => "mcl_flowers:sunflower",
+        460 => "mcl_flowers:sunflower_top",
+        461 => "mcl_flowers:lilac",
+        462 => "mcl_flowers:lilac_top",
+        463 => "mcl_flowers:rose_bush",
+        464 => "mcl_flowers:rose_bush_top",
+        465 => "mcl_flowers:peony",
+        466 => "mcl_flowers:peony_top",
+        467 => "mcl_farming:sweet_berry_bush_3",
+        468 => "mcl_farming:pumpkin",
+        469 => "mcl_flowers:waterlily",
+        470 => "mcl_core:cactus",
+        471 => "mcl_core:dirt_with_grass_snow",
+        472 => "mcl_core:podzol",
+        473 => "mcl_colorblocks:concrete_powder_silver",
+        474 => "mcl_core:snow_2",
+        475 => "mcl_core:snow_3",
+        476 => "mcl_core:snow_4",
+        477 => "mcl_core:snow_5",
+        478 => "mcl_core:snow_6",
+        479 => "mcl_core:snow_7",
+        480 => "mcl_trees:leaves_azalea",
+        481 => return conv_bed(block, props, "white"),
+        482 => "mcl_lectern:lectern",
+        483 => "mcl_cake:cake",
+        484 => "mcl_farming:melon",
+        485 => "mcl_loom:loom",
+        486 => "mcl_smithing_table:table",
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }
@@ -579,7 +809,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_definitions::STONE;
+    use crate::block_definitions::{RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE, WHITE_BED};
+    use std::collections::HashMap;
 
     /// Blocks Mineclonia has no node for, so they can only fall back. Keep this
     /// list short: every entry is a block that exports as plain stone.
@@ -588,6 +819,21 @@ mod tests {
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
     /// a block without a Mineclonia node fails here instead of in someone's map.
+    #[test]
+    fn beds_export_head_and_foot_facing_their_head() {
+        let foot = to_mineclonia_node(RED_BED_EAST_FOOT, None);
+        let head = to_mineclonia_node(RED_BED_EAST_HEAD, None);
+        assert_eq!(foot.name, "mcl_beds:bed_red_bottom");
+        assert_eq!(head.name, "mcl_beds:bed_red_top");
+        assert_eq!((foot.param2, head.param2), (1, 1));
+        let props = Value::Compound(HashMap::from([
+            ("facing".to_string(), Value::String("south".to_string())),
+            ("part".to_string(), Value::String("head".to_string())),
+        ]));
+        let white = to_mineclonia_node(WHITE_BED, Some(&props));
+        assert_eq!((white.name, white.param2), ("mcl_beds:bed_white_top", 2));
+    }
+
     #[test]
     fn every_block_maps_to_a_mineclonia_node() {
         let mut unmapped = Vec::new();

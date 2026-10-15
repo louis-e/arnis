@@ -110,6 +110,7 @@ pub fn oklab_distance_lab(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
 }
 
 /// Squared perceptual distance (Oklab) between two sRGB colors.
+#[cfg(test)]
 pub fn oklab_distance(from: &RGBTuple, to: &RGBTuple) -> f32 {
     let a = rgb_to_oklab(from.0, from.1, from.2);
     let b = rgb_to_oklab(to.0, to.1, to.2);

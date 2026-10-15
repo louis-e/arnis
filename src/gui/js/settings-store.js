@@ -7,6 +7,8 @@
 // Restore and revert always write through the control and dispatch real
 // events, so the existing side-effect handlers run unchanged.
 
+import { SETTINGS_REFRESHED_EVENT } from './settings-layout.js';
+
 const STORAGE_KEY = 'arnis-settings';
 
 // Bump only when stored values need migrating, not when settings are added.
@@ -24,7 +26,9 @@ const SETTINGS = [
   { id: 'overture-toggle', kind: 'checkbox', store: OWN },
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
   { id: 'interior-toggle', kind: 'checkbox', store: OWN },
+  { id: 'height-multiplier-slider', kind: 'number', store: OWN },
   { id: 'fillground-toggle', kind: 'checkbox', store: OWN },
+  { id: 'caves-toggle', kind: 'checkbox', store: OWN },
   { id: 'canopy-height-toggle', kind: 'checkbox', store: OWN },
   { id: 'max-tree-size-group', kind: 'segmented', store: OWN, valueAttr: 'data-max-tree-size' },
   { id: 'legacy-trees-toggle', kind: 'checkbox', store: OWN },
@@ -32,8 +36,10 @@ const SETTINGS = [
   // World
   { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
+  { id: 'world-type-group', kind: 'segmented', store: OWN, valueAttr: 'data-world-type' },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
+  { id: 'one-world-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
   // The facade controls. Registered here like every other segmented control,
   // so the panel's Revert and Reset to defaults reach them: the store reads the
@@ -412,9 +418,10 @@ const REVERT_ICON =
   '<path transform="scale(-1,1) translate(-24,0)" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-8 8s3.57 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>' +
   '</svg>';
 
-// Appends a revert button to each row's label, right after the tooltip icon.
-// Nesting it in the label is safe: the HTML spec gives a label no activation
-// behaviour for interactive descendants, so this does not toggle the checkbox.
+// Appends a revert button to each row's setting name, right after the tooltip
+// icon. Nesting it in the label is safe: the HTML spec gives a label no
+// activation behaviour for interactive descendants, so this does not toggle
+// the checkbox.
 function injectRevertButtons(localization) {
   for (const entry of SETTINGS) {
     if (entry.revertable === false) continue;
@@ -424,8 +431,11 @@ function injectRevertButtons(localization) {
     const row = el.closest('.settings-row');
     if (!row) continue;
 
+    // The heading holds the name; the label around it also holds the icon and
+    // the description, and the button belongs beside the name.
     const label = row.querySelector(':scope > label');
-    if (!label || label.querySelector(':scope > .setting-revert')) continue;
+    const slot = (label && label.querySelector('.setting-heading')) || label;
+    if (!slot || slot.querySelector(':scope > .setting-revert')) continue;
 
     const button = document.createElement('button');
     button.type = 'button';
@@ -442,7 +452,7 @@ function injectRevertButtons(localization) {
       revert(entry);
     });
 
-    label.appendChild(button);
+    slot.appendChild(button);
   }
 }
 
@@ -490,11 +500,20 @@ function refresh() {
     resetButton.disabled = !anyModified;
     if (!anyModified) cancelResetConfirm();
   }
+
+  // The sidebar marks the sections that hold a modified row.
+  document.dispatchEvent(new CustomEvent(SETTINGS_REFRESHED_EVENT));
 }
 
 /* Global reset button, with an inline two-step confirmation */
 
 let confirmTimer = null;
+
+// The button carries an icon, so only its label span is rewritten.
+function setResetText(button, text) {
+  const label = button.querySelector('.settings-reset-label') || button;
+  label.textContent = text;
+}
 
 function cancelResetConfirm() {
   const button = document.getElementById('reset-settings-button');
@@ -504,7 +523,7 @@ function cancelResetConfirm() {
   }
   if (!button) return;
   button.classList.remove('is-confirming');
-  button.textContent = button.dataset.idleLabel || 'Reset';
+  setResetText(button, button.dataset.idleLabel || 'Reset all settings');
 }
 
 function initResetButton(localization) {
@@ -512,7 +531,6 @@ function initResetButton(localization) {
   if (!button) return;
 
   applyResetLabels(button, localization);
-  button.textContent = button.dataset.idleLabel;
 
   button.addEventListener('click', () => {
     if (button.classList.contains('is-confirming')) {
@@ -522,7 +540,7 @@ function initResetButton(localization) {
     }
     // Ask once, so a stray click cannot wipe every setting. Self-cancels.
     button.classList.add('is-confirming');
-    button.textContent = button.dataset.confirmLabel;
+    setResetText(button, button.dataset.confirmLabel);
     confirmTimer = setTimeout(cancelResetConfirm, 4000);
   });
 
@@ -536,23 +554,25 @@ function initResetButton(localization) {
   });
 }
 
-// The row label says what this resets, so the button stays short in every locale.
+// The button stands alone in the sidebar, so its idle label names what it
+// resets; the confirm label stays short in every locale.
 function applyResetLabels(button, localization) {
   button.dataset.idleLabel = localizedString(
     localization,
-    'reset_all_settings_button',
-    'Reset'
+    'reset_all_settings',
+    'Reset all settings'
   );
   button.dataset.confirmLabel = localizedString(
     localization,
     'reset_all_settings_confirm',
     'Confirm?'
   );
-  if (!button.classList.contains('is-confirming')) {
-    button.textContent = button.dataset.idleLabel;
-  } else {
-    button.textContent = button.dataset.confirmLabel;
-  }
+  setResetText(
+    button,
+    button.classList.contains('is-confirming')
+      ? button.dataset.confirmLabel
+      : button.dataset.idleLabel
+  );
 }
 
 /* Public API */

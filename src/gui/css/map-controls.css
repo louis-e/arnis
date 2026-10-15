@@ -1,0 +1,393 @@
+/* Map controls: the draw toolbar, the search box, the drawing actions, the
+   world preview opacity slider and the coordinate menu. They share the
+   translucent grey of the map's hint pill (bbox.css), so everything floating
+   over the map reads as one set, and follow the settings page: light line
+   icons, yellow for the tool in use, dimmed for one that cannot be used yet.
+
+   Loaded after leaflet.css, leaflet.draw.css and bbox.css. The selectors
+   repeat .leaflet-draw and .leaflet-touch where Leaflet's own rules would
+   otherwise win on specificity. */
+
+:root {
+  --map-surface: rgba(46, 46, 46, 0.9);
+  --map-surface-solid: #2e2e2e;
+  --map-border: rgba(255, 255, 255, 0.14);
+  --map-text: #ececec;
+  --map-muted: #b5b5b5;
+  --map-accent: #fecc44;
+  --map-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Toolbar groups */
+
+.leaflet-top.leaflet-left .leaflet-control {
+  margin-top: 10px;
+  margin-left: 10px;
+}
+
+.leaflet-draw .leaflet-draw-toolbar {
+  margin-top: 8px;
+}
+
+.leaflet-draw .leaflet-draw-toolbar-top {
+  margin-top: 0;
+}
+
+.leaflet-draw .leaflet-bar,
+.leaflet-touch .leaflet-draw .leaflet-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--map-border);
+  border-radius: 9px;
+  background: var(--map-surface);
+  background-clip: border-box;
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* Buttons */
+
+.leaflet-draw .leaflet-bar a,
+.leaflet-touch .leaflet-draw .leaflet-bar a,
+.leaflet-touch .leaflet-draw .leaflet-draw-toolbar a {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  line-height: 32px;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  background-image: none;
+  color: var(--map-text);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* The icon, masked out of the button's text colour */
+.leaflet-draw .leaflet-bar a::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+  background-color: currentColor;
+  -webkit-mask: var(--tool-icon) center / contain no-repeat;
+  mask: var(--tool-icon) center / contain no-repeat;
+}
+
+.leaflet-draw .leaflet-bar a:hover,
+.leaflet-draw .leaflet-bar a:focus {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.leaflet-draw .leaflet-bar a:focus {
+  outline: none;
+}
+
+.leaflet-draw .leaflet-bar a:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--map-accent);
+}
+
+/* The tool in use */
+.leaflet-draw .leaflet-bar a.leaflet-draw-toolbar-button-enabled,
+.leaflet-draw .leaflet-bar a#world-preview-btn.active {
+  background-color: var(--map-accent);
+  color: #1c1c1c;
+}
+
+/* Nothing to act on yet */
+.leaflet-draw .leaflet-bar a.leaflet-disabled,
+.leaflet-draw .leaflet-bar a.disabled,
+.leaflet-draw .leaflet-bar a.leaflet-disabled:hover,
+.leaflet-draw .leaflet-bar a.disabled:hover {
+  background-color: transparent;
+  color: rgba(236, 236, 236, 0.32);
+  cursor: default;
+}
+
+/* While there is no area yet, the tool that makes one is outlined in yellow,
+   next to the hint at the bottom of the map that names it. */
+.leaflet-draw .leaflet-bar a.map-tool-attention:not(.leaflet-draw-toolbar-button-enabled) {
+  box-shadow: inset 0 0 0 1.5px rgba(254, 204, 68, 0.8);
+  color: var(--map-accent);
+}
+
+.leaflet-draw-toolbar a.leaflet-draw-draw-rectangle { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='5' width='14' height='14' stroke-width='1.8'/%3E%3Cg fill='black' stroke='none'%3E%3Crect x='2.5' y='2.5' width='5' height='5' rx='1'/%3E%3Crect x='16.5' y='2.5' width='5' height='5' rx='1'/%3E%3Crect x='2.5' y='16.5' width='5' height='5' rx='1'/%3E%3Crect x='16.5' y='16.5' width='5' height='5' rx='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-draw-polyline { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19h16'/%3E%3Cpath d='M4 19 15 6'/%3E%3Cpath d='M10.5 19A6.5 6.5 0 0 0 8.2 14.04'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-draw-marker { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0'/%3E%3Ccircle cx='12' cy='10' r='3'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-edit-remove { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/%3E%3Cpath d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-edit-preview { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z'/%3E%3Cpath d='M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12'/%3E%3Cpath d='M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-edit-terrain { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m8 3 4 8 5-5 5 15H2L8 3z'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-edit-body.body-earth { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cellipse cx='12' cy='12' rx='3.8' ry='9'/%3E%3Cpath d='M3 12h18'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-edit-body.body-moon { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='9.2' cy='9.2' r='2.2'/%3E%3Ccircle cx='15.2' cy='13.6' r='1.6'/%3E%3Ccircle cx='9.8' cy='15.8' r='1.2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-edit-body.body-mars { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M5.6 7.4Q12 10.8 18.4 7.4'/%3E%3Cpath d='M7.4 15.4 16.4 13.8'/%3E%3C/g%3E%3C/svg%3E"); }
+
+/* Tooltip beside a toolbar button: its name, what it does, and why it
+   cannot be used yet when that is the case. Placed by bbox.js. */
+.map-tool-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 250px;
+  padding: 7px 10px;
+  border: 1px solid var(--map-border);
+  border-radius: 6px;
+  background: rgba(38, 38, 38, 0.97);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  color: var(--map-muted);
+  font-family: var(--map-font);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+.map-tool-tip.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.map-tool-tip strong {
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.map-tool-tip .map-tool-tip-note {
+  margin-top: 3px;
+  color: #f2cf73;
+}
+
+/* Drawing actions (Cancel) beside the tool in use */
+
+.leaflet-draw .leaflet-draw-actions {
+  left: 46px;
+}
+
+.leaflet-draw .leaflet-draw-actions a,
+.leaflet-draw .leaflet-draw-actions-top a,
+.leaflet-draw .leaflet-draw-actions-bottom a,
+.leaflet-draw .leaflet-draw-actions-top.leaflet-draw-actions-bottom a {
+  height: 32px;
+  padding: 0 12px;
+  border-left: 1px solid var(--map-border);
+  background-color: var(--map-surface-solid);
+  color: var(--map-text);
+  font: 500 12.5px/32px var(--map-font);
+}
+
+.leaflet-draw .leaflet-draw-actions a:hover {
+  background-color: #3c3c3c;
+  color: #ffffff;
+}
+
+.leaflet-draw .leaflet-draw-actions li a {
+  border-radius: 0;
+}
+
+.leaflet-draw .leaflet-draw-actions li:first-child a {
+  border-left: none;
+  border-radius: 6px 0 0 6px;
+}
+
+.leaflet-draw .leaflet-draw-actions li:last-child a {
+  border-radius: 0 6px 6px 0;
+}
+
+.leaflet-draw .leaflet-draw-actions li:only-child a {
+  border-radius: 6px;
+}
+
+.leaflet-draw .leaflet-draw-actions-top,
+.leaflet-draw .leaflet-draw-actions-bottom {
+  margin-top: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+}
+
+/* World preview opacity, under the toolbar while the preview is shown */
+
+.leaflet-bar.world-preview-slider-container,
+.leaflet-touch .leaflet-bar.world-preview-slider-container {
+  padding: 9px 10px;
+  border: 1px solid var(--map-border);
+  border-radius: 9px;
+  background: var(--map-surface);
+  background-clip: border-box;
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.world-preview-slider-container a {
+  display: none;
+}
+
+.world-preview-slider {
+  display: block;
+  width: 96px;
+  height: 8px;
+  margin: 0;
+  accent-color: var(--map-accent);
+  cursor: pointer;
+}
+
+/* Search */
+
+#search-container {
+  top: 10px;
+  right: 10px;
+  font-family: var(--map-font);
+}
+
+#search-box {
+  overflow: hidden;
+  border: 1px solid var(--map-border);
+  border-radius: 9px;
+  background: var(--map-surface);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s ease;
+}
+
+#search-box:focus-within {
+  border-color: rgba(254, 204, 68, 0.75);
+}
+
+#city-search {
+  width: 210px;
+  padding: 8px 4px 8px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--map-text);
+  font-family: var(--map-font);
+  font-size: 13px;
+}
+
+#city-search::placeholder {
+  color: #9c9c9c;
+}
+
+#city-search:focus {
+  border: none;
+  box-shadow: none;
+}
+
+#search-btn {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  width: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--map-muted);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+#search-btn:hover,
+#search-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  outline: none;
+}
+
+/* Out of flow so long results match the box width instead of widening it. */
+#search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  max-width: none;
+  margin-top: 6px;
+  border: 1px solid var(--map-border);
+  border-top: 1px solid var(--map-border);
+  border-radius: 9px;
+  background: rgba(40, 40, 40, 0.97);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.search-result-item {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--map-text);
+}
+
+.search-result-item:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.search-result-name {
+  color: var(--map-accent);
+  font-weight: 600;
+}
+
+.search-result-details {
+  color: #a4a4a4;
+}
+
+.search-loading,
+.search-no-results {
+  color: var(--map-muted);
+}
+
+#search-results::-webkit-scrollbar {
+  width: 8px;
+}
+
+#search-results::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18) padding-box;
+}
+
+/* Right-click coordinate menu */
+
+.coordinate-context-menu {
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--map-border);
+  border-radius: 8px;
+  background: rgba(40, 40, 40, 0.97);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--map-text);
+  font-family: var(--map-font);
+}
+
+.coordinate-context-menu-item {
+  padding: 7px 10px;
+  border-radius: 5px;
+  color: var(--map-text);
+}
+
+.coordinate-context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.coordinate-context-menu-separator {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaflet-draw .leaflet-bar a,
+  .map-tool-tip,
+  #search-box,
+  #search-btn {
+    transition: none;
+  }
+}

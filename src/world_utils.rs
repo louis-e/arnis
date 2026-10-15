@@ -148,6 +148,10 @@ fn sanitize_chars_and_trim_capped(name: &str, max_bytes: usize) -> String {
     sanitized
 }
 
+pub fn world_folder_name(raw: &str) -> Option<String> {
+    Some(sanitize_custom_world_name(raw)).filter(|n| !n.is_empty())
+}
+
 /// Sanitizes an area name for safe use in filesystem paths.
 /// Replaces characters that are invalid on Windows/macOS/Linux, trims whitespace,
 /// and limits length to prevent excessively long filenames.
@@ -199,16 +203,44 @@ pub fn create_new_world_with_name(
     };
 
     let new_world_path: PathBuf = base_path.join(&unique_name);
+    write_world_skeleton(&new_world_path, &unique_name, true)?;
+    Ok(new_world_path.display().to_string())
+}
+
+/// Flat template chunks the skeleton writes as `region/r.0.0.mca`.
+const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
+
+/// Deletes `region/r.0.0.mca` while it is still exactly the skeleton's template, so a void
+/// world keeps no flat chunks where its area never reaches. A file anything has written to
+/// is left alone.
+pub fn remove_untouched_template_region(world_path: &Path) {
+    let path = world_path.join("region").join("r.0.0.mca");
+    let untouched = fs::metadata(&path).is_ok_and(|m| m.len() == REGION_TEMPLATE.len() as u64)
+        && fs::read(&path).is_ok_and(|bytes| bytes == REGION_TEMPLATE);
+    if untouched {
+        let _ = fs::remove_file(&path);
+    }
+}
+
+/// Writes `level.dat`, the icon and `region/` for a new Java world. One World
+/// skips the region template, whose placeholder chunks it would not overwrite.
+pub fn write_world_skeleton(
+    new_world_path: &Path,
+    level_name: &str,
+    with_template_region: bool,
+) -> Result<(), String> {
+    let unique_name = level_name.to_string();
 
     // Create the new world directory structure
     fs::create_dir_all(new_world_path.join("region"))
         .map_err(|e| format!("Failed to create world directory: {e}"))?;
 
     // Copy the region template file
-    const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
-    let region_path = new_world_path.join("region").join("r.0.0.mca");
-    fs::write(&region_path, REGION_TEMPLATE)
-        .map_err(|e| format!("Failed to create region file: {e}"))?;
+    if with_template_region {
+        let region_path = new_world_path.join("region").join("r.0.0.mca");
+        fs::write(&region_path, REGION_TEMPLATE)
+            .map_err(|e| format!("Failed to create region file: {e}"))?;
+    }
 
     // Add the level.dat file
     const LEVEL_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/level.dat");
@@ -293,7 +325,170 @@ pub fn create_new_world_with_name(
     fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
         .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
 
-    Ok(new_world_path.display().to_string())
+    Ok(())
+}
+
+/// Holds Minecraft's `session.lock` while Arnis writes a world.
+pub struct SessionLock {
+    // On Unix it is only held: closing it releases the fcntl lock.
+    #[cfg_attr(unix, allow(dead_code))]
+    file: fs::File,
+    path: PathBuf,
+}
+
+/// Locks this process holds. Probing one would close a handle to it, and on
+/// Unix closing any handle drops the process's lock.
+static HELD_LOCKS: std::sync::Mutex<Vec<LockId>> = std::sync::Mutex::new(Vec::new());
+
+#[derive(Clone, PartialEq)]
+struct LockId {
+    path: PathBuf,
+    #[cfg(unix)]
+    inode: (u64, u64),
+}
+
+impl LockId {
+    fn of(path: &Path) -> Self {
+        LockId {
+            path: path.to_path_buf(),
+            #[cfg(unix)]
+            inode: unix_inode(path).unwrap_or_default(),
+        }
+    }
+
+    fn is_held(path: &Path) -> bool {
+        #[cfg(unix)]
+        let inode = unix_inode(path);
+        HELD_LOCKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|h| {
+                #[cfg(unix)]
+                if inode.is_some() && inode == Some(h.inode) {
+                    return true;
+                }
+                h.path == path
+            })
+    }
+}
+
+#[cfg(unix)]
+fn unix_inode(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+impl SessionLock {
+    pub fn acquire(world_path: &Path) -> Result<Self, String> {
+        let session_lock_path = world_path.join("session.lock");
+        if LockId::is_held(&session_lock_path) {
+            return Err("Failed to acquire lock on session.lock file: already held".to_string());
+        }
+
+        // Not truncated before the lock is ours: the holder's file stays intact.
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&session_lock_path)
+            .map_err(|e| format!("Failed to create session.lock file: {e}"))?;
+
+        // Java locks with fcntl. On Unix only that lock is taken: flock does not
+        // see it on Linux, and on macOS the two would block each other.
+        #[cfg(unix)]
+        posix_lock(&file)
+            .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
+        #[cfg(not(unix))]
+        fs2::FileExt::try_lock_exclusive(&file)
+            .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
+
+        file.set_len(0)
+            .and_then(|_| (&file).write_all("\u{2603}".as_bytes()))
+            .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
+
+        HELD_LOCKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(LockId::of(&session_lock_path));
+        Ok(SessionLock {
+            file,
+            path: session_lock_path,
+        })
+    }
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+        #[cfg(not(unix))]
+        let _ = fs2::FileExt::unlock(&self.file);
+        HELD_LOCKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|h| h.path != self.path);
+    }
+}
+
+#[cfg(unix)]
+fn posix_lock(file: &fs::File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: flock is plain data; zeroed is a valid whole-file request.
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK as _;
+    fl.l_whence = libc::SEEK_SET as _;
+    // SAFETY: the descriptor is open for the lifetime of `file`.
+    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &fl) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn posix_lock_held_elsewhere(file: &fs::File) -> bool {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: as in `posix_lock`; F_GETLK only writes into `fl`.
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK as _;
+    fl.l_whence = libc::SEEK_SET as _;
+    let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut fl) };
+    // F_UNLCK is an i32 on Linux and an i16 on macOS; l_type is always c_short.
+    let unlocked: libc::c_short = libc::F_UNLCK as _;
+    r == 0 && fl.l_type != unlocked
+}
+
+/// Whether another process holds the world's `session.lock`.
+pub fn world_is_locked(world_path: &Path) -> bool {
+    let path = world_path.join("session.lock");
+    if !path.exists() || LockId::is_held(&path) {
+        return false;
+    }
+    let file = match fs::OpenOptions::new().read(true).write(true).open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            return e.kind() == std::io::ErrorKind::PermissionDenied || is_sharing_violation(&e)
+        }
+    };
+    #[cfg(unix)]
+    {
+        posix_lock_held_elsewhere(&file)
+    }
+    #[cfg(not(unix))]
+    {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => {
+                let _ = fs2::FileExt::unlock(&file);
+                false
+            }
+            Err(_) => true,
+        }
+    }
+}
+
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(33))
 }
 
 /// Generates a unique "Arnis World N" name.
@@ -331,29 +526,6 @@ fn generate_unique_default_world_name(base_path: &Path) -> String {
 /// "Arnis World N" scheme if nothing usable survives sanitization (e.g. the
 /// input was only invalid characters).
 fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String {
-    generate_unique_custom_world_name_excluding(base_path, raw_name, None)
-}
-
-/// True when both paths exist and resolve to the same directory entry.
-/// Canonicalizing normalises the case on case-insensitive filesystems, which
-/// a textual `Path` comparison would not. Returns false if either side can't
-/// be resolved, so an unreadable path is never mistaken for a match.
-fn is_same_existing_path(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
-}
-
-/// Same as [`generate_unique_custom_world_name`], but a candidate path that
-/// resolves to `exclude` is treated as available. Used when renaming a world
-/// in place so keeping (or case-tweaking) its current name doesn't get bumped
-/// to " (2)" just because its own directory already "collides" with itself.
-fn generate_unique_custom_world_name_excluding(
-    base_path: &Path,
-    raw_name: &str,
-    exclude: Option<&Path>,
-) -> String {
     let sanitized = sanitize_custom_world_name(raw_name);
 
     // Nothing usable survived sanitization (e.g. the input was only invalid
@@ -363,133 +535,18 @@ fn generate_unique_custom_world_name_excluding(
         return generate_unique_default_world_name(base_path);
     }
 
-    let is_available = |candidate: &Path| -> bool {
-        if !candidate.exists() {
-            return true;
-        }
-        // The candidate is taken - unless it *is* the excluded world's own
-        // directory. Compared canonically rather than by path equality: on
-        // Windows and macOS the filesystem matches case-insensitively, so
-        // re-capitalising a world ("My World" -> "my world") finds an
-        // existing directory whose path text differs from `exclude`, and a
-        // plain `==` would read the world's own directory as a collision and
-        // bump it to " (2)".
-        exclude.is_some_and(|excluded| is_same_existing_path(candidate, excluded))
-    };
-
-    let candidate_path = base_path.join(&sanitized);
-    if is_available(&candidate_path) {
+    if !base_path.join(&sanitized).exists() {
         return sanitized;
     }
 
     let mut counter: i32 = 2;
     loop {
         let candidate = format!("{sanitized} ({counter})");
-        let candidate_path = base_path.join(&candidate);
-        if is_available(&candidate_path) {
+        if !base_path.join(&candidate).exists() {
             return candidate;
         }
         counter += 1;
     }
-}
-
-/// Overwrites the `LevelName` field in an existing world's `level.dat`.
-fn update_level_name(world_path: &Path, new_name: &str) -> Result<(), String> {
-    let level_path = world_path.join("level.dat");
-    let level_data = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
-
-    let mut decoder = GzDecoder::new(level_data.as_slice());
-    let mut decompressed_data = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
-
-    let mut nbt_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat: {e}"))?;
-
-    match nbt_data {
-        Value::Compound(ref mut root) => match root.get_mut("Data") {
-            Some(Value::Compound(ref mut data)) => {
-                data.insert("LevelName".to_string(), Value::String(new_name.to_string()));
-            }
-            _ => return Err("level.dat is missing its Data compound".to_string()),
-        },
-        _ => return Err("level.dat root is not a compound".to_string()),
-    }
-
-    let serialized_data =
-        fastnbt::to_bytes(&nbt_data).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
-
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(&serialized_data)
-        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
-    let compressed_data = encoder
-        .finish()
-        .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
-
-    fs::write(&level_path, compressed_data).map_err(|e| format!("Failed to write level.dat: {e}"))
-}
-
-/// Renames an already-created Java world in place: moves its directory to a
-/// sanitized, de-duplicated version of `new_name` (excluding the world's own
-/// current directory from collision checks) and updates `LevelName` in its
-/// `level.dat` to match. Returns the world's new full path.
-///
-/// Fails (without touching anything) if `world_path` isn't an existing
-/// directory or doesn't look like a world (no `level.dat`), so callers can't
-/// accidentally rename an arbitrary/unrelated folder. A failure to rewrite
-/// `level.dat` also moves the directory back, so an `Err` means the world is
-/// still where and what the caller last saw it - unless the rollback itself
-/// fails, which the error message then spells out.
-pub fn rename_world(world_path: &Path, new_name: &str) -> Result<String, String> {
-    if !world_path.is_dir() {
-        return Err("World directory does not exist".to_string());
-    }
-    if !world_path.join("level.dat").is_file() {
-        return Err("Not a valid world directory (missing level.dat)".to_string());
-    }
-    let base_path = world_path
-        .parent()
-        .ok_or_else(|| "World path has no parent directory".to_string())?;
-
-    let trimmed = new_name.trim();
-    if trimmed.is_empty() {
-        return Err("World name cannot be blank".to_string());
-    }
-    // Same sanitizer the new name is actually built with, so this check can't
-    // pass a name that later resolves to nothing.
-    if sanitize_custom_world_name(trimmed).is_empty() {
-        return Err("World name is invalid after sanitization".to_string());
-    }
-
-    let unique_name =
-        generate_unique_custom_world_name_excluding(base_path, trimmed, Some(world_path));
-    let new_world_path = base_path.join(&unique_name);
-
-    let moved = new_world_path != world_path;
-    if moved {
-        fs::rename(world_path, &new_world_path)
-            .map_err(|e| format!("Failed to rename world directory: {e}"))?;
-    }
-
-    if let Err(update_error) = update_level_name(&new_world_path, &unique_name) {
-        // Put the directory back. Without this, a reported failure would still
-        // have moved the world, leaving the caller holding a `world_path` that
-        // no longer exists while it believes nothing changed.
-        if moved {
-            if let Err(rollback_error) = fs::rename(&new_world_path, world_path) {
-                return Err(format!(
-                    "{update_error}. The world was also left renamed to \
-                     \"{unique_name}\" because it could not be moved back: \
-                     {rollback_error}"
-                ));
-            }
-        }
-        return Err(update_error);
-    }
-
-    Ok(new_world_path.display().to_string())
 }
 
 /// Name of the bundled Java datapack that extends the Overworld build height.
@@ -616,6 +673,54 @@ pub fn enable_datapack_in_level_dat(world_path: &Path, pack_dir_name: &str) -> R
     Ok(())
 }
 
+/// Turns the overworld's flat generator into the vanilla "The Void" preset: one layer of air
+/// over the void biome, without the start platform, lakes or structures, so everything the
+/// area does not cover stays empty. No-op when the overworld is not a flat generator.
+fn make_void_generator(root: &mut Value) {
+    let Value::Compound(root_map) = root else {
+        return;
+    };
+    let Some(Value::Compound(data)) = root_map.get_mut("Data") else {
+        return;
+    };
+    let Some(Value::Compound(settings)) = data.get_mut("WorldGenSettings") else {
+        return;
+    };
+    let Some(Value::Compound(dimensions)) = settings.get_mut("dimensions") else {
+        return;
+    };
+    let Some(Value::Compound(overworld)) = dimensions.get_mut("minecraft:overworld") else {
+        return;
+    };
+    let Some(Value::Compound(generator)) = overworld.get_mut("generator") else {
+        return;
+    };
+    if !matches!(generator.get("type"), Some(Value::String(t)) if t == "minecraft:flat") {
+        return;
+    }
+    let Some(Value::Compound(flat)) = generator.get_mut("settings") else {
+        return;
+    };
+    let mut air = std::collections::HashMap::new();
+    air.insert(
+        "block".to_string(),
+        Value::String("minecraft:air".to_string()),
+    );
+    air.insert("height".to_string(), Value::Int(1));
+    flat.insert(
+        "layers".to_string(),
+        Value::List(vec![Value::Compound(air)]),
+    );
+    flat.insert(
+        "biome".to_string(),
+        Value::String("minecraft:the_void".to_string()),
+    );
+    // The void biome's one feature is the stone start platform at the origin.
+    flat.insert("features".to_string(), Value::Byte(0));
+    flat.insert("lakes".to_string(), Value::Byte(0));
+    flat.insert("structure_overrides".to_string(), Value::List(Vec::new()));
+}
+
 /// Lifts the superflat generator plane to `base_y` by prepending an air layer.
 /// Flat layers stack up from the dimension floor, so with the tall datapack's -2032 floor the
 /// terrain outside the written regions would sit up to ~2000 blocks above the generated plane.
@@ -672,11 +777,148 @@ fn raise_superflat_floor(root: &mut Value, base_y: i32, min_y: i32) {
     }
 }
 
-// Writes GameType, DayTime and the player's game mode into an existing level.dat.
+/// Sets `LastPlayed` to now, which lists the world first in Minecraft.
+pub fn touch_last_played(world_path: &Path) -> Result<(), String> {
+    let level_path = world_path.join("level.dat");
+    let raw = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
+    let mut decompressed = Vec::new();
+    GzDecoder::new(raw.as_slice())
+        .read_to_end(&mut decompressed)
+        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
+    let mut root: Value = fastnbt::from_bytes(&decompressed)
+        .map_err(|e| format!("Failed to parse level.dat NBT: {e}"))?;
+    let Value::Compound(ref mut top) = root else {
+        return Err("level.dat root is not a compound".to_string());
+    };
+    let Some(Value::Compound(data)) = top.get_mut("Data") else {
+        return Err("level.dat missing Data compound".to_string());
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Failed to read the clock: {e}"))?
+        .as_millis() as i64;
+    data.insert("LastPlayed".to_string(), Value::Long(now_ms));
+
+    let serialized =
+        fastnbt::to_bytes(&root).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized)
+        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
+    replace_file_atomically(&level_path, &compressed)
+}
+
+/// DataVersion of 26.1, which keeps dimensions under `dimensions/` and maps under
+/// `data/minecraft/maps/`. The game moves an older world there when it first opens it.
+pub const DIMENSION_FOLDERS_DATA_VERSION: i32 = 4772;
+
+/// Where a Java world keeps its overworld chunks and its maps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorldLayout {
+    /// Before 26.1, and every world Arnis creates.
+    #[default]
+    Legacy,
+    /// 26.1 and later.
+    Dimensions,
+}
+
+impl WorldLayout {
+    /// The layout `level.dat` declares. An unreadable one counts as legacy.
+    pub fn of(world: &Path) -> Self {
+        match level_data_version(world) {
+            Some(v) if v >= DIMENSION_FOLDERS_DATA_VERSION => WorldLayout::Dimensions,
+            _ => WorldLayout::Legacy,
+        }
+    }
+
+    /// Folder holding the overworld's `region/`, `entities/` and `poi/`.
+    pub fn overworld_dir(self, world: &Path) -> PathBuf {
+        match self {
+            WorldLayout::Legacy => world.to_path_buf(),
+            WorldLayout::Dimensions => world.join("dimensions").join("minecraft").join("overworld"),
+        }
+    }
+
+    /// Folder holding the map files and the map id counter.
+    pub fn maps_dir(self, world: &Path) -> PathBuf {
+        match self {
+            WorldLayout::Legacy => world.join("data"),
+            WorldLayout::Dimensions => world.join("data").join("minecraft").join("maps"),
+        }
+    }
+}
+
+fn read_gzip_nbt(path: &Path) -> Result<Value, String> {
+    let raw = fs::read(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    let mut decompressed = Vec::new();
+    GzDecoder::new(raw.as_slice())
+        .read_to_end(&mut decompressed)
+        .map_err(|e| format!("Failed to decompress {}: {e}", path.display()))?;
+    fastnbt::from_bytes(&decompressed)
+        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+}
+
+fn write_gzip_nbt(path: &Path, value: &Value) -> Result<(), String> {
+    let serialized = fastnbt::to_bytes(value)
+        .map_err(|e| format!("Failed to serialize {}: {e}", path.display()))?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized)
+        .map_err(|e| format!("Failed to compress {}: {e}", path.display()))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| format!("Failed to compress {}: {e}", path.display()))?;
+    replace_file_atomically(path, &compressed)
+        .map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+/// `Data.DataVersion` of a world's `level.dat`.
+pub(crate) fn level_data_version(world: &Path) -> Option<i32> {
+    let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
+        return None;
+    };
+    match root.get("Data") {
+        Some(Value::Compound(data)) => match data.get("DataVersion") {
+            Some(Value::Int(v)) => Some(*v),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The singleplayer player's file in a 26.1+ world, named by `Data.singleplayer_uuid`.
+fn singleplayer_file(
+    world: &Path,
+    data: &std::collections::HashMap<String, Value>,
+) -> Option<PathBuf> {
+    let Some(Value::IntArray(uuid)) = data.get("singleplayer_uuid") else {
+        return None;
+    };
+    if uuid.len() != 4 {
+        return None;
+    }
+    let hex: String = uuid.iter().map(|w| format!("{:08x}", *w as u32)).collect();
+    let name = format!(
+        "{}-{}-{}-{}-{}.dat",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    );
+    Some(world.join("players").join("data").join(name))
+}
+
+// Writes GameType, DayTime, the player's game mode and what the game generates around the
+// area into an existing level.dat.
 pub fn apply_java_world_settings(
     world_path: &Path,
     game_mode: crate::args::GameMode,
     world_time: i64,
+    world_type: crate::args::WorldType,
 ) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
@@ -712,11 +954,14 @@ pub fn apply_java_world_settings(
 
     // Folded into this rewrite rather than a second read/write: both need the post-generation
     // base, which is only known once the terrain has been scaled.
-    raise_superflat_floor(
-        &mut root,
-        crate::world_editor::base_chunk_y(),
-        crate::world_editor::min_y(),
-    );
+    match world_type {
+        crate::args::WorldType::Void => make_void_generator(&mut root),
+        crate::args::WorldType::Flat => raise_superflat_floor(
+            &mut root,
+            crate::world_editor::base_chunk_y(),
+            crate::world_editor::min_y(),
+        ),
+    }
 
     let serialized =
         fastnbt::to_bytes(&root).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
@@ -780,25 +1025,30 @@ pub fn set_spawn_in_level_dat(
         }
     };
 
-    data.insert("SpawnX".to_string(), Value::Int(spawn_x));
-    data.insert("SpawnY".to_string(), Value::Int(spawn_y));
-    data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+    // 1.21.9+ keeps the spawn in a `spawn` compound.
+    if let Some(Value::Compound(spawn)) = data.get_mut("spawn") {
+        spawn.insert(
+            "pos".to_string(),
+            Value::IntArray(fastnbt::IntArray::new(vec![spawn_x, spawn_y, spawn_z])),
+        );
+        spawn.insert(
+            "dimension".to_string(),
+            Value::String("minecraft:overworld".to_string()),
+        );
+    } else {
+        data.insert("SpawnX".to_string(), Value::Int(spawn_x));
+        data.insert("SpawnY".to_string(), Value::Int(spawn_y));
+        data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+    }
 
-    // Update player position if Player compound exists
+    // 26.1+ keeps the player in a file of their own.
+    let player_file = if data.contains_key("Player") {
+        None
+    } else {
+        singleplayer_file(world_path, data)
+    };
     if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-        if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-            if pos.len() >= 3 {
-                if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
-                    *pos_x = spawn_x as f64;
-                }
-                if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
-                    *pos_y = spawn_y as f64;
-                }
-                if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
-                    *pos_z = spawn_z as f64;
-                }
-            }
-        }
+        move_player(player, spawn_x, spawn_y, spawn_z);
     }
 
     // Serialize, compress, and write back
@@ -816,12 +1066,135 @@ pub fn set_spawn_in_level_dat(
     replace_file_atomically(&level_path, &compressed_data)
         .map_err(|e| format!("Failed to write updated level.dat: {e}"))?;
 
+    if let Some(path) = player_file.filter(|p| p.is_file()) {
+        let mut player = read_gzip_nbt(&path)?;
+        if let Value::Compound(ref mut player) = player {
+            move_player(player, spawn_x, spawn_y, spawn_z);
+        }
+        write_gzip_nbt(&path, &player)?;
+    }
+
     Ok(())
+}
+
+/// Puts a player at the spawn, in the overworld wherever they logged out.
+fn move_player(
+    player: &mut std::collections::HashMap<String, Value>,
+    spawn_x: i32,
+    spawn_y: i32,
+    spawn_z: i32,
+) {
+    if player.contains_key("Dimension") {
+        player.insert(
+            "Dimension".to_string(),
+            Value::String("minecraft:overworld".to_string()),
+        );
+    }
+    if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+        for (slot, v) in pos.iter_mut().zip([spawn_x, spawn_y, spawn_z]) {
+            if let Value::Double(ref mut p) = slot {
+                *p = v as f64;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn a_spawn_move_follows_a_world_minecraft_has_upgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(dir.path()).unwrap());
+        assert_eq!(WorldLayout::of(&world), WorldLayout::Legacy);
+
+        // What 26.3 leaves: the spawn in a compound and the player in a file of their own.
+        let mut level = read_gzip_nbt(&world.join("level.dat")).unwrap();
+        let Value::Compound(ref mut root) = level else {
+            panic!("level root");
+        };
+        let Some(Value::Compound(data)) = root.get_mut("Data") else {
+            panic!("level data");
+        };
+        for key in ["Player", "SpawnX", "SpawnY", "SpawnZ"] {
+            data.remove(key);
+        }
+        data.insert("DataVersion".to_string(), Value::Int(5023));
+        let spawn = HashMap::from([
+            (
+                "pos".to_string(),
+                Value::IntArray(fastnbt::IntArray::new(vec![0, 0, 0])),
+            ),
+            (
+                "dimension".to_string(),
+                Value::String("minecraft:overworld".to_string()),
+            ),
+        ]);
+        data.insert("spawn".to_string(), Value::Compound(spawn));
+        let uuid = vec![-993932354, 1062356475, -1621421405, -1681526930];
+        data.insert(
+            "singleplayer_uuid".to_string(),
+            Value::IntArray(fastnbt::IntArray::new(uuid)),
+        );
+        write_gzip_nbt(&world.join("level.dat"), &level).unwrap();
+        let player_path = world.join("players/data/c4c1cbbe-3f52-45fb-9f5b-12a39bc5ef6e.dat");
+        fs::create_dir_all(player_path.parent().unwrap()).unwrap();
+        let player = HashMap::from([
+            (
+                "Pos".to_string(),
+                Value::List(vec![
+                    Value::Double(1.0),
+                    Value::Double(2.0),
+                    Value::Double(3.0),
+                ]),
+            ),
+            (
+                "Dimension".to_string(),
+                Value::String("minecraft:the_nether".to_string()),
+            ),
+        ]);
+        write_gzip_nbt(&player_path, &Value::Compound(player)).unwrap();
+        assert_eq!(WorldLayout::of(&world), WorldLayout::Dimensions);
+        assert_eq!(
+            WorldLayout::Dimensions.overworld_dir(&world),
+            world.join("dimensions/minecraft/overworld")
+        );
+
+        set_spawn_in_level_dat(&world, 100, 64, -200).unwrap();
+
+        let Value::Compound(root) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
+            panic!("level root");
+        };
+        let Some(Value::Compound(data)) = root.get("Data") else {
+            panic!("level data");
+        };
+        let Some(Value::Compound(spawn)) = data.get("spawn") else {
+            panic!("spawn");
+        };
+        let Some(Value::IntArray(pos)) = spawn.get("pos") else {
+            panic!("spawn pos");
+        };
+        assert_eq!(&pos[..], &[100, 64, -200]);
+        assert!(!data.contains_key("SpawnX"));
+
+        let Value::Compound(player) = read_gzip_nbt(&player_path).unwrap() else {
+            panic!("player");
+        };
+        assert_eq!(
+            player.get("Pos"),
+            Some(&Value::List(vec![
+                Value::Double(100.0),
+                Value::Double(64.0),
+                Value::Double(-200.0)
+            ]))
+        );
+        assert_eq!(
+            player.get("Dimension"),
+            Some(&Value::String("minecraft:overworld".to_string()))
+        );
+    }
 
     fn level_name(world: &Path) -> String {
         let raw = fs::read(world.join("level.dat")).unwrap();
@@ -963,112 +1336,32 @@ mod tests {
     }
 
     #[test]
-    fn rename_world_moves_directory_and_updates_level_name() {
+    fn only_an_untouched_template_region_is_removed() {
         let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "New Name").unwrap());
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let region = world.join("region").join("r.0.0.mca");
+        assert!(region.is_file());
+        remove_untouched_template_region(&world);
+        assert!(!region.exists(), "the template goes");
 
-        assert_eq!(renamed.file_name().unwrap(), "New Name");
-        assert!(!world.exists());
-        assert!(renamed.exists());
-        assert_eq!(level_name(&renamed), "New Name");
-    }
-
-    #[test]
-    fn rename_world_dedupes_against_other_worlds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world_a = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Alpha")).unwrap());
-        let _world_b = create_new_world_with_name(tmp.path(), Some("Beta")).unwrap();
-
-        // Renaming "Alpha" to the already-taken "Beta" must not clobber it.
-        let renamed = PathBuf::from(rename_world(&world_a, "Beta").unwrap());
-        assert_eq!(renamed.file_name().unwrap(), "Beta (2)");
-        assert_eq!(level_name(&renamed), "Beta (2)");
-    }
-
-    #[test]
-    fn rename_world_to_its_own_name_is_a_no_op() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Same Name")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "Same Name").unwrap());
-        assert_eq!(renamed, world);
-        assert!(renamed.exists());
-        assert_eq!(level_name(&renamed), "Same Name");
-    }
-
-    #[test]
-    fn rename_world_allows_case_only_change() {
-        // On Windows/macOS the new directory "exists" (the filesystem matches
-        // case-insensitively) *and* is the world's own directory, so a plain
-        // path comparison against `exclude` misses it and the world gets
-        // bumped to "... (2)" for merely re-capitalising its own name.
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("My World")).unwrap());
-        let renamed = PathBuf::from(rename_world(&world, "my world").unwrap());
-
-        assert_eq!(renamed.file_name().unwrap(), "my world");
-        assert_eq!(level_name(&renamed), "my world");
-        // Exactly one world directory, not an extra "my world (2)".
-        let dirs: Vec<_> = fs::read_dir(tmp.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_dir())
-            .collect();
-        assert_eq!(
-            dirs.len(),
-            1,
-            "case-only rename must not create a second world"
-        );
-    }
-
-    #[test]
-    fn rename_world_rejects_blank_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
-        assert!(rename_world(&world, "   ").is_err());
-        // Nothing should have moved on failure.
-        assert!(world.exists());
-    }
-
-    #[test]
-    fn rename_world_rejects_name_that_becomes_empty_after_sanitization() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world = PathBuf::from(create_new_world_with_name(tmp.path(), Some("Keep Me")).unwrap());
-        assert!(rename_world(&world, "...  ").is_err());
-        assert!(world.exists());
-        assert_eq!(level_name(&world), "Keep Me");
-    }
-
-    #[test]
-    fn rename_world_rolls_back_the_move_when_level_dat_cannot_be_updated() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            PathBuf::from(create_new_world_with_name(tmp.path(), Some("Old Name")).unwrap());
-        // Unreadable as NBT, but still a file, so the up-front validation
-        // passes and the failure lands after the directory has been moved.
-        fs::write(world.join("level.dat"), b"not gzipped nbt").unwrap();
-
-        assert!(rename_world(&world, "New Name").is_err());
-        // An Err must mean nothing moved.
-        assert!(world.exists(), "world should have been moved back");
-        assert!(!tmp.path().join("New Name").exists());
-    }
-
-    #[test]
-    fn rename_world_rejects_nonexistent_directory() {
-        let tmp = tempfile::tempdir().unwrap();
-        let missing = tmp.path().join("Does Not Exist");
-        assert!(rename_world(&missing, "New Name").is_err());
+        let mut written = REGION_TEMPLATE.to_vec();
+        written[8192] ^= 1;
+        fs::write(&region, &written).unwrap();
+        remove_untouched_template_region(&world);
+        assert!(region.exists(), "a region something wrote to stays");
     }
 
     #[test]
     fn apply_java_world_settings_writes_gametype_and_daytime() {
         let tmp = tempfile::tempdir().unwrap();
         let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
-        apply_java_world_settings(&world, crate::args::GameMode::Survival, 13000).unwrap();
+        apply_java_world_settings(
+            &world,
+            crate::args::GameMode::Survival,
+            13000,
+            crate::args::WorldType::Void,
+        )
+        .unwrap();
 
         let raw = fs::read(world.join("level.dat")).unwrap();
         let mut decompressed = Vec::new();
@@ -1170,13 +1463,25 @@ mod tests {
             crate::world_editor::DEFAULT_MAX_Y,
         );
         crate::world_editor::set_base_chunk_y(-62);
-        apply_java_world_settings(&vanilla, crate::args::GameMode::Creative, 6000).unwrap();
+        apply_java_world_settings(
+            &vanilla,
+            crate::args::GameMode::Creative,
+            6000,
+            crate::args::WorldType::Flat,
+        )
+        .unwrap();
         let vanilla_layers = flat_layers(&level_dat_root(&vanilla));
 
         let tall = PathBuf::from(create_new_world(tmp.path()).unwrap());
         crate::world_editor::set_world_bounds(-2032, 2031);
         crate::world_editor::set_base_chunk_y(-1876);
-        apply_java_world_settings(&tall, crate::args::GameMode::Creative, 6000).unwrap();
+        apply_java_world_settings(
+            &tall,
+            crate::args::GameMode::Creative,
+            6000,
+            crate::args::WorldType::Flat,
+        )
+        .unwrap();
         let tall_layers = flat_layers(&level_dat_root(&tall));
 
         crate::world_editor::set_world_bounds(
@@ -1188,6 +1493,52 @@ mod tests {
         assert_eq!(vanilla_layers[0].0, "minecraft:dirt");
         assert_eq!(tall_layers[0], ("minecraft:air".to_string(), 154));
         assert_eq!(tall_layers[1..], vanilla_layers[..]);
+    }
+
+    #[test]
+    fn a_void_world_gets_the_void_preset_whatever_the_floor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        apply_java_world_settings(
+            &world,
+            crate::args::GameMode::Creative,
+            6000,
+            crate::args::WorldType::Void,
+        )
+        .unwrap();
+        let root = level_dat_root(&world);
+        assert_eq!(
+            flat_layers(&root),
+            vec![("minecraft:air".to_string(), 1)],
+            "nothing but air past the area"
+        );
+
+        let mut node = &root;
+        for key in [
+            "Data",
+            "WorldGenSettings",
+            "dimensions",
+            "minecraft:overworld",
+            "generator",
+            "settings",
+        ] {
+            let Value::Compound(map) = node else {
+                panic!("{key} parent not a compound");
+            };
+            node = map.get(key).unwrap();
+        }
+        let Value::Compound(settings) = node else {
+            panic!("settings not a compound");
+        };
+        assert_eq!(
+            settings.get("biome"),
+            Some(&Value::String("minecraft:the_void".to_string()))
+        );
+        assert_eq!(settings.get("features"), Some(&Value::Byte(0)));
+        assert_eq!(
+            settings.get("structure_overrides"),
+            Some(&Value::List(vec![]))
+        );
     }
 
     /// Highest format that still allows the deprecated `formats` key.
@@ -1311,5 +1662,171 @@ mod tests {
             assert_eq!(dim["height"], 4064, "format {format}");
             assert_eq!(dim["logical_height"], 4064, "format {format}");
         }
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn a_world_without_a_lock_file_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    #[test]
+    fn a_session_lock_excludes_a_second_one_and_goes_away_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = SessionLock::acquire(dir.path()).unwrap();
+        assert!(dir.path().join("session.lock").is_file());
+        assert!(!world_is_locked(dir.path()));
+        assert!(SessionLock::acquire(dir.path()).is_err());
+        drop(lock);
+        assert!(!dir.path().join("session.lock").exists());
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_lock_held_through_another_handle_is_seen() {
+        use fs2::FileExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = fs::File::create(dir.path().join("session.lock")).unwrap();
+        file.try_lock_exclusive().unwrap();
+        assert!(world_is_locked(dir.path()));
+        file.unlock().unwrap();
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    /// Another process holds the lock, the way Minecraft does. The test binary
+    /// runs itself as that process.
+    #[test]
+    fn a_lock_held_by_another_process_is_seen_and_kept() {
+        const HOLD: &str = "ARNIS_TEST_HOLD_SESSION_LOCK";
+        const TEST: &str =
+            "world_utils::lock_tests::a_lock_held_by_another_process_is_seen_and_kept";
+        if let Ok(dir) = std::env::var(HOLD) {
+            let dir = PathBuf::from(dir);
+            let _lock = SessionLock::acquire(&dir).unwrap();
+            fs::write(dir.join("ready"), b"").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while !dir.join("done").exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([TEST, "--exact", "--test-threads=1"])
+            .env(HOLD, dir.path())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !dir.path().join("ready").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the holder never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let seen = world_is_locked(dir.path());
+        let taken = SessionLock::acquire(dir.path()).is_ok();
+        // Windows also blocks reads of a locked range; the in-process test covers it there.
+        #[cfg(unix)]
+        let content = fs::read(dir.path().join("session.lock")).unwrap_or_default();
+        fs::write(dir.path().join("done"), b"").unwrap();
+        assert!(child.wait().unwrap().success());
+
+        assert!(seen, "a lock held by another process must be reported");
+        assert!(!taken, "a lock held by another process must not be taken");
+        #[cfg(unix)]
+        assert_eq!(
+            content,
+            "\u{2603}".as_bytes(),
+            "the holder's file must stay as it was"
+        );
+        assert!(!world_is_locked(dir.path()));
+    }
+
+    #[test]
+    fn world_folder_names_are_sanitized() {
+        assert_eq!(world_folder_name("  My City  ").as_deref(), Some("My City"));
+        assert_eq!(world_folder_name("a/b:c").as_deref(), Some("a_b_c"));
+        assert_eq!(world_folder_name(".."), None);
+        assert_eq!(world_folder_name("   "), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_held_lock_file_is_left_as_it_was() {
+        use fs2::FileExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.lock");
+        fs::write(&path, "held").unwrap();
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        holder.try_lock_exclusive().unwrap();
+        assert!(SessionLock::acquire(dir.path()).is_err());
+        holder.unlock().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "held");
+    }
+
+    #[test]
+    fn a_stale_lock_file_nobody_holds_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("session.lock"), "\u{2603}").unwrap();
+        assert!(!world_is_locked(dir.path()));
+        let lock = SessionLock::acquire(dir.path()).unwrap();
+        drop(lock);
+    }
+
+    #[test]
+    fn last_played_is_moved_to_now() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        let read = || {
+            let raw = fs::read(world.join("level.dat")).unwrap();
+            let mut plain = Vec::new();
+            GzDecoder::new(raw.as_slice())
+                .read_to_end(&mut plain)
+                .unwrap();
+            let Value::Compound(root) = fastnbt::from_bytes::<Value>(&plain).unwrap() else {
+                panic!("root not a compound");
+            };
+            let Some(Value::Compound(data)) = root.get("Data") else {
+                panic!("no Data");
+            };
+            match data.get("LastPlayed") {
+                Some(Value::Long(t)) => *t,
+                other => panic!("LastPlayed is {other:?}"),
+            }
+        };
+        let before = read();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        touch_last_played(&world).unwrap();
+        assert!(read() > before);
+    }
+
+    #[test]
+    fn the_skeleton_is_a_complete_world() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("Named World");
+        write_world_skeleton(&world, "Named World", true).unwrap();
+        assert!(world.join("level.dat").is_file());
+        assert!(world.join("icon.png").is_file());
+        assert!(world.join("region").join("r.0.0.mca").is_file());
+
+        let bare = dir.path().join("One");
+        write_world_skeleton(&bare, "One", false).unwrap();
+        assert!(bare.join("level.dat").is_file());
+        assert!(bare.join("region").is_dir());
+        assert!(!bare.join("region").join("r.0.0.mca").exists());
     }
 }

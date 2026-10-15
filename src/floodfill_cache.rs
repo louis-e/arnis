@@ -9,7 +9,7 @@ use crate::floodfill::{flood_fill_area, MAX_FLOOD_FILL_AREA};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 /// Shared, reference-counted flood fill result.
@@ -366,11 +366,58 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
     way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes")
 }
 
+/// Paving that yields to planted areas mapped inside it. Pitches, tracks and
+/// playgrounds keep their whole footprint.
+fn paving_yields_to_nested_areas(way: &ProcessedWay) -> bool {
+    (way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes"))
+        || way
+            .tags
+            .get("amenity")
+            .is_some_and(|v| SEALED_AMENITY.contains(&v.as_str()))
+        || way.tags.get("leisure").map(String::as_str) == Some("schoolyard")
+}
+
+const PLANTED_LANDUSE: &[&str] = &[
+    "grass",
+    "flowerbed",
+    "meadow",
+    "greenfield",
+    "village_green",
+    "forest",
+    "orchard",
+    "allotments",
+    "plant_nursery",
+];
+
+/// A lawn, bed, wood or pond, as dispatched by `process_element`.
+fn is_planted_way(way: &ProcessedWay) -> bool {
+    let tags = &way.tags;
+    if ["building", "building:part", "highway"]
+        .iter()
+        .any(|k| tags.contains_key(*k))
+    {
+        return false;
+    }
+    if let Some(landuse) = tags.get("landuse") {
+        return PLANTED_LANDUSE.contains(&landuse.as_str());
+    }
+    if let Some(natural) = tags.get("natural") {
+        return !matches!(natural.as_str(), "tree" | "tree_row")
+            && tags.get("amenity").map(String::as_str) != Some("fountain");
+    }
+    !tags.contains_key("amenity")
+        && matches!(
+            tags.get("leisure").map(String::as_str),
+            Some("park" | "garden")
+        )
+}
+
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates (shared via Arc so handler
     /// fetches are O(1) refcount bumps instead of deep clones).
-    way_cache: FnvHashMap<u64, FloodFillResult>,
+    /// Releasable through `&self`, so tile threads can free fills mid-run.
+    way_cache: FnvHashMap<u64, Mutex<Option<FloodFillResult>>>,
 }
 
 impl FloodFillCache {
@@ -386,7 +433,7 @@ impl FloodFillCache {
     /// This runs in parallel using Rayon, taking advantage of multiple CPU cores.
     pub fn precompute(elements: &[ProcessedElement], timeout: Option<&Duration>) -> Self {
         // Collect all ways that need flood fill
-        let ways_needing_fill: Vec<&ProcessedWay> = elements
+        let mut ways_needing_fill: Vec<&ProcessedWay> = elements
             .iter()
             .filter_map(|el| match el {
                 ProcessedElement::Way(way) => {
@@ -399,6 +446,24 @@ impl FloodFillCache {
                 _ => None,
             })
             .collect();
+
+        // The outer rings of the relations filled member by member. Every tile a relation
+        // overlaps used to fill them again, which for a large beach or dune field meant a
+        // full-size fill per tile thread; once here they are shared like a way's.
+        let mut seen: fnv::FnvHashSet<u64> = ways_needing_fill.iter().map(|w| w.id).collect();
+        for element in elements {
+            let ProcessedElement::Relation(rel) = element else {
+                continue;
+            };
+            if !Self::relation_fills_members(rel) {
+                continue;
+            }
+            for member in &rel.members {
+                if member.role == ProcessedMemberRole::Outer && seen.insert(member.way.id) {
+                    ways_needing_fill.push(&member.way);
+                }
+            }
+        }
 
         // Compute all way flood fills in parallel
         let way_results: Vec<(u64, Vec<(i32, i32)>)> = ways_needing_fill
@@ -421,15 +486,29 @@ impl FloodFillCache {
             } else {
                 Arc::new(filled)
             };
-            cache.way_cache.insert(id, entry);
+            cache.way_cache.insert(id, Mutex::new(Some(entry)));
         }
 
         cache
     }
 
-    /// Cached fill for a way id, None when absent (no computation).
-    pub fn get_cached(&self, way_id: u64) -> Option<&FloodFillResult> {
-        self.way_cache.get(&way_id)
+    /// Cached fill for a way id, None when absent or released (no computation).
+    pub fn get_cached(&self, way_id: u64) -> Option<FloodFillResult> {
+        self.way_cache
+            .get(&way_id)
+            .and_then(|e| e.lock().unwrap_or_else(|p| p.into_inner()).clone())
+    }
+
+    /// Whether a fill was precomputed for this way id, released or not.
+    pub fn contains(&self, way_id: u64) -> bool {
+        self.way_cache.contains_key(&way_id)
+    }
+
+    /// Frees a way's fill once nothing reads it again; `get_cached` is None afterwards.
+    pub fn release(&self, way_id: u64) {
+        if let Some(e) = self.way_cache.get(&way_id) {
+            e.lock().unwrap_or_else(|p| p.into_inner()).take();
+        }
     }
 
     /// Gets cached flood fill result for a way, or computes it if not cached.
@@ -443,10 +522,10 @@ impl FloodFillCache {
         way: &ProcessedWay,
         timeout: Option<&Duration>,
     ) -> FloodFillResult {
-        if let Some(cached) = self.way_cache.get(&way.id) {
+        if let Some(cached) = self.get_cached(way.id) {
             // Cheap refcount bump — the underlying Vec is shared between the
             // cache and the caller.
-            Arc::clone(cached)
+            cached
         } else {
             // Fallback: compute on demand for synthetic/combined ways from relations.
             // These are rare (only relations with tag-inherited members), so the
@@ -487,7 +566,7 @@ impl FloodFillCache {
     /// - landuse -> landuse::generate_landuse
     /// - leisure -> leisure::generate_leisure
     /// - amenity -> amenities::generate_amenities
-    /// - natural (except tree) -> natural::generate_natural
+    /// - natural (except tree and tree_row) -> natural::generate_natural
     /// - highway with area=yes -> highways::generate_highways (area fill)
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         way.tags.contains_key("building")
@@ -498,7 +577,7 @@ impl FloodFillCache {
             || way
                 .tags
                 .get("natural")
-                .map(|v| v != "tree")
+                .map(|v| v != "tree" && v != "tree_row")
                 .unwrap_or(false)
             // Highway areas (like pedestrian plazas) use flood fill when area=yes
             || (way.tags.contains_key("highway")
@@ -508,6 +587,31 @@ impl FloodFillCache {
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar"))
+    }
+
+    /// Relations `process_element` renders by filling each outer member: natural, landuse
+    /// that paints ground, and parks. Mirrors its dispatch; keep the two in sync.
+    fn relation_fills_members(rel: &crate::osm_parser::ProcessedRelation) -> bool {
+        let tags = &rel.tags;
+        if tags.contains_key("building")
+            || tags.contains_key("building:part")
+            || tags.get("type").map(String::as_str) == Some("building")
+            || tags.contains_key("water")
+            || matches!(
+                tags.get("natural").map(String::as_str),
+                Some("water" | "bay")
+            )
+        {
+            return false;
+        }
+        if tags.contains_key("natural") {
+            return true;
+        }
+        if let Some(landuse) = tags.get("landuse") {
+            // generate_landuse returns before filling these.
+            return !matches!(landuse.as_str(), "residential" | "commercial");
+        }
+        tags.get("leisure").map(String::as_str) == Some("park")
     }
 
     /// Collects all building footprint coordinates from the pre-computed cache.
@@ -548,7 +652,7 @@ impl FloodFillCache {
                 if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
                     && !crate::element_processing::buildings::is_underground_building(&way.tags)
                 {
-                    if let Some(cached) = self.way_cache.get(&way.id) {
+                    if let Some(cached) = self.get_cached(way.id) {
                         for &(x, z) in cached.iter() {
                             footprints.set(x, z);
                         }
@@ -561,7 +665,8 @@ impl FloodFillCache {
     }
 
     /// Builds the sealed-surface mask: the road mask plus every cached footprint
-    /// of a leisure, amenity or highway area that paves its ground.
+    /// of a leisure, amenity or highway area that paves its ground, less the
+    /// planted areas mapped inside paving.
     ///
     /// Returns `None` when no such area contributes a column the roads do not
     /// already own, so the caller can share the road mask instead of paying for a
@@ -572,26 +677,63 @@ impl FloodFillCache {
         elements: &[ProcessedElement],
         roads: &RoadMaskBitmap,
     ) -> Option<SealedSurfaceBitmap> {
-        let sealed_fills: Vec<&FloodFillResult> = elements
-            .iter()
-            .filter_map(|e| match e {
-                ProcessedElement::Way(w) if is_sealed_surface_way(w) => self.way_cache.get(&w.id),
-                _ => None,
-            })
-            .collect();
+        let mut managed: Vec<FloodFillResult> = Vec::new();
+        let mut paving: Vec<FloodFillResult> = Vec::new();
+        let mut planted: Vec<FloodFillResult> = Vec::new();
+        for element in elements {
+            let ProcessedElement::Way(w) = element else {
+                continue;
+            };
+            let Some(fill) = self.get_cached(w.id) else {
+                continue;
+            };
+            if is_sealed_surface_way(w) {
+                if paving_yields_to_nested_areas(w) {
+                    paving.push(fill);
+                } else {
+                    managed.push(fill);
+                }
+            } else if is_planted_way(w) {
+                planted.push(fill);
+            }
+        }
 
         // A tagged area whose fill came back empty (degenerate ring, fill timeout) or that
         // sits entirely on columns the roads already own would clone a full second bitmap
         // for nothing, so bail out before allocating. Short-circuits on the first new cell.
-        if !sealed_fills
+        if !managed
             .iter()
+            .chain(&paving)
             .any(|f| f.iter().any(|&(x, z)| roads.is_unset_in_bounds(x, z)))
         {
             return None;
         }
 
         let mut mask = roads.clone();
-        for fill in sealed_fills {
+        // Largest first, so each column takes the state of the smallest area over it.
+        // Anything as large as all the paving changes nothing, and paving wins a tie.
+        let largest = paving.iter().map(|f| f.len()).max().unwrap_or(0);
+        let mut layers: Vec<(usize, bool, &FloodFillResult)> = paving
+            .iter()
+            .map(|f| (f.len(), true, f))
+            .chain(
+                planted
+                    .iter()
+                    .filter(|f| f.len() < largest)
+                    .map(|f| (f.len(), false, f)),
+            )
+            .collect();
+        layers.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for (_, paved, fill) in layers {
+            for &(x, z) in fill.iter() {
+                if paved {
+                    mask.set(x, z);
+                } else if !roads.contains(x, z) {
+                    mask.clear(x, z);
+                }
+            }
+        }
+        for fill in managed {
             for &(x, z) in fill.iter() {
                 mask.set(x, z);
             }
@@ -794,6 +936,52 @@ mod tests {
     }
 
     #[test]
+    fn a_lawn_inside_paving_keeps_its_ground_but_not_inside_a_pitch() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let square = |id, (x0, z0): (i32, i32), side: i32, tags: &[(&str, &str)]| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            ProcessedElement::Way(tagged_way(
+                id,
+                &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)],
+                tags,
+            ))
+        };
+        let elements = vec![
+            square(1, (0, 0), 40, &[("amenity", "parking")]),
+            square(2, (10, 10), 10, &[("landuse", "grass")]),
+            // A car park inside the lawn is paved again.
+            square(3, (12, 12), 3, &[("amenity", "parking")]),
+            square(4, (50, 50), 40, &[("leisure", "pitch")]),
+            square(5, (60, 60), 10, &[("landuse", "grass")]),
+            // Bigger than all the paving, so it cannot open any of it.
+            square(6, (0, 0), 60, &[("landuse", "meadow")]),
+        ];
+
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        roads.set(18, 15);
+        let sealed = cache.collect_sealed_surfaces(&elements, &roads).unwrap();
+
+        assert!(
+            sealed.contains(30, 30),
+            "the car park around the lawn stays paved"
+        );
+        assert!(
+            !sealed.contains(17, 17),
+            "the lawn inside the car park keeps its ground"
+        );
+        assert!(
+            sealed.contains(13, 13),
+            "paving inside the lawn is paved again"
+        );
+        assert!(
+            sealed.contains(18, 15),
+            "a road across the lawn stays sealed"
+        );
+        assert!(sealed.contains(65, 65), "a pitch keeps its whole footprint");
+    }
+
+    #[test]
     fn nothing_to_seal_shares_the_road_mask() {
         let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
         let elements = vec![ProcessedElement::Way(tagged_way(
@@ -832,5 +1020,43 @@ mod tests {
             cache.collect_sealed_surfaces(&elements, &roads).is_none(),
             "the pitch adds no column, so the road mask is already the answer"
         );
+    }
+
+    fn area_relation(id: u64, member_id: u64, tags: &[(&str, &str)]) -> ProcessedElement {
+        let mut member = tagged_way(
+            member_id,
+            &[(0, 0), (20, 0), (20, 20), (0, 20), (0, 0)],
+            &[],
+        );
+        member.tags.clear();
+        ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+            id,
+            members: vec![crate::osm_parser::ProcessedMember {
+                role: ProcessedMemberRole::Outer,
+                way: std::sync::Arc::new(member),
+            }],
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn filled_relations_are_precomputed_once_and_others_are_not() {
+        let elements = vec![
+            area_relation(1, 101, &[("natural", "sand")]),
+            area_relation(2, 102, &[("leisure", "park")]),
+            // Painted by nothing, so filling it up front would only cost memory.
+            area_relation(3, 103, &[("landuse", "residential")]),
+            area_relation(4, 104, &[("natural", "water")]),
+            area_relation(5, 105, &[("building", "yes")]),
+        ];
+        let cache = FloodFillCache::precompute(&elements, None);
+        assert!(cache.get_cached(101).is_some_and(|f| !f.is_empty()));
+        assert!(cache.get_cached(102).is_some_and(|f| !f.is_empty()));
+        for skipped in [103, 104, 105] {
+            assert!(cache.get_cached(skipped).is_none(), "member {skipped}");
+        }
     }
 }

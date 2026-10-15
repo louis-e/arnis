@@ -20,14 +20,17 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use fastnbt::Value;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use rusty_leveldb::DB;
+use rusty_leveldb::env::{Env, FileLock, Logger, RandomAccess};
+use rusty_leveldb::{Options, PosixDiskEnv, DB};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashMap as StdHashMap;
 use std::fs::{self, File};
 use std::io::{Cursor, Write as IoWrite};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 use vek::Vec2;
 use zip::write::FileOptions;
 use zip::CompressionMethod;
@@ -86,6 +89,92 @@ impl From<serde_json::Error> for BedrockSaveError {
 }
 
 const DEFAULT_BEDROCK_COMPRESSION_LEVEL: u8 = 6;
+
+/// rusty-leveldb 3.0.3's LRU `remove` leaves the list's tail pointer dangling
+/// when it removes the last node, and the table cache is the only cache that
+/// removes (on every compaction). A table cache of one entry never has a tail
+/// apart from its head, so the dangling pointer is reset by the next insert
+/// before anything reads it. The library reserves 10 handles, so 11 gives 1.
+/// Fixed upstream after 4.0.1; drop this once bedrockrs moves to a fixed release.
+const LEVELDB_MAX_OPEN_FILES: usize = 11;
+
+/// LevelDB options for writing a Bedrock world. `mcpe_options` sets the
+/// compressors; this adds the workarounds for rusty-leveldb panics.
+fn bedrock_db_options() -> Options {
+    let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
+    opts.env = Rc::new(Box::new(MonotonicDiskEnv::new()));
+    opts.max_open_files = LEVELDB_MAX_OPEN_FILES;
+    opts
+}
+
+/// The stock disk env with a monotonic clock. rusty-leveldb times compactions
+/// by subtracting wall-clock readings, which overflows when the system clock
+/// steps backwards mid-compaction. The timings only feed its stats.
+struct MonotonicDiskEnv {
+    inner: PosixDiskEnv,
+    epoch: Instant,
+}
+
+impl MonotonicDiskEnv {
+    fn new() -> Self {
+        Self {
+            inner: PosixDiskEnv::new(),
+            epoch: Instant::now(),
+        }
+    }
+}
+
+impl Env for MonotonicDiskEnv {
+    fn open_sequential_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn std::io::Read>> {
+        self.inner.open_sequential_file(p)
+    }
+    fn open_random_access_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn RandomAccess>> {
+        self.inner.open_random_access_file(p)
+    }
+    fn open_writable_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn IoWrite>> {
+        self.inner.open_writable_file(p)
+    }
+    fn open_appendable_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn IoWrite>> {
+        self.inner.open_appendable_file(p)
+    }
+    fn exists(&self, p: &Path) -> rusty_leveldb::Result<bool> {
+        self.inner.exists(p)
+    }
+    fn children(&self, p: &Path) -> rusty_leveldb::Result<Vec<PathBuf>> {
+        self.inner.children(p)
+    }
+    fn size_of(&self, p: &Path) -> rusty_leveldb::Result<usize> {
+        self.inner.size_of(p)
+    }
+    fn delete(&self, p: &Path) -> rusty_leveldb::Result<()> {
+        self.inner.delete(p)
+    }
+    fn mkdir(&self, p: &Path) -> rusty_leveldb::Result<()> {
+        self.inner.mkdir(p)
+    }
+    fn rmdir(&self, p: &Path) -> rusty_leveldb::Result<()> {
+        self.inner.rmdir(p)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> rusty_leveldb::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn lock(&self, p: &Path) -> rusty_leveldb::Result<FileLock> {
+        self.inner.lock(p)
+    }
+    fn unlock(&self, l: FileLock) -> rusty_leveldb::Result<()> {
+        self.inner.unlock(l)
+    }
+    fn new_logger(&self, p: &Path) -> rusty_leveldb::Result<Logger> {
+        self.inner.new_logger(p)
+    }
+    fn micros(&self) -> u64 {
+        // Offset by one so the first reading is never 0, like a wall clock's.
+        self.epoch.elapsed().as_micros() as u64 + 1
+    }
+    fn sleep_for(&self, micros: u32) {
+        self.inner.sleep_for(micros)
+    }
+}
 
 /// Marks the staging directory as ours. Never packaged, `package_mcworld` names its files.
 const STAGING_MARKER: &str = ".arnis-staging";
@@ -460,7 +549,7 @@ impl BedrockWriter {
         let db_path = self.output_dir.join("db");
 
         // Open LevelDB once for all writes (blocks, entities, block entities)
-        let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
+        let mut opts = bedrock_db_options();
         opts.create_if_missing = true;
         let mut db = DB::open(db_path.into_boxed_path(), opts)
             .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
@@ -1600,7 +1689,7 @@ mod tests {
         writer.write_chunks_to_db(&world).expect("write chunks");
 
         // Reopen the LevelDB and verify each populated chunk got version + Data3D + subchunk(4).
-        let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
+        let mut opts = bedrock_db_options();
         opts.create_if_missing = false;
         let mut db =
             DB::open(writer.output_dir.join("db").into_boxed_path(), opts).expect("reopen db");
@@ -1635,5 +1724,43 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod leveldb_options_tests {
+    use super::*;
+
+    /// Tiny memtables and tables force many flushes and compactions, and so many
+    /// table-cache evictions. Under stock options with a small table cache this
+    /// workload corrupts rusty-leveldb's LRU list and panics in `cache.rs`.
+    #[test]
+    fn bedrock_db_survives_heavy_compaction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut opts = bedrock_db_options();
+        opts.create_if_missing = true;
+        opts.write_buffer_size = 16 * 1024;
+        opts.max_file_size = 16 * 1024;
+        let mut db = DB::open(tmp.path().join("db").into_boxed_path(), opts).unwrap();
+
+        // xorshift, so keys land out of order and overlap across tables
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        for i in 0..15_000u32 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let key = (x % 10_000).to_le_bytes();
+            db.put(&key, &[(i % 251) as u8; 200]).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(db.get(&(x % 10_000).to_le_bytes()).is_some());
+    }
+
+    #[test]
+    fn monotonic_env_clock_never_goes_backwards() {
+        let env = MonotonicDiskEnv::new();
+        let a = env.micros();
+        assert!(a > 0);
+        assert!(env.micros() >= a);
     }
 }

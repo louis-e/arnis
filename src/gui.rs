@@ -16,7 +16,6 @@ use crate::world_editor::WorldFormat;
 use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
-use fs2::FileExt;
 use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
@@ -25,45 +24,7 @@ use std::sync::Arc;
 use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
-/// Manages the session.lock file for a Minecraft world directory
-struct SessionLock {
-    file: fs::File,
-    path: PathBuf,
-}
-
-impl SessionLock {
-    /// Creates and locks a session.lock file in the specified world directory
-    fn acquire(world_path: &Path) -> Result<Self, String> {
-        let session_lock_path = world_path.join("session.lock");
-
-        // Create or open the session.lock file
-        let file = fs::File::create(&session_lock_path)
-            .map_err(|e| format!("Failed to create session.lock file: {e}"))?;
-
-        // Write the snowman character (U+2603) as specified by Minecraft format
-        let snowman_bytes = "☃".as_bytes(); // This is UTF-8 encoded E2 98 83
-        (&file)
-            .write_all(snowman_bytes)
-            .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
-
-        // Acquire an exclusive lock on the file
-        file.try_lock_exclusive()
-            .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
-
-        Ok(SessionLock {
-            file,
-            path: session_lock_path,
-        })
-    }
-}
-
-impl Drop for SessionLock {
-    fn drop(&mut self) {
-        // Release the lock and remove the session.lock file
-        let _ = self.file.unlock();
-        let _ = fs::remove_file(&self.path);
-    }
-}
+use crate::world_utils::SessionLock;
 
 /// Removes a freshly created Java world directory. Called whenever generation
 /// bails out before producing anything useful, so the user isn't left with a
@@ -152,7 +113,6 @@ pub fn run_gui() -> Result<(), String> {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             gui_create_world,
-            gui_rename_world,
             gui_get_default_save_path,
             gui_get_default_bedrock_save_path,
             gui_get_default_luanti_save_path,
@@ -174,7 +134,11 @@ pub fn run_gui() -> Result<(), String> {
             gui_get_preview_facades,
             gui_precompute_facades,
             gui_cancel_precompute,
-            gui_log
+            gui_one_world_info,
+            gui_one_world_overlap,
+            gui_get_one_world_overlays,
+            gui_log,
+            gui_set_telemetry_consent
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -348,6 +312,29 @@ fn gui_log(level: String, message: String) {
     }
 }
 
+/// Trims `area_name` so "<base_name>: <area_name>" stays within 30 characters.
+/// `None` when the base name leaves no room. Custom names can start with
+/// "Arnis World " and already be that long, so the budget saturates.
+fn fit_area_name(base_name: &str, area_name: String) -> Option<String> {
+    let max_len = 30usize.saturating_sub(base_name.chars().count() + 2); // 2 for ": "
+    if max_len == 0 {
+        None
+    } else if area_name.chars().count() > max_len {
+        Some(area_name.chars().take(max_len).collect())
+    } else {
+        Some(area_name)
+    }
+}
+
+/// Mirrors the frontend's consent record into the backend. Called on startup and
+/// whenever the user answers or flips it, so crashes before the first generation
+/// are covered and a withdrawal takes effect immediately rather than at the next
+/// generation.
+#[tauri::command]
+fn gui_set_telemetry_consent(consent: bool) {
+    telemetry::set_telemetry_consent(consent);
+}
+
 /// Opens a native folder-picker dialog and returns the chosen path.
 #[tauri::command]
 fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
@@ -387,22 +374,6 @@ fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<Str
 
 fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
     crate::world_utils::create_new_world_with_name(base_path, custom_name)
-}
-
-/// Renames an already-created Java world in place (moves its directory and
-/// updates `LevelName` in `level.dat`). Called when the user commits an edit
-/// via the custom-world-name pencil after a world already exists.
-///
-/// Returns the world's new full path on success, or a human-readable error
-/// message on failure (e.g. the world no longer exists, the name is blank,
-/// or the filesystem rename failed).
-#[tauri::command]
-fn gui_rename_world(world_path: String, world_name: String) -> Result<String, String> {
-    let trimmed = world_path.trim();
-    if trimmed.is_empty() {
-        return Err("No world selected".to_string());
-    }
-    crate::world_utils::rename_world(Path::new(trimmed), &world_name)
 }
 
 /// Adds localized area name to the world name in level.dat
@@ -465,23 +436,10 @@ fn add_localized_world_name(
         }
     };
 
-    // Create new name with localized area name, ensuring total length doesn't exceed 30 characters
     let base_name = current_name.clone();
-    let max_area_name_len = 30 - base_name.len() - 2; // 2 chars for ": "
-
-    let truncated_area_name =
-        if area_name.chars().count() > max_area_name_len && max_area_name_len > 0 {
-            // Truncate the area name to fit within the 30 character limit
-            area_name
-                .chars()
-                .take(max_area_name_len)
-                .collect::<String>()
-        } else if max_area_name_len == 0 {
-            // If base name is already too long, don't add area name
-            return world_path;
-        } else {
-            area_name
-        };
+    let Some(truncated_area_name) = fit_area_name(&base_name, area_name) else {
+        return world_path;
+    };
 
     let new_name = format!("{base_name}: {truncated_area_name}");
     let mut write_succeeded = false;
@@ -871,6 +829,9 @@ fn cache_size_string() -> String {
     total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
     // Its own root beside the tile cache, and Clear Cache deletes it.
     total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
+    if let Some(d) = crate::osm_tiles::cache_root() {
+        total = total.saturating_add(dir_size_bytes(&d));
+    }
     for root in crate::models_3d::model_cache_roots() {
         total = total.saturating_add(dir_size_bytes(&root));
     }
@@ -944,6 +905,7 @@ fn clear_tile_caches_now() -> Result<String, String> {
         .combined(clear_land_cover_cache())
         .combined(crate::canopy::clear_canopy_cache())
         .combined(crate::overture::clear_overture_cache())
+        .combined(crate::osm_tiles::clear_osm_tiles_cache())
         .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
@@ -1066,6 +1028,120 @@ struct WorldMapData {
     max_mc_x: i32,
     min_mc_z: i32,
     max_mc_z: i32,
+}
+
+#[derive(serde::Serialize)]
+struct OneWorldInfo {
+    world_path: String,
+    exists: bool,
+    /// The folder exists but is not a One World.
+    foreign: bool,
+    locked: bool,
+    area_count: usize,
+    scale: Option<f64>,
+    height_multiplier: Option<f64>,
+    terrain: Option<bool>,
+    disable_height_limit: Option<bool>,
+    aws_only_elevation: Option<bool>,
+    /// Changes whenever an area is recorded.
+    revision: u32,
+}
+
+fn one_world_dir(save_path: &str, world_name: &str) -> PathBuf {
+    let name = crate::world_utils::world_folder_name(world_name)
+        .unwrap_or_else(|| crate::one_world::DEFAULT_WORLD_NAME.to_string());
+    PathBuf::from(save_path.trim()).join(name)
+}
+
+#[tauri::command(async)]
+fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldInfo, String> {
+    let world_path = one_world_dir(&save_path, &world_name);
+    let manifest = crate::one_world::Manifest::load(&world_path)?;
+    let foreign = manifest.is_none()
+        && world_path.exists()
+        && fs::read_dir(&world_path)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false);
+    Ok(OneWorldInfo {
+        world_path: world_path.display().to_string(),
+        exists: manifest.is_some(),
+        foreign,
+        locked: manifest.is_some() && crate::world_utils::world_is_locked(&world_path),
+        area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
+        scale: manifest.as_ref().map(|m| m.scale),
+        height_multiplier: manifest.as_ref().map(|m| m.height_multiplier),
+        terrain: manifest.as_ref().map(|m| m.terrain),
+        disable_height_limit: manifest.as_ref().map(|m| m.disable_height_limit),
+        aws_only_elevation: manifest.as_ref().map(|m| m.aws_only_elevation),
+        revision: manifest.as_ref().map(|m| m.next_area_id).unwrap_or(0),
+    })
+}
+
+/// Chunks of the selected area that already exist in the One World.
+#[tauri::command(async)]
+fn gui_one_world_overlap(
+    save_path: String,
+    world_name: String,
+    bbox_text: String,
+) -> Result<u64, String> {
+    let world_path = one_world_dir(&save_path, &world_name);
+    let Some(manifest) = crate::one_world::Manifest::load(&world_path)? else {
+        return Ok(0);
+    };
+    let bbox = LLBBox::from_str(&bbox_text)?;
+    let (rect, _) = crate::projection::snap_bbox_to_chunks(&manifest.projection(), &bbox)?;
+    Ok(crate::one_world::existing_chunks(&world_path, &rect))
+}
+
+/// Map overlays plus the frame the teleport menu projects with.
+#[derive(serde::Serialize)]
+struct OneWorldOverlays {
+    origin_lat: f64,
+    origin_lon: f64,
+    scale: f64,
+    areas: Vec<WorldMapData>,
+}
+
+#[tauri::command(async)]
+fn gui_get_one_world_overlays(world_path: String) -> Result<Option<OneWorldOverlays>, String> {
+    let world_dir = PathBuf::from(world_path.trim());
+    let Some(manifest) = crate::one_world::Manifest::load(&world_dir)? else {
+        return Ok(None);
+    };
+    let mut out = Vec::with_capacity(manifest.areas.len());
+    for area in &manifest.areas {
+        let image_base64 = match area
+            .preview
+            .as_deref()
+            .and_then(|rel| crate::one_world::safe_preview_path(&world_dir, rel))
+        {
+            Some(path) => match fs::read(path) {
+                Ok(bytes) => format!(
+                    "data:image/png;base64,{}",
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
+                ),
+                Err(_) => String::new(),
+            },
+            None => String::new(),
+        };
+        out.push(WorldMapData {
+            image_base64,
+            min_lat: area.min_lat,
+            max_lat: area.max_lat,
+            min_lon: area.min_lon,
+            max_lon: area.max_lon,
+            min_mc_x: area.min_x,
+            max_mc_x: area.max_x,
+            min_mc_z: area.min_z,
+            max_mc_z: area.max_z,
+        });
+    }
+    Ok(Some(OneWorldOverlays {
+        origin_lat: manifest.origin_lat,
+        origin_lon: manifest.origin_lon,
+        scale: manifest.scale,
+        areas: out,
+    }))
 }
 
 /// Reveals a file or folder in the system file explorer.
@@ -1301,11 +1377,13 @@ fn gui_start_generation(
     bedrock_save_path: String,
     luanti_save_path: String,
     world_scale: f64,
+    height_multiplier: f64,
     ground_level: i32,
     terrain_enabled: bool,
     skip_osm_objects: bool,
     interior_enabled: bool,
     fillground_enabled: bool,
+    caves_enabled: bool,
     legacy_trees_enabled: bool,
     max_tree_size: String,
     canopy_height_enabled: bool,
@@ -1322,6 +1400,7 @@ fn gui_start_generation(
     rotation_angle: f64,
     gamemode: String,
     world_time: i64,
+    world_type: String,
     map_item: bool,
     signage: String,
     mapillary_token: String,
@@ -1330,9 +1409,15 @@ fn gui_start_generation(
     building_facades_enabled: bool,
     facade_detail: String,
     celestial_body_name: String,
+    one_world: bool,
+    one_world_name: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
+
+    // A One World is resolved inside the worker, once `Args` exist.
+    let one_world = one_world && world_format == "java" && celestial_body_name == "earth";
+    let is_new_world = is_new_world && !one_world;
 
     // Claim the process before touching any shared state. The frontend disables its button
     // for the same reason; this is the authoritative check behind it.
@@ -1367,6 +1452,10 @@ fn gui_start_generation(
             emit_gui_error(&e);
             return Err(e);
         }
+    }
+    if let Err(e) = crate::args::validate_height_multiplier(height_multiplier) {
+        emit_gui_error(&e);
+        return Err(e);
     }
 
     // Store telemetry consent for crash reporting
@@ -1430,7 +1519,11 @@ fn gui_start_generation(
         // Held until the worker finishes, on every path, so the globals stay this run's.
         let _generation_slot = generation_slot;
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            let world_path = PathBuf::from(&selected_world);
+            let world_path = if one_world {
+                one_world_dir(&selected_world, &one_world_name)
+            } else {
+                PathBuf::from(&selected_world)
+            };
 
             // Determine world format from UI selection first (needed for session lock decision)
 
@@ -1511,23 +1604,25 @@ fn gui_start_generation(
 
             // Acquire session lock for Java worlds only
             // Session lock prevents Minecraft from having the world open during generation
-            // Bedrock worlds are generated as .mcworld files and don't need this lock
-            let _session_lock: Option<SessionLock> = if world_format == WorldFormat::JavaAnvil {
-                match SessionLock::acquire(&world_path) {
-                    Ok(lock) => Some(lock),
-                    Err(e) => {
-                        let error_msg = format!("Failed to acquire session lock: {e}");
-                        eprintln!("{error_msg}");
-                        emit_gui_error(&error_msg);
-                        return Err(error_msg);
+            // Bedrock worlds are generated as .mcworld files and don't need this lock.
+            // A One World is locked by `prepare` below.
+            let mut _session_lock: Option<SessionLock> =
+                if world_format == WorldFormat::JavaAnvil && !one_world {
+                    match SessionLock::acquire(&world_path) {
+                        Ok(lock) => Some(lock),
+                        Err(e) => {
+                            let error_msg = format!("Failed to acquire session lock: {e}");
+                            eprintln!("{error_msg}");
+                            emit_gui_error(&error_msg);
+                            return Err(error_msg);
+                        }
                     }
-                }
-            } else {
-                None
-            };
+                } else {
+                    None
+                };
 
             // Parse the bounding box from the text with proper error handling
-            let bbox = match LLBBox::from_str(&bbox_text) {
+            let mut bbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
                 Err(e) => {
                     let error_msg = format!("Failed to parse bounding box: {e}");
@@ -1575,38 +1670,12 @@ fn gui_start_generation(
                 }
             };
 
-            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
-            // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
-            let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
-                CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
-            {
-                let (sx, sz) = if let Some((lat, lng)) = spawn_point {
-                    if let Ok(llpoint) = LLPoint::new(lat, lng) {
-                        let xzpoint = transformer.transform_point(llpoint);
-                        (xzpoint.x, xzpoint.z)
-                    } else {
-                        calculate_default_spawn(&pre_rot_bbox)
-                    }
-                } else {
-                    calculate_default_spawn(&pre_rot_bbox)
-                };
-                Some(map_transformation::rotate::rotate_xz_point(
-                    sx,
-                    sz,
-                    rotation_angle.clamp(-90.0, 90.0),
-                    &pre_rot_bbox,
-                ))
-            } else {
-                None
-            };
-
-            // Create generation options. The facade job is filled in below,
-            // once `Args` exists to say whether there is one.
+            // Create generation options. Spawn point and facade job are set below.
             let mut generation_options = GenerationOptions {
                 path: generation_path.clone(),
                 format: world_format,
                 level_name,
-                spawn_point: mc_spawn_point,
+                spawn_point: None,
                 luanti_game,
                 ground_level,
                 facades: crate::mapillary::FacadeJob::default(),
@@ -1621,13 +1690,17 @@ fn gui_start_generation(
                 path: Some(if world_format == WorldFormat::JavaAnvil {
                     generation_path.clone()
                 } else {
-                    world_path
+                    world_path.clone()
                 }),
                 bedrock: world_format == WorldFormat::BedrockMcWorld,
                 luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                height_multiplier,
                 projection: crate::projection::ProjectionKind::Local,
+                one_world: false,
+                world_name: None,
+                one_world_run: None,
                 ground_level,
                 mode: if skip_osm_objects {
                     crate::args::GenerationMode::TerrainOnly
@@ -1639,6 +1712,13 @@ fn gui_start_generation(
                 legacy_terrain: false,
                 interior: interior_enabled,
                 fillground: fillground_enabled,
+                caves: caves_enabled,
+                // The asset pack, biome mix and zone preview are CLI aids; the GUI toggle
+                // carves with the defaults and a `cave-pack` folder next to the executable.
+                cave_asset_pack: None,
+                cave_biomes: None,
+                cave_zone_map: None,
+                cave_zone_map_step: None,
                 legacy_trees: legacy_trees_enabled,
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
                 canopy_height: canopy_height_enabled,
@@ -1649,6 +1729,8 @@ fn gui_start_generation(
                 // Parquet reader drops entirely - but both differences are far
                 // below a block, so the choice is not worth a GUI setting.
                 overture_source: crate::args::OvertureSource::Auto,
+                osm_tiles_url: crate::osm_tiles::DEFAULT_OSM_TILES_URL.to_string(),
+                no_tile_archive: false,
                 use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
@@ -1662,6 +1744,7 @@ fn gui_start_generation(
                 voxy_lod: voxy_lod_enabled,
                 gamemode: crate::args::GameMode::from_str_lossy(&gamemode),
                 world_time: world_time.clamp(0, 23999),
+                world_type: crate::args::WorldType::from_str_lossy(&world_type),
                 map_item,
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld
@@ -1704,7 +1787,84 @@ fn gui_start_generation(
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
+            // Same as run_cli: caves carve into the filled ground, so they bring it with them.
+            if args.caves {
+                args.fillground = true;
+            }
+
+            let mut one_world_extending = false;
+            if one_world {
+                let session = match crate::one_world::prepare(&world_path, &bbox, &mut args) {
+                    Ok(session) => session,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        emit_gui_error(&e);
+                        emit_gui_progress_update(progress::MESSAGE_ONLY, &format!("Error! {e}"));
+                        return Err(e);
+                    }
+                };
+                bbox = session.llbbox;
+                one_world_extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
+                if session.created {
+                    cleanup_guard = Some(NewWorldCleanup::new(world_path.clone()));
+                }
+                _session_lock = Some(session.lock);
+                if args.disable_height_limit && session.created {
+                    if let Err(e) = crate::world_utils::install_tall_datapack(&world_path) {
+                        let error_msg = format!("Failed to install tall-world datapack: {e}");
+                        eprintln!("{error_msg}");
+                        emit_gui_error(&error_msg);
+                        return Err(error_msg);
+                    }
+                }
+                progress::emit_world_name_update(
+                    world_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(crate::one_world::DEFAULT_WORLD_NAME),
+                );
+            }
             let args = args;
+
+            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
+            // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates).
+            // An extended One World keeps its spawn unless a marker was placed.
+            let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
+                crate::projection::ProjectionSpec::from_args(&args).transformer(&bbox)
+            {
+                let marker = spawn_point.and_then(|(lat, lng)| LLPoint::new(lat, lng).ok());
+                match (marker, one_world_extending) {
+                    (None, true) => None,
+                    (marker, _) => {
+                        let (sx, sz) = match marker {
+                            Some(llpoint) => {
+                                let xzpoint = transformer.transform_point(llpoint);
+                                (xzpoint.x, xzpoint.z)
+                            }
+                            None => calculate_default_spawn(&pre_rot_bbox),
+                        };
+                        Some(map_transformation::rotate::rotate_xz_point(
+                            sx,
+                            sz,
+                            args.rotation,
+                            &pre_rot_bbox,
+                        ))
+                    }
+                }
+            } else {
+                None
+            };
+            generation_options.spawn_point = mc_spawn_point;
+            // Y is corrected after generation.
+            if one_world && !one_world_extending {
+                if let Some((sx, sz)) = mc_spawn_point {
+                    if let Err(e) =
+                        set_player_spawn_in_level_dat(&world_path.display().to_string(), sx, sz)
+                    {
+                        eprintln!("Warning: Failed to set spawn point: {e}");
+                    }
+                }
+            }
 
             // Same as run_cli: the facade pipeline needs only the bbox, and its
             // downloads are the longest part of a run that uses it, so it starts
@@ -1723,11 +1883,14 @@ fn gui_start_generation(
             if args.skip_objects() {
                 // Generate ground data (terrain) for terrain-only mode
                 let mut ground = ground::generate_ground_data(&args, bbox);
+                // Matches run_cli.
+                ground.mark_beaches();
 
                 // Create empty parsed_elements and xzbbox for terrain-only mode
                 let mut parsed_elements = Vec::new();
                 let (_coord_transformer, mut xzbbox) =
-                    CoordTransformer::llbbox_to_xzbbox(&bbox, args.scale)
+                    crate::projection::ProjectionSpec::from_args(&args)
+                        .transformer(&bbox)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
 
                 // The spawn point is rotated above, so skipping the world
@@ -1744,7 +1907,7 @@ fn gui_start_generation(
                     .map_err(|e| format!("Rotation failed: {e}"))?;
                 }
 
-                let _ = data_processing::generate_world_with_options(
+                if let Err(e) = data_processing::generate_world_with_options(
                     parsed_elements,
                     xzbbox,
                     bbox,
@@ -1753,7 +1916,10 @@ fn gui_start_generation(
                     generation_options.clone(),
                     osm_parser::OutlineSuppression::new(),
                     osm_parser::PartGroups::new(),
-                );
+                ) {
+                    emit_gui_error(&e);
+                    return Err(e);
+                }
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
                 }
@@ -1772,7 +1938,7 @@ fn gui_start_generation(
                     if args.overture {
                         overture::fetch_overture_buildings(
                             &bbox,
-                            args.scale,
+                            &crate::projection::ProjectionSpec::from_args(&args),
                             args.overture_source,
                             args.debug,
                         )
@@ -1781,8 +1947,14 @@ fn gui_start_generation(
                     }
                 });
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
-                let fetch_result =
-                    retrieve_data::fetch_data_from_overpass(bbox, args.debug, "requests", None);
+                let fetch_result = retrieve_data::fetch_osm_data(
+                    bbox,
+                    args.debug,
+                    "requests",
+                    None,
+                    &args.osm_tiles_url,
+                    !args.no_tile_archive,
+                );
                 // A panicked worker already reported itself through the panic hook.
                 // Overture is supplementary, so drop it and keep going; terrain is
                 // not, so hand the failure back instead of taking the app down.
@@ -1807,9 +1979,8 @@ fn gui_start_generation(
                         osm_parser::parse_osm_data(
                             raw_data,
                             bbox,
-                            args.scale,
                             args.debug,
-                            crate::projection::ProjectionKind::Local,
+                            &crate::projection::ProjectionSpec::from_args(&args),
                         );
 
                     let overture::OvertureData {
@@ -1846,6 +2017,7 @@ fn gui_start_generation(
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
                     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+                    ground.mark_beaches();
 
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(
@@ -1865,7 +2037,7 @@ fn gui_start_generation(
                         .map_err(|e| format!("Rotation failed: {e}"))?;
                     }
 
-                    let _ = data_processing::generate_world_with_options(
+                    if let Err(e) = data_processing::generate_world_with_options(
                         parsed_elements,
                         xzbbox,
                         bbox,
@@ -1874,7 +2046,12 @@ fn gui_start_generation(
                         generation_options.clone(),
                         outline_suppression,
                         part_groups,
-                    );
+                    ) {
+                        eprintln!("World generation failed: {e}");
+                        send_log(LogLevel::Error, &format!("World generation failed: {e}"));
+                        emit_gui_error(&e);
+                        return Err(e);
+                    }
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
                     }
@@ -1904,6 +2081,46 @@ fn gui_start_generation(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod fit_area_name_tests {
+    use super::fit_area_name;
+
+    #[test]
+    fn short_base_keeps_or_truncates_area() {
+        assert_eq!(
+            fit_area_name("Arnis World 1", "Berlin".into()).as_deref(),
+            Some("Berlin")
+        );
+        // 30 - 13 - 2 = 15 characters of room
+        assert_eq!(
+            fit_area_name("Arnis World 1", "Charlottenburg-Wilmersdorf".into()).as_deref(),
+            Some("Charlottenburg-")
+        );
+    }
+
+    #[test]
+    fn long_base_leaves_name_alone_instead_of_underflowing() {
+        assert_eq!(
+            fit_area_name("Arnis World 1 of my home town", "X".into()),
+            None
+        );
+        assert_eq!(
+            fit_area_name("Arnis World Downtown Berlin 2026", "X".into()),
+            None
+        );
+    }
+
+    #[test]
+    fn counts_characters_not_bytes() {
+        // 16 characters but 48 bytes; there is still room for 12 characters.
+        let out = fit_area_name(
+            "Arnis World 東京東京",
+            "大阪大阪大阪大阪大阪大阪大阪".into(),
+        );
+        assert_eq!(out.map(|s| s.chars().count()), Some(12));
+    }
 }
 
 #[cfg(test)]

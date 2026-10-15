@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::building_facade::BuildingContext;
+use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::element_processing::*;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::ground::Ground;
@@ -23,10 +24,10 @@ use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat};
 use colored::Colorize;
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
-use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// Generation options that can be passed separately from CLI Args
 #[derive(Clone)]
@@ -70,7 +71,7 @@ fn landuse_paints_ground(tags: &HashMap<String, String>) -> bool {
 }
 
 /// Footprint of a ground-filling way, or `None` if it does not reach a ground-fill handler.
-/// Mirrors the landuse/natural/leisure arms of `process_element`; keep both in sync.
+/// Mirrors the landuse/natural/leisure/place arms of `process_element`; keep both in sync.
 fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     let tags = &way.tags;
     if tags.contains_key("building")
@@ -81,13 +82,16 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     }
     let fills_ground = if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
-    } else if tags.contains_key("natural") {
+    } else if let Some(natural) = tags.get("natural") {
         // natural=* + amenity=fountain falls through to the fountain handler.
-        tags.get("amenity").map(String::as_str) != Some("fountain")
+        tags.get("amenity").map(String::as_str) != Some("fountain") && natural != "tree_row"
     } else if tags.contains_key("amenity") {
         false
+    } else if tags.contains_key("leisure") {
+        true
     } else {
-        tags.contains_key("leisure")
+        // A square paves its footprint and must yield to lawns inside it.
+        tags.get("place").map(String::as_str) == Some("square")
     };
     fills_ground.then(|| ring_area(&way.nodes))
 }
@@ -134,20 +138,19 @@ fn ground_fill_area(element: &ProcessedElement) -> Option<f64> {
         ProcessedElement::Relation(rel) => relation_ground_fill_area(rel)?,
         ProcessedElement::Node(_) => return None,
     };
-    // Degenerate rings render nothing; dropping them keeps a zero area from sorting last and winning.
+    // Degenerate rings render nothing; dropping them keeps a zero area from sorting first and winning.
     (area > 0.0).then_some(area)
 }
 
-/// Reorders ground-filling areas so larger ones render first and smaller ones overwrite them.
+/// Reorders ground-filling areas so smaller ones render first and larger ones fill in around them.
 ///
-/// Elements otherwise render in arbitrary OSM parse order, so a large `landuse=forest` can paint
-/// over a `landuse=meadow` nested inside it. Sorting by descending footprint makes the smallest
-/// (most specific) area the last writer for every block it covers.
+/// Ground blocks are only written where nothing stands yet, so the first area to reach a block
+/// keeps it. Sorting by ascending footprint makes the smallest (most specific) area win.
 ///
 /// Only the slots already occupied by ground-filling areas are rewritten, so every other element
 /// keeps its index. This stays correct across tiles: a tile renders a subsequence of this global
-/// order, and an area is assigned to every tile it overlaps, so the larger area still precedes the
-/// smaller one inside each tile.
+/// order, and an area is assigned to every tile it overlaps, so the smaller area still precedes the
+/// larger one inside each tile.
 pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     let mut slots: Vec<usize> = Vec::new();
     let mut areas: Vec<f64> = Vec::new();
@@ -165,8 +168,8 @@ pub(crate) fn sort_ground_fill_areas(elements: &mut [ProcessedElement]) {
     // src[k] = compact index of the area that belongs in slots[k].
     let mut src: Vec<usize> = (0..count).collect();
     src.sort_by(|&a, &b| {
-        areas[b]
-            .total_cmp(&areas[a])
+        areas[a]
+            .total_cmp(&areas[b])
             .then_with(|| elements[slots[a]].id().cmp(&elements[slots[b]].id()))
     });
 
@@ -199,6 +202,67 @@ fn release_finished_fills(
     }
 }
 
+/// Fill ids each tile can read, and how many tiles read each one. A tile reads the fills of
+/// its ways, of its relations' members, and of their building-part siblings, which
+/// `get_cached` serves with no recompute fallback, so none of them may be missed.
+fn tile_fill_readers(
+    tile_assignments: &[Vec<usize>],
+    elements: &[ProcessedElement],
+    part_groups: &PartGroups,
+    group_members: &FnvHashMap<u64, Vec<u64>>,
+    cached: impl Fn(u64) -> bool,
+) -> (Vec<Vec<u64>>, FnvHashMap<u64, AtomicU32>) {
+    let tile_fill_ids: Vec<Vec<u64>> = tile_assignments
+        .iter()
+        .map(|elems| {
+            let mut ids: Vec<u64> = Vec::new();
+            let mut add = |id: u64| {
+                ids.push(id);
+                for seed in [part_groups.get(&id).copied().unwrap_or(id), id] {
+                    let key = crate::osm_parser::seed_without_hint(seed);
+                    if let Some(members) = group_members.get(&key) {
+                        ids.extend_from_slice(members);
+                    }
+                }
+            };
+            for &idx in elems {
+                match &elements[idx] {
+                    ProcessedElement::Way(way) => add(way.id),
+                    ProcessedElement::Relation(rel) => {
+                        add(rel.id);
+                        for member in &rel.members {
+                            add(member.way.id);
+                        }
+                    }
+                    ProcessedElement::Node(_) => {}
+                }
+            }
+            ids.retain(|&id| cached(id));
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        })
+        .collect();
+    let mut counts: FnvHashMap<u64, u32> = FnvHashMap::default();
+    for &id in tile_fill_ids.iter().flatten() {
+        *counts.entry(id).or_default() += 1;
+    }
+    let readers = counts
+        .into_iter()
+        .map(|(id, n)| (id, AtomicU32::new(n)))
+        .collect();
+    (tile_fill_ids, readers)
+}
+
+/// Drops one finished tile's hold on its fills, freeing each fill it was the last to read.
+fn release_tile_fills(ids: &[u64], readers: &FnvHashMap<u64, AtomicU32>, cache: &FloodFillCache) {
+    for id in ids {
+        if readers[id].fetch_sub(1, Ordering::AcqRel) == 1 {
+            cache.release(*id);
+        }
+    }
+}
+
 /// Process a single element by dispatching to the appropriate element processor.
 ///
 /// Extracted from the main loop so the same dispatch runs in both the sequential
@@ -207,7 +271,7 @@ fn release_finished_fills(
 /// mutable state is the per-tile `editor` and `rail_tunnel_points`.
 ///
 /// Element suppression (3D-model / building-outline) and flood-fill cache
-/// eviction are handled by the caller; the cache is shared immutably in the
+/// eviction are handled by the caller; the cache is shared across tiles in the
 /// parallel path and must not be mutated here.
 #[allow(clippy::too_many_arguments)]
 fn process_element(
@@ -215,6 +279,7 @@ fn process_element(
     element: &ProcessedElement,
     args: &Args,
     highway_connectivity: &highways::HighwayConnectivityMap,
+    road_markings: &road_markings::RoadMarkingIndex,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &CoordinateBitmap,
     building_passages: &CoordinateBitmap,
@@ -234,6 +299,7 @@ fn process_element(
     part_groups: &PartGroups,
     group_members: &FnvHashMap<u64, Vec<u64>>,
     still_surfaces: &water_areas::StillWaterSurfaces,
+    interior_uses: &InteriorUseIndex,
 ) {
     let signage = editor.signage_enabled();
     match element {
@@ -261,6 +327,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    interior_uses,
                 };
                 let anchor =
                     buildings::generate_buildings(editor, way, args, None, None, &ctx, group_seed);
@@ -284,6 +351,7 @@ fn process_element(
                     tunnel_portals,
                     tunnel_footprint,
                     tunnel_cells,
+                    road_markings,
                 );
                 if signage {
                     signage::generate_highway_way_signage(editor, way, building_footprints);
@@ -335,6 +403,7 @@ fn process_element(
                         big_water_field,
                         road_mask,
                         tunnel_footprint,
+                        bridge_surface,
                         still_surfaces,
                     );
                 } else {
@@ -347,6 +416,8 @@ fn process_element(
                     rail_tunnel_points,
                     rail_bridge_internal_endpoints,
                     bridge_outlines,
+                    bridge_structures,
+                    bridge_surface,
                     road_mask,
                     building_footprints,
                     rail_mask,
@@ -409,6 +480,7 @@ fn process_element(
                     tunnel_portals,
                     tunnel_footprint,
                     tunnel_cells,
+                    road_markings,
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
@@ -437,6 +509,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
             } else if rel.tags.contains_key("water")
@@ -453,6 +526,7 @@ fn process_element(
                     big_water_field,
                     road_mask,
                     tunnel_footprint,
+                    bridge_surface,
                     still_surfaces,
                 );
             } else if rel.tags.contains_key("natural") {
@@ -486,6 +560,33 @@ fn process_element(
             } else if rel.tags.contains_key("man_made") {
                 man_made::generate_man_made(editor, element, args);
             }
+        }
+    }
+}
+
+/// Merged-tile count shared by the tile workers and the merging thread.
+type TileGate = (Mutex<usize>, Condvar);
+
+/// Stop the tile workers. Set under the gate's lock so a worker between checking the flag
+/// and going to sleep cannot miss the wakeup.
+fn abort_tile_pipeline(stop: &AtomicBool, gate: &TileGate) {
+    let guard = gate.0.lock().unwrap_or_else(|p| p.into_inner());
+    stop.store(true, Ordering::Relaxed);
+    drop(guard);
+    gate.1.notify_all();
+}
+
+/// Aborts the tile pipeline when the worker holding it panics: its tile never arrives, so
+/// the others would wait for that merge forever.
+struct AbortOnPanic<'a> {
+    stop: &'a AtomicBool,
+    gate: &'a TileGate,
+}
+
+impl Drop for AbortOnPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            abort_tile_pipeline(self.stop, self.gate);
         }
     }
 }
@@ -529,6 +630,17 @@ pub fn generate_world_with_options(
     let output_path = options.path.clone();
     let world_format = options.format;
     let generation_start = args.benchmark.then(std::time::Instant::now);
+    // World-wide extras (map item, branding, world settings) belong to the
+    // first area of a One World.
+    let one_world = args.one_world_run.as_ref();
+    let extending = one_world.is_some_and(|run| run.extending);
+    let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
+
+    // Before anything reads a footprint: nothing is built on a runway.
+    let dropped = highways::drop_buildings_on_aircraft_pavement(&mut elements, args.scale);
+    if dropped > 0 {
+        println!("  Skipped {dropped} building(s) on runways, taxiways and aprons");
+    }
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
@@ -559,11 +671,39 @@ pub fn generate_world_with_options(
     // producing that.
     let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
     editor.set_bake_lighting(args.bake_lighting || wants_voxy);
+    let void_world =
+        world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
+    editor.set_void_world(void_world);
+    if void_world && !extending {
+        // A world made by `create_new_world` starts with the flat template region. The area
+        // rewrites it when it reaches that region; one it misses would stay a grass square.
+        crate::world_utils::remove_untouched_template_region(&output_path);
+    }
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
+    if let Some(run) = one_world {
+        editor.set_merge_into_existing(crate::world_utils::WorldLayout::of(&run.world_dir));
+        editor.set_climate_anchor(run.origin_lat, run.origin_lon);
+        // metadata.json describes the whole world, not this area alone.
+        if let Ok(Some(manifest)) = crate::one_world::Manifest::load(&run.world_dir) {
+            let union = match manifest.extent() {
+                Some(ext) => XZBBox::rect_from_min_max(
+                    ext.min_x().min(xzbbox.min_x()),
+                    ext.min_z().min(xzbbox.min_z()),
+                    ext.max_x().max(xzbbox.max_x()),
+                    ext.max_z().max(xzbbox.max_z()),
+                )
+                .unwrap_or_else(|_| xzbbox.clone()),
+                None => xzbbox.clone(),
+            };
+            if let Ok(ll) = crate::projection::llbbox_for_rect(&manifest.projection(), &union) {
+                editor.set_metadata_extent(union, ll);
+            }
+        }
+    }
 
     // Facade textures: loaded and projected onto the buildings before any tile
     // thread starts, so the wall builder only reads. A folder given on the
@@ -644,9 +784,25 @@ pub fn generate_world_with_options(
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
     // threads only read the registry. Java only; other formats keep banner fallbacks.
     let signage_start = args.benchmark.then(std::time::Instant::now);
+    // A One World continues after its last map id.
+    let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
+    let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
+    let first_decal_id = if one_world.is_some() {
+        let layout = crate::world_utils::WorldLayout::of(&output_path);
+        let next = crate::map_item::next_map_id(&layout.maps_dir(&output_path));
+        next + if wants_map_item {
+            2
+        } else if place_branding {
+            1
+        } else {
+            0
+        }
+    } else {
+        crate::decals::registry::DecalRegistry::FIRST_ID
+    };
     let signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
         == WorldFormat::JavaAnvil)
-        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox))
+        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox, first_decal_id))
         .flatten()
         .map(Arc::new);
     if let (Some(t), Some(_)) = (signage_start, signage_ctx.as_ref()) {
@@ -672,12 +828,12 @@ pub fn generate_world_with_options(
     // The map item consumes the same accumulator, so either feature enables it.
     // Without the PNG the map item only needs 128px, so a small frame suffices
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
-    let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil;
-    // Branding map ships on every Java world.
-    let place_branding = world_format == WorldFormat::JavaAnvil;
     let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
-        Arc::new(if wants_png {
+        Arc::new(if wants_png && one_world.is_some() {
+            // Every area of a One World is sent to the map overlay at once.
+            PreviewAccumulator::new_capped(&xzbbox, 2048)
+        } else if wants_png {
             PreviewAccumulator::new(&xzbbox)
         } else if wants_local_maps {
             // "You are here" boards crop this, so give them a little more resolution.
@@ -701,6 +857,16 @@ pub fn generate_world_with_options(
         }
     }
 
+    if let (Some(run), Some(affine)) = (one_world, ground.elevation_affine()) {
+        crate::one_world::remember_elevation(run, affine)?;
+    }
+    if let Some(run) = one_world.filter(|run| run.replaced_chunks > 0) {
+        emit_gui_progress_update(
+            MESSAGE_ONLY,
+            &format!("Replacing {} existing chunks", run.replaced_chunks),
+        );
+    }
+
     let ground = Arc::new(ground);
     let mut bench = crate::bench::Bench::new(args.benchmark);
     crate::world_editor::reset_section_counters(args.benchmark);
@@ -708,15 +874,16 @@ pub fn generate_world_with_options(
     ground.warm_water_blend();
     bench.mark("ground_warm");
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
-    // Uses the ground's real base, not args: the montane check measures blocks above it, and
-    // the base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
+    // Uses the area's floor, not args: the montane check measures blocks above it, and the
+    // base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
     // blocks back into metres, which compression makes far smaller than args.scale.
     let tree_pack = crate::trees::tree_pack::load(
         args,
         llbbox,
         args.scale,
-        ground.base_level(),
+        crate::ground::area_floor_for(&ground, args),
         ground.blocks_per_meter(),
+        ground.ecoregion_map(),
     )
     .map(Arc::new);
     bench.reset();
@@ -731,6 +898,14 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
+    let road_markings = road_markings::RoadMarkingIndex::build(
+        &elements,
+        args.scale,
+        crate::decals::region::SignRegion::detect(
+            (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
+            (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+        ),
+    );
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
     let mut rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
@@ -742,7 +917,7 @@ pub fn generate_world_with_options(
         editor.set_tree_pack(Arc::clone(tp));
     }
 
-    // Nested areas render correctly only if the smallest one writes last.
+    // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 
     // Pre-compute all flood fills in parallel for better CPU utilization
@@ -751,6 +926,13 @@ pub fn generate_world_with_options(
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
+
+    // Tenants and surrounding areas per building, for interiors furnished by use.
+    let interior_uses = if args.interior {
+        InteriorUseIndex::build(&elements, &clip_bbox)
+    } else {
+        InteriorUseIndex::default()
+    };
 
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
@@ -776,6 +958,11 @@ pub fn generate_world_with_options(
     };
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
+    let mapped_trunks = Arc::new(crate::trees::mapped::MappedTrunks::collect(
+        &elements, args.scale,
+    ));
+    editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
     let group_members: FnvHashMap<u64, Vec<u64>> = {
@@ -795,7 +982,7 @@ pub fn generate_world_with_options(
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
     let bridge_structures =
-        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines);
+        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines, args.scale);
     let bridge_surface =
         bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
 
@@ -898,6 +1085,14 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
+        let (tile_fill_ids, fill_readers) = tile_fill_readers(
+            &tile_assignments,
+            &elements,
+            &part_groups,
+            &group_members,
+            |id| flood_fill_cache.contains(id),
+        );
+
         // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
         // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
         // are kept via region deferral.
@@ -981,253 +1176,338 @@ pub fn generate_world_with_options(
             }
         }
 
-        let mut place_dur = std::time::Duration::ZERO;
         let mut merge_dur = std::time::Duration::ZERO;
         let total_tiles = indexed_tiles.len().max(1);
         // Counted per tile, not per element: measured per-tile cost is near flat
         // (the area work dominates), so tile count tracks time despite LPT order.
         let mut tiles_merged = 0usize;
         let mut last_emitted_pct = 20.0_f64;
-        // Placement-side ticks so the bar moves before the first batch merges.
+        // Placement-side ticks so the bar moves before the first tile merges.
         let tiles_placed = std::sync::atomic::AtomicUsize::new(0);
-        for batch in indexed_tiles.chunks(tile_batch_size) {
-            // Phase 1: process this batch of tiles in parallel
-            let place_start = std::time::Instant::now();
-            let batch_results: Vec<_> = batch
-                .par_iter()
-                .map(|&(tile_idx, tile_bounds)| {
-                    // max_* are exclusive; rect_from_min_max treats max as inclusive,
-                    // so subtract 1. Clamp to the world bbox so edge-tile halos don't
-                    // extend past world bounds.
-                    let tile_xzbbox = XZBBox::rect_from_min_max(
-                        (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
-                        (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
-                        (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
-                        (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
-                    )
-                    .expect("Failed to create tile XZBBox");
+        // Phase 1: build one tile on its own editor.
+        let process_tile = |&(tile_idx, tile_bounds): &(usize, &tile::TileBounds)| {
+            // max_* are exclusive; rect_from_min_max treats max as inclusive,
+            // so subtract 1. Clamp to the world bbox so edge-tile halos don't
+            // extend past world bounds.
+            let tile_xzbbox = XZBBox::rect_from_min_max(
+                (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
+                (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
+                (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
+                (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
+            )
+            .expect("Failed to create tile XZBBox");
 
-                    let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
-                    tile_editor.set_ground(Arc::clone(&ground));
-                    tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
-                    // Ground generation runs on tile editors, so they need the real scale.
-                    tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
-                    tile_editor.set_place_schematics(args.use_3d);
-                    tile_editor.set_map_decals(place_branding);
-                    if let Some(ref tp) = tree_pack {
-                        tile_editor.set_tree_pack(Arc::clone(tp));
-                    }
-                    tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
-                    if let Some(ctx) = &signage_ctx {
-                        tile_editor.set_signage(Arc::clone(ctx));
-                    }
-                    tile_editor.set_strict_bounds(
-                        tile_bounds.min_x,
-                        tile_bounds.min_z,
-                        tile_bounds.max_x - 1,
-                        tile_bounds.max_z - 1,
-                    );
+            let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
+            tile_editor.set_ground(Arc::clone(&ground));
+            tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
+            // Ground generation runs on tile editors, so they need the real scale.
+            tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
+            tile_editor.set_place_schematics(args.use_3d);
+            tile_editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
+            if let Some(ref tp) = tree_pack {
+                tile_editor.set_tree_pack(Arc::clone(tp));
+            }
+            tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
+            tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+            if let Some(ctx) = &signage_ctx {
+                tile_editor.set_signage(Arc::clone(ctx));
+            }
+            tile_editor.set_strict_bounds(
+                tile_bounds.min_x,
+                tile_bounds.min_z,
+                tile_bounds.max_x - 1,
+                tile_bounds.max_z - 1,
+            );
 
-                    let mut tile_rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
-                    let mut tile_tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
+            let mut tile_rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
+            let mut tile_tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
 
-                    for &elem_idx in &tile_assignments[tile_idx] {
-                        let element = &elements[elem_idx];
-                        let suppression_key = (element.kind(), element.id());
-                        if models_3d_suppressed.contains(&suppression_key)
-                            || (has_landmarks && landmark_suppressed.contains(&suppression_key))
-                            || outline_suppression.contains(&suppression_key)
-                        {
-                            continue;
-                        }
-                        process_element(
-                            &mut tile_editor,
-                            element,
-                            args,
-                            &highway_connectivity,
-                            &flood_fill_cache,
-                            &building_footprints,
-                            &building_passages,
-                            &road_mask,
-                            &rail_mask,
-                            &tunnel_footprint,
-                            // World bbox (not tile) for relation/area ring clipping: clipping to
-                            // the tile can drop a relation whose ring fails to close. The tile
-                            // editor still bounds the actual writes.
-                            &xzbbox,
-                            &big_water_field,
-                            &bridge_structures,
-                            &bridge_surface,
-                            &bridge_outlines,
-                            &rail_bridge_internal_endpoints,
-                            &mut tile_rail_tunnel_points,
-                            &tunnel_internal_endpoints,
-                            &tunnel_portals,
-                            &mut tile_tunnel_cells,
-                            &part_groups,
-                            &group_members,
-                            &still_surfaces,
-                        );
-                    }
+            for &elem_idx in &tile_assignments[tile_idx] {
+                let element = &elements[elem_idx];
+                let suppression_key = (element.kind(), element.id());
+                if models_3d_suppressed.contains(&suppression_key)
+                    || (has_landmarks && landmark_suppressed.contains(&suppression_key))
+                    || outline_suppression.contains(&suppression_key)
+                {
+                    continue;
+                }
+                process_element(
+                    &mut tile_editor,
+                    element,
+                    args,
+                    &highway_connectivity,
+                    &road_markings,
+                    &flood_fill_cache,
+                    &building_footprints,
+                    &building_passages,
+                    &road_mask,
+                    &rail_mask,
+                    &tunnel_footprint,
+                    // World bbox (not tile) for relation/area ring clipping: clipping to
+                    // the tile can drop a relation whose ring fails to close. The tile
+                    // editor still bounds the actual writes.
+                    &clip_bbox,
+                    &big_water_field,
+                    &bridge_structures,
+                    &bridge_surface,
+                    &bridge_outlines,
+                    &rail_bridge_internal_endpoints,
+                    &mut tile_rail_tunnel_points,
+                    &tunnel_internal_endpoints,
+                    &tunnel_portals,
+                    &mut tile_tunnel_cells,
+                    &part_groups,
+                    &group_members,
+                    &still_surfaces,
+                    &interior_uses,
+                );
+            }
 
-                    // Per-tile ground + ore + ESA-water over strict bounds (parallel);
-                    // neighbour reads use the editor halo from intersection assignment.
-                    let g_min_x = tile_bounds.min_x.max(xzbbox.min_x());
-                    let g_max_x = (tile_bounds.max_x - 1).min(xzbbox.max_x());
-                    let g_min_z = tile_bounds.min_z.max(xzbbox.min_z());
-                    let g_max_z = (tile_bounds.max_z - 1).min(xzbbox.max_z());
-                    ground_generation::generate_ground_region(
-                        &mut tile_editor,
-                        ground.as_ref(),
-                        args,
-                        &xzbbox,
-                        &building_footprints,
-                        &tunnel_footprint,
-                        &bridge_surface,
-                        g_min_x,
-                        g_max_x,
-                        g_min_z,
-                        g_max_z,
-                        false,
-                    );
-                    if args.fillground {
-                        crate::ore_generation::generate_ores_region(
-                            &mut tile_editor,
-                            g_min_x,
-                            g_max_x,
-                            g_min_z,
-                            g_max_z,
-                            false,
-                        );
-                    }
-                    crate::water_depth::carve_lc_water_region(
-                        &mut tile_editor,
-                        ground.as_ref(),
-                        &xzbbox,
-                        &big_water_field,
-                        &road_mask,
-                        &tunnel_footprint,
-                        g_min_x,
-                        g_max_x,
-                        g_min_z,
-                        g_max_z,
-                    );
+            release_tile_fills(&tile_fill_ids[tile_idx], &fill_readers, &flood_fill_cache);
 
-                    // Under eviction the post-merge rail-tunnel carve can't run (regions get freed),
-                    // so carve in-tile now, after ground/fill so the interior isn't refilled.
-                    if eviction_active {
-                        railways::carve_rail_tunnel_interior(
-                            &mut tile_editor,
-                            &tile_rail_tunnel_points,
-                        );
-                        highways::carve_highway_tunnel_interior(
-                            &mut tile_editor,
-                            &tile_tunnel_cells,
-                        );
-                    }
+            // Per-tile ground + ore + ESA-water over strict bounds (parallel);
+            // neighbour reads use the editor halo from intersection assignment.
+            let g_min_x = tile_bounds.min_x.max(xzbbox.min_x());
+            let g_max_x = (tile_bounds.max_x - 1).min(xzbbox.max_x());
+            let g_min_z = tile_bounds.min_z.max(xzbbox.min_z());
+            let g_max_z = (tile_bounds.max_z - 1).min(xzbbox.max_z());
+            ground_generation::generate_ground_region(
+                &mut tile_editor,
+                ground.as_ref(),
+                args,
+                &xzbbox,
+                &building_footprints,
+                &tunnel_footprint,
+                &bridge_surface,
+                g_min_x,
+                g_max_x,
+                g_min_z,
+                g_max_z,
+                false,
+            );
+            // Caves bring their own vanilla ore table, placed after the carve so no
+            // vein hangs in a cave; the plain veins only fill caveless ground.
+            if args.caves {
+                crate::caves::carve_region(
+                    &mut tile_editor,
+                    args,
+                    &xzbbox,
+                    g_min_x,
+                    g_max_x,
+                    g_min_z,
+                    g_max_z,
+                );
+            } else if args.fillground {
+                crate::ore_generation::generate_ores_region(
+                    &mut tile_editor,
+                    g_min_x,
+                    g_max_x,
+                    g_min_z,
+                    g_max_z,
+                    false,
+                );
+            }
+            crate::water_depth::carve_lc_water_region(
+                &mut tile_editor,
+                ground.as_ref(),
+                &xzbbox,
+                &big_water_field,
+                &road_mask,
+                &tunnel_footprint,
+                &bridge_surface,
+                g_min_x,
+                g_max_x,
+                g_min_z,
+                g_max_z,
+            );
 
-                    let tile_road_overrides = tile_editor.take_road_surface_overrides();
+            // Under eviction the post-merge rail-tunnel carve can't run (regions get freed),
+            // so carve in-tile now, after ground/fill so the interior isn't refilled.
+            if eviction_active {
+                railways::carve_rail_tunnel_interior(&mut tile_editor, &tile_rail_tunnel_points);
+                highways::carve_highway_tunnel_interior(&mut tile_editor, &tile_tunnel_cells);
+            }
+            // Seal floating water/lava last: the water-depth carve and the tunnel carves
+            // above can each undercut a water body over a cave. Under eviction this tile
+            // flushes soon, so it happens here; otherwise once after the merge.
+            if args.caves && eviction_active {
+                crate::caves::seal_floating_fluid_region(
+                    &mut tile_editor,
+                    g_min_x,
+                    g_max_x,
+                    g_min_z,
+                    g_max_z,
+                );
+            }
 
-                    // Emit on whole-percent steps only; the monotonic clamp
-                    // reconciles these with the merge-side emits.
-                    let placed =
-                        tiles_placed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    if (placed * 50 / total_tiles) != ((placed - 1) * 50 / total_tiles) {
-                        let pct = 20.0 + (placed as f64 / total_tiles as f64) * 50.0;
-                        emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
-                    }
+            let tile_road_overrides = tile_editor.take_road_surface_overrides();
 
-                    (
-                        tile_idx,
-                        tile_editor.into_world(),
-                        tile_rail_tunnel_points,
-                        tile_tunnel_cells,
-                        tile_road_overrides,
-                    )
-                })
-                .collect();
-            place_dur += place_start.elapsed();
+            // Emit on whole-percent steps only; the monotonic clamp
+            // reconciles these with the merge-side emits.
+            let placed = tiles_placed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if (placed * 50 / total_tiles) != ((placed - 1) * 50 / total_tiles) {
+                let pct = 20.0 + (placed as f64 / total_tiles as f64) * 50.0;
+                emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
+            }
 
-            let merge_start = std::time::Instant::now();
-            // Phase 2: merge this batch's results into the main editor (sequential).
-            // batch_results is dropped after this loop, freeing memory before next batch.
-            for (
+            (
                 tile_idx,
-                tile_world,
+                tile_editor.into_world(),
                 tile_rail_tunnel_points,
                 tile_tunnel_cells,
                 tile_road_overrides,
-            ) in batch_results
-            {
-                editor.merge_world(
-                    tile_world,
-                    tiles[tile_idx].min_x,
-                    tiles[tile_idx].min_z,
-                    tiles[tile_idx].max_x - 1,
-                    tiles[tile_idx].max_z - 1,
-                );
-                // Carry road-surface overrides to the main editor so the post-merge 3D-model
-                // pass stays road-aware. Under eviction keep only the deferred 3D regions'
-                // overrides (the rest are evicted; this caps the extra resident RAM).
-                if eviction_active {
-                    editor.merge_road_surface_overrides_in_regions(
-                        tile_road_overrides,
-                        &model_regions,
-                    );
-                } else {
-                    editor.merge_road_surface_overrides(tile_road_overrides);
-                }
+            )
+        };
 
-                if eviction_active {
-                    // This tile contributes to its own region and its 8 neighbours;
-                    // flush each non-deferred region whose contributors are all merged.
-                    // (Rail tunnels are carved in-tile above, so they don't defer regions.)
-                    let rt = region_of_tile[tile_idx];
-                    for dz in -1..=1 {
-                        for dx in -1..=1 {
-                            let d = (rt.0 + dx, rt.1 + dz);
-                            if let Some(c) = remaining.get_mut(&d) {
-                                *c -= 1;
-                                if *c == 0
-                                    && !evicted_regions.contains(&d)
-                                    && !model_regions.contains(&d)
-                                    && Some(d) != spawn_region
-                                {
-                                    if hash_check {
-                                        hash_acc = hash_acc
-                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+        // Tiles merge in list order: outside its own bounds a tile only fills air, so the
+        // first writer wins there, and the flush bookkeeping counts merges. Workers take
+        // tiles in that order and run at most `tile_batch_size` ahead of the merge, which
+        // is what one batch used to hold at once, so the peak stays where it was. The merge
+        // then runs beside the placement instead of idling every thread at each batch end.
+        let window = tile_batch_size;
+        let next_tile = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        let gate: TileGate = (Mutex::new(0), Condvar::new());
+        let place_start = std::time::Instant::now();
+        std::thread::scope(|scope| -> Result<(), String> {
+            let (tx, rx) = std::sync::mpsc::channel();
+            for _ in 0..window.min(indexed_tiles.len()) {
+                let tx = tx.clone();
+                let (process_tile, indexed_tiles) = (&process_tile, &indexed_tiles);
+                let (next_tile, stop, gate) = (&next_tile, &stop, &gate);
+                scope.spawn(move || {
+                    // A worker that panics must not leave the rest waiting on its tile.
+                    let _abort = AbortOnPanic { stop, gate };
+                    loop {
+                        let i = next_tile.fetch_add(1, Ordering::Relaxed);
+                        let Some(entry) = indexed_tiles.get(i) else {
+                            break;
+                        };
+                        let mut merged = gate.0.lock().unwrap_or_else(|p| p.into_inner());
+                        while i >= *merged + window && !stop.load(Ordering::Relaxed) {
+                            merged = gate.1.wait(merged).unwrap_or_else(|p| p.into_inner());
+                        }
+                        drop(merged);
+                        if stop.load(Ordering::Relaxed)
+                            || tx.send((i, process_tile(entry))).is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(tx);
+            // Likewise the merge: a panic here would leave the workers parked on the window.
+            let _abort = AbortOnPanic {
+                stop: &stop,
+                gate: &gate,
+            };
+
+            // Phase 2: merge into the main editor in list order as tiles arrive (sequential).
+            let mut pending = std::collections::BTreeMap::new();
+            let mut next_merge = 0usize;
+            let merged = (|| -> Result<(), String> {
+                for (i, result) in &rx {
+                    pending.insert(i, result);
+                    while let Some((
+                        tile_idx,
+                        tile_world,
+                        tile_rail_tunnel_points,
+                        tile_tunnel_cells,
+                        tile_road_overrides,
+                    )) = pending.remove(&next_merge)
+                    {
+                        let merge_start = std::time::Instant::now();
+                        editor.merge_world(
+                            tile_world,
+                            tiles[tile_idx].min_x,
+                            tiles[tile_idx].min_z,
+                            tiles[tile_idx].max_x - 1,
+                            tiles[tile_idx].max_z - 1,
+                        );
+                        // Carry road-surface overrides to the main editor so the post-merge 3D-model
+                        // pass stays road-aware. Under eviction keep only the deferred 3D regions'
+                        // overrides (the rest are evicted; this caps the extra resident RAM).
+                        if eviction_active {
+                            editor.merge_road_surface_overrides_in_regions(
+                                tile_road_overrides,
+                                &model_regions,
+                            );
+                        } else {
+                            editor.merge_road_surface_overrides(tile_road_overrides);
+                        }
+
+                        if eviction_active {
+                            // This tile contributes to its own region and its 8 neighbours;
+                            // flush each non-deferred region whose contributors are all merged.
+                            // (Rail tunnels are carved in-tile above, so they don't defer regions.)
+                            let rt = region_of_tile[tile_idx];
+                            for dz in -1..=1 {
+                                for dx in -1..=1 {
+                                    let d = (rt.0 + dx, rt.1 + dz);
+                                    if let Some(c) = remaining.get_mut(&d) {
+                                        *c -= 1;
+                                        if *c == 0
+                                            && !evicted_regions.contains(&d)
+                                            && !model_regions.contains(&d)
+                                            && Some(d) != spawn_region
+                                        {
+                                            if hash_check {
+                                                hash_acc = hash_acc.wrapping_add(
+                                                    editor.region_content_hash(d.0, d.1),
+                                                );
+                                            }
+                                            // Facade panels check the region's final blocks
+                                            // and must be in before it leaves memory.
+                                            crate::mapillary::displays::flush_region(
+                                                &mut editor,
+                                                d.0,
+                                                d.1,
+                                            );
+                                            crate::building_facades::flush_region(
+                                                &mut editor,
+                                                d.0,
+                                                d.1,
+                                            );
+                                            if let Some(w) = flush_worker.as_ref() {
+                                                editor.flush_region_via(w, d.0, d.1)?;
+                                            }
+                                            evicted_regions.insert(d);
+                                        }
                                     }
-                                    // Facade panels check the region's final blocks
-                                    // and must be in before it leaves memory.
-                                    crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
-                                    crate::building_facades::flush_region(&mut editor, d.0, d.1);
-                                    if let Some(w) = flush_worker.as_ref() {
-                                        editor.flush_region_via(w, d.0, d.1)?;
-                                    }
-                                    evicted_regions.insert(d);
                                 }
                             }
                         }
+
+                        // Under eviction the in-tile carve already ran, and nothing reads
+                        // these afterwards, so don't retain the points or the cells.
+                        if !eviction_active {
+                            rail_tunnel_points.extend(tile_rail_tunnel_points);
+                            tunnel_cells.extend(tile_tunnel_cells);
+                        }
+
+                        // Step 20%->70% per merged tile, throttled to whole-percent steps.
+                        tiles_merged += 1;
+                        let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
+                        if pct - last_emitted_pct >= 1.0 {
+                            emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
+                            last_emitted_pct = pct;
+                        }
+                        merge_dur += merge_start.elapsed();
+
+                        next_merge += 1;
+                        *gate.0.lock().unwrap_or_else(|p| p.into_inner()) = next_merge;
+                        gate.1.notify_all();
                     }
                 }
-
-                // Under eviction the in-tile carve already ran, and nothing reads
-                // these afterwards, so don't retain the points or the cells.
-                if !eviction_active {
-                    rail_tunnel_points.extend(tile_rail_tunnel_points);
-                    tunnel_cells.extend(tile_tunnel_cells);
-                }
-
-                // Step 20%->70% per merged tile, throttled to whole-percent steps.
-                tiles_merged += 1;
-                let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
-                if pct - last_emitted_pct >= 1.0 {
-                    emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
-                    last_emitted_pct = pct;
-                }
+                Ok(())
+            })();
+            if merged.is_err() {
+                abort_tile_pipeline(&stop, &gate);
             }
-            merge_dur += merge_start.elapsed();
-        }
+            merged
+        })?;
+        let place_dur = place_start.elapsed();
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);
         bench.reset();
@@ -1334,13 +1614,14 @@ pub fn generate_world_with_options(
                 &element,
                 args,
                 &highway_connectivity,
+                &road_markings,
                 &flood_fill_cache,
                 &building_footprints,
                 &building_passages,
                 &road_mask,
                 &rail_mask,
                 &tunnel_footprint,
-                &xzbbox,
+                &clip_bbox,
                 &big_water_field,
                 &bridge_structures,
                 &bridge_surface,
@@ -1353,10 +1634,11 @@ pub fn generate_world_with_options(
                 &part_groups,
                 &group_members,
                 &still_surfaces,
+                &interior_uses,
             );
 
             // Release flood fill cache entries for memory optimization.
-            // (Skipped in the parallel path where the cache is shared immutably.)
+            // (The parallel path releases per tile instead.)
             release_finished_fills(&mut flood_fill_cache, &fills_expiring_at, index);
             // Element is dropped here, freeing its memory immediately.
         }
@@ -1368,6 +1650,7 @@ pub fn generate_world_with_options(
 
     // Keep road_mask alive for the LC_WATER carve below.
     drop(highway_connectivity);
+    drop(road_markings);
     drop(flood_fill_cache);
 
     // True when ground (and the ore/water post-passes) run on the merged editor:
@@ -1389,7 +1672,11 @@ pub fn generate_world_with_options(
     bench.mark("ground_gen");
 
     if ground_on_merged {
-        if args.fillground {
+        if args.caves {
+            println!("{} Carving caves...", "[6b/7]".bold());
+            emit_gui_progress_update(89.0, "Carving caves...");
+            crate::caves::carve(&mut editor, args, &xzbbox);
+        } else if args.fillground {
             crate::ore_generation::generate_ores(&mut editor, &xzbbox);
         }
         // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
@@ -1400,6 +1687,7 @@ pub fn generate_world_with_options(
             &big_water_field,
             &road_mask,
             &tunnel_footprint,
+            &bridge_surface,
         );
     }
 
@@ -1427,6 +1715,16 @@ pub fn generate_world_with_options(
     }
     if !eviction_active && !tunnel_cells.is_empty() {
         highways::carve_highway_tunnel_interior(&mut editor, &tunnel_cells);
+    }
+    // Seal floating water/lava as the final underground pass; eviction tiles did it in-tile.
+    if args.caves && !eviction_active {
+        crate::caves::seal_floating_fluid_region(
+            &mut editor,
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
     }
 
     // Run after ground generation so anchor Y reflects the final terrain.
@@ -1575,8 +1873,15 @@ pub fn generate_world_with_options(
     }
 
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.
+    // A One World records the area only after its PNG is written.
     if let Some(p) = preview.filter(|_| args.map_preview) {
-        let png_path = map_preview::preview_output_path(&output_path, world_format);
+        let png_path = match one_world {
+            Some(run) => run.preview_path(),
+            None => map_preview::preview_output_path(&output_path, world_format),
+        };
+        if let Some(parent) = png_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let result = map_preview::PreviewResult {
             png_path: png_path.clone(),
             min_lat: llbbox.min().lat(),
@@ -1603,13 +1908,30 @@ pub fn generate_world_with_options(
                 Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
             }
         };
-        if crate::progress::is_running_with_gui() {
+        if crate::progress::is_running_with_gui() && one_world.is_none() {
             std::thread::spawn(finalize);
         } else {
             finalize();
         }
     }
     bench.mark("map_preview");
+
+    if let Some(run) = one_world {
+        let png = run.preview_path();
+        let preview_path = png.is_file().then_some(png.as_path());
+        crate::one_world::record_area(
+            run,
+            &llbbox,
+            &xzbbox,
+            ground.elevation_affine(),
+            preview_path,
+        )
+        .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
+        println!("One World: area #{} recorded.", run.area_id);
+        if let Err(e) = crate::world_utils::touch_last_played(&run.world_dir) {
+            eprintln!("Warning: Failed to update LastPlayed: {e}");
+        }
+    }
 
     if let Some(start) = generation_start {
         let gen_ms = start.elapsed().as_millis();
@@ -1618,19 +1940,37 @@ pub fn generate_world_with_options(
 
     emit_gui_progress_update(99.5, "Finalizing world...");
 
-    if world_format == WorldFormat::JavaAnvil {
+    if world_format == WorldFormat::JavaAnvil && !extending {
         if let Err(e) = crate::world_utils::apply_java_world_settings(
             &output_path,
             args.gamemode,
             args.world_time,
+            args.world_type,
         ) {
             eprintln!("Warning: Failed to apply world settings: {e}");
         }
     }
 
+    // An extended One World moves the spawn only to a marker inside this area.
+    if extending {
+        if let Some((sx, sz)) = options.spawn_point.filter(|&(x, z)| {
+            xzbbox.contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
+        }) {
+            let rel = crate::coordinate_system::cartesian::XZPoint::new(
+                sx - xzbbox.min_x(),
+                sz - xzbbox.min_z(),
+            );
+            let sy = ground.level(rel) + 3;
+            match crate::world_utils::set_spawn_in_level_dat(&output_path, sx, sy, sz) {
+                Ok(()) => println!("Spawn point moved to {sx}, {sy}, {sz}."),
+                Err(e) => eprintln!("Warning: Failed to move the spawn point: {e}"),
+            }
+        }
+    }
+
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]
-    if world_format == WorldFormat::JavaAnvil {
+    if world_format == WorldFormat::JavaAnvil && !extending {
         use crate::gui::update_player_spawn_y_after_generation;
 
         // Always update spawn Y since we now always set a spawn point (user-selected or default).
@@ -1712,6 +2052,87 @@ mod tests {
         })
     }
 
+    fn building(id: u64) -> ProcessedElement {
+        way(id, 10, &[("building", "yes")])
+    }
+
+    /// Releases tiles in order and reports, after each, which of `watch` are still cached.
+    fn release_in_order(
+        elements: &[ProcessedElement],
+        assignments: &[Vec<usize>],
+        part_groups: &PartGroups,
+        group_members: &FnvHashMap<u64, Vec<u64>>,
+        watch: &[u64],
+    ) -> Vec<Vec<bool>> {
+        let cache = FloodFillCache::precompute(elements, None);
+        let (tile_ids, readers) =
+            tile_fill_readers(assignments, elements, part_groups, group_members, |id| {
+                cache.contains(id)
+            });
+        (0..assignments.len())
+            .map(|t| {
+                release_tile_fills(&tile_ids[t], &readers, &cache);
+                watch
+                    .iter()
+                    .map(|&id| cache.get_cached(id).is_some())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fill_shared_by_tiles_survives_until_last_tile() {
+        let elements = vec![building(1), building(2)];
+        let states = release_in_order(
+            &elements,
+            &[vec![0, 1], vec![0], vec![]],
+            &PartGroups::new(),
+            &FnvHashMap::default(),
+            &[1, 2],
+        );
+        assert_eq!(
+            states,
+            vec![vec![true, false], vec![false, false], vec![false, false]]
+        );
+    }
+
+    #[test]
+    fn relation_member_fill_counts_the_relation_tile() {
+        // Way 1001 is both its own element and the relation's outer member.
+        let mut member = building(1001);
+        let rel = relation(1, 10, &[("type", "multipolygon"), ("landuse", "grass")]);
+        if let (ProcessedElement::Way(w), ProcessedElement::Relation(r)) = (&mut member, &rel) {
+            w.nodes = r.members[0].way.nodes.clone();
+        }
+        let elements = vec![member, rel];
+        let states = release_in_order(
+            &elements,
+            &[vec![0], vec![1]],
+            &PartGroups::new(),
+            &FnvHashMap::default(),
+            &[1001],
+        );
+        assert_eq!(states, vec![vec![true], vec![false]]);
+    }
+
+    #[test]
+    fn part_sibling_fill_waits_for_every_sibling_tile() {
+        // Parts 10 and 11 of one building in different tiles each read the other's fill.
+        let seed = 77u64;
+        let part_groups: PartGroups = [(10, seed), (11, seed)].into_iter().collect();
+        let mut group_members: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+        group_members.insert(crate::osm_parser::seed_without_hint(seed), vec![10, 11]);
+        let elements = vec![building(10), building(11)];
+        let states = release_in_order(
+            &elements,
+            &[vec![0], vec![1]],
+            &part_groups,
+            &group_members,
+            &[10, 11],
+        );
+        assert_eq!(states, vec![vec![true, true], vec![false, false]]);
+    }
+
     fn ids(elements: &[ProcessedElement]) -> Vec<u64> {
         elements.iter().map(|e| e.id()).collect()
     }
@@ -1788,11 +2209,11 @@ mod tests {
 
     #[test]
     fn no_op_landuse_does_not_displace_real_areas() {
-        // The residential polygon is the largest, but must not take the first area slot.
+        // The residential polygon is the largest, but must not take the last area slot.
         let mut elements = vec![
-            way(1, 10, &[("leisure", "pitch")]),
+            way(1, 100, &[("leisure", "park")]),
             way(2, 500, &[("landuse", "residential")]),
-            way(3, 100, &[("leisure", "park")]),
+            way(3, 10, &[("leisure", "pitch")]),
         ];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![3, 2, 1]);
@@ -1806,13 +2227,30 @@ mod tests {
     }
 
     #[test]
-    fn smaller_area_renders_after_larger_one() {
+    fn smaller_area_renders_before_larger_one() {
         let mut elements = vec![
-            way(1, 10, &[("leisure", "park")]),
-            way(2, 100, &[("landuse", "forest")]),
+            way(1, 100, &[("landuse", "forest")]),
+            way(2, 10, &[("leisure", "park")]),
         ];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![2, 1]);
+    }
+
+    #[test]
+    fn a_square_yields_to_the_lawns_inside_it() {
+        // Parse order puts the older square first; the lawn must still claim its ground.
+        let mut elements = vec![
+            way(1, 60, &[("place", "square")]),
+            way(2, 10, &[("landuse", "grass")]),
+        ];
+        sort_ground_fill_areas(&mut elements);
+        assert_eq!(ids(&elements), vec![2, 1]);
+        assert!(ground_fill_area(&way(3, 10, &[("place", "neighbourhood")])).is_none());
+    }
+
+    #[test]
+    fn tree_rows_are_not_ground_fill() {
+        assert!(ground_fill_area(&way(1, 10, &[("natural", "tree_row")])).is_none());
     }
 
     #[test]
@@ -1826,15 +2264,15 @@ mod tests {
         ];
         sort_ground_fill_areas(&mut elements);
         // Slots 0, 2, 4 held areas; 1 and 3 must not move.
-        assert_eq!(ids(&elements), vec![3, 2, 5, 4, 1]);
+        assert_eq!(ids(&elements), vec![1, 2, 5, 4, 3]);
     }
 
     #[test]
     fn relations_participate_in_the_ordering() {
-        // A big relation must fall behind a small way even though relations parse last.
+        // A small relation must go ahead of a big way even though relations parse last.
         let mut elements = vec![
-            way(1, 10, &[("landuse", "grass")]),
-            relation(2, 100, &[("landuse", "forest")]),
+            way(1, 100, &[("landuse", "forest")]),
+            relation(2, 10, &[("landuse", "meadow")]),
         ];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![2, 1]);

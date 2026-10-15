@@ -59,7 +59,6 @@ use colored::Colorize;
 
 use crate::args::Args;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::progress::{emit_gui_progress_update, MESSAGE_ONLY};
 use facade::BuildingSample;
@@ -96,19 +95,9 @@ fn offset_point(lat: f64, lon: f64, bearing_deg: f64, distance_m: f64) -> Option
 /// including the map rotation.
 fn world_xz(lat: f64, lon: f64, llbbox: LLBBox, args: &Args) -> Option<(i32, i32)> {
     let llpoint = LLPoint::new(lat, lon).ok()?;
-    let (transformer, pre_rotation_bbox) = match args.projection {
-        crate::projection::ProjectionKind::WebMercator => {
-            let origin_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
-            let origin_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
-            let proj =
-                crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
-            CoordTransformer::with_projection(&llbbox, args.scale, &proj)
-        }
-        crate::projection::ProjectionKind::Local => {
-            CoordTransformer::llbbox_to_xzbbox(&llbbox, args.scale)
-        }
-    }
-    .ok()?;
+    let (transformer, pre_rotation_bbox) = crate::projection::ProjectionSpec::from_args(args)
+        .transformer(&llbbox)
+        .ok()?;
 
     let xzpoint = transformer.transform_point(llpoint);
     Some(crate::map_transformation::rotate::rotate_xz_point(
@@ -530,7 +519,9 @@ fn pipeline_config(args: &Args, llbbox: LLBBox) -> Option<pipeline::PipelineConf
         llbbox.max().lat(),
         llbbox.max().lng(),
     );
-    let fetch = fetch::FetchConfig::new(token, bbox);
+    let mut fetch = fetch::FetchConfig::new(token, bbox);
+    // Walls match by node id, so read OSM where the world does.
+    fetch.endpoints.osm_tiles = (!args.no_tile_archive).then(|| args.osm_tiles_url.clone());
     let mut cfg = pipeline::PipelineConfig::new(fetch, types::Params::default());
     // The world build waits on this job, so a box whose cold run takes hours may
     // only be answered out of the cache. See `PRECOMPUTE_MAX_AREA_M2`.
@@ -658,7 +649,7 @@ fn run_facade_pipeline(mut cfg: pipeline::PipelineConfig) -> Option<PathBuf> {
 /// world waiting with a frozen bar and no cancel button. Above the cap it runs
 /// in cache-only mode ([`pipeline::PipelineConfig::cache_only`]): an area
 /// precomputed in pieces still gets its facades out of the per wall cache, and
-/// one that is not is told so in a single Overpass query.
+/// one that is not is told so after a single OSM query.
 pub const PRECOMPUTE_MAX_AREA_M2: f64 = 100_000.0;
 
 /// The part of a message the status line has room for.

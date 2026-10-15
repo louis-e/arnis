@@ -119,6 +119,31 @@ static SHADED_PALETTE: Lazy<Vec<PaletteEntry>> = Lazy::new(|| {
 /// Returns the opaque map color id (base * 4 + shade) perceptually closest to the given RGB.
 /// Exact palette colors short-circuit; everything else is matched in Oklab.
 pub fn nearest_map_color(r: u8, g: u8, b: u8) -> u8 {
+    // Fixed-size direct-mapped memo: map renders repeat the same few colors thousands of
+    // times, and a bounded table cannot grow across worlds on the long-lived thread pool.
+    // A slot packs rgb << 8 | id; opaque ids are >= 4, so 0 marks an empty slot.
+    thread_local! {
+        static MEMO: std::cell::RefCell<Box<[u32; MEMO_SLOTS]>> =
+            std::cell::RefCell::new(Box::new([0; MEMO_SLOTS]));
+    }
+    let rgb = u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b);
+    let slot = (rgb.wrapping_mul(0x9E37_79B1) >> (32 - MEMO_BITS)) as usize;
+    MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        let entry = m[slot];
+        if entry != 0 && entry >> 8 == rgb {
+            return entry as u8;
+        }
+        let id = nearest_map_color_uncached(r, g, b);
+        m[slot] = rgb << 8 | u32::from(id);
+        id
+    })
+}
+
+const MEMO_BITS: u32 = 14;
+const MEMO_SLOTS: usize = 1 << MEMO_BITS;
+
+fn nearest_map_color_uncached(r: u8, g: u8, b: u8) -> u8 {
     let lab = rgb_to_oklab(r, g, b);
     let mut best_id = 4u8;
     let mut best_dist = f32::MAX;
@@ -138,6 +163,25 @@ pub fn nearest_map_color(r: u8, g: u8, b: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memo_matches_uncached_search() {
+        // Two passes over far more colors than slots, so evicted and colliding slots are hit.
+        for _ in 0..2 {
+            for i in 0..(MEMO_SLOTS as u32 * 4) {
+                let rgb = i.wrapping_mul(2_654_435_761) & 0xFF_FFFF;
+                let (r, g, b) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+                assert_eq!(
+                    nearest_map_color(r, g, b),
+                    nearest_map_color_uncached(r, g, b)
+                );
+            }
+        }
+        assert_eq!(
+            nearest_map_color(0, 0, 0),
+            nearest_map_color_uncached(0, 0, 0)
+        );
+    }
 
     #[test]
     fn base_table_has_62_entries() {

@@ -6,7 +6,8 @@
 use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::bresenham::bresenham_line;
-use crate::element_processing::buildings::{compute_building_centroid, compute_outward_normal};
+use crate::element_processing::buildings::{compute_outward_normal, outward_side};
+use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::ProcessedWay;
 
@@ -62,6 +63,8 @@ pub struct BuildingContext<'a> {
     pub building_footprints: &'a CoordinateBitmap,
     /// group_seed -> sorted member way ids; only groups with >= 2 members.
     pub group_members: &'a FnvHashMap<u64, Vec<u64>>,
+    /// Tenants and surrounding areas per building, for interiors.
+    pub interior_uses: &'a InteriorUseIndex,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -169,9 +172,10 @@ pub fn compute_facade_plan(
     scale: f64,
     own_cells: &FnvHashSet<(i32, i32)>,
 ) -> FacadePlan {
-    let Some((cx, cz)) = compute_building_centroid(&element.nodes) else {
+    if element.nodes.len() < 3 {
         return FacadePlan::empty();
-    };
+    }
+    let outward = outward_side(&element.nodes);
     let setback_max = street_setback_max(scale);
 
     let mut segments: Vec<Option<SegmentFacade>> = Vec::new();
@@ -182,7 +186,7 @@ pub fn compute_facade_plan(
     for node in &element.nodes {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
-            let (nx, nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            let (nx, nz) = compute_outward_normal(x1, z1, x2, z2, outward);
             if nx == 0 && nz == 0 {
                 segments.push(None);
                 segment_columns.push(Vec::new());
@@ -429,6 +433,7 @@ mod tests {
                 road_mask: road,
                 building_footprints: footprints,
                 group_members: &self.groups,
+                interior_uses: InteriorUseIndex::empty(),
             }
         }
     }

@@ -5,7 +5,7 @@
 use rand::Rng;
 
 use crate::block_definitions::*;
-use crate::colors::{oklab_distance, RGBTuple};
+use crate::colors::{oklab_components, oklab_distance_lab, RGBTuple};
 
 pub const USE_MODEL: u8 = 1;
 pub const USE_WALL: u8 = 2;
@@ -123,22 +123,35 @@ static PALETTE: &[(RGBTuple, Block, u8)] = &[
     ((87,  91,  91),  CYAN_TERRACOTTA, MWR),
 ];
 
+/// `PALETTE` with each colour already in Oklab. Converting costs three `powf` and three
+/// `cbrt`, and a 3D model matches every one of its voxels against the whole palette.
+fn palette_lab() -> impl Iterator<Item = (&'static (f32, f32, f32), Block, u8)> {
+    static LAB: std::sync::OnceLock<Vec<(f32, f32, f32)>> = std::sync::OnceLock::new();
+    let lab = LAB.get_or_init(|| {
+        PALETTE
+            .iter()
+            .map(|(c, _, _)| oklab_components(c))
+            .collect()
+    });
+    lab.iter().zip(PALETTE).map(|(l, &(_, b, f))| (l, b, f))
+}
+
 /// Palette block whose color is perceptually closest (Oklab) to the input.
 pub fn closest_block(color: RGBTuple) -> Block {
-    PALETTE
-        .iter()
+    let target = oklab_components(&color);
+    palette_lab()
         .min_by(|(a, _, _), (b, _, _)| {
-            oklab_distance(&color, a).total_cmp(&oklab_distance(&color, b))
+            oklab_distance_lab(target, **a).total_cmp(&oklab_distance_lab(target, **b))
         })
-        .map(|(_, block, _)| *block)
+        .map(|(_, block, _)| block)
         .unwrap_or(STONE_BRICKS)
 }
 
 /// Top-K perceptually-closest palette blocks (ascending Oklab distance).
 pub fn closest_blocks(color: RGBTuple, k: usize) -> Vec<Block> {
-    let mut scored: Vec<(f32, Block)> = PALETTE
-        .iter()
-        .map(|(c, b, _)| (oklab_distance(&color, c), *b))
+    let target = oklab_components(&color);
+    let mut scored: Vec<(f32, Block)> = palette_lab()
+        .map(|(c, b, _)| (oklab_distance_lab(target, *c), b))
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0));
     scored.into_iter().take(k.max(1)).map(|(_, b)| b).collect()
@@ -146,9 +159,7 @@ pub fn closest_blocks(color: RGBTuple, k: usize) -> Vec<Block> {
 
 /// Squared Oklab distance with lightness downweighted: a colour tag is
 /// about hue, and plain Oklab lets pale neutrals outrank the hue match.
-fn tag_match_distance(a: &RGBTuple, b: &RGBTuple) -> f32 {
-    let a = crate::colors::oklab_components(a);
-    let b = crate::colors::oklab_components(b);
+fn tag_match_distance(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
     let dl = 0.5 * (a.0 - b.0);
     let da = a.1 - b.1;
     let db = a.2 - b.2;
@@ -158,10 +169,10 @@ fn tag_match_distance(a: &RGBTuple, b: &RGBTuple) -> f32 {
 /// Three nearest usage-flagged blocks within 1.5x of the best match, picked
 /// with the caller's rng. An exact palette hit is returned alone.
 fn pick_for_usage(color: RGBTuple, usage: u8, rng: &mut impl Rng) -> Block {
-    let mut scored: Vec<(f32, Block)> = PALETTE
-        .iter()
+    let target = oklab_components(&color);
+    let mut scored: Vec<(f32, Block)> = palette_lab()
         .filter(|(_, _, flags)| flags & usage != 0)
-        .map(|(c, b, _)| (tag_match_distance(&color, c), *b))
+        .map(|(c, b, _)| (tag_match_distance(target, *c), b))
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0));
     scored.truncate(3);
@@ -197,7 +208,7 @@ const WARM_STONE: &[Block] = &[
 /// `#9B6950`, `#A17665`) at 52 or less, so a plain bound on `a` let those in
 /// while a hue floor admits the same stone family and refuses them.
 fn reads_as_warm_stone(color: RGBTuple) -> bool {
-    let (l, a, b) = crate::colors::oklab_components(&color);
+    let (l, a, b) = oklab_components(&color);
     let chroma = (a * a + b * b).sqrt();
     // tan(60 degrees): on the warm side of the a axis, b has to lead a by that.
     let yellow_enough = a <= 0.0 || b > 1.73 * a;
@@ -217,10 +228,10 @@ pub fn wall_block_for_color(color: RGBTuple, rng: &mut impl Rng) -> Block {
 /// No cutoff: the list is already one family, so its members are alternatives
 /// for each other by construction rather than by distance.
 fn pick_nearest_of(list: &[Block], color: RGBTuple, rng: &mut impl Rng) -> Block {
-    let mut scored: Vec<(f32, Block)> = PALETTE
-        .iter()
+    let target = oklab_components(&color);
+    let mut scored: Vec<(f32, Block)> = palette_lab()
         .filter(|(_, b, _)| list.contains(b))
-        .map(|(c, b, _)| (tag_match_distance(&color, c), *b))
+        .map(|(c, b, _)| (tag_match_distance(target, *c), b))
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0));
     scored.truncate(3);
@@ -256,14 +267,12 @@ const NOT_A_FACADE: &[Block] = &[
 /// breaking near-ties at random (as this once did) only put noise back into a
 /// wall that was measured to be flat.
 pub fn facade_block_for_color(color: RGBTuple) -> Block {
-    let (tl, ta, tb) = crate::colors::oklab_components(&color);
-    PALETTE
-        .iter()
+    let (tl, ta, tb) = oklab_components(&color);
+    palette_lab()
         .filter(|(_, b, _)| !NOT_A_FACADE.contains(b))
-        .map(|(c, b, _)| {
-            let (l, a, bb) = crate::colors::oklab_components(c);
+        .map(|(&(l, a, bb), b, _)| {
             let d = (tl - l) * (tl - l) + 4.0 * ((ta - a) * (ta - a) + (tb - bb) * (tb - bb));
-            (d, *b)
+            (d, b)
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, b)| b)
@@ -294,6 +303,28 @@ mod tests {
     #[test]
     fn palette_non_empty() {
         assert!(PALETTE.len() >= 60);
+    }
+
+    // The cached palette must pick exactly what converting both colours on every
+    // comparison picked.
+    #[test]
+    fn cached_oklab_picks_what_per_call_conversion_picked() {
+        for r in (0..=255u8).step_by(5) {
+            for g in (0..=255u8).step_by(5) {
+                for b in (0..=255u8).step_by(5) {
+                    let c = (r, g, b);
+                    let want = PALETTE
+                        .iter()
+                        .min_by(|(x, _, _), (y, _, _)| {
+                            crate::colors::oklab_distance(&c, x)
+                                .total_cmp(&crate::colors::oklab_distance(&c, y))
+                        })
+                        .map(|(_, block, _)| *block)
+                        .unwrap();
+                    assert_eq!(closest_block(c).id(), want.id(), "{c:?}");
+                }
+            }
+        }
     }
 
     #[test]

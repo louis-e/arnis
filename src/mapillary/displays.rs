@@ -36,8 +36,8 @@
 //!   wall texture.
 //! * `write_packs` runs once the world is saved. An item's model is chosen by
 //!   the `minecraft:item_model` component, which is pure resource pack, so
-//!   there is no data pack: everything goes into `<world>/resources.zip` (and
-//!   the same file under `resourcepacks/`, where 26.1 looks).
+//!   there is no data pack: everything goes into `<world>/resources.zip`, which
+//!   26.1 and later move to `resourcepacks/` when they upgrade the world.
 //!
 //! Per panel the pack carries three files: the item model definition
 //! (`assets/arnis/items/<name>.json`), the model itself
@@ -80,9 +80,17 @@ pub const MAX_PANEL: i32 = 32;
 /// the wall's own surface.
 pub const PUSH_OUT: f64 = 0.06;
 
-/// `view_range` 1.0 is 64 blocks times the client's entity distance scaling.
-/// A facade has to stay up as long as the building itself is drawn.
-const VIEW_RANGE: f32 = 4.0;
+/// `view_range` 1.0 is 64 blocks times the client's entity distance scaling
+/// (50% to 500%). A facade has to stay up as long as the building itself is
+/// drawn, and past a certain distance the game decides that anyway: a display
+/// is only sent to a player within its tracking range, 10 chunks scaled by the
+/// server's `entity-broadcast-range-percentage` and capped at the view
+/// distance, so at most 32 chunks. 16 reaches those 512 blocks even at the
+/// lowest entity distance, so this is never the limit; at 4 the panels of a
+/// player who had turned entity distance down vanished at 128 blocks. Culling
+/// is off (see `width` below), so a longer range adds no work the tracking
+/// range does not already allow.
+const VIEW_RANGE: f32 = 16.0;
 
 /// Namespace of the models and their textures.
 const NAMESPACE: &str = "arnis";
@@ -1618,14 +1626,12 @@ fn write_packs_for(
     let mut panels: Vec<(Panel, u64)> = panels.into_iter().zip(hashes).collect();
     panels.sort_by(|a, b| a.0.name.cmp(&b.0.name));
 
-    let rp_dir = world_path.join("resourcepacks");
-    std::fs::create_dir_all(&rp_dir).map_err(|e| format!("create {}: {e}", rp_dir.display()))?;
+    // Only the pre-26.1 place: 26.1 moves it to resourcepacks/ when it upgrades the
+    // world, and 26.3 refuses to upgrade a world that already has a file there.
     let primary = world_path.join("resources.zip");
-    let secondary = rp_dir.join("resources.zip");
 
     // Streamed to disk beside its final name: assembled in memory the zip was
-    // as large again as the crops on a city. The game has looked in two places
-    // for a world's pack, so the finished file is copied to the other one.
+    // as large again as the crops on a city.
     let staged = primary.with_extension("zip.tmp");
     let written = (|| -> Result<(), String> {
         let file = std::fs::File::create(&staged)
@@ -1640,9 +1646,6 @@ fn write_packs_for(
         return Err(e);
     }
     install_world_pack(&primary, &staged)?;
-    let staged = secondary.with_extension("zip.tmp");
-    std::fs::copy(&primary, &staged).map_err(|e| format!("copy {}: {e}", staged.display()))?;
-    install_world_pack(&secondary, &staged)?;
 
     Ok(PackReport {
         panels: count,
@@ -2046,43 +2049,42 @@ mod tests {
         // Display panels are resource pack only: no variants, no level.dat.
         assert!(!world.join("datapacks").exists());
 
-        for rel in ["resources.zip", "resourcepacks/resources.zip"] {
-            let file = std::fs::File::open(world.join(rel)).unwrap();
-            let mut archive = zip::ZipArchive::new(file).unwrap();
-            let read = |archive: &mut zip::ZipArchive<std::fs::File>, name: &str| {
-                let mut text = String::new();
-                std::io::Read::read_to_string(&mut archive.by_name(name).unwrap(), &mut text)
-                    .unwrap();
-                text
-            };
-            let mcmeta: serde_json::Value =
-                serde_json::from_str(&read(&mut archive, "pack.mcmeta")).unwrap();
-            assert_eq!(mcmeta["pack"]["pack_format"], 46, "{rel}");
-            assert_eq!(mcmeta["pack"]["min_format"], 46, "{rel}");
-            assert_eq!(mcmeta["pack"]["description"], "Arnis facade panels");
+        // 26.3 refuses to upgrade a world that already has a pack under resourcepacks/.
+        assert!(!world.join("resourcepacks").exists());
 
-            let def: serde_json::Value =
-                serde_json::from_str(&read(&mut archive, "assets/arnis/items/f1_0_0_0.json"))
-                    .unwrap();
-            assert_eq!(def["model"]["model"], "arnis:item/f1_0_0_0");
-            let model: serde_json::Value = serde_json::from_str(&read(
-                &mut archive,
-                "assets/arnis/models/item/f1_0_0_0.json",
-            ))
-            .unwrap();
-            assert_eq!(model["textures"]["0"], "arnis:block/f1_0_0_0");
+        let file = std::fs::File::open(world.join("resources.zip")).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let read = |archive: &mut zip::ZipArchive<std::fs::File>, name: &str| {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut archive.by_name(name).unwrap(), &mut text).unwrap();
+            text
+        };
+        let mcmeta: serde_json::Value =
+            serde_json::from_str(&read(&mut archive, "pack.mcmeta")).unwrap();
+        assert_eq!(mcmeta["pack"]["pack_format"], 46);
+        assert_eq!(mcmeta["pack"]["min_format"], 46);
+        assert_eq!(mcmeta["pack"]["description"], "Arnis facade panels");
 
-            let mut png = Vec::new();
-            std::io::Read::read_to_end(
-                &mut archive
-                    .by_name("assets/arnis/textures/block/f1_0_0_0.png")
-                    .unwrap(),
-                &mut png,
-            )
-            .unwrap();
-            let img = image::load_from_memory(&png).unwrap();
-            assert_eq!((img.width(), img.height()), (48, 32), "{rel}");
-        }
+        let def: serde_json::Value =
+            serde_json::from_str(&read(&mut archive, "assets/arnis/items/f1_0_0_0.json")).unwrap();
+        assert_eq!(def["model"]["model"], "arnis:item/f1_0_0_0");
+        let model: serde_json::Value = serde_json::from_str(&read(
+            &mut archive,
+            "assets/arnis/models/item/f1_0_0_0.json",
+        ))
+        .unwrap();
+        assert_eq!(model["textures"]["0"], "arnis:block/f1_0_0_0");
+
+        let mut png = Vec::new();
+        std::io::Read::read_to_end(
+            &mut archive
+                .by_name("assets/arnis/textures/block/f1_0_0_0.png")
+                .unwrap(),
+            &mut png,
+        )
+        .unwrap();
+        let img = image::load_from_memory(&png).unwrap();
+        assert_eq!((img.width(), img.height()), (48, 32));
     }
 
     /// A `cols` m wide, `rows` m high wall texture at the lab's 8 px per
@@ -2663,7 +2665,7 @@ mod tests {
             e.get("billboard"),
             Some(&Value::String("fixed".to_string()))
         );
-        assert_eq!(e.get("view_range"), Some(&Value::Float(4.0)));
+        assert_eq!(e.get("view_range"), Some(&Value::Float(16.0)));
         assert_eq!(e.get("width"), Some(&Value::Float(0.0)));
         assert_eq!(e.get("height"), Some(&Value::Float(0.0)));
         // A `fixed` billboard still turns the model by the entity's own yaw
@@ -2741,7 +2743,6 @@ mod tests {
         write_packs_for(&world, panels, 16, 16).unwrap();
         // Staged beside its final name and renamed into place, nothing left.
         assert!(!world.join("resources.zip.tmp").exists());
-        assert!(!world.join("resourcepacks/resources.zip.tmp").exists());
 
         let file = std::fs::File::open(world.join("resources.zip")).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
@@ -2825,13 +2826,9 @@ mod tests {
         assert_eq!((img.width(), img.height()), (64, 48));
         assert_eq!((img.width() % 16, img.height() % 16), (0, 0));
 
-        // Resource pack only, and the same bytes at both places a world pack
-        // has ever been read from.
+        // Resource pack only, in the place the game moves it from when it upgrades.
         assert!(!world.join("datapacks").exists());
-        assert_eq!(
-            std::fs::read(world.join("resources.zip")).unwrap(),
-            std::fs::read(world.join("resourcepacks/resources.zip")).unwrap()
-        );
+        assert!(!world.join("resourcepacks").exists());
     }
 
     /// A panel whose blocks are not a multiple of 16 pixels gets a texture

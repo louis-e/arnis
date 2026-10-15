@@ -1,4 +1,5 @@
 use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_WATER};
+use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 
@@ -20,6 +21,22 @@ const STEEP_WATER_LAND_BELOW_M: f64 = 2.0;
 /// Share of a component's edge cells that must be perched. Only a blob's downhill side
 /// is, so this is low; the slope gate above is what does the separating.
 const MIN_PERCHED_FRACTION: f64 = 0.10;
+
+/// Water cells up to this far above the surface are noise or mixed ESA pixels; higher are walls.
+const WATER_UP_TOLERANCE_M: f64 = 2.0;
+
+/// Fall per metre toward the middle of a channel past which a cell is its wall. 19 degrees,
+/// steeper than the banks a coarse DEM smears into a wide river.
+const CHANNEL_WALL_SLOPE: f64 = 0.35;
+
+/// Land smaller than this inside water is a rock or an islet, not a bank of the channel.
+const MIN_BANK_AREA_M2: f64 = 25_000.0;
+
+/// About how far a coarse DEM spreads a waterfall below its lip.
+const FALL_REACH_M: f64 = 128.0;
+
+/// Level water this long above a falling cell makes it a falls face; a gorge wall's rim is shorter.
+const LEVEL_RUN_M: f64 = 30.0;
 
 /// Repair terrain anomalies (LiDAR classification errors, tile seams, provider glitches).
 ///
@@ -90,6 +107,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
                         }
 
                         neighbors.clear();
+                        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                         for dy in -RADIUS..=RADIUS {
                             for dx in -RADIUS..=RADIUS {
                                 if dy == 0 && dx == 0 {
@@ -99,10 +117,18 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
                                     [(x as i32 + dx) as usize];
                                 if v.is_finite() {
                                     neighbors.push(v);
+                                    lo = lo.min(v);
+                                    hi = hi.max(v);
                                 }
                             }
                         }
                         if neighbors.len() < 8 {
+                            continue;
+                        }
+                        // The median lies within the neighbours' range, so a centre within
+                        // the threshold of both ends cannot deviate past it. Most terrain is
+                        // that smooth, and this skips both selects there.
+                        if center - lo <= abs_threshold && hi - center <= abs_threshold {
                             continue;
                         }
 
@@ -272,6 +298,8 @@ pub fn apply_land_cover_repair(
 /// Flowing components get a per-cell local median instead of one level, smoothed at
 /// 40 m where that only removes DEM seams and left sharp at real drops.
 ///
+/// Water below or above a waterfall is split off a still body and leveled on its own.
+///
 /// The returned bool grid marks which cells actually became water surface,
 /// so the coastal pull-down and Gaussian source-masking operate on the
 /// real water surface rather than the ESA classification.
@@ -280,10 +308,6 @@ fn level_water_surfaces(
     lc_grid: &[Vec<u8>],
     m_per_cell: f64,
 ) -> Vec<Vec<bool>> {
-    // Cells up to this many metres above the estimated surface are still
-    // treated as water (covers noise / wave chop / 10 m ESA mixed-pixel
-    // bleed). Beyond this they are real walls and kept as terrain.
-    const WATER_UP_TOLERANCE_M: f64 = 2.0;
     // Histogram bin width for mode estimation. 1 m is tight enough to
     // resolve a distinct water-surface peak vs bathymetric tail.
     const MODE_BIN_SIZE_M: f64 = 1.0;
@@ -318,16 +342,96 @@ fn level_water_surfaces(
 
     let h = heights.len();
     let w = heights[0].len();
-    let mut visited = vec![vec![false; w]; h];
+    let mut visited = vec![0u64; (w * h).div_ceil(64)];
     let mut is_water_surface = vec![vec![false; w]; h];
 
-    // Snapshot for reading so local-median / mode / clamp computations never
-    // see already-mutated heights from the current pass.
-    let heights_snapshot: Vec<Vec<f64>> = heights.to_vec();
+    // Leveled in place: a body reads only its own cells and its banks.
+    // Cells of the body being leveled, and scratch marks for splitting it.
+    let mut in_body = vec![0u64; (w * h).div_ceil(64)];
+    let mut marks = vec![0u64; (w * h).div_ceil(64)];
+    // Channel walls, kept as terrain; marked first with every cell that falls from its bank.
+    let mut walls_mask = vec![0u64; (w * h).div_ceil(64)];
+    // Bank distances in chamfer units (three per cell), built once a flowing body needs them.
+    let bank_dist: std::cell::OnceCell<Vec<u8>> = std::cell::OnceCell::new();
+    let wall_step = slope_step(m_per_cell);
+    let fall_reach = ((FALL_REACH_M / m_per_cell).round() as u16).max(1);
+    let level_run = (LEVEL_RUN_M / m_per_cell).max(2.0);
+    // Local surface of each cell of a flowing body, and the count of channel walls that left it.
+    let mut flowing_surfaces = |heights: &[Vec<f64>],
+                                cells: &[(usize, usize)],
+                                members: &mut [u64],
+                                fallback: f64,
+                                reach: bool|
+     -> (Vec<(u32, u32, f32)>, usize) {
+        let bank_dist = bank_dist.get_or_init(|| bank_distances(lc_grid, m_per_cell));
+        // A reach's walls that fall away from the body it left are that body's waterfall.
+        let from_body = reach.then(|| steps_from_other_water(cells, members, lc_grid, fall_reach));
+        let falls: Vec<bool> = {
+            let members: &[u64] = members;
+            cells
+                .par_iter()
+                .map(|&(x, y)| {
+                    let walk = walk_from_bank(bank_dist, members, w, x, y, wall_step);
+                    on_channel_wall(heights, &walk, x, y, m_per_cell)
+                        && !from_body
+                            .as_ref()
+                            .is_some_and(|d| falls_away(d, &walk, w, x, y))
+                })
+                .collect()
+        };
+        for (&(x, y), &f) in cells.iter().zip(&falls) {
+            if f {
+                set_bit(&mut walls_mask, y * w + x);
+            }
+        }
+        // Below level water the ground falls from a lip, not from a bank: a falls face.
+        let mut walls: Vec<bool> = {
+            let falling: &[u64] = &walls_mask;
+            cells
+                .par_iter()
+                .zip(&falls)
+                .map(|(&(x, y), &f)| {
+                    f && !under_level_water(heights, lc_grid, bank_dist, falling, x, y, level_run)
+                })
+                .collect()
+        };
+        for ((&(x, y), &f), &wall) in cells.iter().zip(&falls).zip(&walls) {
+            if f && !wall {
+                clear_bit(&mut walls_mask, y * w + x);
+            }
+        }
+        keep_anchored_walls(&mut walls_mask, lc_grid, cells, &mut walls);
+        let mut wall_count = 0;
+        for (&(x, y), &wall) in cells.iter().zip(&walls) {
+            if wall {
+                clear_bit(members, y * w + x);
+                wall_count += 1;
+            }
+        }
+        let members: &[u64] = members;
+        let surfaces = cells
+            .par_iter()
+            .zip(&walls)
+            .filter_map(|(&(cx, cy), &wall)| {
+                (!wall && heights[cy][cx].is_finite()).then(|| {
+                    let (r, n) = (LOCAL_SURFACE_RADIUS, MIN_LOCAL_SAMPLES);
+                    let surface = if reach {
+                        local_reach_median(heights, members, lc_grid, cx, cy, r, n)
+                    } else {
+                        local_water_median(heights, members, cx, cy, r, n)
+                    }
+                    .unwrap_or(fallback);
+                    (cx as u32, cy as u32, surface as f32)
+                })
+            })
+            .collect::<Vec<(u32, u32, f32)>>();
+        (surfaces, wall_count)
+    };
 
     let mut components_leveled = 0usize;
     let mut still_components = 0usize;
     let mut flowing_components = 0usize;
+    let mut split_reaches = 0usize;
     let mut cells_leveled = 0usize;
     let mut cells_skipped = 0usize;
     let mut max_flowing_iqr = 0.0f64;
@@ -336,7 +440,7 @@ fn level_water_surfaces(
 
     for start_y in 0..h {
         for start_x in 0..w {
-            if visited[start_y][start_x] || lc_grid[start_y][start_x] != LC_WATER {
+            if get_bit(&visited, start_y * w + start_x) || lc_grid[start_y][start_x] != LC_WATER {
                 continue;
             }
 
@@ -344,7 +448,7 @@ fn level_water_surfaces(
             let mut component: Vec<(usize, usize)> = Vec::new();
             let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
             queue.push_back((start_x, start_y));
-            visited[start_y][start_x] = true;
+            set_bit(&mut visited, start_y * w + start_x);
 
             while let Some((x, y)) = queue.pop_front() {
                 component.push((x, y));
@@ -356,18 +460,18 @@ fn level_water_surfaces(
                     }
                     let nxu = nx as usize;
                     let nyu = ny as usize;
-                    if !visited[nyu][nxu] && lc_grid[nyu][nxu] == LC_WATER {
-                        visited[nyu][nxu] = true;
+                    if !get_bit(&visited, nyu * w + nxu) && lc_grid[nyu][nxu] == LC_WATER {
+                        set_bit(&mut visited, nyu * w + nxu);
                         queue.push_back((nxu, nyu));
                     }
                 }
             }
 
             // Collect finite elevations.
-            let values: Vec<f64> = component
+            let mut values: Vec<f64> = component
                 .iter()
                 .filter_map(|&(x, y)| {
-                    let v = heights_snapshot[y][x];
+                    let v = heights[y][x];
                     if v.is_finite() {
                         Some(v)
                     } else {
@@ -387,13 +491,17 @@ fn level_water_surfaces(
             // roughly half the cells are at each end of the gradient.
             let iqr = interquartile_range(&values);
 
+            // In place: the mode below does not depend on the order.
             let fallback_median = {
-                let mut v = values.clone();
-                let mid = v.len() / 2;
-                v.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
-                v[mid]
+                let mid = values.len() / 2;
+                values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                values[mid]
             };
 
+            let mut body = component;
+            for &(x, y) in &body {
+                set_bit(&mut in_body, y * w + x);
+            }
             if iqr > FLOWING_IQR_THRESHOLD_M {
                 // ── Flowing water (river-like) ─────────────────────────
                 // Use a per-cell local median surface so the gradient is
@@ -407,24 +515,11 @@ fn level_water_surfaces(
                 if iqr > max_flowing_iqr {
                     max_flowing_iqr = iqr;
                 }
-                flowing_cells.push(Vec::new());
-                for &(cx, cy) in &component {
-                    let orig = heights_snapshot[cy][cx];
-                    if !orig.is_finite() {
-                        continue;
-                    }
-                    let local_surface = local_water_median(
-                        &heights_snapshot,
-                        lc_grid,
-                        cx,
-                        cy,
-                        LOCAL_SURFACE_RADIUS,
-                        MIN_LOCAL_SAMPLES,
-                    )
-                    .unwrap_or(fallback_median);
-                    let last = flowing_cells.last_mut().expect("component pushed above");
-                    last.push((cx as u32, cy as u32, local_surface as f32));
-                }
+                drop(values);
+                let (surfaces, walls) =
+                    flowing_surfaces(heights, &body, &mut in_body, fallback_median, false);
+                flowing_cells.push(surfaces);
+                cells_skipped += walls;
             } else {
                 // ── Still water (lake / fjord / ocean) ─────────────────
                 // Estimate a single surface for the whole component via
@@ -437,11 +532,35 @@ fn level_water_surfaces(
                 } else {
                     fallback_median
                 };
+                drop(values);
+                let mut other = split_off_other_levels(
+                    &body,
+                    raw_surface,
+                    heights,
+                    lc_grid,
+                    &mut in_body,
+                    &mut marks,
+                    m_per_cell,
+                );
+                if !other.reaches.is_empty() || !other.shadow.is_empty() {
+                    body.retain(|&(x, y)| get_bit(&in_body, y * w + x));
+                }
+                // Clamped by its own shore only, not by the banks of what split off.
                 let surface =
-                    clamp_by_adjacent_land(raw_surface, &component, &heights_snapshot, lc_grid);
+                    clamp_by_adjacent_land(raw_surface, &body, heights, lc_grid, &mut marks);
+                if !other.reaches.is_empty() {
+                    grow_reaches(
+                        &mut other.reaches,
+                        surface,
+                        raw_surface,
+                        heights,
+                        &mut in_body,
+                    );
+                    body.retain(|&(x, y)| get_bit(&in_body, y * w + x));
+                }
 
-                for &(cx, cy) in &component {
-                    let orig = heights_snapshot[cy][cx];
+                for &(cx, cy) in &body {
+                    let orig = heights[cy][cx];
                     if !orig.is_finite() {
                         continue;
                     }
@@ -455,6 +574,32 @@ fn level_water_surfaces(
                         cells_skipped += 1;
                     }
                 }
+                // Shadow keeps its terrain, like the walls.
+                cells_skipped += other.shadow.len();
+                // A reach of a waterfall is part of a river, so it keeps its gradient.
+                for Reach { cells: reach, .. } in other.reaches {
+                    split_reaches += 1;
+                    for &(x, y) in &reach {
+                        set_bit(&mut marks, y * w + x);
+                    }
+                    // Every cell of a reach is finite: it was picked by its height.
+                    let reach_median = {
+                        let mut v: Vec<f64> = reach.iter().map(|&(x, y)| heights[y][x]).collect();
+                        let mid = v.len() / 2;
+                        v.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                        v[mid]
+                    };
+                    let (surfaces, walls) =
+                        flowing_surfaces(heights, &reach, &mut marks, reach_median, true);
+                    flowing_cells.push(surfaces);
+                    cells_skipped += walls;
+                    for &(x, y) in &reach {
+                        clear_bit(&mut marks, y * w + x);
+                    }
+                }
+            }
+            for &(x, y) in &body {
+                clear_bit(&mut in_body, y * w + x);
             }
 
             components_leveled += 1;
@@ -463,8 +608,10 @@ fn level_water_surfaces(
 
     // Smooth the local-median surface, then flatten as still water does.
     // The scan is done, so the scratch grids go before the blur allocates.
-    drop(heights_snapshot);
     drop(visited);
+    drop(in_body);
+    drop(marks);
+    drop(bank_dist);
     let sigma_cells = if m_per_cell > 0.0 && m_per_cell.is_finite() {
         (FLOW_SMOOTH_SIGMA_M / m_per_cell).min(64.0)
     } else {
@@ -495,8 +642,10 @@ fn level_water_surfaces(
                 surface = surface.min(orig.max(land));
             }
             let at_or_below = orig <= surface + WATER_UP_TOLERANCE_M;
-            let flatten = at_or_below || !has_non_water_neighbor(lc_grid, cx, cy);
-            if flatten {
+            // A wall is land here, so water it encloses above the surface is no pit to dig.
+            let shore =
+                has_non_water_neighbor(lc_grid, cx, cy) || next_to(&walls_mask, w, h, cx, cy);
+            if at_or_below || !shore {
                 heights[cy][cx] = surface;
                 is_water_surface[cy][cx] = true;
                 cells_leveled += 1;
@@ -505,6 +654,7 @@ fn level_water_surfaces(
             }
         }
     }
+    drop(walls_mask);
 
     if components_leveled > 0 {
         if flowing_components > 0 {
@@ -521,6 +671,12 @@ fn level_water_surfaces(
             eprintln!(
                 "Land cover repair: leveled {} water component(s), {} surface cells flattened, {} off-surface cells kept as terrain",
                 components_leveled, cells_leveled, cells_skipped
+            );
+        }
+        if split_reaches > 0 {
+            eprintln!(
+                "Land cover repair: leveled {} reach(es) below or above a waterfall at their own level",
+                split_reaches
             );
         }
     }
@@ -636,15 +792,15 @@ fn interquartile_range(values: &[f64]) -> f64 {
     (q3 - q1).max(0.0)
 }
 
-/// Return the median elevation of water cells within `radius` of `(cx, cy)`,
-/// or `None` if fewer than `min_samples` finite water heights are in range.
+/// Return the median elevation of the body's cells (set bits of `body`) within
+/// `radius` of `(cx, cy)`, or `None` if fewer than `min_samples` are finite.
 ///
 /// Used by the flowing-water path in `level_water_surfaces` to build a
 /// per-cell water surface that follows the river's gradient at scales
 /// longer than the radius, while still averaging out local DSM noise.
 fn local_water_median(
     heights: &[Vec<f64>],
-    lc_grid: &[Vec<u8>],
+    body: &[u64],
     cx: usize,
     cy: usize,
     radius: i32,
@@ -667,7 +823,7 @@ fn local_water_median(
             if nx < 0 || nx >= w {
                 continue;
             }
-            if lc_grid[ny as usize][nx as usize] != LC_WATER {
+            if !get_bit(body, ny as usize * w as usize + nx as usize) {
                 continue;
             }
             let v = heights[ny as usize][nx as usize];
@@ -682,6 +838,414 @@ fn local_water_median(
     let mid = samples.len() / 2;
     samples.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
     Some(samples[mid])
+}
+
+/// Steps from each cell of a reach (set bits of `members`) to water outside it, up to `cap`.
+fn steps_from_other_water(
+    reach: &[(usize, usize)],
+    members: &[u64],
+    lc_grid: &[Vec<u8>],
+    cap: u16,
+) -> FnvHashMap<u32, u16> {
+    let h = lc_grid.len();
+    let w = lc_grid[0].len();
+    let neighbours = |x: usize, y: usize| {
+        [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+            .into_iter()
+            .filter_map(move |(dx, dy)| {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+                (nx >= 0 && ny >= 0 && nx < w as i32 && ny < h as i32)
+                    .then_some((nx as usize, ny as usize))
+            })
+    };
+    let mut steps: FnvHashMap<u32, u16> = FnvHashMap::default();
+    let mut frontier: Vec<(usize, usize)> = reach
+        .iter()
+        .copied()
+        .filter(|&(x, y)| {
+            neighbours(x, y)
+                .any(|(nx, ny)| lc_grid[ny][nx] == LC_WATER && !get_bit(members, ny * w + nx))
+        })
+        .collect();
+    for &(x, y) in &frontier {
+        steps.insert((y * w + x) as u32, 0);
+    }
+    let mut d = 0u16;
+    while !frontier.is_empty() && d < cap {
+        d += 1;
+        let mut next = Vec::new();
+        for (x, y) in frontier {
+            for (nx, ny) in neighbours(x, y) {
+                if !get_bit(members, ny * w + nx) {
+                    continue;
+                }
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    steps.entry((ny * w + nx) as u32)
+                {
+                    e.insert(d);
+                    next.push((nx, ny));
+                }
+            }
+        }
+        frontier = next;
+    }
+    steps
+}
+
+/// Whether `walk` leads away from the water the reach left: a fall from it, not a wall.
+fn falls_away(steps: &FnvHashMap<u32, u16>, walk: &Walk, w: usize, x: usize, y: usize) -> bool {
+    let Some(&start) = steps.get(&((y * w + x) as u32)) else {
+        return false;
+    };
+    let (ex, ey) = walk.end;
+    let end = steps
+        .get(&((ey * w + ex) as u32))
+        .copied()
+        .unwrap_or(u16::MAX);
+    walk.run > 0.0 && f64::from(end.saturating_sub(start)) >= 0.5 * walk.run
+}
+
+/// A walk from a cell away from its nearest bank, with its halfway point. Lengths in cells.
+struct Walk {
+    end: (usize, usize),
+    run: f64,
+    mid: (usize, usize),
+    mid_run: f64,
+}
+
+/// Walk from `(x, y)` away from its nearest bank for at most `step` cells, staying in `body`.
+fn walk_from_bank(bank_dist: &[u8], body: &[u64], w: usize, x: usize, y: usize, step: i64) -> Walk {
+    let h = bank_dist.len() / w;
+    // Where each step ended and the length walked by then; `slope_step` allows at most 16.
+    let mut path = [((x, y), 0.0f64); 16];
+    let mut taken = 0;
+    let (mut cx, mut cy) = (x, y);
+    let mut run = 0.0;
+    while taken < (step as usize).min(path.len()) {
+        let cur = f64::from(bank_dist[cy * w + cx]);
+        // Gain per unit length, so diagonal steps do not drift along the channel.
+        let mut best: Option<(f64, usize, usize, f64)> = None;
+        for (dx, dy) in [
+            (1i32, 0i32),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ] {
+            let nx = cx as i32 + dx;
+            let ny = cy as i32 + dy;
+            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                continue;
+            }
+            let (nxu, nyu) = (nx as usize, ny as usize);
+            let idx = nyu * w + nxu;
+            if !get_bit(body, idx) {
+                continue;
+            }
+            let len = if dx != 0 && dy != 0 {
+                std::f64::consts::SQRT_2
+            } else {
+                1.0
+            };
+            let gain = (f64::from(bank_dist[idx]) - cur) / len;
+            if gain > 0.0 && best.is_none_or(|b| gain > b.0) {
+                best = Some((gain, nxu, nyu, len));
+            }
+        }
+        let Some((_, nx, ny, len)) = best else {
+            break;
+        };
+        (cx, cy) = (nx, ny);
+        run += len;
+        path[taken] = ((cx, cy), run);
+        taken += 1;
+    }
+    // Halfway along the steps taken, so a walk that ends early still has two halves.
+    let (mid, mid_run) = if taken >= 2 {
+        path[taken / 2 - 1]
+    } else {
+        ((x, y), 0.0)
+    };
+    Walk {
+        end: (cx, cy),
+        run,
+        mid,
+        mid_run,
+    }
+}
+
+/// Drop the walls of `cells` no chain of walls ties to land, as a wall hangs from its bank.
+fn keep_anchored_walls(
+    mask: &mut [u64],
+    lc_grid: &[Vec<u8>],
+    cells: &[(usize, usize)],
+    walls: &mut [bool],
+) {
+    let h = lc_grid.len();
+    let w = lc_grid[0].len();
+    let neighbours = |x: usize, y: usize| {
+        (-1i32..=1)
+            .flat_map(|dy| (-1i32..=1).map(move |dx| (dx, dy)))
+            .filter(|&d| d != (0, 0))
+            .map(move |(dx, dy)| (x as i32 + dx, y as i32 + dy))
+    };
+    let mut reached: FnvHashSet<u32> = FnvHashSet::default();
+    let mut queue: Vec<(usize, usize)> = Vec::new();
+    for (&(x, y), _) in cells.iter().zip(walls.iter()).filter(|(_, &wall)| wall) {
+        // The grid edge counts as land, as the bank may lie beyond it.
+        let on_land = neighbours(x, y).any(|(nx, ny)| {
+            nx < 0
+                || ny < 0
+                || nx >= w as i32
+                || ny >= h as i32
+                || lc_grid[ny as usize][nx as usize] != LC_WATER
+        });
+        if on_land && reached.insert((y * w + x) as u32) {
+            queue.push((x, y));
+        }
+    }
+    while let Some((x, y)) = queue.pop() {
+        for (nx, ny) in neighbours(x, y) {
+            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                continue;
+            }
+            let idx = ny as usize * w + nx as usize;
+            if get_bit(mask, idx) && reached.insert(idx as u32) {
+                queue.push((nx as usize, ny as usize));
+            }
+        }
+    }
+    for (&(x, y), wall) in cells.iter().zip(walls.iter_mut()) {
+        if *wall && !reached.contains(&((y * w + x) as u32)) {
+            *wall = false;
+            clear_bit(mask, y * w + x);
+        }
+    }
+}
+
+/// Whether level water `run` cells long, at or above `(x, y)`, lies on its way to the nearest
+/// bank, where a wall rises to the bank. `falling` marks the cells that fall away from their bank.
+fn under_level_water(
+    heights: &[Vec<f64>],
+    lc_grid: &[Vec<u8>],
+    bank_dist: &[u8],
+    falling: &[u64],
+    x: usize,
+    y: usize,
+    run: f64,
+) -> bool {
+    let h = heights.len();
+    let w = heights[0].len();
+    let here = heights[y][x];
+    let (mut cx, mut cy) = (x, y);
+    let mut level = 0.0;
+    // Bank distance falls every step, so the walk ends.
+    loop {
+        let cur = bank_dist[cy * w + cx];
+        let mut best: Option<(f64, usize, usize, f64)> = None;
+        for (dx, dy) in [
+            (1i32, 0i32),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ] {
+            let nx = cx as i32 + dx;
+            let ny = cy as i32 + dy;
+            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                continue;
+            }
+            let (nx, ny) = (nx as usize, ny as usize);
+            let d = bank_dist[ny * w + nx];
+            if d >= cur {
+                continue;
+            }
+            let len = if dx != 0 && dy != 0 {
+                std::f64::consts::SQRT_2
+            } else {
+                1.0
+            };
+            let drop = f64::from(cur - d) / len;
+            if best.is_none_or(|b| drop > b.0) {
+                best = Some((drop, nx, ny, len));
+            }
+        }
+        let Some((_, nx, ny, len)) = best else {
+            return false;
+        };
+        let idx = ny * w + nx;
+        if bank_dist[idx] == 0 {
+            return false;
+        }
+        let is_level =
+            lc_grid[ny][nx] == LC_WATER && !get_bit(falling, idx) && heights[ny][nx] >= here;
+        level = if is_level { level + len } else { 0.0 };
+        if level >= run {
+            return true;
+        }
+        (cx, cy) = (nx, ny);
+    }
+}
+
+/// Whether the cell is a gorge wall a coarse DEM smeared into the water: walking away from
+/// the bank it keeps falling over both halves of the walk, where a DEM seam falls on one.
+fn on_channel_wall(heights: &[Vec<f64>], walk: &Walk, x: usize, y: usize, m_per_cell: f64) -> bool {
+    let here = heights[y][x];
+    let (there, mid) = (
+        heights[walk.end.1][walk.end.0],
+        heights[walk.mid.1][walk.mid.0],
+    );
+    if walk.run == 0.0 || !here.is_finite() || !there.is_finite() || !mid.is_finite() {
+        return false;
+    }
+    let falls = |from: f64, to: f64, length: f64, slope: f64| {
+        length <= 0.0 || (from - to) / (length * m_per_cell) > slope
+    };
+    falls(here, there, walk.run, CHANNEL_WALL_SLOPE)
+        && falls(here, mid, walk.mid_run, CHANNEL_WALL_SLOPE / 2.0)
+        && falls(
+            mid,
+            there,
+            walk.run - walk.mid_run,
+            CHANNEL_WALL_SLOPE / 2.0,
+        )
+}
+
+/// Distance from every cell to the nearest bank in chamfer units, three to a cell.
+fn bank_distances(lc_grid: &[Vec<u8>], m_per_cell: f64) -> Vec<u8> {
+    let h = lc_grid.len();
+    let w = lc_grid[0].len();
+    let mut d: Vec<u8> = lc_grid
+        .iter()
+        .flat_map(|row| row.iter().map(|&c| if c == LC_WATER { u8::MAX } else { 0 }))
+        .collect();
+    let min_bank_cells = if m_per_cell > 0.0 && m_per_cell.is_finite() {
+        (MIN_BANK_AREA_M2 / (m_per_cell * m_per_cell)) as usize
+    } else {
+        0
+    };
+    drop_islets(&mut d, w, h, min_bank_cells);
+    crate::water_depth::chamfer_3_4_dt(&mut d, w, h);
+    d
+}
+
+/// Turn land patches under `min_cells`, clear of the grid edge, into water in a bank-distance grid.
+fn drop_islets(d: &mut [u8], w: usize, h: usize, min_cells: usize) {
+    if min_cells == 0 {
+        return;
+    }
+    let mut seen = vec![0u64; (w * h).div_ceil(64)];
+    // Cells of searches that ran into a patch too big for an islet.
+    let mut big = vec![0u64; (w * h).div_ceil(64)];
+    let mut patch: Vec<u32> = Vec::new();
+    for start in 0..w * h {
+        if d[start] != 0 || get_bit(&seen, start) {
+            continue;
+        }
+        // An islet has a shore, so only searches from one can find it.
+        let (x, y) = (start % w, start / w);
+        let shore = (x > 0 && d[start - 1] != 0)
+            || (x + 1 < w && d[start + 1] != 0)
+            || (y > 0 && d[start - w] != 0)
+            || (y + 1 < h && d[start + w] != 0);
+        if !shore {
+            continue;
+        }
+        patch.clear();
+        patch.push(start as u32);
+        set_bit(&mut seen, start);
+        let mut too_big = false;
+        let mut head = 0;
+        'search: while head < patch.len() {
+            let i = patch[head] as usize;
+            head += 1;
+            let (x, y) = (i % w, i / w);
+            if x == 0 || y == 0 || x + 1 == w || y + 1 == h || patch.len() >= min_cells {
+                too_big = true;
+                break;
+            }
+            for n in [i - 1, i + 1, i - w, i + w] {
+                if d[n] != 0 {
+                    continue;
+                }
+                if get_bit(&big, n) {
+                    too_big = true;
+                    break 'search;
+                }
+                if !get_bit(&seen, n) {
+                    set_bit(&mut seen, n);
+                    patch.push(n as u32);
+                }
+            }
+        }
+        if too_big {
+            for &i in &patch {
+                set_bit(&mut big, i as usize);
+            }
+        } else {
+            for &i in &patch {
+                d[i as usize] = u8::MAX;
+            }
+        }
+    }
+}
+
+/// `local_water_median` for a reach, its window shrunk clear of other water so no step forms.
+fn local_reach_median(
+    heights: &[Vec<f64>],
+    reach: &[u64],
+    lc_grid: &[Vec<u8>],
+    cx: usize,
+    cy: usize,
+    radius: i32,
+    min_samples: usize,
+) -> Option<f64> {
+    let h = heights.len() as i32;
+    let w = heights[0].len() as i32;
+    let kernel_side = (radius * 2 + 1) as usize;
+    let mut samples: Vec<(f64, i32)> = Vec::with_capacity(kernel_side * kernel_side);
+    let mut clear = radius;
+    for dy in -radius..=radius {
+        let ny = cy as i32 + dy;
+        if ny < 0 || ny >= h {
+            continue;
+        }
+        for dx in -radius..=radius {
+            let nx = cx as i32 + dx;
+            if nx < 0 || nx >= w {
+                continue;
+            }
+            let d = dx.abs().max(dy.abs());
+            if get_bit(reach, ny as usize * w as usize + nx as usize) {
+                let v = heights[ny as usize][nx as usize];
+                if v.is_finite() {
+                    samples.push((v, d));
+                }
+            } else if lc_grid[ny as usize][nx as usize] == LC_WATER {
+                clear = clear.min(d - 1);
+            }
+        }
+    }
+    let own = heights[cy][cx];
+    if clear < radius {
+        samples.retain(|&(_, d)| d <= clear);
+        let side = (clear * 2 + 1) as usize;
+        if clear < 1 || samples.len() < min_samples.min(side * side / 2) {
+            return own.is_finite().then_some(own);
+        }
+    } else if samples.len() < min_samples {
+        return None;
+    }
+    let mid = samples.len() / 2;
+    samples.select_nth_unstable_by(mid, |a, b| a.0.partial_cmp(&b.0).unwrap());
+    Some(samples[mid].0)
 }
 
 /// Lowest finite height among the cell's non-water 4-neighbours, if it has any.
@@ -783,8 +1347,8 @@ fn histogram_mode(values: &[f64], bin_size: f64) -> f64 {
 ///
 /// We fix it by measuring the 25th percentile of the elevations of every
 /// *non-water* cell that touches the component (4-connected boundary, one
-/// sample per adjacent cell — dedup'd via HashSet) and taking the lower of
-/// that and the proposed surface.
+/// sample per adjacent cell, deduplicated in the cleared scratch bitset `seen`)
+/// and taking the lower of that and the proposed surface.
 ///
 /// - 25th percentile instead of **min**: robust to one DSM-artifact pit in
 ///   the shoreline dragging the whole body down.
@@ -799,6 +1363,7 @@ fn clamp_by_adjacent_land(
     component: &[(usize, usize)],
     heights: &[Vec<f64>],
     lc_grid: &[Vec<u8>],
+    seen: &mut [u64],
 ) -> f64 {
     let h = heights.len();
     if h == 0 {
@@ -806,7 +1371,7 @@ fn clamp_by_adjacent_land(
     }
     let w = heights[0].len();
 
-    let mut seen = std::collections::HashSet::with_capacity(component.len());
+    let mut adjacent: Vec<u32> = Vec::new();
     let mut adjacent_land: Vec<f64> = Vec::new();
     for &(x, y) in component {
         for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
@@ -820,14 +1385,20 @@ fn clamp_by_adjacent_land(
             if lc_grid[nyu][nxu] == LC_WATER {
                 continue;
             }
-            if !seen.insert((nxu, nyu)) {
+            let idx = nyu * w + nxu;
+            if get_bit(seen, idx) {
                 continue;
             }
+            set_bit(seen, idx);
+            adjacent.push(idx as u32);
             let v = heights[nyu][nxu];
             if v.is_finite() {
                 adjacent_land.push(v);
             }
         }
+    }
+    for &idx in &adjacent {
+        clear_bit(seen, idx as usize);
     }
 
     if adjacent_land.is_empty() {
@@ -839,6 +1410,197 @@ fn clamp_by_adjacent_land(
     let land_p25 = adjacent_land[p25_idx];
 
     proposed.min(land_p25)
+}
+
+/// Water of a still body that lies at another level than the body.
+struct OtherLevels {
+    /// Reaches below or above a waterfall, leveled as flowing water.
+    reaches: Vec<Reach>,
+    /// Steep patches above the level: shadow, kept as terrain.
+    shadow: Vec<(usize, usize)>,
+}
+
+struct Reach {
+    below: bool,
+    cells: Vec<(usize, usize)>,
+}
+
+/// Take water at other levels out of a still body (`in_body`): below it where the body would
+/// spill over the banks, above it where its own banks hold it.
+fn split_off_other_levels(
+    body: &[(usize, usize)],
+    level: f64,
+    heights: &[Vec<f64>],
+    lc_grid: &[Vec<u8>],
+    in_body: &mut [u64],
+    marks: &mut [u64],
+    m_per_cell: f64,
+) -> OtherLevels {
+    // Past this a cell is not surface noise or a hydro-flattening step of the body.
+    const LEVEL_SPLIT_M: f64 = 5.0;
+    // Banks this far below the level would let the body spill over them.
+    const SPILL_BANK_M: f64 = 2.5;
+    // Fewest spilling bank edges that can split water off.
+    const MIN_SPILL_EDGES: usize = 4;
+
+    let h = heights.len();
+    let w = heights[0].len();
+    let side = |v: f64| -> i8 {
+        if v < level - LEVEL_SPLIT_M {
+            -1
+        } else if v > level + LEVEL_SPLIT_M {
+            1
+        } else {
+            0
+        }
+    };
+    let max_shadow_cells = if m_per_cell > 0.0 && m_per_cell.is_finite() {
+        (MAX_STEEP_WATER_AREA_M2 / (m_per_cell * m_per_cell)) as usize
+    } else {
+        0
+    };
+    let step = slope_step(m_per_cell);
+
+    let mut out = OtherLevels {
+        reaches: Vec::new(),
+        shadow: Vec::new(),
+    };
+    let mut part: Vec<(usize, usize)> = Vec::new();
+    let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+    for &(sx, sy) in body {
+        let s = side(heights[sy][sx]);
+        if s == 0 || get_bit(marks, sy * w + sx) {
+            continue;
+        }
+        set_bit(marks, sy * w + sx);
+        part.clear();
+        queue.push_back((sx, sy));
+        // Edges from the patch to land, to land under the spill line, and to other water.
+        let (mut land, mut spill, mut water) = (0usize, 0usize, 0usize);
+        while let Some((x, y)) = queue.pop_front() {
+            part.push((x, y));
+            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    continue;
+                }
+                let (nxu, nyu) = (nx as usize, ny as usize);
+                let v = heights[nyu][nxu];
+                if lc_grid[nyu][nxu] != LC_WATER {
+                    land += 1;
+                    if v < level - SPILL_BANK_M {
+                        spill += 1;
+                    }
+                    continue;
+                }
+                let idx = nyu * w + nxu;
+                if get_bit(in_body, idx) && side(v) == s {
+                    if !get_bit(marks, idx) {
+                        set_bit(marks, idx);
+                        queue.push_back((nxu, nyu));
+                    }
+                    continue;
+                }
+                water += 1;
+            }
+        }
+        if s < 0 {
+            if spill >= MIN_SPILL_EDGES && 2 * spill >= land && 2 * land >= water {
+                out.reaches.push(Reach {
+                    below: true,
+                    cells: std::mem::take(&mut part),
+                });
+            }
+            continue;
+        }
+        if land == 0 || land < 2 * water {
+            continue;
+        }
+        // Shadow on a slope, which `drop_water_on_steep_terrain` misses inside a body.
+        let steep = part.len() <= max_shadow_cells && {
+            let mut slopes: Vec<f64> = part
+                .iter()
+                .filter_map(|&(x, y)| {
+                    water_surface_slope(heights, x, y, step, m_per_cell, |nx, ny| {
+                        get_bit(in_body, ny * w + nx)
+                    })
+                })
+                .collect();
+            !slopes.is_empty() && {
+                let mid = slopes.len() / 2;
+                slopes.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                slopes[mid] > MIN_STEEP_WATER_SLOPE
+            }
+        };
+        if steep {
+            out.shadow.extend_from_slice(&part);
+        } else {
+            out.reaches.push(Reach {
+                below: false,
+                cells: std::mem::take(&mut part),
+            });
+        }
+    }
+    for &(x, y) in body {
+        clear_bit(marks, y * w + x);
+    }
+
+    for &(x, y) in out.reaches.iter().flat_map(|r| &r.cells).chain(&out.shadow) {
+        clear_bit(in_body, y * w + x);
+    }
+    out
+}
+
+/// Hand each reach the body cells beside it past the flatten tolerance of `surface`, so no
+/// taller step is left. Cells at the body's own `level` stay, as the clamp can sit far below.
+fn grow_reaches(
+    reaches: &mut [Reach],
+    surface: f64,
+    level: f64,
+    heights: &[Vec<f64>],
+    in_body: &mut [u64],
+) {
+    let h = heights.len();
+    let w = heights[0].len();
+    let (below_from, above_from) = (
+        surface - WATER_UP_TOLERANCE_M,
+        surface.max(level - 1.0) + WATER_UP_TOLERANCE_M,
+    );
+    for reach in reaches {
+        let mut i = 0;
+        while i < reach.cells.len() {
+            let (x, y) = reach.cells[i];
+            i += 1;
+            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    continue;
+                }
+                let (nxu, nyu) = (nx as usize, ny as usize);
+                let idx = nyu * w + nxu;
+                let v = heights[nyu][nxu];
+                let past = if reach.below {
+                    v < below_from
+                } else {
+                    v > above_from
+                };
+                if past && get_bit(in_body, idx) {
+                    clear_bit(in_body, idx);
+                    reach.cells.push((nxu, nyu));
+                }
+            }
+        }
+    }
+}
+
+/// Whether a 4-neighbour of `(x, y)` is set in `mask` over a `w` x `h` grid.
+fn next_to(mask: &[u64], w: usize, h: usize, x: usize, y: usize) -> bool {
+    (x > 0 && get_bit(mask, y * w + x - 1))
+        || (x + 1 < w && get_bit(mask, y * w + x + 1))
+        || (y > 0 && get_bit(mask, (y - 1) * w + x))
+        || (y + 1 < h && get_bit(mask, (y + 1) * w + x))
 }
 
 #[inline(always)]
@@ -882,6 +1644,59 @@ fn nearest_non_water_class(lc_grid: &[Vec<u8>], x: usize, y: usize, radius: i32)
     None
 }
 
+/// About one ESA pixel, so DEM noise finer than the land cover cannot pass for slope.
+fn slope_step(m_per_cell: f64) -> i64 {
+    ((10.0 / m_per_cell).round() as usize).clamp(1, 16) as i64
+}
+
+/// Slope of the water surface at `(x, y)` from the farthest water within `step` each way, so
+/// canyon walls are not read and patches smaller than the step still get measured.
+fn water_surface_slope(
+    heights: &[Vec<f64>],
+    x: usize,
+    y: usize,
+    step: i64,
+    m_per_cell: f64,
+    is_water: impl Fn(usize, usize) -> bool,
+) -> Option<f64> {
+    let h = heights.len();
+    let w = heights[0].len();
+    let here = heights[y][x];
+    if !here.is_finite() {
+        return None;
+    }
+    let (x, y) = (x as i64, y as i64);
+    let at = |ux: i64, uy: i64| -> Option<(f64, f64)> {
+        for d in (1..=step).rev() {
+            let (nx, ny) = (x + ux * d, y + uy * d);
+            if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                continue;
+            }
+            if !is_water(nx as usize, ny as usize) {
+                continue;
+            }
+            let v = heights[ny as usize][nx as usize];
+            if v.is_finite() {
+                return Some((v, d as f64 * m_per_cell));
+            }
+        }
+        None
+    };
+    let axis = |lo: Option<(f64, f64)>, hi: Option<(f64, f64)>| match (lo, hi) {
+        (Some((a, da)), Some((b, db))) => Some((b - a) / (da + db)),
+        (Some((a, da)), None) => Some((here - a) / da),
+        (None, Some((b, db))) => Some((b - here) / db),
+        (None, None) => None,
+    };
+    let gx = axis(at(-1, 0), at(1, 0));
+    let gz = axis(at(0, -1), at(0, 1));
+    if gx.is_none() && gz.is_none() {
+        return None;
+    }
+    let (gx, gz) = (gx.unwrap_or(0.0), gz.unwrap_or(0.0));
+    Some((gx * gx + gz * gz).sqrt())
+}
+
 /// Drop small `LC_WATER` components that sit on steep terrain.
 ///
 /// ESA mistakes deeply shadowed slopes for water (canyon walls, alpine north faces).
@@ -905,49 +1720,12 @@ fn drop_water_on_steep_terrain(
     if w == 0 || lc_grid.len() != h || lc_grid[0].len() != w {
         return 0;
     }
-    // Gradient step: about one ESA pixel, so DEM noise finer than the
-    // classification cannot masquerade as slope.
-    let step = ((10.0 / m_per_cell).round() as usize).clamp(1, 16) as i64;
+    let step = slope_step(m_per_cell);
     let max_cells = (MAX_STEEP_WATER_AREA_M2 / (m_per_cell * m_per_cell)) as usize;
-    // Slope of the claimed water surface, sampled between water cells only. Sampling the
-    // terrain instead would read the canyon walls across any channel narrower than the step.
-    // The farthest water within the step is used, so a patch smaller than the step still
-    // gets measured rather than falling through unjudged.
-    let cell_slope = |x: usize, y: usize| -> Option<f64> {
-        let here = heights[y][x];
-        if !here.is_finite() {
-            return None;
-        }
-        let (x, y) = (x as i64, y as i64);
-        let at = |ux: i64, uy: i64| -> Option<(f64, f64)> {
-            for d in (1..=step).rev() {
-                let (nx, ny) = (x + ux * d, y + uy * d);
-                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
-                    continue;
-                }
-                if lc_grid[ny as usize][nx as usize] != LC_WATER {
-                    continue;
-                }
-                let v = heights[ny as usize][nx as usize];
-                if v.is_finite() {
-                    return Some((v, d as f64 * m_per_cell));
-                }
-            }
-            None
-        };
-        let axis = |lo: Option<(f64, f64)>, hi: Option<(f64, f64)>| match (lo, hi) {
-            (Some((a, da)), Some((b, db))) => Some((b - a) / (da + db)),
-            (Some((a, da)), None) => Some((here - a) / da),
-            (None, Some((b, db))) => Some((b - here) / db),
-            (None, None) => None,
-        };
-        let gx = axis(at(-1, 0), at(1, 0));
-        let gz = axis(at(0, -1), at(0, 1));
-        if gx.is_none() && gz.is_none() {
-            return None;
-        }
-        let (gx, gz) = (gx.unwrap_or(0.0), gz.unwrap_or(0.0));
-        Some((gx * gx + gz * gz).sqrt())
+    let cell_slope = |x: usize, y: usize| {
+        water_surface_slope(heights, x, y, step, m_per_cell, |nx, ny| {
+            lc_grid[ny][nx] == LC_WATER
+        })
     };
     let median = |v: &mut Vec<f64>| -> f64 {
         let mid = v.len() / 2;
@@ -1419,14 +2197,26 @@ const BLUR_CHUNKS: usize = 10;
 #[inline]
 fn blur_line(len: usize, kernel: &[f64], half: i32, get: impl Fn(usize) -> f64) -> Vec<f64> {
     let line_len = len as i32;
+    let vals: Vec<f64> = (0..len).map(get).collect();
+    let bad = prefix_counts(&vals, |v| !v.is_finite());
+    // Same additions in the same order as the edge path's `wsum`, so interior output is bit-identical.
+    let full_wsum = kernel.iter().fold(0.0, |acc, &k| acc + k);
+    let h = half as usize;
     (0..len)
         .map(|i| {
+            if i >= h && i + h < len && bad[i + h + 1] == bad[i - h] {
+                let mut sum = 0.0;
+                for (&k, &v) in kernel.iter().zip(&vals[i - h..=i + h]) {
+                    sum += v * k;
+                }
+                return sum / full_wsum;
+            }
             let mut sum = 0.0;
             let mut wsum = 0.0;
             for (j, &k) in kernel.iter().enumerate() {
                 let idx = i as i32 + j as i32 - half;
                 if idx >= 0 && idx < line_len {
-                    let v = get(idx as usize);
+                    let v = vals[idx as usize];
                     if v.is_finite() {
                         sum += v * k;
                         wsum += k;
@@ -1459,12 +2249,23 @@ fn gaussian_blur_vertical_in_place(
         let x1 = (x0 + col_chunk).min(w);
         let blurred: Vec<(usize, Vec<f64>)> = {
             let src: &[Vec<f64>] = after_h;
+            // Columns are gathered eight at a time: one cache line per row instead of one per cell.
+            const GROUP: usize = 8;
             (x0..x1)
+                .step_by(GROUP)
+                .collect::<Vec<_>>()
                 .into_par_iter()
-                .map(|x| {
-                    let column: Vec<f64> = src.iter().map(|row| row[x]).collect();
-                    let col = blur_line(column.len(), kernel, half, |i| column[i]);
-                    (x, col)
+                .flat_map_iter(|gx| {
+                    let gw = GROUP.min(x1 - gx);
+                    let mut cols: Vec<Vec<f64>> = vec![Vec::with_capacity(src.len()); gw];
+                    for row in src {
+                        for (c, col) in cols.iter_mut().enumerate() {
+                            col.push(row[gx + c]);
+                        }
+                    }
+                    cols.into_iter().enumerate().map(move |(c, column)| {
+                        (gx + c, blur_line(column.len(), kernel, half, |i| column[i]))
+                    })
                 })
                 .collect()
         };
@@ -1527,8 +2328,14 @@ pub(crate) fn gaussian_blur_mask_to_f32_reported(
             .map(|row| {
                 let len = row.len().min(width);
                 let row_len = len as i32;
+                let hits = prefix_counts(&row[..len], |&c| c == target);
                 (0..len)
                     .map(|i| {
+                        match window_hits(&hits, i, half, len) {
+                            (0, _) => return 0.0,
+                            (n, window) if n == window => return 1.0,
+                            _ => {}
+                        }
                         let mut sum = 0.0;
                         let mut wsum = 0.0;
                         for (j, &k) in kernel.iter().enumerate() {
@@ -1567,8 +2374,18 @@ pub(crate) fn gaussian_blur_mask_to_f32_reported(
             .map(|x| {
                 let column: Vec<f64> = after_h.iter().map(|row| row[x]).collect();
                 let col_len = column.len() as i32;
+                let ones = prefix_counts(&column, |&v| v == 1.0);
+                let zeros = prefix_counts(&column, |&v| v == 0.0);
                 let col: Vec<f32> = (0..column.len())
                     .map(|y| {
+                        let (n, window) = window_hits(&ones, y, half, column.len());
+                        if n == window {
+                            return 1.0;
+                        }
+                        let (n, window) = window_hits(&zeros, y, half, column.len());
+                        if n == window {
+                            return 0.0;
+                        }
                         let mut sum = 0.0;
                         let mut wsum = 0.0;
                         for (j, &k) in kernel.iter().enumerate() {
@@ -1600,6 +2417,31 @@ pub(crate) fn gaussian_blur_mask_to_f32_reported(
         report(0.5 + 0.5 * (x0 as f64 / w as f64));
     }
     out
+}
+
+/// `out[i]` = how many of `values[..i]` satisfy `hit`.
+fn prefix_counts<T>(values: &[T], hit: impl Fn(&T) -> bool) -> Vec<u32> {
+    let mut out = Vec::with_capacity(values.len() + 1);
+    let mut n = 0u32;
+    out.push(n);
+    for v in values {
+        n += u32::from(hit(v));
+        out.push(n);
+    }
+    out
+}
+
+/// Hits among the kernel window around `i`, and the window's length, from `prefix_counts`.
+///
+/// A mask blur whose window is all 0 or all 1 has an exact answer: with every sample 0 the
+/// sum stays 0, and with every sample 1 it adds the same weights in the same order as the
+/// weight sum it is divided by. Uniform windows are most of a land-cover mask, and each
+/// would otherwise cost the full kernel.
+#[inline]
+fn window_hits(hits: &[u32], i: usize, half: i32, len: usize) -> (usize, usize) {
+    let lo = i.saturating_sub(half as usize);
+    let hi = (i + half as usize + 1).min(len);
+    ((hits[hi] - hits[lo]) as usize, hi - lo)
 }
 
 fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
@@ -1741,6 +2583,7 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 /// `min_ground_level` is the lowest base the terrain may sink to. The base only sinks when
 /// the relief genuinely does not fit above `ground_level`, so a small bbox is not dropped
 /// into the basement just because the world floor was extended.
+#[cfg(test)]
 pub fn scale_to_minecraft(
     blurred_heights: &[Vec<f64>],
     scale: f64,
@@ -1749,6 +2592,128 @@ pub fn scale_to_minecraft(
     disable_height_limit: bool,
     extended_max_y: i32,
 ) -> (Vec<Vec<f64>>, f64, f64, i32) {
+    let (heights, affine) = scale_to_minecraft_with(
+        blurred_heights,
+        scale,
+        ground_level,
+        min_ground_level,
+        disable_height_limit,
+        extended_max_y,
+        AffinePolicy::Fit,
+    );
+    (
+        heights,
+        affine.min_height_m,
+        affine.blocks_per_meter,
+        affine.ground_level,
+    )
+}
+
+/// `y = ground_level + (h_m - min_height_m) * blocks_per_meter`, bent above
+/// `soft_top` if set.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct ElevationAffine {
+    pub min_height_m: f64,
+    pub blocks_per_meter: f64,
+    pub ground_level: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_top: Option<SoftTop>,
+}
+
+/// Above `knee_m` heights are compressed more the higher they are instead of
+/// clamped: `y = y(knee) + width * asinh((h - knee) * blocks_per_meter / width)`.
+/// The slope at the knee matches the straight part.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct SoftTop {
+    pub knee_m: f64,
+    pub width_blocks: f64,
+}
+
+/// Lowest and highest land on Earth: the Dead Sea shore and Everest.
+const LOWEST_LAND_M: f64 = -430.0;
+const HIGHEST_LAND_M: f64 = 8849.0;
+/// Blocks under the ceiling that the soft top may use.
+const SOFT_TOP_BLOCKS: f64 = 800.0;
+
+impl ElevationAffine {
+    #[inline]
+    pub fn y_for_metres(&self, h_m: f64) -> f64 {
+        match self.soft_top {
+            Some(top) if h_m > top.knee_m => {
+                let knee_y = self.ground_level as f64
+                    + (top.knee_m - self.min_height_m) * self.blocks_per_meter;
+                let rise = (h_m - top.knee_m) * self.blocks_per_meter;
+                knee_y + top.width_blocks * (rise / top.width_blocks).asinh()
+            }
+            _ => self.ground_level as f64 + (h_m - self.min_height_m) * self.blocks_per_meter,
+        }
+    }
+
+    /// One mapping for all land on Earth: `scale` blocks per metre from the
+    /// Dead Sea at `floor` upwards, with a soft top if Everest would otherwise
+    /// end above the ceiling.
+    pub fn whole_earth(scale: f64, floor: i32, extended_max_y: i32) -> Self {
+        let ceiling = terrain_ceiling(true, extended_max_y) as f64;
+        let mut affine = Self {
+            min_height_m: LOWEST_LAND_M,
+            blocks_per_meter: scale,
+            ground_level: floor,
+            soft_top: None,
+        };
+        let knee_y = ceiling - SOFT_TOP_BLOCKS;
+        if affine.y_for_metres(HIGHEST_LAND_M) <= ceiling || knee_y <= floor as f64 {
+            return affine;
+        }
+        let knee_m = LOWEST_LAND_M + (knee_y - floor as f64) / scale;
+        let rise = (HIGHEST_LAND_M - knee_m) * scale;
+        // width * asinh(rise / width) grows with the width towards `rise`.
+        let (mut lo, mut hi) = (1e-3, 1e9);
+        for _ in 0..200 {
+            let mid = (lo + hi) / 2.0;
+            if mid * (rise / mid).asinh() > SOFT_TOP_BLOCKS {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        affine.soft_top = Some(SoftTop {
+            knee_m,
+            width_blocks: lo,
+        });
+        affine
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AffinePolicy {
+    /// Fit this grid's own relief (the ordinary mode).
+    Fit,
+    /// Fit, then leave room below for lower neighbours. First One World area.
+    FitWithHeadroom,
+    /// Reuse a stored mapping. Later One World areas.
+    Fixed(ElevationAffine),
+}
+
+/// Most headroom `FitWithHeadroom` keeps below the lowest cell.
+const HEADROOM_MAX_BLOCKS: f64 = 96.0;
+
+fn terrain_ceiling(disable_height_limit: bool, extended_max_y: i32) -> i32 {
+    let effective_max_y = if disable_height_limit {
+        extended_max_y
+    } else {
+        MAX_Y
+    };
+    effective_max_y - TERRAIN_HEIGHT_BUFFER
+}
+
+fn derive_affine(
+    blurred_heights: &[Vec<f64>],
+    scale: f64,
+    ground_level: i32,
+    min_ground_level: i32,
+    disable_height_limit: bool,
+    extended_max_y: i32,
+) -> (ElevationAffine, FitRange) {
     // Derive min/max
     let (min_height, max_height) = blurred_heights
         .par_iter()
@@ -1784,15 +2749,8 @@ pub fn scale_to_minecraft(
             (min_height, max_height - min_height)
         };
 
-    let effective_max_y = if disable_height_limit {
-        extended_max_y
-    } else {
-        MAX_Y
-    };
-    let upper_clamp = (effective_max_y - TERRAIN_HEIGHT_BUFFER) as f64;
-
     let ideal_scaled_range: f64 = height_range * scale;
-    let ceiling = effective_max_y - TERRAIN_HEIGHT_BUFFER;
+    let ceiling = terrain_ceiling(disable_height_limit, extended_max_y);
 
     // Sink the terrain base to reach the extended floor, but only as far as the relief
     // actually needs. Blindly sinking would drop a low-relief bbox thousands of blocks down
@@ -1830,37 +2788,201 @@ pub fn scale_to_minecraft(
         compressed_range
     };
 
-    let mc_heights: Vec<Vec<f64>> = blurred_heights
-        .par_iter()
-        .map(|row| {
-            row.iter()
-                .map(|&h| {
-                    let relative_height: f64 = if height_range > 0.0 {
-                        (h - min_height) / height_range
-                    } else {
-                        0.0
-                    };
-                    let scaled_height: f64 = relative_height * scaled_range;
-                    let mc_y = ground_level as f64 + scaled_height;
-                    mc_y.clamp(ground_level as f64, upper_clamp)
-                })
-                .collect()
-        })
-        .collect();
-
     let blocks_per_meter = if height_range > 0.0 {
         scaled_range / height_range
     } else {
         0.0
     };
-    // The map preview shades over the band the terrain fills, so publish where it ended up.
-    crate::world_editor::common::set_terrain_top_y(
-        (ground_level as f64 + scaled_range)
-            .min(upper_clamp)
-            .round() as i32,
-    );
+    (
+        ElevationAffine {
+            min_height_m: min_height,
+            blocks_per_meter,
+            ground_level,
+            soft_top: None,
+        },
+        FitRange {
+            height_range,
+            scaled_range,
+        },
+    )
+}
 
-    (mc_heights, min_height, blocks_per_meter, ground_level)
+#[derive(Clone, Copy)]
+struct FitRange {
+    height_range: f64,
+    scaled_range: f64,
+}
+
+/// Kept in its original arithmetic so default worlds round exactly as before.
+fn apply_fit(
+    blurred_heights: &[Vec<f64>],
+    affine: &ElevationAffine,
+    fit: FitRange,
+    upper_clamp: f64,
+) -> Vec<Vec<f64>> {
+    let base = affine.ground_level as f64;
+    blurred_heights
+        .par_iter()
+        .map(|row| {
+            row.iter()
+                .map(|&h| {
+                    let relative_height: f64 = if fit.height_range > 0.0 {
+                        (h - affine.min_height_m) / fit.height_range
+                    } else {
+                        0.0
+                    };
+                    (base + relative_height * fit.scaled_range).clamp(base, upper_clamp)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn apply_affine(
+    blurred_heights: &[Vec<f64>],
+    affine: &ElevationAffine,
+    upper_clamp: f64,
+) -> Vec<Vec<f64>> {
+    let base = affine.ground_level as f64;
+    blurred_heights
+        .par_iter()
+        .map(|row| {
+            row.iter()
+                .map(|&h| affine.y_for_metres(h).clamp(base, upper_clamp))
+                .collect()
+        })
+        .collect()
+}
+
+pub fn scale_to_minecraft_with(
+    blurred_heights: &[Vec<f64>],
+    scale: f64,
+    ground_level: i32,
+    min_ground_level: i32,
+    disable_height_limit: bool,
+    extended_max_y: i32,
+    policy: AffinePolicy,
+) -> (Vec<Vec<f64>>, ElevationAffine) {
+    let ceiling = terrain_ceiling(disable_height_limit, extended_max_y);
+    let upper_clamp = ceiling as f64;
+
+    let mut fit = None;
+    let affine = match policy {
+        AffinePolicy::Fit => {
+            let (affine, range) = derive_affine(
+                blurred_heights,
+                scale,
+                ground_level,
+                min_ground_level,
+                disable_height_limit,
+                extended_max_y,
+            );
+            fit = Some(range);
+            affine
+        }
+        AffinePolicy::FitWithHeadroom => {
+            let (mut affine, range) = derive_affine(
+                blurred_heights,
+                scale,
+                ground_level,
+                min_ground_level,
+                disable_height_limit,
+                extended_max_y,
+            );
+            // A flat first area chose no slope; later areas need one.
+            if affine.blocks_per_meter <= 0.0 {
+                affine.blocks_per_meter = scale;
+            }
+            let free = (ceiling - affine.ground_level) as f64 - range.scaled_range;
+            let margin_blocks = (free * 0.5).min(HEADROOM_MAX_BLOCKS).floor().max(0.0);
+            if margin_blocks > 0.0 {
+                affine.min_height_m -= margin_blocks / affine.blocks_per_meter;
+                eprintln!(
+                    "One World: keeping {} blocks below the lowest terrain for neighbouring areas",
+                    margin_blocks as i32
+                );
+            }
+            affine
+        }
+        AffinePolicy::Fixed(affine) => {
+            eprintln!(
+                "One World: using the world's elevation mapping (1 block = {:.2} m, {:.0} m at Y {}{})",
+                if affine.blocks_per_meter > 0.0 {
+                    1.0 / affine.blocks_per_meter
+                } else {
+                    f64::INFINITY
+                },
+                affine.min_height_m,
+                affine.ground_level,
+                match affine.soft_top {
+                    Some(top) => format!(", compressed above {:.0} m", top.knee_m),
+                    None => String::new(),
+                }
+            );
+            affine
+        }
+    };
+
+    let mc_heights = match fit {
+        Some(range) => apply_fit(blurred_heights, &affine, range, upper_clamp),
+        None => apply_affine(blurred_heights, &affine, upper_clamp),
+    };
+
+    if let AffinePolicy::Fixed(_) = policy {
+        let base = affine.ground_level as f64;
+        let (clamped, total) = blurred_heights
+            .par_iter()
+            .map(|row| {
+                let mut c = 0usize;
+                let mut n = 0usize;
+                for &h in row {
+                    if h.is_finite() {
+                        n += 1;
+                        let y = affine.y_for_metres(h);
+                        // Anything below the lowest land is sea floor, under water anyway.
+                        if (y < base && h > LOWEST_LAND_M) || y > upper_clamp {
+                            c += 1;
+                        }
+                    }
+                }
+                (c, n)
+            })
+            .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+        if total > 0 && clamped * 200 > total {
+            let pct = clamped as f64 * 100.0 / total as f64;
+            eprintln!(
+                "Warning: {pct:.1}% of this area lies outside the world's height band (Y {} to {}) and is flattened there.{}",
+                affine.ground_level,
+                upper_clamp as i32,
+                if disable_height_limit {
+                    ""
+                } else {
+                    " The band was fixed by the first area; a new One World has room for all of Earth."
+                }
+            );
+            crate::progress::emit_gui_progress_update(
+                crate::progress::MESSAGE_ONLY,
+                &format!("Note: {pct:.0}% of the area exceeds the world's height band"),
+            );
+        }
+    }
+
+    // The map preview shades over the band the terrain fills, so publish where it ended up.
+    let top = match fit {
+        Some(range) => affine.ground_level as f64 + range.scaled_range,
+        None => mc_heights
+            .par_iter()
+            .map(|row| row.iter().cloned().fold(f64::MIN, f64::max))
+            .reduce(|| f64::MIN, f64::max),
+    };
+    let top = if top.is_finite() {
+        top
+    } else {
+        affine.ground_level as f64
+    };
+    crate::world_editor::common::set_terrain_top_y(top.min(upper_clamp).round() as i32);
+
+    (mc_heights, affine)
 }
 
 #[cfg(test)]
@@ -1926,6 +3048,31 @@ mod mask_blur_tests {
     fn mask_blur_clamps_oversized_grids_like_the_take_did() {
         // Both dimensions larger than the requested extent.
         check(&grid(50, 40, 3), 37, 29, 3.0);
+    }
+
+    /// Large solid blobs, so most windows are all-0 or all-1 and take the shortcut.
+    fn blobs(w: usize, h: usize) -> Vec<Vec<u8>> {
+        (0..h)
+            .map(|y| {
+                (0..w)
+                    .map(|x| {
+                        let (dx, dy) = (x as f64 - w as f64 * 0.4, y as f64 - h as f64 * 0.5);
+                        let disc = dx * dx + dy * dy < (w as f64 * 0.25).powi(2);
+                        let band = (x + 2 * y) % 97 < 30;
+                        u8::from(disc || band)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn uniform_windows_match_the_full_kernel() {
+        check(&blobs(120, 90), 120, 90, 3.0);
+        check(&blobs(200, 60), 200, 60, 12.0);
+        // Everything one class, and nothing of it.
+        check(&vec![vec![1u8; 40]; 30], 40, 30, 3.0);
+        check(&vec![vec![0u8; 40]; 30], 40, 30, 3.0);
     }
 }
 
@@ -2135,6 +3282,209 @@ mod tests {
             .map(|x| (row[x + 1] - row[x]).abs())
             .fold(0.0, f64::max);
         assert!(max_step > 20.0, "drop was smeared to {max_step} m/cell");
+    }
+
+    /// A lake at 100 m, most of the water, spilling over a falls face into a 40 m gorge.
+    fn lake_over_a_gorge() -> (Vec<Vec<f64>>, Vec<Vec<u8>>) {
+        let (w, h) = (300usize, 200usize);
+        let mut heights = vec![vec![103.0; w]; h];
+        let mut lc = vec![vec![LC_GRASSLAND; w]; h];
+        for z in 0..h {
+            for x in 0..w {
+                let lake = x < 200 && (40..160).contains(&z);
+                let face = (200..230).contains(&x) && (90..110).contains(&z);
+                let gorge = x >= 230 && (90..110).contains(&z);
+                if lake {
+                    heights[z][x] = 100.0;
+                } else if face {
+                    heights[z][x] = 100.0 - (x - 200) as f64 * 1.3;
+                } else if gorge {
+                    heights[z][x] = 60.0 - (x - 230) as f64 * 0.02;
+                } else if x >= 200 && (70..130).contains(&z) {
+                    // Gorge walls, rising from its water to the plateau.
+                    let off = if z < 90 { 90 - z } else { z - 109 } as f64;
+                    heights[z][x] = (62.0 + off * 2.0).min(103.0);
+                }
+                if lake || face || gorge {
+                    lc[z][x] = LC_WATER;
+                }
+            }
+        }
+        (heights, lc)
+    }
+
+    #[test]
+    fn a_lake_keeps_its_level_above_the_gorge_it_spills_into() {
+        // Read as one still lake, its level must not fill the gorge nor the gorge banks clamp it.
+        let (mut heights, lc) = lake_over_a_gorge();
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert!(
+            (heights[100][100] - 100.0).abs() < 0.5,
+            "lake at {}",
+            heights[100][100]
+        );
+        for x in 240..300 {
+            assert!(
+                heights[100][x] < 62.0,
+                "gorge raised to {} at x={x}",
+                heights[100][x]
+            );
+            assert!(surface[100][x], "gorge left dry at x={x}");
+        }
+    }
+
+    #[test]
+    fn a_pit_under_a_lake_is_still_flattened_to_its_surface() {
+        // A deep bed held by the lake's own shore is bathymetry, not water below a fall.
+        let n = 200usize;
+        let mut heights = vec![vec![102.0; n]; n];
+        let mut lc = vec![vec![LC_GRASSLAND; n]; n];
+        for z in 20..180 {
+            for x in 20..180 {
+                lc[z][x] = LC_WATER;
+                heights[z][x] = if (80..120).contains(&x) && (80..120).contains(&z) {
+                    80.0
+                } else {
+                    100.0
+                };
+            }
+        }
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert_eq!(heights[100][100], heights[40][40]);
+        assert!((heights[40][40] - 100.0).abs() <= 1.0);
+        assert!(surface[100][100]);
+    }
+
+    #[test]
+    fn a_river_running_into_a_lake_keeps_its_gradient() {
+        // The river above the lake is held by its own banks and must not be cut down to it.
+        let (w, h) = (320usize, 200usize);
+        let mut heights = vec![vec![104.0; w]; h];
+        let mut lc = vec![vec![LC_GRASSLAND; w]; h];
+        for z in 0..h {
+            for x in 0..w {
+                if x < 200 && (20..180).contains(&z) {
+                    lc[z][x] = LC_WATER;
+                    heights[z][x] = 100.0;
+                } else if x >= 200 {
+                    let bed = 100.0 + (x - 200) as f64 * 0.15;
+                    if (95..105).contains(&z) {
+                        lc[z][x] = LC_WATER;
+                        heights[z][x] = bed;
+                    } else {
+                        heights[z][x] = bed + 3.0 + (z as f64 - 100.0).abs() * 0.1;
+                    }
+                }
+            }
+        }
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        for x in [260, 290, 310] {
+            let bed = 100.0 + (x - 200) as f64 * 0.15;
+            assert!(surface[100][x], "river dropped at x={x}");
+            assert!(
+                (heights[100][x] - bed).abs() < 2.0,
+                "x={x}: {} for {bed}",
+                heights[100][x]
+            );
+        }
+    }
+
+    #[test]
+    fn a_deck_across_a_lake_is_flattened_with_it() {
+        // Mostly surrounded by the lake, a raised strip is no water of its own.
+        let n = 200usize;
+        let mut heights = vec![vec![103.0; n]; n];
+        let mut lc = vec![vec![LC_GRASSLAND; n]; n];
+        for z in 20..180 {
+            for x in 0..n {
+                lc[z][x] = LC_WATER;
+                heights[z][x] = if (90..110).contains(&x) { 110.0 } else { 100.0 };
+            }
+        }
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert_eq!(heights[100][100], heights[100][40]);
+        assert!((heights[100][40] - 100.0).abs() <= 1.0);
+        assert!(surface[100][100]);
+    }
+
+    /// A 21 m river falling 3 % along x, its land cover water climbing `wall` m/m up both sides.
+    fn v_channel(wall: f64) -> (Vec<Vec<f64>>, Vec<Vec<u8>>) {
+        let (w, h) = (400usize, 100usize);
+        let heights = (0..h)
+            .map(|z| {
+                (0..w)
+                    .map(|x| 500.0 - x as f64 * 0.03 + (z as f64 - 50.0).abs() * wall)
+                    .collect()
+            })
+            .collect();
+        let mut lc = vec![vec![LC_GRASSLAND; w]; h];
+        for row in lc.iter_mut().take(61).skip(40) {
+            row.fill(LC_WATER);
+        }
+        (heights, lc)
+    }
+
+    #[test]
+    fn water_does_not_climb_the_walls_of_a_smeared_gorge() {
+        let (mut heights, lc) = v_channel(0.6);
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert!(surface[50][200], "the channel floor is water");
+        assert!(!surface[43][200], "a wall 4 m up holds no water");
+        assert!(!surface[57][200], "a wall 4 m up holds no water");
+    }
+
+    #[test]
+    fn a_level_river_has_no_walls() {
+        let (mut heights, lc) = v_channel(0.0);
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert!((40..61).all(|z| surface[z][200]));
+    }
+
+    #[test]
+    fn a_seam_along_a_narrow_river_is_no_wall() {
+        // Walks across a 7 m river end early; the step is on one half of them only.
+        let (w, h) = (400usize, 100usize);
+        let mut heights = vec![vec![0.0; w]; h];
+        let mut lc = vec![vec![LC_GRASSLAND; w]; h];
+        for (z, (row, lc_row)) in heights.iter_mut().zip(lc.iter_mut()).enumerate() {
+            for (x, (v, c)) in row.iter_mut().zip(lc_row.iter_mut()).enumerate() {
+                let bed = 500.0 - x as f64 * 0.03;
+                *v = if (47..54).contains(&z) {
+                    *c = LC_WATER;
+                    bed + if z < 49 { 1.5 } else { 0.0 }
+                } else {
+                    bed + 10.0
+                };
+            }
+        }
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        assert!(
+            surface[47][200] && surface[48][200],
+            "the seam's high side is water"
+        );
+    }
+
+    #[test]
+    fn a_falls_face_inside_a_river_keeps_its_water() {
+        // The bank lies upstream, so the face falls away from it like a wall, under level water.
+        let (w, h) = (300usize, 260usize);
+        let mut heights = vec![vec![125.0; w]; h];
+        let mut lc = vec![vec![LC_GRASSLAND; w]; h];
+        for z in 20..240 {
+            for x in 20..280 {
+                lc[z][x] = LC_WATER;
+                heights[z][x] = 120.0 - (z.clamp(80, 110) - 80) as f64 * 20.0 / 30.0;
+            }
+        }
+        let surface = level_water_surfaces(&mut heights, &lc, 1.0);
+        for z in 82..108 {
+            assert!(surface[z][150], "face left dry at z={z}");
+            assert!(
+                (100.0..=120.5).contains(&heights[z][150]),
+                "z={z}: {}",
+                heights[z][150]
+            );
+        }
     }
 
     /// Swiss relief: Lake Maggiore 193 m to Dufourspitze 4634 m.
@@ -2450,6 +3800,79 @@ mod tests {
         assert_eq!(repaired[10][10], 100.0);
     }
 
+    /// The repair without its range shortcut: every cell takes both selects.
+    fn repair_by_medians(heights: &mut [Vec<f64>], m_per_cell: f64) {
+        let (h, w) = (heights.len(), heights[0].len());
+        let thr = 6.0f64.max(0.25 * m_per_cell);
+        let passes = if m_per_cell > 4.0 { 2 } else { 10 };
+        for _ in 0..passes {
+            let snap = heights.to_vec();
+            let mut repaired = 0;
+            for y in 2..h - 2 {
+                for x in 2..w - 2 {
+                    let center = snap[y][x];
+                    if !center.is_finite() {
+                        continue;
+                    }
+                    let mut nb: Vec<f64> = (-2i32..=2)
+                        .flat_map(|dy| (-2i32..=2).map(move |dx| (dy, dx)))
+                        .filter(|&d| d != (0, 0))
+                        .map(|(dy, dx)| snap[(y as i32 + dy) as usize][(x as i32 + dx) as usize])
+                        .filter(|v| v.is_finite())
+                        .collect();
+                    if nb.len() < 8 {
+                        continue;
+                    }
+                    let mid = nb.len() / 2;
+                    nb.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                    let median = nb[mid];
+                    let mut dev: Vec<f64> = nb.iter().map(|v| (v - median).abs()).collect();
+                    let dmid = dev.len() / 2;
+                    dev.select_nth_unstable_by(dmid, |a, b| a.partial_cmp(b).unwrap());
+                    let d = (center - median).abs();
+                    if d > thr && d > 3.0 * dev[dmid].max(1.0) {
+                        heights[y][x] = median;
+                        repaired += 1;
+                    }
+                }
+            }
+            if repaired == 0 {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn the_range_shortcut_repairs_exactly_what_the_medians_do() {
+        // Gentle wobble with spikes, pits, a NaN hole and a real cliff.
+        let mut base = wobbly(60, 50);
+        for (y, row) in base.iter_mut().enumerate() {
+            for (x, v) in row.iter_mut().enumerate() {
+                *v = *v * 0.004 + 100.0 + if x > 40 { 30.0 } else { 0.0 };
+                if (x * 7 + y * 13) % 53 == 0 {
+                    *v += if x % 2 == 0 { 25.0 } else { -18.0 };
+                }
+                if (20..23).contains(&x) && (10..12).contains(&y) {
+                    *v = f64::NAN;
+                }
+            }
+        }
+        for m_per_cell in [1.0, 40.0] {
+            let mut got = base.clone();
+            let mut want = base.clone();
+            repair_terrain_anomalies(&mut got, m_per_cell);
+            repair_by_medians(&mut want, m_per_cell);
+            assert_bits_eq(&got, &want);
+            let changed = got
+                .iter()
+                .flatten()
+                .zip(base.iter().flatten())
+                .filter(|(a, b)| a.to_bits() != b.to_bits())
+                .count();
+            assert!(changed > 0, "the fixture has spikes to repair");
+        }
+    }
+
     #[test]
     fn anomaly_repair_stops_eroding_landforms_when_a_cell_is_tens_of_metres() {
         let mut fine = plateau_with_tower(9);
@@ -2459,5 +3882,172 @@ mod tests {
         let mut coarse = plateau_with_tower(9);
         repair_terrain_anomalies(&mut coarse, 24.4);
         assert_eq!(coarse[20][20], 180.0, "a 220 m landform must survive");
+    }
+}
+
+#[cfg(test)]
+mod affine_policy_tests {
+    use super::*;
+
+    fn legacy(grid: &[Vec<f64>], ground_level: i32, upper: f64) -> Vec<Vec<f64>> {
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for &h in grid.iter().flatten() {
+            if h.is_finite() {
+                lo = lo.min(h);
+                hi = hi.max(h);
+            }
+        }
+        let range = hi - lo;
+        grid.iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&h| {
+                        let rel = if range > 0.0 { (h - lo) / range } else { 0.0 };
+                        (ground_level as f64 + rel * range).clamp(ground_level as f64, upper)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_default_mapping_is_bit_identical_to_the_legacy_one() {
+        let grid: Vec<Vec<f64>> = (0..64)
+            .map(|z| {
+                (0..64)
+                    .map(|x| 412.37 + (x as f64 * 0.731).sin() * 9.13 + z as f64 * 0.217)
+                    .collect()
+            })
+            .collect();
+        let (mc, _) = scale_to_minecraft_with(&grid, 1.0, -62, -62, false, 0, AffinePolicy::Fit);
+        let upper = (MAX_Y - TERRAIN_HEIGHT_BUFFER) as f64;
+        let want = legacy(&grid, -62, upper);
+        for (a, b) in mc.iter().flatten().zip(want.iter().flatten()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        let mut flat = vec![vec![300.0; 4]; 4];
+        flat[1][2] = f64::NAN;
+        let (mc, _) = scale_to_minecraft_with(&flat, 1.0, -62, -62, false, 0, AffinePolicy::Fit);
+        assert!(mc.iter().flatten().all(|&y| y == -62.0));
+    }
+
+    fn ramp() -> Vec<Vec<f64>> {
+        (0..4)
+            .map(|z| (0..4).map(|x| 500.0 + (z * 4 + x) as f64).collect())
+            .collect()
+    }
+
+    #[test]
+    fn fit_puts_the_lowest_cell_on_the_ground_level() {
+        let (mc, affine) =
+            scale_to_minecraft_with(&ramp(), 1.0, -62, -62, false, 0, AffinePolicy::Fit);
+        assert_eq!(mc[0][0], -62.0);
+        assert_eq!(mc[3][3], -62.0 + 15.0);
+        assert_eq!(affine.min_height_m, 500.0);
+        assert_eq!(affine.blocks_per_meter, 1.0);
+        assert_eq!(affine.ground_level, -62);
+    }
+
+    #[test]
+    fn headroom_lifts_the_first_area_and_keeps_the_mapping_invertible() {
+        let (mc, affine) = scale_to_minecraft_with(
+            &ramp(),
+            1.0,
+            -62,
+            -62,
+            false,
+            0,
+            AffinePolicy::FitWithHeadroom,
+        );
+        assert_eq!(mc[0][0], -62.0 + 96.0);
+        assert!((affine.min_height_m - (500.0 - 96.0)).abs() < 1e-9);
+        assert_eq!(affine.y_for_metres(500.0), -62.0 + 96.0);
+        assert_eq!(affine.y_for_metres(515.0), mc[3][3]);
+    }
+
+    #[test]
+    fn a_flat_first_area_still_gets_a_slope_for_its_neighbours() {
+        let flat = vec![vec![420.0; 4]; 4];
+        let (_, affine) = scale_to_minecraft_with(
+            &flat,
+            2.0,
+            -62,
+            -62,
+            false,
+            0,
+            AffinePolicy::FitWithHeadroom,
+        );
+        assert_eq!(affine.blocks_per_meter, 2.0);
+        assert!((affine.min_height_m - (420.0 - 48.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_fixed_mapping_is_reused_and_clamped() {
+        let stored = ElevationAffine {
+            min_height_m: 404.0,
+            blocks_per_meter: 1.0,
+            ground_level: -62,
+            soft_top: None,
+        };
+        let mut grid = ramp();
+        grid[0][0] = 300.0; // below the world's lowest: clamps at the base
+        grid[3][3] = 2000.0; // above the ceiling: clamps below it
+        grid[1][1] = f64::NAN;
+        let (mc, affine) =
+            scale_to_minecraft_with(&grid, 1.0, -62, -62, false, 0, AffinePolicy::Fixed(stored));
+        assert_eq!(affine, stored);
+        assert_eq!(mc[0][0], -62.0);
+        assert_eq!(mc[3][3], (MAX_Y - TERRAIN_HEIGHT_BUFFER) as f64);
+        assert!(mc[1][1].is_nan());
+        assert_eq!(mc[0][1], -62.0 + (501.0 - 404.0));
+    }
+
+    #[test]
+    fn the_whole_earth_fits_one_to_one_up_to_the_soft_top() {
+        let e = ElevationAffine::whole_earth(1.0, -2014, 2031);
+        let top = e.soft_top.unwrap();
+        assert_eq!(top.knee_m, 2800.0);
+        assert_eq!(e.y_for_metres(-430.0), -2014.0);
+        assert_eq!(e.y_for_metres(0.0), -1584.0);
+        assert_eq!(e.y_for_metres(2500.0), 916.0);
+        assert!((e.y_for_metres(8849.0) - 2016.0).abs() < 1e-6);
+
+        // Continuous with the same slope at the knee, and still rising at Everest.
+        let below = e.y_for_metres(top.knee_m - 0.01);
+        let above = e.y_for_metres(top.knee_m + 0.01);
+        assert!((above - below - 0.02).abs() < 1e-6);
+        let mut last = f64::MIN;
+        for h in (0..=8849).step_by(7) {
+            let y = e.y_for_metres(h as f64);
+            assert!(y > last);
+            last = y;
+        }
+        assert!(e.y_for_metres(8849.0) - e.y_for_metres(8800.0) > 1.0);
+    }
+
+    #[test]
+    fn the_whole_earth_needs_no_soft_top_when_it_fits() {
+        let e = ElevationAffine::whole_earth(0.4, -2014, 2031);
+        assert_eq!(e.soft_top, None);
+        assert!(e.y_for_metres(8849.0) <= 2016.0);
+    }
+
+    #[test]
+    fn a_whole_earth_mapping_only_clamps_the_sea_floor() {
+        let stored = ElevationAffine::whole_earth(1.0, -2014, 2031);
+        let grid = vec![vec![-1500.0, -10.0, 520.0], vec![3000.0, 4808.0, 8849.0]];
+        let (mc, _) = scale_to_minecraft_with(
+            &grid,
+            1.0,
+            -62,
+            -2030,
+            true,
+            2031,
+            AffinePolicy::Fixed(stored),
+        );
+        assert_eq!(mc[0][0], -2014.0);
+        assert_eq!(mc[0][1], -1594.0);
+        assert_eq!(mc[0][2], -1064.0);
+        assert!(mc[1][0] < mc[1][1] && mc[1][1] < mc[1][2] && mc[1][2] <= 2016.0);
     }
 }

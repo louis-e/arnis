@@ -4,7 +4,7 @@ use fastnbt::Value;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 // Enums for stair properties
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -65,7 +65,7 @@ impl BlockWithProperties {
     pub fn new(block: Block, properties: Option<Value>) -> Self {
         Self {
             block,
-            properties: properties.map(Arc::new),
+            properties: properties.map(intern_props),
         }
     }
 
@@ -460,7 +460,6 @@ impl Block {
             363 => "white_wall_banner",
             364..=365 => "spruce_door",
             366 => "oak_door",
-            367 => "end_stone",
             // Aeroplane livery + jetbridge blocks (bundled .schem props only).
             368 => "purpur_block",
             369 => "purpur_slab",
@@ -479,6 +478,99 @@ impl Block {
             382 => "coal_block",
             383 => "blackstone_slab",
             384 => "iron_door",
+            385 => "lava",
+            386 => "obsidian",
+            387 => "ice",
+            388 => "blue_ice",
+            389 => "powder_snow",
+            390 => "calcite",
+            391 => "amethyst_block",
+            392 => "budding_amethyst",
+            393 => "amethyst_cluster",
+            394 => "small_amethyst_bud",
+            395 => "medium_amethyst_bud",
+            396 => "large_amethyst_bud",
+            397 => "basalt",
+            398 => "smooth_basalt",
+            399 => "dripstone_block",
+            400 => "pointed_dripstone",
+            401 => "sculk",
+            402 => "sculk_vein",
+            403 => "sculk_catalyst",
+            404 => "sculk_sensor",
+            405 => "sculk_shrieker",
+            406 => "glow_lichen",
+            407 => "moss_carpet",
+            408 => "cave_vines",
+            409 => "cave_vines_plant",
+            410 => "spore_blossom",
+            411 => "azalea",
+            412 => "flowering_azalea",
+            413 => "big_dripleaf",
+            414 => "big_dripleaf_stem",
+            415 => "small_dripleaf",
+            416 => "small_dripleaf",
+            417 => "mycelium",
+            418 => "red_mushroom",
+            419 => "brown_mushroom",
+            420 => "red_mushroom_block",
+            421 => "brown_mushroom_block",
+            422 => "mushroom_stem",
+            423 => "shroomlight",
+            424 => "tube_coral_block",
+            425 => "brain_coral_block",
+            426 => "bubble_coral_block",
+            427 => "fire_coral_block",
+            428 => "horn_coral_block",
+            429 => "dead_tube_coral_block",
+            430 => "dead_brain_coral_block",
+            431 => "dead_bubble_coral_block",
+            432 => "dead_fire_coral_block",
+            433 => "dead_horn_coral_block",
+            434 => "tube_coral",
+            435 => "brain_coral",
+            436 => "bubble_coral",
+            437 => "fire_coral",
+            438 => "horn_coral",
+            439 => "tube_coral_fan",
+            440 => "brain_coral_fan",
+            441 => "bubble_coral_fan",
+            442 => "fire_coral_fan",
+            443 => "horn_coral_fan",
+            444 => "deepslate_coal_ore",
+            445 => "deepslate_iron_ore",
+            446 => "deepslate_copper_ore",
+            447 => "deepslate_gold_ore",
+            448 => "deepslate_redstone_ore",
+            449 => "deepslate_lapis_ore",
+            450 => "deepslate_diamond_ore",
+            451 => "cornflower",
+            452 => "oxeye_daisy",
+            453 => "allium",
+            454 => "lily_of_the_valley",
+            455 => "red_tulip",
+            456 => "orange_tulip",
+            457 => "white_tulip",
+            458 => "pink_tulip",
+            459..=460 => "sunflower",
+            461..=462 => "lilac",
+            463..=464 => "rose_bush",
+            465..=466 => "peony",
+            467 => "sweet_berry_bush",
+            468 => "pumpkin",
+            469 => "lily_pad",
+            470 => "cactus",
+            471 => "grass_block",
+            472 => "podzol",
+            473 => "light_gray_concrete_powder",
+            474..=479 => "snow",
+            480 => "flowering_azalea_leaves",
+            481 => "white_bed",
+            482 => "lectern",
+            483 => "cake",
+            484 => "melon",
+            485 => "loom",
+            486 => "smithing_table",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -710,7 +802,9 @@ impl Block {
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
-            231 => Some(Value::Compound({
+            // Cherry, mangrove, azalea and flowering azalea leaves; persistent so a
+            // trunkless bush does not decay.
+            231 | 233 | 234 | 480 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
@@ -807,6 +901,50 @@ impl Block {
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
+            // Small dripleaf lower/upper halves.
+            415 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            416 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Tall flowers: odd ids are the lower half, even ids the upper.
+            459 | 461 | 463 | 465 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            460 | 462 | 464 | 466 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Grass and podzol under a snow layer, whose sides the game only turns
+            // snowy on a block update.
+            471 | 472 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("snowy".to_string(), Value::String("true".to_string()));
+                map
+            })),
+            // Snow layers two to seven eighths deep.
+            474..=479 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert(
+                    "layers".to_string(),
+                    Value::String((self.id - 472).to_string()),
+                );
+                map
+            })),
+            // Ripe, so the bush shows its berries.
+            467 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("age".to_string(), Value::String("3".to_string()));
+                map
+            })),
 
             _ => None,
         }
@@ -857,14 +995,75 @@ pub fn create_stair_with_properties(
 }
 // Add half=top to make it upside-down.
 pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
-    if let Some(props) = stair.properties.as_ref() {
-        if let Value::Compound(map) = props.as_ref() {
-            let mut new_map = map.clone();
-            new_map.insert("half".to_string(), Value::String("top".to_string()));
-            stair.properties = Some(Arc::new(Value::Compound(new_map)));
-        }
+    if let Some(Value::Compound(map)) = stair.properties.as_deref() {
+        let mut new_map = map.clone();
+        new_map.insert("half".to_string(), Value::String("top".to_string()));
+        stair.properties = Some(intern_props(Value::Compound(new_map)));
     }
     stair
+}
+
+/// One shared allocation per distinct block state.
+///
+/// A placed block keeps its state compound for as long as its section is resident, and
+/// the same few hundred states (a flipped stair, a slab half, a log axis) were built
+/// afresh for every block that used them: 345k compounds on a 13 km² city, around a
+/// hundred megabytes at the memory peak. Compounds of plain strings are shared through
+/// here; anything else is wrapped as it is.
+///
+/// The table only holds weak references, so a state lives exactly as long as some block
+/// holds it, and a finished world does not keep its states behind in a long GUI session.
+pub fn intern_props(value: Value) -> Arc<Value> {
+    const SHARDS: usize = 16;
+    static STATES: Lazy<[Mutex<StateShard>; SHARDS]> =
+        Lazy::new(|| std::array::from_fn(|_| Mutex::default()));
+
+    let Value::Compound(map) = &value else {
+        return Arc::new(value);
+    };
+    if !map.values().all(|v| matches!(v, Value::String(_))) {
+        return Arc::new(value);
+    }
+    let mut state: Vec<(&str, &str)> = map
+        .iter()
+        .filter_map(|(k, v)| match v {
+            Value::String(s) => Some((k.as_str(), s.as_str())),
+            _ => None,
+        })
+        .collect();
+    state.sort_unstable();
+    let key: String = state.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]).collect();
+    let shard = key
+        .bytes()
+        .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
+    let mut shard = STATES[shard % SHARDS]
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(live) = shard.states.get(&key).and_then(Weak::upgrade) {
+        return live;
+    }
+    shard.sweep_if_due();
+    let state = Arc::new(value);
+    shard.states.insert(key, Arc::downgrade(&state));
+    state
+}
+
+/// One slice of the `intern_props` table.
+#[derive(Default)]
+struct StateShard {
+    states: fnv::FnvHashMap<String, Weak<Value>>,
+    /// Size at which entries whose state is gone are next dropped. Doubles with the live
+    /// count, so the sweep costs O(1) per insert over time.
+    sweep_at: usize,
+}
+
+impl StateShard {
+    fn sweep_if_due(&mut self) {
+        if self.states.len() >= self.sweep_at {
+            self.states.retain(|_, state| state.strong_count() > 0);
+            self.sweep_at = (self.states.len() * 2).max(64);
+        }
+    }
 }
 
 // Lazy static blocks
@@ -895,8 +1094,6 @@ pub const DEEPSLATE_BRICKS: Block = Block::new(20);
 pub const DIORITE: Block = Block::new(21);
 pub const DIRT: Block = Block::new(22);
 pub const END_STONE_BRICKS: Block = Block::new(23);
-/// The Moon's only ground block. Earth never places it.
-pub const END_STONE: Block = Block::new(367);
 pub const FARMLAND: Block = Block::new(24);
 pub const GLASS: Block = Block::new(25);
 pub const GLOWSTONE: Block = Block::new(26);
@@ -1283,6 +1480,115 @@ pub const PALE_OAK_TRAPDOOR: Block = Block::new(381);
 pub const COAL_BLOCK: Block = Block::new(382);
 pub const BLACKSTONE_SLAB: Block = Block::new(383);
 pub const IRON_DOOR: Block = Block::new(384);
+
+// Placed by the cave passes (--caves).
+pub const LAVA: Block = Block::new(385);
+pub const OBSIDIAN: Block = Block::new(386);
+pub const ICE: Block = Block::new(387);
+pub const BLUE_ICE: Block = Block::new(388);
+pub const POWDER_SNOW: Block = Block::new(389);
+pub const CALCITE: Block = Block::new(390);
+pub const AMETHYST_BLOCK: Block = Block::new(391);
+pub const BUDDING_AMETHYST: Block = Block::new(392);
+pub const AMETHYST_CLUSTER: Block = Block::new(393);
+pub const SMALL_AMETHYST_BUD: Block = Block::new(394);
+pub const MEDIUM_AMETHYST_BUD: Block = Block::new(395);
+pub const LARGE_AMETHYST_BUD: Block = Block::new(396);
+pub const BASALT: Block = Block::new(397);
+pub const SMOOTH_BASALT: Block = Block::new(398);
+pub const DRIPSTONE_BLOCK: Block = Block::new(399);
+pub const POINTED_DRIPSTONE: Block = Block::new(400);
+pub const SCULK: Block = Block::new(401);
+pub const SCULK_VEIN: Block = Block::new(402);
+pub const SCULK_CATALYST: Block = Block::new(403);
+pub const SCULK_SENSOR: Block = Block::new(404);
+pub const SCULK_SHRIEKER: Block = Block::new(405);
+pub const GLOW_LICHEN: Block = Block::new(406);
+pub const MOSS_CARPET: Block = Block::new(407);
+pub const CAVE_VINES: Block = Block::new(408);
+pub const CAVE_VINES_PLANT: Block = Block::new(409);
+pub const SPORE_BLOSSOM: Block = Block::new(410);
+pub const AZALEA: Block = Block::new(411);
+pub const FLOWERING_AZALEA: Block = Block::new(412);
+pub const BIG_DRIPLEAF: Block = Block::new(413);
+pub const BIG_DRIPLEAF_STEM: Block = Block::new(414);
+pub const SMALL_DRIPLEAF_LOWER: Block = Block::new(415);
+pub const SMALL_DRIPLEAF_UPPER: Block = Block::new(416);
+pub const MYCELIUM: Block = Block::new(417);
+pub const RED_MUSHROOM: Block = Block::new(418);
+pub const BROWN_MUSHROOM: Block = Block::new(419);
+pub const RED_MUSHROOM_BLOCK: Block = Block::new(420);
+pub const BROWN_MUSHROOM_BLOCK: Block = Block::new(421);
+pub const MUSHROOM_STEM: Block = Block::new(422);
+pub const SHROOMLIGHT: Block = Block::new(423);
+pub const TUBE_CORAL_BLOCK: Block = Block::new(424);
+pub const BRAIN_CORAL_BLOCK: Block = Block::new(425);
+pub const BUBBLE_CORAL_BLOCK: Block = Block::new(426);
+pub const FIRE_CORAL_BLOCK: Block = Block::new(427);
+pub const HORN_CORAL_BLOCK: Block = Block::new(428);
+pub const DEAD_TUBE_CORAL_BLOCK: Block = Block::new(429);
+pub const DEAD_BRAIN_CORAL_BLOCK: Block = Block::new(430);
+pub const DEAD_BUBBLE_CORAL_BLOCK: Block = Block::new(431);
+pub const DEAD_FIRE_CORAL_BLOCK: Block = Block::new(432);
+pub const DEAD_HORN_CORAL_BLOCK: Block = Block::new(433);
+pub const TUBE_CORAL: Block = Block::new(434);
+pub const BRAIN_CORAL: Block = Block::new(435);
+pub const BUBBLE_CORAL: Block = Block::new(436);
+pub const FIRE_CORAL: Block = Block::new(437);
+pub const HORN_CORAL: Block = Block::new(438);
+pub const TUBE_CORAL_FAN: Block = Block::new(439);
+pub const BRAIN_CORAL_FAN: Block = Block::new(440);
+pub const BUBBLE_CORAL_FAN: Block = Block::new(441);
+pub const FIRE_CORAL_FAN: Block = Block::new(442);
+pub const HORN_CORAL_FAN: Block = Block::new(443);
+pub const DEEPSLATE_COAL_ORE: Block = Block::new(444);
+pub const DEEPSLATE_IRON_ORE: Block = Block::new(445);
+pub const DEEPSLATE_COPPER_ORE: Block = Block::new(446);
+pub const DEEPSLATE_GOLD_ORE: Block = Block::new(447);
+pub const DEEPSLATE_REDSTONE_ORE: Block = Block::new(448);
+pub const DEEPSLATE_LAPIS_ORE: Block = Block::new(449);
+pub const DEEPSLATE_DIAMOND_ORE: Block = Block::new(450);
+pub const CORNFLOWER: Block = Block::new(451);
+pub const OXEYE_DAISY: Block = Block::new(452);
+pub const ALLIUM: Block = Block::new(453);
+pub const LILY_OF_THE_VALLEY: Block = Block::new(454);
+pub const RED_TULIP: Block = Block::new(455);
+pub const ORANGE_TULIP: Block = Block::new(456);
+pub const WHITE_TULIP: Block = Block::new(457);
+pub const PINK_TULIP: Block = Block::new(458);
+pub const SUNFLOWER_LOWER: Block = Block::new(459);
+pub const SUNFLOWER_UPPER: Block = Block::new(460);
+pub const LILAC_LOWER: Block = Block::new(461);
+pub const LILAC_UPPER: Block = Block::new(462);
+pub const ROSE_BUSH_LOWER: Block = Block::new(463);
+pub const ROSE_BUSH_UPPER: Block = Block::new(464);
+pub const PEONY_LOWER: Block = Block::new(465);
+pub const PEONY_UPPER: Block = Block::new(466);
+pub const SWEET_BERRY_BUSH: Block = Block::new(467);
+pub const PUMPKIN: Block = Block::new(468);
+pub const LILY_PAD: Block = Block::new(469);
+pub const CACTUS: Block = Block::new(470);
+pub const SNOWY_GRASS_BLOCK: Block = Block::new(471);
+pub const SNOWY_PODZOL: Block = Block::new(472);
+pub const LIGHT_GRAY_CONCRETE_POWDER: Block = Block::new(473);
+pub const FLOWERING_AZALEA_LEAVES: Block = Block::new(480);
+/// Placed with explicit facing and part properties, like every bed.
+pub const WHITE_BED: Block = Block::new(481);
+pub const LECTERN: Block = Block::new(482);
+pub const CAKE: Block = Block::new(483);
+pub const MELON: Block = Block::new(484);
+pub const LOOM: Block = Block::new(485);
+pub const SMITHING_TABLE: Block = Block::new(486);
+/// Snow layers by depth in eighths of a block, one to seven.
+pub const SNOW_LAYERS: [Block; 7] = [
+    SNOW_LAYER,
+    Block::new(474),
+    Block::new(475),
+    Block::new(476),
+    Block::new(477),
+    Block::new(478),
+    Block::new(479),
+];
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
@@ -1723,6 +2029,44 @@ mod material_tests {
 
     fn rng() -> ChaCha8Rng {
         ChaCha8Rng::seed_from_u64(1)
+    }
+
+    // Equal states share one compound, and the table does not keep it alive on its own.
+    #[test]
+    fn interned_states_are_shared_and_then_released() {
+        // A key no other test uses, so nothing else holds this state meanwhile.
+        let state = || fastnbt::nbt!({ "facing": "north", "interner_test": "released" });
+        let a = intern_props(state());
+        let b = intern_props(state());
+        assert!(Arc::ptr_eq(&a, &b));
+        let gone = Arc::downgrade(&a);
+        drop((a, b));
+        assert!(gone.upgrade().is_none(), "the table must not own the state");
+        // Asking again builds it afresh rather than handing back a dead entry.
+        let again = intern_props(state());
+        assert_eq!(again.as_ref(), &state());
+    }
+
+    // Every flip of one stair state shares a compound, and the flip still reads half=top.
+    #[test]
+    fn top_stairs_share_one_compound_per_state() {
+        let flip = |facing, shape| {
+            top_stair(create_stair_with_properties(OAK_STAIRS, facing, shape))
+                .properties
+                .unwrap()
+        };
+        let a = flip(StairFacing::North, StairShape::Straight);
+        let b = flip(StairFacing::North, StairShape::Straight);
+        assert!(Arc::ptr_eq(&a, &b));
+        let Value::Compound(map) = a.as_ref() else {
+            panic!("not a compound");
+        };
+        assert_eq!(map.get("half"), Some(&Value::String("top".into())));
+        assert_eq!(map.get("facing"), Some(&Value::String("north".into())));
+
+        let c = flip(StairFacing::North, StairShape::OuterLeft);
+        let d = flip(StairFacing::South, StairShape::Straight);
+        assert!(!Arc::ptr_eq(&a, &c) && !Arc::ptr_eq(&a, &d));
     }
 
     #[test]

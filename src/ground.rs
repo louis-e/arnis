@@ -5,14 +5,19 @@ use crate::coordinate_system::{
     cartesian::{XZBBox, XZPoint},
     geographic::LLBBox,
 };
-use crate::elevation::compute_grid_dims;
+use crate::ecoregion::{EcoMap, Ecoregion};
+use crate::elevation::{
+    compute_grid_dims, compute_grid_dims_for_world, AffinePolicy, ElevationAffine,
+};
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
 use crate::osm_parser::ProcessedElement;
+use crate::projection::WebMercatorProjection;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use image::{Rgb, RgbImage};
+use std::sync::Arc;
 
 /// Parameters describing the inverse-rotation needed to check whether a world
 /// coordinate falls inside the original (pre-rotation) bounding box.
@@ -54,6 +59,168 @@ pub struct Ground {
     climate: crate::climate::Climate,
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
+    ecoregions: Option<Arc<EcoMap>>,
+}
+
+/// Layout of a run's ground grids. A projected run takes its size from the
+/// projected rectangle and re-spaces rows to Mercator, so every cell sits on
+/// its block.
+#[derive(Clone, Debug)]
+pub struct GroundFrame {
+    pub world_dims: Option<(usize, usize)>,
+    pub mercator: Option<WebMercatorProjection>,
+    pub pad_blocks: usize,
+    pub affine: AffinePolicy,
+    /// Where climate is read; `None` is the bbox centre.
+    pub climate_anchor: Option<(f64, f64)>,
+}
+
+impl GroundFrame {
+    pub fn local() -> Self {
+        Self {
+            world_dims: None,
+            mercator: None,
+            pad_blocks: 0,
+            affine: AffinePolicy::Fit,
+            climate_anchor: None,
+        }
+    }
+
+    pub fn from_args(args: &Args, bbox: &LLBBox) -> Self {
+        let spec = crate::projection::ProjectionSpec::from_args(args);
+        if spec.kind == crate::projection::ProjectionKind::Local {
+            return Self::local();
+        }
+        let projection = spec.mercator(bbox);
+        let (world_w, world_h) = match spec.transformer(bbox) {
+            Ok((_, rect)) => (
+                (rect.max_x() - rect.min_x() + 1) as usize,
+                (rect.max_z() - rect.min_z() + 1) as usize,
+            ),
+            Err(_) => return Self::local(),
+        };
+        match &args.one_world_run {
+            Some(run) => Self {
+                world_dims: Some((world_w, world_h)),
+                mercator: Some(projection),
+                pad_blocks: crate::one_world::ground_pad_blocks(args.scale) as usize,
+                affine: match run.elevation {
+                    Some(affine) => AffinePolicy::Fixed(affine),
+                    None => AffinePolicy::FitWithHeadroom,
+                },
+                climate_anchor: Some((run.origin_lat, run.origin_lon)),
+            },
+            None => Self {
+                world_dims: Some((world_w, world_h)),
+                mercator: Some(projection),
+                pad_blocks: 0,
+                affine: AffinePolicy::Fit,
+                climate_anchor: None,
+            },
+        }
+    }
+
+    fn climate(&self, bbox: &LLBBox) -> crate::climate::Climate {
+        match self.climate_anchor {
+            Some((lat, lon)) => crate::climate::Climate::classify_at(lat, lon),
+            None => crate::climate::Climate::classify(bbox),
+        }
+    }
+
+    fn anchor_lat(&self, bbox: &LLBBox) -> f64 {
+        match self.climate_anchor {
+            Some((lat, _)) => lat,
+            None => (bbox.min().lat() + bbox.max().lat()) / 2.0,
+        }
+    }
+
+    /// Ecoregions over the area, at the geography the land cover is laid out on.
+    fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
+        let map = match &self.mercator {
+            Some(proj) => {
+                let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false);
+                let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false);
+                EcoMap::build(world_w, world_h, (x0, z0), |gx, gz| {
+                    (
+                        proj.lat_for_z(f64::from(z0) + gz),
+                        proj.lon_for_x(f64::from(x0) + gx),
+                    )
+                })
+            }
+            None => {
+                let (top, left) = (bbox.max().lat(), bbox.min().lng());
+                let (dlat, dlon) = (top - bbox.min().lat(), bbox.max().lng() - left);
+                let (w, h) = (world_w as f64, world_h as f64);
+                EcoMap::build(world_w, world_h, (0, 0), move |gx, gz| {
+                    (top - gz / h * dlat, left + gx / w * dlon)
+                })
+            }
+        };
+        map.map(Arc::new)
+    }
+
+    /// The padding is dropped when the padded grid would be capped, since the
+    /// crop is only exact at one cell per block.
+    fn fetch_plan(&self, bbox: &LLBBox, scale: f64) -> FetchPlan {
+        let Some((world_w, world_h)) = self.world_dims else {
+            let (ww, wh, gw, gh) = compute_grid_dims(bbox, scale);
+            return FetchPlan {
+                bbox: *bbox,
+                dims: (ww, wh, gw, gh),
+                pad: 0,
+                final_dims: (ww, wh),
+            };
+        };
+        let pad = self.pad_blocks;
+        let (pw, ph) = (world_w + 2 * pad, world_h + 2 * pad);
+        let (_, _, gw, gh) = compute_grid_dims_for_world(pw, ph);
+        if let (Some(proj), true) = (&self.mercator, gw == pw && gh == ph) {
+            // Providers sample a bbox edge to edge, so with one cell per block a
+            // bbox running from first to last block centre samples every block
+            // at its centre.
+            let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false) as f64
+                - pad as f64
+                + 0.5;
+            let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false) as f64
+                - pad as f64
+                + 0.5;
+            let (x1, z1) = (x0 + (pw - 1) as f64, z0 + (ph - 1) as f64);
+            if let Ok(centres) = LLBBox::new(
+                proj.lat_for_z(z1),
+                proj.lon_for_x(x0),
+                proj.lat_for_z(z0),
+                proj.lon_for_x(x1),
+            ) {
+                return FetchPlan {
+                    bbox: centres,
+                    dims: (pw, ph, gw, gh),
+                    pad,
+                    final_dims: (world_w, world_h),
+                };
+            }
+        }
+        let (_, _, gw, gh) = compute_grid_dims_for_world(world_w, world_h);
+        FetchPlan {
+            bbox: *bbox,
+            dims: (world_w, world_h, gw, gh),
+            pad: 0,
+            final_dims: (world_w, world_h),
+        }
+    }
+}
+
+struct FetchPlan {
+    bbox: LLBBox,
+    /// `(world_width, world_height, grid_width, grid_height)`
+    dims: (usize, usize, usize, usize),
+    pad: usize,
+    final_dims: (usize, usize),
+}
+
+impl FetchPlan {
+    fn grid_dims(&self) -> (usize, usize) {
+        (self.dims.2, self.dims.3)
+    }
 }
 
 /// Climatic snow line in metres by absolute latitude, piecewise-linear through
@@ -82,7 +249,11 @@ fn snow_threshold_for(ed: &ElevationData, lat_deg: f64, ground_level: i32) -> i3
             i32::MAX
         };
     }
-    (ground_level as f64 + (snowline - ed.min_height_m) * ed.blocks_per_meter).round() as i32
+    let affine = ElevationAffine {
+        ground_level,
+        ..ed.affine()
+    };
+    affine.y_for_metres(snowline).round() as i32
 }
 
 impl Ground {
@@ -108,6 +279,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -117,17 +289,37 @@ impl Ground {
         scale: f64,
         ground_level: i32,
         canopy_height: bool,
+        frame: &GroundFrame,
     ) -> Self {
-        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let plan = frame.fetch_plan(bbox, scale);
+        let fetch_bbox = plan.bbox;
+        let (grid_w, grid_h) = plan.grid_dims();
         // Canopy depends on neither, so it downloads alongside the land cover.
-        let (land_cover, canopy) = std::thread::scope(|s| {
-            let job =
-                canopy_height.then(|| s.spawn(|| canopy::fetch_canopy_data(bbox, grid_w, grid_h)));
-            let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+        let (mut land_cover, mut canopy) = std::thread::scope(|s| {
+            let job = canopy_height
+                .then(|| s.spawn(move || canopy::fetch_canopy_data(&fetch_bbox, grid_w, grid_h)));
+            let lc = land_cover::fetch_land_cover_data(&fetch_bbox, grid_w, grid_h);
             (lc, job.and_then(|h| h.join().ok()).flatten())
         });
         if land_cover.is_none() {
             eprintln!("Land cover fetch failed; generating flat ground without it.");
+        }
+        if frame.mercator.is_some() {
+            if let Some(lc) = land_cover.as_mut() {
+                lc.remap_rows_to_mercator(fetch_bbox.max().lat(), fetch_bbox.min().lat());
+            }
+            if let Some(c) = canopy.as_mut() {
+                c.remap_rows_to_mercator(fetch_bbox.max().lat(), fetch_bbox.min().lat());
+            }
+        }
+        let (world_w, world_h) = plan.final_dims;
+        if plan.pad > 0 {
+            if let Some(lc) = land_cover.as_mut() {
+                lc.crop(plan.pad, plan.pad, world_w, world_h);
+            }
+            if let Some(c) = canopy.as_mut() {
+                c.crop(plan.pad, plan.pad, world_w, world_h);
+            }
         }
         Self {
             elevation_enabled: false,
@@ -140,8 +332,9 @@ impl Ground {
             world_height: world_h,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
-            climate: crate::climate::Climate::classify(bbox),
+            climate: frame.climate(bbox),
             body: CelestialBody::Earth,
+            ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
         }
     }
 
@@ -164,6 +357,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -201,6 +395,7 @@ impl Ground {
                 blocks_per_meter: 1.0,
                 slope_correction: 1.0,
                 ground_level: 0,
+                soft_top: None,
             }),
             land_cover: None,
             canopy: None,
@@ -210,6 +405,7 @@ impl Ground {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -217,6 +413,7 @@ impl Ground {
     pub fn new_enabled(
         bbox: &LLBBox,
         scale: f64,
+        height_multiplier: f64,
         ground_level: i32,
         min_ground_level: i32,
         disable_height_limit: bool,
@@ -225,6 +422,7 @@ impl Ground {
         benchmark: bool,
         canopy_height: bool,
         body: CelestialBody,
+        frame: &GroundFrame,
     ) -> Self {
         let mut bench = crate::bench::Bench::new(benchmark);
         // Land cover, canopy and the snow line are Earth datasets keyed by
@@ -234,7 +432,10 @@ impl Ground {
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
-        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let plan = frame.fetch_plan(bbox, scale);
+        let requested_bbox = *bbox;
+        let bbox = &plan.bbox;
+        let (world_w, world_h, grid_w, grid_h) = plan.dims;
         // Canopy needs neither of the other two, so it downloads behind both.
         std::thread::scope(|scope| {
             let canopy_job = canopy_height
@@ -276,6 +477,7 @@ impl Ground {
             match fetch_elevation_data(
                 bbox,
                 scale,
+                height_multiplier,
                 water_floor,
                 sink_floor,
                 disable_height_limit,
@@ -283,9 +485,11 @@ impl Ground {
                 land_cover.as_mut(),
                 source_mode,
                 benchmark,
+                (world_w, world_h, grid_w, grid_h),
+                frame.affine,
             ) {
-                Ok(elevation_data) => {
-                    let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+                Ok(mut elevation_data) => {
+                    let lat = frame.anchor_lat(&requested_bbox);
                     // Must use the base the scaler actually settled on: snow_threshold_for
                     // inverts that exact affine, so a mismatched base misplaces every snow cap.
                     let base = elevation_data.ground_level;
@@ -294,7 +498,28 @@ impl Ground {
                     } else {
                         i32::MAX
                     };
-                    let canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
+                    let mut canopy = canopy_job.and_then(|h| h.join().ok()).flatten();
+                    // Providers sample equal latitude steps.
+                    if frame.mercator.is_some() {
+                        let (top, bottom) = (bbox.max().lat(), bbox.min().lat());
+                        elevation_data.remap_rows_to_mercator(top, bottom);
+                        if let Some(lc) = land_cover.as_mut() {
+                            lc.remap_rows_to_mercator(top, bottom);
+                        }
+                        if let Some(c) = canopy.as_mut() {
+                            c.remap_rows_to_mercator(top, bottom);
+                        }
+                    }
+                    let (final_w, final_h) = plan.final_dims;
+                    if plan.pad > 0 {
+                        elevation_data.crop(plan.pad, plan.pad, final_w, final_h);
+                        if let Some(lc) = land_cover.as_mut() {
+                            lc.crop(plan.pad, plan.pad, final_w, final_h);
+                        }
+                        if let Some(c) = canopy.as_mut() {
+                            c.crop(plan.pad, plan.pad, final_w, final_h);
+                        }
+                    }
                     Self {
                         elevation_enabled: true,
                         extended_ceiling: disable_height_limit
@@ -303,12 +528,16 @@ impl Ground {
                         elevation_data: Some(elevation_data),
                         land_cover,
                         canopy,
-                        world_width: world_w,
-                        world_height: world_h,
+                        world_width: final_w,
+                        world_height: final_h,
                         rotation_mask: None,
                         snow_threshold_y,
-                        climate: crate::climate::Climate::classify(bbox),
+                        climate: frame.climate(&requested_bbox),
                         body,
+                        ecoregions: body
+                            .is_earth()
+                            .then(|| frame.ecoregions(&requested_bbox, (final_w, final_h)))
+                            .flatten(),
                     }
                 }
                 Err(e) => {
@@ -337,8 +566,12 @@ impl Ground {
                         world_height: 0,
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
-                        climate: crate::climate::Climate::classify(bbox),
+                        climate: frame.climate(&requested_bbox),
                         body,
+                        ecoregions: body
+                            .is_earth()
+                            .then(|| frame.ecoregions(&requested_bbox, plan.final_dims))
+                            .flatten(),
                     }
                 }
             }
@@ -362,6 +595,21 @@ impl Ground {
     #[inline(always)]
     pub fn body(&self) -> CelestialBody {
         self.body
+    }
+
+    /// RESOLVE ecoregion under a ground coordinate, if the area has one there.
+    #[inline]
+    pub fn ecoregion(&self, coord: XZPoint) -> Option<Ecoregion> {
+        self.ecoregions.as_ref()?.at(coord)
+    }
+
+    pub fn ecoregion_map(&self) -> Option<&EcoMap> {
+        self.ecoregions.as_deref()
+    }
+
+    /// Replaces the ecoregion map after the ground was rotated.
+    pub fn set_ecoregion_map(&mut self, map: EcoMap) {
+        self.ecoregions = Some(Arc::new(map));
     }
 
     /// Returns whether land cover data is available
@@ -454,6 +702,13 @@ impl Ground {
             xzbbox,
             scale,
         );
+    }
+
+    /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
+    pub fn mark_beaches(&mut self) {
+        if let Some(lc) = self.land_cover.as_mut() {
+            land_cover::mark_beaches(lc);
+        }
     }
 
     /// Reclassify cells under bridges to the surrounding class, sinking new water.
@@ -642,12 +897,87 @@ impl Ground {
         // Saturate: pathological CLI input (e.g. very negative ground_level)
         // can push max - min past i32::MAX.
         let raw = max_val.saturating_sub(min_val);
-        let correction = self
-            .elevation_data
-            .as_ref()
-            .map(|d| d.slope_correction)
-            .unwrap_or(1.0);
+        let correction = match &self.elevation_data {
+            Some(d) => d.slope_correction * d.soft_top_stretch(min_val.saturating_add(raw / 2)),
+            None => 1.0,
+        };
         (raw as f64 * correction).round() as i32
+    }
+
+    /// `slope` from unrounded heights. Same units, but without the jitter of
+    /// whole-block steps, which flips columns along a contour between the
+    /// material tiers and draws stripes on hillsides. Also returns the rise across
+    /// the column along x and along z from the same samples, in blocks.
+    pub fn slope_and_gradient(&self, coord: XZPoint) -> (f64, (f64, f64)) {
+        if !self.elevation_enabled {
+            return (0.0, (0.0, 0.0));
+        }
+
+        const STEP: i32 = 4;
+        let samples = [
+            self.level_exact(XZPoint::new(coord.x + STEP, coord.z)),
+            self.level_exact(XZPoint::new(coord.x - STEP, coord.z)),
+            self.level_exact(XZPoint::new(coord.x, coord.z - STEP)),
+            self.level_exact(XZPoint::new(coord.x, coord.z + STEP)),
+        ];
+        let max_val = samples.iter().copied().fold(f64::MIN, f64::max);
+        let min_val = samples.iter().copied().fold(f64::MAX, f64::min);
+        let raw = max_val - min_val;
+        let slope = (raw * self.slope_units(((min_val + max_val) * 0.5).round() as i32)).max(0.0);
+        (slope, (samples[0] - samples[1], samples[3] - samples[2]))
+    }
+
+    /// How far the ground sits below its surroundings: the mean height eight
+    /// blocks out minus the column's own, from unrounded heights, in `slope`
+    /// units. Positive in hollows and gullies, negative on ridges and knolls.
+    pub fn convexity(&self, coord: XZPoint) -> f64 {
+        if !self.elevation_enabled {
+            return 0.0;
+        }
+
+        const RADIUS: i32 = 8;
+        const DIAGONAL: i32 = 6;
+        let ring = [
+            (RADIUS, 0),
+            (-RADIUS, 0),
+            (0, RADIUS),
+            (0, -RADIUS),
+            (DIAGONAL, DIAGONAL),
+            (DIAGONAL, -DIAGONAL),
+            (-DIAGONAL, DIAGONAL),
+            (-DIAGONAL, -DIAGONAL),
+        ];
+        let center = self.level_exact(coord);
+        let mean = ring
+            .iter()
+            .map(|&(dx, dz)| self.level_exact(XZPoint::new(coord.x + dx, coord.z + dz)))
+            .sum::<f64>()
+            / ring.len() as f64;
+        // Slope units count the rise over four blocks, the ring sits twice as far.
+        (mean - center) * 0.5 * self.slope_units(center.round() as i32)
+    }
+
+    /// Converts a block-space height difference into the `8 * tan(incline)`
+    /// units the slope thresholds are written in.
+    fn slope_units(&self, y: i32) -> f64 {
+        match &self.elevation_data {
+            Some(d) => d.slope_correction * d.soft_top_stretch(y),
+            None => 1.0,
+        }
+    }
+
+    pub fn elevation_affine(&self) -> Option<ElevationAffine> {
+        if !self.elevation_enabled {
+            return None;
+        }
+        self.elevation_data.as_ref().map(|d| d.affine())
+    }
+
+    /// Turns a height step in blocks over a run in blocks into the real incline.
+    pub(crate) fn slope_correction(&self) -> f64 {
+        self.elevation_data
+            .as_ref()
+            .map_or(1.0, |d| d.slope_correction)
     }
 
     /// Vertical blocks per real-world metre, 1.0 without elevation (or with zero
@@ -670,6 +1000,18 @@ impl Ground {
         let data: &ElevationData = self.elevation_data.as_ref().unwrap();
         let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
         self.interpolate_height(x_ratio, z_ratio, data)
+    }
+
+    /// `level` before rounding to a whole block.
+    #[inline(always)]
+    pub fn level_exact(&self, coord: XZPoint) -> f64 {
+        match &self.elevation_data {
+            Some(data) if self.elevation_enabled => {
+                let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
+                Self::interpolate_height_exact(x_ratio, z_ratio, data)
+            }
+            _ => f64::from(self.ground_level),
+        }
     }
 
     /// Returns the appropriate Y level for water placement.
@@ -752,6 +1094,11 @@ impl Ground {
     /// Bilinearly interpolates height value from the elevation grid
     #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
+        Self::interpolate_height_exact(x_ratio, z_ratio, data).round() as i32
+    }
+
+    #[inline(always)]
+    fn interpolate_height_exact(x_ratio: f64, z_ratio: f64, data: &ElevationData) -> f64 {
         let fx = x_ratio * (data.width - 1) as f64;
         let fz = z_ratio * (data.height - 1) as f64;
         let x0 = fx.floor() as usize;
@@ -773,8 +1120,7 @@ impl Ground {
         let v11 = data.heights[z1][x1] as f64;
         let lerp_top = v00 + (v10 - v00) * dx;
         let lerp_bot = v01 + (v11 - v01) * dx;
-        let result = lerp_top + (lerp_bot - lerp_top) * dz;
-        result.round() as i32
+        lerp_top + (lerp_bot - lerp_top) * dz
     }
 
     /// Replace the elevation grid with new rotated/transformed data.
@@ -892,6 +1238,7 @@ impl Ground {
                     land_cover::LC_WETLAND => Rgb([0x00, 0x96, 0xa0]),
                     land_cover::LC_MANGROVES => Rgb([0x00, 0xcf, 0x75]),
                     land_cover::LC_MOSS => Rgb([0xfa, 0xe6, 0xa0]),
+                    land_cover::LC_BEACH => Rgb([0xe8, 0xd8, 0x9c]),
                     _ => Rgb([0x00, 0x00, 0x00]),
                 };
                 img.put_pixel(x as u32, y as u32, color);
@@ -1001,11 +1348,13 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
     // Cleared before the scaler publishes its own: in the GUI a previous run's terrain top
     // would misgrade this world's map preview.
     crate::world_editor::common::set_terrain_top_y(args.ground_level);
+    let frame = GroundFrame::from_args(args, &bbox);
     if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
         let ground = Ground::new_enabled(
             &bbox,
             args.scale,
+            args.height_multiplier,
             args.ground_level,
             min_ground_level_for(args),
             args.disable_height_limit,
@@ -1014,11 +1363,13 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
             args.benchmark,
             args.canopy_height,
             args.body,
+            &frame,
         );
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
-        crate::world_editor::set_base_chunk_y(ground.base_level());
-        crate::world_editor::set_terrain_floor_y(ground.base_level());
+        let floor = area_floor_for(&ground, args);
+        crate::world_editor::set_base_chunk_y(floor);
+        crate::world_editor::set_terrain_floor_y(floor);
         // A grass plane around a lunar crater would be the most visible thing in it.
         crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
         if args.debug {
@@ -1029,19 +1380,36 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         return ground;
     }
     println!("{} Fetching land cover...", "[3/7]".bold());
-    let ground =
-        Ground::new_flat_with_land_cover(&bbox, args.scale, args.ground_level, args.canopy_height);
+    let ground = Ground::new_flat_with_land_cover(
+        &bbox,
+        args.scale,
+        args.ground_level,
+        args.canopy_height,
+        &frame,
+    );
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
     ground
 }
 
+/// The terrain base, except in a One World with the extended floor: its base is the
+/// lowest land on Earth, so bedrock, the filler plane and montane trees follow the
+/// area's own lowest point instead.
+pub(crate) fn area_floor_for(ground: &Ground, args: &Args) -> i32 {
+    match &ground.elevation_data {
+        Some(d) if args.one_world_run.is_some() && args.disable_height_limit => {
+            d.lowest_y().unwrap_or(ground.base_level())
+        }
+        _ => ground.base_level(),
+    }
+}
+
 /// Surface block for the out-of-bbox filler plane that borders the world.
 fn filler_block_for(body: CelestialBody) -> crate::block_definitions::Block {
     match body {
         CelestialBody::Earth => crate::block_definitions::GRASS_BLOCK,
-        CelestialBody::Moon => crate::block_definitions::END_STONE,
+        CelestialBody::Moon => crate::block_definitions::ANDESITE,
         CelestialBody::Mars => crate::block_definitions::RED_TERRACOTTA,
     }
 }
@@ -1123,6 +1491,7 @@ mod tests {
                 blocks_per_meter: 1.0,
                 slope_correction: 1.0,
                 ground_level: 0,
+                soft_top: None,
             }),
             land_cover: None,
             canopy: None,
@@ -1132,6 +1501,7 @@ mod tests {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
     }
 
@@ -1236,6 +1606,7 @@ mod tests {
             blocks_per_meter: bpm,
             slope_correction: 1.0,
             ground_level: 0,
+            soft_top: None,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
         assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);
@@ -1273,6 +1644,27 @@ mod tests {
         // Same hillside with the relief squeezed 4:1 into the vanilla ceiling.
         let compressed = scaled_ground(ramp(0.25), 0.25, 4.0);
         assert_eq!(compressed.slope(XZPoint::new(8, 8)), 8);
+    }
+
+    #[test]
+    fn slope_undoes_the_soft_top() {
+        // A 45 degree face at 3500 m, where the soft top squeezes it to about a quarter.
+        let affine = ElevationAffine::whole_earth(1.0, -2014, 2031);
+        let heights: Vec<Vec<f32>> = (0..17)
+            .map(|_| {
+                (0..17)
+                    .map(|x| affine.y_for_metres(3500.0 + x as f64) as f32)
+                    .collect()
+            })
+            .collect();
+        let mut g = scaled_ground(heights, 1.0, 1.0);
+        let d = g.elevation_data.as_mut().unwrap();
+        d.min_height_m = affine.min_height_m;
+        d.ground_level = affine.ground_level;
+        d.soft_top = affine.soft_top;
+        // Steep, as a real 45 degree face is, instead of the 2 the blocks alone show.
+        let slope = g.slope(XZPoint::new(8, 8));
+        assert!(slope > 4, "{slope}");
     }
 
     #[test]
@@ -1370,12 +1762,28 @@ pub(crate) mod test_support {
         world_height: usize,
     ) -> Ground {
         let (gw, gh) = (land_cover.width, land_cover.height);
+        ground_with_land_cover_and_heights(
+            land_cover,
+            vec![vec![0.0f32; gw]; gh],
+            world_width,
+            world_height,
+        )
+    }
+
+    /// `ground_with_land_cover_and_elevation` over the given terrain, in blocks.
+    pub(crate) fn ground_with_land_cover_and_heights(
+        land_cover: LandCoverData,
+        heights: Vec<Vec<f32>>,
+        world_width: usize,
+        world_height: usize,
+    ) -> Ground {
+        let (gw, gh) = (land_cover.width, land_cover.height);
         Ground {
             elevation_enabled: true,
             extended_ceiling: false,
             ground_level: 0,
             elevation_data: Some(ElevationData {
-                heights: vec![vec![0.0f32; gw]; gh],
+                heights,
                 width: gw,
                 height: gh,
                 world_width,
@@ -1384,6 +1792,7 @@ pub(crate) mod test_support {
                 blocks_per_meter: 1.0,
                 slope_correction: 1.0,
                 ground_level: 0,
+                soft_top: None,
             }),
             land_cover: Some(land_cover),
             canopy: None,
@@ -1393,6 +1802,109 @@ pub(crate) mod test_support {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
+            ecoregions: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use crate::projection::{llbbox_for_rect, snap_bbox_to_chunks, WebMercatorProjection};
+
+    fn projected_frame(pad: usize, w: usize, h: usize) -> GroundFrame {
+        GroundFrame {
+            world_dims: Some((w, h)),
+            mercator: Some(WebMercatorProjection::new(48.1372, 11.5755, 1.0)),
+            pad_blocks: pad,
+            affine: AffinePolicy::Fit,
+            climate_anchor: Some((48.1372, 11.5755)),
+        }
+    }
+
+    #[test]
+    fn the_local_frame_reads_everything_off_the_bbox() {
+        let bbox = LLBBox::new(48.13, 11.56, 48.14, 11.58).unwrap();
+        let plan = GroundFrame::local().fetch_plan(&bbox, 1.0);
+        let (ww, wh, gw, gh) = compute_grid_dims(&bbox, 1.0);
+        assert_eq!(plan.dims, (ww, wh, gw, gh));
+        assert_eq!(plan.pad, 0);
+        assert_eq!(plan.final_dims, (ww, wh));
+        assert_eq!(plan.bbox, bbox);
+    }
+
+    #[test]
+    fn a_padded_plan_fetches_the_rect_plus_the_margin_and_crops_back() {
+        let proj = WebMercatorProjection::new(48.1372, 11.5755, 1.0);
+        let req = LLBBox::new(48.13, 11.56, 48.14, 11.58).unwrap();
+        let (rect, eff) = snap_bbox_to_chunks(&proj, &req).unwrap();
+        let w = (rect.max_x() - rect.min_x() + 1) as usize;
+        let h = (rect.max_z() - rect.min_z() + 1) as usize;
+        let plan = projected_frame(100, w, h).fetch_plan(&eff, 1.0);
+        assert_eq!(plan.pad, 100);
+        assert_eq!(plan.dims, (w + 200, h + 200, w + 200, h + 200));
+        assert_eq!(plan.final_dims, (w, h));
+        let grown = XZBBox::rect_from_min_max(
+            rect.min_x() - 100,
+            rect.min_z() - 100,
+            rect.max_x() + 100,
+            rect.max_z() + 100,
+        )
+        .unwrap();
+        let outer = llbbox_for_rect(&proj, &grown).unwrap();
+        assert!(plan.bbox.min().lat() > outer.min().lat());
+        assert!(plan.bbox.max().lng() < outer.max().lng());
+        // First and last samples sit on the outermost block centres.
+        let x0 = proj.x_for_lon(plan.bbox.min().lng());
+        let x1 = proj.x_for_lon(plan.bbox.max().lng());
+        assert!((x0 - (grown.min_x() as f64 + 0.5)).abs() < 1e-6);
+        assert!((x1 - (grown.max_x() as f64 + 0.5)).abs() < 1e-6);
+        let z0 = proj.z_for_lat(plan.bbox.max().lat());
+        assert!((z0 - (grown.min_z() as f64 + 0.5)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn padding_is_dropped_when_the_grid_would_be_capped() {
+        let side = crate::elevation::MAX_ELEVATION_GRID_DIM;
+        let proj = WebMercatorProjection::new(0.0, 0.0, 1.0);
+        let rect = XZBBox::rect_from_min_max(0, 0, side as i32 - 1, 15).unwrap();
+        let eff = llbbox_for_rect(&proj, &rect).unwrap();
+        let plan = projected_frame(100, side, 16).fetch_plan(&eff, 1.0);
+        assert_eq!(plan.pad, 0);
+        assert_eq!(plan.final_dims, (side, 16));
+    }
+
+    #[test]
+    fn the_frame_follows_the_args() {
+        use clap::Parser;
+        let local =
+            crate::args::Args::parse_from(["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"]);
+        let bbox = LLBBox::new(1.0, 2.0, 3.0, 4.0).unwrap();
+        assert!(GroundFrame::from_args(&local, &bbox).world_dims.is_none());
+
+        let mercator = crate::args::Args::parse_from([
+            "arnis",
+            "--output-dir",
+            ".",
+            "--bbox",
+            "48.13,11.56,48.14,11.58",
+            "--projection",
+            "web_mercator",
+        ]);
+        let bbox = LLBBox::new(48.13, 11.56, 48.14, 11.58).unwrap();
+        let frame = GroundFrame::from_args(&mercator, &bbox);
+        assert!(frame.mercator.is_some());
+        assert_eq!(frame.pad_blocks, 0);
+        assert_eq!(frame.affine, AffinePolicy::Fit);
+        let (_, rect) = crate::projection::ProjectionSpec::from_args(&mercator)
+            .transformer(&bbox)
+            .unwrap();
+        assert_eq!(
+            frame.world_dims,
+            Some((
+                (rect.max_x() - rect.min_x() + 1) as usize,
+                (rect.max_z() - rect.min_z() + 1) as usize
+            ))
+        );
     }
 }

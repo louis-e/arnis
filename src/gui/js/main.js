@@ -9,6 +9,7 @@ import {
   cancelSettingsResetConfirm,
   flushSettingsStore,
 } from './settings-store.js';
+import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -47,11 +48,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  // Before the store restores values, so the cards follow the restored ones.
+  initSettingsLayout();
+  initDialogs();
   initVoxyLightingCoupling();
+  initCavesFillCoupling();
   refreshHeightLimitRow();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  // The store's restore fired the toggle's change event before the save path
+  // and the world name were known; read the world once more with both in hand.
+  refreshOneWorldState();
   resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
@@ -117,84 +125,10 @@ async function applyLocalization(localization) {
   const localizationElements = {
     "#start-button > span[data-localize='start_generation']": "start_generation",
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
-    "h2[data-localize='customization_settings']": "customization_settings",
-    "span[data-localize='world_scale']": "world_scale",
-    "span[data-localize='world_scale_objects_skipped']": "world_scale_objects_skipped",
-    "span[data-localize='custom_bounding_box']": "custom_bounding_box",
+    "input[id='world-name-input']": "placeholder_world_name",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
-    "span[data-localize='language']": "language",
-    "span[data-localize='generation_mode']": "generation_mode",
-    "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
-    "option[data-localize='mode_geo_only']": "mode_geo_only",
-    "option[data-localize='mode_terrain_only']": "mode_terrain_only",
-    "span[data-localize='terrain']": "terrain",
-    "span[data-localize='interior']": "interior",
-    "span[data-localize='fillground']": "fillground",
-    "span[data-localize='legacy_trees']": "legacy_trees",
-    "span[data-localize='overture']": "overture",
-    "span[data-localize='three_dmr']": "three_dmr",
-    "span[data-localize='disable_height_limit']": "disable_height_limit",
-    "span[data-localize='aws_only_elevation']": "aws_only_elevation",
-    "span[data-localize='bake_lighting']": "bake_lighting",
-    "span[data-localize='voxy_lod']": "voxy_lod",
-    "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
-    "span[data-localize='map_theme']": "map_theme",
-    "span[data-localize='custom_map_source']": "custom_map_source",
-    "span[data-localize='java_save_path']": "java_save_path",
-    "span[data-localize='bedrock_save_path']": "bedrock_save_path",
-    "span[data-localize='luanti_save_path']": "luanti_save_path",
-    "span[data-localize='rotation_angle']": "rotation_angle",
-    "span[data-localize='canopy_height']": "canopy_height",
-    "span[data-localize='max_tree_size']": "max_tree_size",
-    "button[data-localize='tree_size_small']": "tree_size_small",
-    "button[data-localize='tree_size_medium']": "tree_size_medium",
-    "button[data-localize='tree_size_big']": "tree_size_big",
-    "button[data-localize='tree_size_tall']": "tree_size_tall",
-    "button[data-localize='tree_size_giant']": "tree_size_giant",
-    "span[data-localize='gamemode']": "gamemode",
-    "button[data-localize='gamemode_survival']": "gamemode_survival",
-    "button[data-localize='gamemode_creative']": "gamemode_creative",
-    "button[data-localize='gamemode_spectator']": "gamemode_spectator",
-    "span[data-localize='world_time']": "world_time",
-    "span[data-localize='map_item']": "map_item",
-    "span[data-localize='custom_world_name']": "custom_world_name",
-    "span[data-localize='signage']": "signage",
-    "span[data-localize='mapillary_token']": "mapillary_token",
-    "span[data-localize='facade_precompute']": "facade_precompute",
-    "span[data-localize='facade_mode']": "facade_mode",
-    "button[data-localize='facade_mode_blocks']": "facade_mode_blocks",
-    "button[data-localize='facade_mode_photos']": "facade_mode_photos",
-    "div[data-localize='facade_mode_java_only']": "facade_mode_java_only",
-    "button[data-localize='signage_none']": "signage_none",
-    "button[data-localize='signage_basic']": "signage_basic",
-    "button[data-localize='signage_full']": "signage_full",
-    "div[data-localize='settings_section_generation']": "settings_section_generation",
-    "div[data-localize='settings_section_facades']": "settings_section_facades",
-    "span[data-localize='facade_source']": "facade_source",
-    "span[data-localize='facade_detail']": "facade_detail",
-    "button[data-localize='facade_detail_standard']": "facade_detail_standard",
-    "button[data-localize='facade_detail_high']": "facade_detail_high",
-    "button[data-localize='facade_source_off']": "facade_source_off",
-    "button[data-localize='facade_source_preset']": "facade_source_preset",
-    "button[data-localize='facade_source_mapillary']": "facade_source_mapillary",
-    "span[data-localize='enable_luanti']": "enable_luanti",
-    "div[data-localize='settings_section_world']": "settings_section_world",
-    "div[data-localize='settings_section_map']": "settings_section_map",
-    "div[data-localize='settings_section_application']": "settings_section_application",
-    "button[data-localize='facade_precompute_button']": "facade_precompute_button",
-    "span[data-localize='clear_tile_cache']": "clear_tile_cache",
-    "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
-    // Row label only; settings-store.js owns the button text.
-    "span[data-localize='reset_all_settings']": "reset_all_settings",
     ".footer-link": "footer_text",
-    "button[data-localize='license_and_credits']": "license_and_credits",
-    "h2[data-localize='license_and_credits']": "license_and_credits",
-    "button[data-localize='version_info']": "version_info",
-    "h2[data-localize='update_modal_title']": "update_modal_title",
-    "div[data-localize='update_modal_download_note']": "update_modal_download_note",
-    "button[data-localize='update_view_on_github']": "update_view_on_github",
-    "button[data-localize='update_download']": "update_download",
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
@@ -205,6 +139,14 @@ async function applyLocalization(localization) {
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
+
+  // Every text on the settings page and in the dialogs carries its key, and
+  // several appear more than once (a section name is in the sidebar and on the
+  // section itself), so they are localized in one pass rather than selector by
+  // selector.
+  document.querySelectorAll("#settings-modal [data-localize], .dialog [data-localize]").forEach((element) => {
+    localizeElement(localization, { element }, element.dataset.localize);
+  });
 
   // settings-store.js creates these buttons and owns their text.
   localizeSettingsStore(localization);
@@ -218,11 +160,14 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+  renderOneWorldStatus();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
       const w = frame.contentWindow;
       if (w && typeof w.renderBboxHint === 'function') w.renderBboxHint();
+      // The toolbar's labels and the search placeholder, same reason.
+      if (w && typeof w.refreshMapToolLabels === 'function') w.refreshMapToolLabels();
     } catch (_) {
       // A frame that is not ours or not loaded yet; the hint renders itself
       // once it is.
@@ -259,6 +204,10 @@ async function initFooter() {
     footerElement.textContent = footerText
       .replace("{year}", currentYear)
       .replace("{version}", version);
+
+    // The About section of the settings page repeats the same line.
+    const aboutVersion = document.getElementById("about-version");
+    if (aboutVersion) aboutVersion.textContent = footerElement.textContent;
   }
 }
 
@@ -329,7 +278,11 @@ async function checkForUpdates() {
 }
 
 function openUpdateModal(opts = {}) {
-  const showDownload = opts.showDownload !== false;
+  const info = latestReleaseInfo;
+  // Version info opened from Settings only reads, unless the release it shows
+  // is newer than this build: then the download is offered there as well.
+  const showDownload =
+    opts.showDownload !== false || !!(info && info.release && info.isNewer);
   const modal = document.getElementById("update-modal");
   if (!modal) return;
   const titleEl = document.getElementById("update-modal-title");
@@ -341,8 +294,12 @@ function openUpdateModal(opts = {}) {
   if (downloadBtn) downloadBtn.style.display = showDownload ? "" : "none";
   if (downloadNote) downloadNote.style.display = showDownload ? "" : "none";
 
-  const info = latestReleaseInfo;
+  const metaEl = document.getElementById("update-modal-meta");
+
   if (!info || !info.release) {
+    titleEl.textContent =
+      (window.localization && window.localization.update_modal_title) || "What's new in Arnis";
+    if (metaEl) metaEl.replaceChildren();
     const fallbackMsg =
       (window.localization && window.localization.update_fetch_failed) ||
       "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly.";
@@ -354,7 +311,9 @@ function openUpdateModal(opts = {}) {
   const rel = info.release;
 
   titleEl.textContent = (rel.name && rel.name.trim()) || rel.tag_name || "Latest release";
+  renderReleaseMeta(metaEl, info, rel);
   bodyEl.innerHTML = renderMarkdown(rel.body || "");
+  bodyEl.scrollTop = 0;
   bodyEl.querySelectorAll("a[href]").forEach((a) => {
     const href = a.getAttribute("href");
     if (!href) return;
@@ -367,7 +326,9 @@ function openUpdateModal(opts = {}) {
   if (downloadBtn && showDownload) {
     const asset = pickAssetForPlatform(rel.assets || [], currentPlatform);
     downloadBtn.disabled = false;
-    downloadBtn.textContent =
+    // Only the label: the button also holds its icon.
+    const label = downloadBtn.querySelector(".dialog-button-label") || downloadBtn;
+    label.textContent =
       (window.localization && window.localization.update_download) || "Download";
     downloadBtn.dataset.downloadUrl = asset ? asset.browser_download_url : rel.html_url;
   }
@@ -391,15 +352,106 @@ async function openVersionInfoModal() {
   openUpdateModal({ showDownload: false });
 }
 
-function closeUpdateModal() {
-  const modal = document.getElementById("update-modal");
-  if (modal) modal.style.display = "none";
+// The line under the release title: its date, then the version, or
+// "3.2.0 → 3.3.0" when it is newer than this build. A localized date and
+// numbers only, so nothing here needs a translation.
+function renderReleaseMeta(metaEl, info, rel) {
+  if (!metaEl) return;
+  metaEl.replaceChildren();
+  const parts = [];
+  const date = formatReleaseDate(rel.published_at);
+  if (date) parts.push(document.createTextNode(date));
+
+  const plain = (v) => String(v || "").replace(/^v/i, "");
+  const remote = plain(info.remoteVersion || rel.tag_name);
+  if (info.isNewer && info.localVersion && remote) {
+    const version = document.createElement("span");
+    const newer = document.createElement("span");
+    newer.className = "is-new";
+    newer.textContent = remote;
+    version.append(`${plain(info.localVersion)} → `, newer);
+    parts.push(version);
+  } else if (remote) {
+    parts.push(document.createTextNode(remote));
+  }
+
+  parts.forEach((part, i) => {
+    if (i > 0) metaEl.append(" · ");
+    metaEl.append(part);
+  });
 }
 
+// The interface language as a locale for dates and numbers, rather than the
+// system one.
+function interfaceLocale() {
+  const lang = localStorage.getItem("arnis-language") || navigator.language;
+  // Arnis files Ukrainian under "ua"; the language tag is "uk".
+  return lang === "ua" ? "uk" : lang;
+}
+
+function formatReleaseDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat(interfaceLocale(), { dateStyle: "long" }).format(date);
+  } catch (_) {
+    return date.toDateString();
+  }
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById("update-modal");
+  if (modal) hideModal(modal);
+}
+
+// Where focus returns to once a dialog closes.
+const modalReturnFocus = new WeakMap();
+
+// Shows a dialog's backdrop and moves focus onto the dialog, so the keyboard
+// acts on it rather than on whatever is behind.
 function showModal(modal) {
+  if (modal.style.display !== "flex") {
+    modalReturnFocus.set(modal, document.activeElement);
+  }
   modal.style.display = "flex";
   modal.style.justifyContent = "center";
   modal.style.alignItems = "center";
+  const dialog = modal.querySelector(".dialog");
+  if (dialog) dialog.focus({ preventScroll: true });
+}
+
+function hideModal(modal) {
+  modal.style.display = "none";
+  const back = modalReturnFocus.get(modal);
+  modalReturnFocus.delete(modal);
+  if (back && document.contains(back) && typeof back.focus === "function") {
+    back.focus({ preventScroll: true });
+  }
+}
+
+// A click on the backdrop closes the dialog, but only when the press started
+// there too: selecting text inside and letting go outside must not close it.
+function closeOnBackdrop(modal, close) {
+  let pressedOnBackdrop = false;
+  modal.addEventListener("pointerdown", (event) => {
+    pressedOnBackdrop = event.target === modal;
+  });
+  modal.addEventListener("click", (event) => {
+    if (pressedOnBackdrop && event.target === modal) close();
+    pressedOnBackdrop = false;
+  });
+}
+
+// License, version info and the 3D preview are read-only, so a click beside
+// them may close them. The consent dialog is left alone: it wants an answer.
+function initDialogs() {
+  const license = document.getElementById("license-modal");
+  const update = document.getElementById("update-modal");
+  const preview3d = document.getElementById("preview3d-modal");
+  if (license) closeOnBackdrop(license, () => window.closeLicense());
+  if (update) closeOnBackdrop(update, closeUpdateModal);
+  if (preview3d) closeOnBackdrop(preview3d, () => window.closePreview3D && window.closePreview3D());
 }
 
 function openUpdateInBrowser() {
@@ -539,10 +591,18 @@ function refreshFacadeSourceRows() {
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
-  const grey = (id, live) => {
+  // A row that belongs to another source is hidden: it has nothing to say
+  // until that source is picked, and the whole Mapillary block greyed out
+  // under Off only buried the rest of the page. A row that belongs to this
+  // source but cannot act yet (no token, wrong format) is greyed instead, so
+  // it is still there to explain itself.
+  const grey = (id, shown, live) => {
     const el = document.getElementById(id);
     const row = el && el.closest('.settings-row');
-    if (row) row.classList.toggle('settings-row-unavailable', !live);
+    if (row) {
+      row.style.display = shown ? '' : 'none';
+      row.classList.toggle('settings-row-unavailable', !live);
+    }
     if (el) {
       el.querySelectorAll('.segment, input, button').forEach((c) => {
         c.disabled = !live;
@@ -550,11 +610,13 @@ function refreshFacadeSourceRows() {
       if (el.tagName === 'INPUT' || el.tagName === 'BUTTON') el.disabled = !live;
     }
   };
-  grey('mapillary-token', source === 'mapillary');
-  grey('facade-mode-group', source === 'mapillary' && !!getMapillaryToken());
+  const mapillary = source === 'mapillary';
+  const token = !!getMapillaryToken();
+  grey('mapillary-token', mapillary, mapillary);
+  grey('facade-mode-group', mapillary, mapillary && token);
   // Panel resolution, so it means nothing where no panels are hung.
-  grey('facade-detail-group', source !== 'off' && java);
-  grey('precompute-facades-button', source === 'mapillary' && !!getMapillaryToken());
+  grey('facade-detail-group', source !== 'off', source !== 'off' && java);
+  grey('precompute-facades-button', mapillary, mapillary && token);
 
   const notice = document.getElementById('facade-java-only-notice');
   if (notice) notice.style.display = java ? 'none' : '';
@@ -640,6 +702,7 @@ function setCelestialBody(body) {
   // the world format and the stored source too.
   refreshHeightLimitRow();
   refreshFacadeRows();
+  refreshOneWorldState();
 
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
   const timeSlider = document.getElementById('world-time-slider');
@@ -676,6 +739,9 @@ function registerMessageEvent() {
 
     // Handle angle measurement from the map polyline tool
     if (event.data && event.data.type === 'angleMeasured') {
+      // A One World is aligned to real coordinates; the tool is disabled on
+      // the map too, this only covers a measurement already in flight.
+      if (isOneWorldEnabled()) return;
       var angle = event.data.angle;
       var rotationInput = document.getElementById("rotation-angle-input");
       if (rotationInput) {
@@ -957,13 +1023,24 @@ function setupProgressListener() {
         progressInfo.style.color = "#fa7878";
         setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
-        setWorldNameLabel("");
+        if (lastRunOneWorld) {
+          // The world keeps its name; the status line carries the reason.
+          setWorldNameLabel(oneWorldDisplayName());
+          if (isOneWorldEnabled()) setOneWorldStatus(message.replace(/^Error!\s*/, ''), 'error');
+        } else {
+          setWorldNameLabel("");
+        }
         resetEta();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
         resetEta();
+        // The world just grew by one area: reload its status and overlays.
+        if (lastRunOneWorld) {
+          oneWorldOverlayKey = null;
+          refreshOneWorldState();
+        }
         // A generation just built facades into the same cache, so the preview
         // has something new to say.
         window.arnisPreview3D?.refreshFacades();
@@ -1063,41 +1140,49 @@ function initSettings() {
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
 
-  // Open settings modal
+  // Where focus goes back to once the page closes.
+  let focusBeforeSettings = null;
+
+  // Open the settings page
   function openSettings() {
+    focusBeforeSettings = document.activeElement;
     settingsModal.style.display = "flex";
-    settingsModal.style.justifyContent = "center";
-    settingsModal.style.alignItems = "center";
+    syncSettingsLayout();
+    // Focus moves onto the page, so Tab and the arrow keys act on it rather
+    // than on the map behind it.
+    settingsModal.focus({ preventScroll: true });
     // The caches grow with every generation, so the number the panel shows
     // has to be read when the panel opens; measuring it once at startup left
     // it stale for the whole session.
     refreshCacheSize();
   }
 
-  // Close settings modal
+  // Close the settings page
   function closeSettings() {
     settingsModal.style.display = "none";
     // Webview teardown events are not guaranteed, so commit here.
     flushSettingsStore();
     cancelSettingsResetConfirm();
+    if (focusBeforeSettings && typeof focusBeforeSettings.focus === "function") {
+      focusBeforeSettings.focus({ preventScroll: true });
+    }
+    focusBeforeSettings = null;
   }
 
-  // Close settings and license modals on escape key
+  // Escape closes the topmost dialog only. License and version info open on
+  // top of the settings page, so closing them returns to it.
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      if (settingsModal.style.display === "flex") {
-        closeSettings();
-      }
-      
-      const licenseModal = document.getElementById("license-modal");
-      if (licenseModal && licenseModal.style.display === "flex") {
-        closeLicense();
-      }
+    if (event.key !== "Escape") return;
 
-      const updateModal = document.getElementById("update-modal");
-      if (updateModal && updateModal.style.display === "flex") {
-        closeUpdateModal();
-      }
+    const licenseModal = document.getElementById("license-modal");
+    const updateModal = document.getElementById("update-modal");
+    const licenseOpen = licenseModal && licenseModal.style.display === "flex";
+    const updateOpen = updateModal && updateModal.style.display === "flex";
+
+    if (licenseOpen) closeLicense();
+    if (updateOpen) closeUpdateModal();
+    if (!licenseOpen && !updateOpen && settingsModal.style.display === "flex") {
+      closeSettings();
     }
   });
 
@@ -1117,6 +1202,7 @@ function initSettings() {
   }
 
   slider.addEventListener("input", refreshScaleDisplay);
+  slider.addEventListener("input", refreshBboxSelectionInfo);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -1126,11 +1212,33 @@ function initSettings() {
   });
   refreshScaleDisplay();
 
+  const heightSlider = document.getElementById("height-multiplier-slider");
+  const heightValue = document.getElementById("height-multiplier-value");
+  const refreshHeightDisplay = () => {
+    heightValue.textContent = parseFloat(heightSlider.value).toFixed(2) + "\u00d7";
+  };
+  heightSlider.addEventListener("input", refreshHeightDisplay);
+  heightSlider.addEventListener("dblclick", () => {
+    heightSlider.value = 1;
+    heightSlider.dispatchEvent(new Event("input", { bubbles: true }));
+    heightSlider.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  refreshHeightDisplay();
+
   // Game mode segmented control
   const gamemodeGroup = document.getElementById("gamemode-group");
   gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // World type segmented control
+  const worldTypeGroup = document.getElementById("world-type-group");
+  worldTypeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      worldTypeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -1206,6 +1314,9 @@ function initSettings() {
 
   // Custom world name editor (Java only), gated by its Settings toggle
   initCustomWorldNameToggle();
+
+  // One World: a persistent world every area extends (Java only)
+  initOneWorld();
 
   // Save path setting
   initSavePathSetting();
@@ -1370,6 +1481,7 @@ function initSettings() {
   telemetryToggle.addEventListener("change", () => {
     const isEnabled = telemetryToggle.checked;
     localStorage.setItem(telemetryKey, isEnabled ? 'true' : 'false');
+    syncTelemetryConsent();
   });
 
 
@@ -1379,37 +1491,44 @@ function initSettings() {
     const licenseContent = document.getElementById("license-content");
 
     licenseContent.innerHTML = licenseText;
-    licenseModal.style.display = "flex";
-    licenseModal.style.justifyContent = "center";
-    licenseModal.style.alignItems = "center";
+    licenseContent.scrollTop = 0;
+    showModal(licenseModal);
 
-    const threeDmrBlock =
-      `<p><b>3D Model Repository (3DMR):</b></p>` +
-      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
-    licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
+    // The credits only known at runtime go into their own spot in the
+    // "Models, Textures and Fonts" list. Held by reference, so a slow answer
+    // from an earlier opening lands in that opening's detached copy rather
+    // than doubling up in this one.
+    const runtime = licenseContent.querySelector("#license-runtime-credits") || licenseContent;
+    const credit = (title, body) =>
+      `<div class="credit"><h4>${title}</h4>${body}</div>`;
+
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "3D Model Repository (3DMR)",
+      `<p>Landmark models from <a href="https://3dmr.eu" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`
+    ));
 
     // The premade facade set. All CC0, so attribution is a courtesy rather than
     // a condition, but the sources are named because someone should be able to
     // find them and because it says plainly that the pixels are free to ship.
-    const facadeTextureBlock =
-      `<p><b>Preset Building Facade Textures:</b></p>` +
-      `<p style="font-size: 0.9em;">The photographs hung on buildings by the Preset Facades setting, all released under ` +
-      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" style="color: inherit;" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
-      `<ul style="padding-left: 20px; font-size: 0.9em;">` +
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "Preset Building Facade Textures",
+      `<p>The photographs hung on buildings by the Preset Facades setting, all released under ` +
+      `<a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>:</p>` +
+      `<ul>` +
       `<li>Urban building, apartment and shop front photographs by <b>Scouser</b>, from ` +
-      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" style="color: inherit;" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
+      `<a href="https://opengameart.org/content/free-urban-textures-buildings-apartments-shop-fronts" target="_blank" rel="noopener noreferrer">OpenGameArt</a></li>` +
       `<li>Tiling facade materials from <b>TextureCan</b>: ` +
-      `<a href="https://www.texturecan.com/details/315/" style="color: inherit;" target="_blank" rel="noopener noreferrer">315</a>, ` +
-      `<a href="https://www.texturecan.com/details/316/" style="color: inherit;" target="_blank" rel="noopener noreferrer">316</a>, ` +
-      `<a href="https://www.texturecan.com/details/357/" style="color: inherit;" target="_blank" rel="noopener noreferrer">357</a>, ` +
-      `<a href="https://www.texturecan.com/details/360/" style="color: inherit;" target="_blank" rel="noopener noreferrer">360</a>, ` +
-      `<a href="https://www.texturecan.com/details/563/" style="color: inherit;" target="_blank" rel="noopener noreferrer">563</a></li>` +
-      `</ul>`;
-    licenseContent.insertAdjacentHTML("beforeend", facadeTextureBlock);
+      `<a href="https://www.texturecan.com/details/315/" target="_blank" rel="noopener noreferrer">315</a>, ` +
+      `<a href="https://www.texturecan.com/details/316/" target="_blank" rel="noopener noreferrer">316</a>, ` +
+      `<a href="https://www.texturecan.com/details/357/" target="_blank" rel="noopener noreferrer">357</a>, ` +
+      `<a href="https://www.texturecan.com/details/360/" target="_blank" rel="noopener noreferrer">360</a>, ` +
+      `<a href="https://www.texturecan.com/details/563/" target="_blank" rel="noopener noreferrer">563</a></li>` +
+      `</ul>`
+    ));
 
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
     const link = (url, text) =>
-      `<a href="${esc(url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+      `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
 
     // Mapillary imagery is CC BY-SA, and the licence is on the pixels: a world
     // built from street photographs has to name the photographers. The source
@@ -1437,45 +1556,44 @@ function initSettings() {
         ? ` ${unnamed} of these name only the photograph: their records carry the image id but not the uploader name. Each link opens the image, which names its uploader.`
         : "";
       mapillaryList =
-        `<p style="font-size: 0.9em;">Photographs used by the last generation:${note}</p>` +
-        `<ul style="padding-left: 20px; font-size: 0.9em;">${lines}</ul>`;
+        `<p>Photographs used by the last generation:${note}</p>` +
+        `<ul>${lines}</ul>`;
     } else {
       mapillaryList =
-        `<p style="font-size: 0.9em;">The photographs a generation used are listed here once it has run.</p>`;
+        `<p>The photographs a generation used are listed here once it has run.</p>`;
     }
-    const mapillaryBlock =
-      `<p><b>Building Facades (Mapillary):</b></p>` +
-      `<p style="font-size: 0.9em;">The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
+    runtime.insertAdjacentHTML("beforeend", credit(
+      "Building Facades (Mapillary)",
+      `<p>The Mapillary facade source measures wall textures and colours from street-level photographs on ` +
       `${link("https://www.mapillary.com", "Mapillary")}, licensed ` +
       `${link("https://creativecommons.org/licenses/by-sa/4.0/", "CC BY-SA 4.0")}. ` +
       `Share-alike applies to anything you publish that carries them.</p>` +
-      mapillaryList;
-    licenseContent.insertAdjacentHTML("beforeend", mapillaryBlock);
+      mapillaryList
+    ));
 
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
       if (Array.isArray(rows) && rows.length > 0) {
         const items = rows.map(r => {
           const lic = r.license_url
-            ? `<a href="${esc(r.license_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
+            ? `<a href="${esc(r.license_url)}" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
             : esc(r.license);
-          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
+          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
         }).join("");
-        const block =
-          `<p><b>Bundled 3D Models (Wikimedia Commons via Wikidata P4896):</b></p>` +
-          `<p style="font-size: 0.9em;">Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
-          `<ul style="padding-left: 20px;">${items}</ul>`;
-        licenseContent.insertAdjacentHTML("beforeend", block);
+        runtime.insertAdjacentHTML("beforeend", credit(
+          "Bundled 3D Models (Wikimedia Commons via Wikidata P4896)",
+          `<p>Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
+          `<ul>${items}</ul>`
+        ));
       }
     } catch (e) {
       console.warn("Failed to load 3D model attributions:", e);
     }
-
   }
 
   function closeLicense() {
     const licenseModal = document.getElementById("license-modal");
-    licenseModal.style.display = "none";
+    hideModal(licenseModal);
   }
 
   window.openLicense = openLicense;
@@ -1511,6 +1629,28 @@ function initVoxyLightingCoupling() {
   });
 }
 
+// Caves are carved into the filled ground, so turning them on turns Fill Ground
+// on, and turning Fill Ground off takes the caves with it.
+function initCavesFillCoupling() {
+  const caves = document.getElementById('caves-toggle');
+  const fill = document.getElementById('fillground-toggle');
+  if (!caves || !fill) return;
+
+  // Dispatch so the settings store persists the knock-on change too.
+  const set = (el, value) => {
+    if (el.checked === value) return;
+    el.checked = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  caves.addEventListener('change', () => {
+    if (caves.checked) set(fill, true);
+  });
+  fill.addEventListener('change', () => {
+    if (!fill.checked) set(caves, false);
+  });
+}
+
 function initWorldFormatToggle() {
   initLuantiExperimentalToggle();
 
@@ -1535,12 +1675,16 @@ function initLuantiExperimentalToggle() {
   const bedrockBtn = document.getElementById('format-bedrock');
   if (!toggle || !luantiBtn) return;
 
+  const luantiPathRow = document.getElementById('luanti-save-path-row');
+
   const applyRightmost = (enabled) => {
     luantiBtn.style.display = enabled ? '' : 'none';
     luantiBtn.classList.toggle('format-toggle-btn--rightmost', enabled);
     if (bedrockBtn) {
       bedrockBtn.classList.toggle('format-toggle-btn--rightmost', !enabled);
     }
+    // A save path for a format nobody can pick is only noise.
+    if (luantiPathRow) luantiPathRow.style.display = enabled ? '' : 'none';
   };
 
   const enabled = isLuantiEnabled();
@@ -1559,7 +1703,7 @@ function initLuantiExperimentalToggle() {
 
 function setWorldFormat(format) {
   if (!VALID_FORMATS.includes(format)) return;
-  if (format === 'luanti' && !isLuantiEnabled()) return;
+  if (format === 'luanti' && (!isLuantiEnabled() || isOneWorldToggleOn())) return;
 
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
@@ -1595,12 +1739,24 @@ function refreshHeightLimitRow(format) {
   }
 }
 
+// Bedrock and Luanti keep their own flat generators, so the choice only means
+// something for Java. Greyed rather than hidden, like the other format gates.
+function refreshWorldTypeRow(format) {
+  const group = document.getElementById('world-type-group');
+  if (!group) return;
+  const java = (format || selectedWorldFormat) === 'java';
+  group.classList.toggle('segmented-disabled', !java);
+  const row = group.closest('.settings-row');
+  if (row) row.classList.toggle('settings-row-unavailable', !java);
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
   const luantiBtn = document.getElementById('format-luanti');
 
   refreshHeightLimitRow(format);
+  refreshWorldTypeRow(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -1616,6 +1772,8 @@ function updateFormatToggleUI(format) {
     if (luantiBtn) luantiBtn.classList.add('format-active');
     worldPath = "";
   }
+  // The label names the last Java world only while that is still the target.
+  if (!worldPath) worldLabelName = "";
 
   // The facade panels are Java entities, so the mode control changes with the
   // format. Called from here so a format picked before the settings modal is
@@ -1624,10 +1782,19 @@ function updateFormatToggleUI(format) {
   // Custom names are Java-only; hide/show the pencil and re-derive the
   // label preview whenever the active format changes.
   refreshWorldNameEditUI();
+  // One World is Java-only too: its status and pins follow the format.
+  refreshOneWorldState();
 }
 
 // Expose to window for onclick handlers
 window.setWorldFormat = setWorldFormat;
+
+// The backend only reports crashes and errors while it holds a consent of true,
+// so push the stored answer to it at startup and on every change.
+function syncTelemetryConsent() {
+  const consent = localStorage.getItem('telemetry-consent') === 'true';
+  Promise.resolve(invoke('gui_set_telemetry_consent', { consent })).catch(() => {});
+}
 
 // Telemetry consent (first run only)
 function initTelemetryConsent() {
@@ -1639,15 +1806,15 @@ function initTelemetryConsent() {
 
   if (existing === null) {
     // First run: ask for consent
-    modal.style.display = 'flex';
-    modal.style.justifyContent = 'center';
-    modal.style.alignItems = 'center';
+    showModal(modal);
   }
+  syncTelemetryConsent();
 
   // Expose handlers
   window.acceptTelemetry = () => {
     localStorage.setItem(key, 'true');
-    modal.style.display = 'none';
+    hideModal(modal);
+    syncTelemetryConsent();
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -1659,7 +1826,8 @@ function initTelemetryConsent() {
 
   window.rejectTelemetry = () => {
     localStorage.setItem(key, 'false');
-    modal.style.display = 'none';
+    hideModal(modal);
+    syncTelemetryConsent();
     // Update settings toggle to reflect the consent
     const telemetryToggle = document.getElementById('telemetry-toggle');
     if (telemetryToggle) {
@@ -2009,6 +2177,9 @@ function initTooltips() {
     }
     icon.addEventListener('mouseenter', () => show(icon));
     icon.addEventListener('mouseleave', hide);
+    // The icon sits inside the setting's <label>, whose click would otherwise
+    // flip the switch it belongs to.
+    icon.addEventListener('click', (e) => e.preventDefault());
     icon.addEventListener('focus', () => show(icon));
     icon.addEventListener('blur', hide);
     // Escape closes the tooltip while it's focused.
@@ -2047,7 +2218,12 @@ const SAVE_PATHS = {
     inputId: 'save-path-input',
     browseId: 'save-path-browse',
     get: () => savePath,
-    set: (value) => { savePath = value; },
+    set: (value) => {
+      const changed = savePath !== value;
+      savePath = value;
+      // The One World lives under the saves path, so a new path is a new world.
+      if (changed && typeof refreshOneWorldState === 'function') refreshOneWorldState();
+    },
   },
   bedrock: {
     storageKey: 'arnis-bedrock-save-path',
@@ -2165,6 +2341,7 @@ function handleBboxInput() {
     if (input === "") {
       // Empty input - revert to map selection if available
       customBBoxValid = false;
+      bboxInputError = false;
       selectedBBox = mapSelectedBBox;
       
       // Clear the info text only if no map selection exists
@@ -2218,6 +2395,7 @@ function handleBboxInput() {
 
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
+        bboxInputError = false;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
 
@@ -2234,6 +2412,7 @@ function handleBboxInput() {
         } else {
           selectedBBox = mapSelectedBBox;
         }
+        bboxInputError = true;
         setBboxSelectionInfo(bboxSelectionInfo, "error_coordinates_out_of_range", "#fecc44");
       }
     } else {
@@ -2245,6 +2424,7 @@ function handleBboxInput() {
       } else {
         selectedBBox = mapSelectedBBox;
       }
+      bboxInputError = true;
       setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
     // The Precompute button next to this field turns on the selection, and the
@@ -2266,23 +2446,12 @@ function handleBboxInput() {
 const BODY_RADIUS_M = { earth: 6371000, moon: 1737400, mars: 3396000 };
 
 function calculateBBoxSize(lat1, lng1, lat2, lng2) {
-  // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
   // Real ground, not an Earth-sized overestimate: a lunar box reads 13x too large.
   const R = BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth;
-
-  const latDistance = toRad(lat2 - lat1);
-  const lngDistance = toRad(lng2 - lng1);
-
-  const a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(lngDistance / 2) * Math.sin(lngDistance / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  // Width and height of the box
-  const height = R * latDistance;
-  const width = R * lngDistance;
-
+  // Width at the middle latitude, as the world is built and as the CLI's area_km2 measures.
+  const height = R * toRad(lat2 - lat1);
+  const width = R * toRad(lng2 - lng1) * Math.cos(toRad((lat1 + lat2) / 2));
   return Math.abs(width * height);
 }
 
@@ -2295,15 +2464,17 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-// Selection-size warnings, in true square metres of ground. Measured timings and
-// world sizes, square selections:
-//   Earth 1km2 18s/19MB | 4km2 25s/70MB | 9km2 39s/154MB | 25km2 47s/415MB
+// Selection-size warnings, in square metres of ground at world scale 1. Measured
+// timings, peak memory and world sizes, square selections over central Munich:
+//   Earth 9km2 8s/1.1GB/146MB | 25km2 20s/1.7GB/399MB | 85km2 66s/3.6GB/1.3GB
+//         150km2 111s/5.1GB/2.3GB, so about 1.6GB plus 0.023GB per km2
 //   Moon  2deg 5s/4MB | 5deg 9s/16MB | 10deg 21s/36MB | 20deg 68s/144MB
 //   Mars  2deg 5s/4MB | 5deg 9s/16MB | 10deg 20s/36MB | 20deg 51s/100MB
-// Earth keeps its long-standing tiers, which guard memory more than the clock.
-// The Moon and Mars tiers land near one, three and nine minutes.
+// The Earth tiers guard memory more than the clock: about 4GB, 6GB (fine on an
+// 8GB machine) and 13GB. The Moon and Mars tiers land near one, three and nine
+// minutes.
 const AREA_THRESHOLDS = {
-  earth: { extensive: 44e6, large: 85e6, extreme: 500e6 },
+  earth: { extensive: 100e6, large: 200e6, extreme: 500e6 },
   moon: { extensive: 3e11, large: 1e12, extreme: 3e12 },
   mars: { extensive: 1.5e12, large: 5e12, extreme: 1.5e13 }
 };
@@ -2311,6 +2482,7 @@ const AREA_THRESHOLDS = {
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
+let bboxInputError = false;  // The coordinate field holds input that did not validate
 
 /**
  * Displays the appropriate bbox size status message based on area thresholds
@@ -2319,6 +2491,7 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
+  selectedSize *= earthScaleFactor();
   if (selectedSize > t.extreme) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
   } else if (selectedSize > t.large) {
@@ -2330,9 +2503,17 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   }
 }
 
-// Re-runs the size status, e.g. after a body switch changes which tiers apply.
+// Blocks, and so memory, grow with the square of the scale; Moon and Mars use a fixed one.
+function earthScaleFactor() {
+  if (selectedCelestialBody !== 'earth') return 1;
+  const s = parseFloat(document.getElementById("scale-value-slider")?.value);
+  return isFinite(s) && s > 0 ? s * s : 1;
+}
+
+// Re-runs the size status, e.g. after a body switch or scale change moves the tier.
 function refreshBboxSelectionInfo() {
-  if (!mapSelectedBBox) return;
+  // An error about the typed coordinates stays until the field is fixed.
+  if (!mapSelectedBBox || bboxInputError) return;
   const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
   displayBboxSizeStatus(
     document.getElementById("bbox-selection-info"),
@@ -2361,6 +2542,7 @@ function displayBboxInfoText(bboxText) {
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
+  bboxInputError = false;
 
   // Reset rotation when bbox changes
   if (typeof window.updateRotation === 'function') {
@@ -2413,15 +2595,36 @@ function displayBboxInfoText(bboxText) {
 
 let worldPath = "";
 
+// Name of the world the last run made (or is making), as the label shows it.
+// A pending custom name is drawn over it without replacing it.
+let worldLabelName = "";
+
 function setWorldNameLabel(text) {
+  worldLabelName = text || "";
+  renderWorldNameLabel();
+}
+
+function renderWorldNameLabel() {
   const label = document.getElementById('world-name-label');
   if (!label) return;
+  const pending = pendingWorldName();
+  const text = pending || worldLabelName;
+  label.toggleAttribute('data-pending', !!pending);
+  label.title = pending
+    ? (window.localization && window.localization.placeholder_world_name) || 'Name of the next world'
+    : '';
   if (text) {
     label.removeAttribute('data-placeholder');
     label.textContent = text;
   } else {
     label.setAttribute('data-placeholder', 'true');
-    localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+    // Before the first localization pass there is nothing to look the text up
+    // in, and that pass fills the placeholder itself. Looking it up here
+    // instead fetched English, which arrived after the translation and
+    // overwrote it.
+    if (window.localization) {
+      localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+    }
   }
 }
 
@@ -2432,16 +2635,11 @@ function basenameFromPath(p) {
 
 /* Custom world name (Java only, opt-in via Settings > Custom World Name) */
 
-// Holds the user's typed name across edits/generations. Only ever sent to
-// the backend while the setting is enabled; the backend sanitizes and
-// de-duplicates it, so this is just what the pencil editor shows/pre-fills.
+// Name for the next Java world, "" for the default "Arnis World N". The pencil
+// only ever names the world the next Start creates, never one already on disk,
+// and that world uses the name up. Only sent while the setting is on; the
+// backend sanitizes it and appends " (2)" if the folder is taken.
 let customWorldName = "";
-
-// True from the moment the user commits an edit until the next world is
-// actually created. Lets the label preview the pending name even when
-// `worldPath` still points at a previously generated world (otherwise that
-// stale real name would keep showing instead of what was just typed).
-let worldNameEditedSinceLastCreate = false;
 
 function isCustomWorldNameFeatureEnabled() {
   const toggle = document.getElementById('custom-world-name-toggle');
@@ -2451,28 +2649,24 @@ function isCustomWorldNameFeatureEnabled() {
   return !!(toggle && toggle.checked) && selectedWorldFormat === 'java';
 }
 
+// The name the next Start will ask for, if any.
+function pendingWorldName() {
+  if (isOneWorldEnabled() || !isCustomWorldNameFeatureEnabled()) return "";
+  return customWorldName;
+}
+
 function canEditCustomWorldName() {
-  // While a generation or rename is in flight, the world directory may be
-  // actively written to on disk, so renaming/recreating it out from under
-  // that write would corrupt or orphan the in-progress world.
+  // While a generation is in flight the next world's name is already taken
+  // from here, so an edit would only look like it applied to the running one.
   return isCustomWorldNameFeatureEnabled() && generationButtonEnabled;
 }
 
-// Shows the pending custom name (if any) unless a world already exists for
-// the current pending state, in which case its real (possibly
-// de-duplicated) name from the backend is authoritative.
 function updateWorldNamePreviewLabel() {
-  if (worldPath && !worldNameEditedSinceLastCreate) return;
-  if (!isCustomWorldNameFeatureEnabled()) {
-    // Feature off: fall back to showing whatever world actually exists
-    // rather than blanking a real name to "".
-    setWorldNameLabel(basenameFromPath(worldPath));
+  if (isOneWorldEnabled()) {
+    setWorldNameLabel(oneWorldDisplayName());
     return;
   }
-  // customWorldName can be "" right after committing a blank edit on an
-  // already-existing world; that must keep showing the real name, not the
-  // "no world generated yet" placeholder (setWorldNameLabel("") would).
-  setWorldNameLabel(customWorldName || basenameFromPath(worldPath));
+  renderWorldNameLabel();
 }
 
 // Cancels any in-progress edit and shows/hides the pencil to match the
@@ -2483,6 +2677,9 @@ function refreshWorldNameEditUI() {
   const editButton = document.getElementById('world-name-edit-button');
   if (editButton) {
     editButton.style.display = canEditCustomWorldName() ? '' : 'none';
+    const title = isOneWorldEnabled() ? 'Choose the One World to extend or create' : 'Name the next world';
+    editButton.title = title;
+    editButton.setAttribute('aria-label', title);
   }
   updateWorldNamePreviewLabel();
 }
@@ -2514,14 +2711,9 @@ function startWorldNameEdit(event) {
   const editButton = document.getElementById('world-name-edit-button');
   if (!label || !input) return;
 
-  // Prefer an in-progress edit; otherwise pre-fill with the currently shown
-  // real world name (if any) so re-opening the editor lets the user rename
-  // an already-created world instead of starting from blank. Falling back
-  // to the directory basename keeps the input useful even if the label was
-  // not yet refreshed from disk.
-  const visibleName = label.hasAttribute('data-placeholder') ? '' : label.textContent.trim();
-  input.value = customWorldName || visibleName || basenameFromPath(worldPath);
-  input.dataset.originalValue = input.value;
+  // Starts from the pending name, never from the last world's: that world
+  // keeps its name, and asking for it again would only get "Name (2)".
+  input.value = isOneWorldEnabled() ? oneWorldFolderName() : customWorldName;
   label.style.display = 'none';
   if (editButton) editButton.style.display = 'none';
   input.style.display = '';
@@ -2530,14 +2722,9 @@ function startWorldNameEdit(event) {
   input.select();
 }
 
-// Commits the pencil editor. If no world has been created yet, this just
-// remembers the name for the next generation. If a world already exists,
-// this actually renames it on disk right away via gui_rename_world (moves
-// the directory + updates level.dat), rather than silently deferring to
-// "the next Start Generation click creates a new, separate world" - that
-// would leave the already-generated world's real name unchanged, which is
-// not what "rename" means to someone editing an existing world's name.
-async function commitWorldNameEdit() {
+// Commits the pencil editor: remembers the name for the next generation, or
+// clears it when left blank. Nothing on disk changes.
+function commitWorldNameEdit() {
   const input = document.getElementById('world-name-input');
   if (!input) {
     endWorldNameEdit();
@@ -2545,51 +2732,22 @@ async function commitWorldNameEdit() {
   }
   const newName = input.value.trim();
 
-  if (worldPath) {
-    const currentName = input.dataset.originalValue || basenameFromPath(worldPath);
+  // One World: the name picks the world to extend or create. Nothing is renamed.
+  if (isOneWorldEnabled()) {
+    setOneWorldName(newName === ONE_WORLD_DEFAULT_NAME ? '' : newName);
     endWorldNameEdit();
-    if (!newName || newName === currentName) return; // nothing to rename
-
-    // Block Start Generation (and re-opening the editor) for the brief
-    // window the rename is in flight, so nothing else can read/write
-    // worldPath while it's changing.
-    setGenerationButtonEnabled(false);
-    try {
-      const renamedPath = await invoke('gui_rename_world', { worldPath: worldPath, worldName: newName });
-      if (renamedPath) {
-        worldPath = renamedPath;
-        customWorldName = basenameFromPath(renamedPath);
-        setWorldNameLabel(customWorldName);
-      }
-    } catch (error) {
-      console.error("Failed to rename world:", error);
-      // Nothing changed on disk; make sure the label still reflects that,
-      // and say why. A rename fails for reasons the user can act on - the
-      // world is open in Minecraft holding a lock on the directory, or the
-      // name was left with nothing usable after sanitization - and silently
-      // snapping the old name back just reads as a dead pencil.
-      setWorldNameLabel(currentName);
-      const progressInfo = document.getElementById('progress-info');
-      if (progressInfo) {
-        localizeElement(window.localization, { element: progressInfo }, "failed_to_rename_world");
-        progressInfo.style.color = "#fa7878";
-      }
-    } finally {
-      setGenerationButtonEnabled(true);
-    }
+    refreshOneWorldState();
     return;
   }
 
   customWorldName = newName;
-  worldNameEditedSinceLastCreate = true;
   endWorldNameEdit();
 }
 
 // Hiding the still-focused input fires a native blur (asynchronously, after
 // the handler that hid it has returned), which would otherwise re-enter the
 // blur handler below and re-run the edit we are already finishing: Escape
-// would re-commit what it just discarded, and Enter would fire a second
-// gui_rename_world against the path the first one is still renaming.
+// would re-commit what it just discarded.
 // endWorldNameEdit() sets this whenever it hides a focused input.
 let suppressNextWorldNameBlur = false;
 
@@ -2657,6 +2815,395 @@ function initCustomWorldNameToggle() {
   }
 
   refreshWorldNameEditUI();
+}
+
+/* One World (Java only, opt-in via Settings > One World) */
+
+const ONE_WORLD_DEFAULT_NAME = "Arnis One World";
+const ONE_WORLD_NAME_KEY = 'arnis-one-world-name';
+// The user's own values of the settings a One World pins, put back when the
+// mode goes off.
+const ONE_WORLD_RESTORE_KEY = 'arnis-one-world-restore';
+// Last answer from gui_one_world_info, null while the mode is off.
+let oneWorldInfo = null;
+let oneWorldPinned = false;
+// Key the map overlays were last sent for.
+let oneWorldOverlayKey = null;
+// Whether the running (or last) generation was a One World run.
+let lastRunOneWorld = false;
+let oneWorldName = localStorage.getItem(ONE_WORLD_NAME_KEY) || '';
+
+function isOneWorldAvailable() {
+  return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
+}
+
+function isOneWorldToggleOn() {
+  const toggle = document.getElementById('one-world-toggle');
+  return !!(toggle && toggle.checked);
+}
+
+// Luanti cannot hold a One World, so it is off while the toggle is.
+function refreshLuantiAvailability() {
+  const on = isOneWorldToggleOn();
+  const luantiBtn = document.getElementById('format-luanti');
+  if (luantiBtn) {
+    luantiBtn.disabled = on;
+    luantiBtn.title = on ? 'Luanti is not available in One World mode' : '';
+  }
+  setSettingsRowAvailable('enable-luanti-toggle', !on);
+  if (on && selectedWorldFormat === 'luanti') setWorldFormat('java');
+}
+
+function isOneWorldEnabled() {
+  const toggle = document.getElementById('one-world-toggle');
+  return !!(toggle && toggle.checked) && isOneWorldAvailable();
+}
+
+// The name picks the world; it never renames one on disk.
+function oneWorldFolderName() {
+  if (isCustomWorldNameFeatureEnabled() && oneWorldName) return oneWorldName;
+  return ONE_WORLD_DEFAULT_NAME;
+}
+
+function oneWorldDisplayName() {
+  if (oneWorldInfo && oneWorldInfo.world_path) return basenameFromPath(oneWorldInfo.world_path);
+  return oneWorldFolderName();
+}
+
+function setOneWorldName(name) {
+  oneWorldName = name;
+  if (name) localStorage.setItem(ONE_WORLD_NAME_KEY, name);
+  else localStorage.removeItem(ONE_WORLD_NAME_KEY);
+}
+
+function oneWorldText(key, fallback, vars) {
+  let text = (window.localization && window.localization[key]) || fallback;
+  for (const k in (vars || {})) text = text.split('{' + k + '}').join(vars[k]);
+  return text;
+}
+
+function setOneWorldStatus(text, tone) {
+  const el = document.getElementById('one-world-status');
+  if (!el) return;
+  el.style.display = text ? '' : 'none';
+  el.textContent = text || '';
+  el.classList.toggle('is-warn', tone === 'warn');
+  el.classList.toggle('is-error', tone === 'error');
+}
+
+function renderOneWorldStatus() {
+  const info = oneWorldInfo;
+  if (!isOneWorldEnabled() || !info) return;
+  const name = oneWorldDisplayName();
+  if (!savePath) {
+    setOneWorldStatus(oneWorldText('one_world_no_save_path', 'Set the Minecraft saves folder in Settings first'), 'error');
+    return;
+  }
+  if (info.foreign) {
+    setOneWorldStatus(oneWorldText('one_world_foreign', 'Folder "{name}" exists but is not a One World', { name }), 'error');
+    return;
+  }
+  if (!info.exists) {
+    setOneWorldStatus(oneWorldText('one_world_will_create', 'One World "{name}" will be created', { name }));
+    return;
+  }
+  let text = oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}', { name, count: info.area_count });
+  let tone = '';
+  if (info.locked) {
+    text += ' \u00b7 ' + oneWorldText('one_world_locked', 'open in Minecraft');
+    tone = 'warn';
+  }
+  const mode = document.getElementById('generation-mode-select');
+  const wantsTerrain = mode ? mode.value !== 'geo-only' : true;
+  if (typeof info.terrain === 'boolean' && info.terrain !== wantsTerrain) {
+    text += ' \u00b7 ' + oneWorldText(info.terrain ? 'one_world_needs_terrain' : 'one_world_needs_flat',
+      info.terrain ? 'this world uses terrain' : 'this world is flat');
+    tone = 'warn';
+  }
+  setOneWorldStatus(text, tone);
+}
+
+function setSettingsRowAvailable(inputId, available) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.disabled = !available;
+  const row = input.closest('.settings-row');
+  if (row) {
+    row.classList.toggle('settings-row-unavailable', !available);
+    row.toggleAttribute('inert', !available);
+  }
+}
+
+function readOneWorldRestore() {
+  try {
+    return JSON.parse(localStorage.getItem(ONE_WORLD_RESTORE_KEY) || '{}') || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function writeOneWorldRestore(record) {
+  if (Object.keys(record).length) localStorage.setItem(ONE_WORLD_RESTORE_KEY, JSON.stringify(record));
+  else localStorage.removeItem(ONE_WORLD_RESTORE_KEY);
+}
+
+function controlValue(el) {
+  return el.type === 'checkbox' ? el.checked : parseFloat(el.value);
+}
+
+function writeControl(el, value) {
+  if (controlValue(el) === value) return;
+  if (el.type === 'checkbox') el.checked = !!value;
+  else el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// Pins a control to the world's value, remembering the user's own once.
+// `null` puts the user's value back.
+function pinControl(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const record = readOneWorldRestore();
+  if (value === null) {
+    if (id in record) {
+      writeControl(el, record[id]);
+      delete record[id];
+      writeOneWorldRestore(record);
+    }
+    return;
+  }
+  if (!(id in record)) {
+    record[id] = controlValue(el);
+    writeOneWorldRestore(record);
+  }
+  writeControl(el, value);
+}
+
+function restoreNaturalRows() {
+  setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('height-multiplier-slider', true);
+  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('voxy-lod-toggle', true);
+  setSettingsRowAvailable('disable-height-limit-toggle', true);
+  refreshHeightLimitRow();
+}
+
+// Rotation stays 0, the Voxy cache off and the build height extended while
+// the mode is on; scale, build height and elevation source follow the world
+// once it exists.
+function applyOneWorldPins(info) {
+  oneWorldPinned = true;
+  const rotationInput = document.getElementById('rotation-angle-input');
+  if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
+  setSettingsRowAvailable('rotation-angle-input', false);
+  setSettingsRowAvailable('voxy-lod-toggle', false);
+  postToMap({ type: 'setRotationLocked', locked: true });
+
+  const exists = !!(info && info.exists);
+  pinControl('scale-value-slider', exists && typeof info.scale === 'number' ? info.scale : null);
+  pinControl('height-multiplier-slider',
+    exists && typeof info.height_multiplier === 'number' ? info.height_multiplier : null);
+  pinControl('disable-height-limit-toggle',
+    exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
+  restoreNaturalRows();
+  setSettingsRowAvailable('voxy-lod-toggle', false);
+  setSettingsRowAvailable('disable-height-limit-toggle', false);
+  if (exists) {
+    setSettingsRowAvailable('scale-value-slider', false);
+    setSettingsRowAvailable('height-multiplier-slider', false);
+    setSettingsRowAvailable('aws-only-elevation-toggle', false);
+  }
+}
+
+function releaseOneWorldPins() {
+  if (!oneWorldPinned) return;
+  oneWorldPinned = false;
+  pinControl('scale-value-slider', null);
+  pinControl('height-multiplier-slider', null);
+  pinControl('disable-height-limit-toggle', null);
+  setSettingsRowAvailable('rotation-angle-input', true);
+  restoreNaturalRows();
+  postToMap({ type: 'setRotationLocked', locked: false });
+}
+
+function clearOneWorldOverlays() {
+  if (oneWorldOverlayKey === null) return;
+  oneWorldOverlayKey = null;
+  postToMap({ type: 'oneWorldOverlays', areas: [] });
+}
+
+function isWorldNameEditing() {
+  const input = document.getElementById('world-name-input');
+  return !!(input && input.style.display !== 'none');
+}
+
+async function fetchOneWorldInfo() {
+  return invoke('gui_one_world_info', { savePath: savePath, worldName: oneWorldFolderName() });
+}
+
+// Re-reads the world the next area joins. Call whenever something that picks
+// the world changes: toggle, name, save path, format, body, window focus.
+let oneWorldRefreshSeq = 0;
+async function refreshOneWorldState() {
+  const seq = ++oneWorldRefreshSeq;
+  refreshLuantiAvailability();
+  setSettingsRowAvailable('one-world-toggle', isOneWorldAvailable());
+  if (!isOneWorldEnabled()) {
+    const wasOn = oneWorldInfo !== null;
+    oneWorldInfo = null;
+    releaseOneWorldPins();
+    setOneWorldStatus('');
+    clearOneWorldOverlays();
+    if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
+    if (!isWorldNameEditing()) refreshWorldNameEditUI();
+    return;
+  }
+  if (!savePath) {
+    oneWorldInfo = { exists: false, foreign: false };
+    applyOneWorldPins(oneWorldInfo);
+    renderOneWorldStatus();
+    return;
+  }
+  let info;
+  try {
+    info = await fetchOneWorldInfo();
+  } catch (error) {
+    if (seq !== oneWorldRefreshSeq) return;
+    console.error('Failed to read the One World:', error);
+    oneWorldInfo = null;
+    setOneWorldStatus(String(error), 'error');
+    clearOneWorldOverlays();
+    return;
+  }
+  if (seq !== oneWorldRefreshSeq) return;
+  oneWorldInfo = info;
+  applyOneWorldPins(info);
+  if (!isWorldNameEditing()) refreshWorldNameEditUI();
+  renderOneWorldStatus();
+
+  if (!info.exists || info.foreign) {
+    clearOneWorldOverlays();
+    return;
+  }
+  const key = info.world_path + '|' + info.revision + '|' + info.area_count;
+  if (key === oneWorldOverlayKey) return;
+  try {
+    const overlays = await invoke('gui_get_one_world_overlays', { worldPath: info.world_path });
+    if (seq !== oneWorldRefreshSeq) return;
+    oneWorldOverlayKey = key;
+    postToMap({
+      type: 'oneWorldOverlays',
+      world_path: info.world_path,
+      areas: (overlays && overlays.areas) || [],
+      origin_lat: overlays ? overlays.origin_lat : 0,
+      origin_lon: overlays ? overlays.origin_lon : 0,
+      scale: overlays ? overlays.scale : 1
+    });
+  } catch (error) {
+    console.error('Failed to load the One World overlays:', error);
+  }
+}
+
+// Resolves when the user answers the overlap question.
+function confirmOneWorldOverlap(count) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('one-world-confirm-modal');
+    const text = document.getElementById('one-world-confirm-text');
+    const ok = document.getElementById('one-world-confirm-ok');
+    const cancel = document.getElementById('one-world-confirm-cancel');
+    const close = document.getElementById('one-world-confirm-close');
+    if (!modal || !text || !ok || !cancel) {
+      resolve(true);
+      return;
+    }
+    text.textContent = oneWorldText('one_world_confirm_text',
+      '{count} chunks of this area already exist in the world. They are generated again, and anything built there in Minecraft is replaced.',
+      { count });
+    const finish = (answer) => {
+      hideModal(modal);
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
+      if (close) close.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(answer);
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (event) => { if (event.key === 'Escape') finish(false); };
+    ok.addEventListener('click', onOk);
+    cancel.addEventListener('click', onCancel);
+    if (close) close.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    showModal(modal);
+    ok.focus();
+  });
+}
+
+// Checks the world right before a run. Returns false when the run must not start.
+async function prepareOneWorldRun() {
+  if (!savePath) {
+    renderOneWorldStatus();
+    return false;
+  }
+  let info;
+  try {
+    info = await fetchOneWorldInfo();
+  } catch (error) {
+    setOneWorldStatus(String(error), 'error');
+    return false;
+  }
+  oneWorldInfo = info;
+  applyOneWorldPins(info);
+  renderOneWorldStatus();
+  if (info.foreign) return false;
+  if (info.locked) {
+    setOneWorldStatus(oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}',
+      { name: oneWorldDisplayName(), count: info.area_count }) + ' \u00b7 ' +
+      oneWorldText('one_world_locked', 'open in Minecraft'), 'error');
+    return false;
+  }
+  if (!info.exists) return true;
+  let overlap = 0;
+  try {
+    overlap = await invoke('gui_one_world_overlap', {
+      savePath: savePath, worldName: oneWorldFolderName(), bboxText: selectedBBox
+    });
+  } catch (error) {
+    setOneWorldStatus(String(error), 'error');
+    return false;
+  }
+  return overlap > 0 ? confirmOneWorldOverlap(overlap) : true;
+}
+
+function postToMap(message) {
+  const mapFrame = document.querySelector('.map-container');
+  if (mapFrame && mapFrame.contentWindow) {
+    mapFrame.contentWindow.postMessage(message, '*');
+  }
+}
+
+function initOneWorld() {
+  const toggle = document.getElementById('one-world-toggle');
+  if (!toggle) return;
+  // Also fires when the settings store restores the value.
+  toggle.addEventListener('change', refreshOneWorldState);
+  const mode = document.getElementById('generation-mode-select');
+  if (mode) mode.addEventListener('change', renderOneWorldStatus);
+  const nameToggle = document.getElementById('custom-world-name-toggle');
+  if (nameToggle) nameToggle.addEventListener('change', () => { if (isOneWorldEnabled()) refreshOneWorldState(); });
+  // Minecraft may have opened or closed the world meanwhile.
+  window.addEventListener('focus', () => {
+    if (isOneWorldEnabled() && generationButtonEnabled) refreshOneWorldState();
+  });
+  // A reloaded map iframe comes back without overlays.
+  const mapFrame = getMapFrame();
+  if (mapFrame) {
+    mapFrame.addEventListener('load', () => {
+      oneWorldOverlayKey = null;
+      if (isOneWorldEnabled()) refreshOneWorldState();
+    });
+  }
 }
 
 /**
@@ -2728,23 +3275,29 @@ async function startGeneration() {
     // Past every synchronous refusal, so from here the click is a real start.
     resetProgressUi(STARTING_MESSAGE);
 
-    // Auto-create world for Java format
-    if (selectedWorldFormat === 'java') {
+    const oneWorld = isOneWorldEnabled();
+    if (oneWorld && !(await prepareOneWorldRun())) {
+      const info = document.getElementById('progress-info');
+      if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
+      return;
+    }
+    lastRunOneWorld = oneWorld;
+
+    // Auto-create world for Java format (a One World is resolved by the backend)
+    if (selectedWorldFormat === 'java' && !oneWorld) {
       if (!savePath) {
         console.warn("Cannot create world: save path not set");
         return;
       }
       try {
-        const requestedName = isCustomWorldNameFeatureEnabled() && customWorldName ? customWorldName : null;
+        const requestedName = pendingWorldName() || null;
         const worldName = await invoke('gui_create_world', { savePath: savePath, worldName: requestedName });
         if (worldName) {
           worldPath = worldName;
-          worldNameEditedSinceLastCreate = false;
-          const createdName = basenameFromPath(worldName);
-          setWorldNameLabel(createdName);
-          // Pre-fill the editor with the real (possibly de-duplicated) name,
-          // so editing again starts from what was actually created.
-          if (requestedName) customWorldName = createdName;
+          // Used up: the world after this one gets the default name again
+          // unless the pencil names it too.
+          if (requestedName) customWorldName = "";
+          setWorldNameLabel(basenameFromPath(worldName));
         }
       } catch (error) {
         handleWorldSelectionError(error);
@@ -2752,8 +3305,10 @@ async function startGeneration() {
       }
     }
 
-    // Clear any existing world preview since we're generating a new one
-    notifyWorldChanged();
+    // Clear any existing world preview since we're generating a new one.
+    // A One World keeps its areas on the map; the new one joins them at the end.
+    if (!oneWorld) notifyWorldChanged();
+    if (oneWorld) setWorldNameLabel(oneWorldFolderName());
 
     // Get the map iframe reference
     const mapFrame = document.querySelector('.map-container');
@@ -2774,6 +3329,7 @@ async function startGeneration() {
 
     var interior = document.getElementById("interior-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
+    var caves = document.getElementById("caves-toggle").checked;
     var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
     var canopy_height = document.getElementById("canopy-height-toggle").checked;
     var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
@@ -2787,6 +3343,14 @@ async function startGeneration() {
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    var heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
+    if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
+      if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
+      if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
+      if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
+    } else if (oneWorld) {
+      disable_height_limit = true;
+    }
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
     var ground_level = -62;
@@ -2798,10 +3362,12 @@ async function startGeneration() {
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
 
     // Get rotation angle
-    var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value) || 0;
+    var rotationAngle = oneWorld ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
 
     var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
     var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
+    var worldTypeBtn = document.querySelector("#world-type-group .segment.active");
+    var worldType = worldTypeBtn ? worldTypeBtn.dataset.worldType : "void";
     var mapItem = document.getElementById("map-item-toggle").checked;
     var signageBtn = document.querySelector("#signage-group .segment.active");
     var signage = signageBtn ? signageBtn.dataset.signage : "basic";
@@ -2812,15 +3378,17 @@ async function startGeneration() {
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
-        selectedWorld: worldPath,
+        selectedWorld: oneWorld ? savePath : worldPath,
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
         worldScale: scale,
+        heightMultiplier: heightMultiplier,
         groundLevel: ground_level,
         terrainEnabled: terrain,
         skipOsmObjects: skipOsmObjects,
         interiorEnabled: interior,
         fillgroundEnabled: fill_ground,
+        cavesEnabled: caves,
         legacyTreesEnabled: legacy_trees,
         maxTreeSize: maxTreeSize,
         canopyHeightEnabled: canopy_height,
@@ -2837,6 +3405,7 @@ async function startGeneration() {
         rotationAngle: rotationAngle,
         gamemode: gamemode,
         worldTime: worldTime,
+        worldType: worldType,
         mapItem: mapItem,
         signage: signage,
         mapillaryToken: getMapillaryToken(),
@@ -2844,7 +3413,9 @@ async function startGeneration() {
         facadeMode: getEffectiveFacadeMode(),
         buildingFacadesEnabled: getBuildingFacadesEnabled(),
         facadeDetail: getFacadeDetail(),
-        celestialBodyName: selectedCelestialBody
+        celestialBodyName: selectedCelestialBody,
+        oneWorld: oneWorld,
+        oneWorldName: oneWorld ? oneWorldFolderName() : ""
     });
 
     console.log("Generation process started.");
@@ -2879,6 +3450,8 @@ let currentWorldMapData = null;
  * Called when the backend emits the map-preview-ready event
  */
 async function showWorldPreviewButton() {
+  // A One World shows every area at once, reloaded when the run reports Done.
+  if (lastRunOneWorld) return;
   // Try to load the world map data
   await loadWorldMapData();
 

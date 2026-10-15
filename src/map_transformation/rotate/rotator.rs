@@ -262,6 +262,21 @@ fn rotate_ground_data(
     sin_r: f64,
     cos_r: f64,
 ) {
+    let new_world_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
+    let new_world_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
+
+    if let Some(map) = ground.ecoregion_map() {
+        let rotated = map.resample(new_world_w, new_world_h, |x, z| {
+            let (wx, wz) = ((xzbbox.min_x() + x) as f64, (xzbbox.min_z() + z) as f64);
+            let (ox, oz) = rotate_point(wx, wz, cx, cz, -sin_r, cos_r);
+            (
+                ox.round() as i32 - orig_min_x,
+                oz.round() as i32 - orig_min_z,
+            )
+        });
+        ground.set_ecoregion_map(rotated);
+    }
+
     // Nothing to rotate without elevation, land cover or canopy; bail before cloning.
     // Flat land-cover mode still needs its grid rotated so the sea stays aligned.
     if !ground.elevation_enabled && !ground.has_land_cover() && !ground.has_canopy() {
@@ -269,9 +284,6 @@ fn rotate_ground_data(
     }
 
     let original_ground = ground.clone();
-
-    let new_world_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
-    let new_world_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
 
     // Cap the rotation grid using the same constant as elevation
     // fetching (`crate::elevation::MAX_ELEVATION_GRID_DIM`). Having two

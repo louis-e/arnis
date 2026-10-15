@@ -1,5 +1,6 @@
 use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::water_depth::{carve_water_column, BigWaterField};
@@ -19,6 +20,7 @@ pub fn generate_water_area_from_way(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     surfaces: &StillWaterSurfaces,
 ) {
     let Some(outers) = way_rings(element) else {
@@ -32,6 +34,7 @@ pub fn generate_water_area_from_way(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         surface,
     );
 }
@@ -46,6 +49,7 @@ fn way_rings(element: &ProcessedWay) -> Option<Vec<Vec<ProcessedNode>>> {
     Some(outers)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_water_areas_from_relation(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
@@ -53,6 +57,7 @@ pub fn generate_water_areas_from_relation(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     surfaces: &StillWaterSurfaces,
 ) {
     let Some((outers, inners)) = relation_rings(element, xzbbox) else {
@@ -66,6 +71,7 @@ pub fn generate_water_areas_from_relation(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         surface,
     );
 }
@@ -170,6 +176,7 @@ fn relation_rings(
     Some((outers, inners))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_water_areas(
     editor: &mut WorldEditor,
     outers: &[Vec<ProcessedNode>],
@@ -177,6 +184,7 @@ fn generate_water_areas(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     still_surface: Option<i32>,
 ) {
     // Calculate polygon bounding box to limit fill area
@@ -227,6 +235,7 @@ fn generate_water_areas(
         bwf,
         road_mask,
         tunnel_footprint,
+        bridge_surface,
         still_surface,
     );
 
@@ -544,6 +553,8 @@ const STILL_SURFACE_MIN_LC_SHARE: f64 = 0.3;
 const STILL_SURFACE_MIN_LC_COLUMNS: usize = 64;
 /// Rough cap on the number of columns sampled for the surface statistics.
 const STILL_SURFACE_MAX_SAMPLES: usize = 250_000;
+/// Most ESA water below its surface a still polygon may hold; more lies below a waterfall.
+const STILL_SURFACE_MAX_BELOW_SHARE: f64 = 0.01;
 
 /// Water surface Y of every still OSM water body, resolved once per element.
 #[derive(Default)]
@@ -607,7 +618,7 @@ fn is_water_area_way(way: &ProcessedWay) -> bool {
 /// drawn-down reservoir has columns well above it. Filling those at their own height
 /// terraces water up the exposed bank. When enough of the polygon is ESA water sitting
 /// at one leveled Y, that Y is the surface. Rivers are leveled per cell and never pass
-/// the single-Y test, so they keep the per-column fill.
+/// the single-Y test, so they keep the per-column fill, as does a polygon past a waterfall.
 fn still_surface_level(
     ground: &Ground,
     outers: &[Vec<XZPoint>],
@@ -673,7 +684,54 @@ fn still_surface_level(
         return None;
     }
     lc_levels.select_nth_unstable(n / 2);
-    Some(lc_levels[n / 2])
+    let surface = lc_levels[n / 2];
+    let below = lc_levels.iter().filter(|&&y| y < surface - 1).count();
+    if below as f64 > STILL_SURFACE_MAX_BELOW_SHARE * n as f64 {
+        return None;
+    }
+    Some(surface)
+}
+
+/// Whether steep ground climbs to water within the polygon: a falls face does, a gorge wall not.
+fn climbs_to_water(editor: &WorldEditor, spans: &SpanRows, x: i32, z: i32) -> bool {
+    const MAX_CLIMB: usize = 48;
+    // Steps look this far ahead, past the bumps a DEM leaves on a falling curtain of water.
+    const REACH: i32 = 3;
+    let (mut cx, mut cz) = (x, z);
+    let mut y = editor.get_ground_level(cx, cz);
+    for _ in 0..MAX_CLIMB {
+        let mut best: Option<(i32, i32, i32)> = None;
+        // The neighbours first, the wider ring only on a bump.
+        for (inner, outer) in [(0, 1), (1, REACH)] {
+            for dz in -outer..=outer {
+                for dx in -outer..=outer {
+                    if dx.abs() <= inner && dz.abs() <= inner {
+                        continue;
+                    }
+                    let (nx, nz) = (cx + dx, cz + dz);
+                    let ny = editor.get_ground_level(nx, nz);
+                    // Water outside the polygon counts: the river above is often its own polygon.
+                    if ny >= y && editor.is_lc_water(nx, nz) {
+                        return true;
+                    }
+                    if ny > y && best.is_none_or(|b| ny > b.0) {
+                        best = Some((ny, nx, nz));
+                    }
+                }
+            }
+            if best.is_some() {
+                break;
+            }
+        }
+        let Some((ny, nx, nz)) = best else {
+            return false;
+        };
+        if !spans.contains(nx, nz) {
+            return false;
+        }
+        (cx, cz, y) = (nx, nz, ny);
+    }
+    false
 }
 
 /// Fills water blocks using scanline rasterization.
@@ -696,6 +754,7 @@ fn scanline_fill_water(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
     tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
     still_surface: Option<i32>,
 ) {
     let edges = PolygonEdges::new(outers, inners);
@@ -707,11 +766,17 @@ fn scanline_fill_water(
         for &(span_start, span_end) in spans.get(z) {
             let (start, end) = (span_start.max(min_x), span_end.min(max_x));
             for x in start..=end {
-                // Keep road/bridge surfaces (carve would overwrite them).
-                if road_mask.contains(x, z) {
+                // Keep road surfaces, except under a raised deck.
+                let on_road = road_mask.contains(x, z);
+                if on_road && !bridge_surface.contains(x, z) {
                     continue;
                 }
                 let ground_y = editor.get_ground_level(x, z);
+                // ESA water below the surface is leveled at its own level, below a waterfall.
+                let still_surface = still_surface.filter(|&surface| {
+                    ground_y >= surface - 1
+                        || editor.cover_class(x, z) != crate::land_cover::LC_WATER
+                });
                 let water_y = match still_surface {
                     Some(surface) => {
                         // Exposed bank above the body's surface, or terrain so far below it
@@ -722,6 +787,10 @@ fn scanline_fill_water(
                         surface
                     }
                     None => {
+                        // A gorge wall the polygon spans would hang water down the slope.
+                        if editor.is_steep_land(x, z) && !climbs_to_water(editor, &spans, x, z) {
+                            continue;
+                        }
                         let water_y = editor.get_water_level(x, z);
                         if ground_y > water_y {
                             // A lower neighbour within the snap radius: a bank the
@@ -736,6 +805,12 @@ fn scanline_fill_water(
                         }
                     }
                 };
+                if on_road
+                    && (!bridge_surface.deck_clears(x, z, water_y)
+                        || bridge_surface.over_grade_way(x, z))
+                {
+                    continue;
+                }
                 // Over a bore, fill down to the terrain but never carve into it.
                 if tunnel_footprint.contains(x, z) {
                     for y in (ground_y + 1).min(water_y)..=water_y {
@@ -809,6 +884,7 @@ mod tests {
             &bwf,
             &road_mask,
             &footprint,
+            &BridgeSurfaceMap::empty(),
             &StillWaterSurfaces(surfaces),
         );
 
@@ -820,5 +896,125 @@ mod tests {
         }
         // The bore itself is untouched below the terrain.
         assert!(!editor.block_exists_absolute(35, -1, 35));
+    }
+
+    /// Ground over an `n` square, one land cover class and one terrain height per cell.
+    fn covered_ground(
+        n: usize,
+        class: impl Fn(usize, usize) -> u8,
+        height: impl Fn(usize, usize) -> f32,
+    ) -> Ground {
+        let lc = crate::land_cover::LandCoverData {
+            grid: (0..n)
+                .map(|z| (0..n).map(|x| class(x, z)).collect())
+                .collect(),
+            water_distance: vec![vec![0u8; n]; n],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width: n,
+            height: n,
+            cells_per_meter: 1.0,
+        };
+        let heights = (0..n)
+            .map(|z| (0..n).map(|x| height(x, z)).collect())
+            .collect();
+        crate::ground::test_support::ground_with_land_cover_and_heights(lc, heights, n, n)
+    }
+
+    #[test]
+    fn a_polygon_running_past_a_waterfall_has_no_single_surface() {
+        let n = 100usize;
+        let bbox = XZBBox::rect_from_min_max(0, 0, n as i32 - 1, n as i32 - 1).unwrap();
+        let edge = n as i32 - 1;
+        let square = vec![vec![
+            XZPoint::new(0, 0),
+            XZPoint::new(edge, 0),
+            XZPoint::new(edge, edge),
+            XZPoint::new(0, edge),
+            XZPoint::new(0, 0),
+        ]];
+        let level = |below_fall: usize| {
+            let ground = covered_ground(
+                n,
+                |_, _| crate::land_cover::LC_WATER,
+                |_, z| if z >= n - below_fall { -20.0 } else { 5.0 },
+            );
+            still_surface_level(&ground, &square, &[], &bbox)
+        };
+        assert_eq!(level(0), Some(5));
+        // A twentieth of the water lies below a fall: the quartiles agree, the levels do not.
+        assert_eq!(level(5), None);
+    }
+
+    #[test]
+    fn a_polygon_spanning_a_gorge_wall_leaves_the_wall_dry() {
+        let n = 80usize;
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // Water on the floor, then a wall rising 1.5 blocks a block under the polygon.
+        let ground = covered_ground(
+            n,
+            |x, _| {
+                if x < 40 {
+                    crate::land_cover::LC_WATER
+                } else {
+                    crate::land_cover::LC_GRASSLAND
+                }
+            },
+            |x, _| x.saturating_sub(40) as f32 * 1.5,
+        );
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+        editor.set_ground(Arc::new(ground.clone()));
+        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let none = CoordinateBitmap::new_empty();
+
+        generate_water_area_from_way(
+            &mut editor,
+            &ring(1, 10, 70),
+            &bwf,
+            &none,
+            &none,
+            &BridgeSurfaceMap::empty(),
+            &StillWaterSurfaces::default(),
+        );
+
+        assert!(editor.check_for_block_absolute(20, 0, 40, Some(&[WATER]), None));
+        let wall_y = editor.get_ground_level(60, 40);
+        assert!(!editor.check_for_block_absolute(60, wall_y, 40, Some(&[WATER]), None));
+    }
+
+    #[test]
+    fn a_polygon_keeps_its_water_down_a_falls_face() {
+        // The face is land cover land, but climbs to the polygon's water: no gorge wall.
+        let n = 80usize;
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let ground = covered_ground(
+            n,
+            |x, _| {
+                if (30..50).contains(&x) {
+                    crate::land_cover::LC_GRASSLAND
+                } else {
+                    crate::land_cover::LC_WATER
+                }
+            },
+            |x, _| 30.0 - x.clamp(30, 50).saturating_sub(30) as f32 * 1.5,
+        );
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+        editor.set_ground(Arc::new(ground.clone()));
+        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let none = CoordinateBitmap::new_empty();
+
+        generate_water_area_from_way(
+            &mut editor,
+            &ring(1, 10, 70),
+            &bwf,
+            &none,
+            &none,
+            &BridgeSurfaceMap::empty(),
+            &StillWaterSurfaces::default(),
+        );
+
+        let face_y = editor.get_ground_level(40, 40);
+        assert!(editor.check_for_block_absolute(40, face_y, 40, Some(&[WATER]), None));
     }
 }

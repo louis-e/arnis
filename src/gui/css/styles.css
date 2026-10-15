@@ -15,6 +15,57 @@
   --primary-accent: #fecc44;
   --primary-accent-dark: #e6b73d;
   --primary-accent-light: #fff2cc;
+
+  /* Neutral greys of the settings page and the dialogs, in the same family
+     as the main window (#333 body). Yellow means "selected" or "on". */
+  --ui-bg: #333333;
+  --ui-sidebar: #2a2a2a;
+  --ui-card: #3a3a3a;
+  --ui-card-border: #444444;
+  --ui-tile: #424242;
+  --ui-tile-hover: #484848;
+  --ui-tile-border: #4d4d4d;
+  --ui-field: #2c2c2c;
+  --ui-field-border: #5a5a5a;
+  --ui-text: #f2f2f2;
+  --ui-muted: #b8b8b8;
+  --ui-faint: #8f8f8f;
+  --ui-accent: var(--primary-accent);
+  --ui-accent-soft: rgba(254, 204, 68, 0.12);
+  --ui-link: #ffd970;
+  --ui-on-accent: #1c1c1c;
+  --ui-danger: #cf6679;
+}
+
+/* One stroke icon from the sprite in index.html, sized by its context */
+.icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 html, body {
@@ -126,6 +177,27 @@ a:hover {
   flex-direction: column;
 }
 
+.format-toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* One World: which persistent world the next area joins, under the format toggle. */
+.one-world-status {
+  font-size: 0.78em;
+  color: #c9c9c9;
+  text-align: center;
+  margin-top: 6px;
+  line-height: 1.3em;
+  overflow-wrap: anywhere;
+}
+.one-world-status.is-warn {
+  color: #fecc44;
+}
+.one-world-status.is-error {
+  color: #fa7878;
+}
+
 .bbox-selection-text {
   font-size: 0.9em;
   color: #ffffff;
@@ -206,6 +278,11 @@ a:hover {
   white-space: nowrap;
   min-width: 0;
   flex: 0 1 auto;
+}
+
+/* A custom name waiting for the next Start, not a world that exists yet */
+.world-name-label[data-pending] {
+  font-style: italic;
 }
 
 /* Inline editor for the custom world name, swapped in for .world-name-label
@@ -512,7 +589,64 @@ button:hover {
   background-color: var(--primary-accent-dark);
 }
 
-/* Customization Settings */
+/* Switch: a real checkbox, so `checked`, change events and the settings
+   store work exactly as they would on a plain one. Used on the settings page
+   and in the dialogs. */
+input.switch {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: #5e5e5e;
+  cursor: pointer;
+  transition: background-color 0.18s ease;
+}
+
+input.switch::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #d6d6d6;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+input.switch:checked {
+  background: var(--ui-accent);
+}
+
+input.switch:checked::before {
+  transform: translateX(18px);
+  background: #ffffff;
+}
+
+input.switch:disabled {
+  cursor: default;
+}
+
+input.switch:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input.switch,
+  input.switch::before {
+    transition: none;
+  }
+}
+
+/* Backdrop behind every dialog; the dialogs themselves are in dialogs.css. */
 .modal {
   position: fixed;
   z-index: 20001;
@@ -521,81 +655,10 @@ button:hover {
   width: 100%;
   height: 100%;
   overflow: auto;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0, 0, 0, 0.55);
   display: flex;
   justify-content: center;
   align-items: center;
-}
-
-.modal-content {
-  background-color: #717171;
-  padding: 20px;
-  border: 1px solid #797979;
-  border-radius: 10px;
-  width: 400px;
-  max-height: calc(90vh - 40px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-.settings-scrollable {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 8px;
-  position: relative;
-}
-
-
-/* Custom scrollbar for settings */
-.settings-scrollable::-webkit-scrollbar {
-  width: 8px;
-}
-
-.settings-scrollable::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  margin-top: 8px;
-}
-
-.settings-scrollable::-webkit-scrollbar-thumb {
-  background-color: rgba(254, 204, 68, 0.5);
-  border-radius: 10px;
-}
-
-.settings-scrollable::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(254, 204, 68, 0.7);
-}
-
-/* License modal scrollable area */
-.license-scrollable {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 8px;
-  margin-top: 10px;
-}
-
-.license-scrollable::-webkit-scrollbar {
-  width: 10px;
-}
-
-.license-scrollable::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-}
-
-.license-scrollable::-webkit-scrollbar-thumb {
-  background-color: rgba(254, 204, 68, 0.5);
-  border-radius: 10px;
-}
-
-.license-scrollable::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(254, 204, 68, 0.7);
 }
 
 .close-button {
@@ -610,320 +673,10 @@ button:hover {
   color: #ffffff;
 }
 
-.settings-header {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.settings-header h2 {
-  margin: 0;
-}
-
-.settings-header .close-button {
-  position: absolute;
-  right: 0;
-  top: 0;
-}
-
-.settings-footer {
-  flex-shrink: 0;
-}
-
-/* Modal actions/buttons */
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.btn-primary {
-  background-color: var(--primary-accent);
-  color: #1a1a1a;
-}
-
-.btn-primary:hover {
-  background-color: var(--primary-accent-dark);
-}
-
-.btn-secondary {
-  background-color: #e0e0e0;
-}
-
-@media (prefers-color-scheme: dark) {
-  .btn-secondary {
-    background-color: #3a3a3a;
-    color: #ffffff;
-  }
-}
-
-/* Update / release-notes modal */
-.update-modal-content {
-  width: 600px;
-  max-width: calc(100vw - 40px);
-}
-
-.update-modal-body {
-  font-size: 0.9em;
-  line-height: 1.45;
-  padding: 12px 14px;
-  border: 1px solid #5b5b5b;
-  border-radius: 6px;
-  background-color: #5f5f5f;
-  margin-top: 4px;
-  text-align: justify;
-  text-justify: inter-word;
-  hyphens: auto;
-}
-
-.update-modal-body img {
-  /* Release banner / inline screenshots: scale to container without distortion */
-  max-width: 100%;
-  height: auto;
-  border-radius: 4px;
-  display: block;
-  margin: 8px auto;
-}
-
-.update-modal-body h1,
-.update-modal-body h2,
-.update-modal-body h3 {
-  margin: 14px 0 6px 0;
-  line-height: 1.25;
-}
-
-.update-modal-body h1 { font-size: 1.25em; }
-.update-modal-body h2 { font-size: 1.12em; }
-.update-modal-body h3 { font-size: 1.02em; }
-
-.update-modal-body p {
-  margin: 6px 0;
-}
-
-.update-modal-body ul,
-.update-modal-body ol {
-  margin: 6px 0;
-  padding-left: 22px;
-}
-
-.update-modal-body li {
-  margin: 2px 0;
-}
-
-.update-modal-body a {
-  color: #fecc44;
-  text-decoration: none;
-}
-
-.update-modal-body a:hover {
-  text-decoration: underline;
-}
-
-.update-modal-body code {
-  background-color: rgba(0, 0, 0, 0.25);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
-  font-size: 0.9em;
-}
-
-.update-modal-body pre {
-  background-color: rgba(0, 0, 0, 0.25);
-  padding: 8px 10px;
-  border-radius: 4px;
-  overflow-x: auto;
-}
-
-.update-modal-body pre code {
-  background: none;
-  padding: 0;
-}
-
-.update-modal-body hr {
-  border: none;
-  border-top: 1px solid #797979;
-  margin: 12px 0;
-}
-
-.update-modal-body blockquote {
-  border-left: 3px solid #fecc44;
-  margin: 8px 0;
-  padding: 2px 10px;
-  color: #d8d8d8;
-}
-
-.update-modal-download-note {
-  flex-shrink: 0;
-  margin-top: 12px;
-  font-size: 0.8em;
-  line-height: 1.4;
-  opacity: 0.8;
-  text-align: center;
-}
-
-.update-modal-actions {
-  flex-shrink: 0;
-  margin-top: 12px;
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-}
-
-.update-modal-actions button {
-  padding: 8px 16px;
-  font-weight: 600;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.update-modal-actions .btn-primary:hover {
-  filter: brightness(1.05);
-}
-
-#update-download-button[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* Shared accent for all checkboxes and sliders so new toggles need no per-id CSS. */
 input[type="checkbox"],
 input[type="range"] {
   accent-color: #fecc44;
-}
-
-.terrain-toggle-container,
-.fillground-toggle-container,
-.interior-toggle-container,
-.scale-slider-container {
-  margin: 15px 0;
-}
-
-.scale-slider-container label {
-  display: block;
-  margin-bottom: 5px;
-}
-
-#scale-value-slider {
-  accent-color: #fecc44;
-}
-
-#slider-value {
-  margin-left: 10px;
-  font-weight: bold;
-}
-
-.bbox-input-container {
-  margin-bottom: 20px;
-}
-
-.bbox-input-container label {
-  display: block;
-  margin-bottom: 5px;
-}
-
-#bbox-coords {
-  width: 100%;
-  padding: 5px;
-  border: 1px solid #fecc44;
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-#bbox-coords:focus {
-  outline: none;
-  border-color: #fecc44;
-  box-shadow: 0 0 5px #fecc44;
-}
-
-#save-path {
-  width: 100%;
-  padding: 5px;
-  border: 1px solid #fecc44;
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-#save-path:focus {
-  outline: none;
-  border-color: #fecc44;
-  box-shadow: 0 0 5px #fecc44;
-}
-
-/* Settings Modal Layout */
-.settings-section-header {
-  font-size: 0.7em;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: #c0c0c0;
-  margin-top: 10px;
-  margin-bottom: 4px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-  text-align: left;
-}
-
-.settings-section-header:first-of-type {
-  margin-top: 0;
-}
-
-.settings-notice {
-  border-left: 3px solid #fecc44;
-  margin-bottom: 12px;
-  padding: 6px 10px;
-  font-size: 0.8em;
-  color: #d8d8d8;
-  text-align: left;
-}
-
-/* A notice that reports an outcome rather than warning about one. Same green
-   and warm red the cache button flashes, so the panel speaks one language. */
-.settings-notice.is-success {
-  border-left-color: #4caf50;
-}
-
-.settings-notice.is-error {
-  border-left-color: #cf6679;
-}
-
-.settings-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.settings-row label {
-  text-align: left;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* One line per setting name, the control beside it gives up the width. */
-  white-space: nowrap;
-}
-
-/* Tooltip icon (question mark in circle) */
-.tooltip-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background-color: rgba(254, 204, 68, 0.3);
-  color: #fecc44;
-  font-size: 11px;
-  font-weight: bold;
-  cursor: help;
-  position: relative;
-  flex-shrink: 0;
-}
-
-.tooltip-icon:hover {
-  background-color: rgba(254, 204, 68, 0.5);
 }
 
 /* Arnis-styled tooltip box.
@@ -994,398 +747,6 @@ input[type="range"] {
 
 .global-tooltip-body {
   position: relative;
-}
-
-.settings-control {
-  flex: 1;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.settings-control input[type="range"] {
-  width: 60%;
-}
-
-.settings-control input[type="text"],
-.settings-control input[type="password"],
-.settings-control input[type="number"] {
-  width: 100%;
-  max-width: 180px;
-  padding: 5px;
-  border-radius: 4px;
-  border: 1px solid #fecc44;
-}
-
-/* Save Path Setting */
-.save-path-control {
-  gap: 0;
-}
-
-/* Rotation Angle Control */
-.rotation-control {
-  gap: 4px;
-}
-
-.rotation-control input[type="number"] {
-  width: 60px !important;
-  max-width: 60px !important;
-  text-align: center;
-  font-weight: bold;
-}
-
-/* Segmented control (game mode) */
-.segmented-control {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid #5a5a5a;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.segmented-control .segment {
-  all: unset;
-  box-sizing: border-box;
-  padding: 5px 10px;
-  color: #ececec;
-  font-size: 0.85em;
-  font-family: inherit;
-  line-height: 1;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.segmented-control .segment:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.segmented-control .segment + .segment {
-  border-left: 1px solid #5a5a5a;
-}
-
-.segmented-control .segment.active {
-  background: #fecc44;
-  color: #1e1e1e;
-  font-weight: 600;
-}
-
-/* One segment the selected world format cannot show, next to ones it can. */
-.segmented-control .segment:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.segmented-control .segment:disabled:hover {
-  background: none;
-}
-
-/* Five segments do not fit beside a label at the normal size. */
-.segmented-control.is-compact .segment {
-  padding: 5px 7px;
-  font-size: 0.78em;
-}
-
-#world-time-value {
-  min-width: 42px;
-  text-align: right;
-  font-weight: bold;
-}
-
-.rotation-unit {
-  font-weight: bold;
-  color: #ececec;
-  font-size: 0.95em;
-}
-
-.save-path-input {
-  max-width: 200px !important;
-  font-size: 0.85em;
-  border-top-right-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-  border-right: none !important;
-}
-
-.save-path-browse {
-  background: none;
-  border: 1px solid #fecc44;
-  border-radius: 0 4px 4px 0;
-  padding: 0 6px;
-  margin-top: 0;
-  box-shadow: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  align-self: stretch;
-  justify-content: center;
-  transition: background 0.2s ease;
-}
-
-.save-path-browse:hover {
-  background: rgba(254, 204, 68, 0.15);
-}
-
-.save-path-browse svg {
-  width: 14px;
-  height: 14px;
-  fill: #fecc44;
-}
-
-/* How much disk the caches hold, sitting just left of the Clear button. Muted
-   so it reads as information about the button rather than a second control. */
-.cache-size {
-  /* the panel's secondary text colour; #9aa4b2 was too dim to read here */
-  color: #d6d6d6;
-  font-size: 0.8em;
-  margin-right: 8px;
-  white-space: nowrap;
-}
-
-/* Clear-cache button: compact golden-outline button that sits in the
-   settings row's standard right-aligned `.settings-control` slot, no
-   extra wrapper element. Success/error feedback is expressed by a
-   brief class-driven background flash rather than a separate status
-   label; keeps the row visually consistent with the checkbox and
-   slider rows next to it. */
-.clear-cache-button,
-.settings-reset-button {
-  background: none;
-  border: 1px solid #fecc44;
-  border-radius: 4px;
-  color: #fecc44;
-  padding: 2px 14px;
-  margin: 0;
-  box-shadow: none;
-  cursor: pointer;
-  font-size: 0.85em;
-  /* Include `color` in the transition so the success flash fades both
-     the background and foreground back to default together, instead of
-     one property snapping. */
-  transition: background 0.4s ease, color 0.4s ease,
-              border-color 0.4s ease, opacity 0.2s ease;
-}
-
-.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error),
-.settings-reset-button:hover:not(:disabled):not(.is-confirming) {
-  background: rgba(254, 204, 68, 0.15);
-}
-
-.clear-cache-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-/* Green flash on success — background + text reinforce the confirmation
-   without touching layout. The button stays the same size so the row
-   doesn't reflow between idle / confirming states. */
-.clear-cache-button.is-success {
-  background: rgba(76, 175, 80, 0.85);
-  color: #ffffff;
-  border-color: #4caf50;
-}
-
-.clear-cache-button.is-error {
-  background: rgba(207, 102, 121, 0.85);
-  color: #ffffff;
-  border-color: #cf6679;
-}
-
-/* Per-setting revert button, inside the row label after the tooltip icon. */
-/* Same 16px box and round hover target as .tooltip-icon so they read as a pair. */
-/* The resets undo the global button rule, like .save-path-browse does. */
-/* No border: this is content-box in some engines and it would shrink the glyph. */
-/* Hidden with visibility, not display, so the label cannot shift mid-drag. */
-.setting-revert {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  margin: 0;
-  background: none;
-  border: none;
-  border-radius: 50%;
-  box-shadow: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-.settings-row.is-modified .setting-revert {
-  visibility: visible;
-  opacity: 1;
-}
-
-.setting-revert:hover {
-  background: rgba(254, 204, 68, 0.3);
-}
-
-.setting-revert:focus-visible {
-  outline: 1px solid #fecc44;
-  outline-offset: 1px;
-}
-
-/* Slightly inset in the 16px box and softened, to sit at the same visual
-   weight as the tooltip icon's translucent disc rather than outshine it. */
-.setting-revert svg {
-  width: 13px;
-  height: 13px;
-  fill: rgba(254, 204, 68, 0.75);
-  display: block;
-  transition: fill 0.15s ease;
-}
-
-.setting-revert:hover svg {
-  fill: #fecc44;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .setting-revert {
-    transition: none;
-  }
-}
-
-/* Disabled while nothing differs from the defaults. */
-.settings-reset-button:disabled {
-  cursor: default;
-  opacity: 0.45;
-  border-color: rgba(254, 204, 68, 0.35);
-}
-
-/* Awaiting the second click. Same warm red as .clear-cache-button.is-error. */
-.settings-reset-button.is-confirming {
-  background: rgba(207, 102, 121, 0.85);
-  border-color: #cf6679;
-  color: #ffffff;
-}
-
-.license-button-row {
-  justify-content: center;
-  gap: 8px;
-  margin-top: 5px;
-}
-
-.license-button {
-  flex: 1;
-  max-width: 50%;
-}
-
-/* Buy Me a Coffee and Discord styling */
-.buymeacoffee-row {
-  justify-content: center;
-  align-items: center;
-  gap: 15px;
-  margin-top: 10px;
-  margin-bottom: -10px;
-}
-
-.github-link,
-.buymeacoffee-link,
-.discord-link {
-  display: inline-block;
-  transition: transform 0.3s ease, opacity 0.3s ease;
-}
-
-.github-link:hover,
-.buymeacoffee-link:hover,
-.discord-link:hover {
-  transform: scale(1.05);
-  opacity: 0.8;
-}
-
-.github-logo,
-.buymeacoffee-logo,
-.discord-logo {
-  height: 35px;
-  width: auto;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-/* Generation mode dropdown styling */
-.generation-mode-dropdown {
-  width: 100%;
-  max-width: 180px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid #fecc44;
-  background-color: #ffffff;
-  color: #0f0f0f;
-  appearance: menulist;
-  cursor: pointer;
-  font-size: 15px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-
-.generation-mode-dropdown option {
-  padding: 5px;
-  font-size: 15px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .generation-mode-dropdown {
-    background-color: #0f0f0f98;
-    color: #ffffff;
-    border: 1px solid #fecc44;
-  }
-}
-
-/* Language dropdown styling */
-.language-dropdown {
-  width: 100%;
-  max-width: 180px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid #fecc44;
-  background-color: #ffffff;
-  color: #0f0f0f;
-  appearance: menulist;
-  cursor: pointer;
-  font-size: 15px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-
-.language-dropdown option {
-  padding: 5px;
-  font-size: 15px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .language-dropdown {
-    background-color: #0f0f0f98;
-    color: #ffffff;
-    border: 1px solid #fecc44;
-  }
-}
-
-/* Theme dropdown styling */
-.theme-dropdown {
-  width: 100%;
-  max-width: 180px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid #fecc44;
-  background-color: #ffffff;
-  color: #0f0f0f;
-  appearance: menulist;
-  cursor: pointer;
-  font-size: 15px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-
-.theme-dropdown option {
-  padding: 5px;
-  font-size: 15px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .theme-dropdown {
-    background-color: #0f0f0f98;
-    color: #ffffff;
-    border: 1px solid #fecc44;
-  }
 }
 
 .button-block-row {
@@ -1489,14 +850,4 @@ input[type="range"] {
     transform: scale(1) rotate(0deg);
     opacity: 1;
   }
-}
-
-/* Options that do not apply to the selected celestial body or world format */
-.settings-row-unavailable {
-  opacity: 0.4;
-  pointer-events: none;
-}
-
-.segmented-disabled {
-  pointer-events: none;
 }

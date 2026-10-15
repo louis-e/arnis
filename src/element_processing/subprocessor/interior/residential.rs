@@ -1,9 +1,9 @@
+//! Flats and houses: two hand-drawn floor plans tiled across the storey.
+
+use super::canvas::Canvas;
+use super::FloorCtx;
 use crate::block_definitions::*;
-use crate::element_processing::buildings::BUILDING_PASSAGE_HEIGHT;
 use crate::element_processing::subprocessor::buildings_loot::chest_loot;
-use crate::floodfill_cache::CoordinateBitmap;
-use crate::world_editor::WorldEditor;
-use std::collections::HashSet;
 
 // Deterministic gate so chests stay occasional and reproducible across region streaming.
 fn chest_gate(x: i32, z: i32, floor_y: i32, salt: u32, modulus: u32) -> bool {
@@ -241,7 +241,7 @@ const ABANDONED_INTERIOR2_LAYER2: [[char; 23]; 23] = [
 
 /// Maps interior layout characters to actual block types for different floor layers
 #[inline(always)]
-pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Block> {
+fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Block> {
     match c {
         ' ' => None,                     // Nothing
         'W' => Some(wall_block),         // Use the building's wall block for interior walls
@@ -286,198 +286,65 @@ pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option
     }
 }
 
-/// Generates interior layouts inside buildings at each floor level
-#[allow(clippy::too_many_arguments)]
-pub fn generate_building_interior(
-    editor: &mut WorldEditor,
-    floor_area: &[(i32, i32)],
-    min_x: i32,
-    min_z: i32,
-    max_x: i32,
-    max_z: i32,
-    start_y_offset: i32,
-    building_height: i32,
-    wall_block: Block,
-    floor_levels: &[i32],
-    abs_terrain_offset: i32,
-    is_abandoned_building: bool,
-    building_passages: &CoordinateBitmap,
-    has_sloped_roof: bool,
-) {
-    // Skip interior generation for very small buildings
-    let width = max_x - min_x + 1;
-    let depth = max_z - min_z + 1;
+/// Tiles the house plan over one unit, shifted per storey.
+pub(super) fn tile_floor(c: &mut Canvas, zone: u16, ctx: &FloorCtx, abandoned: bool) {
+    let (layer1, layer2) = match (abandoned, ctx.floor == 0) {
+        (true, true) => (&ABANDONED_INTERIOR1_LAYER1, &ABANDONED_INTERIOR1_LAYER2),
+        (true, false) => (&ABANDONED_INTERIOR2_LAYER1, &ABANDONED_INTERIOR2_LAYER2),
+        (false, true) => (&INTERIOR1_LAYER1, &INTERIOR1_LAYER2),
+        (false, false) => (&INTERIOR2_LAYER1, &INTERIOR2_LAYER2),
+    };
+    let ph = layer1.len() as i32;
+    let pw = layer1[0].len() as i32;
+    let (pwu, phu) = (pw as usize, ph as usize);
+    let shift = ctx.floor as i32;
+    let chest_modulus = if abandoned { 160 } else { 128 };
+    let wall = c.partition;
 
-    if width < 8 || depth < 8 {
-        return; // Building too small for interior
-    }
+    for (x, z) in c.cells(zone) {
+        // Keep the plan off the outer walls, and away from doors and the ladder.
+        let (ox, oz) = ctx.origin;
+        if x < ox || z < oz || x > ctx.far.0 || z > ctx.far.1 || !c.is_free(x, z) {
+            continue;
+        }
+        let pxu = (x - ox + shift).rem_euclid(pw) as usize;
+        let pzu = (z - oz + shift).rem_euclid(ph) as usize;
+        let cell1 = layer1[pzu][pxu];
+        let cell2 = layer2[pzu][pxu];
 
-    // For efficiency, create a HashSet of floor area coordinates
-    let floor_area_set: HashSet<(i32, i32)> = floor_area.iter().cloned().collect();
-
-    // Add buffer around edges to avoid placing furniture too close to walls
-    let buffer = 2;
-    let interior_min_x = min_x + buffer;
-    let interior_min_z = min_z + buffer;
-    let interior_max_x = max_x - buffer;
-    let interior_max_z = max_z - buffer;
-
-    // Per-building seed so chest gates decorrelate between neighbours.
-    let building_salt = (min_x as u32).wrapping_mul(0x9E37_79B1) ^ (min_z as u32);
-    let chest_modulus = if is_abandoned_building { 160 } else { 128 };
-
-    // Generate interiors for each floor
-    for (floor_index, &floor_y) in floor_levels.iter().enumerate() {
-        // Store wall and door positions for this floor to extend them to the ceiling
-        let mut wall_positions = Vec::new();
-        let mut door_positions = Vec::new();
-
-        // Determine the floor extension height (ceiling) - either next floor or roof
-        let current_floor_ceiling = if floor_index < floor_levels.len() - 1 {
-            // For intermediate floors, extend walls up to just below the next floor
-            floor_levels[floor_index + 1] - 1
-        } else {
-            // Sloped roofs occupy the volume above the wall; flat/no-roof
-            // buildings need an extra ceiling course.
-            if has_sloped_roof {
-                start_y_offset + building_height
-            } else {
-                start_y_offset + building_height + 1
-            }
-        };
-
-        // Choose the appropriate interior pattern based on floor number
-        let (layer1, layer2) = if is_abandoned_building {
-            if floor_index == 0 {
-                (&ABANDONED_INTERIOR1_LAYER1, &ABANDONED_INTERIOR1_LAYER2)
-            } else {
-                (&ABANDONED_INTERIOR2_LAYER1, &ABANDONED_INTERIOR2_LAYER2)
-            }
-        } else if floor_index == 0 {
-            // Ground floor uses INTERIOR1 patterns
-            (&INTERIOR1_LAYER1, &INTERIOR1_LAYER2)
-        } else {
-            // Upper floors use INTERIOR2 patterns
-            (&INTERIOR2_LAYER1, &INTERIOR2_LAYER2)
-        };
-
-        // Get dimensions for the selected pattern
-        let pattern_height = layer1.len() as i32;
-        let pattern_width = layer1[0].len() as i32;
-
-        // Calculate Y offset - place interior 1 block above floor level consistently
-        let y_offset = 1;
-
-        // Create a seamless repeating pattern across the interior of this floor
-        for z in interior_min_z..=interior_max_z {
-            for x in interior_min_x..=interior_max_x {
-                // Skip if outside the building's floor area
-                if !floor_area_set.contains(&(x, z)) {
-                    continue;
-                }
-
-                // Skip interior blocks in building-passage zones on floors
-                // that fall within the archway opening.
-                if building_passages.contains(x, z)
-                    && floor_y < start_y_offset + BUILDING_PASSAGE_HEIGHT.min(building_height)
-                {
-                    continue;
-                }
-
-                // Map the world coordinates to pattern coordinates using modulo
-                // This creates a seamless tiling effect across the entire building
-                // Add floor_index offset to create variation between floors
-                let pattern_x = ((x - interior_min_x + floor_index as i32) % pattern_width
-                    + pattern_width)
-                    % pattern_width;
-                let pattern_z = ((z - interior_min_z + floor_index as i32) % pattern_height
-                    + pattern_height)
-                    % pattern_height;
-
-                // Access the pattern arrays safely
-                let pxu = pattern_x as usize;
-                let pzu = pattern_z as usize;
-                let pw = pattern_width as usize;
-                let ph = pattern_height as usize;
-                let cell1 = layer1[pzu][pxu];
-                let cell2 = layer2[pzu][pxu];
-
-                // Occasional loot chests on empty floor cells that back onto an interior wall.
-                if cell1 == ' ' && cell2 == ' ' {
-                    let wall_adjacent = layer1[(pzu + ph - 1) % ph][pxu] == 'W'
-                        || layer1[(pzu + 1) % ph][pxu] == 'W'
-                        || layer1[pzu][(pxu + pw - 1) % pw] == 'W'
-                        || layer1[pzu][(pxu + 1) % pw] == 'W';
-                    if wall_adjacent && chest_gate(x, z, floor_y, building_salt, chest_modulus) {
-                        let chest_y = floor_y + y_offset + abs_terrain_offset;
-                        if editor.get_block_absolute(x, chest_y, z).is_none() {
-                            editor.set_chest_with_items_absolute(
-                                x,
-                                chest_y,
-                                z,
-                                chest_loot(x, z, building_salt),
-                            );
-                        }
-                        continue;
-                    }
-                }
-
-                // Place first layer blocks
-                if let Some(block) = get_interior_block(cell1, false, wall_block) {
-                    editor.set_block_absolute(
-                        block,
-                        x,
-                        floor_y + y_offset + abs_terrain_offset,
-                        z,
-                        None,
-                        None,
-                    );
-
-                    // Beds have no baked model; each half needs its own block entity to render.
-                    // Only when the bed actually landed (edge cells can lose to existing structure).
-                    if matches!(cell1, '1'..='8') {
-                        let bed_y = floor_y + y_offset + abs_terrain_offset;
-                        if editor.get_block_absolute(x, bed_y, z).map(|b| b.id())
-                            == Some(block.id())
-                        {
-                            editor.set_bed_block_entity_absolute(x, bed_y, z);
-                        }
-                    }
-                    // If this is a wall in layer 1, add to wall positions to extend later
-                    if cell1 == 'W' {
-                        wall_positions.push((x, z));
-                    }
-                    // If this is a door in layer 1, add to door positions to add wall above later
-                    else if cell1 == 'D' {
-                        door_positions.push((x, z));
-                    }
-                }
-
-                // Place second layer blocks
-                if let Some(block) = get_interior_block(cell2, true, wall_block) {
-                    editor.set_block_absolute(
-                        block,
-                        x,
-                        floor_y + y_offset + abs_terrain_offset + 1,
-                        z,
-                        None,
-                        None,
-                    );
-                }
+        // Occasional loot chests on empty floor cells that back onto an interior wall.
+        if cell1 == ' ' && cell2 == ' ' {
+            let wall_adjacent = layer1[(pzu + phu - 1) % phu][pxu] == 'W'
+                || layer1[(pzu + 1) % phu][pxu] == 'W'
+                || layer1[pzu][(pxu + pwu - 1) % pwu] == 'W'
+                || layer1[pzu][(pxu + 1) % pwu] == 'W';
+            if wall_adjacent && chest_gate(x, z, c.floor_y, ctx.salt, chest_modulus) {
+                let chest_y = c.floor_y + 1;
+                c.editor
+                    .set_chest_with_items_absolute(x, chest_y, z, chest_loot(x, z, ctx.salt));
+                c.put(x, 1, z, CHEST);
+                continue;
             }
         }
 
-        // Extend walls all the way to the next floor ceiling or roof
-        for (x, z) in &wall_positions {
-            for y in (floor_y + y_offset + 2)..=current_floor_ceiling {
-                editor.set_block_absolute(wall_block, *x, y + abs_terrain_offset, *z, None, None);
+        if let Some(block) = get_interior_block(cell1, false, wall) {
+            c.put(x, 1, z, block);
+            // Beds have no baked model; each half needs its own block entity to render.
+            // Only when the bed actually landed (edge cells can lose to existing structure).
+            if matches!(cell1, '1'..='8') {
+                let bed_y = c.floor_y + 1;
+                if c.editor.get_block_absolute(x, bed_y, z).map(|b| b.id()) == Some(block.id()) {
+                    c.editor.set_bed_block_entity_absolute(x, bed_y, z);
+                }
             }
         }
-
-        // Add wall blocks above doors all the way to the ceiling/next floor
-        for (x, z) in &door_positions {
-            for y in (floor_y + y_offset + 2)..=current_floor_ceiling {
-                editor.set_block_absolute(wall_block, *x, y + abs_terrain_offset, *z, None, None);
+        if let Some(block) = get_interior_block(cell2, true, wall) {
+            c.put(x, 2, z, block);
+        }
+        // Walls, and the lintel above doors, run up to the ceiling.
+        if cell1 == 'W' || cell1 == 'D' {
+            for dy in 3..=c.headroom() {
+                c.put(x, dy, z, wall);
             }
         }
     }

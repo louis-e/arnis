@@ -15,25 +15,34 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COARSE_DIRT,
-    COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
-    DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
-    HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
-    SANDSTONE, SMOOTH_STONE, SNOW_LAYER, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
-    TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
+    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS,
+    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
+    MOSS_BLOCK, MUD, OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE,
+    SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
+    WHITE_CONCRETE, YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
+use crate::ground_decoration::{LOOSE_PLANTS, STACKED_PLANT_PARTS, WOOD};
 use crate::land_cover;
 use crate::progress::emit_gui_progress_update;
+use crate::terrain_surface;
 use crate::world_editor::WorldEditor;
 use crate::world_editor::{min_y, terrain_floor_y};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
+
+// Salts that keep the undergrowth fields independent of each other.
+const SALT_FOREST_FLOOR: u32 = 0xF0E5_7F10;
+const SALT_SHRUB_FLOOR: u32 = 0x5B7B_F10A;
+const SALT_SWARD: u32 = 0x5A7D_0001;
+const SALT_TALL_SWARD: u32 = 0x5A7D_0002;
+const SALT_WETLAND_POOLS: u32 = 0x9001_5E75;
 
 /// Per-chunk cache of ground Y values.
 ///
@@ -103,6 +112,59 @@ impl ChunkGroundCache {
             self.grid[lz * 16 + lx]
         } else {
             editor.get_ground_level(nx, nz)
+        }
+    }
+}
+
+/// Water answers for one chunk and the ring of columns around it.
+///
+/// Every column asks about itself and its eight neighbours, so each answer was worked
+/// out up to nine times, three block lookups apiece. The ground pass only writes water
+/// into the column it is on (trees keep water on their blacklist), so an answer holds
+/// until that column is processed, and is forgotten then.
+struct WaterColumnMemo {
+    base_x: i32,
+    base_z: i32,
+    /// Row-major over the 18x18 window: 0 not asked yet, 1 dry, 2 water.
+    state: [u8; 18 * 18],
+}
+
+impl WaterColumnMemo {
+    fn new(chunk_x: i32, chunk_z: i32) -> Self {
+        Self {
+            base_x: (chunk_x << 4) - 1,
+            base_z: (chunk_z << 4) - 1,
+            state: [0; 18 * 18],
+        }
+    }
+
+    #[inline]
+    fn slot(&self, x: i32, z: i32) -> Option<usize> {
+        let (dx, dz) = (x - self.base_x, z - self.base_z);
+        ((0..18).contains(&dx) && (0..18).contains(&dz)).then_some((dz * 18 + dx) as usize)
+    }
+
+    #[inline]
+    fn get(&mut self, x: i32, z: i32, probe: impl FnOnce() -> bool) -> bool {
+        let Some(i) = self.slot(x, z) else {
+            return probe();
+        };
+        match self.state[i] {
+            1 => false,
+            2 => true,
+            _ => {
+                let water = probe();
+                self.state[i] = 1 + u8::from(water);
+                water
+            }
+        }
+    }
+
+    /// Called once the column has been processed, which may have put water in it.
+    #[inline]
+    fn forget(&mut self, x: i32, z: i32) {
+        if let Some(i) = self.slot(x, z) {
+            self.state[i] = 0;
         }
     }
 }
@@ -188,7 +250,7 @@ pub fn generate_ground_region(
     // `Some` only off Earth, where the body's palette replaces land cover and
     // every Earth-only surface pass is off.
     let planetary_body = (!args.body.is_earth()).then_some(args.body);
-    let planetary_lat = args
+    let center_lat = args
         .bbox
         .as_ref()
         .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
@@ -237,10 +299,34 @@ pub fn generate_ground_region(
     let min_chunk_z = iter_min_z >> 4;
     let max_chunk_z = iter_max_z >> 4;
 
-    // Snow line as a Minecraft Y; i32::MAX disables snow (flat/low terrain).
-    let snow_threshold_y = ground.snow_threshold_y();
-    // Soften the snow edge so it isn't a perfect contour line.
-    const SNOW_EDGE_JITTER: f64 = 6.0;
+    // Snow line and the band over which snow thickens into full cover.
+    let snow_line = terrain_surface::SnowLine::new(ground, center_lat, args.rotation);
+    // Share of forest-floor grass that grows as ferns, by the habitat the forest is in.
+    // Undergrowth thins out with dryness: sparse in deserts, thinner on steppe,
+    // full in savanna, temperate and boreal country.
+    let climate_sward = match climate {
+        crate::climate::Climate::HotDesert => 0.25,
+        crate::climate::Climate::ColdDesert => 0.3,
+        crate::climate::Climate::IceCap => 0.3,
+        crate::climate::Climate::HotSteppe => 0.55,
+        crate::climate::Climate::ColdSteppe => 0.7,
+        crate::climate::Climate::Tundra => 0.7,
+        crate::climate::Climate::DryContinental => 0.85,
+        crate::climate::Climate::Boreal => 0.9,
+        crate::climate::Climate::Temperate | crate::climate::Climate::TropicalSavanna => 1.0,
+    };
+    // Read per chunk, as the ecoregion under the forest can change across the area.
+    let fern_share_at = |x: i32, z: i32| match crate::ground_decoration::habitat(
+        land_cover::LC_TREE_COVER,
+        climate,
+        center_lat.abs(),
+        false,
+        ground.ecoregion(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z())),
+    ) {
+        Some(crate::ground_decoration::Habitat::Taiga) => 0.45,
+        Some(crate::ground_decoration::Habitat::Jungle) => 0.3,
+        _ => 0.12,
+    };
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
@@ -249,6 +335,18 @@ pub fn generate_ground_region(
             let chunk_max_x = ((chunk_x << 4) + 15).min(iter_max_x);
             let chunk_min_z = (chunk_z << 4).max(iter_min_z);
             let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
+            let forest_fern_share = fern_share_at((chunk_x << 4) + 8, (chunk_z << 4) + 8);
+            // Fallen rock is only looked for where the relief could hold a cliff.
+            let talus_field = (terrain_enabled && planetary_body.is_none())
+                .then(|| {
+                    terrain_surface::TalusField::new(
+                        ground,
+                        chunk_x,
+                        chunk_z,
+                        (xzbbox.min_x(), xzbbox.min_z()),
+                    )
+                })
+                .flatten();
 
             // Precompute a per-chunk ground-Y cache so subsequent lookups
             // (main column + water-column + depth-fill neighbours, ~20+ per
@@ -266,6 +364,8 @@ pub fn generate_ground_region(
                     chunk_max_z,
                 )
             });
+
+            let mut water_memo = WaterColumnMemo::new(chunk_x, chunk_z);
 
             // --fillground fast path: bulk-fill fully-buried sections to
             // Uniform(STONE) so the per-column loop only walks the boundary
@@ -344,12 +444,14 @@ pub fn generate_ground_region(
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
 
-                    // Compute slope once for this column (used for surface selection and depth)
-                    let slope = if terrain_enabled {
-                        ground.slope(coord)
+                    // Slope once per column (used for surface selection and depth), from
+                    // unrounded heights so a contour doesn't flicker between tiers.
+                    let (slope_f, gradient) = if terrain_enabled {
+                        ground.slope_and_gradient(coord)
                     } else {
-                        0
+                        (0.0, (0.0, 0.0))
                     };
+                    let slope = slope_f.round() as i32;
 
                     // On steep terrain, override any existing OSM surface block
                     // (e.g., a quarry's stone, a park's grass) with slope-appropriate
@@ -361,7 +463,20 @@ pub fn generate_ground_region(
                     // at that slope would wipe e.g. a `landuse=quarry` STONE surface
                     // with GRASS_BLOCK for no good reason — it's only a 27° hiking
                     // slope, not a cliff.
-                    let steep_override = terrain_enabled && slope > 4;
+                    //
+                    // Mapped sand holds up to its angle of repose (~34°, below the
+                    // `slope > 6` tier), so a dune's slip face stays sand, not a stripe of
+                    // scree down the dune field.
+                    let steep_override = terrain_enabled
+                        && slope > 4
+                        && (slope > 6
+                            || !editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z,
+                                Some(&[SAND]),
+                                None,
+                            ));
                     let mut did_underfill = false;
 
                     // Determine surface and under-block material for this column.
@@ -420,18 +535,21 @@ pub fn generate_ground_region(
                             }
                             false
                         };
-                        let placed_water = has_water_in_column(x, z);
+                        let mut water_at = |wx: i32, wz: i32| {
+                            water_memo.get(wx, wz, || has_water_in_column(wx, wz))
+                        };
+                        let placed_water = water_at(x, z);
                         let osm_gap = if placed_water {
                             false
                         } else {
-                            let water_n = has_water_in_column(x, z - 1);
-                            let water_s = has_water_in_column(x, z + 1);
-                            let water_w = has_water_in_column(x - 1, z);
-                            let water_e = has_water_in_column(x + 1, z);
-                            let water_ne = has_water_in_column(x + 1, z - 1);
-                            let water_nw = has_water_in_column(x - 1, z - 1);
-                            let water_se = has_water_in_column(x + 1, z + 1);
-                            let water_sw = has_water_in_column(x - 1, z + 1);
+                            let water_n = water_at(x, z - 1);
+                            let water_s = water_at(x, z + 1);
+                            let water_w = water_at(x - 1, z);
+                            let water_e = water_at(x + 1, z);
+                            let water_ne = water_at(x + 1, z - 1);
+                            let water_nw = water_at(x - 1, z - 1);
+                            let water_se = water_at(x + 1, z + 1);
+                            let water_sw = water_at(x - 1, z + 1);
 
                             // Fill single-cell gaps when water spans opposite neighbors.
                             (water_n && water_s)
@@ -478,21 +596,58 @@ pub fn generate_ground_region(
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
+                            let cover_here = if has_land_cover {
+                                ground.cover_class(coord)
+                            } else {
+                                0
+                            };
+                            // Snow by altitude and terrain shape. An ESA snow/ice cell near
+                            // the snow line or in a cold climate is a glacier, which keeps
+                            // patches of old snow even below the line.
+                            let mut snow_depth = snow_line.depth(x, z, ground_y);
+                            let glacier = planetary_body.is_none()
+                                && terrain_surface::is_glacier_cover(cover_here)
+                                && terrain_surface::is_plausible_ice(snow_depth, climate);
+                            if glacier {
+                                snow_depth = terrain_surface::glacier_depth(snow_depth);
+                            }
+                            let snow = if planetary_body.is_some()
+                                || snow_depth < terrain_surface::SNOW_MIN_DEPTH
+                            {
+                                terrain_surface::Snow::None
+                            } else {
+                                terrain_surface::snow_cover(
+                                    snow_depth,
+                                    slope_f,
+                                    || ground.convexity(coord),
+                                    snow_line.shade(gradient, slope_f),
+                                    x,
+                                    z,
+                                )
+                            };
+
+                            // Below a cliff, from gentle ground up to the talus's own angle.
+                            let talus = match &talus_field {
+                                Some(field)
+                                    if slope <= 6 && terrain_surface::takes_talus(cover_here) =>
+                                {
+                                    field.near(x, z, ground.level_exact(coord))
+                                }
+                                _ => 0.0,
+                            };
+                            let talus_block =
+                                terrain_surface::talus_palette(x, z, talus, cover_here);
+
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if let Some(body) = planetary_body {
                                 // No land cover off Earth, so this replaces the
                                 // whole ESA cascade below.
                                 crate::celestial::surface_palette(
-                                    body,
-                                    slope,
-                                    planetary_lat,
-                                    ground_y,
-                                    x,
-                                    z,
+                                    body, slope, center_lat, ground_y, x, z,
                                 )
                             } else if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
-                                let cover = ground.cover_class(coord);
+                                let cover = cover_here;
 
                                 // Steep terrain overrides land cover classification.
                                 //
@@ -501,51 +656,19 @@ pub fn generate_ground_region(
                                 //
                                 //   slope > 8  → ≥ 45° : sheer cliff face
                                 //   slope > 6  → ≥ 37° : very steep rocky face
-                                //   slope > 4  → ≥ 27° : steep slope with scree
+                                //   slope > 4  → ≥ 27° : steep slope, soil between outcrops
                                 //   slope ≤ 4  → < 27° : falls through to land cover
                                 //                        (alpine meadow, forest, etc.)
                                 //
                                 // We don't force rock materials onto 21–27° slopes
                                 // any more — that's a normal hiking incline where
                                 // grass and trees belong.
-                                if slope > 4 {
-                                    if slope > 8 {
-                                        // Sheer cliff: each column is 100% one material
-                                        // so the downward under-fill matches the surface,
-                                        // producing vertical stripes of cobbled/deepslate.
-                                        let h = land_cover::coord_hash(x, z);
-                                        if h.is_multiple_of(2) {
-                                            (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
-                                        } else {
-                                            (DEEPSLATE, DEEPSLATE)
-                                        }
-                                    } else if slope > 6 {
-                                        // Very steep rock face: stone-dominant with
-                                        // weathered cobblestone chunks and occasional
-                                        // andesite banding. Deepslate stays below-surface
-                                        // only — it would read as "cliff" if exposed here.
-                                        let h = land_cover::coord_hash(x, z) % 20;
-                                        if h < 12 {
-                                            (STONE, DEEPSLATE) // 60%
-                                        } else if h < 17 {
-                                            (COBBLESTONE, DEEPSLATE) // 25%
-                                        } else {
-                                            (ANDESITE, DEEPSLATE) // 15%
-                                        }
-                                    } else {
-                                        // Steep slope with natural scree: rocky mix where
-                                        // the gravel is a minority patch (not the whole
-                                        // surface) so it looks like real scree rather
-                                        // than a grey slope.
-                                        let h = land_cover::coord_hash(x, z) % 12;
-                                        match h {
-                                            0..=3 => (ANDESITE, STONE),    // 33%
-                                            4..=5 => (TUFF, STONE),        // 17%
-                                            6..=7 => (STONE, STONE),       // 17%
-                                            8..=9 => (COBBLESTONE, STONE), // 17%
-                                            _ => (GRAVEL, STONE),          // 17% scree
-                                        }
-                                    }
+                                if let Some(p) = talus_block {
+                                    p
+                                } else if slope > 4 {
+                                    terrain_surface::steep_palette(x, z, ground_y, slope, cover)
+                                } else if glacier {
+                                    terrain_surface::GLACIER_ICE
                                 } else if let Some(p) = climate.surface_palette(cover, x, z) {
                                     p
                                 } else {
@@ -605,41 +728,34 @@ pub fn generate_ground_region(
                                                         ));
                                                         cc == land_cover::LC_BARE
                                                             || cc == land_cover::LC_SNOW_ICE
+                                                            || cc == land_cover::LC_BEACH
                                                     })
                                                     .count();
                                             if neighbors_bare == 0 {
                                                 // Isolated pixel - blend with surroundings
                                                 (GRASS_BLOCK, DIRT)
+                                            } else if value_noise_01(x, z, 6) < 0.45 {
+                                                // Bare/sparse terrain: earth patches at
+                                                // ~6-block resolution between rock, whose
+                                                // own patches come from a separate field.
+                                                (COARSE_DIRT, DIRT)
                                             } else {
-                                                // Bare/sparse terrain: soil patches
-                                                // interspersed with varied rock. Value
-                                                // noise at ~6-block resolution groups
-                                                // coarse dirt into organic earth
-                                                // patches (rather than scattering it
-                                                // as single pixels whose warm brown
-                                                // stands out against grey rock), then
-                                                // a finer per-block hash picks the
-                                                // specific block within each zone.
-                                                let noise = value_noise_01(x, z, 6);
-                                                let h = land_cover::coord_hash(x, z);
-                                                // Threshold 0.45 → roughly 30 % dirt
-                                                // coverage given the bell-shaped
-                                                // distribution of bilinear-interpolated
-                                                // uniform samples.
-                                                if noise < 0.45 {
-                                                    match h % 10 {
-                                                        0..=7 => (COARSE_DIRT, DIRT), // 80% inside dirt patch
-                                                        _ => (STONE, STONE), // 20% stone poking through
-                                                    }
-                                                } else {
-                                                    match h % 12 {
-                                                        0..=3 => (STONE, STONE),       // 33%
-                                                        4..=5 => (ANDESITE, STONE),    // 17%
-                                                        6..=7 => (COBBLESTONE, STONE), // 17%
-                                                        8..=9 => (GRAVEL, STONE),      // 17% scree
-                                                        _ => (ANDESITE, STONE), // 17% more andesite
-                                                    }
-                                                }
+                                                terrain_surface::bare_rock_palette(x, z)
+                                            }
+                                        }
+                                        // Sand, or shingle where it is cold. No slope
+                                        // check needed: steep shores took the rock
+                                        // tiers above.
+                                        land_cover::LC_BEACH => {
+                                            if matches!(
+                                                climate,
+                                                crate::climate::Climate::Tundra
+                                                    | crate::climate::Climate::IceCap
+                                            ) && value_noise_01(x + 41, z + 5, 6) < 0.7
+                                            {
+                                                (GRAVEL, STONE)
+                                            } else {
+                                                (SAND, SANDSTONE)
                                             }
                                         }
                                         // LC_WATER handled above with variable depth
@@ -648,39 +764,12 @@ pub fn generate_ground_region(
                                         _ => (GRASS_BLOCK, DIRT),
                                     }
                                 }
-                            } else if terrain_enabled {
-                                // No land cover data: same slope-based cascade
-                                // as the has_land_cover path, falling through
-                                // to plain grass for the ≤4 slopes (no ESA
-                                // class to pick instead).
-                                if slope > 8 {
-                                    let h = land_cover::coord_hash(x, z);
-                                    if h.is_multiple_of(2) {
-                                        (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
-                                    } else {
-                                        (DEEPSLATE, DEEPSLATE)
-                                    }
-                                } else if slope > 6 {
-                                    let h = land_cover::coord_hash(x, z) % 20;
-                                    if h < 12 {
-                                        (STONE, DEEPSLATE)
-                                    } else if h < 17 {
-                                        (COBBLESTONE, DEEPSLATE)
-                                    } else {
-                                        (ANDESITE, DEEPSLATE)
-                                    }
-                                } else if slope > 4 {
-                                    let h = land_cover::coord_hash(x, z) % 12;
-                                    match h {
-                                        0..=3 => (ANDESITE, STONE),
-                                        4..=5 => (TUFF, STONE),
-                                        6..=7 => (STONE, STONE),
-                                        8..=9 => (COBBLESTONE, STONE),
-                                        _ => (GRAVEL, STONE),
-                                    }
-                                } else {
-                                    (GRASS_BLOCK, DIRT)
-                                }
+                            } else if let Some(p) = talus_block {
+                                p
+                            } else if terrain_enabled && slope > 4 {
+                                // No land cover data: the same slope cascade, falling
+                                // through to plain grass for the ≤4 slopes.
+                                terrain_surface::steep_palette(x, z, ground_y, slope, 0)
                             } else {
                                 (GRASS_BLOCK, DIRT)
                             };
@@ -738,6 +827,20 @@ pub fn generate_ground_region(
                                 (surface_block, under_block)
                             };
 
+                            // Full snow cover takes over the surface, and so does any snow
+                            // on ice, which the game won't hold as a layer. The under-block
+                            // stays, so the faces of steps show the rock or ice below.
+                            let surface_block = if (snow == terrain_surface::Snow::Block
+                                || snow != terrain_surface::Snow::None
+                                    && terrain_surface::is_ice(surface_block))
+                                && water_blend <= 0.5
+                                && surface_block != WATER
+                            {
+                                SNOW_BLOCK
+                            } else {
+                                surface_block
+                            };
+
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
                                 // Use blacklist to avoid replacing water/bedrock and
@@ -760,12 +863,24 @@ pub fn generate_ground_region(
                                         GRAY_CONCRETE,
                                         LIGHT_GRAY_CONCRETE,
                                         WHITE_CONCRETE,
+                                        YELLOW_CONCRETE,
                                         DIRT_PATH,
                                         STONE_BRICKS,
                                         BRICK,
                                         OAK_PLANKS,
                                         BLACK_CONCRETE,
                                     ]),
+                                );
+                            } else if talus_block.is_some_and(|(top, _)| top == surface_block) {
+                                // Fallen rock buries a mapped meadow at the wall's foot too,
+                                // never its roads, fields or paths.
+                                editor.set_block_absolute(
+                                    surface_block,
+                                    x,
+                                    ground_y,
+                                    z,
+                                    Some(terrain_surface::TALUS_BURIES),
+                                    None,
                                 );
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
@@ -774,31 +889,28 @@ pub fn generate_ground_region(
                             // Don't place dirt/under blocks below water surfaces.
                             // OSM water (rivers, lakes) is placed during element processing;
                             // placing dirt underneath would show through shallow water.
-                            let surface_is_water = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z,
-                                Some(&[WATER]),
-                                None,
-                            );
+                            let top = editor.get_block_absolute(x, ground_y, z);
+                            let surface_is_water = top == Some(WATER);
 
-                            // Snow-cap terrain above the climatic snow line. Skip
-                            // water (placed block or ESA-classified, e.g. a steep
-                            // lake edge where rock sits at ground_y). Pre-existing
-                            // flat OSM stone is intentionally left uncapped here.
-                            if snow_threshold_y != i32::MAX
+                            // Snow layers, also over any surface a mapped feature set before
+                            // full cover could. Skip water (placed block or ESA-classified,
+                            // e.g. a steep lake edge where rock sits at ground_y). On natural
+                            // ground they rise with the unrounded terrain, while mapped
+                            // surfaces only get a dusting.
+                            if snow != terrain_surface::Snow::None
                                 && !surface_is_water
                                 && water_blend <= 0.5
                             {
-                                let edge = (value_noise_01(x, z, 8) - 0.5) * SNOW_EDGE_JITTER;
-                                if ground_y as f64 >= snow_threshold_y as f64 + edge {
-                                    editor.set_block_if_absent_absolute(
-                                        SNOW_LAYER,
-                                        x,
-                                        ground_y + 1,
-                                        z,
-                                    );
-                                }
+                                let eighths =
+                                    if top == Some(surface_block) || top == Some(PACKED_ICE) {
+                                        let rise = terrain_enabled.then(|| {
+                                            ground.level_exact(coord) - f64::from(ground_y) + 0.5
+                                        });
+                                        terrain_surface::snow_eighths(snow, rise)
+                                    } else {
+                                        1
+                                    };
+                                terrain_surface::place_snow(editor, x, ground_y, z, top, eighths);
                             }
 
                             if !surface_is_water {
@@ -834,14 +946,28 @@ pub fn generate_ground_region(
                                 let y_max = ground_y - 1;
                                 if y_max > min_y() {
                                     let y_min = (ground_y - depth).max(min_y() + 1);
-                                    editor.fill_column_absolute(
-                                        under_block,
-                                        x,
-                                        z,
-                                        y_min,
-                                        y_max,
-                                        true,
-                                    );
+                                    // Rock faces show their bedding down the whole step.
+                                    // Off Earth the column stays plain stone.
+                                    if slope > 4 && under_block == STONE && planetary_body.is_none()
+                                    {
+                                        terrain_surface::fill_strata(
+                                            editor,
+                                            x,
+                                            z,
+                                            y_min,
+                                            y_max,
+                                            slope > 6,
+                                        );
+                                    } else {
+                                        editor.fill_column_absolute(
+                                            under_block,
+                                            x,
+                                            z,
+                                            y_min,
+                                            y_max,
+                                            true,
+                                        );
+                                    }
                                 }
                                 did_underfill = true;
                             } else {
@@ -886,12 +1012,21 @@ pub fn generate_ground_region(
                             // with, and surface=dirt or surface=grass make the block check
                             // below say "natural" on both.
                             let sealed = editor.surface_is_sealed(x, z);
+                            // Podzol and moss come from the boreal and tundra palettes.
                             let ground_is_natural = !sealed
                                 && editor.check_for_block_absolute(
                                     x,
                                     ground_y,
                                     z,
-                                    Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
+                                    Some(&[
+                                        GRASS_BLOCK,
+                                        COARSE_DIRT,
+                                        DIRT,
+                                        MUD,
+                                        FARMLAND,
+                                        PODZOL,
+                                        MOSS_BLOCK,
+                                    ]),
                                     None,
                                 );
                             // Trees can also grow through stone surfaces (urban tree cover)
@@ -928,6 +1063,7 @@ pub fn generate_ground_region(
                                 && ground_allows_trees
                                 && !tunnel_footprint.contains(x, z)
                                 && !editor.block_exists_absolute(x, ground_y + 1, z)
+                                && !editor.under_mapped_crown(x, z)
                             {
                                 tree::Tree::create_from_canopy(
                                     editor,
@@ -942,6 +1078,15 @@ pub fn generate_ground_region(
                             {
                                 let cover = ground.cover_class(coord);
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
+                                // Worn coarse-dirt ground carries half the grass of a lawn.
+                                let worn = editor.check_for_block_absolute(
+                                    x,
+                                    ground_y,
+                                    z,
+                                    Some(&[COARSE_DIRT]),
+                                    None,
+                                );
+                                let sward = climate_sward * if worn { 0.5 } else { 1.0 };
 
                                 match cover {
                                     land_cover::LC_TREE_COVER
@@ -959,54 +1104,56 @@ pub fn generate_ground_region(
                                             30
                                         };
                                         let choice = rng.random_range(0..tree_rate);
-                                        if choice == 0 && !canopy_covered {
+                                        if choice == 0
+                                            && !canopy_covered
+                                            && !editor.under_mapped_crown(x, z)
+                                        {
                                             tree::Tree::create(
                                                 editor,
                                                 (x, 1, z),
                                                 Some(building_footprints),
                                                 Some(bridge_surface),
                                             );
-                                        } else if ground_is_natural {
-                                            // Undergrowth only on natural surfaces
-                                            if choice == 1 {
-                                                let flower = [
-                                                    RED_FLOWER,
-                                                    BLUE_FLOWER,
-                                                    YELLOW_FLOWER,
-                                                    WHITE_FLOWER,
-                                                ][rng.random_range(0..4)];
-                                                editor.set_block_absolute(
-                                                    flower,
-                                                    x,
-                                                    ground_y + 1,
-                                                    z,
-                                                    None,
-                                                    None,
-                                                );
-                                            } else if choice <= 13 {
-                                                editor.set_block_absolute(
-                                                    GRASS,
-                                                    x,
-                                                    ground_y + 1,
-                                                    z,
-                                                    None,
-                                                    None,
-                                                );
-                                            }
+                                        } else if ground_is_natural
+                                            && undergrowth_roll(
+                                                x,
+                                                z,
+                                                0.4 * sward,
+                                                SALT_FOREST_FLOOR,
+                                            )
+                                        {
+                                            // Undergrowth only on natural surfaces. Flowers
+                                            // come in patches from the decoration pass.
+                                            let fern = (land_cover::coord_hash(x ^ 0xFE, z ^ 0x4E)
+                                                % 100)
+                                                as f64
+                                                / 100.0
+                                                < forest_fern_share;
+                                            editor.set_block_absolute(
+                                                if fern { FERN } else { GRASS },
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
                                         }
                                     }
                                     land_cover::LC_SHRUBLAND if ground_is_natural => {
                                         let choice = rng.random_range(0..100);
                                         if choice < 2 {
-                                            editor.set_block_absolute(
-                                                OAK_LEAVES,
+                                            crate::element_processing::bush::place_bush(
+                                                editor,
                                                 x,
-                                                ground_y + 1,
                                                 z,
-                                                None,
-                                                None,
+                                                crate::element_processing::bush::BushKind::Wild,
                                             );
-                                        } else if choice < 30 {
+                                        } else if undergrowth_roll(
+                                            x,
+                                            z,
+                                            0.28 * sward,
+                                            SALT_SHRUB_FLOOR,
+                                        ) {
                                             editor.set_block_absolute(
                                                 GRASS,
                                                 x,
@@ -1017,20 +1164,16 @@ pub fn generate_ground_region(
                                             );
                                         }
                                     }
-                                    land_cover::LC_GRASSLAND if ground_is_natural => {
-                                        // Short grass on grassland (~55%)
-                                        let choice = rng.random_range(0..100);
-                                        if choice < 50 {
-                                            editor.set_block_absolute(
-                                                GRASS,
-                                                x,
-                                                ground_y + 1,
-                                                z,
-                                                None,
-                                                None,
-                                            );
-                                        } else if choice < 55 {
-                                            // Occasional tall grass
+                                    // Short grass on grassland (~55%), thick in some
+                                    // stretches and thin in others, with tall grass
+                                    // gathered in its own stands.
+                                    land_cover::LC_GRASSLAND
+                                        if ground_is_natural
+                                            && undergrowth_roll(x, z, 0.55 * sward, SALT_SWARD) =>
+                                    {
+                                        let stand = patch_noise(x, z, 9, SALT_TALL_SWARD) > 0.8;
+                                        let tall_share = if stand { 35 } else { 4 };
+                                        if rng.random_range(0..100) < tall_share {
                                             editor.set_block_absolute(
                                                 TALL_GRASS_BOTTOM,
                                                 x,
@@ -1047,15 +1190,9 @@ pub fn generate_ground_region(
                                                 None,
                                                 None,
                                             );
-                                        } else if choice == 55 {
-                                            let flower = [
-                                                RED_FLOWER,
-                                                BLUE_FLOWER,
-                                                YELLOW_FLOWER,
-                                                WHITE_FLOWER,
-                                            ][rng.random_range(0..4)];
+                                        } else {
                                             editor.set_block_absolute(
-                                                flower,
+                                                GRASS,
                                                 x,
                                                 ground_y + 1,
                                                 z,
@@ -1114,8 +1251,11 @@ pub fn generate_ground_region(
                                         if ground_is_natural =>
                                     {
                                         let choice = rng.random_range(0..100);
-                                        if choice < 30 {
-                                            // Water patches in wetlands
+                                        // Standing water in pools rather than single-block
+                                        // holes, and only where it cannot run off downhill.
+                                        if patch_noise(x, z, 5, SALT_WETLAND_POOLS) < 0.28
+                                            && editor.water_source_is_enclosed(x, z)
+                                        {
                                             editor.set_block_absolute(
                                                 WATER,
                                                 x,
@@ -1124,7 +1264,7 @@ pub fn generate_ground_region(
                                                 Some(&[MUD, GRASS_BLOCK]),
                                                 None,
                                             );
-                                        } else if choice < 65 {
+                                        } else if choice < 50 {
                                             editor.set_block_absolute(
                                                 GRASS,
                                                 x,
@@ -1133,7 +1273,7 @@ pub fn generate_ground_region(
                                                 None,
                                                 None,
                                             );
-                                        } else if choice < 75 {
+                                        } else if choice < 64 {
                                             editor.set_block_absolute(
                                                 TALL_GRASS_BOTTOM,
                                                 x,
@@ -1177,13 +1317,11 @@ pub fn generate_ground_region(
                                                     None,
                                                     None,
                                                 ),
-                                                6..=8 => editor.set_block_absolute(
-                                                    OAK_LEAVES,
+                                                6..=8 => crate::element_processing::bush::place_bush(
+                                                    editor,
                                                     x,
-                                                    ground_y + 1,
                                                     z,
-                                                    None,
-                                                    None,
+                                                    crate::element_processing::bush::BushKind::Low,
                                                 ),
                                                 9 => editor.set_block_absolute(
                                                     DEAD_BUSH,
@@ -1247,11 +1385,15 @@ pub fn generate_ground_region(
                         }
                     }
 
-                    // Post-processing: remove stray vegetation from road surfaces.
+                    // Post-processing: remove stray vegetation from road and water surfaces.
                     // Despite guards in natural/landuse processing, overlapping elements
                     // with the same priority can still place vegetation on roads depending
-                    // on sort order. This cleanup pass catches any remaining cases.
-                    if editor.check_for_block_absolute(
+                    // on sort order, and an area that floods its ground later (a wetland
+                    // puddle, a shoal) leaves another area's plants floating on the water.
+                    // A plant with a trunk or branch right above it reads as having
+                    // taken the wood's place, so it goes too. This cleanup pass
+                    // catches any remaining cases.
+                    let stray_surface = editor.check_for_block_absolute(
                         x,
                         ground_y,
                         z,
@@ -1262,56 +1404,47 @@ pub fn generate_ground_region(
                             GRAY_CONCRETE,
                             LIGHT_GRAY_CONCRETE,
                             WHITE_CONCRETE,
+                            YELLOW_CONCRETE,
                             DIRT_PATH,
+                            WATER,
                         ]),
                         None,
-                    ) && editor.check_for_block_absolute(
-                        x,
-                        ground_y + 1,
-                        z,
-                        Some(&[
-                            GRASS,
-                            OAK_LEAVES,
-                            DEAD_BUSH,
-                            TALL_GRASS_BOTTOM,
-                            RED_FLOWER,
-                            BLUE_FLOWER,
-                            WHITE_FLOWER,
-                            YELLOW_FLOWER,
-                        ]),
-                        None,
-                    ) {
+                    );
+                    if editor.check_for_block_absolute(x, ground_y + 1, z, Some(LOOSE_PLANTS), None)
+                        && (stray_surface
+                            || editor.check_for_block_absolute(
+                                x,
+                                ground_y + 2,
+                                z,
+                                Some(WOOD),
+                                None,
+                            ))
+                    {
                         editor.set_block_absolute(
                             AIR,
                             x,
                             ground_y + 1,
                             z,
-                            Some(&[
-                                GRASS,
-                                OAK_LEAVES,
-                                DEAD_BUSH,
-                                TALL_GRASS_BOTTOM,
-                                RED_FLOWER,
-                                BLUE_FLOWER,
-                                WHITE_FLOWER,
-                                YELLOW_FLOWER,
-                            ]),
+                            Some(LOOSE_PLANTS),
                             None,
                         );
-                        // Also clear tall grass top if it was a two-block plant
-                        if editor.check_for_block_absolute(
-                            x,
-                            ground_y + 2,
-                            z,
-                            Some(&[TALL_GRASS_TOP]),
-                            None,
-                        ) {
+                        // Also clear the top of a two-block plant, or a stack of cane.
+                        for y in ground_y + 2..=ground_y + 3 {
+                            if !editor.check_for_block_absolute(
+                                x,
+                                y,
+                                z,
+                                Some(STACKED_PLANT_PARTS),
+                                None,
+                            ) {
+                                break;
+                            }
                             editor.set_block_absolute(
                                 AIR,
                                 x,
-                                ground_y + 2,
+                                y,
                                 z,
-                                Some(&[TALL_GRASS_TOP]),
+                                Some(STACKED_PLANT_PARTS),
                                 None,
                             );
                         }
@@ -1338,6 +1471,7 @@ pub fn generate_ground_region(
                         Some(&[BEDROCK]),
                     );
 
+                    water_memo.forget(x, z);
                     block_counter += 1;
                     #[allow(clippy::manual_is_multiple_of)]
                     if block_counter % batch_size == 0 {
@@ -1359,8 +1493,21 @@ pub fn generate_ground_region(
         // at the end of generation for maximum throughput.
     }
 
+    // Plant patches need every column of the region finished first.
+    crate::ground_decoration::decorate_region(
+        editor, ground, args, xzbbox, iter_min_x, iter_max_x, iter_min_z, iter_max_z,
+    );
+
     ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();
+}
+
+/// Whether a column carries undergrowth: `mean` of the ground on average, but
+/// thick in some stretches and thin in others, as the game's grass patches are.
+fn undergrowth_roll(x: i32, z: i32, mean: f64, salt: u32) -> bool {
+    let density = (mean * (0.3 + 1.4 * patch_noise(x, z, 11, salt))).min(0.95);
+    let roll = land_cover::coord_hash(x ^ salt as i32, z ^ salt.rotate_left(9) as i32) % 1000;
+    (roll as f64) < density * 1000.0
 }
 
 /// Smooth scalar noise in `[0, 1]` at approximately `scale`-block resolution.
@@ -1400,4 +1547,60 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
     let a = v00 * (1.0 - fx) + v10 * fx;
     let b = v01 * (1.0 - fx) + v11 * fx;
     a * (1.0 - fz) + b * fz
+}
+
+/// `value_noise_01` on its own lattice, so layers with different salts are
+/// independent instead of shifted copies of one field. The lattice is turned
+/// about 27 degrees to the block grid, so patches don't come out boxy and
+/// lined up with the axes.
+pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    const COS: f64 = 0.891_006_524_188_368;
+    const SIN: f64 = 0.453_990_499_739_547;
+    let s = f64::from(scale.max(1));
+    let (fx, fz) = (f64::from(x), f64::from(z));
+    let u = (fx * COS - fz * SIN) / s;
+    let v = (fx * SIN + fz * COS) / s;
+    let (u0, v0) = (u.floor(), v.floor());
+    let (tu, tv) = (u - u0, v - v0);
+    let su = tu * tu * (3.0 - 2.0 * tu);
+    let sv = tv * tv * (3.0 - 2.0 * tv);
+    let (cu, cv) = (u0 as i32, v0 as i32);
+    let salt_x = salt as i32;
+    let salt_z = salt.rotate_left(16) as i32;
+    let sample = |cx: i32, cz: i32| {
+        (land_cover::coord_hash(cx ^ salt_x, cz ^ salt_z) % 1000) as f64 / 1000.0
+    };
+    let a = sample(cu, cv) * (1.0 - su) + sample(cu + 1, cv) * su;
+    let b = sample(cu, cv + 1) * (1.0 - su) + sample(cu + 1, cv + 1) * su;
+    a * (1.0 - sv) + b * sv
+}
+
+/// Smooth noise remapped to a roughly uniform `[0, 1]`, so `patch_noise(..) < 0.2`
+/// covers about a fifth of the ground in patches about `scale` blocks across.
+///
+/// Bilinear value noise piles up around 0.5; the table is its measured quantiles.
+pub(crate) fn patch_noise(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    const QUANTILES: [(f64, f64); 13] = [
+        (0.0, 0.0),
+        (0.15, 0.05),
+        (0.21, 0.1),
+        (0.30, 0.2),
+        (0.37, 0.3),
+        (0.435, 0.4),
+        (0.496, 0.5),
+        (0.558, 0.6),
+        (0.625, 0.7),
+        (0.702, 0.8),
+        (0.796, 0.9),
+        (0.858, 0.95),
+        (1.0, 1.0),
+    ];
+    let v = value_noise_salted(x, z, scale, salt);
+    for pair in QUANTILES.windows(2) {
+        let ((v0, q0), (v1, q1)) = (pair[0], pair[1]);
+        if v <= v1 {
+            return q0 + (v - v0) / (v1 - v0) * (q1 - q0);
+        }
+    }
+    1.0
 }

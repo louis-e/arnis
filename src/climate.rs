@@ -2,24 +2,36 @@
 
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::geo_grid::TiledGrid;
+use crate::ground_generation::patch_noise;
 use crate::land_cover::{
     coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
     LC_TREE_COVER,
 };
+use std::sync::{LazyLock, OnceLock};
 
-// Global Koppen-Geiger grid, 0.1 deg, 1 byte/cell (class 1..30, 0 = ocean/nodata).
-static KOPPEN: &[u8] = include_bytes!("../assets/climate/koppen_0p1.bin");
-const KOPPEN_COLS: usize = 3600;
-const KOPPEN_ROWS: usize = 1800;
-const KOPPEN_RES: f64 = 0.1;
+// Global Koppen-Geiger grid, 0.1 deg, class 1..30 per cell (0 = ocean/nodata).
+static KOPPEN_BYTES: &[u8] = include_bytes!("../assets/climate/koppen.grid");
+static KOPPEN: LazyLock<Option<TiledGrid>> = LazyLock::new(|| TiledGrid::parse(KOPPEN_BYTES));
+// Decoded tiles stay cached; each is 10 KB and a run touches one or two.
+type KoppenTile = OnceLock<Option<Box<[u8]>>>;
+static KOPPEN_TILES: LazyLock<Vec<KoppenTile>> = LazyLock::new(|| {
+    let tiles = KOPPEN.as_ref().map_or(0, TiledGrid::tile_count);
+    (0..tiles).map(|_| OnceLock::new()).collect()
+});
 
 fn koppen_class(lat: f64, lon: f64) -> u8 {
-    if KOPPEN.len() != KOPPEN_COLS * KOPPEN_ROWS {
+    let Some(grid) = KOPPEN.as_ref() else {
         return 0;
-    }
-    let col = (((lon + 180.0) / KOPPEN_RES).floor() as isize).clamp(0, KOPPEN_COLS as isize - 1);
-    let row = (((90.0 - lat) / KOPPEN_RES).floor() as isize).clamp(0, KOPPEN_ROWS as isize - 1);
-    KOPPEN[row as usize * KOPPEN_COLS + col as usize]
+    };
+    let (col, row) = grid.position(lat, lon);
+    let cell = grid.cell(col, row);
+    let Some(slot) = KOPPEN_TILES.get(grid.tile_of(cell)) else {
+        return 0;
+    };
+    let tile = slot.get_or_init(|| grid.decode(grid.tile_of(cell)).map(Vec::into_boxed_slice));
+    tile.as_deref()
+        .map_or(0, |t| grid.value(t, grid.index_in_tile(cell)) as u8)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,6 +72,10 @@ impl Climate {
         Climate::from_class(koppen_class(lat, lon))
     }
 
+    pub fn classify_at(lat: f64, lon: f64) -> Climate {
+        Climate::from_class(koppen_class(lat, lon))
+    }
+
     /// Surface palette (surface, under) for veg/bare cover, or None to keep the baseline.
     pub fn surface_palette(self, cover: u8, x: i32, z: i32) -> Option<(Block, Block)> {
         // DryContinental (Grand Canyon) keeps baseline blocks; only its biome is adapted.
@@ -77,66 +93,71 @@ impl Climate {
         if !veg && !bare {
             return None;
         }
-        let h = coord_hash(x, z);
+        // Shares along one smooth field, so each material forms patches and the
+        // listed order is also the order they grade into one another.
+        let n = patch_noise(x, z, 9, 0x00C1_1A7E);
+        let pick = |bands: &[(f64, (Block, Block))]| {
+            bands
+                .iter()
+                .find(|(upto, _)| n < *upto)
+                .map_or(bands[bands.len() - 1].1, |(_, p)| *p)
+        };
         let pal = match self {
             Climate::IceCap => {
-                if h.is_multiple_of(6) {
+                if patch_noise(x, z, 20, 0x001C_ECA9) < 0.17 {
                     (PACKED_ICE, PACKED_ICE)
                 } else {
                     (SNOW_BLOCK, SNOW_BLOCK)
                 }
             }
-            Climate::HotDesert => match h % 12 {
-                0 => (SANDSTONE, SANDSTONE),
-                1 => (SMOOTH_SANDSTONE, SANDSTONE),
-                _ => (SAND, SANDSTONE),
-            },
-            Climate::HotSteppe if bare => match h % 10 {
-                0..=4 => (SAND, SANDSTONE),
-                _ => (COARSE_DIRT, DIRT),
-            },
-            Climate::HotSteppe => match h % 10 {
-                0..=2 => (SAND, SANDSTONE),
-                3..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::ColdDesert if bare => match h % 12 {
-                0..=4 => (GRAVEL, STONE),
-                5..=8 => (COARSE_DIRT, DIRT),
-                _ => (STONE, STONE),
-            },
-            Climate::ColdDesert => match h % 10 {
-                0..=4 => (COARSE_DIRT, DIRT),
-                5..=7 => (GRAVEL, STONE),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::ColdSteppe if bare => match h % 10 {
-                0..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRAVEL, STONE),
-            },
-            Climate::ColdSteppe => match h % 10 {
-                0..=2 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::Boreal if bare => match h % 10 {
-                0..=4 => (COARSE_DIRT, DIRT),
-                _ => (GRAVEL, STONE),
-            },
-            Climate::Boreal => match h % 10 {
-                0..=3 => (PODZOL, DIRT),
-                4..=5 => (COARSE_DIRT, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
-            Climate::Tundra if bare => match h % 10 {
-                0..=4 => (GRAVEL, STONE),
-                5..=7 => (COARSE_DIRT, DIRT),
-                _ => (STONE, STONE),
-            },
-            Climate::Tundra => match h % 10 {
-                0..=3 => (COARSE_DIRT, DIRT),
-                4..=5 => (MOSS_BLOCK, DIRT),
-                _ => (GRASS_BLOCK, DIRT),
-            },
+            Climate::HotDesert => {
+                // Sandstone crops out in patches; per-block sandstone read as speckle.
+                if patch_noise(x, z, 12, 0x00DE_5E27) < 0.06 {
+                    (SANDSTONE, SANDSTONE)
+                } else if coord_hash(x, z).is_multiple_of(40) {
+                    (SMOOTH_SANDSTONE, SANDSTONE)
+                } else {
+                    (SAND, SANDSTONE)
+                }
+            }
+            Climate::HotSteppe if bare => {
+                pick(&[(0.35, (SAND, SANDSTONE)), (1.0, (COARSE_DIRT, DIRT))])
+            }
+            Climate::HotSteppe => pick(&[
+                (0.15, (SAND, SANDSTONE)),
+                (0.5, (COARSE_DIRT, DIRT)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
+            Climate::ColdDesert if bare => pick(&[
+                (0.42, (GRAVEL, STONE)),
+                (0.75, (COARSE_DIRT, DIRT)),
+                (1.0, (STONE, STONE)),
+            ]),
+            Climate::ColdDesert => pick(&[
+                (0.5, (COARSE_DIRT, DIRT)),
+                (0.8, (GRAVEL, STONE)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
+            Climate::ColdSteppe if bare => {
+                pick(&[(0.6, (COARSE_DIRT, DIRT)), (1.0, (GRAVEL, STONE))])
+            }
+            Climate::ColdSteppe => pick(&[(0.3, (COARSE_DIRT, DIRT)), (1.0, (GRASS_BLOCK, DIRT))]),
+            Climate::Boreal if bare => pick(&[(0.5, (COARSE_DIRT, DIRT)), (1.0, (GRAVEL, STONE))]),
+            Climate::Boreal => pick(&[
+                (0.4, (PODZOL, DIRT)),
+                (0.6, (COARSE_DIRT, DIRT)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
+            Climate::Tundra if bare => pick(&[
+                (0.5, (GRAVEL, STONE)),
+                (0.8, (COARSE_DIRT, DIRT)),
+                (1.0, (STONE, STONE)),
+            ]),
+            Climate::Tundra => pick(&[
+                (0.4, (COARSE_DIRT, DIRT)),
+                (0.6, (MOSS_BLOCK, DIRT)),
+                (1.0, (GRASS_BLOCK, DIRT)),
+            ]),
             Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental => return None,
         };
         Some(pal)
@@ -170,9 +191,11 @@ mod tests {
     }
 
     #[test]
-    fn embedded_grid_size_matches() {
+    fn embedded_grid_parses() {
         // If this fails the embedded grid is wrong; koppen_class then safely returns 0.
-        assert_eq!(KOPPEN.len(), KOPPEN_COLS * KOPPEN_ROWS);
+        let grid = KOPPEN.as_ref().expect("koppen.grid");
+        assert_eq!(grid.cells_per_degree().round(), 10.0);
+        assert_eq!(KOPPEN_TILES.len(), 648);
     }
 
     #[test]
