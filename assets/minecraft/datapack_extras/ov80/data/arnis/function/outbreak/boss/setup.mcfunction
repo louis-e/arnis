@@ -1,3 +1,4 @@
+scoreboard players operation @s arnis.ob.run = #run arnis.ob
 tag @s remove arnis.ob.new
 attribute @s minecraft:scale base set 3
 attribute @s minecraft:max_health base set 400

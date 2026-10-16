@@ -14,4 +14,4 @@ execute if score #night arnis.ob matches 5 if score #won arnis.ob matches 0 run 
 execute if score #night arnis.ob matches 5.. if score #won arnis.ob matches 1 run title @a subtitle {"text":"They keep coming","color":"gray"}
 title @a title [{"text":"Night ","color":"dark_red"},{"score":{"name":"#night","objective":"arnis.ob"},"color":"dark_red"}]
 execute as @a at @s run playsound minecraft:event.raid.horn master @s ~ ~ ~ 4 0.7
-execute if score #night arnis.ob matches 5 if score #won arnis.ob matches 0 run function arnis:outbreak/boss/spawn
+execute if score #night arnis.ob matches 5 if score #won arnis.ob matches 0 run scoreboard players set #boss_due arnis.ob 1

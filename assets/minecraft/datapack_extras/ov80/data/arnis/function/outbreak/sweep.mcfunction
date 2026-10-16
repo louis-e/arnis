@@ -1,4 +1,3 @@
-execute if score #run arnis.ob matches 0 as @e[tag=arnis.ob.ent,tag=!arnis.ob.run0,tag=!arnis.ob.run1] run tag @s add arnis.ob.run0
-execute if score #run arnis.ob matches 1 as @e[tag=arnis.ob.ent,tag=!arnis.ob.run0,tag=!arnis.ob.run1] run tag @s add arnis.ob.run1
-execute if score #run arnis.ob matches 0 run kill @e[tag=arnis.ob.run1]
-execute if score #run arnis.ob matches 1 run kill @e[tag=arnis.ob.run0]
+# Each entity keeps the run it was spawned in, which outlasts the time it spends unloaded.
+execute as @e[tag=arnis.ob.ent] unless score @s arnis.ob.run matches -2147483648.. run scoreboard players operation @s arnis.ob.run = #run arnis.ob
+execute as @e[tag=arnis.ob.ent] unless score @s arnis.ob.run = #run arnis.ob run kill @s

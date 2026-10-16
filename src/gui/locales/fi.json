@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Peruuta",
   "one_world_confirm_ok": "Luo",
   "settings_section_gameplay": "Pelattavuus",
-  "settings_section_gameplay_desc": "Lisäosia, jotka toimivat maailman sisäisestä datapaketista. Vain Java, kaikki pois päältä, ellet kytke niitä.",
+  "settings_section_gameplay_desc": "Lisäosia, jotka toimivat maailman sisäisestä datapaketista. Vain Java, ei käytettävissä Yksi maailma -tilassa. Kaikki pois päältä, ellet kytke niitä.",
   "settings_nav_gameplay": "Valikko, löydöt, zombit",
   "pause_menu": "Arnis-taukovalikko",
   "pause_menu_desc": "Matkustus, löydöt ja kiitokset taukovalikosta.",

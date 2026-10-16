@@ -59,17 +59,17 @@ const TRAFFIC: &[(&str, &[u8])] = static_files![
     "data/arnis/function/traffic/tick.mcfunction",
     "data/arnis/function/traffic/on.mcfunction",
     "data/arnis/function/traffic/off.mcfunction",
+    "data/arnis/function/traffic/catch_up.mcfunction",
+    "data/arnis/function/traffic/switched.mcfunction",
     "data/arnis/function/traffic/phase/a_go.mcfunction",
     "data/arnis/function/traffic/phase/a_amber.mcfunction",
     "data/arnis/function/traffic/phase/a_stop.mcfunction",
     "data/arnis/function/traffic/phase/a_ready.mcfunction",
-    "data/arnis/function/traffic/phase/a_hold.mcfunction",
     "data/arnis/function/traffic/phase/a_walk_end.mcfunction",
     "data/arnis/function/traffic/phase/b_go.mcfunction",
     "data/arnis/function/traffic/phase/b_amber.mcfunction",
     "data/arnis/function/traffic/phase/b_stop.mcfunction",
     "data/arnis/function/traffic/phase/b_ready.mcfunction",
-    "data/arnis/function/traffic/phase/b_hold.mcfunction",
     "data/arnis/function/traffic/phase/b_walk_end.mcfunction",
 ];
 
@@ -182,13 +182,17 @@ pub struct Extras {
 
 impl Extras {
     pub fn from_args(args: &Args) -> Self {
+        // Each One World area would write its pack over the last one's.
+        if args.one_world {
+            return Self::default();
+        }
         Self {
             gravity: args.body_gravity && gravity_ratio(args.body).is_some(),
             traffic_lights: args.traffic_lights,
             discoveries: args.discoveries,
             pause_menu: args.pause_menu,
             outbreak: args.zombie_outbreak,
-            cars: args.moving_cars && !args.one_world,
+            cars: args.moving_cars,
         }
     }
 
@@ -256,8 +260,6 @@ pub struct PackContext {
     pub credits: Credits,
     /// Traffic shows red and amber together before green.
     pub red_amber: bool,
-    /// Folder for this area's discoveries, so One World areas each keep their own tab.
-    pub folder: String,
     /// The functions that load the car lanes and set what drivers check ahead, as
     /// (path in the pack, text).
     pub car_functions: Vec<(String, String)>,
@@ -425,7 +427,7 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     }
 
     if ctx.has_discoveries() {
-        let dir = format!("data/arnis/advancement/discoveries/{}", ctx.folder);
+        let dir = format!("data/arnis/advancement/discoveries/{}", discoveries::FOLDER);
         out.push((
             format!("{dir}/root.json"),
             pretty(&discoveries::root(&ctx.area, ctx.places.len(), false)),
@@ -439,7 +441,7 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
             ("ov107/", CriteriaSchema::Namespaced),
             ("ov121/", CriteriaSchema::Typed),
         ] {
-            for (path, adv) in discoveries::tree(&ctx.area, &ctx.folder, &ctx.places, schema) {
+            for (path, adv) in discoveries::tree(&ctx.area, &ctx.places, schema) {
                 out.push((format!("{prefix}{dir}/{path}.json"), pretty(&adv)));
             }
         }
@@ -626,7 +628,6 @@ mod tests {
                 mapillary: false,
             },
             red_amber: true,
-            folder: "main".into(),
             car_functions: Vec::new(),
         }
     }

@@ -1072,7 +1072,7 @@ pub fn generate_world_with_options(
                     |x, z| {
                         xzbbox.contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
                             && !building_footprints.contains(x, z)
-                            && ground.water_distance(rel(x, z)) == 0
+                            && ground.cover_class(rel(x, z)) != crate::land_cover::LC_WATER
                     },
                     |x, z| road_mask.contains(x, z),
                     |x, z| ground.level(rel(x, z)),
@@ -2050,8 +2050,6 @@ pub fn generate_world_with_options(
                 crate::decals::region::SignRegion::Germanic
                     | crate::decals::region::SignRegion::UkIreland
             ),
-            folder: one_world
-                .map_or_else(|| "main".to_string(), |run| format!("area_{}", run.area_id)),
             car_functions: car_network
                 .as_ref()
                 .map(|net| {

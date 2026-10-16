@@ -1,7 +1,7 @@
 function arnis:outbreak/clear
-# A new run id, so the infected of the last one are cleared wherever they turn up.
+# A new run id, never reused, so the infected of every earlier run are cleared wherever they
+# turn up.
 scoreboard players add #run arnis.ob 1
-execute if score #run arnis.ob matches 2.. run scoreboard players set #run arnis.ob 0
 scoreboard players set #state arnis.ob 1
 scoreboard players set #phase arnis.ob 1
 scoreboard players set #day arnis.ob 1

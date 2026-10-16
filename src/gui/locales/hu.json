@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Mégse",
   "one_world_confirm_ok": "Generálás",
   "settings_section_gameplay": "Játékmenet",
-  "settings_section_gameplay_desc": "Extrák, amelyek a világban lévő adatcsomagból futnak. Csak Java, mind ki van kapcsolva, amíg be nem kapcsolod.",
+  "settings_section_gameplay_desc": "Extrák, amelyek a világban lévő adatcsomagból futnak. Csak Java, Egy világ módban nem érhető el. Mind ki van kapcsolva, amíg be nem kapcsolod.",
   "settings_nav_gameplay": "Menü, felfedezések, zombik",
   "pause_menu": "Arnis szünetmenü",
   "pause_menu_desc": "Utazás, felfedezések és köszönetnyilvánítás a szünetmenüből.",

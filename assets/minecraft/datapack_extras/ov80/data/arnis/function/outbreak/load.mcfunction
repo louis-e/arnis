@@ -3,6 +3,7 @@ scoreboard objectives add arnis.ob.kills totalKillCount {"text":"Kills","color":
 scoreboard objectives add arnis.ob.deaths deathCount
 scoreboard objectives add arnis.ob.ctl trigger
 scoreboard objectives add arnis.ob.seen dummy
+scoreboard objectives add arnis.ob.run dummy
 bossbar add arnis:outbreak {"text":"Zombie Outbreak"}
 bossbar add arnis:boss {"text":"Patient Zero","color":"dark_red"}
 bossbar set arnis:boss color red

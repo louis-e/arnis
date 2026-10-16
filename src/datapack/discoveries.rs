@@ -13,6 +13,8 @@ const MAX_PER_CATEGORY: usize = 16;
 const POINT_RADIUS: i32 = 8;
 /// Slack around a mapped outline, so walking up to a building counts.
 const OUTLINE_PAD: i32 = 3;
+/// Folder of the tab's advancements.
+pub const FOLDER: &str = "main";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Category {
@@ -422,25 +424,29 @@ pub enum CriteriaSchema {
 }
 
 fn location_criterion(place: &Place, schema: CriteriaSchema) -> Value {
-    let position = json!({
-        "x": { "min": place.min.0 as f64, "max": (place.max.0 + 1) as f64 },
-        "z": { "min": place.min.1 as f64, "max": (place.max.1 + 1) as f64 },
+    // The same coordinates in the Nether or the End are not the place.
+    let location = json!({
+        "dimension": "minecraft:overworld",
+        "position": {
+            "x": { "min": place.min.0 as f64, "max": (place.max.0 + 1) as f64 },
+            "z": { "min": place.min.1 as f64, "max": (place.max.1 + 1) as f64 },
+        },
     });
     let player = match schema {
         CriteriaSchema::Legacy => json!([{
             "condition": "minecraft:entity_properties",
             "entity": "this",
-            "predicate": { "location": { "position": position } },
+            "predicate": { "location": location },
         }]),
         CriteriaSchema::Namespaced => json!([{
             "condition": "minecraft:entity_properties",
             "entity": "this",
-            "predicate": { "minecraft:location": { "position": position } },
+            "predicate": { "minecraft:location": location },
         }]),
         CriteriaSchema::Typed => json!({
             "type": "minecraft:entity_properties",
             "entity": "this",
-            "predicate": { "minecraft:location": { "position": position } },
+            "predicate": { "minecraft:location": location },
         }),
     };
     json!({ "trigger": "minecraft:location", "conditions": { "player": player } })
@@ -466,15 +472,10 @@ pub fn root(area: &str, places: usize, modern_background: bool) -> Value {
     })
 }
 
-/// Every advancement but the root, as (path below the area folder, JSON).
-pub fn tree(
-    area: &str,
-    folder: &str,
-    places: &[Place],
-    schema: CriteriaSchema,
-) -> Vec<(String, Value)> {
+/// Every advancement but the root, as (path below `FOLDER`, JSON).
+pub fn tree(area: &str, places: &[Place], schema: CriteriaSchema) -> Vec<(String, Value)> {
     let mut out = Vec::new();
-    let root_id = format!("arnis:discoveries/{folder}/root");
+    let root_id = format!("arnis:discoveries/{FOLDER}/root");
     let mut categories: Vec<Category> = places.iter().map(|p| p.category).collect();
     categories.sort();
     categories.dedup();
@@ -510,7 +511,7 @@ pub fn tree(
             out.push((
                 format!("{}/{i}", category.key()),
                 json!({
-                    "parent": format!("arnis:discoveries/{folder}/{}", category.key()),
+                    "parent": format!("arnis:discoveries/{FOLDER}/{}", category.key()),
                     "display": {
                         "icon": { "id": category.icon() },
                         "title": place.name,
@@ -676,7 +677,10 @@ mod tests {
             score: 0,
         };
         let legacy = location_criterion(&place, CriteriaSchema::Legacy);
-        assert!(legacy["conditions"]["player"][0]["predicate"]["location"].is_object());
+        assert_eq!(
+            legacy["conditions"]["player"][0]["predicate"]["location"]["dimension"],
+            "minecraft:overworld"
+        );
         let namespaced = location_criterion(&place, CriteriaSchema::Namespaced);
         assert!(
             namespaced["conditions"]["player"][0]["predicate"]["minecraft:location"].is_object()

@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Avbryt",
   "one_world_confirm_ok": "Generera",
   "settings_section_gameplay": "Spelande",
-  "settings_section_gameplay_desc": "Extrafunktioner som körs från ett datapaket i världen. Endast Java, alla avstängda tills du slår på dem.",
+  "settings_section_gameplay_desc": "Extrafunktioner som körs från ett datapaket i världen. Endast Java, inte i läget En värld. Alla avstängda tills du slår på dem.",
   "settings_nav_gameplay": "Meny, upptäckter, zombier",
   "pause_menu": "Arnis pausmeny",
   "pause_menu_desc": "Resor, upptäckter och tack från pausmenyn.",

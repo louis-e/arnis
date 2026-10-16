@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Annuler",
   "one_world_confirm_ok": "Générer",
   "settings_section_gameplay": "Jouabilité",
-  "settings_section_gameplay_desc": "Des extras qui tournent depuis un pack de données dans le monde. Java uniquement, tous désactivés sauf si vous les activez.",
+  "settings_section_gameplay_desc": "Des extras qui tournent depuis un pack de données dans le monde. Java uniquement, pas en mode Monde unique. Tous désactivés sauf si vous les activez.",
   "settings_nav_gameplay": "Menu, découvertes, zombies",
   "pause_menu": "Menu pause Arnis",
   "pause_menu_desc": "Voyage, découvertes et crédits depuis le menu pause.",

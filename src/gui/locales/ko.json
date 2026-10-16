@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "취소",
   "one_world_confirm_ok": "생성",
   "settings_section_gameplay": "게임플레이",
-  "settings_section_gameplay_desc": "월드 안의 데이터 팩으로 작동하는 추가 기능입니다. Java 전용이며 켜기 전까지 모두 꺼져 있습니다.",
+  "settings_section_gameplay_desc": "월드 안의 데이터 팩으로 작동하는 추가 기능입니다. Java 전용이며 하나의 월드 모드에서는 사용할 수 없습니다. 켜기 전까지 모두 꺼져 있습니다.",
   "settings_nav_gameplay": "메뉴, 발견, 좀비",
   "pause_menu": "Arnis 일시정지 메뉴",
   "pause_menu_desc": "일시정지 메뉴에서 이동, 발견, 크레딧을 확인하세요.",

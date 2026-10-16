@@ -1794,7 +1794,7 @@ fn gui_start_generation(
                 discoveries,
                 pause_menu,
                 zombie_outbreak,
-                moving_cars: moving_cars && !one_world,
+                moving_cars,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.

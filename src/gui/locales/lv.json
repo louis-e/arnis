@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Atcelt",
   "one_world_confirm_ok": "Ģenerēt",
   "settings_section_gameplay": "Spēle",
-  "settings_section_gameplay_desc": "Papildinājumi, kas darbojas no datu pakotnes pasaulē. Tikai Java, visi izslēgti, līdz tos ieslēgsi.",
+  "settings_section_gameplay_desc": "Papildinājumi, kas darbojas no datu pakotnes pasaulē. Tikai Java, nav pieejami Vienas pasaules režīmā. Visi izslēgti, līdz tos ieslēgsi.",
   "settings_nav_gameplay": "Izvēlne, atklājumi, zombiji",
   "pause_menu": "Arnis pauzes izvēlne",
   "pause_menu_desc": "Ceļošana, atklājumi un pateicības pauzes izvēlnē.",

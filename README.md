@@ -57,17 +57,6 @@ cargo run --release --no-default-features -- --one-world --output-dir="C:/YOUR_P
 
 Every area is placed in the same Web Mercator frame, so neighbouring areas join seamlessly; the first run fixes scale, terrain mode and build height, and rotation is off. In the GUI the same mode is the *One World* toggle under Settings > World.
 
-Optional gameplay extras ship as a data pack inside the Java world. All of them are off by default; in the GUI they live under Settings > Gameplay:
-
-| Flag | What it adds | Minecraft Java |
-| --- | --- | --- |
-| `--pause-menu` | An *Arnis* button in the pause menu: travel, discoveries, data credits | 1.21.6+ (credits in chat on 1.21.4–1.21.5) |
-| `--discoveries` | An advancement tab of the area's landmarks, unlocked by walking there | 1.21.4+ |
-| `--traffic-lights` | Signal heads that cycle red, amber and green, with pedestrian and bike lights | 1.21.4+ |
-| `--zombie-outbreak` | Five nights of zombie waves, a boss and supply drops; starts in Survival | 1.21.6+ |
-| `--body-gravity` | Real surface gravity on `--body=moon` and `--body=mars` worlds | 1.21.4+ |
-| `--moving-cars` | Cars that drive the streets at the speed limit, queue, turn at junctions and stop at red with `--traffic-lights` | 1.21.4+ |
-
 After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`

@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Скасувати",
   "one_world_confirm_ok": "Створити",
   "settings_section_gameplay": "Ігровий процес",
-  "settings_section_gameplay_desc": "Доповнення, що працюють з пакета даних у світі. Лише Java, усі вимкнені, доки ви їх не ввімкнете.",
+  "settings_section_gameplay_desc": "Доповнення, що працюють з пакета даних у світі. Лише Java, недоступні в режимі «Єдиний світ». Усі вимкнені, доки ви їх не ввімкнете.",
   "settings_nav_gameplay": "Меню, відкриття, зомбі",
   "pause_menu": "Меню паузи Arnis",
   "pause_menu_desc": "Переміщення, відкриття та подяки в меню паузи.",

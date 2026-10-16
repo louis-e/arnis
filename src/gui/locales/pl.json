@@ -221,7 +221,7 @@
   "one_world_confirm_cancel": "Anuluj",
   "one_world_confirm_ok": "Generuj",
   "settings_section_gameplay": "Rozgrywka",
-  "settings_section_gameplay_desc": "Dodatki działające z paczki danych w świecie. Tylko Java, wszystkie wyłączone, dopóki ich nie włączysz.",
+  "settings_section_gameplay_desc": "Dodatki działające z paczki danych w świecie. Tylko Java, niedostępne w trybie Jeden świat. Wszystkie wyłączone, dopóki ich nie włączysz.",
   "settings_nav_gameplay": "Menu, odkrycia, zombie",
   "pause_menu": "Menu pauzy Arnis",
   "pause_menu_desc": "Podróże, odkrycia i podziękowania w menu pauzy.",

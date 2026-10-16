@@ -752,9 +752,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             ));
         }
     }
-    // Each area would load its own lanes over the last one's cars.
-    if args.moving_cars && args.one_world {
-        return Err("--moving-cars is not available with --one-world yet.".to_string());
+    // Each area would write its pack over the last one's.
+    if args.one_world {
+        if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
+            return Err(format!("{flag} is not available with --one-world yet."));
+        }
     }
     if args.body_gravity && args.body.is_earth() {
         return Err("--body-gravity only applies to --body moon or --body mars.".to_string());
@@ -1044,6 +1046,8 @@ mod tests {
         assert!(bedrock.contains("--discoveries"), "{bedrock}");
         assert!(validate_args(&parse(&["--body-gravity"])).is_err());
         assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
+        let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();
+        assert!(one_world.contains("--pause-menu"), "{one_world}");
     }
 
     #[test]

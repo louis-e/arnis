@@ -1752,18 +1752,17 @@ function refreshWorldTypeRow(format) {
   if (row) row.classList.toggle('settings-row-unavailable', !java);
 }
 
-// The extras are a Java data pack. Off Earth there are no roads or places, and
-// gravity only differs there.
+// The extras are a Java data pack, and each One World area would write its own over
+// the last one's. Off Earth there are no roads or places, and gravity only differs there.
 function refreshGameplayRows(format) {
-  const java = (format || selectedWorldFormat) === 'java';
+  const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldToggleOn();
   const earth = selectedCelestialBody === 'earth';
-  setSettingsRowAvailable('pause-menu-toggle', java);
-  setSettingsRowAvailable('zombie-outbreak-toggle', java);
-  setSettingsRowAvailable('discoveries-toggle', java && earth);
-  setSettingsRowAvailable('traffic-lights-toggle', java && earth);
-  // Each One World area would load its own lanes over the last one's cars.
-  setSettingsRowAvailable('moving-cars-toggle', java && earth && !isOneWorldToggleOn());
-  setSettingsRowAvailable('body-gravity-toggle', java && !earth);
+  setSettingsRowAvailable('pause-menu-toggle', pack);
+  setSettingsRowAvailable('zombie-outbreak-toggle', pack);
+  setSettingsRowAvailable('discoveries-toggle', pack && earth);
+  setSettingsRowAvailable('traffic-lights-toggle', pack && earth);
+  setSettingsRowAvailable('moving-cars-toggle', pack && earth);
+  setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
 }
 
 // Disabled means unavailable for this format or body, so a stale tick is never sent.
