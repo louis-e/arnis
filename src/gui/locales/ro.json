@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Înlocuiești chunk-urile existente?",
   "one_world_confirm_text": "{count} chunk-uri din această zonă există deja în lume. Vor fi generate din nou, iar construcțiile Minecraft din ele vor fi înlocuite.",
   "one_world_confirm_cancel": "Anulează",
-  "one_world_confirm_ok": "Generează"
+  "one_world_confirm_ok": "Generează",
+  "settings_section_gameplay": "Gameplay",
+  "settings_section_gameplay_desc": "Extra-uri care rulează dintr-un pachet de date în lume. Doar Java, nu în modul O singură lume. Toate sunt dezactivate până le activezi.",
+  "settings_nav_gameplay": "Meniu, descoperiri, zombi",
+  "pause_menu": "Meniu de pauză Arnis",
+  "pause_menu_desc": "Călătorii, descoperiri și credite din meniul de pauză.",
+  "discoveries": "Descoperiri",
+  "discoveries_desc": "Mergi la repere reale pentru a le debloca drept progrese.",
+  "traffic_lights": "Semafoare funcționale",
+  "traffic_lights_desc": "Semafoare care chiar își schimbă culoarea.",
+  "zombie_outbreak": "Invazie de zombi",
+  "zombie_outbreak_desc": "Cinci nopți de valuri de zombi pe străzile tale, cu un boss.",
+  "body_gravity": "Gravitație pe Lună și Marte",
+  "body_gravity_desc": "Gravitație redusă reală în lumile Lună și Marte.",
+  "moving_cars": "Mașini în mișcare",
+  "moving_cars_desc": "Trafic care circulă pe străzile tale cu limita de viteză."
 }

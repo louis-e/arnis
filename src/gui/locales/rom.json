@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Replace e chunkura save?",
   "one_world_confirm_text": "{count} chunkura kadaleske thaneske si save andi thema. Generirilpe palem thaj sa so tu kerdan ando Minecraft si replace.",
   "one_world_confirm_cancel": "Cancel",
-  "one_world_confirm_ok": "Generiril"
+  "one_world_confirm_ok": "Generiril",
+  "settings_section_gameplay": "Khelipe",
+  "settings_section_gameplay_desc": "Ekstre so phiren andar jekh data pack ande thema. Numa Java, na ando modo Jekh thema. Sa si phandade dji kaj tu len pute.",
+  "settings_nav_gameplay": "Meniu, arakhipena, zombie",
+  "pause_menu": "Arnis meniu pauzako",
+  "pause_menu_desc": "Drom, arakhipena thaj krediturja andar o meniu pauzako.",
+  "discoveries": "Arakhipena",
+  "discoveries_desc": "Dža ke čačutne thana te putres len sar advancements.",
+  "traffic_lights": "Semafora so keren buti",
+  "traffic_lights_desc": "Semafora so čače paruven pe.",
+  "zombie_outbreak": "Zombie invazija",
+  "zombie_outbreak_desc": "Panž rjata zombie valurenca pe tire droma, jekhe boss-eja.",
+  "body_gravity": "Gravitacija pe Čhon thaj Mars",
+  "body_gravity_desc": "Čačutni tikni gravitacija pe Čhonesko thaj Marsesko thema.",
+  "moving_cars": "Motorura so phiren",
+  "moving_cars_desc": "Trafiko so phirel pe tire droma ka limita sigurimaski."
 }
