@@ -165,7 +165,6 @@ impl Climate {
     }
 }
 
-
 /// One consistent surface block for the built-up ground in a generated city or town.
 /// Classification uses the area's climate sample and its RESOLVE ecoregion at the
 /// geographic centre. Unknown/missing data falls back to grass, and every city in
@@ -206,9 +205,6 @@ pub fn city_surface_block(climate: Climate, ecoregion: Option<Ecoregion>) -> Blo
     if climate == Climate::ColdDesert {
         return GRAVEL;
     }
-    if biome == Some(Desert) {
-        return SAND;
-    }
 
     let tropical = matches!(
         climate,
@@ -224,13 +220,15 @@ pub fn city_surface_block(climate: Climate, ecoregion: Option<Ecoregion>) -> Blo
     if climate == Climate::Boreal || biome == Some(Boreal) {
         return PODZOL;
     }
-    if matches!(climate, Climate::TropicalSavanna | Climate::HotSteppe)
+    if climate == Climate::TropicalSavanna
         || matches!(biome, Some(TropicalGrassland | DryTropical))
     {
         return COARSE_DIRT;
     }
-    if matches!(climate, Climate::ColdSteppe | Climate::DryContinental)
-        || biome == Some(TemperateGrassland)
+    if matches!(
+        climate,
+        Climate::HotSteppe | Climate::ColdSteppe | Climate::DryContinental
+    ) || biome == Some(TemperateGrassland)
     {
         return HAY_BALE;
     }
@@ -265,9 +263,16 @@ fn is_volcanic_region(name: &str, biome: Option<EcoBiome>) -> bool {
 
 fn is_mountainous_region(name: &str, biome: Option<EcoBiome>) -> bool {
     biome == Some(EcoBiome::MontaneGrassland)
-        || ["mountain", "montane", "alps", "himalay", "andes", "rocky mountain"]
-            .iter()
-            .any(|hint| name.contains(hint))
+        || [
+            "mountain",
+            "montane",
+            "alps",
+            "himalay",
+            "andes",
+            "rocky mountain",
+        ]
+        .iter()
+        .any(|hint| name.contains(hint))
 }
 
 fn is_tropical_island_region(name: &str, realm: Option<Realm>) -> bool {
