@@ -467,7 +467,7 @@ fn process_element(
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
             } else if node.tags.contains_key("barrier") {
                 barriers::generate_barrier_nodes(editor, node, bridge_surface);
-            } else if node.tags.contains_key("highway") {
+            } else if node.tags.contains_key("highway") || traffic_lights::is_signal(&node.tags) {
                 highways::generate_highways(
                     editor,
                     element,
@@ -607,6 +607,23 @@ fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool
 
     // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
+}
+
+/// Caps concurrent tile editors (~2 regions each, region + halo) to 20% of free RAM.
+fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: bool) -> usize {
+    let pool_threads = pool_threads.max(1);
+    if available_mb == 0 {
+        return pool_threads;
+    }
+
+    const TILE_RAM_BUDGET_PERCENT: u64 = 20;
+    const REGIONS_PER_TILE_ESTIMATE: u64 = 2;
+    let per_tile_mb = crate::world_editor::per_region_estimate_mb(fillground)
+        .max(1)
+        .saturating_mul(REGIONS_PER_TILE_ESTIMATE);
+    let tile_budget_mb = available_mb.saturating_mul(TILE_RAM_BUDGET_PERCENT) / 100;
+    let memory_bound = (tile_budget_mb / per_tile_mb).max(1);
+    pool_threads.min(usize::try_from(memory_bound).unwrap_or(usize::MAX))
 }
 
 /// Free RAM in MB.
@@ -899,14 +916,12 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
-    let road_markings = road_markings::RoadMarkingIndex::build(
-        &elements,
-        args.scale,
-        crate::decals::region::SignRegion::detect(
-            (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
-            (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
-        ),
+    let sign_region = crate::decals::region::SignRegion::detect(
+        (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
+        (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
     );
+    let road_markings = road_markings::RoadMarkingIndex::build(&elements, args.scale, sign_region);
+    let extras = crate::datapack::Extras::from_args(args);
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
     let mut rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
@@ -972,6 +987,21 @@ pub fn generate_world_with_options(
     ));
     editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
 
+    let traffic_signals =
+        (extras.traffic_lights && world_format == WorldFormat::JavaAnvil).then(|| {
+            Arc::new(
+                crate::element_processing::traffic_lights::SignalIndex::build(
+                    &elements,
+                    args.scale,
+                    sign_region.drives_on_left(),
+                    &road_mask,
+                ),
+            )
+        });
+    if let Some(signals) = &traffic_signals {
+        editor.set_traffic_signals(Arc::clone(signals));
+    }
+
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
     let group_members: FnvHashMap<u64, Vec<u64>> = {
@@ -1022,6 +1052,60 @@ pub fn generate_world_with_options(
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+
+    let car_network = (extras.cars && world_format == WorldFormat::JavaAnvil).then(|| {
+        let rel = |x: i32, z: i32| {
+            crate::coordinate_system::cartesian::XZPoint::new(
+                x - xzbbox.min_x(),
+                z - xzbbox.min_z(),
+            )
+        };
+        let net = crate::element_processing::cars::CarNetwork::build(
+            &elements,
+            args.scale,
+            sign_region.drives_on_left(),
+            extras.traffic_lights,
+            &xzbbox,
+            |x, z| {
+                bridge_surface
+                    .nearby_deck_y(x, z, 0)
+                    .unwrap_or_else(|| ground.level(rel(x, z)))
+            },
+        );
+        println!(
+            "  Moving cars: {} cars on the road network",
+            net.car_count()
+        );
+        Arc::new(net)
+    });
+    if let Some(cars) = &car_network {
+        editor.set_car_network(Arc::clone(cars));
+    }
+
+    // The elements are gone by the time the pack is written.
+    let extras_places =
+        (extras.wants_places() && world_format == WorldFormat::JavaAnvil).then(|| {
+            let (mut places, settlement) =
+                crate::datapack::discoveries::collect(&elements, &xzbbox);
+            let rel = |x: i32, z: i32| {
+                crate::coordinate_system::cartesian::XZPoint::new(
+                    x - xzbbox.min_x(),
+                    z - xzbbox.min_z(),
+                )
+            };
+            for place in &mut places {
+                place.settle(
+                    |x, z| {
+                        xzbbox.contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
+                            && !building_footprints.contains(x, z)
+                            && ground.cover_class(rel(x, z)) != crate::land_cover::LC_WATER
+                    },
+                    |x, z| road_mask.contains(x, z),
+                    |x, z| ground.level(rel(x, z)),
+                );
+            }
+            (places, settlement)
+        });
 
     // Runway segments merge across ways, so planes prescan here and stamp after the merge.
     let planes = crate::structures::plane::prescan(&elements, args);
@@ -1086,12 +1170,6 @@ pub fn generate_world_with_options(
         // Tiles are processed in batches (one tile per rayon thread) to cap peak memory.
         // Without batching, all tile WorldToModify structs would be in memory at once,
         // which can exceed RAM for large areas and cause disk thrashing.
-        let tile_batch_size = rayon::current_num_threads().max(1);
-        println!(
-            "  Processing {} tiles across {tile_batch_size} threads...",
-            tiles.len()
-        );
-
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
         let (tile_fill_ids, fill_readers) = tile_fill_readers(
@@ -1108,6 +1186,12 @@ pub fn generate_world_with_options(
         // Read at the decision point: the precompute above allocates heavily, and an
         // optimistic figure would skip streaming in exactly the runs that need it.
         let available_mb = available_memory_mb();
+        let tile_batch_size =
+            tile_processing_threads(rayon::current_num_threads(), available_mb, args.fillground);
+        println!(
+            "  Processing {} tiles across {tile_batch_size} threads...",
+            tiles.len()
+        );
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
 
@@ -1220,6 +1304,12 @@ pub fn generate_world_with_options(
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
+            }
+            if let Some(signals) = &traffic_signals {
+                tile_editor.set_traffic_signals(Arc::clone(signals));
+            }
+            if let Some(cars) = &car_network {
+                tile_editor.set_car_network(Arc::clone(cars));
             }
             tile_editor.set_strict_bounds(
                 tile_bounds.min_x,
@@ -1960,6 +2050,51 @@ pub fn generate_world_with_options(
         }
     }
 
+    if world_format == WorldFormat::JavaAnvil && extras.any() {
+        let (places, settlement) = extras_places.unwrap_or_default();
+        let ctx = crate::datapack::PackContext {
+            extras,
+            area: extras_area_name(&output_path, args, llbbox, settlement),
+            body: args.body,
+            destinations: crate::datapack::PackContext::destinations_from(
+                &places,
+                options
+                    .spawn_point
+                    .or_else(|| crate::map_item::read_spawn_xz(&output_path))
+                    .map(|(x, z)| {
+                        let rel = crate::coordinate_system::cartesian::XZPoint::new(
+                            x - xzbbox.min_x(),
+                            z - xzbbox.min_z(),
+                        );
+                        (x, z, Some(ground.level(rel)))
+                    }),
+            ),
+            places,
+            credits: crate::datapack::Credits::from_args(args),
+            red_amber: matches!(
+                sign_region,
+                crate::decals::region::SignRegion::Germanic
+                    | crate::decals::region::SignRegion::UkIreland
+            ),
+            car_functions: car_network
+                .as_ref()
+                .map(|net| {
+                    let mut functions = net.look_functions();
+                    functions.extend(net.body_functions());
+                    functions.push((
+                        "data/arnis/function/cars/network.mcfunction".to_string(),
+                        net.storage_function(),
+                    ));
+                    functions
+                })
+                .unwrap_or_default(),
+        };
+        match crate::datapack::install(&output_path, &ctx) {
+            Ok(()) => println!("Installed the {} data pack.", crate::datapack::PACK_NAME),
+            Err(e) => eprintln!("Warning: Failed to install the extras data pack: {e}"),
+        }
+    }
+
     // An extended One World moves the spawn only to a marker inside this area.
     if extending {
         if let Some((sx, sz)) = options.spawn_point.filter(|&(x, z)| {
@@ -2018,10 +2153,50 @@ pub fn generate_world_with_options(
     Ok(output_path)
 }
 
+/// The area's name for titles and dialogs: the one the GUI already put in the world's
+/// name, else the reverse-geocoded place, else the most important settlement mapped in it.
+fn extras_area_name(
+    world: &std::path::Path,
+    args: &Args,
+    llbbox: LLBBox,
+    settlement: Option<String>,
+) -> String {
+    if !args.body.is_earth() {
+        return args.body.display_name().to_string();
+    }
+    if let Some(named) = crate::world_utils::level_name(world)
+        .and_then(|n| n.split_once(": ").map(|(_, area)| area.trim().to_string()))
+        .filter(|a| !a.is_empty())
+    {
+        return named;
+    }
+    let (lat, lng) = (
+        (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
+        (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+    );
+    crate::retrieve_data::fetch_area_name(lat, lng)
+        .ok()
+        .flatten()
+        .or(settlement)
+        .unwrap_or_else(|| "this area".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::osm_parser::ProcessedMember;
+
+    #[test]
+    fn tile_threads_capped_by_free_ram() {
+        let per_tile = crate::world_editor::per_region_estimate_mb(false) * 2;
+        // Unknown memory or plenty of headroom keeps the pool size.
+        assert_eq!(tile_processing_threads(16, 0, false), 16);
+        assert_eq!(tile_processing_threads(16, 64_000, false), 16);
+        // Tight memory caps it, but never below one worker.
+        assert_eq!(tile_processing_threads(16, per_tile * 5 * 4, false), 4);
+        assert_eq!(tile_processing_threads(16, 1, false), 1);
+        assert_eq!(tile_processing_threads(0, 64_000, false), 1);
+    }
 
     fn square(id: u64, size: i32, tags: &[(&str, &str)]) -> ProcessedWay {
         let corners = [(0, 0), (size, 0), (size, size), (0, size)];

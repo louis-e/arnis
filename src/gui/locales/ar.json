@@ -219,5 +219,20 @@
   "one_world_confirm_title": "استبدال القطع الموجودة؟",
   "one_world_confirm_text": "يوجد {count} من قطع هذه المنطقة في العالم بالفعل. ستُنشأ من جديد، وسيُستبدل كل ما بُني هناك في Minecraft.",
   "one_world_confirm_cancel": "إلغاء",
-  "one_world_confirm_ok": "إنشاء"
+  "one_world_confirm_ok": "إنشاء",
+  "settings_section_gameplay": "أسلوب اللعب",
+  "settings_section_gameplay_desc": "إضافات تعمل من حزمة بيانات داخل العالم. لإصدار Java فقط، وغير متاحة في وضع عالم واحد. كلها متوقفة ما لم تفعّلها.",
+  "settings_nav_gameplay": "القائمة، الاكتشافات، الزومبي",
+  "pause_menu": "قائمة الإيقاف المؤقت من Arnis",
+  "pause_menu_desc": "التنقل والاكتشافات والشكر من قائمة الإيقاف المؤقت.",
+  "discoveries": "الاكتشافات",
+  "discoveries_desc": "امشِ إلى المعالم الحقيقية لفتحها كإنجازات.",
+  "traffic_lights": "إشارات مرور تعمل",
+  "traffic_lights_desc": "إشارات مرور تتبدّل فعلاً.",
+  "zombie_outbreak": "تفشّي الزومبي",
+  "zombie_outbreak_desc": "خمس ليالٍ من موجات الزومبي في شوارعك، مع زعيم في النهاية.",
+  "body_gravity": "جاذبية القمر والمريخ",
+  "body_gravity_desc": "جاذبية منخفضة حقيقية في عوالم القمر والمريخ.",
+  "moving_cars": "سيارات متحركة",
+  "moving_cars_desc": "حركة مرور تسير في شوارعك بالسرعة المحددة."
 }

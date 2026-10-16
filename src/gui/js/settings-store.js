@@ -41,6 +41,14 @@ const SETTINGS = [
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   { id: 'one-world-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
+
+  // Gameplay
+  { id: 'pause-menu-toggle', kind: 'checkbox', store: OWN },
+  { id: 'discoveries-toggle', kind: 'checkbox', store: OWN },
+  { id: 'traffic-lights-toggle', kind: 'checkbox', store: OWN },
+  { id: 'moving-cars-toggle', kind: 'checkbox', store: OWN },
+  { id: 'zombie-outbreak-toggle', kind: 'checkbox', store: OWN },
+  { id: 'body-gravity-toggle', kind: 'checkbox', store: OWN },
   // The facade controls. Registered here like every other segmented control,
   // so the panel's Revert and Reset to defaults reach them: the store reads the
   // active segment and restores one by clicking it, which is also what keeps

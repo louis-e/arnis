@@ -260,6 +260,10 @@ pub struct WorldEditor<'a> {
     map_decals: bool,
     /// Signage context (decal registry, styles, intersections); shared with tile editors.
     signage: Option<Arc<crate::element_processing::signage::SignageContext>>,
+    /// Signal heads to build as cycling display entities instead of the banner heads.
+    traffic_signals: Option<Arc<crate::element_processing::traffic_lights::SignalIndex>>,
+    /// Lanes and cars, placed as their roads are built.
+    car_network: Option<Arc<crate::element_processing::cars::CarNetwork>>,
     /// Strict (non-halo) bounds of a tile editor: min_x, min_z, max_x, max_z inclusive.
     /// None for the main editor, which owns everything.
     strict_bounds: Option<(i32, i32, i32, i32)>,
@@ -311,6 +315,8 @@ impl<'a> WorldEditor<'a> {
             start_with_map: false,
             map_decals: false,
             signage: None,
+            traffic_signals: None,
+            car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             merge_into_existing: None,
@@ -364,6 +370,8 @@ impl<'a> WorldEditor<'a> {
             start_with_map: false,
             map_decals: false,
             signage: None,
+            traffic_signals: None,
+            car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             merge_into_existing: None,
@@ -417,6 +425,8 @@ impl<'a> WorldEditor<'a> {
             start_with_map: false,
             map_decals: false,
             signage: None,
+            traffic_signals: None,
+            car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             merge_into_existing: None,
@@ -674,6 +684,27 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    pub fn set_traffic_signals(
+        &mut self,
+        index: Arc<crate::element_processing::traffic_lights::SignalIndex>,
+    ) {
+        self.traffic_signals = Some(index);
+    }
+
+    pub fn traffic_signals(
+        &self,
+    ) -> Option<Arc<crate::element_processing::traffic_lights::SignalIndex>> {
+        self.traffic_signals.clone()
+    }
+
+    pub fn set_car_network(&mut self, net: Arc<crate::element_processing::cars::CarNetwork>) {
+        self.car_network = Some(net);
+    }
+
+    pub fn car_network(&self) -> Option<Arc<crate::element_processing::cars::CarNetwork>> {
+        self.car_network.clone()
+    }
+
     /// The signage context, if decals are enabled and a registry was built.
     pub fn signage(&self) -> Option<Arc<crate::element_processing::signage::SignageContext>> {
         if !self.map_decals {
@@ -809,6 +840,31 @@ impl<'a> WorldEditor<'a> {
         abs_y: f64,
         z: f64,
         seed: i64,
+        extra: HashMap<String, Value>,
+    ) -> bool {
+        self.add_entity_exact("minecraft:item_display", x, abs_y, z, seed, extra)
+    }
+
+    /// `add_item_display` for a block display, which draws a scaled block model.
+    pub fn add_block_display(
+        &mut self,
+        x: f64,
+        abs_y: f64,
+        z: f64,
+        seed: i64,
+        extra: HashMap<String, Value>,
+    ) -> bool {
+        self.add_entity_exact("minecraft:block_display", x, abs_y, z, seed, extra)
+    }
+
+    /// An entity of any kind at an exact position, with `extra` as its own tags.
+    pub fn add_entity_exact(
+        &mut self,
+        id: &str,
+        x: f64,
+        abs_y: f64,
+        z: f64,
+        seed: i64,
         mut extra: HashMap<String, Value>,
     ) -> bool {
         let (bx, bz) = (x.floor() as i32, z.floor() as i32);
@@ -826,7 +882,7 @@ impl<'a> WorldEditor<'a> {
                 Value::Double(z),
             ]),
         );
-        self.add_entity_seeded("minecraft:item_display", bx, rel_y, bz, seed, Some(extra));
+        self.add_entity_seeded(id, bx, rel_y, bz, seed, Some(extra));
         true
     }
 

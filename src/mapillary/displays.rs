@@ -123,7 +123,7 @@ const ITEM: &str = "minecraft:stone";
 /// chosen by the `minecraft:item_model` component and resolved through
 /// `assets/<ns>/items/`. The mcmeta declares support open-ended upwards, so
 /// every later version loads the pack as well.
-const RESOURCEPACK_FORMAT: u32 = 46;
+pub(crate) const RESOURCEPACK_FORMAT: u32 = 46;
 
 /// Pixels per metre of the lab's `_tex.png` wall textures.
 const TEX_PX_PER_M: f64 = 8.0;
@@ -1530,7 +1530,7 @@ fn write_resource_zip<W: Write + Seek>(
 /// substring "Arnis", so a user's own pack that merely mentioned Arnis in its
 /// description was taken for ours and replaced. Nothing but this writer puts
 /// this path in a pack.
-pub(super) const PACK_MARKER: &str = ".arnis_facade_pack";
+pub(crate) const PACK_MARKER: &str = ".arnis_facade_pack";
 
 /// Whether the pack at `path` is one Arnis wrote.
 ///
@@ -1539,7 +1539,7 @@ pub(super) const PACK_MARKER: &str = ".arnis_facade_pack";
 /// holds its own pack and replacing that is the point; a world the user has
 /// dressed themselves holds theirs, and losing it to a regeneration is not
 /// something they can undo. Ours says so in `pack.mcmeta`.
-pub(super) fn is_arnis_pack(path: &Path) -> bool {
+pub(crate) fn is_arnis_pack(path: &Path) -> bool {
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
@@ -1559,7 +1559,7 @@ pub(super) fn is_arnis_pack(path: &Path) -> bool {
 /// of `path`, so the last step is one rename: a run that dies half way leaves
 /// the world with the pack it had, not a truncated zip that the next run would
 /// take for someone else's and move aside.
-pub(super) fn install_world_pack(path: &Path, staged: &Path) -> Result<(), String> {
+pub(crate) fn install_world_pack(path: &Path, staged: &Path) -> Result<(), String> {
     if path.exists() && !is_arnis_pack(path) {
         let mut backup = path.with_extension("zip.bak");
         let mut n = 1;

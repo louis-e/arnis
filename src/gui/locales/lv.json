@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Aizstāt esošos chunkus?",
   "one_world_confirm_text": "{count} šī apgabala chunki pasaulē jau ir. Tie tiek ģenerēti no jauna, un viss, kas tur uzbūvēts Minecraft, tiek aizstāts.",
   "one_world_confirm_cancel": "Atcelt",
-  "one_world_confirm_ok": "Ģenerēt"
+  "one_world_confirm_ok": "Ģenerēt",
+  "settings_section_gameplay": "Spēle",
+  "settings_section_gameplay_desc": "Papildinājumi, kas darbojas no datu pakotnes pasaulē. Tikai Java, nav pieejami Vienas pasaules režīmā. Visi izslēgti, līdz tos ieslēgsi.",
+  "settings_nav_gameplay": "Izvēlne, atklājumi, zombiji",
+  "pause_menu": "Arnis pauzes izvēlne",
+  "pause_menu_desc": "Ceļošana, atklājumi un pateicības pauzes izvēlnē.",
+  "discoveries": "Atklājumi",
+  "discoveries_desc": "Aizej līdz īstiem apskates objektiem, lai atbloķētu tos kā sasniegumus.",
+  "traffic_lights": "Strādājoši luksofori",
+  "traffic_lights_desc": "Luksofori, kas tiešām pārslēdzas.",
+  "zombie_outbreak": "Zombiju uzliesmojums",
+  "zombie_outbreak_desc": "Piecas naktis zombiju viļņu tavās ielās, ar bosu.",
+  "body_gravity": "Mēness un Marsa gravitācija",
+  "body_gravity_desc": "Īsta zema gravitācija Mēness un Marsa pasaulēs.",
+  "moving_cars": "Braucošas automašīnas",
+  "moving_cars_desc": "Satiksme, kas brauc pa tavām ielām ar atļauto ātrumu."
 }
