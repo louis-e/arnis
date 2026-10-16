@@ -10,6 +10,7 @@ use crate::element_processing::building_facade::{
     MIN_FACADE_FOOTPRINT,
 };
 use crate::element_processing::historic;
+use crate::element_processing::store_brands::{StoreBrand, StoreFamily};
 use crate::element_processing::subprocessor::interior::{
     generate_building_interior, plan_interior, Entry, InteriorRequest, PlanInputs,
 };
@@ -388,6 +389,12 @@ impl BuildingCategory {
         // Check for historic buildings (only after ruling out religious ones)
         if element.tags.contains_key("historic") {
             return BuildingCategory::Historic;
+        }
+
+        // A recognized chain is a commercial building even when OSM only marks
+        // its outline as building=yes and carries the business identity in name.
+        if StoreBrand::from_tags(&element.tags).is_some() {
+            return BuildingCategory::Commercial;
         }
 
         match building_type {
@@ -1291,6 +1298,37 @@ impl BuildingStyle {
     }
 }
 
+/// Turns a tagged chain outlet into a low-rise branded retail shell while
+/// preserving facade colours supplied by actual Mapillary building imagery.
+fn apply_store_brand_style(style: &mut BuildingStyle, brand: StoreBrand, element: &ProcessedWay) {
+    let palette = brand.palette();
+    if !crate::mapillary::facades::has_building(element.id) {
+        style.wall_block = palette.wall;
+    }
+    style.floor_block = palette.floor;
+    style.window_block = palette.glass;
+    style.accent_block = palette.primary;
+    style.roof_block = Some(palette.roof);
+    style.use_vertical_windows = false;
+    style.use_horizontal_windows = false;
+    style.has_windows = true;
+    style.has_garage_door = false;
+    style.has_single_door = true;
+    style.use_accent_roof_line = true;
+    style.use_accent_lines = true;
+    style.use_vertical_accent = false;
+    style.has_parapet = true;
+    style.has_chimney = false;
+    style.wall_depth_style = WallDepthStyle::None;
+
+    // Keep an explicitly mapped roof shape, but give untagged chain outlets a
+    // broad, flat retail canopy instead of a random residential roof.
+    if !element.tags.contains_key("roof:shape") && element.tags.get("roof").map(String::as_str) != Some("no") {
+        style.roof_type = RoofType::Flat;
+        style.generate_roof = true;
+    }
+}
+
 /// Building configuration derived from OSM tags and args
 #[derive(Clone)]
 struct BuildingConfig {
@@ -1347,6 +1385,7 @@ struct BuildingConfig {
     base_course_block: Option<Block>,
     /// Wider, taller glass on the ground floor of commercial buildings.
     has_storefront: bool,
+    store_brand: Option<StoreBrand>,
     /// Per-building window dressing style, derived from hand-built reference frames.
     window_frame: Option<WindowFrameStyle>,
     /// The wall columns a facade photograph covers, built as a plain shell
@@ -6422,6 +6461,61 @@ fn generate_storefront_awnings(
     }
 }
 
+/// A two-colour fascia makes a recognized chain's street front readable without
+/// adding logo art or changing its mapped footprint.
+fn generate_store_brand_fascia(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
+) {
+    let Some(brand) = config.store_brand else {
+        return;
+    };
+    if !config.is_ground_level || config.condition != BuildingCondition::Normal {
+        return;
+    }
+
+    let outward = outward_side(&element.nodes);
+    let palette = brand.palette();
+    let fascia_y = (config.ground_floor_top() + 1)
+        .min(config.start_y_offset + config.building_height)
+        + config.abs_terrain_offset;
+    let alternate_every = match brand {
+        StoreBrand::Carrefour | StoreBrand::Dominos | StoreBrand::Aeon => 2,
+        _ => 5,
+    };
+    let mut previous_node: Option<(i32, i32)> = None;
+    let mut phase = 0usize;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let (nx, nz) = compute_outward_normal(x1, z1, x2, z2, outward);
+            if nx != 0 || nz != 0 {
+                let points =
+                    bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+                for (x, _, z) in points {
+                    if building_passages.contains(x, z)
+                        || facade.is_party(x, z)
+                        || !facade.is_street(x, z)
+                    {
+                        continue;
+                    }
+                    let block = if phase % alternate_every == 0 {
+                        palette.secondary
+                    } else {
+                        palette.primary
+                    };
+                    editor.set_block_absolute(block, x, fascia_y, z, None, None);
+                    phase += 1;
+                }
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
 /// Vertical drainpipe runs hugging two facade corners, a staple of hand-built city blocks.
 fn generate_corner_downpipes(
     editor: &mut WorldEditor,
@@ -7376,6 +7470,8 @@ pub fn generate_buildings(
         .or_else(|| element.tags.get("building:part"))
         .map(|s| s.as_str())
         .unwrap_or("yes");
+    let store_brand = StoreBrand::from_tags(&element.tags)
+        .or_else(|| ctx.interior_uses.brand(element.id));
     let floor_cycle = floor_cycle_for(building_type, &element.tags);
 
     // Architectural era, consumed by palettes, frames, depth styles and
@@ -7590,13 +7686,24 @@ pub fn generate_buildings(
         };
 
     // Determine building category and get appropriate style preset
-    let category = BuildingCategory::from_element(
+    let mapped_category = BuildingCategory::from_element(
         element,
         is_tall_building,
         building_height,
         group_seed,
         scale_factor,
     );
+    let category = if store_brand.is_some()
+        && !is_tall_building
+        && !matches!(
+            mapped_category,
+            BuildingCategory::Historic | BuildingCategory::Religious | BuildingCategory::Tower
+        )
+    {
+        BuildingCategory::Commercial
+    } else {
+        mapped_category
+    };
     let preset = BuildingStylePreset::for_category(category);
 
     // Street/neighbor classification: party walls, fronting streets, corner.
@@ -7646,7 +7753,7 @@ pub fn generate_buildings(
     let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > floor_cycle + 2;
     let climate = editor.climate();
-    let style = BuildingStyle::resolve(
+    let mut style = BuildingStyle::resolve(
         &preset,
         element,
         building_type,
@@ -7660,6 +7767,9 @@ pub fn generate_buildings(
         group_seed,
         &mut rng,
     );
+    if let Some(brand) = store_brand.filter(|_| !is_tall_building) {
+        apply_store_brand_style(&mut style, brand, element);
+    }
 
     let condition = BuildingCondition::from_tags(&element.tags);
     let is_abandoned_building = matches!(
@@ -7840,8 +7950,10 @@ pub fn generate_buildings(
             && condition == BuildingCondition::Normal
             && min_level_offset == 0
             && facade.has_any_street
-            && element_rng(group_seed ^ 0x5709_EF90_0000_0002)
-                .random_bool(if facade.corner.is_some() { 0.85 } else { 0.60 }),
+            && (store_brand.is_some()
+                || element_rng(group_seed ^ 0x5709_EF90_0000_0002)
+                    .random_bool(if facade.corner.is_some() { 0.85 } else { 0.60 })),
+        store_brand,
         window_frame: (has_windows
             && condition == BuildingCondition::Normal
             && !is_tall_building
@@ -7967,8 +8079,21 @@ pub fn generate_buildings(
             BuildingCondition::Construction | BuildingCondition::Ruined
         ))
     .then(|| {
+        let mut interior_tags = element.tags.clone();
+        if let Some(brand) = store_brand {
+            match brand.family() {
+                StoreFamily::Restaurant => {
+                    interior_tags.remove("shop");
+                    interior_tags.insert("amenity".to_string(), "fast_food".to_string());
+                }
+                StoreFamily::Supermarket => {
+                    interior_tags.remove("amenity");
+                    interior_tags.insert("shop".to_string(), "supermarket".to_string());
+                }
+            }
+        }
         plan_interior(&PlanInputs {
-            tags: &element.tags,
+            tags: &interior_tags,
             building_type,
             floors: storey_levels.len(),
             min_level,
@@ -8103,6 +8228,7 @@ pub fn generate_buildings(
         generate_corner_downpipes(editor, element, &config, effective_passages, &facade);
         generate_archetype_window_headers(editor, element, &config, effective_passages, &facade);
         generate_storefront_awnings(editor, element, &config, effective_passages, &facade);
+        generate_store_brand_fascia(editor, element, &config, effective_passages, &facade);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -8194,6 +8320,7 @@ pub fn generate_buildings(
                     claims: ctx.interior_uses.claims(element.id),
                     scale: args.scale,
                     floor_block: config.floor_block,
+                    brand: store_brand,
                     seed: group_seed,
                 },
             );
@@ -12627,6 +12754,7 @@ mod style_tests {
             rustication: false,
             base_course_block: None,
             has_storefront: false,
+            store_brand: None,
             window_frame: None,
             facade_shell: Arc::default(),
             preset_shell: Arc::default(),

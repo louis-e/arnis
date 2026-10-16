@@ -14,6 +14,7 @@ pub use uses::{plan_interior, InteriorPlan, PlanInputs};
 
 use crate::block_definitions::*;
 use crate::element_processing::buildings::{cached_prop_block, BUILDING_PASSAGE_HEIGHT};
+use crate::element_processing::store_brands::StoreBrand;
 use crate::element_processing::subprocessor::buildings_loot::{themed_chest_loot, LootTheme};
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::world_editor::WorldEditor;
@@ -47,6 +48,8 @@ pub struct InteriorRequest<'a> {
     pub scale: f64,
     /// The slab between storeys, which a light may replace.
     pub floor_block: Block,
+    /// Recognized chain identity from the building's OSM brand/name tags.
+    pub brand: Option<StoreBrand>,
     pub seed: u64,
 }
 
@@ -63,6 +66,7 @@ struct FloorCtx {
     far: (i32, i32),
     /// Big enough for the tiled house plan rather than a cottage layout.
     homes_fit: bool,
+    brand: Option<StoreBrand>,
 }
 
 pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorRequest) {
@@ -124,6 +128,7 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
             origin: (min_x + 2, min_z + 2),
             far: (max_x - 2, max_z - 2),
             homes_fit,
+            brand: req.brand,
         };
         // The ladder only climbs where this storey has room for it, never through the shell.
         let mut shaft_open = false;

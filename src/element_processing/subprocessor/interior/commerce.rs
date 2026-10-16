@@ -6,6 +6,7 @@ use super::canvas::{
 use super::uses::{Eatery, Goods};
 use super::{book_shelf, chest, entry_u, plant, table_set, FloorCtx};
 use crate::block_definitions::*;
+use crate::element_processing::store_brands::{StoreBrand, StoreFamily};
 use crate::element_processing::subprocessor::buildings_loot::LootTheme;
 
 /// Full blocks that read as stocked shelving.
@@ -264,19 +265,25 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     };
     let ue = entry_u(c, zone, &f);
     let tall = c.headroom() >= 3;
+    let palette = ctx.brand.map(|brand| brand.palette());
+    let lanes = ctx.brand.map_or(3, |brand| brand.checkout_lanes());
 
     // Checkout lanes beside the entry: counter, cashier, walkway.
     for side in [1, -1] {
-        for lane in 0..3 {
+        for lane in 0..lanes {
             let u = ue + side * (2 + lane * 3);
             let cells: Vec<(i32, i32)> = (2..=4).map(|v| f.world(u, v)).collect();
             if !cells.iter().all(|&(x, z)| c.is_free(x, z)) {
                 break;
             }
             for (i, &(x, z)) in cells.iter().enumerate() {
-                c.put_with(x, 1, z, top_slab(SMOOTH_STONE_SLAB));
+                if let Some(palette) = palette {
+                    c.put(x, 1, z, palette.counter);
+                } else {
+                    c.put_with(x, 1, z, top_slab(SMOOTH_STONE_SLAB));
+                }
                 if i == 1 {
-                    c.put(x, 2, z, DAYLIGHT_DETECTOR);
+                    c.put(x, 2, z, palette.map_or(DAYLIGHT_DETECTOR, |p| p.secondary));
                 }
             }
             let (sx, sz) = f.world(u + side, 3);
@@ -291,12 +298,22 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
             continue;
         }
         if n == f.front() {
-            c.put(x, 1, z, WHITE_CONCRETE);
+            c.put(x, 1, z, palette.map_or(WHITE_CONCRETE, |p| p.shelving));
             if tall {
                 c.put(x, 2, z, LIGHT_BLUE_STAINED_GLASS);
             }
         } else {
-            c.put(x, 1, z, pick(&[BARREL, HAY_BALE, BARREL, PUMPKIN], h));
+            let shelf = palette.map_or_else(
+                || pick(&[BARREL, HAY_BALE, BARREL, PUMPKIN], h),
+                |p| {
+                    if h.is_multiple_of(3) {
+                        p.shelving
+                    } else {
+                        pick(&[BARREL, HAY_BALE, BARREL, PUMPKIN], h)
+                    }
+                },
+            );
+            c.put(x, 1, z, shelf);
             if tall && !c.window_behind(x, z, n) {
                 c.put(x, 2, z, pick(&[BARREL, MELON, BARREL], h >> 8));
             }
@@ -315,12 +332,17 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         if v == 7 && lane == 2 {
             c.put(x, 1, z, pick(&[HAY_BALE, MELON, PUMPKIN, COMPOSTER], h));
         } else if v >= 9 && (lane == 2 || lane == 3) && v % 10 != 0 {
-            c.put(
-                x,
-                1,
-                z,
-                pick(&[BARREL, BARREL, HAY_BALE, CHISELLED_BOOKSHELF], h),
+            let shelf = palette.map_or_else(
+                || pick(&[BARREL, BARREL, HAY_BALE, CHISELLED_BOOKSHELF], h),
+                |p| {
+                    if h.is_multiple_of(3) {
+                        p.shelving
+                    } else {
+                        pick(&[BARREL, BARREL, HAY_BALE, CHISELLED_BOOKSHELF], h)
+                    }
+                },
             );
+            c.put(x, 1, z, shelf);
             if tall {
                 c.put(x, 2, z, pick(&[BARREL, MELON, PUMPKIN, BARREL], h >> 8));
             }
@@ -334,6 +356,8 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
         return;
     };
     let cells = c.area(zone);
+    let palette = ctx.brand.map(|brand| brand.palette());
+    let spacing = ctx.brand.map_or(5, |brand| brand.dining_spacing());
     // A kitchen behind a wall at the back of anything bigger than a corner cafe.
     let kitchen_row = (f.depth >= 13 && cells >= 90).then_some(f.depth - 5);
     if let Some(row) = kitchen_row {
@@ -348,11 +372,11 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
     let ue = entry_u(c, zone, &f);
     let half = (f.width / 4).clamp(1, 4);
     let mid = f.width / 2;
-    let counter = match kind {
+    let counter = palette.map_or_else(|| match kind {
         Eatery::Bar => SPRUCE_PLANKS,
         Eatery::FastFood => POLISHED_ANDESITE,
         _ => ctx.wood.planks,
-    };
+    }, |p| p.counter);
     for u in mid - half..=mid + half {
         let (x, z) = f.world(u, service_v);
         if c.put(x, 1, z, counter) {
@@ -360,9 +384,14 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
             let item = match kind {
                 Eatery::Cafe => pick(&[CAKE, EMPTY_FLOWER_POT, BREWING_STAND], h),
                 Eatery::Bar => pick(&[BREWING_STAND, EMPTY_FLOWER_POT, LANTERN], h),
-                _ => pick(&[EMPTY_FLOWER_POT, LANTERN, CAKE], h),
+                _ => match ctx.brand {
+                    Some(StoreBrand::Subway) => pick(&[MELON, MOSS_BLOCK, COMPOSTER], h),
+                    Some(StoreBrand::Dominos) => CAKE,
+                    Some(_) => palette.map_or(LANTERN, |p| p.secondary),
+                    None => pick(&[EMPTY_FLOWER_POT, LANTERN, CAKE], h),
+                },
             };
-            if h.is_multiple_of(3) {
+            if h.is_multiple_of(3) || matches!(ctx.brand, Some(StoreBrand::Subway)) {
                 c.put(x, 2, z, item);
             }
             // Staff walk behind the counter.
@@ -394,7 +423,10 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
             continue;
         }
         // Two cells of aisle between neighbouring tables and their chairs.
-        if (u - ue).rem_euclid(5) != 2 {
+        if (u - ue).rem_euclid(spacing) != 2 {
+            continue;
+        }
+        if spacing > 5 && v % spacing != 2 {
             continue;
         }
         let placed = match kind {
@@ -425,17 +457,60 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
             c.put(x, 2, z, LANTERN);
         }
     }
+
+    // Small chain-specific fixtures give the dining room a distinct service
+    // pattern as well as its matching facade palette.
+    if let Some(brand) = ctx.brand.filter(|brand| brand.family() == StoreFamily::Restaurant) {
+        let palette = brand.palette();
+        match brand {
+            StoreBrand::McDonalds | StoreBrand::Jollibee => {
+                for side in [-1, 1] {
+                    let (x, z) = f.world(ue + side * 2, 2);
+                    if c.put(x, 1, z, BLACK_CONCRETE) {
+                        c.put(x, 2, z, palette.primary);
+                    }
+                }
+            }
+            StoreBrand::Dominos => {
+                for side in [-1, 1] {
+                    let (x, z) = f.world(ue + side * 2, service_v + 2);
+                    if c.put(x, 1, z, BARREL) {
+                        c.put(x, 2, z, palette.secondary);
+                    }
+                }
+            }
+            StoreBrand::Kfc | StoreBrand::BurgerKing => {
+                let (x, z) = f.world(ue, service_v - 1);
+                if c.is_free(x, z) {
+                    c.put_with(x, 1, z, facing_block(SMOKER, f.back()));
+                }
+            }
+            StoreBrand::Subway => {}
+            StoreBrand::MosBurger => plant(c, &f, f.width - 1, 1, ctx.seed ^ 0x4D4F53),
+            StoreBrand::Walmart
+            | StoreBrand::Carrefour
+            | StoreBrand::Aldi
+            | StoreBrand::Tesco
+            | StoreBrand::Aeon => {}
+        }
+    }
 }
 
 /// Stoves, sinks and worktops round the walls, a prep table in the middle.
 fn furnish_kitchen(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     c.focus(zone);
     for ((x, z), n) in c.wall_cells(zone) {
-        let block = match mix(x, z, ctx.seed ^ 0x4C17) % 5 {
-            0 => facing_block(SMOKER, n),
-            1 => facing_block(FURNACE, n),
-            2 => BlockWithProperties::simple(WATER_CAULDRON),
-            3 => BlockWithProperties::simple(CRAFTING_TABLE),
+        let h = mix(x, z, ctx.seed ^ 0x4C17);
+        let block = match (ctx.brand, h % 5) {
+            (Some(StoreBrand::Dominos), 0 | 1) => facing_block(FURNACE, n),
+            (Some(StoreBrand::Kfc | StoreBrand::BurgerKing | StoreBrand::Jollibee), 0 | 1) => {
+                facing_block(SMOKER, n)
+            }
+            (Some(StoreBrand::Subway), 0 | 1) => BlockWithProperties::simple(COMPOSTER),
+            (_, 0) => facing_block(SMOKER, n),
+            (_, 1) => facing_block(FURNACE, n),
+            (_, 2) => BlockWithProperties::simple(WATER_CAULDRON),
+            (_, 3) => BlockWithProperties::simple(CRAFTING_TABLE),
             _ => BlockWithProperties::simple(BARREL),
         };
         c.put_with(x, 1, z, block);
