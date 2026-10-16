@@ -608,12 +608,7 @@ fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool
     available_mb > 0 && est_peak_mb * 100 > available_mb * 55
 }
 
-/// Caps concurrent tile editors to a conservative share of currently available RAM.
-///
-/// A tile editor covers a 512-block region plus its halo; reserve roughly two regions per
-/// worker and leave most free RAM for the world state, flood-fill caches, and the OS. This
-/// reduces peak working memory on high-core, low-memory machines without penalizing machines
-/// with unknown memory or enough headroom.
+/// Caps concurrent tile editors (~2 regions each, region + halo) to 20% of free RAM.
 fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: bool) -> usize {
     let pool_threads = pool_threads.max(1);
     if available_mb == 0 {
@@ -1115,11 +1110,8 @@ pub fn generate_world_with_options(
         // Read at the decision point: the precompute above allocates heavily, and an
         // optimistic figure would skip streaming in exactly the runs that need it.
         let available_mb = available_memory_mb();
-        let tile_batch_size = tile_processing_threads(
-            rayon::current_num_threads(),
-            available_mb,
-            args.fillground,
-        );
+        let tile_batch_size =
+            tile_processing_threads(rayon::current_num_threads(), available_mb, args.fillground);
         println!(
             "  Processing {} tiles across {tile_batch_size} threads...",
             tiles.len()
@@ -2038,6 +2030,18 @@ pub fn generate_world_with_options(
 mod tests {
     use super::*;
     use crate::osm_parser::ProcessedMember;
+
+    #[test]
+    fn tile_threads_capped_by_free_ram() {
+        let per_tile = crate::world_editor::per_region_estimate_mb(false) * 2;
+        // Unknown memory or plenty of headroom keeps the pool size.
+        assert_eq!(tile_processing_threads(16, 0, false), 16);
+        assert_eq!(tile_processing_threads(16, 64_000, false), 16);
+        // Tight memory caps it, but never below one worker.
+        assert_eq!(tile_processing_threads(16, per_tile * 5 * 4, false), 4);
+        assert_eq!(tile_processing_threads(16, 1, false), 1);
+        assert_eq!(tile_processing_threads(0, 64_000, false), 1);
+    }
 
     fn square(id: u64, size: i32, tags: &[(&str, &str)]) -> ProcessedWay {
         let corners = [(0, 0), (size, 0), (size, size), (0, size)];
