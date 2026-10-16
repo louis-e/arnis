@@ -571,6 +571,18 @@ impl Block {
             484 => "melon",
             485 => "loom",
             486 => "smithing_table",
+            487 => "light",
+            488 => "mangrove_planks",
+            489 => "mangrove_stairs",
+            490 => "mangrove_slab",
+            491 => "deepslate_tile_stairs",
+            492 => "nether_brick_slab",
+            493 => "waxed_oxidized_cut_copper_slab",
+            494 => "polished_granite_slab",
+            495 => "birch_planks",
+            496 => "light_gray_wool",
+            497 => "pink_terracotta",
+            498 => "lime_terracotta",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -945,6 +957,14 @@ impl Block {
                 map.insert("age".to_string(), Value::String("3".to_string()));
                 map
             })),
+            // Stem texture on every face, spelled out: readers that take a
+            // missing face as false show the brown pores instead of cream.
+            422 => Some(Value::Compound(
+                ["north", "south", "east", "west", "up", "down"]
+                    .iter()
+                    .map(|f| (f.to_string(), Value::String("true".to_string())))
+                    .collect(),
+            )),
 
             _ => None,
         }
@@ -1579,6 +1599,25 @@ pub const CAKE: Block = Block::new(483);
 pub const MELON: Block = Block::new(484);
 pub const LOOM: Block = Block::new(485);
 pub const SMITHING_TABLE: Block = Block::new(486);
+/// Invisible light source (level 15): lights an interior without showing a lamp
+/// through the windows.
+pub const LIGHT: Block = Block::new(487);
+/// Dark red clay tile on roofs (Biberschwanz), with its stair and slab.
+pub const MANGROVE_PLANKS: Block = Block::new(488);
+pub const MANGROVE_STAIRS: Block = Block::new(489);
+pub const MANGROVE_SLAB: Block = Block::new(490);
+pub const DEEPSLATE_TILE_STAIRS: Block = Block::new(491);
+pub const NETHER_BRICK_SLAB: Block = Block::new(492);
+pub const WAXED_OXIDIZED_CUT_COPPER_SLAB: Block = Block::new(493);
+pub const POLISHED_GRANITE_SLAB: Block = Block::new(494);
+/// Pale ochre render on walls.
+pub const BIRCH_PLANKS: Block = Block::new(495);
+/// Net curtains seen through a window, with white wool.
+pub const LIGHT_GRAY_WOOL: Block = Block::new(496);
+/// Salmon-pink painted render (Latin America, South Asia, the tropics).
+pub const PINK_TERRACOTTA: Block = Block::new(497);
+/// Faded green painted render.
+pub const LIME_TERRACOTTA: Block = Block::new(498);
 /// Snow layers by depth in eighths of a block, one to seven.
 pub const SNOW_LAYERS: [Block; 7] = [
     SNOW_LAYER,
@@ -1608,12 +1647,14 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         SMOOTH_STONE => POLISHED_ANDESITE_STAIRS,
         DIORITE => POLISHED_DIORITE_STAIRS,
         POLISHED_DIORITE => POLISHED_DIORITE_STAIRS,
+        LIGHT_GRAY_CONCRETE_POWDER => POLISHED_ANDESITE_STAIRS,
 
         // Dark stone family
         DEEPSLATE => DEEPSLATE_BRICK_STAIRS,
         DEEPSLATE_BRICKS => DEEPSLATE_BRICK_STAIRS,
         POLISHED_DEEPSLATE => POLISHED_DEEPSLATE_STAIRS,
-        COBBLED_DEEPSLATE => DEEPSLATE_BRICK_STAIRS,
+        COBBLED_DEEPSLATE => COBBLED_DEEPSLATE_STAIRS,
+        DEEPSLATE_TILES => DEEPSLATE_TILE_STAIRS,
         BLACKSTONE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         POLISHED_BLACKSTONE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         POLISHED_BLACKSTONE_BRICKS => POLISHED_BLACKSTONE_BRICK_STAIRS,
@@ -1621,10 +1662,10 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
 
         // Warm reds and browns
         BRICK => BRICK_STAIRS,
-        TERRACOTTA => BRICK_STAIRS,
+        TERRACOTTA => GRANITE_STAIRS,
         ORANGE_TERRACOTTA => BRICK_STAIRS,
         RED_TERRACOTTA => BRICK_STAIRS,
-        GRANITE => POLISHED_GRANITE_STAIRS,
+        GRANITE => GRANITE_STAIRS,
         POLISHED_GRANITE => POLISHED_GRANITE_STAIRS,
 
         // Mud and earth tones
@@ -1638,6 +1679,9 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
 
         // White and pale tones
         WHITE_TERRACOTTA => QUARTZ_STAIRS,
+        MUSHROOM_STEM | CALCITE => QUARTZ_STAIRS,
+        // Painted render: white-painted trim.
+        PINK_TERRACOTTA | LIME_TERRACOTTA => QUARTZ_STAIRS,
         LIGHT_BLUE_TERRACOTTA => POLISHED_DIORITE_STAIRS,
 
         // Cool blues / cyan get dark stone stairs
@@ -1651,9 +1695,9 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         SMOOTH_SANDSTONE => SMOOTH_SANDSTONE_STAIRS,
 
         // Whites and quartz
-        QUARTZ_BLOCK => POLISHED_DIORITE_STAIRS,
+        QUARTZ_BLOCK => QUARTZ_STAIRS,
         QUARTZ_BRICKS => POLISHED_DIORITE_STAIRS,
-        SMOOTH_QUARTZ => POLISHED_DIORITE_STAIRS,
+        SMOOTH_QUARTZ => SMOOTH_QUARTZ_STAIRS,
         WHITE_CONCRETE => QUARTZ_STAIRS,
         GLASS => QUARTZ_STAIRS,
 
@@ -1664,6 +1708,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         LIGHT_BLUE_CONCRETE => POLISHED_DIORITE_STAIRS,
         CYAN_CONCRETE => DEEPSLATE_BRICK_STAIRS,
         GREEN_CONCRETE => MOSSY_COBBLESTONE_STAIRS,
+        DARK_PRISMARINE => DARK_PRISMARINE_STAIRS,
 
         // Nether brick family
         NETHER_BRICK => NETHER_BRICK_STAIRS,
@@ -1677,6 +1722,9 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         WAXED_EXPOSED_CUT_COPPER => WAXED_EXPOSED_CUT_COPPER_STAIRS,
 
         // Wood family
+        MANGROVE_PLANKS => MANGROVE_STAIRS,
+        CHERRY_PLANKS => CHERRY_STAIRS,
+        BIRCH_PLANKS => SMOOTH_SANDSTONE_STAIRS,
         OAK_PLANKS => OAK_STAIRS,
         SPRUCE_PLANKS => SPRUCE_STAIRS,
         DARK_OAK_PLANKS => DARK_OAK_STAIRS,
@@ -1700,13 +1748,33 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
 pub fn get_slab_block_for_material(material: Block) -> Block {
     match material {
         STONE_BRICKS | CHISELED_STONE_BRICKS | CRACKED_STONE_BRICKS => STONE_BRICK_SLAB,
-        BRICK | BROWN_TERRACOTTA | BROWN_CONCRETE_POWDER => BRICK_SLAB,
+        BRICK | BROWN_TERRACOTTA | BROWN_CONCRETE_POWDER | RED_TERRACOTTA => BRICK_SLAB,
+        GRANITE | POLISHED_GRANITE | TERRACOTTA => POLISHED_GRANITE_SLAB,
         MUD_BRICKS | WHITE_TERRACOTTA | GRAY_TERRACOTTA | LIGHT_BLUE_TERRACOTTA => MUD_BRICK_SLAB,
-        OAK_PLANKS | OAK_LOG | SPRUCE_PLANKS | DARK_OAK_PLANKS => OAK_SLAB,
-        QUARTZ_BLOCK | QUARTZ_BRICKS | WHITE_CONCRETE => QUARTZ_SLAB_TOP,
-        SMOOTH_STONE | POLISHED_ANDESITE | ANDESITE | GRAY_CONCRETE | LIGHT_GRAY_CONCRETE => {
-            SMOOTH_STONE_SLAB
-        }
+        OAK_PLANKS | OAK_LOG => OAK_SLAB,
+        SPRUCE_PLANKS => SPRUCE_SLAB,
+        DARK_OAK_PLANKS => DARK_OAK_SLAB,
+        QUARTZ_BLOCK | QUARTZ_BRICKS | WHITE_CONCRETE | MUSHROOM_STEM | CALCITE
+        | PINK_TERRACOTTA | LIME_TERRACOTTA => QUARTZ_SLAB_TOP,
+        POLISHED_ANDESITE => POLISHED_ANDESITE_SLAB,
+        SMOOTH_STONE
+        | ANDESITE
+        | GRAY_CONCRETE
+        | LIGHT_GRAY_CONCRETE
+        | LIGHT_GRAY_CONCRETE_POWDER => SMOOTH_STONE_SLAB,
+        // Roof coverings: the slab of the same texture as the stair.
+        DEEPSLATE_BRICKS | POLISHED_DEEPSLATE => POLISHED_DEEPSLATE_SLAB,
+        DEEPSLATE_TILES => DEEPSLATE_TILE_SLAB,
+        COBBLED_DEEPSLATE => COBBLED_DEEPSLATE_SLAB,
+        POLISHED_BLACKSTONE_BRICKS | POLISHED_BLACKSTONE => POLISHED_BLACKSTONE_SLAB,
+        BLACKSTONE => BLACKSTONE_SLAB,
+        RED_NETHER_BRICKS => RED_NETHER_BRICK_SLAB,
+        NETHER_BRICK => NETHER_BRICK_SLAB,
+        DARK_PRISMARINE => DARK_PRISMARINE_SLAB,
+        WAXED_OXIDIZED_COPPER => WAXED_OXIDIZED_CUT_COPPER_SLAB,
+        MANGROVE_PLANKS => MANGROVE_SLAB,
+        CHERRY_PLANKS => CHERRY_SLAB,
+        BIRCH_PLANKS => CUT_SANDSTONE_SLAB,
         SANDSTONE | SMOOTH_SANDSTONE => STONE_BLOCK_SLAB,
         _ => STONE_BRICK_SLAB,
     }
@@ -1726,59 +1794,65 @@ pub fn get_wall_piece_for_material(material: Block) -> Block {
         BRICK | BROWN_TERRACOTTA | BROWN_CONCRETE_POWDER | MUD_BRICKS | WHITE_TERRACOTTA => {
             BRICK_WALL
         }
-        ANDESITE | GRAY_CONCRETE | LIGHT_GRAY_CONCRETE => ANDESITE_WALL,
+        ANDESITE
+        | GRAY_CONCRETE
+        | LIGHT_GRAY_CONCRETE
+        | LIGHT_GRAY_CONCRETE_POWDER
+        | CYAN_TERRACOTTA => ANDESITE_WALL,
+        SANDSTONE | SMOOTH_SANDSTONE => SANDSTONE_WALL,
+        MUSHROOM_STEM | CALCITE => DIORITE_WALL,
         _ => COBBLESTONE_WALL,
     }
 }
 
-// Window variations for different building types
-pub static WINDOW_VARIATIONS: [Block; 11] = [
-    GLASS,
+// Window glass. Seen from the street a window reads grey to black; the tinted,
+// brown and blue glass this once drew from looked like coloured panels.
+// Repeats weight an entry.
+pub static WINDOW_VARIATIONS: [Block; 5] = [
     GRAY_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
     GRAY_STAINED_GLASS,
-    BROWN_STAINED_GLASS,
-    WHITE_STAINED_GLASS,
-    TINTED_GLASS,
-    LIGHT_BLUE_STAINED_GLASS,
-    CYAN_STAINED_GLASS,
-    BLACK_STAINED_GLASS,
-    BROWN_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+    GLASS,
 ];
 
 // Residential window options
-pub static RESIDENTIAL_WINDOW_OPTIONS: [Block; 6] = [
-    GLASS,
-    WHITE_STAINED_GLASS,
+pub static RESIDENTIAL_WINDOW_OPTIONS: [Block; 5] = [
+    GRAY_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
-    BROWN_STAINED_GLASS,
-    TINTED_GLASS,
-    LIGHT_BLUE_STAINED_GLASS,
+    GRAY_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+    GLASS,
 ];
 
-// Institutional window options (hospital, school, etc.)
+// Institutional window options (offices, shops, schools, hospitals).
 pub static INSTITUTIONAL_WINDOW_OPTIONS: [Block; 4] = [
-    GLASS,
-    WHITE_STAINED_GLASS,
+    GRAY_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
-    LIGHT_BLUE_STAINED_GLASS,
+    GRAY_STAINED_GLASS,
+    BLACK_STAINED_GLASS,
 ];
 
 // Hospitality window options (hotel, restaurant).
-pub static HOSPITALITY_WINDOW_OPTIONS: [Block; 5] = [
-    GLASS,
-    WHITE_STAINED_GLASS,
+pub static HOSPITALITY_WINDOW_OPTIONS: [Block; 4] = [
     GRAY_STAINED_GLASS,
-    LIGHT_BLUE_STAINED_GLASS,
-    BROWN_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+    GRAY_STAINED_GLASS,
+    BLACK_STAINED_GLASS,
 ];
 
 // Industrial window options
-pub static INDUSTRIAL_WINDOW_OPTIONS: [Block; 4] = [
-    GLASS,
+pub static INDUSTRIAL_WINDOW_OPTIONS: [Block; 3] =
+    [GRAY_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS, GLASS];
+
+// Glass of the windowed tower families: grey and black, cyan on some
+// contemporary towers.
+pub static TOWER_WINDOW_OPTIONS: [Block; 5] = [
+    GRAY_STAINED_GLASS,
     GRAY_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
-    BROWN_STAINED_GLASS,
+    BLACK_STAINED_GLASS,
+    CYAN_STAINED_GLASS,
 ];
 
 // Religious window options (stained glass).
@@ -1795,7 +1869,7 @@ pub static FARM_WINDOW_OPTIONS: [Block; 3] = [GLASS, WHITE_STAINED_GLASS, LIGHT_
 
 // Historic window options (clear, slightly aged glazing).
 pub static HISTORIC_WINDOW_OPTIONS: [Block; 3] =
-    [GLASS, LIGHT_GRAY_STAINED_GLASS, WHITE_STAINED_GLASS];
+    [LIGHT_GRAY_STAINED_GLASS, GRAY_STAINED_GLASS, GLASS];
 
 // Floor block options for buildings
 pub static FLOOR_BLOCK_OPTIONS: [Block; 8] = [
@@ -1821,26 +1895,21 @@ pub fn get_floor_block_with_rng(rng: &mut impl rand::Rng) -> Block {
     FLOOR_BLOCK_OPTIONS[rng.random_range(0..FLOOR_BLOCK_OPTIONS.len())]
 }
 
-// Function to get a random fallback building block when no color attribute is specified
+// Wall of an untyped building where no regional palette applies. Plain
+// masonry, render and concrete only: nether, end and blackstone blocks read as
+// fantasy, light blue terracotta as a painted toy.
 pub fn get_fallback_building_block(rng: &mut impl rand::Rng) -> Block {
     let fallback_options = [
-        BLACKSTONE,
-        BLACK_TERRACOTTA,
         BRICK,
         BROWN_CONCRETE,
         BROWN_TERRACOTTA,
-        DEEPSLATE_BRICKS,
-        END_STONE_BRICKS,
+        CYAN_TERRACOTTA,
         GRAY_CONCRETE,
         GRAY_TERRACOTTA,
-        LIGHT_BLUE_TERRACOTTA,
         LIGHT_GRAY_CONCRETE,
         MUD_BRICKS,
-        NETHER_BRICK,
+        MUSHROOM_STEM,
         POLISHED_ANDESITE,
-        POLISHED_BLACKSTONE,
-        POLISHED_BLACKSTONE_BRICKS,
-        POLISHED_DEEPSLATE,
         POLISHED_GRANITE,
         QUARTZ_BLOCK,
         QUARTZ_BRICKS,
@@ -1880,14 +1949,23 @@ pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         .collect();
 
     let options: &[Block] = match normalized.as_str() {
-        "brick" | "bricks" | "redbrick" => &[BRICK, NETHER_BRICK],
+        "brick" | "bricks" | "redbrick" => &[BRICK, BRICK, BRICK, POLISHED_GRANITE],
         // `hard` and `block` are among the most common building:material values.
-        "stone" | "naturalstone" | "hard" => &[STONE_BRICKS, COBBLESTONE, SMOOTH_STONE, ANDESITE],
-        "limestone" => &[SMOOTH_STONE, POLISHED_ANDESITE, WHITE_TERRACOTTA],
-        "sandstone" => &[SANDSTONE, SMOOTH_SANDSTONE],
-        "marble" => &[QUARTZ_BLOCK, POLISHED_DIORITE, WHITE_CONCRETE],
-        "granite" => &[POLISHED_GRANITE, POLISHED_DIORITE, QUARTZ_BLOCK],
-        "slate" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],
+        "stone" | "naturalstone" | "hard" => {
+            &[STONE_BRICKS, SMOOTH_STONE, POLISHED_ANDESITE, ANDESITE]
+        }
+        // Building limestone is cream to buff.
+        "limestone" => &[MUSHROOM_STEM, SMOOTH_SANDSTONE, CALCITE],
+        "sandstone" => &[SMOOTH_SANDSTONE, SMOOTH_SANDSTONE, SANDSTONE],
+        "marble" => &[QUARTZ_BLOCK, CALCITE, POLISHED_DIORITE],
+        // Most building granite is grey; Minecraft's granite is the pink kind.
+        "granite" => &[
+            POLISHED_ANDESITE,
+            POLISHED_ANDESITE,
+            LIGHT_GRAY_CONCRETE,
+            POLISHED_GRANITE,
+        ],
+        "slate" => &[DEEPSLATE_BRICKS, POLISHED_DEEPSLATE, POLISHED_BLACKSTONE],
         "concrete"
         | "reinforcedconcrete"
         | "cementblock"
@@ -1897,16 +1975,18 @@ pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         | "concreteblocks"
         | "block"
         | "concretemasonryunit" => &[
-            GRAY_CONCRETE,
             LIGHT_GRAY_CONCRETE,
-            WHITE_CONCRETE,
+            LIGHT_GRAY_CONCRETE,
             SMOOTH_STONE,
+            WHITE_CONCRETE,
         ],
+        // Pale render: white, cream, peach.
         "plaster" | "stucco" | "render" | "rendering" | "limerender" | "plastered" => &[
             WHITE_CONCRETE,
-            LIGHT_GRAY_CONCRETE,
-            QUARTZ_BLOCK,
+            WHITE_CONCRETE,
+            WHITE_TERRACOTTA,
             SMOOTH_SANDSTONE,
+            MUSHROOM_STEM,
         ],
         // timber_framing normalizes to "timberframing", which this arm was missing.
         "wood" | "timber" | "timberframe" | "timberframing" | "timberplanks" | "halftimber"
@@ -1923,12 +2003,12 @@ pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
             WAXED_COPPER_BLOCK,
         ],
         "glass" => &[
-            GLASS,
+            GRAY_STAINED_GLASS,
             LIGHT_GRAY_STAINED_GLASS,
-            WHITE_STAINED_GLASS,
-            TINTED_GLASS,
+            GLASS,
+            BLACK_STAINED_GLASS,
         ],
-        "mirror" | "solarpanels" => &[GLASS, BLUE_STAINED_GLASS, LIGHT_BLUE_STAINED_GLASS],
+        "mirror" | "solarpanels" => &[GRAY_STAINED_GLASS, CYAN_STAINED_GLASS, BLACK_STAINED_GLASS],
         "tiles" | "tile" | "rooftiles" | "ceramictiles" | "ceramic" | "terracotta" => &[
             WHITE_TERRACOTTA,
             BROWN_TERRACOTTA,
@@ -1949,7 +2029,7 @@ pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         | "prefabricated" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, WHITE_CONCRETE],
         "plastic" | "light" => &[WHITE_CONCRETE, LIGHT_GRAY_CONCRETE, QUARTZ_BLOCK, GLASS],
         "mixed" | "masonry" => &[STONE_BRICKS, BRICK, SMOOTH_STONE, COBBLESTONE],
-        "pebbledash" => &[ANDESITE, COBBLESTONE, STONE_BRICKS, GRAVEL],
+        "pebbledash" => &[ANDESITE, COBBLESTONE, STONE_BRICKS],
         _ => return None,
     };
 
@@ -1969,10 +2049,8 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
             &[GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS]
         }
         "tile" | "tiles" | "rooftile" | "rooftiles" | "ceramic" | "ceramictiles" | "claytile"
-        | "claytiles" | "cementtile" | "terracotta" => {
-            &[BRICK, NETHER_BRICK, RED_NETHER_BRICKS, MUD_BRICKS]
-        }
-        "slate" | "slates" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],
+        | "claytiles" | "cementtile" | "terracotta" => &[RED_TERRACOTTA, BRICK, BRICK, TERRACOTTA],
+        "slate" | "slates" => &[COBBLED_DEEPSLATE, DEEPSLATE_TILES],
         "metal"
         | "steel"
         | "aluminium"
@@ -1984,17 +2062,17 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         | "corrugated"
         | "cgi"
         | "tin"
-        | "zinc"
-        | "zink"
-        | "lead"
         | "sheetmetal"
         | "metalsheet"
-        | "metalplates" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, IRON_BLOCK],
-        "copper" => &[
-            WAXED_OXIDIZED_COPPER,
-            WAXED_EXPOSED_COPPER,
-            WAXED_COPPER_BLOCK,
+        | "metalplates" => &[
+            POLISHED_ANDESITE,
+            SMOOTH_STONE,
+            LIGHT_GRAY_CONCRETE,
+            IRON_BLOCK,
         ],
+        // Zinc and lead weather to a light blue-grey.
+        "zinc" | "zink" | "lead" => &[POLISHED_ANDESITE, POLISHED_ANDESITE, STONE_BRICKS],
+        "copper" => &[WAXED_OXIDIZED_COPPER],
         "concrete" | "reinforcedconcrete" | "rcc" | "concerte" | "cement" | "concreteslab" => {
             &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, SMOOTH_STONE]
         }
@@ -2003,14 +2081,16 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         }
         "thatch" | "straw" | "reed" | "reeds" | "palmleaves" => &[HAY_BALE],
         "asphalt" | "bitumen" | "tar" | "tarpaper" | "rolledasphalt" | "rolledroofing"
-        | "asphaltshingle" | "asphaltshingles" | "roofingfelt" => {
-            &[BLACKSTONE, POLISHED_BLACKSTONE, POLISHED_BLACKSTONE_BRICKS]
-        }
+        | "asphaltshingle" | "asphaltshingles" | "roofingfelt" => &[
+            COBBLED_DEEPSLATE,
+            DEEPSLATE_TILES,
+            POLISHED_BLACKSTONE_BRICKS,
+        ],
         "stone" => &[STONE_BRICKS, SMOOTH_STONE, ANDESITE],
         "gravel" => &[GRAVEL],
         "grass" | "green" | "vegetation" | "greenroof" | "sod" => &[GRASS_BLOCK, MOSS_BLOCK],
         "eternit" | "asbestos" | "fibrecement" | "fibercement" => {
-            &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE]
+            &[POLISHED_ANDESITE, COBBLED_DEEPSLATE, DEEPSLATE_TILES]
         }
         "plastic" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, WHITE_CONCRETE, GLASS],
         // These blocks share one stair variant, so pitched panel roofs stay uniform.
@@ -2135,6 +2215,23 @@ mod material_tests {
             get_roof_block_for_material("asphalt_shingle", &mut rng()),
             get_roof_block_for_material("asphaltshingle", &mut rng()),
         );
+    }
+
+    #[test]
+    fn brick_is_never_nether_brick() {
+        for seed in 0..100 {
+            let mut r = ChaCha8Rng::seed_from_u64(seed);
+            for m in ["brick", "bricks", "red_brick"] {
+                let b = get_wall_block_for_material(m, &mut r).unwrap();
+                assert!(matches!(b, BRICK | POLISHED_GRANITE), "{m}: {}", b.name());
+            }
+            let tile = get_roof_block_for_material("roof_tiles", &mut r).unwrap();
+            assert!(
+                !matches!(tile, NETHER_BRICK | RED_NETHER_BRICKS | MUD_BRICKS),
+                "roof tiles drew {}",
+                tile.name()
+            );
+        }
     }
 
     #[test]

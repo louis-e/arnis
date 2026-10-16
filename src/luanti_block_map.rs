@@ -801,6 +801,19 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         484 => "mcl_farming:melon",
         485 => "mcl_loom:loom",
         486 => "mcl_smithing_table:table",
+        // No invisible light node in the Mineclonia family; the room stays unlit.
+        487 => "air",
+        488 => "mcl_trees:wood_mangrove",
+        489 => return conv_stair(props, "mcl_stairs:stair_mangrove"),
+        490 => "mcl_stairs:slab_mangrove",
+        491 => return conv_stair(props, "mcl_stairs:stair_deepslate_tiles"),
+        492 => "mcl_stairs:slab_nether_brick",
+        493 => "mcl_stairs:slab_copper_oxidized_cut",
+        494 => "mcl_stairs:slab_granite_smooth",
+        495 => "mcl_trees:wood_birch",
+        496 => "mcl_wool:silver",
+        497 => "mcl_colorblocks:hardened_clay_pink",
+        498 => "mcl_colorblocks:hardened_clay_lime",
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }
