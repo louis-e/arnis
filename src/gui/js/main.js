@@ -1755,7 +1755,8 @@ function refreshWorldTypeRow(format) {
 // The extras are a Java data pack, and each One World area would write its own over
 // the last one's. Off Earth there are no roads or places, and gravity only differs there.
 function refreshGameplayRows(format) {
-  const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldToggleOn();
+  // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
+  const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldEnabled();
   const earth = selectedCelestialBody === 'earth';
   setSettingsRowAvailable('pause-menu-toggle', pack);
   setSettingsRowAvailable('zombie-outbreak-toggle', pack);
