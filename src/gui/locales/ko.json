@@ -219,5 +219,20 @@
   "one_world_confirm_title": "기존 청크를 바꿀까요?",
   "one_world_confirm_text": "이 영역의 청크 {count}개가 이미 월드에 있습니다. 다시 생성되며 Minecraft에서 그곳에 지은 것은 모두 바뀝니다.",
   "one_world_confirm_cancel": "취소",
-  "one_world_confirm_ok": "생성"
+  "one_world_confirm_ok": "생성",
+  "settings_section_gameplay": "게임플레이",
+  "settings_section_gameplay_desc": "월드 안의 데이터 팩으로 작동하는 추가 기능입니다. Java 전용이며 하나의 월드 모드에서는 사용할 수 없습니다. 켜기 전까지 모두 꺼져 있습니다.",
+  "settings_nav_gameplay": "메뉴, 발견, 좀비",
+  "pause_menu": "Arnis 일시정지 메뉴",
+  "pause_menu_desc": "일시정지 메뉴에서 이동, 발견, 크레딧을 확인하세요.",
+  "discoveries": "발견",
+  "discoveries_desc": "실제 명소까지 걸어가 발전 과제로 잠금 해제하세요.",
+  "traffic_lights": "작동하는 신호등",
+  "traffic_lights_desc": "실제로 바뀌는 신호등.",
+  "zombie_outbreak": "좀비 아웃브레이크",
+  "zombie_outbreak_desc": "거리를 휩쓰는 좀비 웨이브 속에서 다섯 밤을 버티세요. 보스도 등장합니다.",
+  "body_gravity": "달과 화성 중력",
+  "body_gravity_desc": "달과 화성 월드에서 실제 낮은 중력.",
+  "moving_cars": "움직이는 자동차",
+  "moving_cars_desc": "제한 속도로 거리를 달리는 차량."
 }

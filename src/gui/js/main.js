@@ -54,6 +54,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initVoxyLightingCoupling();
   initCavesFillCoupling();
   refreshHeightLimitRow();
+  refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
@@ -701,6 +702,7 @@ function setCelestialBody(body) {
   // loop: the height-limit pack is also format-gated and the facade rows read
   // the world format and the stored source too.
   refreshHeightLimitRow();
+  refreshGameplayRows();
   refreshFacadeRows();
   refreshOneWorldState();
 
@@ -1750,12 +1752,33 @@ function refreshWorldTypeRow(format) {
   if (row) row.classList.toggle('settings-row-unavailable', !java);
 }
 
+// The extras are a Java data pack, and each One World area would write its own over
+// the last one's. Off Earth there are no roads or places, and gravity only differs there.
+function refreshGameplayRows(format) {
+  // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
+  const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldEnabled();
+  const earth = selectedCelestialBody === 'earth';
+  setSettingsRowAvailable('pause-menu-toggle', pack);
+  setSettingsRowAvailable('zombie-outbreak-toggle', pack);
+  setSettingsRowAvailable('discoveries-toggle', pack && earth);
+  setSettingsRowAvailable('traffic-lights-toggle', pack && earth);
+  setSettingsRowAvailable('moving-cars-toggle', pack && earth);
+  setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
+}
+
+// Disabled means unavailable for this format or body, so a stale tick is never sent.
+function gameplayToggle(id) {
+  const el = document.getElementById(id);
+  return !!(el && el.checked && !el.disabled);
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
   const luantiBtn = document.getElementById('format-luanti');
 
   refreshHeightLimitRow(format);
+  refreshGameplayRows(format);
   refreshWorldTypeRow(format);
 
   javaBtn.classList.remove('format-active');
@@ -3188,6 +3211,7 @@ function initOneWorld() {
   if (!toggle) return;
   // Also fires when the settings store restores the value.
   toggle.addEventListener('change', refreshOneWorldState);
+  toggle.addEventListener('change', () => refreshGameplayRows());
   const mode = document.getElementById('generation-mode-select');
   if (mode) mode.addEventListener('change', renderOneWorldStatus);
   const nameToggle = document.getElementById('custom-world-name-toggle');
@@ -3414,6 +3438,12 @@ async function startGeneration() {
         buildingFacadesEnabled: getBuildingFacadesEnabled(),
         facadeDetail: getFacadeDetail(),
         celestialBodyName: selectedCelestialBody,
+        pauseMenu: gameplayToggle('pause-menu-toggle'),
+        discoveries: gameplayToggle('discoveries-toggle'),
+        trafficLights: gameplayToggle('traffic-lights-toggle'),
+        movingCars: gameplayToggle('moving-cars-toggle'),
+        zombieOutbreak: gameplayToggle('zombie-outbreak-toggle'),
+        bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : ""
     });

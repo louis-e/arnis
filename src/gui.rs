@@ -1409,6 +1409,12 @@ fn gui_start_generation(
     building_facades_enabled: bool,
     facade_detail: String,
     celestial_body_name: String,
+    pause_menu: bool,
+    discoveries: bool,
+    traffic_lights: bool,
+    zombie_outbreak: bool,
+    moving_cars: bool,
+    body_gravity: bool,
     one_world: bool,
     one_world_name: String,
 ) -> Result<(), String> {
@@ -1783,6 +1789,12 @@ fn gui_start_generation(
                 // aid.
                 building_facades_dir: None,
                 body: celestial_body,
+                body_gravity,
+                traffic_lights,
+                discoveries,
+                pause_menu,
+                zombie_outbreak,
+                moving_cars,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.

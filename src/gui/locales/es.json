@@ -219,5 +219,20 @@
   "one_world_confirm_title": "¿Reemplazar chunks existentes?",
   "one_world_confirm_text": "{count} chunks de esta área ya existen en el mundo. Se generan de nuevo y se reemplaza todo lo construido allí en Minecraft.",
   "one_world_confirm_cancel": "Cancelar",
-  "one_world_confirm_ok": "Generar"
+  "one_world_confirm_ok": "Generar",
+  "settings_section_gameplay": "Jugabilidad",
+  "settings_section_gameplay_desc": "Extras que funcionan desde un paquete de datos dentro del mundo. Solo Java, no disponibles en el modo Un solo mundo. Todos desactivados salvo que los actives.",
+  "settings_nav_gameplay": "Menú, descubrimientos, zombis",
+  "pause_menu": "Menú de pausa de Arnis",
+  "pause_menu_desc": "Viajes, descubrimientos y créditos desde el menú de pausa.",
+  "discoveries": "Descubrimientos",
+  "discoveries_desc": "Camina hasta lugares emblemáticos reales para desbloquearlos como progresos.",
+  "traffic_lights": "Semáforos funcionales",
+  "traffic_lights_desc": "Semáforos que cambian de verdad.",
+  "zombie_outbreak": "Brote zombi",
+  "zombie_outbreak_desc": "Cinco noches de oleadas de zombis por tus calles, con un jefe final.",
+  "body_gravity": "Gravedad de la Luna y Marte",
+  "body_gravity_desc": "Gravedad baja real en mundos de la Luna y Marte.",
+  "moving_cars": "Coches en movimiento",
+  "moving_cars_desc": "Tráfico que circula por tus calles al límite de velocidad."
 }

@@ -686,7 +686,7 @@ impl RegionWriteCtx {
 /// odds of two colliding are percents, not nothing. A collision here is silent
 /// entity loss, which is the defect this key exists to fix.
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
-enum EntityIdentity {
+pub(super) enum EntityIdentity {
     Uuid([i32; 4]),
     /// Block entities carry no UUID; `Facing` separates the ones that share a
     /// cell, and -1 stands for an entity that has neither.
@@ -694,7 +694,9 @@ enum EntityIdentity {
 }
 
 #[inline]
-fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, EntityIdentity)> {
+pub(super) fn get_entity_coords(
+    entity: &HashMap<String, Value>,
+) -> Option<(i32, i32, i32, EntityIdentity)> {
     let facing = match entity.get("UUID") {
         Some(Value::IntArray(uuid)) if uuid.len() == 4 => {
             EntityIdentity::Uuid([uuid[0], uuid[1], uuid[2], uuid[3]])
