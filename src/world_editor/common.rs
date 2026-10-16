@@ -1561,6 +1561,34 @@ impl WorldToModify {
         all_clean
     }
 
+    /// Dedup key, the one the save path uses: the cell plus the entity's UUID, so a tile
+    /// halo's copy collapses while a car's parts or a signal's lamps sharing a cell do not.
+    fn entity_coords(value: &Value) -> Option<(i32, i32, i32, super::java::EntityIdentity)> {
+        let Value::Compound(map) = value else {
+            return None;
+        };
+        super::java::get_entity_coords(map)
+    }
+
+    /// Per-chunk lists a tile carries into the merged world. Fluid ticks ride along so cave
+    /// water and lava placed in a tile still flow once its chunk meets another tile's data.
+    fn merges_as_list(key: &str) -> bool {
+        matches!(key, "block_entities" | "entities" | "fluid_ticks")
+    }
+
+    /// Appends `other_list` into `self_list`, skipping entries already present at a coordinate.
+    /// Tile halos process boundary features twice, so this drops the duplicate copies instead of
+    /// retaining both (which also spared the save path from stripping them later).
+    fn dedup_extend(self_list: &mut Vec<Value>, other_list: &[Value]) {
+        let mut seen: FnvHashSet<_> = self_list.iter().filter_map(Self::entity_coords).collect();
+        for entry in other_list {
+            match Self::entity_coords(entry) {
+                Some(coords) if !seen.insert(coords) => {}
+                _ => self_list.push(entry.clone()),
+            }
+        }
+    }
+
     /// Merge another `WorldToModify` into self.
     ///
     /// For each non-AIR block in `other`, write it into `self`.
@@ -1579,51 +1607,6 @@ impl WorldToModify {
     /// (auth tile only overwrites where it placed non-AIR). Without this,
     /// e.g. tree canopies that cross tile boundaries would be clobbered when
     /// the receiving tile happens to have a chunk in the same column.
-    /// Position key for a block entity (x/y/z ints) or entity (floored Pos doubles).
-    /// Dedup key: cell coordinates plus, for hanging entities, the face they hang on, so
-    /// several decals can share one cell without collapsing into one.
-    fn entity_coords(value: &Value) -> Option<(i32, i32, i32, i32)> {
-        let Value::Compound(map) = value else {
-            return None;
-        };
-        let facing = match map.get("Facing") {
-            Some(Value::Byte(f)) => *f as i32,
-            Some(Value::Int(f)) => *f,
-            _ => -1,
-        };
-        if let (Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Int(z))) =
-            (map.get("x"), map.get("y"), map.get("z"))
-        {
-            return Some((*x, *y, *z, facing));
-        }
-        if let Some(Value::List(pos)) = map.get("Pos") {
-            if let [Value::Double(x), Value::Double(y), Value::Double(z)] = pos.as_slice() {
-                return Some((x.floor() as i32, y.floor() as i32, z.floor() as i32, facing));
-            }
-        }
-        None
-    }
-
-    /// Per-chunk lists a tile carries into the merged world. Fluid ticks ride along so cave
-    /// water and lava placed in a tile still flow once its chunk meets another tile's data.
-    fn merges_as_list(key: &str) -> bool {
-        matches!(key, "block_entities" | "entities" | "fluid_ticks")
-    }
-
-    /// Appends `other_list` into `self_list`, skipping entries already present at a coordinate.
-    /// Tile halos process boundary features twice, so this drops the duplicate copies instead of
-    /// retaining both (which also spared the save path from stripping them later).
-    fn dedup_extend(self_list: &mut Vec<Value>, other_list: &[Value]) {
-        let mut seen: FnvHashSet<(i32, i32, i32, i32)> =
-            self_list.iter().filter_map(Self::entity_coords).collect();
-        for entry in other_list {
-            match Self::entity_coords(entry) {
-                Some(coords) if !seen.insert(coords) => {}
-                _ => self_list.push(entry.clone()),
-            }
-        }
-    }
-
     pub fn merge(
         &mut self,
         other: WorldToModify,
@@ -2391,6 +2374,30 @@ mod merge_fast_path_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tile_merge_keeps_entities_sharing_a_cell_and_drops_halo_copies() {
+        let entity = |uuid: i32, x: f64| {
+            Value::Compound(std::collections::HashMap::from([
+                (
+                    "Pos".to_string(),
+                    Value::List(vec![
+                        Value::Double(x),
+                        Value::Double(70.0),
+                        Value::Double(5.5),
+                    ]),
+                ),
+                (
+                    "UUID".to_string(),
+                    Value::IntArray(fastnbt::IntArray::new(vec![uuid, 0, 0, 1])),
+                ),
+            ]))
+        };
+        // A car's body and its marker, a few pixels apart in one cell.
+        let mut merged = vec![entity(1, 3.4)];
+        WorldToModify::dedup_extend(&mut merged, &[entity(1, 3.4), entity(2, 3.6)]);
+        assert_eq!(merged.len(), 2);
+    }
 
     #[test]
     fn high_id_blocks_stay_paletted() {

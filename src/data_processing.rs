@@ -466,7 +466,7 @@ fn process_element(
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
             } else if node.tags.contains_key("barrier") {
                 barriers::generate_barrier_nodes(editor, node, bridge_surface);
-            } else if node.tags.contains_key("highway") {
+            } else if node.tags.contains_key("highway") || traffic_lights::is_signal(&node.tags) {
                 highways::generate_highways(
                     editor,
                     element,
@@ -898,14 +898,12 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
-    let road_markings = road_markings::RoadMarkingIndex::build(
-        &elements,
-        args.scale,
-        crate::decals::region::SignRegion::detect(
-            (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
-            (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
-        ),
+    let sign_region = crate::decals::region::SignRegion::detect(
+        (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
+        (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
     );
+    let road_markings = road_markings::RoadMarkingIndex::build(&elements, args.scale, sign_region);
+    let extras = crate::datapack::Extras::from_args(args);
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
     let mut rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
@@ -963,6 +961,21 @@ pub fn generate_world_with_options(
     ));
     editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
 
+    let traffic_signals =
+        (extras.traffic_lights && world_format == WorldFormat::JavaAnvil).then(|| {
+            Arc::new(
+                crate::element_processing::traffic_lights::SignalIndex::build(
+                    &elements,
+                    args.scale,
+                    sign_region.drives_on_left(),
+                    &road_mask,
+                ),
+            )
+        });
+    if let Some(signals) = &traffic_signals {
+        editor.set_traffic_signals(Arc::clone(signals));
+    }
+
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
     let group_members: FnvHashMap<u64, Vec<u64>> = {
@@ -1013,6 +1026,60 @@ pub fn generate_world_with_options(
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+
+    let car_network = (extras.cars && world_format == WorldFormat::JavaAnvil).then(|| {
+        let rel = |x: i32, z: i32| {
+            crate::coordinate_system::cartesian::XZPoint::new(
+                x - xzbbox.min_x(),
+                z - xzbbox.min_z(),
+            )
+        };
+        let net = crate::element_processing::cars::CarNetwork::build(
+            &elements,
+            args.scale,
+            sign_region.drives_on_left(),
+            extras.traffic_lights,
+            &xzbbox,
+            |x, z| {
+                bridge_surface
+                    .nearby_deck_y(x, z, 0)
+                    .unwrap_or_else(|| ground.level(rel(x, z)))
+            },
+        );
+        println!(
+            "  Moving cars: {} cars on the road network",
+            net.car_count()
+        );
+        Arc::new(net)
+    });
+    if let Some(cars) = &car_network {
+        editor.set_car_network(Arc::clone(cars));
+    }
+
+    // The elements are gone by the time the pack is written.
+    let extras_places =
+        (extras.wants_places() && world_format == WorldFormat::JavaAnvil).then(|| {
+            let (mut places, settlement) =
+                crate::datapack::discoveries::collect(&elements, &xzbbox);
+            let rel = |x: i32, z: i32| {
+                crate::coordinate_system::cartesian::XZPoint::new(
+                    x - xzbbox.min_x(),
+                    z - xzbbox.min_z(),
+                )
+            };
+            for place in &mut places {
+                place.settle(
+                    |x, z| {
+                        xzbbox.contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
+                            && !building_footprints.contains(x, z)
+                            && ground.cover_class(rel(x, z)) != crate::land_cover::LC_WATER
+                    },
+                    |x, z| road_mask.contains(x, z),
+                    |x, z| ground.level(rel(x, z)),
+                );
+            }
+            (places, settlement)
+        });
 
     // Runway segments merge across ways, so planes prescan here and stamp after the merge.
     let planes = crate::structures::plane::prescan(&elements, args);
@@ -1211,6 +1278,12 @@ pub fn generate_world_with_options(
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
+            }
+            if let Some(signals) = &traffic_signals {
+                tile_editor.set_traffic_signals(Arc::clone(signals));
+            }
+            if let Some(cars) = &car_network {
+                tile_editor.set_car_network(Arc::clone(cars));
             }
             tile_editor.set_strict_bounds(
                 tile_bounds.min_x,
@@ -1951,6 +2024,51 @@ pub fn generate_world_with_options(
         }
     }
 
+    if world_format == WorldFormat::JavaAnvil && extras.any() {
+        let (places, settlement) = extras_places.unwrap_or_default();
+        let ctx = crate::datapack::PackContext {
+            extras,
+            area: extras_area_name(&output_path, args, llbbox, settlement),
+            body: args.body,
+            destinations: crate::datapack::PackContext::destinations_from(
+                &places,
+                options
+                    .spawn_point
+                    .or_else(|| crate::map_item::read_spawn_xz(&output_path))
+                    .map(|(x, z)| {
+                        let rel = crate::coordinate_system::cartesian::XZPoint::new(
+                            x - xzbbox.min_x(),
+                            z - xzbbox.min_z(),
+                        );
+                        (x, z, Some(ground.level(rel)))
+                    }),
+            ),
+            places,
+            credits: crate::datapack::Credits::from_args(args),
+            red_amber: matches!(
+                sign_region,
+                crate::decals::region::SignRegion::Germanic
+                    | crate::decals::region::SignRegion::UkIreland
+            ),
+            car_functions: car_network
+                .as_ref()
+                .map(|net| {
+                    let mut functions = net.look_functions();
+                    functions.extend(net.body_functions());
+                    functions.push((
+                        "data/arnis/function/cars/network.mcfunction".to_string(),
+                        net.storage_function(),
+                    ));
+                    functions
+                })
+                .unwrap_or_default(),
+        };
+        match crate::datapack::install(&output_path, &ctx) {
+            Ok(()) => println!("Installed the {} data pack.", crate::datapack::PACK_NAME),
+            Err(e) => eprintln!("Warning: Failed to install the extras data pack: {e}"),
+        }
+    }
+
     // An extended One World moves the spawn only to a marker inside this area.
     if extending {
         if let Some((sx, sz)) = options.spawn_point.filter(|&(x, z)| {
@@ -2007,6 +2125,34 @@ pub fn generate_world_with_options(
     }
 
     Ok(output_path)
+}
+
+/// The area's name for titles and dialogs: the one the GUI already put in the world's
+/// name, else the reverse-geocoded place, else the most important settlement mapped in it.
+fn extras_area_name(
+    world: &std::path::Path,
+    args: &Args,
+    llbbox: LLBBox,
+    settlement: Option<String>,
+) -> String {
+    if !args.body.is_earth() {
+        return args.body.display_name().to_string();
+    }
+    if let Some(named) = crate::world_utils::level_name(world)
+        .and_then(|n| n.split_once(": ").map(|(_, area)| area.trim().to_string()))
+        .filter(|a| !a.is_empty())
+    {
+        return named;
+    }
+    let (lat, lng) = (
+        (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
+        (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+    );
+    crate::retrieve_data::fetch_area_name(lat, lng)
+        .ok()
+        .flatten()
+        .or(settlement)
+        .unwrap_or_else(|| "this area".to_string())
 }
 
 #[cfg(test)]
