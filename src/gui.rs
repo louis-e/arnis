@@ -2222,7 +2222,6 @@ mod locale_tests {
         ("pl", include_str!("gui/locales/pl.json")),
         ("pt-BR", include_str!("gui/locales/pt-BR.json")),
         ("ro", include_str!("gui/locales/ro.json")),
-        ("rom", include_str!("gui/locales/rom.json")),
         ("ru", include_str!("gui/locales/ru.json")),
         ("sl", include_str!("gui/locales/sl.json")),
         ("sv", include_str!("gui/locales/sv.json")),
