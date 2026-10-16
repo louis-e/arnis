@@ -261,6 +261,7 @@ pub fn generate_ground_region(
     let schematic_trees = editor.tree_pack().is_some();
     let terrain_enabled = ground.elevation_enabled;
     let climate = ground.climate();
+    let city_surface_block = ground.city_surface_block();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -704,16 +705,7 @@ pub fn generate_ground_region(
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_CROPLAND => (FARMLAND, DIRT),
                                         land_cover::LC_BUILT_UP => {
-                                            let h = land_cover::coord_hash(x, z) % 100;
-                                            if h < 72 {
-                                                (STONE_BRICKS, STONE)
-                                            } else if h < 87 {
-                                                (CRACKED_STONE_BRICKS, STONE)
-                                            } else if h < 92 {
-                                                (STONE, STONE)
-                                            } else {
-                                                (COBBLESTONE, STONE)
-                                            }
+                                            (city_surface_block, STONE)
                                         }
                                         land_cover::LC_BARE | land_cover::LC_SNOW_ICE => {
                                             // Skip isolated bare pixels (surrounded by non-bare)

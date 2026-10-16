@@ -3,6 +3,7 @@
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::geo_grid::TiledGrid;
+use crate::ecoregion::{EcoBiome, Ecoregion, Realm};
 use crate::ground_generation::patch_noise;
 use crate::land_cover::{
     coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
@@ -162,6 +163,130 @@ impl Climate {
         };
         Some(pal)
     }
+}
+
+
+/// One consistent surface block for the built-up ground in a generated city or town.
+/// Classification uses the area's climate sample and its RESOLVE ecoregion at the
+/// geographic centre. Unknown/missing data falls back to grass, and every city in
+/// a mapped zone gets the same block.
+pub fn city_surface_block(climate: Climate, ecoregion: Option<Ecoregion>) -> Block {
+    use EcoBiome::*;
+
+    let biome = ecoregion.map(|eco| eco.biome);
+    let realm = ecoregion.map(|eco| eco.realm);
+    let name = ecoregion
+        .and_then(|eco| crate::ecoregion::name(eco.id))
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    // Keep polar and special geographic zones ahead of the broad climate classes.
+    if climate == Climate::IceCap {
+        return PACKED_ICE;
+    }
+    if is_mountainous_region(&name, biome) {
+        return STONE;
+    }
+    if climate == Climate::Tundra || biome == Some(Tundra) {
+        return SNOW_BLOCK;
+    }
+    if is_volcanic_region(&name, biome) {
+        return BLACKSTONE;
+    }
+    if matches!(biome, Some(Flooded | Mangroves))
+        || ["wetland", "flooded", "swamp", "mangrove"]
+            .iter()
+            .any(|hint| name.contains(hint))
+    {
+        return MUD;
+    }
+    if climate == Climate::HotDesert {
+        return SAND;
+    }
+    if climate == Climate::ColdDesert {
+        return GRAVEL;
+    }
+    if biome == Some(Desert) {
+        return SAND;
+    }
+
+    let tropical = matches!(
+        climate,
+        Climate::TropicalSavanna | Climate::HotSteppe | Climate::HotDesert
+    ) || matches!(
+        biome,
+        Some(MoistTropical | DryTropical | TropicalConifer | TropicalGrassland)
+    );
+    if tropical && is_tropical_island_region(&name, realm) {
+        return SAND;
+    }
+
+    if climate == Climate::Boreal || biome == Some(Boreal) {
+        return PODZOL;
+    }
+    if matches!(climate, Climate::TropicalSavanna | Climate::HotSteppe)
+        || matches!(biome, Some(TropicalGrassland | DryTropical))
+    {
+        return COARSE_DIRT;
+    }
+    if matches!(climate, Climate::ColdSteppe | Climate::DryContinental)
+        || biome == Some(TemperateGrassland)
+    {
+        return HAY_BALE;
+    }
+    if biome == Some(Mediterranean) {
+        return STONE;
+    }
+    if biome == Some(MoistTropical) {
+        return MOSS_BLOCK;
+    }
+
+    // Temperate is also the deliberate fallback for missing climate/ecoregion data.
+    GRASS_BLOCK
+}
+
+fn is_volcanic_region(name: &str, biome: Option<EcoBiome>) -> bool {
+    (name.contains("volcan") && biome != Some(EcoBiome::TropicalGrassland))
+        || [
+            "hawai",
+            "iceland",
+            "canary islands",
+            "azores",
+            "kermadec",
+            "galapagos",
+            "windward islands",
+            "sunda islands",
+            "new zealand north island",
+            "fiji",
+        ]
+        .iter()
+        .any(|hint| name.contains(hint))
+}
+
+fn is_mountainous_region(name: &str, biome: Option<EcoBiome>) -> bool {
+    biome == Some(EcoBiome::MontaneGrassland)
+        || ["mountain", "montane", "alps", "himalay", "andes", "rocky mountain"]
+            .iter()
+            .any(|hint| name.contains(hint))
+}
+
+fn is_tropical_island_region(name: &str, realm: Option<Realm>) -> bool {
+    realm == Some(Realm::Oceania)
+        || [
+            "island",
+            "hawai",
+            "caribbean",
+            "cuban",
+            "hispaniolan",
+            "jamaican",
+            "antilles",
+            "fiji",
+            "samoa",
+            "tonga",
+            "vanuatu",
+        ]
+        .iter()
+        .any(|hint| name.contains(hint))
 }
 
 #[cfg(test)]
