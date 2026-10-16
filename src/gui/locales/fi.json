@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Korvataanko olemassa olevat chunkit?",
   "one_world_confirm_text": "Tämän alueen {count} chunkia on jo maailmassa. Ne luodaan uudelleen, ja kaikki mitä niihin on Minecraftissa rakennettu korvataan.",
   "one_world_confirm_cancel": "Peruuta",
-  "one_world_confirm_ok": "Luo"
+  "one_world_confirm_ok": "Luo",
+  "settings_section_gameplay": "Pelattavuus",
+  "settings_section_gameplay_desc": "Lisäosia, jotka toimivat maailman sisäisestä datapaketista. Vain Java, kaikki pois päältä, ellet kytke niitä.",
+  "settings_nav_gameplay": "Valikko, löydöt, zombit",
+  "pause_menu": "Arnis-taukovalikko",
+  "pause_menu_desc": "Matkustus, löydöt ja kiitokset taukovalikosta.",
+  "discoveries": "Löydöt",
+  "discoveries_desc": "Kävele oikeille maamerkeille avataksesi ne edistysaskelina.",
+  "traffic_lights": "Toimivat liikennevalot",
+  "traffic_lights_desc": "Liikennevalot, jotka oikeasti vaihtuvat.",
+  "zombie_outbreak": "Zombiepuhkeama",
+  "zombie_outbreak_desc": "Viisi yötä zombiaaltoja kaduillasi, lopussa pomo.",
+  "body_gravity": "Kuun ja Marsin painovoima",
+  "body_gravity_desc": "Aito matala painovoima Kuu- ja Mars-maailmoissa.",
+  "moving_cars": "Liikkuvat autot",
+  "moving_cars_desc": "Liikennettä, joka ajaa kaduillasi nopeusrajoitusta noudattaen."
 }

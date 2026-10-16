@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Zamenjam obstoječe chunke?",
   "one_world_confirm_text": "{count} chunkov tega območja v svetu že obstaja. Ustvarjeni bodo znova, vse, kar je bilo tam zgrajeno v Minecraftu, pa bo zamenjano.",
   "one_world_confirm_cancel": "Prekliči",
-  "one_world_confirm_ok": "Ustvari"
+  "one_world_confirm_ok": "Ustvari",
+  "settings_section_gameplay": "Igranje",
+  "settings_section_gameplay_desc": "Dodatki, ki delujejo iz podatkovnega paketa v svetu. Samo Java, vsi izklopljeni, dokler jih ne vklopiš.",
+  "settings_nav_gameplay": "Meni, odkritja, zombiji",
+  "pause_menu": "Arnis meni za premor",
+  "pause_menu_desc": "Potovanje, odkritja in zahvale v meniju za premor.",
+  "discoveries": "Odkritja",
+  "discoveries_desc": "Sprehodi se do resničnih znamenitosti in jih odkleni kot napredke.",
+  "traffic_lights": "Delujoči semaforji",
+  "traffic_lights_desc": "Semaforji, ki se res preklapljajo.",
+  "zombie_outbreak": "Zombi izbruh",
+  "zombie_outbreak_desc": "Pet noči valov zombijev po tvojih ulicah, z glavnim nasprotnikom.",
+  "body_gravity": "Gravitacija Lune in Marsa",
+  "body_gravity_desc": "Prava nizka gravitacija v svetovih Lune in Marsa.",
+  "moving_cars": "Vozeči avtomobili",
+  "moving_cars_desc": "Promet, ki vozi po tvojih ulicah z omejeno hitrostjo."
 }

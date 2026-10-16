@@ -875,6 +875,40 @@ fn write_gzip_nbt(path: &Path, value: &Value) -> Result<(), String> {
         .map_err(|e| format!("Failed to write {}: {e}", path.display()))
 }
 
+/// Survival on Normal, for the Zombie Outbreak: the template is Creative on Peaceful, where
+/// zombies despawn. The outbreak's start function sets both again for worlds Minecraft has
+/// already upgraded past these keys.
+pub fn start_in_survival(world: &Path) -> Result<(), String> {
+    let path = world.join("level.dat");
+    let mut root = read_gzip_nbt(&path)?;
+    let Value::Compound(ref mut r) = root else {
+        return Err("level.dat root is not a compound".to_string());
+    };
+    let Some(Value::Compound(data)) = r.get_mut("Data") else {
+        return Err("level.dat missing Data compound".to_string());
+    };
+    data.insert("GameType".to_string(), Value::Int(0));
+    data.insert("Difficulty".to_string(), Value::Byte(2));
+    if let Some(Value::Compound(player)) = data.get_mut("Player") {
+        player.insert("playerGameType".to_string(), Value::Int(0));
+    }
+    write_gzip_nbt(&path, &root)
+}
+
+/// `Data.LevelName` of a world's `level.dat`.
+pub(crate) fn level_name(world: &Path) -> Option<String> {
+    let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
+        return None;
+    };
+    match root.get("Data") {
+        Some(Value::Compound(data)) => match data.get("LevelName") {
+            Some(Value::String(name)) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// `Data.DataVersion` of a world's `level.dat`.
 pub(crate) fn level_data_version(world: &Path) -> Option<i32> {
     let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {

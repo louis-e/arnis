@@ -219,5 +219,20 @@
   "one_world_confirm_title": "既存のチャンクを置き換えますか？",
   "one_world_confirm_text": "このエリアの {count} チャンクは既にワールドにあります。再生成され、Minecraft でそこに建てたものは置き換えられます。",
   "one_world_confirm_cancel": "キャンセル",
-  "one_world_confirm_ok": "生成"
+  "one_world_confirm_ok": "生成",
+  "settings_section_gameplay": "ゲームプレイ",
+  "settings_section_gameplay_desc": "ワールド内のデータパックで動く追加機能です。Java版のみ。オンにしない限りすべてオフです。",
+  "settings_nav_gameplay": "メニュー、発見、ゾンビ",
+  "pause_menu": "Arnis ポーズメニュー",
+  "pause_menu_desc": "ポーズメニューから移動、発見、クレジットを表示。",
+  "discoveries": "発見",
+  "discoveries_desc": "実在の名所まで歩いて進捗として解除しよう。",
+  "traffic_lights": "動く信号機",
+  "traffic_lights_desc": "本当に切り替わる信号機。",
+  "zombie_outbreak": "ゾンビ・アウトブレイク",
+  "zombie_outbreak_desc": "街中を襲うゾンビの波を5夜生き延びよう。ボスも登場。",
+  "body_gravity": "月と火星の重力",
+  "body_gravity_desc": "月と火星のワールドで本物の低重力。",
+  "moving_cars": "走る車",
+  "moving_cars_desc": "制限速度で街の道路を走る車。"
 }

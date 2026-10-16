@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Zastąpić istniejące chunki?",
   "one_world_confirm_text": "{count} chunków tego obszaru już istnieje w świecie. Zostaną wygenerowane ponownie, a wszystko, co tam zbudowano w Minecrafcie, zostanie zastąpione.",
   "one_world_confirm_cancel": "Anuluj",
-  "one_world_confirm_ok": "Generuj"
+  "one_world_confirm_ok": "Generuj",
+  "settings_section_gameplay": "Rozgrywka",
+  "settings_section_gameplay_desc": "Dodatki działające z paczki danych w świecie. Tylko Java, wszystkie wyłączone, dopóki ich nie włączysz.",
+  "settings_nav_gameplay": "Menu, odkrycia, zombie",
+  "pause_menu": "Menu pauzy Arnis",
+  "pause_menu_desc": "Podróże, odkrycia i podziękowania w menu pauzy.",
+  "discoveries": "Odkrycia",
+  "discoveries_desc": "Dojdź do prawdziwych zabytków, aby odblokować je jako postępy.",
+  "traffic_lights": "Działająca sygnalizacja",
+  "traffic_lights_desc": "Sygnalizacja świetlna, która naprawdę się zmienia.",
+  "zombie_outbreak": "Epidemia zombie",
+  "zombie_outbreak_desc": "Pięć nocy fal zombie na twoich ulicach, z bossem.",
+  "body_gravity": "Grawitacja Księżyca i Marsa",
+  "body_gravity_desc": "Prawdziwa niska grawitacja w światach Księżyca i Marsa.",
+  "moving_cars": "Jeżdżące samochody",
+  "moving_cars_desc": "Ruch uliczny jeżdżący po twoich ulicach z dozwoloną prędkością."
 }

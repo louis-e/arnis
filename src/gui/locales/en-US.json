@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Replace existing chunks?",
   "one_world_confirm_text": "{count} chunks of this area already exist in the world. They are generated again, and anything built there in Minecraft is replaced.",
   "one_world_confirm_cancel": "Cancel",
-  "one_world_confirm_ok": "Generate"
+  "one_world_confirm_ok": "Generate",
+  "settings_section_gameplay": "Gameplay",
+  "settings_section_gameplay_desc": "Extras that run from a data pack inside the world. Java only, all off unless you turn them on.",
+  "settings_nav_gameplay": "Menu, discoveries, zombies",
+  "pause_menu": "Arnis Pause Menu",
+  "pause_menu_desc": "Travel, discoveries and credits from the pause menu.",
+  "discoveries": "Discoveries",
+  "discoveries_desc": "Walk to real landmarks to unlock them as advancements.",
+  "traffic_lights": "Working Traffic Lights",
+  "traffic_lights_desc": "Traffic lights that actually switch.",
+  "zombie_outbreak": "Zombie Outbreak",
+  "zombie_outbreak_desc": "Five nights of zombie waves through your streets, with a boss.",
+  "body_gravity": "Moon & Mars Gravity",
+  "body_gravity_desc": "Real low gravity on Moon and Mars worlds.",
+  "moving_cars": "Moving Cars",
+  "moving_cars_desc": "Traffic that drives your streets at the speed limit."
 }

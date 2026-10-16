@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Lecseréled a meglévő chunkokat?",
   "one_world_confirm_text": "A terület {count} chunkja már létezik a világban. Újra létrejönnek, és minden, amit ott a Minecraftban építettek, lecserélődik.",
   "one_world_confirm_cancel": "Mégse",
-  "one_world_confirm_ok": "Generálás"
+  "one_world_confirm_ok": "Generálás",
+  "settings_section_gameplay": "Játékmenet",
+  "settings_section_gameplay_desc": "Extrák, amelyek a világban lévő adatcsomagból futnak. Csak Java, mind ki van kapcsolva, amíg be nem kapcsolod.",
+  "settings_nav_gameplay": "Menü, felfedezések, zombik",
+  "pause_menu": "Arnis szünetmenü",
+  "pause_menu_desc": "Utazás, felfedezések és köszönetnyilvánítás a szünetmenüből.",
+  "discoveries": "Felfedezések",
+  "discoveries_desc": "Sétálj el valódi nevezetességekhez, hogy előrelépésként feloldd őket.",
+  "traffic_lights": "Működő közlekedési lámpák",
+  "traffic_lights_desc": "Közlekedési lámpák, amelyek tényleg váltanak.",
+  "zombie_outbreak": "Zombijárvány",
+  "zombie_outbreak_desc": "Öt éjszakányi zombihullám az utcáidon, a végén főellenséggel.",
+  "body_gravity": "Hold- és Mars-gravitáció",
+  "body_gravity_desc": "Valódi alacsony gravitáció a Hold- és Mars-világokban.",
+  "moving_cars": "Mozgó autók",
+  "moving_cars_desc": "Forgalom, amely a sebességhatárral közlekedik az utcáidon."
 }

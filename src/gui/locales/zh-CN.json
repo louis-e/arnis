@@ -219,5 +219,20 @@
   "one_world_confirm_title": "替换已有区块？",
   "one_world_confirm_text": "此区域的 {count} 个区块已存在于世界中。它们将重新生成，在 Minecraft 中建造的内容都会被替换。",
   "one_world_confirm_cancel": "取消",
-  "one_world_confirm_ok": "生成"
+  "one_world_confirm_ok": "生成",
+  "settings_section_gameplay": "玩法",
+  "settings_section_gameplay_desc": "通过世界内的数据包运行的额外功能。仅限 Java 版，默认全部关闭。",
+  "settings_nav_gameplay": "菜单、发现、僵尸",
+  "pause_menu": "Arnis 暂停菜单",
+  "pause_menu_desc": "在暂停菜单中传送、查看发现和致谢。",
+  "discoveries": "发现",
+  "discoveries_desc": "走到真实地标即可解锁对应进度。",
+  "traffic_lights": "会变灯的红绿灯",
+  "traffic_lights_desc": "真正会切换的红绿灯。",
+  "zombie_outbreak": "僵尸爆发",
+  "zombie_outbreak_desc": "在你的街道上抵御五个夜晚的僵尸潮，最后还有首领。",
+  "body_gravity": "月球与火星重力",
+  "body_gravity_desc": "月球和火星世界中的真实低重力。",
+  "moving_cars": "行驶的汽车",
+  "moving_cars_desc": "按限速在你的街道上行驶的车流。"
 }

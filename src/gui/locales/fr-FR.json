@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Remplacer les chunks existants ?",
   "one_world_confirm_text": "{count} chunks de cette zone existent déjà dans le monde. Ils sont générés à nouveau et tout ce qui y a été construit dans Minecraft est remplacé.",
   "one_world_confirm_cancel": "Annuler",
-  "one_world_confirm_ok": "Générer"
+  "one_world_confirm_ok": "Générer",
+  "settings_section_gameplay": "Jouabilité",
+  "settings_section_gameplay_desc": "Des extras qui tournent depuis un pack de données dans le monde. Java uniquement, tous désactivés sauf si vous les activez.",
+  "settings_nav_gameplay": "Menu, découvertes, zombies",
+  "pause_menu": "Menu pause Arnis",
+  "pause_menu_desc": "Voyage, découvertes et crédits depuis le menu pause.",
+  "discoveries": "Découvertes",
+  "discoveries_desc": "Rendez-vous aux vrais monuments pour les débloquer comme progrès.",
+  "traffic_lights": "Feux de circulation fonctionnels",
+  "traffic_lights_desc": "Des feux qui changent vraiment de couleur.",
+  "zombie_outbreak": "Épidémie zombie",
+  "zombie_outbreak_desc": "Cinq nuits de vagues de zombies dans vos rues, avec un boss.",
+  "body_gravity": "Gravité Lune et Mars",
+  "body_gravity_desc": "Une vraie faible gravité dans les mondes Lune et Mars.",
+  "moving_cars": "Voitures en mouvement",
+  "moving_cars_desc": "Une circulation qui roule dans vos rues à la vitesse limite."
 }

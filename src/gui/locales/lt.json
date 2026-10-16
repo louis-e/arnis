@@ -219,5 +219,20 @@
   "one_world_confirm_title": "Pakeisti esamus chunkus?",
   "one_world_confirm_text": "{count} šios srities chunkų pasaulyje jau yra. Jie sukuriami iš naujo, o viskas, kas ten pastatyta Minecraft, pakeičiama.",
   "one_world_confirm_cancel": "Atšaukti",
-  "one_world_confirm_ok": "Generuoti"
+  "one_world_confirm_ok": "Generuoti",
+  "settings_section_gameplay": "Žaidimas",
+  "settings_section_gameplay_desc": "Priedai, veikiantys iš duomenų paketo pasaulyje. Tik Java, visi išjungti, kol jų neįjungsite.",
+  "settings_nav_gameplay": "Meniu, atradimai, zombiai",
+  "pause_menu": "Arnis pauzės meniu",
+  "pause_menu_desc": "Kelionės, atradimai ir padėkos pauzės meniu.",
+  "discoveries": "Atradimai",
+  "discoveries_desc": "Nueikite prie tikrų lankytinų vietų, kad atrakintumėte jas kaip pažangą.",
+  "traffic_lights": "Veikiantys šviesoforai",
+  "traffic_lights_desc": "Šviesoforai, kurie tikrai persijungia.",
+  "zombie_outbreak": "Zombių protrūkis",
+  "zombie_outbreak_desc": "Penkios naktys zombių bangų jūsų gatvėse, su bosu.",
+  "body_gravity": "Mėnulio ir Marso gravitacija",
+  "body_gravity_desc": "Tikra maža gravitacija Mėnulio ir Marso pasauliuose.",
+  "moving_cars": "Važiuojantys automobiliai",
+  "moving_cars_desc": "Eismas, važiuojantis jūsų gatvėmis leistinu greičiu."
 }
