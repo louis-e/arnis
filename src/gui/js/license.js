@@ -63,6 +63,10 @@ export const licenseText = `
 <p>Terrain for the Moon and Mars is read from the NASA <a href="https://pds-geosciences.wustl.edu/" target="_blank" rel="noopener noreferrer">Planetary Data System, Geosciences Node</a>: the <a href="https://pds-geosciences.wustl.edu/missions/lro/lola.htm" target="_blank" rel="noopener noreferrer">LRO LOLA</a> gridded topography for the Moon (LOLA/USGS) and the <a href="https://pds-geosciences.wustl.edu/missions/mgs/megdr.html" target="_blank" rel="noopener noreferrer">MGS MOLA MEGDR</a> for Mars. As works of the U.S. Government these data are not subject to copyright; the PDS asks that they be credited.</p>
 </div>
 <div class="credit">
+<h4>USGS Lunar and Martian Geology</h4>
+<p>Planetary surface geology is derived from the USGS <a href="https://astrogeology.usgs.gov/search/map/Moon/Geology/Unified_Geologic_Map_of_the_Moon_GIS_v2/" target="_blank" rel="noopener noreferrer">Unified Geologic Map of the Moon</a> (Fortezzo, Spudis and Harrel, 2020; CC0), the <a href="https://pubs.usgs.gov/publication/sim3292" target="_blank" rel="noopener noreferrer">Global Geologic Map of Mars</a> (SIM 3292; public domain), and the <a href="https://www.usgs.gov/data/mars-dune-digital-database-merged" target="_blank" rel="noopener noreferrer">Mars Global Digital Dune Database</a> (CC0). Coverage and mapped feature limits are documented in <code>assets/planetary/README.md</code>.</p>
+</div>
+<div class="credit">
 <h4>ESA WorldCover 2021</h4>
 <p>Land cover classification data provided by the <a href="https://esa-worldcover.org/en" target="_blank" rel="noopener noreferrer">ESA WorldCover</a> project (10m resolution, v200). Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC-BY 4.0</a>. &copy; ESA WorldCover project 2021.</p>
 </div>
@@ -232,3 +236,4 @@ Aeroplanes and jet bridge by French_Prod</p>
 
 <p class="credits-disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
 `;
+
