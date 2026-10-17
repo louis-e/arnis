@@ -3,6 +3,7 @@
 use crate::block_definitions::{Block, GLASS, STONE_BRICKS};
 use crate::block_palette::closest_block;
 use dda_voxelize::DdaVoxelizer;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 /// Pure magenta (#FF00FF) in model colors becomes GLASS instead of palette-mapping.
@@ -282,29 +283,44 @@ impl MipTexture {
         for (i, v) in lut.iter_mut().enumerate() {
             *v = srgb_to_linear(i as f32 / 255.0);
         }
-        let px = img
-            .pixels
-            .chunks_exact(stride)
-            .take(w * h)
-            .map(|c| {
-                let a = if has_alpha && use_alpha {
-                    c[3] as f32 / 255.0
-                } else {
-                    1.0
-                };
-                [
-                    lut[c[0] as usize] * a,
-                    lut[c[1] as usize] * a,
-                    lut[c[2] as usize] * a,
-                    a,
-                ]
-            })
-            .collect();
-        let mut level = MipLevel { w, h, px };
-        while level.w.max(level.h) > MAX_TEXTURE_SIDE {
-            level = level.half();
+        let texel = |i: usize| {
+            let c = &img.pixels[i * stride..];
+            let a = if has_alpha && use_alpha {
+                c[3] as f32 / 255.0
+            } else {
+                1.0
+            };
+            [
+                lut[c[0] as usize] * a,
+                lut[c[1] as usize] * a,
+                lut[c[2] as usize] * a,
+                a,
+            ]
+        };
+        // Box-filtered straight from the bytes, so a large texture never
+        // exists at full size in f32.
+        let mut f = 1;
+        while (w / f).max(h / f) > MAX_TEXTURE_SIDE {
+            f *= 2;
         }
-        let mut levels = vec![level];
+        let (lw, lh) = ((w / f).max(1), (h / f).max(1));
+        let norm = 1.0 / (f * f) as f32;
+        let mut px = Vec::with_capacity(lw * lh);
+        for y in 0..lh {
+            for x in 0..lw {
+                let mut acc = [0.0f32; 4];
+                for sy in y * f..y * f + f {
+                    for sx in x * f..x * f + f {
+                        let p = texel(sy.min(h - 1) * w + sx.min(w - 1));
+                        for i in 0..4 {
+                            acc[i] += p[i];
+                        }
+                    }
+                }
+                px.push(acc.map(|v| v * norm));
+            }
+        }
+        let mut levels = vec![MipLevel { w: lw, h: lh, px }];
         while let Some(last) = levels.last().filter(|l| l.w > 1 || l.h > 1) {
             let next = last.half();
             levels.push(next);
@@ -439,10 +455,10 @@ fn accumulate_glb(
     let (document, buffers, images) =
         gltf::import_slice(glb_bytes).map_err(|e| format!("glTF parse: {e}"))?;
 
-    let mut accum: HashMap<[i32; 3], VoxelAccum> = HashMap::new();
-    // Keyed by glTF texture, which pairs an image with its sampler, and by
-    // whether alpha counts.
-    let mut textures: HashMap<(usize, bool), Option<MipTexture>> = HashMap::new();
+    let accum: RefCell<HashMap<[i32; 3], VoxelAccum>> = RefCell::new(HashMap::new());
+    // The last triangle to reach each cell, so a triangle shades a cell once.
+    let mut visits: DdaVoxelizer<u32> = DdaVoxelizer::new();
+    let mut tri_id: u32 = 0;
 
     let scenes: Vec<_> = if let Some(scene) = document.default_scene() {
         scene.nodes().collect()
@@ -472,18 +488,15 @@ fn accumulate_glb(
                     gltf::material::AlphaMode::Mask => Some(mat.alpha_cutoff().unwrap_or(0.5)),
                     gltf::material::AlphaMode::Blend => Some(BLEND_CUTOFF),
                 };
-                let key = tex_info.as_ref().map(|info| {
+                // Built per primitive and dropped after it, so one mip chain is
+                // alive at a time; the sampler comes with the glTF texture.
+                let mips = tex_info.as_ref().and_then(|info| {
                     let tex = info.texture();
-                    let key = (tex.index(), cutoff.is_some());
-                    textures.entry(key).or_insert_with(|| {
-                        let sampler = tex.sampler();
-                        images.get(tex.source().index()).and_then(|img| {
-                            MipTexture::new(img, [sampler.wrap_s(), sampler.wrap_t()], key.1)
-                        })
-                    });
-                    key
+                    let sampler = tex.sampler();
+                    let img = images.get(tex.source().index())?;
+                    MipTexture::new(img, [sampler.wrap_s(), sampler.wrap_t()], cutoff.is_some())
                 });
-                let texture = key.and_then(|k| textures.get(&k)?.as_ref());
+                let texture = mips.as_ref();
                 let material = Material {
                     factor,
                     texture,
@@ -540,9 +553,12 @@ fn accumulate_glb(
                     let frame = tri_uv.and(TriFrame::new(&tri));
                     // The DDA picks the cells; its weights drift on diagonal
                     // lines, so each cell is shaded from its own footprint.
-                    let mut cells: DdaVoxelizer<()> = DdaVoxelizer::new();
-                    cells.add_triangle(&tri, &|_: Option<&()>, _: [i32; 3], _: [f32; 3]| {});
-                    for cell in cells.finalize().into_keys() {
+                    tri_id = tri_id.wrapping_add(1);
+                    let id = tri_id;
+                    let shade = |prev: Option<&u32>, cell: [i32; 3], _: [f32; 3]| {
+                        if prev == Some(&id) {
+                            return id;
+                        }
                         let s = match &frame {
                             Some(frame) => shade_footprint(
                                 &material,
@@ -562,10 +578,13 @@ fn accumulate_glb(
                         }
                         .of_triangle();
                         accum
+                            .borrow_mut()
                             .entry(cell)
                             .and_modify(|a| *a = a.add(&s))
                             .or_insert(s);
-                    }
+                        id
+                    };
+                    visits.add_triangle(&tri, &shade);
                 }
             }
         }
@@ -575,7 +594,7 @@ fn accumulate_glb(
         }
     }
 
-    Ok(accum)
+    Ok(accum.into_inner())
 }
 
 /// Voxelizes a .glb model, leaving the block choice to the caller. Textures are
