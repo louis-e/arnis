@@ -20,9 +20,9 @@ use crate::osm_parser::{
 };
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
-use fnv::FnvHashSet;
+use fnv::{FnvHashMap, FnvHashSet};
 use rand::Rng;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9375,7 +9375,7 @@ fn generate_facade_cornices(
     let stair = trim_stair(config.trim_block);
     let slab = trim_slab(config.trim_block);
     let ledge = make_top_slab(slab);
-    let cap = cached_prop_block(slab, &[("type", "bottom")]);
+    let cap = rooftops::bottom_slab(slab);
 
     for wc in facade_columns(&element.nodes, config) {
         if front_blocked(&wc, config, building_passages, facade, part_probe) {
@@ -9768,7 +9768,7 @@ fn generate_hospital_helipad(
         return;
     }
 
-    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+    let floor_set: FnvHashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     // Roof surface Y (on top of the flat roof)
     let roof_y = config.start_y_offset + config.building_height + config.abs_terrain_offset + 1;
@@ -9832,8 +9832,8 @@ fn generate_floors_and_ceilings(
     open_hall: bool,
     furnished: bool,
     lid: &RoofMembrane,
-) -> HashSet<(i32, i32)> {
-    let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
+) -> FnvHashSet<(i32, i32)> {
+    let mut processed_points: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     let ceiling_light_block = if config.is_abandoned_building {
         COBWEB
     } else {
@@ -10133,8 +10133,8 @@ pub fn generate_buildings(
 
     if let Some(holes) = hole_polygons {
         if !holes.is_empty() {
-            let outer_area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
-            let mut hole_points: HashSet<(i32, i32)> = HashSet::new();
+            let outer_area: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+            let mut hole_points: FnvHashSet<(i32, i32)> = FnvHashSet::default();
 
             for hole in holes {
                 if hole.way.nodes.len() < 3 {
@@ -10993,7 +10993,7 @@ pub fn generate_buildings(
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
     let roof_area: Vec<(i32, i32)> = {
-        let mut area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        let mut area: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
         area.extend(wall_outline.iter().copied());
         // Sort to ensure deterministic iteration order across runs/platforms
         let mut v: Vec<(i32, i32)> = area.into_iter().collect();
@@ -11124,7 +11124,7 @@ pub fn generate_buildings(
         let eave_blocked: FnvHashSet<(i32, i32)> = if style.roof_type == RoofType::Flat {
             FnvHashSet::default()
         } else {
-            let own: HashSet<(i32, i32)> = roof_area.iter().copied().collect();
+            let own: FnvHashSet<(i32, i32)> = roof_area.iter().copied().collect();
             let mut blocked = FnvHashSet::default();
             for &(x, z) in &roof_area {
                 if ROOF_SIDES
@@ -12178,7 +12178,7 @@ fn generate_residential_antenna(
         return;
     }
 
-    let footprint: HashSet<(i32, i32)> = roof_area.iter().copied().collect();
+    let footprint: FnvHashSet<(i32, i32)> = roof_area.iter().copied().collect();
     let cx = roof_area.iter().map(|p| p.0).sum::<i32>() / roof_area.len() as i32;
     let cz = roof_area.iter().map(|p| p.1).sum::<i32>() / roof_area.len() as i32;
 
@@ -12353,7 +12353,7 @@ fn has_lower_neighbor(
     x: i32,
     z: i32,
     roof_height: i32,
-    roof_heights: &HashMap<(i32, i32), i32>,
+    roof_heights: &FnvHashMap<(i32, i32), i32>,
 ) -> bool {
     [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
         .iter()
@@ -12371,7 +12371,12 @@ const MAX_STAIR_DROP: i32 = 2;
 
 /// Whether the top block of a roof column faces a drop too steep for a stair.
 #[inline]
-fn steep_drop(x: i32, z: i32, roof_height: i32, roof_heights: &HashMap<(i32, i32), i32>) -> bool {
+fn steep_drop(
+    x: i32,
+    z: i32,
+    roof_height: i32,
+    roof_heights: &FnvHashMap<(i32, i32), i32>,
+) -> bool {
     [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
         .iter()
         .any(|(nx, nz)| {
@@ -12391,11 +12396,11 @@ fn steep_drop(x: i32, z: i32, roof_height: i32, roof_heights: &HashMap<(i32, i32
 fn place_dormer_windows(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
-    roof_heights: &HashMap<(i32, i32), i32>,
-    edge_scans: &HashMap<(i32, i32), (i32, i32)>,
+    roof_heights: &FnvHashMap<(i32, i32), i32>,
+    edge_scans: &FnvHashMap<(i32, i32), (i32, i32)>,
     config: &RoofConfig,
     parallel_to_ridge: (i32, i32),
-    footprint: &HashSet<(i32, i32)>,
+    footprint: &FnvHashSet<(i32, i32)>,
     mansard_band: Option<i32>,
 ) -> Vec<(i32, i32)> {
     let mut built: Vec<(i32, i32)> = Vec::new();
@@ -12645,10 +12650,10 @@ fn place_dormer_windows(
 fn place_roof_blocks_with_stairs(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
-    roof_heights: &HashMap<(i32, i32), i32>,
+    roof_heights: &FnvHashMap<(i32, i32), i32>,
     config: &RoofConfig,
     stair_direction_fn: impl Fn(i32, i32, i32) -> BlockWithProperties,
-    footprint: Option<&HashSet<(i32, i32)>>,
+    footprint: Option<&FnvHashSet<(i32, i32)>>,
 ) {
     // Use empty blacklist to allow overwriting wall/ceiling blocks
     let replace_any: &[Block] = &[];
@@ -12830,12 +12835,12 @@ fn eave_quarters(sides: u8) -> [bool; 4] {
 /// Top block height of a pitched roof per cell, relative to the terrain
 /// offset, as the generators report it for the chimneys. Dormer cells are
 /// left out.
-type RoofSurface = HashMap<(i32, i32), i32>;
+type RoofSurface = FnvHashMap<(i32, i32), i32>;
 
 /// Surface levels of a pitched roof per cell, in half blocks: `2y + 1` for
 /// a stair or block topping out at `y`, `2y` for a bottom slab at `y`.
 /// Equal levels are flush, one apart a slab step, two apart a stair step.
-type RoofLevels = HashMap<(i32, i32), i32>;
+type RoofLevels = FnvHashMap<(i32, i32), i32>;
 
 /// How a slope is built.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -12859,9 +12864,9 @@ enum RoofCap {
 /// neighbour at the same level, in a patch big enough to read as a deck.
 /// A slope never has a 3 x 3 flat, so only the capped plateaus qualify; a
 /// patch of a few cells would read as a skylight and stays tile.
-fn capped_flat_tops(levels: &RoofLevels) -> HashSet<(i32, i32)> {
+fn capped_flat_tops(levels: &RoofLevels) -> FnvHashSet<(i32, i32)> {
     const MIN_DECK: usize = 30;
-    let flat: HashSet<(i32, i32)> = levels
+    let flat: FnvHashSet<(i32, i32)> = levels
         .iter()
         .filter(|&(&(x, z), &l)| {
             ROOF_QUARTERS
@@ -12871,8 +12876,9 @@ fn capped_flat_tops(levels: &RoofLevels) -> HashSet<(i32, i32)> {
         })
         .map(|(&c, _)| c)
         .collect();
-    let mut seen: HashSet<(i32, i32)> = HashSet::with_capacity(flat.len());
-    let mut decks: HashSet<(i32, i32)> = HashSet::new();
+    let mut seen: FnvHashSet<(i32, i32)> =
+        FnvHashSet::with_capacity_and_hasher(flat.len(), Default::default());
+    let mut decks: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     let mut starts: Vec<(i32, i32)> = flat.iter().copied().collect();
     starts.sort_unstable();
     for start in starts {
@@ -12974,14 +12980,14 @@ fn place_roof_surface(
     mode: PitchMode,
     outside: &dyn Fn(i32, i32) -> Option<i32>,
     overwrite_inner: bool,
-) -> HashMap<(i32, i32), (i32, RoofCap)> {
+) -> FnvHashMap<(i32, i32), (i32, RoofCap)> {
     let stair_mat = get_stair_block_for_material(config.roof_block);
     let slab = roof_slab_for_stair(stair_mat);
     let level_at = |x: i32, z: i32| levels.get(&(x, z)).copied().or_else(|| outside(x, z));
     let sheet_cells = if config.trim.sheet_top {
         capped_flat_tops(levels)
     } else {
-        HashSet::new()
+        FnvHashSet::default()
     };
     let abs = config.abs_terrain_offset;
     let replace_any: &[Block] = &[];
@@ -12991,7 +12997,7 @@ fn place_roof_surface(
         .tone_patches
         .then(|| roof_tone_sibling(config.roof_block))
         .flatten();
-    let mut tops = HashMap::with_capacity(floor_area.len());
+    let mut tops = FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
     for &(x, z) in floor_area {
         let l = levels[&(x, z)];
         let y = l.div_euclid(2);
@@ -13090,7 +13096,7 @@ fn place_roof_surface(
 fn place_rake_trim(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
-    tops: &HashMap<(i32, i32), (i32, RoofCap)>,
+    tops: &FnvHashMap<(i32, i32), (i32, RoofCap)>,
     config: &RoofConfig,
     outside: &dyn Fn(i32, i32) -> Option<i32>,
 ) -> Vec<((i32, i32), (i32, i32))> {
@@ -13098,7 +13104,7 @@ fn place_rake_trim(
     let slab = roof_slab_for_stair(stair_mat);
     let abs = config.abs_terrain_offset;
     let mut trims: Vec<((i32, i32), (i32, i32))> = Vec::new();
-    let mut seen: HashSet<(i32, i32)> = HashSet::new();
+    let mut seen: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     for &(x, z) in floor_area {
         let (y, cap) = tops[&(x, z)];
         let block = match (cap, slab) {
@@ -13142,7 +13148,7 @@ fn place_rake_trim(
 fn place_roof_eaves(
     editor: &mut WorldEditor,
     seeds: &[((i32, i32), u8)],
-    covered: &HashSet<(i32, i32)>,
+    covered: &FnvHashSet<(i32, i32)>,
     config: &RoofConfig,
     mode: PitchMode,
 ) {
@@ -13157,11 +13163,11 @@ fn place_roof_eaves(
     let open = |c: &(i32, i32)| !covered.contains(c) && !config.trim.blocked.contains(c);
 
     // Ring cells keep the sides they hang off: two in a valley.
-    let mut inner: HashMap<(i32, i32), u8> = HashMap::new();
-    let mut outer: HashMap<(i32, i32), u8> = HashMap::new();
-    let mut corner_inner: HashMap<(i32, i32), usize> = HashMap::new();
-    let mut corner_outer: HashMap<(i32, i32), usize> = HashMap::new();
-    let mut arms: HashMap<(i32, i32), u8> = HashMap::new();
+    let mut inner: FnvHashMap<(i32, i32), u8> = FnvHashMap::default();
+    let mut outer: FnvHashMap<(i32, i32), u8> = FnvHashMap::default();
+    let mut corner_inner: FnvHashMap<(i32, i32), usize> = FnvHashMap::default();
+    let mut corner_outer: FnvHashMap<(i32, i32), usize> = FnvHashMap::default();
+    let mut arms: FnvHashMap<(i32, i32), u8> = FnvHashMap::default();
     for &((x, z), sides) in seeds {
         for (i, &(dx, dz)) in ROOF_SIDES.iter().enumerate() {
             if sides & (1 << i) == 0 {
@@ -13315,7 +13321,7 @@ fn place_roof_eaves(
 /// Eave seeds for a roof that drops on every open side (hipped family).
 fn all_side_eave_seeds(
     floor_area: &[(i32, i32)],
-    footprint: &HashSet<(i32, i32)>,
+    footprint: &FnvHashSet<(i32, i32)>,
 ) -> Vec<((i32, i32), u8)> {
     floor_area
         .iter()
@@ -13782,7 +13788,7 @@ fn generate_gabled_roof(
     wings: Option<&WingFrame>,
 ) -> RoofSurface {
     // Create a HashSet for O(1) footprint lookups, this is the actual building shape
-    let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+    let footprint: FnvHashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     let ridge_runs_along_x = ridge.along_x;
     let tent = ridge.tent;
@@ -13829,7 +13835,7 @@ fn generate_gabled_roof(
     // roof wins, which forms the valleys where wings meet), and the
     // distances to the eaves across the ridge for the dormers.
     let mut samples: Vec<((i32, i32), WingSamples)> = Vec::with_capacity(floor_area.len());
-    let mut edge_scans: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
+    let mut edge_scans: FnvHashMap<(i32, i32), (i32, i32)> = FnvHashMap::default();
 
     if let Some(frame) = wings {
         for &(x, z) in floor_area {
@@ -14003,8 +14009,10 @@ fn generate_gabled_roof(
         }
     };
 
-    let mut levels: RoofLevels = HashMap::with_capacity(floor_area.len());
-    let mut owner: HashMap<(i32, i32), usize> = HashMap::with_capacity(floor_area.len());
+    let mut levels: RoofLevels =
+        FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
+    let mut owner: FnvHashMap<(i32, i32), usize> =
+        FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
     for (cell, cands) in &samples {
         let best = cands
             .iter()
@@ -14098,7 +14106,7 @@ fn generate_gabled_roof(
                     .filter(|c| owner.get(c) == Some(&main))
                     .collect();
                 let (b0, b1) = w.across();
-                let scans: HashMap<(i32, i32), (i32, i32)> = cells
+                let scans: FnvHashMap<(i32, i32), (i32, i32)> = cells
                     .iter()
                     .map(|&(x, z)| {
                         let (u, v) = f.uv(x, z);
@@ -14197,10 +14205,11 @@ fn mansard_boost(dist_to_edge: i32, steep_h: i32, cap: i32) -> i32 {
 /// bulging over the inside corner as scans along the axes made it.
 fn hip_edge_distances(
     floor_area: &[(i32, i32)],
-    footprint: &HashSet<(i32, i32)>,
-) -> HashMap<(i32, i32), i32> {
+    footprint: &FnvHashSet<(i32, i32)>,
+) -> FnvHashMap<(i32, i32), i32> {
     let inside = |x: i32, z: i32| footprint.contains(&(x, z));
-    let mut dist: HashMap<(i32, i32), i32> = HashMap::with_capacity(floor_area.len());
+    let mut dist: FnvHashMap<(i32, i32), i32> =
+        FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
     let mut queue: VecDeque<(i32, i32)> = VecDeque::new();
     for &(x, z) in floor_area {
         let edge = ROOF_SIDES.iter().any(|&(dx, dz)| !inside(x + dx, z + dz))
@@ -14238,7 +14247,7 @@ fn generate_hipped_roof_inner(
     with_overhang: bool,
     mansard_steep_h: Option<i32>,
 ) -> RoofSurface {
-    let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+    let footprint: FnvHashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     // Scan from (x,z) in one cardinal direction until leaving the footprint.
     let scan_dir = |mut cx: i32, mut cz: i32, dx: i32, dz: i32| -> i32 {
@@ -14263,8 +14272,8 @@ fn generate_hipped_roof_inner(
     // Perpendicular-to-ridge scans for dormer placement (ridge = longer axis),
     // and the narrowest local half-span, which caps a mansard's narrow wings.
     let ridge_runs_along_x = config.width() >= config.length();
-    let mut edge_scans: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
-    let mut local_half: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut edge_scans: FnvHashMap<(i32, i32), (i32, i32)> = FnvHashMap::default();
+    let mut local_half: FnvHashMap<(i32, i32), i32> = FnvHashMap::default();
     for &(x, z) in floor_area {
         let dm_x = scan_dir(x, z, -1, 0);
         let dp_x = scan_dir(x, z, 1, 0);
@@ -14304,7 +14313,8 @@ fn generate_hipped_roof_inner(
 
     let lift = if with_overhang { 1 } else { 0 };
     let eave = config.base_height + lift;
-    let mut levels: RoofLevels = HashMap::with_capacity(floor_area.len());
+    let mut levels: RoofLevels =
+        FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
     for &(x, z) in floor_area {
         let e = dist.get(&(x, z)).copied().unwrap_or(0);
         // Rise above the eave, in half blocks.
@@ -14537,7 +14547,7 @@ fn generate_skillion_roof(
     // Stairs face uphill, opposite the downhill direction.
     let stair_facing = cardinal_for_bearing(downhill_deg + 180.0);
 
-    let mut roof_heights = HashMap::new();
+    let mut roof_heights = FnvHashMap::default();
     for &(x, z) in floor_area {
         let p = x as f64 * dx + z as f64 * dz;
         let slope_progress = (p_max - p) / run;
@@ -14599,7 +14609,7 @@ fn polygon_contains(pts: &[(f64, f64)], x: f64, z: f64) -> bool {
 fn footprint_radial_fractions(
     nodes: &[ProcessedNode],
     cells: &[(i32, i32)],
-) -> Option<HashMap<(i32, i32), f64>> {
+) -> Option<FnvHashMap<(i32, i32), f64>> {
     let mut pts: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
     if pts.len() >= 2 && pts.first() == pts.last() {
         pts.pop();
@@ -14659,7 +14669,8 @@ fn footprint_radial_fractions(
         }
     }
 
-    let mut out: HashMap<(i32, i32), f64> = HashMap::with_capacity(cells.len());
+    let mut out: FnvHashMap<(i32, i32), f64> =
+        FnvHashMap::with_capacity_and_hasher(cells.len(), Default::default());
     // Scratch for the crossings short of the current cell, reused per cell.
     let mut before: Vec<f64> = Vec::new();
     for &(x, z) in cells {
@@ -14725,7 +14736,7 @@ fn generate_pyramidal_roof(
     config: &RoofConfig,
     nodes: &[ProcessedNode],
 ) {
-    let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+    let footprint: FnvHashSet<(i32, i32)> = floor_area.iter().copied().collect();
     // A mapped roof:height is the apex rise, a spire included; an inferred
     // one stays squat against both the footprint and the walls.
     let peak_boost = config.peak_cap.unwrap_or_else(|| {
@@ -14740,7 +14751,7 @@ fn generate_pyramidal_roof(
     let half_l = (config.length() / 2).max(1) as f64;
     let radial = footprint_radial_fractions(nodes, floor_area);
 
-    let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut roof_heights: FnvHashMap<(i32, i32), i32> = FnvHashMap::default();
     for &(x, z) in floor_area {
         let fraction = radial.as_ref().map_or_else(
             || {
@@ -14886,7 +14897,8 @@ fn generate_dome_roof(
     let radial = footprint_radial_fractions(nodes, floor_area);
     // Use empty blacklist to allow overwriting wall/ceiling blocks
     let replace_any: &[Block] = &[];
-    let mut surface: HashMap<(i32, i32), i32> = HashMap::with_capacity(floor_area.len());
+    let mut surface: FnvHashMap<(i32, i32), i32> =
+        FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
 
     for &(x, z) in floor_area {
         let normalized_distance = radial.as_ref().map_or_else(
@@ -14911,7 +14923,7 @@ fn generate_dome_roof(
 fn fill_roof_shell(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
-    surface: &HashMap<(i32, i32), i32>,
+    surface: &FnvHashMap<(i32, i32), i32>,
     config: &RoofConfig,
     replace_any: &[Block],
 ) {
@@ -14957,7 +14969,8 @@ fn generate_cone_roof(
         |p| p.max(1),
     );
     let radial = footprint_radial_fractions(nodes, floor_area);
-    let mut surface: HashMap<(i32, i32), i32> = HashMap::with_capacity(floor_area.len());
+    let mut surface: FnvHashMap<(i32, i32), i32> =
+        FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
 
     for &(x, z) in floor_area {
         let normalized = radial.as_ref().map_or_else(
@@ -14995,7 +15008,7 @@ fn generate_onion_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], conf
         |p| p.max(1),
     );
 
-    let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+    let footprint: FnvHashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     // Bulb extends up to 1.25x the base radius.
     let max_search = (base_radius * 1.25).ceil() as i32 + 1;
@@ -15096,7 +15109,7 @@ fn generate_roof(
     holes: &[&[ProcessedNode]],
 ) -> RoofSurface {
     if roof_area.is_empty() {
-        return RoofSurface::new();
+        return RoofSurface::default();
     }
 
     let mut config = RoofConfig::from_roof_area(
@@ -15171,7 +15184,7 @@ fn generate_roof(
         None
     };
 
-    let mut surface = RoofSurface::new();
+    let mut surface = RoofSurface::default();
     match roof_type {
         // The cover already ranks OSM tags over the preset over the membrane.
         RoofType::Flat => {
@@ -19869,7 +19882,7 @@ mod roof_geometry_tests {
             BASE + 12,
             "crown carries the mapped rise"
         );
-        let footprint: HashSet<(i32, i32)> = cells.iter().copied().collect();
+        let footprint: FnvHashSet<(i32, i32)> = cells.iter().copied().collect();
         let mut worst = 0;
         for &(x, z) in &cells {
             let on_edge = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
@@ -20186,7 +20199,7 @@ mod roof_geometry_tests {
         // Arm: ridge along Z at x=5.
         assert_eq!(top(&editor, 5, 20) - top(&editor, 0, 20), 5);
         assert_eq!(top(&editor, 5, 15), top(&editor, 5, 25));
-        let footprint: HashSet<(i32, i32)> = cells.iter().copied().collect();
+        let footprint: FnvHashSet<(i32, i32)> = cells.iter().copied().collect();
         for &(x, z) in &cells {
             let edge = ROOF_SIDES
                 .iter()

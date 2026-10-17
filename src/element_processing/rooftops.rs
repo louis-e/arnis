@@ -339,9 +339,14 @@ fn is_glass(block: Block) -> bool {
     block.name().contains("glass")
 }
 
-/// A bottom slab, stated outright: some slab ids default to the top half.
+/// A bottom slab. Only the slab ids that default to the top half need the
+/// state spelled out; the rest stay plain blocks, which store no properties.
 pub(crate) fn bottom_slab(slab: Block) -> BlockWithProperties {
-    cached_prop_block(slab, &[("type", "bottom")])
+    if slab == OAK_SLAB_TOP || slab == QUARTZ_SLAB_TOP {
+        cached_prop_block(slab, &[("type", "bottom")])
+    } else {
+        BlockWithProperties::simple(slab)
+    }
 }
 
 /// Integer hash of a seed and a cell (splitmix64 finaliser).
@@ -692,7 +697,10 @@ pub(crate) fn fit_out_roof(editor: &mut WorldEditor, deck: &mut RoofDeck, brief:
         && usable >= 20
         && rng.random_bool(tank_share)
     {
-        let r = brief.scaled(if usable >= 90 { 2 } else { 1 });
+        // Sizes are picked unscaled and scaled once, so a bigger world scale
+        // makes the tank proportionally bigger, not taller.
+        let large = usable >= 90;
+        let r = brief.scaled(if large { 2 } else { 1 });
         let size = 2 * r + 1;
         let target = if bulkhead_top.is_some() {
             end_b
@@ -700,8 +708,8 @@ pub(crate) fn fit_out_roof(editor: &mut WorldEditor, deck: &mut RoofDeck, brief:
             step(heart, axis, flip * long / 6)
         };
         if let Some((x0, z0)) = deck.find_near(target, size, size, 2, reach) {
-            let frame = brief.scaled(if r >= 2 { 3 } else { 2 }) + rng.random_range(0..2);
-            let barrel = brief.scaled(r + 2);
+            let frame = brief.scaled(if large { 3 } else { 2 }) + rng.random_range(0..2);
+            let barrel = brief.scaled(if large { 4 } else { 3 });
             place_water_tank(editor, deck, (x0 + r, z0 + r), r, frame, barrel);
         }
     }
@@ -1240,6 +1248,10 @@ fn place_penthouse(editor: &mut WorldEditor, deck: &mut RoofDeck, brief: &Roofto
     if cells.len() * 100 < total * 20 || cells.len() < 36 {
         return false;
     }
+    // Never built over a reservation (a hospital's helipad) or against one.
+    if cells.iter().any(|&(x, z)| !deck.fits(x, z, 1, 1, inset)) {
+        return false;
+    }
     let mut rng = element_rng(brief.seed ^ 0x9E47_0A5E_0000_0001);
     let storeys = if brief.height >= brief.scaled(120) && cells.len() >= 300 && rng.random_bool(0.5)
     {
@@ -1422,6 +1434,41 @@ mod tests {
         assert!(apart, "{first:?} {second:?}");
         for (x0, z0) in [first, second] {
             assert!(x0 >= 2 && z0 >= 2 && x0 + 3 <= 14 && z0 + 3 <= 8);
+        }
+    }
+
+    #[test]
+    fn plant_rooms_keep_off_reserved_cells() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::element_processing::building_test_support::test_editor;
+        let brief = RooftopBrief {
+            region: BuildingRegion::Europe,
+            category: BuildingCategory::Hospital,
+            era: ArchEra::Unknown,
+            height: 60,
+            floor_cycle: 4,
+            wall: WHITE_CONCRETE,
+            scale: 1.0,
+            seed: 7,
+            residential: false,
+            whole_building: true,
+            sparse: false,
+            green: false,
+        };
+        let cells: Vec<(i32, i32)> = (0..40).flat_map(|x| (0..40).map(move |z| (x, z))).collect();
+        let xzbbox = XZBBox::rect_from_xz_lengths(50.0, 50.0).unwrap();
+
+        let mut editor = test_editor(&xzbbox);
+        let mut deck = RoofDeck::new(&cells, 10).unwrap();
+        assert!(place_penthouse(&mut editor, &mut deck, &brief));
+
+        // A helipad reserved in the middle turns the plant room down.
+        let mut editor = test_editor(&xzbbox);
+        let mut deck = RoofDeck::new(&cells, 10).unwrap();
+        deck.reserve(17, 17, 7, 7);
+        assert!(!place_penthouse(&mut editor, &mut deck, &brief));
+        for (x, z) in [(20, 20), (17, 17), (23, 23)] {
+            assert!(editor.get_block_absolute(x, 11 + 4, z).is_none());
         }
     }
 }

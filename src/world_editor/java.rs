@@ -764,6 +764,10 @@ fn block_light_emission(name: &str, props: Option<&Value>) -> u8 {
         "minecraft:glow_lichen" => 7,
         "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" if !unlit => 7,
         "minecraft:sculk_catalyst" => 6,
+        // The invisible light block carries its level; 15 unless stated.
+        "minecraft:light" => prop_str(props, "level")
+            .and_then(|l| l.parse::<u8>().ok())
+            .map_or(15, |l| l.min(15)),
         "minecraft:magma_block" => 3,
         "minecraft:brewing_stand" | "minecraft:brown_mushroom" => 1,
         _ => 0,
@@ -776,7 +780,7 @@ fn is_light_transparent(name: &str) -> bool {
     if n == "tinted_glass" {
         return false; // tinted glass blocks all light, unlike other glass
     }
-    if n.ends_with("air") || n.ends_with("leaves") || n.contains("glass") {
+    if n.ends_with("air") || n == "light" || n.ends_with("leaves") || n.contains("glass") {
         return true;
     }
     const EXACT: &[&str] = &[
@@ -2352,5 +2356,19 @@ mod merge_tests {
         assert!(!m.writes_chunk(-3, 0));
         assert!(!m.writes_chunk(0, 1));
         assert!(RegionWriteMode::Fresh.writes_chunk(1000, -1000));
+    }
+
+    #[test]
+    fn invisible_light_block_lights_and_passes_light() {
+        use super::{block_light_emission, light_opacity};
+        assert_eq!(block_light_emission("minecraft:light", None), 15);
+        let level = Value::Compound(HashMap::from([(
+            "level".to_string(),
+            Value::String("9".to_string()),
+        )]));
+        assert_eq!(block_light_emission("minecraft:light", Some(&level)), 9);
+        assert_eq!(light_opacity("minecraft:light"), 0);
+        // Names merely containing "light" keep their own behaviour.
+        assert_eq!(light_opacity("minecraft:light_gray_concrete"), 15);
     }
 }

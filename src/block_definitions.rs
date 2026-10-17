@@ -1013,9 +1013,60 @@ pub fn create_stair_with_properties(
 
     BlockWithProperties::from_arc(base_stair_block, Some(properties))
 }
+#[allow(clippy::type_complexity)]
+static TOP_STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// The facing and shape of a plain stair state (no other properties), as
+/// `create_stair_with_properties` builds it.
+fn plain_stair_state(map: &HashMap<String, Value>) -> Option<(StairFacing, StairShape)> {
+    let text = |key: &str| match map.get(key) {
+        Some(Value::String(s)) => Some(s.as_str()),
+        _ => None,
+    };
+    let shape_given = map.contains_key("shape");
+    if map.len() != 1 + usize::from(shape_given) {
+        return None;
+    }
+    let facing = [
+        StairFacing::North,
+        StairFacing::East,
+        StairFacing::South,
+        StairFacing::West,
+    ]
+    .into_iter()
+    .find(|f| Some(f.as_str()) == text("facing"))?;
+    let shape = match text("shape") {
+        None if !shape_given => StairShape::Straight,
+        given => [
+            StairShape::Straight,
+            StairShape::InnerLeft,
+            StairShape::InnerRight,
+            StairShape::OuterLeft,
+            StairShape::OuterRight,
+        ]
+        .into_iter()
+        .find(|s| Some(s.as_str()) == given)?,
+    };
+    Some((facing, shape))
+}
+
 // Add half=top to make it upside-down.
 pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
     if let Some(Value::Compound(map)) = stair.properties.as_deref() {
+        // Plain stairs, by far the most common, share one top-half state each
+        // instead of cloning and interning a compound on every placement.
+        if let Some((facing, shape)) = plain_stair_state(map) {
+            let key = (stair.block.id(), facing, shape);
+            let mut cache = TOP_STAIR_CACHE.lock().unwrap();
+            let props = cache.entry(key).or_insert_with(|| {
+                let mut new_map = map.clone();
+                new_map.insert("half".to_string(), Value::String("top".to_string()));
+                intern_props(Value::Compound(new_map))
+            });
+            stair.properties = Some(props.clone());
+            return stair;
+        }
         let mut new_map = map.clone();
         new_map.insert("half".to_string(), Value::String("top".to_string()));
         stair.properties = Some(intern_props(Value::Compound(new_map)));
