@@ -55,6 +55,7 @@ mod retrieve_data;
 mod structures;
 #[cfg(feature = "gui")]
 mod telemetry;
+pub(crate) mod terrain_detail;
 mod terrain_surface;
 #[cfg(test)]
 mod test_utilities;

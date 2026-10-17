@@ -4,6 +4,7 @@ pub mod provider;
 pub mod providers;
 pub mod selector;
 
+use crate::terrain_detail::TerrainDetailLevel;
 use crate::{
     coordinate_system::{geographic::LLBBox, transformation::geo_distance},
     land_cover::LandCoverData,
@@ -132,7 +133,10 @@ pub const MAX_ELEVATION_GRID_DIM: usize = 16384;
 /// and shrinking both axes by the same factor keeps sampling isotropic at the same memory.
 pub const MAX_ELEVATION_GRID_CELLS: usize = MAX_ELEVATION_GRID_DIM * MAX_ELEVATION_GRID_DIM;
 
-/// Compute world and grid dimensions for the given bbox and scale.
+/// Compute world and grid dimensions at the pre-setting full resolution.
+///
+/// Keep this compatibility helper at one sample per block; GUI generation
+/// passes its selected detail level through `compute_grid_dims_with_detail`.
 ///
 /// Exposed so callers (e.g. `Ground::new_enabled`) can fetch land cover at the
 /// same dimensions as the elevation grid before elevation fetch starts.
@@ -150,16 +154,60 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
     compute_grid_dims_for_world(world_width, world_height)
 }
 
+/// Compute world and elevation grid dimensions for a selected sampling density.
+pub fn compute_grid_dims_with_detail(
+    bbox: &LLBBox,
+    scale: f64,
+    detail: TerrainDetailLevel,
+) -> (usize, usize, usize, usize) {
+    if detail == TerrainDetailLevel::High {
+        return compute_grid_dims(bbox, scale);
+    }
+    let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
+    // Apply same floor() and scale operations as CoordTransformer.llbbox_to_xzbbox()
+    let scale_factor_z: f64 = base_scale_z.floor() * scale;
+    let scale_factor_x: f64 = base_scale_x.floor() * scale;
+    // World block positions span 0..=scale_factor (inclusive), so there are
+    // scale_factor+1 distinct positions.
+    let world_width: usize = scale_factor_x as usize + 1;
+    let world_height: usize = scale_factor_z as usize + 1;
+    compute_grid_dims_for_world_with_detail(world_width, world_height, detail)
+}
+
 /// `compute_grid_dims` for a world whose block size is already known.
 pub fn compute_grid_dims_for_world(
     world_width: usize,
     world_height: usize,
 ) -> (usize, usize, usize, usize) {
+    compute_grid_dims_for_world_with_spacing(world_width, world_height, 1)
+}
+
+/// `compute_grid_dims_for_world` with a sampling-density setting.
+pub fn compute_grid_dims_for_world_with_detail(
+    world_width: usize,
+    world_height: usize,
+    detail: TerrainDetailLevel,
+) -> (usize, usize, usize, usize) {
+    if detail == TerrainDetailLevel::High {
+        return compute_grid_dims_for_world(world_width, world_height);
+    }
+    compute_grid_dims_for_world_with_spacing(
+        world_width,
+        world_height,
+        detail.sample_spacing_blocks(),
+    )
+}
+
+fn compute_grid_dims_for_world_with_spacing(
+    world_width: usize,
+    world_height: usize,
+    spacing: usize,
+) -> (usize, usize, usize, usize) {
     // One elevation sample per block is the ideal: finer buys nothing (a block is the
-    // smallest representable unit), coarser blurs the terrain. Only shrink below that when
-    // the grid would breach a limit.
-    let mut grid_width: usize = world_width.max(2);
-    let mut grid_height: usize = world_height.max(2);
+    // smallest representable unit). Lower detail levels deliberately sample more coarsely;
+    // the Ground lookup bilinearly fills the intervening block columns.
+    let mut grid_width: usize = world_width.div_ceil(spacing).max(2);
+    let mut grid_height: usize = world_height.div_ceil(spacing).max(2);
     let cells = grid_width as f64 * grid_height as f64;
     let budget_shrink = (cells / MAX_ELEVATION_GRID_CELLS as f64).sqrt();
     // A long thin bbox stays under the cell budget while still running far past the per-axis
@@ -434,6 +482,7 @@ fn compute_nan_ratio(heights: &[Vec<f64>]) -> f64 {
 mod grid_dim_tests {
     use super::*;
     use crate::coordinate_system::geographic::LLBBox;
+    use crate::terrain_detail::TerrainDetailLevel;
 
     /// The Switzerland bbox: ~346 km x ~225 km, a 1.54:1 aspect.
     fn switzerland() -> LLBBox {
@@ -447,6 +496,23 @@ mod grid_dim_tests {
         let bbox = LLBBox::from_str("47.3700,8.5350,47.3790,8.5480").unwrap();
         let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(&bbox, 1.0);
         assert_eq!((grid_w, grid_h), (world_w, world_h));
+    }
+
+    #[test]
+    fn terrain_detail_levels_reduce_sampling_density() {
+        let (world_w, world_h) = (4000, 2000);
+        let high =
+            compute_grid_dims_for_world_with_detail(world_w, world_h, TerrainDetailLevel::High);
+        let balanced =
+            compute_grid_dims_for_world_with_detail(world_w, world_h, TerrainDetailLevel::Balanced);
+        let low =
+            compute_grid_dims_for_world_with_detail(world_w, world_h, TerrainDetailLevel::Low);
+
+        assert_eq!((high.2, high.3), (world_w, world_h));
+        assert_eq!((balanced.2, balanced.3), (world_w / 2, world_h / 2));
+        assert_eq!((low.2, low.3), (world_w / 4, world_h / 4));
+        assert!(high.2 * high.3 > balanced.2 * balanced.3);
+        assert!(balanced.2 * balanced.3 > low.2 * low.3);
     }
 
     #[test]
@@ -476,12 +542,19 @@ mod grid_dim_tests {
     #[test]
     fn grid_never_exceeds_the_cell_budget() {
         for scale in [0.05, 0.1, 0.3, 0.5, 1.0, 2.5] {
-            let (_, _, grid_w, grid_h) = compute_grid_dims(&switzerland(), scale);
-            assert!(
-                grid_w * grid_h <= MAX_ELEVATION_GRID_CELLS,
-                "scale {scale} blew the cell budget: {grid_w}x{grid_h}"
-            );
-            assert!(grid_w >= 2 && grid_h >= 2);
+            for detail in [
+                TerrainDetailLevel::Low,
+                TerrainDetailLevel::Balanced,
+                TerrainDetailLevel::High,
+            ] {
+                let (_, _, grid_w, grid_h) =
+                    compute_grid_dims_with_detail(&switzerland(), scale, detail);
+                assert!(
+                    grid_w * grid_h <= MAX_ELEVATION_GRID_CELLS,
+                    "{detail:?} at scale {scale} blew the cell budget: {grid_w}x{grid_h}"
+                );
+                assert!(grid_w >= 2 && grid_h >= 2);
+            }
         }
     }
 
