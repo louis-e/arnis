@@ -57,6 +57,8 @@ pub struct Ground {
     snow_threshold_y: i32,
     /// Climate at the bbox center, driving arid/polar surface palettes and biomes.
     climate: crate::climate::Climate,
+    /// Climate at the selected area's geographic centre for its city surface block.
+    city_climate: crate::climate::Climate,
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
     ecoregions: Option<Arc<EcoMap>>,
@@ -278,6 +280,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            city_climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
         }
@@ -333,6 +336,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: frame.climate(bbox),
+            city_climate: crate::climate::Climate::classify(bbox),
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
         }
@@ -356,6 +360,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            city_climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
         }
@@ -404,6 +409,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            city_climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
         }
@@ -535,6 +541,7 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y,
                         climate: frame.climate(&requested_bbox),
+                        city_climate: crate::climate::Climate::classify(&requested_bbox),
                         body,
                         ecoregions: body
                             .is_earth()
@@ -569,6 +576,7 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
                         climate: frame.climate(&requested_bbox),
+                        city_climate: crate::climate::Climate::classify(&requested_bbox),
                         body,
                         ecoregions: body
                             .is_earth()
@@ -597,6 +605,15 @@ impl Ground {
     #[inline(always)]
     pub fn body(&self) -> CelestialBody {
         self.body
+    }
+
+    /// Surface block for built-up land cover, chosen once at this area's centre.
+    pub fn city_surface_block(&self) -> crate::block_definitions::Block {
+        let center = XZPoint::new(
+            (self.world_width / 2) as i32,
+            (self.world_height / 2) as i32,
+        );
+        crate::climate::city_surface_block(self.city_climate, self.ecoregion(center))
     }
 
     /// RESOLVE ecoregion under a ground coordinate, if the area has one there.
@@ -1508,6 +1525,7 @@ mod tests {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            city_climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
         }
@@ -1809,6 +1827,7 @@ pub(crate) mod test_support {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            city_climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
         }
