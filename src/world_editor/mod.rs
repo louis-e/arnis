@@ -1168,6 +1168,17 @@ impl<'a> WorldEditor<'a> {
         self.get_ground_level(x, z) + y_offset
     }
 
+    /// Latitude/longitude the area's regional styles are taken at: the climate
+    /// anchor when one was set, else the bbox centre.
+    pub fn geo_anchor(&self) -> (f64, f64) {
+        self.climate_anchor.unwrap_or_else(|| {
+            (
+                (self.llbbox.min().lat() + self.llbbox.max().lat()) / 2.0,
+                (self.llbbox.min().lng() + self.llbbox.max().lng()) / 2.0,
+            )
+        })
+    }
+
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
         match self.climate_anchor {

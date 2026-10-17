@@ -24,6 +24,7 @@ pub mod parking_garage;
 pub mod power;
 pub mod railways;
 pub mod road_markings;
+pub mod rooftops;
 pub mod signage;
 pub mod sport_pitches;
 pub mod subprocessor;
