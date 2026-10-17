@@ -143,7 +143,15 @@ pub const MAX_ELEVATION_GRID_CELLS: usize = MAX_ELEVATION_GRID_DIM * MAX_ELEVATI
 ///
 /// Returns `(world_width, world_height, grid_width, grid_height)`.
 pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usize) {
-    compute_grid_dims_with_detail(bbox, scale, TerrainDetailLevel::High)
+    let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
+    // Apply same floor() and scale operations as CoordTransformer.llbbox_to_xzbbox()
+    let scale_factor_z: f64 = base_scale_z.floor() * scale;
+    let scale_factor_x: f64 = base_scale_x.floor() * scale;
+    // World block positions span 0..=scale_factor (inclusive), so there are
+    // scale_factor+1 distinct positions.
+    let world_width: usize = scale_factor_x as usize + 1;
+    let world_height: usize = scale_factor_z as usize + 1;
+    compute_grid_dims_for_world(world_width, world_height)
 }
 
 /// Compute world and elevation grid dimensions for a selected sampling density.
@@ -152,6 +160,9 @@ pub fn compute_grid_dims_with_detail(
     scale: f64,
     detail: TerrainDetailLevel,
 ) -> (usize, usize, usize, usize) {
+    if detail == TerrainDetailLevel::High {
+        return compute_grid_dims(bbox, scale);
+    }
     let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
     // Apply same floor() and scale operations as CoordTransformer.llbbox_to_xzbbox()
     let scale_factor_z: f64 = base_scale_z.floor() * scale;
@@ -168,7 +179,7 @@ pub fn compute_grid_dims_for_world(
     world_width: usize,
     world_height: usize,
 ) -> (usize, usize, usize, usize) {
-    compute_grid_dims_for_world_with_detail(world_width, world_height, TerrainDetailLevel::High)
+    compute_grid_dims_for_world_with_spacing(world_width, world_height, 1)
 }
 
 /// `compute_grid_dims_for_world` with a sampling-density setting.
@@ -177,10 +188,24 @@ pub fn compute_grid_dims_for_world_with_detail(
     world_height: usize,
     detail: TerrainDetailLevel,
 ) -> (usize, usize, usize, usize) {
+    if detail == TerrainDetailLevel::High {
+        return compute_grid_dims_for_world(world_width, world_height);
+    }
+    compute_grid_dims_for_world_with_spacing(
+        world_width,
+        world_height,
+        detail.sample_spacing_blocks(),
+    )
+}
+
+fn compute_grid_dims_for_world_with_spacing(
+    world_width: usize,
+    world_height: usize,
+    spacing: usize,
+) -> (usize, usize, usize, usize) {
     // One elevation sample per block is the ideal: finer buys nothing (a block is the
     // smallest representable unit). Lower detail levels deliberately sample more coarsely;
     // the Ground lookup bilinearly fills the intervening block columns.
-    let spacing = detail.sample_spacing_blocks();
     let mut grid_width: usize = world_width.div_ceil(spacing).max(2);
     let mut grid_height: usize = world_height.div_ceil(spacing).max(2);
     let cells = grid_width as f64 * grid_height as f64;
