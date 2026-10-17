@@ -22,7 +22,9 @@ use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
 use rand::Rng;
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5786,8 +5788,9 @@ fn plan_synthetic_entrance(
     // first, dodging passages and party columns and keeping 2 columns clear
     // of the ends.
     let columns: Vec<WallColumn> = facade_columns(&element.nodes, config)
-        .into_iter()
+        .iter()
         .filter(|c| c.seg == seg_index)
+        .copied()
         .collect();
     let usable = |idx: usize| {
         let (bx, bz) = points[idx];
@@ -6305,7 +6308,36 @@ const RUN_HEADING_COS: f64 = 0.97;
 /// run. Consecutive segments that keep their heading form one run, so a node
 /// part way along a facade, where a neighbour's party wall or a mapped
 /// entrance meets it, does not break the bays.
-fn facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Vec<WallColumn> {
+///
+/// The wall, its windows, frames, balconies, cornices and awnings each walk
+/// the same ring in turn, so the last ring is kept per thread and handed out
+/// again rather than laid out once per pass.
+fn facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Rc<[WallColumn]> {
+    type Memo = Option<(Vec<(i32, i32)>, BayRhythm, Rc<[WallColumn]>)>;
+    thread_local! {
+        static LAST: RefCell<Memo> = const { RefCell::new(None) };
+    }
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        if let Some((ring, bays, columns)) = last.as_ref() {
+            if *bays == config.bays
+                && ring.len() == nodes.len()
+                && ring
+                    .iter()
+                    .zip(nodes)
+                    .all(|(&(x, z), n)| x == n.x && z == n.z)
+            {
+                return columns.clone();
+            }
+        }
+        let columns: Rc<[WallColumn]> = lay_out_facade_columns(nodes, config).into();
+        let ring = nodes.iter().map(|n| (n.x, n.z)).collect();
+        *last = Some((ring, config.bays, columns.clone()));
+        columns
+    })
+}
+
+fn lay_out_facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Vec<WallColumn> {
     let n_seg = nodes.len().saturating_sub(1);
     if n_seg == 0 {
         return Vec::new();
@@ -6430,7 +6462,7 @@ fn build_wall_ring(
     let columns = facade_columns(nodes, config);
     let ring_cells: FnvHashSet<(i32, i32)> = columns.iter().map(|c| (c.x, c.z)).collect();
 
-    for wc in &columns {
+    for wc in columns.iter() {
         let (bx, bz) = (wc.x, wc.z);
         let kind = &mut segments[wc.seg];
         // Passages only apply to ground-level buildings; elevated
@@ -8020,9 +8052,62 @@ static FACADE_PROPS: once_cell::sync::Lazy<FacadePropsCache> =
     once_cell::sync::Lazy::new(Default::default);
 
 pub(crate) fn cached_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
-    let key: String = props.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]).collect();
+    // Facades ask for the same few hundred states over and over, so each
+    // thread keeps the ones it has used, found by a hash of the state without
+    // building its key or taking the lock. A miss falls back to the shared
+    // map, so a state is still one compound across all threads.
+    type Local = FnvHashMap<u64, Vec<(u16, String, std::sync::Arc<Value>)>>;
+    thread_local! {
+        static LOCAL: RefCell<Local> = RefCell::new(FnvHashMap::default());
+    }
+    let pieces = || props.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]);
+    let hash = {
+        use std::hash::Hasher;
+        let mut h = fnv::FnvHasher::default();
+        h.write_u16(base.id());
+        for piece in pieces() {
+            h.write(piece.as_bytes());
+        }
+        h.finish()
+    };
+    let matches = |key: &str| {
+        let mut rest = key.as_bytes();
+        for piece in pieces() {
+            match rest.strip_prefix(piece.as_bytes()) {
+                Some(r) => rest = r,
+                None => return false,
+            }
+        }
+        rest.is_empty()
+    };
+    let hit = LOCAL.with(|local| {
+        local.borrow().get(&hash).and_then(|entries| {
+            entries
+                .iter()
+                .find(|(id, key, _)| *id == base.id() && matches(key))
+                .map(|(_, _, arc)| arc.clone())
+        })
+    });
+    if let Some(arc) = hit {
+        return BlockWithProperties::from_arc(base, Some(arc));
+    }
+
+    let key: String = pieces().collect();
+    let arc = shared_prop_state(base, props, key.clone());
+    LOCAL.with(|local| {
+        local
+            .borrow_mut()
+            .entry(hash)
+            .or_default()
+            .push((base.id(), key, arc.clone()));
+    });
+    BlockWithProperties::from_arc(base, Some(arc))
+}
+
+/// The one compound all threads share for a state.
+fn shared_prop_state(base: Block, props: &[(&str, &str)], key: String) -> std::sync::Arc<Value> {
     let mut cache = FACADE_PROPS.lock().unwrap();
-    let arc = cache
+    cache
         .entry((base.id(), key))
         .or_insert_with(|| {
             let mut map: HashMap<String, Value> = HashMap::new();
@@ -8031,8 +8116,7 @@ pub(crate) fn cached_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWit
             }
             std::sync::Arc::new(Value::Compound(map))
         })
-        .clone();
-    BlockWithProperties::from_arc(base, Some(arc))
+        .clone()
 }
 
 /// Creates a `BlockWithProperties` for an open trapdoor with the given
@@ -8431,11 +8515,11 @@ fn generate_balconies(
     let columns = facade_columns(&element.nodes, config);
     let mut seg_cells: Vec<FnvHashSet<(i32, i32)>> =
         vec![FnvHashSet::default(); element.nodes.len().saturating_sub(1)];
-    for wc in &columns {
+    for wc in columns.iter() {
         seg_cells[wc.seg].insert((wc.x, wc.z));
     }
 
-    for wc in &columns {
+    for wc in columns.iter() {
         let BaySlot::Window { k, width, bay } = wc.slot() else {
             continue;
         };
@@ -8769,7 +8853,7 @@ fn generate_wall_depth_features(
     // overhang stair placed 1 block outward at base_height - 1.
     let height_reduction = if has_sloped_roof { 2 } else { 0 };
 
-    for wc in facade_columns(&element.nodes, config) {
+    for &wc in facade_columns(&element.nodes, config).iter() {
         let (bx, bz) = (wc.x, wc.z);
         if front_blocked(&wc, config, building_passages, facade, part_probe)
             || facade.is_door(bx, bz)
@@ -8880,7 +8964,7 @@ fn generate_window_frames(
         .is_some_and(WindowFrameStyle::has_planters);
     let window_boxes = has_window_boxes(config, &element.tags);
 
-    for wc in facade_columns(&element.nodes, config) {
+    for &wc in facade_columns(&element.nodes, config).iter() {
         if front_blocked(&wc, config, building_passages, facade, part_probe) {
             continue;
         }
@@ -9211,7 +9295,7 @@ fn generate_window_life(
             .is_none_or(|b| b == AIR)
     };
 
-    for wc in &columns {
+    for wc in columns.iter() {
         let BaySlot::Window { k, width, .. } = wc.slot() else {
             continue;
         };
@@ -9377,7 +9461,7 @@ fn generate_facade_cornices(
     let ledge = make_top_slab(slab);
     let cap = rooftops::bottom_slab(slab);
 
-    for wc in facade_columns(&element.nodes, config) {
+    for &wc in facade_columns(&element.nodes, config).iter() {
         if front_blocked(&wc, config, building_passages, facade, part_probe) {
             continue;
         }
@@ -9437,7 +9521,7 @@ fn generate_storefront_awnings(
     let awning = AWNING_OPTIONS[rng.random_range(0..AWNING_OPTIONS.len())];
     let awning_y = config.ground_floor_top() - 1 + config.abs_terrain_offset;
 
-    for wc in facade_columns(&element.nodes, config) {
+    for &wc in facade_columns(&element.nodes, config).iter() {
         if front_blocked(&wc, config, building_passages, facade, None)
             || !config.shopfront_column(wc.facade(facade))
             || !wc.shop_slot().is_window()
@@ -9841,8 +9925,11 @@ fn generate_floors_and_ceilings(
     };
     // An empty shell is lit by invisible light hung under each slab, so no
     // lamp grid shows through the windows; furnished interiors keep their
-    // glowstone, which the furnishing plans around.
-    let hidden_lights = !furnished && !config.is_abandoned_building;
+    // glowstone, which the furnishing plans around. Luanti games have no
+    // invisible light node, so there the lamps stay flush in the ceiling.
+    let hidden_lights = !furnished
+        && !config.is_abandoned_building
+        && editor.format() != crate::world_editor::WorldFormat::LuantiWorld;
 
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
@@ -13354,9 +13441,6 @@ struct SlopeSample {
     scan_perp_min: i32,
 }
 
-/// A cell's slope sample on each wing covering it, by wing index.
-type WingSamples = Vec<(usize, SlopeSample)>;
-
 /// One rectangular wing of a footprint, in its `WingFrame` (`u` along the
 /// frame's axis, `v` across it), roofed along its own ridge.
 #[derive(Clone, Copy, Debug)]
@@ -13833,20 +13917,25 @@ fn generate_gabled_roof(
 
     // Slope samples per cell, one for each wing covering it (the highest
     // roof wins, which forms the valleys where wings meet), and the
-    // distances to the eaves across the ridge for the dormers.
-    let mut samples: Vec<((i32, i32), WingSamples)> = Vec::with_capacity(floor_area.len());
+    // distances to the eaves across the ridge for the dormers. All samples
+    // sit in one list, each cell holding its range of it.
+    let mut samples: Vec<((i32, i32), std::ops::Range<usize>)> =
+        Vec::with_capacity(floor_area.len());
+    let mut sample_list: Vec<(usize, SlopeSample)> = Vec::with_capacity(floor_area.len());
     let mut edge_scans: FnvHashMap<(i32, i32), (i32, i32)> = FnvHashMap::default();
 
     if let Some(frame) = wings {
         for &(x, z) in floor_area {
             let (u, v) = frame.uv(x, z);
-            let mut cands: Vec<(usize, SlopeSample)> = frame
-                .wings
-                .iter()
-                .enumerate()
-                .filter_map(|(i, w)| w.slope(u, v, true).map(|s| (i, s)))
-                .collect();
-            if cands.is_empty() {
+            let start = sample_list.len();
+            sample_list.extend(
+                frame
+                    .wings
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, w)| w.slope(u, v, true).map(|s| (i, s))),
+            );
+            if sample_list.len() == start {
                 // A sliver the wings miss carries on the nearest one.
                 let nearest = (0..frame.wings.len()).min_by(|&a, &b| {
                     frame.wings[a]
@@ -13856,10 +13945,10 @@ fn generate_gabled_roof(
                 if let Some(i) = nearest {
                     let w = &frame.wings[i];
                     let (cu, cv) = (u.clamp(w.u.0, w.u.1), v.clamp(w.v.0, w.v.1));
-                    cands.extend(w.slope(cu, cv, true).map(|s| (i, s)));
+                    sample_list.extend(w.slope(cu, cv, true).map(|s| (i, s)));
                 }
             }
-            samples.push(((x, z), cands));
+            samples.push(((x, z), start..sample_list.len()));
         }
     } else {
         // For each footprint position, scan all 4 cardinal directions to
@@ -13908,27 +13997,25 @@ fn generate_gabled_roof(
             };
             let half_z = (dm_z + dp_z + 1) / 2;
             let half_x = (dm_x + dp_x + 1) / 2;
-            samples.push((
-                (x, z),
-                vec![(
-                    0,
-                    SlopeSample {
-                        dist_to_edge: dm_perp.min(dp_perp),
-                        local_half: half_z.min(half_x),
-                        perp_reach: (dm_perp + dp_perp) / 2,
-                        dm_along,
-                        dp_along,
-                        scan_perp_min,
-                    },
-                )],
+            let start = sample_list.len();
+            sample_list.push((
+                0,
+                SlopeSample {
+                    dist_to_edge: dm_perp.min(dp_perp),
+                    local_half: half_z.min(half_x),
+                    perp_reach: (dm_perp + dp_perp) / 2,
+                    dm_along,
+                    dp_along,
+                    scan_perp_min,
+                },
             ));
+            samples.push(((x, z), start..sample_list.len()));
         }
     }
 
     // The widest half-span decides the pitch for the whole roof.
-    let max_reach = samples
+    let max_reach = sample_list
         .iter()
-        .flat_map(|(_, c)| c.iter())
         .map(|(_, s)| s.perp_reach.min(s.local_half))
         .max()
         .unwrap_or(0);
@@ -14013,8 +14100,8 @@ fn generate_gabled_roof(
         FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
     let mut owner: FnvHashMap<(i32, i32), usize> =
         FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
-    for (cell, cands) in &samples {
-        let best = cands
+    for (cell, range) in &samples {
+        let best = sample_list[range.clone()]
             .iter()
             .map(|(i, s)| (level_of(s), *i))
             .max_by_key(|&(l, i)| (l, std::cmp::Reverse(i)));
@@ -14644,27 +14731,48 @@ fn footprint_radial_fractions(
     let bucket_of = |ang: f64| -> usize {
         (((ang + std::f64::consts::PI) / std::f64::consts::TAU) * BUCKETS as f64) as usize
     };
-    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); BUCKETS];
-    for i in 0..n {
+    // The bucket ranges each edge covers, as inclusive (from, to) pairs.
+    let edge_ranges = |i: usize| -> [Option<(usize, usize)>; 2] {
         let (ax, az) = pts[i];
         let (bx, bz) = pts[(i + 1) % n];
         let a0 = (az - cz).atan2(ax - cx);
         let a1 = (bz - cz).atan2(bx - cx);
         let (lo, hi) = (a0.min(a1), a0.max(a1));
         // One bucket of slack each side covers rays on a bucket boundary.
-        let wraps = hi - lo > std::f64::consts::PI;
-        let ranges: Vec<(usize, usize)> = if wraps {
+        let ranges = if hi - lo > std::f64::consts::PI {
             // The edge crosses the +-180 seam: cover both ends of the circle.
-            vec![
-                (0, bucket_of(lo) + 1),
-                (bucket_of(hi).saturating_sub(1), BUCKETS - 1),
+            [
+                Some((0, bucket_of(lo) + 1)),
+                Some((bucket_of(hi).saturating_sub(1), BUCKETS - 1)),
             ]
         } else {
-            vec![(bucket_of(lo).saturating_sub(1), bucket_of(hi) + 1)]
+            [
+                Some((bucket_of(lo).saturating_sub(1), bucket_of(hi) + 1)),
+                None,
+            ]
         };
-        for (from, to) in ranges {
-            for bucket in buckets.iter_mut().take(to.min(BUCKETS - 1) + 1).skip(from) {
-                bucket.push(i);
+        ranges.map(|r| r.map(|(from, to)| (from, to.min(BUCKETS - 1))))
+    };
+    // All buckets in one list: count each bucket's edges, then fill them in,
+    // so bucket `b` is `bucket_edges[bucket_start[b]..bucket_start[b + 1]]`.
+    let mut bucket_start = vec![0usize; BUCKETS + 1];
+    for i in 0..n {
+        for (from, to) in edge_ranges(i).into_iter().flatten() {
+            for b in from..=to {
+                bucket_start[b + 1] += 1;
+            }
+        }
+    }
+    for b in 0..BUCKETS {
+        bucket_start[b + 1] += bucket_start[b];
+    }
+    let mut fill = bucket_start.clone();
+    let mut bucket_edges = vec![0usize; bucket_start[BUCKETS]];
+    for i in 0..n {
+        for (from, to) in edge_ranges(i).into_iter().flatten() {
+            for b in from..=to {
+                bucket_edges[fill[b]] = i;
+                fill[b] += 1;
             }
         }
     }
@@ -14687,7 +14795,8 @@ fn footprint_radial_fractions(
         let mut t_hit: Option<f64> = None;
         let mut t_far = 0.0f64;
         before.clear();
-        for &i in &buckets[bucket_of(pz.atan2(px)).min(BUCKETS - 1)] {
+        let b = bucket_of(pz.atan2(px)).min(BUCKETS - 1);
+        for &i in &bucket_edges[bucket_start[b]..bucket_start[b + 1]] {
             let (ax, az) = pts[i];
             let (bx, bz) = pts[(i + 1) % n];
             let (ex, ez) = (bx - ax, bz - az);
@@ -16437,6 +16546,59 @@ mod style_tests {
         assert_eq!(editor.climate(), Climate::HotDesert);
     }
 
+    #[test]
+    fn empty_interiors_hide_their_lights_only_where_the_format_can() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+        use crate::element_processing::building_test_support::test_editor;
+        use crate::world_editor::WorldFormat;
+        let xz = XZBBox::rect_from_xz_lengths(20.0, 20.0).unwrap();
+        let cells: Vec<(i32, i32)> = (1..10).flat_map(|x| (1..10).map(move |z| (x, z))).collect();
+        let config = test_config(12, false, false);
+        let passages = CoordinateBitmap::new_empty();
+        let lid = RoofMembrane::uniform(SMOOTH_STONE);
+        let count = |editor: &WorldEditor, block: Block| {
+            let mut n = 0;
+            for &(x, z) in &cells {
+                for y in 0..=13 {
+                    n +=
+                        usize::from(editor.check_for_block_absolute(x, y, z, Some(&[block]), None));
+                }
+            }
+            n
+        };
+
+        let mut java = test_editor(&xz);
+        generate_floors_and_ceilings(
+            &mut java, &cells, &config, false, &passages, false, false, &lid,
+        );
+        assert!(count(&java, LIGHT) > 0);
+        assert_eq!(count(&java, GLOWSTONE), 0);
+
+        // Luanti games have no invisible light: the lamps sit in the ceiling.
+        let mut luanti = WorldEditor::new_with_format_and_name(
+            std::path::PathBuf::from("/dev/null/unused"),
+            &xz,
+            LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap(),
+            WorldFormat::LuantiWorld,
+            None,
+            None,
+            false,
+        );
+        generate_floors_and_ceilings(
+            &mut luanti,
+            &cells,
+            &config,
+            false,
+            &passages,
+            false,
+            false,
+            &lid,
+        );
+        assert_eq!(count(&luanti, LIGHT), 0);
+        assert!(count(&luanti, GLOWSTONE) > 0);
+    }
+
     fn test_config(height: i32, attic: bool, top: bool) -> BuildingConfig {
         BuildingConfig {
             is_ground_level: true,
@@ -18114,7 +18276,7 @@ mod style_tests {
         let columns = facade_columns(&way.nodes, &config);
         let mut seen: HashMap<(usize, i32, i32), Option<(Block, CurtainDraw)>> = HashMap::new();
         let mut hung = 0;
-        for wc in &columns {
+        for wc in columns.iter() {
             let BaySlot::Window { bay, .. } = wc.slot() else {
                 continue;
             };

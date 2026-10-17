@@ -379,6 +379,8 @@ fn value_noise(seed: u64, x: i32, z: i32, cell: i32) -> f64 {
 pub(crate) struct RoofDeck {
     grid: RoofDistanceGrid,
     taken: Vec<bool>,
+    /// The largest distance from the edge of any cell.
+    deepest: i32,
     /// Absolute Y of the roof surface; props stand on it.
     surface_y: i32,
 }
@@ -390,9 +392,11 @@ impl RoofDeck {
         }
         let grid = roof_edge_distances(cells);
         let taken = vec![false; grid.dist.len()];
+        let deepest = grid.dist.iter().copied().max().unwrap_or(-1);
         Some(Self {
             grid,
             taken,
+            deepest,
             surface_y,
         })
     }
@@ -453,6 +457,15 @@ impl RoofDeck {
         min_edge: i32,
         reach: i32,
     ) -> Option<(i32, i32)> {
+        // Reject what cannot fit anywhere before the search, which grows with
+        // the square of `reach`: the inset bounds, or the roof's depth (a
+        // `w`×`d` rectangle has a cell `min(w, d) / 2` further in than its rim).
+        if w > self.grid.width - 2 * min_edge
+            || d > self.grid.height - 2 * min_edge
+            || self.deepest < min_edge + (w.min(d) - 1) / 2
+        {
+            return None;
+        }
         let (ox, oz) = (target.0 - w / 2, target.1 - d / 2);
         for r in 0..=reach {
             for (dx, dz) in ring(r) {
@@ -469,7 +482,7 @@ impl RoofDeck {
     }
 
     fn deepest(&self) -> i32 {
-        self.grid.dist.iter().copied().max().unwrap_or(-1)
+        self.deepest
     }
 
     fn cells_at_least(&self, min_edge: i32) -> Vec<(i32, i32)> {
@@ -617,7 +630,8 @@ pub(crate) fn fit_out_roof(editor: &mut WorldEditor, deck: &mut RoofDeck, brief:
             let big = usable >= 400;
             let (len, wide) = if big { (5, 4) } else { (4, 3) };
             let (w, d) = oriented(brief.scaled(len), brief.scaled(wide));
-            let h = brief.scaled(if brief.height >= 40 { 4 } else { 3 });
+            // A door is two blocks tall at any scale, under the cap.
+            let h = brief.scaled(if brief.height >= 40 { 4 } else { 3 }).max(2);
             let wall = bulkhead_wall(brief.wall, &mut rng);
             let cap = if rng.random_bool(0.6) {
                 POLISHED_BLACKSTONE_SLAB
@@ -1435,6 +1449,24 @@ mod tests {
         for (x0, z0) in [first, second] {
             assert!(x0 >= 2 && z0 >= 2 && x0 + 3 <= 14 && z0 + 3 <= 8);
         }
+    }
+
+    #[test]
+    fn deck_search_rejects_props_that_cannot_fit() {
+        // A long strip only six wide: a 5×4 prop cannot stand two in from
+        // its edge, however far the search reaches.
+        let strip: Vec<(i32, i32)> = (0..2000)
+            .flat_map(|x| (0..6).map(move |z| (x, z)))
+            .collect();
+        let deck = RoofDeck::new(&strip, 10).unwrap();
+        assert_eq!(deck.find_near((1000, 3), 5, 4, 2, 1000), None);
+        assert!(deck.find_near((1000, 3), 2, 2, 2, 1000).is_some());
+        // A diagonal band: a wide bounding box, but no deep cell.
+        let band: Vec<(i32, i32)> = (0..60)
+            .flat_map(|x| (0..5).map(move |k| (x, x + k)))
+            .collect();
+        let deck = RoofDeck::new(&band, 10).unwrap();
+        assert_eq!(deck.find_near((30, 32), 3, 3, 2, 60), None);
     }
 
     #[test]
