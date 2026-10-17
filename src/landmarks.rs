@@ -434,7 +434,7 @@ impl Model {
 
 /// `mask` plus what it encloses, by flooding the outside in from the border.
 /// A tribune ring becomes the whole bowl, so the pitch counts as interior.
-fn fill_enclosed(mask: &[bool], span_x: usize, span_z: usize) -> Vec<bool> {
+pub(crate) fn fill_enclosed(mask: &[bool], span_x: usize, span_z: usize) -> Vec<bool> {
     let mut outside = vec![false; mask.len()];
     let mut stack: Vec<usize> = Vec::new();
     let push = |i: usize, outside: &mut Vec<bool>, stack: &mut Vec<usize>| {

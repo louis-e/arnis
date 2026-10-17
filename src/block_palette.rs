@@ -147,6 +147,16 @@ pub fn closest_block(color: RGBTuple) -> Block {
         .unwrap_or(STONE_BRICKS)
 }
 
+/// Closest of a caller's own (colour, block) list, for models held to one family.
+pub fn closest_of(choices: &[(RGBTuple, Block)], color: RGBTuple) -> Block {
+    let target = oklab_components(&color);
+    choices
+        .iter()
+        .map(|(c, b)| (oklab_distance_lab(target, oklab_components(c)), *b))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map_or(STONE_BRICKS, |(_, b)| b)
+}
+
 /// Top-K perceptually-closest palette blocks (ascending Oklab distance).
 pub fn closest_blocks(color: RGBTuple, k: usize) -> Vec<Block> {
     let target = oklab_components(&color);
@@ -277,6 +287,30 @@ pub fn facade_block_for_color(color: RGBTuple) -> Block {
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, b)| b)
         .unwrap_or(WHITE_CONCRETE)
+}
+
+/// Textures that read as bare metal, never as a coat of paint.
+const METAL_LOOK: &[Block] = &[
+    WAXED_COPPER_BLOCK,
+    WAXED_EXPOSED_COPPER,
+    WAXED_OXIDIZED_COPPER,
+    IRON_BLOCK,
+    GOLD_BLOCK,
+    NETHERITE_BLOCK,
+];
+
+/// The one wall block for painted structure, which must not mix blocks. Matched
+/// mostly on hue: shading hides a lightness gap, a wrong hue reads at once.
+pub fn paint_block_for_color(color: RGBTuple) -> Block {
+    let (tl, ta, tb) = oklab_components(&color);
+    palette_lab()
+        .filter(|(_, b, flags)| flags & USE_WALL != 0 && !METAL_LOOK.contains(b))
+        .map(|(&(l, a, bb), b, _)| {
+            let dl = 0.25 * (tl - l);
+            (dl * dl + (ta - a) * (ta - a) + (tb - bb) * (tb - bb), b)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map_or(STONE_BRICKS, |(_, b)| b)
 }
 
 /// Roof block for a `roof:colour` tag value.

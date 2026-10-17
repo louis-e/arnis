@@ -3,6 +3,7 @@ pub mod amenities;
 pub mod barriers;
 pub mod bridge_modules;
 pub mod bridge_styles;
+pub mod bridge_towers;
 pub mod bridges;
 pub mod building_facade;
 #[cfg(test)]
@@ -24,6 +25,7 @@ pub mod parking_garage;
 pub mod power;
 pub mod railways;
 pub mod road_markings;
+pub mod rooftops;
 pub mod signage;
 pub mod sport_pitches;
 pub mod subprocessor;

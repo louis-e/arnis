@@ -423,6 +423,7 @@ impl Ground {
         canopy_height: bool,
         body: CelestialBody,
         frame: &GroundFrame,
+        peaks: &crate::elevation::PeakSource,
     ) -> Self {
         let mut bench = crate::bench::Bench::new(benchmark);
         // Land cover, canopy and the snow line are Earth datasets keyed by
@@ -487,6 +488,7 @@ impl Ground {
                 benchmark,
                 (world_w, world_h, grid_w, grid_h),
                 frame.affine,
+                peaks,
             ) {
                 Ok(mut elevation_data) => {
                     let lat = frame.anchor_lat(&requested_bbox);
@@ -1344,7 +1346,12 @@ impl Ground {
     }
 }
 
-pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
+/// `peaks` delivers OSM summits once the parallel OSM fetch has them.
+pub fn generate_ground_data(
+    args: &Args,
+    bbox: LLBBox,
+    peaks: &crate::elevation::PeakSource,
+) -> Ground {
     // Cleared before the scaler publishes its own: in the GUI a previous run's terrain top
     // would misgrade this world's map preview.
     crate::world_editor::common::set_terrain_top_y(args.ground_level);
@@ -1364,6 +1371,7 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
             args.canopy_height,
             args.body,
             &frame,
+            peaks,
         );
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.

@@ -1900,7 +1900,11 @@ fn gui_start_generation(
             // regardless of the selected generation mode.
             if args.skip_objects() {
                 // Generate ground data (terrain) for terrain-only mode
-                let mut ground = ground::generate_ground_data(&args, bbox);
+                let mut ground = ground::generate_ground_data(
+                    &args,
+                    bbox,
+                    &crate::elevation::PeakSource::none(),
+                );
                 // Matches run_cli.
                 ground.mark_beaches();
 
@@ -1951,6 +1955,7 @@ fn gui_start_generation(
             }
 
             // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
+            let (peak_tx, peaks) = crate::elevation::PeakSource::channel();
             let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
                     if args.overture {
@@ -1964,7 +1969,7 @@ fn gui_start_generation(
                         overture::OvertureData::default()
                     }
                 });
-                let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox));
+                let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox, &peaks));
                 let fetch_result = retrieve_data::fetch_osm_data(
                     bbox,
                     args.debug,
@@ -1973,6 +1978,18 @@ fn gui_start_generation(
                     &args.osm_tiles_url,
                     !args.no_tile_archive,
                 );
+                // The terrain thread waits on this before fitting its height range.
+                if let Ok(raw) = fetch_result.as_ref() {
+                    let _ = peak_tx.send(crate::elevation::TerrainHints {
+                        peaks: crate::elevation::peaks::peaks_in(raw),
+                        tall_models: if args.use_3d {
+                            crate::models_3d::wikidata::tall_models_in(raw)
+                        } else {
+                            Vec::new()
+                        },
+                    });
+                }
+                drop(peak_tx);
                 // A panicked worker already reported itself through the panic hook.
                 // Overture is supplementary, so drop it and keep going; terrain is
                 // not, so hand the failure back instead of taking the app down.
