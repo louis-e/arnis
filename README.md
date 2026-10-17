@@ -19,6 +19,16 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
 Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
 
+### Troubleshooting
+
+On Linux systems with Intel Arc GPUs running Wayland, Arnis may fail to launch with an EGL initialization error such as `Could not create surfaceless EGL display: EGL_NOT_INITIALIZED`. This can be caused by WebKitGTK initializing an unsupported surfaceless EGL context.
+
+As a workaround, launch Arnis with Mesa's Zink driver:
+
+```bash
+MESA_LOADER_DRIVER_OVERRIDE=zink ./arnis
+```
+
 ## 📚 Documentation
 
 <img src="assets/git/documentation.png" width="100%" alt="Banner">
