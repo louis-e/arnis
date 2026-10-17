@@ -12859,7 +12859,7 @@ fn roof_slab_for_stair(stair: Block) -> Option<Block> {
         ANDESITE_STAIRS => ANDESITE_SLAB,
         POLISHED_ANDESITE_STAIRS => POLISHED_ANDESITE_SLAB,
         POLISHED_DIORITE_STAIRS | DIORITE_STAIRS => POLISHED_DIORITE_SLAB,
-        DEEPSLATE_BRICK_STAIRS => DEEPSLATE_TILE_SLAB,
+        DEEPSLATE_BRICK_STAIRS | DEEPSLATE_TILE_STAIRS => DEEPSLATE_TILE_SLAB,
         POLISHED_DEEPSLATE_STAIRS => POLISHED_DEEPSLATE_SLAB,
         COBBLED_DEEPSLATE_STAIRS => COBBLED_DEEPSLATE_SLAB,
         POLISHED_BLACKSTONE_BRICK_STAIRS => POLISHED_BLACKSTONE_SLAB,
@@ -12870,12 +12870,17 @@ fn roof_slab_for_stair(stair: Block) -> Option<Block> {
         SMOOTH_SANDSTONE_STAIRS => CUT_SANDSTONE_SLAB,
         QUARTZ_STAIRS | SMOOTH_QUARTZ_STAIRS => SMOOTH_QUARTZ_SLAB,
         RED_NETHER_BRICK_STAIRS => RED_NETHER_BRICK_SLAB,
+        NETHER_BRICK_STAIRS => NETHER_BRICK_SLAB,
+        // No plain granite slab: the polished one is the same stone.
+        GRANITE_STAIRS | POLISHED_GRANITE_STAIRS => POLISHED_GRANITE_SLAB,
+        WAXED_OXIDIZED_CUT_COPPER_STAIRS => WAXED_OXIDIZED_CUT_COPPER_SLAB,
         WAXED_EXPOSED_CUT_COPPER_STAIRS => WAXED_EXPOSED_CUT_COPPER_SLAB,
         OAK_STAIRS => OAK_SLAB,
         SPRUCE_STAIRS => SPRUCE_SLAB,
         DARK_OAK_STAIRS => DARK_OAK_SLAB,
         JUNGLE_STAIRS => JUNGLE_SLAB,
         CHERRY_STAIRS => CHERRY_SLAB,
+        MANGROVE_STAIRS => MANGROVE_SLAB,
         CRIMSON_STAIRS => CRIMSON_SLAB,
         WARPED_STAIRS => WARPED_SLAB,
         BAMBOO_STAIRS => BAMBOO_SLAB,
@@ -18288,6 +18293,23 @@ mod style_tests {
             }
         }
         assert!(hung > 0);
+    }
+
+    #[test]
+    fn roof_stairs_with_a_slab_family_get_slab_pitches() {
+        for (stairs, slab) in [
+            (DEEPSLATE_TILE_STAIRS, DEEPSLATE_TILE_SLAB),
+            (GRANITE_STAIRS, POLISHED_GRANITE_SLAB),
+            (POLISHED_GRANITE_STAIRS, POLISHED_GRANITE_SLAB),
+            (MANGROVE_STAIRS, MANGROVE_SLAB),
+            (NETHER_BRICK_STAIRS, NETHER_BRICK_SLAB),
+            (
+                WAXED_OXIDIZED_CUT_COPPER_STAIRS,
+                WAXED_OXIDIZED_CUT_COPPER_SLAB,
+            ),
+        ] {
+            assert_eq!(roof_slab_for_stair(stairs), Some(slab), "{}", stairs.name());
+        }
     }
 
     #[test]

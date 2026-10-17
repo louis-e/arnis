@@ -1,6 +1,8 @@
 use crate::block_definitions::Block;
 use fastnbt::Value;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 /* * This file contains data converted from MC2MT.
  * Original C++ Source Copyright (C) 2016 rollerozxa
@@ -156,19 +158,33 @@ fn conv_stair(props: Option<&Value>, name: &'static str) -> LuantiNode {
     LuantiNode { name, param2 }
 }
 
-/// MC2MT `CONV_SLAB` equivalent.
+/// MC2MT `CONV_SLAB` equivalent, for every slab at once.
 ///
-/// MC2MT expands CONV_SLAB(id, mcn, dbottom, dtop, mtn) into 2 entries:
-///   bottom → mtn,        param2 = 0
-///   top    → mtn "_top", param2 = 0
-#[allow(dead_code)]
-fn conv_slab(props: Option<&Value>, bottom: &'static str, top: &'static str) -> LuantiNode {
-    let name = if prop_eq(props, "type", "top") {
-        top
-    } else {
-        bottom
+/// Mineclonia registers each slab `mcl_stairs:slab_X` as three nodes:
+///   bottom → `slab_X`, top → `slab_X_top`, double → `slab_X_double`.
+/// The half comes from the stored `type`, else from the block's own default
+/// (a few slab ids are the top half unless told otherwise).
+fn slab_half(block: Block, props: Option<&Value>, name: &'static str) -> &'static str {
+    if !name.starts_with("mcl_stairs:slab_") || name.ends_with("_double") {
+        return name;
+    }
+    let half = prop_str(props, "type").or_else(|| {
+        (block == crate::block_definitions::OAK_SLAB_TOP
+            || block == crate::block_definitions::QUARTZ_SLAB_TOP)
+            .then_some("top")
+    });
+    let suffix = match half {
+        Some("top") => "_top",
+        Some("double") => "_double",
+        _ => return name,
     };
-    LuantiNode { name, param2: 0 }
+    // A few dozen slab names in all, each spelled out once.
+    static NAMES: Lazy<Mutex<HashMap<(&'static str, &'static str), &'static str>>> =
+        Lazy::new(Default::default);
+    let mut names = NAMES.lock().unwrap_or_else(|p| p.into_inner());
+    names
+        .entry((name, suffix))
+        .or_insert_with(|| Box::leak(format!("{name}{suffix}").into_boxed_str()))
 }
 
 /// Java `facing` of a block growing out of a surface (amethyst buds) → Luanti wallmounted
@@ -817,7 +833,10 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         498 => "mcl_colorblocks:hardened_clay_lime",
         _ => "mcl_core:stone",
     };
-    LuantiNode { name, param2: 0 }
+    LuantiNode {
+        name: slab_half(block, props, name),
+        param2: 0,
+    }
 }
 
 #[cfg(test)]
@@ -833,6 +852,43 @@ mod tests {
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
     /// a block without a Mineclonia node fails here instead of in someone's map.
+    #[test]
+    fn slabs_export_their_half() {
+        use crate::block_definitions::{POLISHED_GRANITE_SLAB, QUARTZ_SLAB_TOP, STONE_BRICK_SLAB};
+        let typed = |t: &str| {
+            Value::Compound(HashMap::from([(
+                "type".to_string(),
+                Value::String(t.to_string()),
+            )]))
+        };
+        let name = |block, props: Option<&Value>| to_mineclonia_node(block, props).name;
+        assert_eq!(
+            name(POLISHED_GRANITE_SLAB, None),
+            "mcl_stairs:slab_granite_smooth"
+        );
+        assert_eq!(
+            name(POLISHED_GRANITE_SLAB, Some(&typed("top"))),
+            "mcl_stairs:slab_granite_smooth_top"
+        );
+        assert_eq!(
+            name(STONE_BRICK_SLAB, Some(&typed("double"))),
+            "mcl_stairs:slab_stonebrick_double"
+        );
+        assert_eq!(
+            name(STONE_BRICK_SLAB, Some(&typed("bottom"))),
+            "mcl_stairs:slab_stonebrick"
+        );
+        // A slab id that is the top half by default stays on top.
+        assert_eq!(
+            name(QUARTZ_SLAB_TOP, None),
+            "mcl_stairs:slab_quartzblock_top"
+        );
+        assert_eq!(
+            name(QUARTZ_SLAB_TOP, Some(&typed("bottom"))),
+            "mcl_stairs:slab_quartzblock"
+        );
+    }
+
     #[test]
     fn beds_export_head_and_foot_facing_their_head() {
         let foot = to_mineclonia_node(RED_BED_EAST_FOOT, None);
