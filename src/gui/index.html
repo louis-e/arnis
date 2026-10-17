@@ -12,6 +12,7 @@
   <!-- Not deferred: the map iframe starts posting log messages as soon as it
        parses, so the bridge has to be listening before that element exists. -->
   <script src="./js/logging.js"></script>
+  <script src="./js/world-storage-estimate.js"></script>
   <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
@@ -145,6 +146,10 @@
               <div id="one-world-status" class="one-world-status" style="display: none;" aria-live="polite"></div>
             </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
+            <div id="world-storage-estimate" class="world-storage-estimate" style="display: none;" role="status" aria-live="polite">
+              <strong id="world-storage-estimate-value"></strong>
+              <span id="world-storage-estimate-message"></span>
+            </div>
 
             <!-- Mini 3D terrain preview (rendered via the map's terrain button, click to expand) -->
             <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview">

@@ -1034,6 +1034,7 @@ struct WorldMapData {
 struct OneWorldInfo {
     world_path: String,
     exists: bool,
+    storage_bytes: u64,
     /// The folder exists but is not a One World.
     foreign: bool,
     locked: bool,
@@ -1065,6 +1066,11 @@ fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldI
     Ok(OneWorldInfo {
         world_path: world_path.display().to_string(),
         exists: manifest.is_some(),
+        storage_bytes: if manifest.is_some() {
+            crate::elevation::cache::dir_size_bytes(&world_path)
+        } else {
+            0
+        },
         foreign,
         locked: manifest.is_some() && crate::world_utils::world_is_locked(&world_path),
         area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
