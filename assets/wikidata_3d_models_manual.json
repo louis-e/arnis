@@ -23,9 +23,10 @@
       "license_url": "https://creativecommons.org/licenses/by/4.0/",
       "artist": "louis-e",
       "height_m": 110.0,
+      "yaw_deg": -100.0,
       "palette_layers": [
-        { "y_max_frac": 0.22, "blocks": ["MUD_BRICKS"] },
-        { "y_max_frac": 1.00, "blocks": ["LIGHT_GRAY_CONCRETE"] }
+        { "y_max_frac": 0.22, "blocks": ["SMOOTH_STONE"] },
+        { "y_max_frac": 1.00, "blocks": ["CALCITE"] }
       ]
     },
     "Q41225": {

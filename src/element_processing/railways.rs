@@ -686,6 +686,7 @@ fn generate_rail_bridge(
         start_is_boundary,
         end_is_boundary,
         None,
+        None,
     );
 }
 

@@ -1627,6 +1627,13 @@ fn generate_highways_internal(
             // Cable carriers hang from pylons; other members stand on piers.
             let bridge_pylons = bridge_member.and_then(|m| m.cable_pylons.as_deref());
             let bridge_cables_carry_deck = bridge_pylons.is_some();
+            // Under mapped towers only the suspended stretch hangs, and it is painted.
+            let bridge_cable_span = bridge_member.and_then(|m| m.cable_span.as_deref());
+            let hangs_at = |x: i32, z: i32| match bridge_cable_span {
+                Some(span) => span.suspends(x, z),
+                None => bridge_cables_carry_deck,
+            };
+            let bridge_paint = bridge_cable_span.map(|s| s.paint);
 
             let is_short_isolated_elevated = !is_bridge_member
                 && !is_bridge_ramp
@@ -1971,7 +1978,7 @@ fn generate_highways_internal(
                                 if is_elevated_deck && (use_absolute_y || cell_y > 0) {
                                     // Foundation: stone bricks for everything except wooden boardwalks.
                                     let foundation = if is_bridge_member {
-                                        bridge_foundation_block
+                                        bridge_paint.unwrap_or(bridge_foundation_block)
                                     } else {
                                         STONE_BRICKS
                                     };
@@ -2022,7 +2029,7 @@ fn generate_highways_internal(
                                         }
                                         if is_center
                                             && use_absolute_y
-                                            && !bridge_cables_carry_deck
+                                            && !hangs_at(set_x, set_z)
                                             && on_pier_step(bridge_style.pier_interval(block_range))
                                         {
                                             if let Some(perp) = bridge_rail_perp {
@@ -2100,7 +2107,7 @@ fn generate_highways_internal(
                                             continue;
                                         }
                                         let rail_block = if is_bridge_member {
-                                            bridge_rail_block_choice
+                                            bridge_paint.unwrap_or(bridge_rail_block_choice)
                                         } else {
                                             LIGHT_GRAY_CONCRETE
                                         };
@@ -2113,7 +2120,9 @@ fn generate_highways_internal(
                                             Some(ROAD_PROTECTED_SURFACES),
                                         );
                                         let rail_foundation = if is_bridge_member {
-                                            bridge_style.rail_foundation_block()
+                                            bridge_paint.unwrap_or_else(|| {
+                                                bridge_style.rail_foundation_block()
+                                            })
                                         } else {
                                             STONE_BRICKS
                                         };
@@ -2287,6 +2296,7 @@ fn generate_highways_internal(
                         bridge_start_is_boundary,
                         bridge_end_is_boundary,
                         bridge_pylons,
+                        bridge_cable_span,
                     );
                 }
             }

@@ -500,6 +500,14 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
                 BedrockBlockStateValue::String("yellow".to_string()),
             )],
         ),
+        "pink_terracotta" => BedrockBlock::with_states(
+            "stained_hardened_clay",
+            vec![("color", BedrockBlockStateValue::String("pink".to_string()))],
+        ),
+        "lime_terracotta" => BedrockBlock::with_states(
+            "stained_hardened_clay",
+            vec![("color", BedrockBlockStateValue::String("lime".to_string()))],
+        ),
         "light_blue_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
             vec![(
@@ -571,6 +579,13 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "green_wool" => BedrockBlock::with_states(
             "wool",
             vec![("color", BedrockBlockStateValue::String("green".to_string()))],
+        ),
+        "light_gray_wool" => BedrockBlock::with_states(
+            "wool",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("silver".to_string()),
+            )],
         ),
         "brown_wool" => BedrockBlock::with_states(
             "wool",
@@ -915,6 +930,13 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "potted_blue_orchid" => BedrockBlock::with_states(
             "flower_pot",
             vec![("update_bit", BedrockBlockStateValue::Bool(false))],
+        ),
+
+        // Legacy id + level state, like the other families this map keeps on the
+        // encoding every Bedrock version resolves.
+        "light" => BedrockBlock::with_states(
+            "light_block",
+            vec![("block_light_level", BedrockBlockStateValue::Int(15))],
         ),
 
         // Beds always carry facing/part properties, so convert_bed owns them;

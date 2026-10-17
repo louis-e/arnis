@@ -3,6 +3,8 @@
 use crate::block_definitions::{Block, GLASS, STONE_BRICKS};
 use crate::block_palette::closest_block;
 use dda_voxelize::DdaVoxelizer;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 /// Pure magenta (#FF00FF) in model colors becomes GLASS instead of palette-mapping.
 const GLASS_SENTINEL: [f32; 3] = [1.0, 0.0, 1.0];
@@ -139,8 +141,249 @@ const IDENT: [[f32; 4]; 4] = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 
-/// Per-voxel: RGB sampled from the primitive's material plus an "uncolored" flag.
-type VoxelValue = ([f32; 3], bool);
+/// Samples falling into one voxel: coverage-weighted sRGB plus tallies.
+#[derive(Clone, Copy, Default)]
+struct VoxelAccum {
+    rgb: [f32; 3],
+    weight: f32,
+    /// Sum of per-sample coverage, normalised so 0.5 is the material's cutoff.
+    coverage: f32,
+    samples: u16,
+    /// Best mean coverage of any one triangle here, so a see-through surface
+    /// crossing an opaque one cannot thin it out.
+    occupancy: f32,
+    /// Coverage of samples that are glass, and of samples with no colour.
+    glass: f32,
+    uncolored: f32,
+}
+
+impl VoxelAccum {
+    fn add(mut self, s: &VoxelAccum) -> Self {
+        for i in 0..3 {
+            self.rgb[i] += s.rgb[i];
+        }
+        self.weight += s.weight;
+        self.coverage += s.coverage;
+        self.samples = self.samples.saturating_add(s.samples);
+        self.occupancy = self.occupancy.max(s.occupancy);
+        self.glass += s.glass;
+        self.uncolored += s.uncolored;
+        self
+    }
+
+    /// This one triangle's samples, closed off so their mean is its occupancy.
+    fn of_triangle(mut self) -> Self {
+        self.occupancy = self.coverage / self.samples.max(1) as f32;
+        self
+    }
+}
+
+/// What a voxel gets painted with, before it is matched to a block.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum VoxelPaint {
+    Rgb((u8, u8, u8)),
+    Glass,
+    /// No material colour at all.
+    Uncolored,
+}
+
+impl VoxelPaint {
+    pub fn block_with(self, pick: impl Fn((u8, u8, u8)) -> Block) -> Block {
+        match self {
+            VoxelPaint::Rgb(c) => pick(c),
+            VoxelPaint::Glass => GLASS,
+            VoxelPaint::Uncolored => STONE_BRICKS,
+        }
+    }
+}
+
+/// Blended materials keep a voxel once this much of it is opaque.
+const BLEND_CUTOFF: f32 = 0.25;
+/// Texture samples per side across a voxel's slice of a triangle, spaced
+/// `FOOTPRINT_SPAN / FOOTPRINT_STEPS` apart; the span covers a diagonal slice.
+const FOOTPRINT_STEPS: usize = 6;
+const FOOTPRINT_SPAN: f32 = 1.5;
+/// Textures are box-filtered down to this before sampling; finer detail is
+/// far below a block anyway.
+const MAX_TEXTURE_SIDE: usize = 512;
+
+#[inline]
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+#[inline]
+fn linear_to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/// One mip level, premultiplied linear RGB plus alpha.
+struct MipLevel {
+    w: usize,
+    h: usize,
+    px: Vec<[f32; 4]>,
+}
+
+impl MipLevel {
+    fn half(&self) -> MipLevel {
+        let (w, h) = ((self.w / 2).max(1), (self.h / 2).max(1));
+        let mut px = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0.0f32; 4];
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let sx = (2 * x + dx).min(self.w - 1);
+                    let sy = (2 * y + dy).min(self.h - 1);
+                    let p = self.px[sy * self.w + sx];
+                    for i in 0..4 {
+                        acc[i] += p[i] * 0.25;
+                    }
+                }
+                px.push(acc);
+            }
+        }
+        MipLevel { w, h, px }
+    }
+}
+
+/// A base colour texture as a mip chain, so one sample stands for a whole voxel.
+struct MipTexture {
+    levels: Vec<MipLevel>,
+    wrap: [gltf::texture::WrappingMode; 2],
+}
+
+impl MipTexture {
+    /// `use_alpha` is false for opaque materials, whose texture alpha glTF ignores;
+    /// premultiplying would lose the colour under transparent texels.
+    fn new(
+        img: &gltf::image::Data,
+        wrap: [gltf::texture::WrappingMode; 2],
+        use_alpha: bool,
+    ) -> Option<Self> {
+        use gltf::image::Format;
+        let (stride, has_alpha) = match img.format {
+            Format::R8G8B8 => (3, false),
+            Format::R8G8B8A8 => (4, true),
+            _ => return None,
+        };
+        let (w, h) = (img.width as usize, img.height as usize);
+        if w == 0 || h == 0 || img.pixels.len() < w * h * stride {
+            return None;
+        }
+        let mut lut = [0.0f32; 256];
+        for (i, v) in lut.iter_mut().enumerate() {
+            *v = srgb_to_linear(i as f32 / 255.0);
+        }
+        let texel = |i: usize| {
+            let c = &img.pixels[i * stride..];
+            let a = if has_alpha && use_alpha {
+                c[3] as f32 / 255.0
+            } else {
+                1.0
+            };
+            [
+                lut[c[0] as usize] * a,
+                lut[c[1] as usize] * a,
+                lut[c[2] as usize] * a,
+                a,
+            ]
+        };
+        // Box-filtered straight from the bytes, so a large texture never
+        // exists at full size in f32.
+        let mut f = 1;
+        while (w / f).max(h / f) > MAX_TEXTURE_SIDE {
+            f *= 2;
+        }
+        let (lw, lh) = ((w / f).max(1), (h / f).max(1));
+        let norm = 1.0 / (f * f) as f32;
+        let mut px = Vec::with_capacity(lw * lh);
+        for y in 0..lh {
+            for x in 0..lw {
+                let mut acc = [0.0f32; 4];
+                for sy in y * f..y * f + f {
+                    for sx in x * f..x * f + f {
+                        let p = texel(sy.min(h - 1) * w + sx.min(w - 1));
+                        for i in 0..4 {
+                            acc[i] += p[i];
+                        }
+                    }
+                }
+                px.push(acc.map(|v| v * norm));
+            }
+        }
+        let mut levels = vec![MipLevel { w: lw, h: lh, px }];
+        while let Some(last) = levels.last().filter(|l| l.w > 1 || l.h > 1) {
+            let next = last.half();
+            levels.push(next);
+        }
+        Some(Self { levels, wrap })
+    }
+
+    fn size(&self) -> (f32, f32) {
+        (self.levels[0].w as f32, self.levels[0].h as f32)
+    }
+
+    /// Bilinear sample at the level where one texel spans about one voxel.
+    fn sample(&self, uv: [f32; 2], texels_per_voxel: f32) -> [f32; 4] {
+        let lod = texels_per_voxel.max(1.0).log2().round() as usize;
+        let lvl = &self.levels[lod.min(self.levels.len() - 1)];
+        let fx = uv[0] * lvl.w as f32 - 0.5;
+        let fy = uv[1] * lvl.h as f32 - 0.5;
+        let (x0, y0) = (fx.floor(), fy.floor());
+        let (tx, ty) = (fx - x0, fy - y0);
+        let at = |x: f32, y: f32| {
+            let xi = wrap_index(x as i64, lvl.w, self.wrap[0]);
+            let yi = wrap_index(y as i64, lvl.h, self.wrap[1]);
+            lvl.px[yi * lvl.w + xi]
+        };
+        let (a, b, c, d) = (
+            at(x0, y0),
+            at(x0 + 1.0, y0),
+            at(x0, y0 + 1.0),
+            at(x0 + 1.0, y0 + 1.0),
+        );
+        let mut out = [0.0f32; 4];
+        for i in 0..4 {
+            let top = a[i] + (b[i] - a[i]) * tx;
+            let bottom = c[i] + (d[i] - c[i]) * tx;
+            out[i] = top + (bottom - top) * ty;
+        }
+        out
+    }
+}
+
+fn wrap_index(i: i64, n: usize, mode: gltf::texture::WrappingMode) -> usize {
+    use gltf::texture::WrappingMode;
+    let n = n as i64;
+    match mode {
+        WrappingMode::ClampToEdge => i.clamp(0, n - 1) as usize,
+        WrappingMode::Repeat => i.rem_euclid(n) as usize,
+        WrappingMode::MirroredRepeat => {
+            let m = i.rem_euclid(2 * n);
+            (if m < n { m } else { 2 * n - 1 - m }) as usize
+        }
+    }
+}
+
+/// Per-primitive shading inputs.
+struct Material<'a> {
+    /// Linear base colour factor, alpha included.
+    factor: [f32; 4],
+    texture: Option<&'a MipTexture>,
+    tex_coord: u32,
+    /// Coverage below which a sample counts as see-through; None when opaque.
+    cutoff: Option<f32>,
+    uncolored: bool,
+}
 
 /// World-space bbox of all triangle vertices in a .glb.
 pub fn glb_model_bbox(glb_bytes: &[u8]) -> Result<([f32; 3], [f32; 3]), String> {
@@ -198,10 +441,24 @@ pub fn voxelize_glb(
     glb_bytes: &[u8],
     transform: WorldTransform,
 ) -> Result<Vec<([i32; 3], Block)>, String> {
+    Ok(voxelize_glb_paint(glb_bytes, transform)?
+        .into_iter()
+        .map(|(pos, paint)| (pos, paint.block_with(closest_block)))
+        .collect())
+}
+
+/// Every voxel any triangle touches, with its shading samples.
+fn accumulate_glb(
+    glb_bytes: &[u8],
+    transform: WorldTransform,
+) -> Result<HashMap<[i32; 3], VoxelAccum>, String> {
     let (document, buffers, images) =
         gltf::import_slice(glb_bytes).map_err(|e| format!("glTF parse: {e}"))?;
 
-    let mut voxelizer: DdaVoxelizer<VoxelValue> = DdaVoxelizer::new();
+    let accum: RefCell<HashMap<[i32; 3], VoxelAccum>> = RefCell::new(HashMap::new());
+    // The last triangle to reach each cell, so a triangle shades a cell once.
+    let mut visits: DdaVoxelizer<u32> = DdaVoxelizer::new();
+    let mut tri_id: u32 = 0;
 
     let scenes: Vec<_> = if let Some(scene) = document.default_scene() {
         scene.nodes().collect()
@@ -225,21 +482,28 @@ pub fn voxelize_glb(
                 let mat = primitive.material();
                 let pbr = mat.pbr_metallic_roughness();
                 let factor = pbr.base_color_factor();
-                let texture_avg = pbr
-                    .base_color_texture()
-                    .and_then(|info| {
-                        let idx = info.texture().source().index();
-                        images.get(idx)
-                    })
-                    .and_then(image_average_color);
-
-                let material_color = if let Some(tex) = texture_avg {
-                    [factor[0] * tex[0], factor[1] * tex[1], factor[2] * tex[2]]
-                } else {
-                    [factor[0], factor[1], factor[2]]
+                let tex_info = pbr.base_color_texture();
+                let cutoff = match mat.alpha_mode() {
+                    gltf::material::AlphaMode::Opaque => None,
+                    gltf::material::AlphaMode::Mask => Some(mat.alpha_cutoff().unwrap_or(0.5)),
+                    gltf::material::AlphaMode::Blend => Some(BLEND_CUTOFF),
                 };
-                let material_uncolored = texture_avg.is_none() && is_default_white(factor);
-                let material_value: VoxelValue = (material_color, material_uncolored);
+                // Built per primitive and dropped after it, so one mip chain is
+                // alive at a time; the sampler comes with the glTF texture.
+                let mips = tex_info.as_ref().and_then(|info| {
+                    let tex = info.texture();
+                    let sampler = tex.sampler();
+                    let img = images.get(tex.source().index())?;
+                    MipTexture::new(img, [sampler.wrap_s(), sampler.wrap_t()], cutoff.is_some())
+                });
+                let texture = mips.as_ref();
+                let material = Material {
+                    factor,
+                    texture,
+                    tex_coord: tex_info.as_ref().map_or(0, |i| i.tex_coord()),
+                    cutoff,
+                    uncolored: texture.is_none() && is_default_white(factor),
+                };
 
                 let reader = primitive.reader(|b| Some(&buffers[b.index()]));
                 let Some(positions) = reader.read_positions() else {
@@ -251,42 +515,76 @@ pub fn voxelize_glb(
                 } else {
                     (0..positions.len() as u32).collect()
                 };
-                // Vertex colors (COLOR_0) modulate the material color when present.
+                // Taken as authored: 3D Builder, which made the stadium, writes them as sRGB.
                 let vertex_colors: Option<Vec<[f32; 4]>> =
                     reader.read_colors(0).map(|c| c.into_rgba_f32().collect());
+                let uvs: Option<Vec<[f32; 2]>> = material.texture.and_then(|_| {
+                    reader
+                        .read_tex_coords(material.tex_coord)
+                        .map(|t| t.into_f32().collect())
+                });
 
                 for &[a0, b0, c0] in indices.as_chunks::<3>().0 {
-                    let ia = a0 as usize;
-                    let ib = b0 as usize;
-                    let ic = c0 as usize;
-                    let a = positions[ia];
-                    let b = positions[ib];
-                    let c = positions[ic];
-                    let wa = transform.apply(transform_point(&world, a));
-                    let wb = transform.apply(transform_point(&world, b));
-                    let wc = transform.apply(transform_point(&world, c));
+                    let (ia, ib, ic) = (a0 as usize, b0 as usize, c0 as usize);
+                    if ia.max(ib).max(ic) >= positions.len() {
+                        continue;
+                    }
+                    let wa = transform.apply(transform_point(&world, positions[ia]));
+                    let wb = transform.apply(transform_point(&world, positions[ib]));
+                    let wc = transform.apply(transform_point(&world, positions[ic]));
                     if !triangle_finite(&wa, &wb, &wc) {
                         continue;
                     }
 
-                    let value: VoxelValue = match vertex_colors.as_ref() {
-                        Some(vc) if ia < vc.len() && ib < vc.len() && ic < vc.len() => {
-                            let ca = vc[ia];
-                            let cb = vc[ib];
-                            let cc = vc[ic];
-                            let avg = [
-                                (ca[0] + cb[0] + cc[0]) / 3.0 * material_color[0],
-                                (ca[1] + cb[1] + cc[1]) / 3.0 * material_color[1],
-                                (ca[2] + cb[2] + cc[2]) / 3.0 * material_color[2],
-                            ];
-                            (avg, false)
+                    let vcol = vertex_colors.as_ref().and_then(|vc| {
+                        let (a, b, c) = (vc.get(ia)?, vc.get(ib)?, vc.get(ic)?);
+                        Some([0, 1, 2, 3].map(|i| (a[i] + b[i] + c[i]) / 3.0))
+                    });
+                    let tri_uv = uvs
+                        .as_ref()
+                        .and_then(|t| Some([*t.get(ia)?, *t.get(ib)?, *t.get(ic)?]));
+                    let tri = [wa, wb, wc];
+                    let texels_per_voxel = match (material.texture, tri_uv) {
+                        (Some(tex), Some(uv)) => texel_density(tex.size(), &uv, tri),
+                        _ => 1.0,
+                    };
+                    // Only a textured triangle needs its frame; untextured ones
+                    // are one colour throughout.
+                    let frame = tri_uv.and(TriFrame::new(&tri));
+                    // The DDA picks the cells; its weights drift on diagonal
+                    // lines, so each cell is shaded from its own footprint.
+                    tri_id = tri_id.wrapping_add(1);
+                    let id = tri_id;
+                    let shade = |prev: Option<&u32>, cell: [i32; 3], _: [f32; 3]| {
+                        if prev == Some(&id) {
+                            return id;
                         }
-                        _ => material_value,
+                        let s = match &frame {
+                            Some(frame) => shade_footprint(
+                                &material,
+                                frame,
+                                tri_uv.as_ref(),
+                                texels_per_voxel,
+                                vcol,
+                                cell,
+                            ),
+                            None => shade_sample(
+                                &material,
+                                tri_uv.as_ref(),
+                                texels_per_voxel,
+                                vcol,
+                                [1.0 / 3.0; 3],
+                            ),
+                        }
+                        .of_triangle();
+                        accum
+                            .borrow_mut()
+                            .entry(cell)
+                            .and_modify(|a| *a = a.add(&s))
+                            .or_insert(s);
+                        id
                     };
-                    let shader = |prev: Option<&VoxelValue>, _: [i32; 3], _: [f32; 3]| {
-                        *prev.unwrap_or(&value)
-                    };
-                    voxelizer.add_triangle(&[wa, wb, wc], &shader);
+                    visits.add_triangle(&tri, &shade);
                 }
             }
         }
@@ -296,80 +594,351 @@ pub fn voxelize_glb(
         }
     }
 
-    let occupied = voxelizer.finalize();
-    let mut out = Vec::with_capacity(occupied.len());
-    for (pos, (color, uncolored)) in occupied {
-        let block = if uncolored {
-            STONE_BRICKS
-        } else if is_glass_sentinel(color) {
-            GLASS
+    Ok(accum.into_inner())
+}
+
+/// Voxelizes a .glb model, leaving the block choice to the caller. Textures are
+/// sampled per voxel, so alpha-cut lattices and decals stay open and keep their
+/// own colours rather than one average per material.
+pub fn voxelize_glb_paint(
+    glb_bytes: &[u8],
+    transform: WorldTransform,
+) -> Result<Vec<([i32; 3], VoxelPaint)>, String> {
+    let accum = accumulate_glb(glb_bytes, transform)?;
+    let kept = kept_voxels(&accum);
+    let mut out = Vec::with_capacity(kept.len());
+    for pos in kept {
+        let acc = &accum[&pos];
+        // Votes among the samples that are there, not the see-through ones.
+        let n = acc.coverage.max(1e-6);
+        let paint = if acc.glass * 2.0 >= n {
+            VoxelPaint::Glass
+        } else if acc.weight <= 0.0 || acc.uncolored * 2.0 > n {
+            VoxelPaint::Uncolored
         } else {
-            let r = (color[0].clamp(0.0, 1.0) * 255.0) as u8;
-            let g = (color[1].clamp(0.0, 1.0) * 255.0) as u8;
-            let b = (color[2].clamp(0.0, 1.0) * 255.0) as u8;
-            closest_block((r, g, b))
+            let c = acc
+                .rgb
+                .map(|v| ((v / acc.weight).clamp(0.0, 1.0) * 255.0).round() as u8);
+            VoxelPaint::Rgb((c[0], c[1], c[2]))
         };
-        out.push((pos, block));
+        out.push((pos, paint));
     }
     Ok(out)
 }
 
-/// Voxelizes pre-transformed triangles, painting every occupied voxel as `block`.
-pub fn voxelize_uniform_triangles<I>(
-    triangles: I,
-    transform: WorldTransform,
-    block: Block,
-) -> Vec<([i32; 3], Block)>
-where
-    I: IntoIterator<Item = [[f32; 3]; 3]>,
-{
-    let mut voxelizer: DdaVoxelizer<()> = DdaVoxelizer::new();
-    let shader = |_: Option<&()>, _: [i32; 3], _: [f32; 3]| {};
-    for tri in triangles {
-        let wa = transform.apply(tri[0]);
-        let wb = transform.apply(tri[1]);
-        let wc = transform.apply(tri[2]);
-        if !triangle_finite(&wa, &wb, &wc) {
-            continue;
-        }
-        voxelizer.add_triangle(&[wa, wb, wc], &shader);
+/// Base-level texels per world block across a triangle.
+fn texel_density(size: (f32, f32), uv: &[[f32; 2]; 3], p: [[f32; 3]; 3]) -> f32 {
+    let (du1, dv1) = (
+        (uv[1][0] - uv[0][0]) * size.0,
+        (uv[1][1] - uv[0][1]) * size.1,
+    );
+    let (du2, dv2) = (
+        (uv[2][0] - uv[0][0]) * size.0,
+        (uv[2][1] - uv[0][1]) * size.1,
+    );
+    let uv_area = (du1 * dv2 - du2 * dv1).abs();
+    let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+    let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+    let cx = e1[1] * e2[2] - e1[2] * e2[1];
+    let cy = e1[2] * e2[0] - e1[0] * e2[2];
+    let cz = e1[0] * e2[1] - e1[1] * e2[0];
+    let world_area = (cx * cx + cy * cy + cz * cz).sqrt();
+    if world_area <= 1e-6 || !uv_area.is_finite() {
+        return 1.0;
     }
-    voxelizer
-        .finalize()
-        .into_keys()
-        .map(|pos| (pos, block))
-        .collect()
+    (uv_area / world_area).sqrt()
 }
 
-/// Mean RGB (0..1) across non-transparent pixels of a decoded glTF image.
-fn image_average_color(img: &gltf::image::Data) -> Option<[f32; 3]> {
-    use gltf::image::Format;
-    let (stride, has_alpha) = match img.format {
-        Format::R8G8B8 => (3, false),
-        Format::R8G8B8A8 => (4, true),
-        _ => return None,
+/// Share of a voxel's samples that count as solid, 0.5 at the material cutoff.
+fn coverage_of(acc: &VoxelAccum) -> f32 {
+    acc.occupancy
+}
+
+/// Touched voxels that become blocks. Half covered is solid. A strip thinner
+/// than a block that straddles two cells on one layer goes to the stronger
+/// cell, so girders stay unbroken; partial voxels left with no neighbour are
+/// dropped as speckle.
+fn kept_voxels(accum: &HashMap<[i32; 3], VoxelAccum>) -> HashSet<[i32; 3]> {
+    let cov = |p: &[i32; 3]| accum.get(p).map(coverage_of);
+    let rescued = |p: [i32; 3], c: f32| {
+        let mut best = 0.0f32;
+        for (dx, dz) in LAYER_NEIGHBOURS {
+            let q = [p[0] + dx, p[1], p[2] + dz];
+            let Some(cq) = cov(&q).filter(|&cq| cq < 0.5) else {
+                continue;
+            };
+            if cq > c || (cq == c && q < p) {
+                return false;
+            }
+            best = best.max(cq);
+        }
+        c + best >= 0.5
     };
-    let mut sum_r: u64 = 0;
-    let mut sum_g: u64 = 0;
-    let mut sum_b: u64 = 0;
-    let mut count: u64 = 0;
-    for chunk in img.pixels.chunks_exact(stride) {
-        if has_alpha && chunk[3] < 16 {
+    let kept: HashSet<[i32; 3]> = accum
+        .iter()
+        .filter(|(&p, acc)| {
+            let c = coverage_of(acc);
+            c >= 0.5 || (c >= RESCUE_MIN && rescued(p, c))
+        })
+        .map(|(&p, _)| p)
+        .collect();
+    let lone = |p: &[i32; 3]| {
+        cov(p).is_some_and(|c| c < 0.999)
+            && !(-1..=1).any(|dx| {
+                (-1..=1).any(|dy| {
+                    (-1..=1).any(|dz| {
+                        (dx, dy, dz) != (0, 0, 0)
+                            && kept.contains(&[p[0] + dx, p[1] + dy, p[2] + dz])
+                    })
+                })
+            })
+    };
+    let specks: Vec<[i32; 3]> = kept.iter().filter(|p| lone(p)).copied().collect();
+    let mut kept = kept;
+    for p in specks {
+        kept.remove(&p);
+    }
+    kept
+}
+
+/// Partly covered voxels below this never come back as part of a strip.
+const RESCUE_MIN: f32 = 0.25;
+const LAYER_NEIGHBOURS: [(i32, i32); 8] = [
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, -1),
+    (0, 1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+];
+
+#[inline]
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+#[inline]
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+#[inline]
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+#[inline]
+fn unit3(a: [f32; 3]) -> Option<[f32; 3]> {
+    let len = dot3(a, a).sqrt();
+    (len > 1e-9 && len.is_finite()).then(|| a.map(|v| v / len))
+}
+
+/// A triangle's plane: an in-plane basis and exact barycentrics.
+struct TriFrame {
+    p0: [f32; 3],
+    e1: [f32; 3],
+    e2: [f32; 3],
+    /// Unnormalised normal over its squared length, for barycentrics.
+    n_scaled: [f32; 3],
+    n: [f32; 3],
+    u: [f32; 3],
+    v: [f32; 3],
+}
+
+impl TriFrame {
+    /// None only for a triangle with no area at all. Barycentrics come from
+    /// cross products: the Gram determinant cancels to zero in f32 on slivers.
+    fn new(t: &[[f32; 3]; 3]) -> Option<Self> {
+        let e1 = sub3(t[1], t[0]);
+        let e2 = sub3(t[2], t[0]);
+        let normal = cross3(e1, e2);
+        let len2 = dot3(normal, normal);
+        if !(len2 > 0.0 && len2.is_finite()) {
+            return None;
+        }
+        let n = unit3(normal)?;
+        let u = unit3(e1)?;
+        Some(Self {
+            p0: t[0],
+            e1,
+            e2,
+            n_scaled: normal.map(|c| c / len2),
+            n,
+            u,
+            v: cross3(n, u),
+        })
+    }
+
+    fn barycentric(&self, p: [f32; 3]) -> [f32; 3] {
+        let d = sub3(p, self.p0);
+        let b1 = dot3(cross3(d, self.e2), self.n_scaled);
+        let b2 = dot3(cross3(self.e1, d), self.n_scaled);
+        [1.0 - b1 - b2, b1, b2]
+    }
+}
+
+/// Shades the part of a triangle inside one voxel from a grid of samples, so a
+/// thin opaque strip counts by the area it covers rather than by luck of one
+/// sample point.
+fn shade_footprint(
+    mat: &Material,
+    frame: &TriFrame,
+    uv: Option<&[[f32; 2]; 3]>,
+    texels_per_voxel: f32,
+    vcol: Option<[f32; 4]>,
+    cell: [i32; 3],
+) -> VoxelAccum {
+    let c = cell.map(|v| v as f32);
+    let off = dot3(sub3(c, frame.p0), frame.n);
+    let q = [0, 1, 2].map(|i| c[i] - frame.n[i] * off);
+    let step = FOOTPRINT_SPAN / FOOTPRINT_STEPS as f32;
+    let texels = texels_per_voxel * step;
+    let mut acc: Option<VoxelAccum> = None;
+    for i in 0..FOOTPRINT_STEPS {
+        let s = (i as f32 + 0.5) * step - FOOTPRINT_SPAN / 2.0;
+        for j in 0..FOOTPRINT_STEPS {
+            let t = (j as f32 + 0.5) * step - FOOTPRINT_SPAN / 2.0;
+            let p = [0, 1, 2].map(|k| q[k] + frame.u[k] * s + frame.v[k] * t);
+            if (0..3).any(|k| (p[k] - c[k]).abs() > 0.5) {
+                continue;
+            }
+            let w = frame.barycentric(p);
+            if w.iter().any(|&x| x < -1e-4) {
+                continue;
+            }
+            let sample = shade_sample(mat, uv, texels, vcol, w);
+            acc = Some(acc.map_or(sample, |a| a.add(&sample)));
+        }
+    }
+    // A sliver between the samples still gets one, at its nearest point.
+    acc.unwrap_or_else(|| {
+        let w = frame.barycentric(q).map(|x| x.max(0.0));
+        let sum = (w[0] + w[1] + w[2]).max(1e-6);
+        shade_sample(mat, uv, texels_per_voxel, vcol, w.map(|x| x / sum))
+    })
+}
+
+/// One sample at barycentric weights `w`, colour in sRGB.
+fn shade_sample(
+    mat: &Material,
+    uv: Option<&[[f32; 2]; 3]>,
+    texels_per_voxel: f32,
+    vcol: Option<[f32; 4]>,
+    w: [f32; 3],
+) -> VoxelAccum {
+    let mut lin = [mat.factor[0], mat.factor[1], mat.factor[2]];
+    let mut alpha = mat.factor[3];
+    if let (Some(tex), Some(uv)) = (mat.texture, uv) {
+        let p = [0, 1].map(|i| uv[0][i] * w[0] + uv[1][i] * w[1] + uv[2][i] * w[2]);
+        let t = tex.sample(p, texels_per_voxel);
+        if t[3] > 1e-4 {
+            for i in 0..3 {
+                lin[i] *= t[i] / t[3];
+            }
+        }
+        alpha *= t[3];
+    }
+    let mut rgb = lin.map(linear_to_srgb);
+    if let Some(vc) = vcol {
+        for i in 0..3 {
+            rgb[i] *= vc[i];
+        }
+        alpha *= vc[3];
+    }
+    let coverage = match mat.cutoff {
+        None => 1.0,
+        Some(cut) => (alpha / (2.0 * cut.max(1e-3))).min(1.0),
+    };
+    let uncolored = mat.uncolored && vcol.is_none();
+    let weight = if uncolored { 0.0 } else { coverage };
+    VoxelAccum {
+        rgb: rgb.map(|c| c * weight),
+        weight,
+        coverage,
+        samples: 1,
+        occupancy: 0.0,
+        glass: if is_glass_sentinel(rgb) {
+            coverage
+        } else {
+            0.0
+        },
+        uncolored: if uncolored { coverage } else { 0.0 },
+    }
+}
+
+/// Voxelizes triangles in one block. A closed mesh comes out solid: a surface
+/// shell only one voxel thick shows daylight through every diagonal step.
+pub fn voxelize_solid_triangles(
+    triangles: &[[[f32; 3]; 3]],
+    transform: WorldTransform,
+    block: Block,
+) -> Vec<([i32; 3], Block)> {
+    let world: Vec<[[f32; 3]; 3]> = triangles
+        .iter()
+        .map(|t| t.map(|v| transform.apply(v)))
+        .filter(|t| triangle_finite(&t[0], &t[1], &t[2]))
+        .collect();
+    let mut voxelizer: DdaVoxelizer<()> = DdaVoxelizer::new();
+    let shader = |_: Option<&()>, _: [i32; 3], _: [f32; 3]| {};
+    for t in &world {
+        voxelizer.add_triangle(t, &shader);
+    }
+    let mut cells: std::collections::HashSet<[i32; 3]> = voxelizer.finalize().into_keys().collect();
+    for ([x, z], hits) in column_crossings(&world) {
+        // An odd count means the mesh leaks here; leave that column as a shell.
+        if hits.len() % 2 != 0 {
             continue;
         }
-        sum_r += chunk[0] as u64;
-        sum_g += chunk[1] as u64;
-        sum_b += chunk[2] as u64;
-        count += 1;
+        for &[enter, leave] in hits.as_chunks::<2>().0 {
+            for y in enter.ceil() as i32..=leave.floor() as i32 {
+                cells.insert([x, y, z]);
+            }
+        }
     }
-    if count == 0 {
-        return None;
+    cells.into_iter().map(|pos| (pos, block)).collect()
+}
+
+/// Where a vertical ray through each voxel column (voxel centres sit on integers,
+/// as in dda-voxelize) crosses the mesh, sorted bottom up.
+fn column_crossings(tris: &[[[f32; 3]; 3]]) -> std::collections::HashMap<[i32; 2], Vec<f32>> {
+    // Off-centre, so a ray never runs exactly along a shared edge and counts it twice.
+    const JX: f32 = 0.0123;
+    const JZ: f32 = 0.0371;
+    let mut out: std::collections::HashMap<[i32; 2], Vec<f32>> = std::collections::HashMap::new();
+    for t in tris {
+        let (ax, az, bx, bz, cx, cz) = (t[0][0], t[0][2], t[1][0], t[1][2], t[2][0], t[2][2]);
+        let den = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+        if den.abs() < 1e-9 {
+            continue;
+        }
+        let x0 = (ax.min(bx).min(cx) - JX).ceil() as i32;
+        let x1 = (ax.max(bx).max(cx) - JX).floor() as i32;
+        let z0 = (az.min(bz).min(cz) - JZ).ceil() as i32;
+        let z1 = (az.max(bz).max(cz) - JZ).floor() as i32;
+        for x in x0..=x1 {
+            for z in z0..=z1 {
+                let (px, pz) = (x as f32 + JX, z as f32 + JZ);
+                let w0 = ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz)) / den;
+                let w1 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / den;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    continue;
+                }
+                let y = w0 * t[0][1] + w1 * t[1][1] + w2 * t[2][1];
+                out.entry([x, z]).or_default().push(y);
+            }
+        }
     }
-    Some([
-        sum_r as f32 / count as f32 / 255.0,
-        sum_g as f32 / count as f32 / 255.0,
-        sum_b as f32 / count as f32 / 255.0,
-    ])
+    for hits in out.values_mut() {
+        hits.sort_by(f32::total_cmp);
+    }
+    out
 }
 
 #[inline]
@@ -457,5 +1026,118 @@ mod tests {
         assert!(is_default_white([1.0, 1.0, 1.0, 0.5]));
         assert!(!is_default_white([0.5, 0.5, 0.5, 1.0]));
         assert!(!is_default_white([1.0, 0.5, 1.0, 1.0]));
+    }
+
+    fn partial(c: f32) -> VoxelAccum {
+        VoxelAccum {
+            coverage: c,
+            samples: 1,
+            ..Default::default()
+        }
+        .of_triangle()
+    }
+
+    #[test]
+    fn strip_split_between_cells_stays_unbroken() {
+        // A vertical strip under a block wide, halved between x 0 and 1 on odd layers.
+        let mut accum = HashMap::new();
+        for y in 0..6 {
+            if y % 2 == 0 {
+                accum.insert([0, y, 0], partial(0.8));
+            } else {
+                accum.insert([0, y, 0], partial(0.4));
+                accum.insert([1, y, 0], partial(0.4));
+            }
+            accum.insert([4, y, 0], partial(0.1));
+        }
+        let kept = kept_voxels(&accum);
+        for y in 0..6 {
+            let n = [[0, y, 0], [1, y, 0]]
+                .iter()
+                .filter(|p| kept.contains(*p))
+                .count();
+            assert_eq!(n, 1, "layer {y} should keep exactly one strip cell");
+            assert!(!kept.contains(&[4, y, 0]));
+        }
+    }
+
+    #[test]
+    fn lone_partial_voxel_is_dropped_but_lone_solid_kept() {
+        let mut accum = HashMap::new();
+        accum.insert([0, 0, 0], partial(0.6));
+        accum.insert([10, 0, 0], partial(1.0));
+        let kept = kept_voxels(&accum);
+        assert!(!kept.contains(&[0, 0, 0]));
+        assert!(kept.contains(&[10, 0, 0]));
+    }
+
+    #[test]
+    fn see_through_surface_does_not_erase_an_opaque_one() {
+        let opaque = VoxelAccum {
+            coverage: 1.0,
+            samples: 1,
+            ..Default::default()
+        }
+        .of_triangle();
+        let clear = VoxelAccum {
+            coverage: 0.0,
+            samples: 16,
+            ..Default::default()
+        }
+        .of_triangle();
+        let mut accum = HashMap::new();
+        accum.insert([0, 0, 0], opaque.add(&clear));
+        assert!(kept_voxels(&accum).contains(&[0, 0, 0]));
+    }
+
+    #[test]
+    fn sliver_triangles_keep_their_frame() {
+        let frame = TriFrame::new(&[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [100.0, 0.01, 0.0]])
+            .expect("a thin but real triangle");
+        let w = frame.barycentric([100.0, 0.01, 0.0]);
+        assert!((w[2] - 1.0).abs() < 1e-3, "{w:?}");
+        assert!(TriFrame::new(&[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]).is_none());
+    }
+
+    #[test]
+    fn opaque_texture_keeps_colour_under_zero_alpha() {
+        let img = gltf::image::Data {
+            pixels: vec![255, 0, 0, 0],
+            format: gltf::image::Format::R8G8B8A8,
+            width: 1,
+            height: 1,
+        };
+        let wrap = [gltf::texture::WrappingMode::Repeat; 2];
+        let opaque = MipTexture::new(&img, wrap, false)
+            .unwrap()
+            .sample([0.5, 0.5], 1.0);
+        assert_eq!(opaque, [1.0, 0.0, 0.0, 1.0]);
+        let cutout = MipTexture::new(&img, wrap, true)
+            .unwrap()
+            .sample([0.5, 0.5], 1.0);
+        assert_eq!(cutout[3], 0.0);
+    }
+
+    #[test]
+    fn footprint_measures_area_inside_voxel() {
+        // A plane at y 0 covering x >= -0.25: three quarters of voxel (0,0,0) are inside.
+        let tri = [[-0.25, 0.0, -5.0], [-0.25, 0.0, 5.0], [10.0, 0.0, 0.0]];
+        let frame = TriFrame::new(&tri).unwrap();
+        let mat = Material {
+            factor: [0.5, 0.5, 0.5, 1.0],
+            texture: None,
+            tex_coord: 0,
+            cutoff: None,
+            uncolored: false,
+        };
+        let acc = shade_footprint(&mat, &frame, None, 1.0, None, [0, 0, 0]);
+        assert_eq!(
+            acc.samples,
+            3 * 4,
+            "a 4x4 grid spans the cube, 3 of its 4 columns inside"
+        );
+        let w = frame.barycentric([3.0, 0.0, 1.0]);
+        assert!((w.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+        assert!(w.iter().all(|&x| x >= 0.0));
     }
 }

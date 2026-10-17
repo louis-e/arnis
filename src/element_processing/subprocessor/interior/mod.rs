@@ -460,7 +460,40 @@ mod tests {
         let cache = FloodFillCache::new();
         let passages = CoordinateBitmap::new_empty();
         let road = CoordinateBitmap::new(xz);
-        let footprints = CoordinateBitmap::new(xz);
+        // As the real pipeline does: every building outline is in the footprint map.
+        let mut footprints = CoordinateBitmap::new(xz);
+        for element in elements {
+            if let ProcessedElement::Way(way) = element {
+                if !way.tags.contains_key("building") {
+                    continue;
+                }
+                let pts: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                let (x0, x1) = (
+                    pts.iter().map(|p| p.0).min().unwrap_or(0),
+                    pts.iter().map(|p| p.0).max().unwrap_or(-1),
+                );
+                let (z0, z1) = (
+                    pts.iter().map(|p| p.1).min().unwrap_or(0),
+                    pts.iter().map(|p| p.1).max().unwrap_or(-1),
+                );
+                for x in x0..=x1 {
+                    for z in z0..=z1 {
+                        let (px, pz) = (x as f64 + 0.5, z as f64 + 0.5);
+                        let mut inside = false;
+                        for (a, b) in pts.iter().zip(pts.iter().cycle().skip(1)) {
+                            let (ax, az, bx, bz) = (a.0 as f64, a.1 as f64, b.0 as f64, b.1 as f64);
+                            if (az > pz) != (bz > pz) && px < ax + (pz - az) * (bx - ax) / (bz - az)
+                            {
+                                inside = !inside;
+                            }
+                        }
+                        if inside || pts.contains(&(x, z)) {
+                            footprints.set(x, z);
+                        }
+                    }
+                }
+            }
+        }
         let groups: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
         let index = InteriorUseIndex::build(elements, xz);
         let ctx = BuildingContext {
@@ -1357,8 +1390,9 @@ mod tests {
             WHITE_CONCRETE,
             DAYLIGHT_DETECTOR,
         ];
-        for x in 30..=40 {
-            for z in 20..=28 {
+        // Inside the cafe's walls only: a wall may itself be white concrete.
+        for x in 31..40 {
+            for z in 21..28 {
                 for y in 1..=2 {
                     let b = editor.get_block_absolute(x, y, z);
                     assert!(
@@ -1387,6 +1421,14 @@ mod tests {
                             continue;
                         };
                         let inside = index::covers(&ring, x, z);
+                        // Sills and trim of the facade sit one block out from the wall.
+                        let facade_layer = !inside
+                            && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                                .iter()
+                                .any(|&(dx, dz)| index::covers(&ring, x + dx, z + dz));
+                        if facade_layer {
+                            continue;
+                        }
                         let name = b.name();
                         let furniture = name.ends_with("_stairs")
                             || name.ends_with("_wool")
