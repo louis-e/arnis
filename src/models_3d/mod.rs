@@ -8,6 +8,7 @@ pub(crate) mod wikidata;
 
 pub use pipeline::Models3dPipeline;
 
+use crate::block_definitions::Block;
 use crate::elevation::cache::{clear_cache_dir, CacheClearStats};
 use crate::world_editor::WorldEditor;
 
@@ -43,6 +44,47 @@ pub(crate) fn lowest_ground_in_bbox(
         editor.get_ground_level((min_x + max_x) / 2, (min_z + max_z) / 2)
     } else {
         lowest
+    }
+}
+
+/// Tallest tree the footprint sweep looks for above the ground.
+const TREE_SWEEP_HEIGHT: i32 = 64;
+
+/// Writes model voxels over whatever stands there. Trees inside the footprint go
+/// first, whole, so none grows through a lattice or a hollow statue.
+pub(crate) fn stamp_voxels(editor: &mut WorldEditor, voxels: &[([i32; 3], Block)]) {
+    clear_trees_in_footprint(editor, voxels);
+    for &([x, y, z], block) in voxels {
+        editor.set_block_absolute(block, x, y, z, None, Some(&[]));
+    }
+}
+
+fn clear_trees_in_footprint(editor: &mut WorldEditor, voxels: &[([i32; 3], Block)]) {
+    let Some((min_x, max_x, min_z, max_z)) = voxels.iter().fold(None, |acc, ([x, _, z], _)| {
+        let (a, b, c, d) = acc.unwrap_or((*x, *x, *z, *z));
+        Some((a.min(*x), b.max(*x), c.min(*z), d.max(*z)))
+    }) else {
+        return;
+    };
+    let top = voxels.iter().map(|(p, _)| p[1]).max().unwrap_or(0);
+    let (span_x, span_z) = ((max_x - min_x + 1) as usize, (max_z - min_z + 1) as usize);
+    let mut mask = vec![false; span_x * span_z];
+    for ([x, _, z], _) in voxels {
+        mask[(x - min_x) as usize + (z - min_z) as usize * span_x] = true;
+    }
+    // Under a ring of legs or a platform edge counts as inside.
+    let mask = crate::landmarks::fill_enclosed(&mask, span_x, span_z);
+    for (i, _) in mask.iter().enumerate().filter(|(_, &m)| m) {
+        let (x, z) = (min_x + (i % span_x) as i32, min_z + (i / span_x) as i32);
+        let ground = editor.get_ground_level(x, z);
+        for y in ground..=(ground + TREE_SWEEP_HEIGHT).min(top) {
+            if editor
+                .get_block_absolute(x, y, z)
+                .is_some_and(crate::water_depth::is_tree_part)
+            {
+                crate::water_depth::clear_tree_from(editor, x, y, z);
+            }
+        }
     }
 }
 

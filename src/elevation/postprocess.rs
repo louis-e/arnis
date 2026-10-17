@@ -2706,6 +2706,48 @@ fn terrain_ceiling(disable_height_limit: bool, extended_max_y: i32) -> i32 {
     effective_max_y - TERRAIN_HEIGHT_BUFFER
 }
 
+/// Blocks to take off the top of the height fit so each model, `height_m` tall at
+/// `model_scale` blocks per metre on terrain of `ground_m`, ends under the ceiling.
+/// Estimated with the fit's own compression; the terrain buffer counts as room.
+pub(crate) fn top_reserve_for(
+    heights: &[Vec<f64>],
+    models: &[(f64, f64)],
+    scale: f64,
+    model_scale: f64,
+    ground_level: i32,
+    disable_height_limit: bool,
+    extended_max_y: i32,
+) -> i32 {
+    if models.is_empty() {
+        return 0;
+    }
+    let (lo, hi) = heights
+        .iter()
+        .flatten()
+        .filter(|h| h.is_finite())
+        .fold((f64::MAX, f64::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+    if lo > hi {
+        return 0;
+    }
+    let available = (terrain_ceiling(disable_height_limit, extended_max_y) - ground_level) as f64;
+    let range = hi - lo;
+    let bpm = if range * scale <= available || range <= 0.0 {
+        scale
+    } else {
+        available / range
+    };
+    let room = available + (TERRAIN_HEIGHT_BUFFER - 2) as f64;
+    let need = models
+        .iter()
+        .map(|&(ground_m, height_m)| (ground_m - lo) * bpm + height_m * model_scale - room)
+        .fold(0.0f64, f64::max);
+    if need <= 0.0 {
+        return 0;
+    }
+    // Never more than half the column, or the terrain would flatten to nothing.
+    (need.ceil() as i32 + 2).min(available as i32 / 2)
+}
+
 fn derive_affine(
     blurred_heights: &[Vec<f64>],
     scale: f64,
@@ -2713,6 +2755,7 @@ fn derive_affine(
     min_ground_level: i32,
     disable_height_limit: bool,
     extended_max_y: i32,
+    top_reserve: i32,
 ) -> (ElevationAffine, FitRange) {
     // Derive min/max
     let (min_height, max_height) = blurred_heights
@@ -2750,7 +2793,7 @@ fn derive_affine(
         };
 
     let ideal_scaled_range: f64 = height_range * scale;
-    let ceiling = terrain_ceiling(disable_height_limit, extended_max_y);
+    let ceiling = terrain_ceiling(disable_height_limit, extended_max_y) - top_reserve;
 
     // Sink the terrain base to reach the extended floor, but only as far as the relief
     // actually needs. Blindly sinking would drop a low-relief bbox thousands of blocks down
@@ -2854,6 +2897,7 @@ fn apply_affine(
         .collect()
 }
 
+#[cfg(test)]
 pub fn scale_to_minecraft_with(
     blurred_heights: &[Vec<f64>],
     scale: f64,
@@ -2862,6 +2906,30 @@ pub fn scale_to_minecraft_with(
     disable_height_limit: bool,
     extended_max_y: i32,
     policy: AffinePolicy,
+) -> (Vec<Vec<f64>>, ElevationAffine) {
+    scale_to_minecraft_reserving(
+        blurred_heights,
+        scale,
+        ground_level,
+        min_ground_level,
+        disable_height_limit,
+        extended_max_y,
+        policy,
+        0,
+    )
+}
+
+/// `scale_to_minecraft_with`, fitting the relief `top_reserve` blocks lower.
+#[allow(clippy::too_many_arguments)]
+pub fn scale_to_minecraft_reserving(
+    blurred_heights: &[Vec<f64>],
+    scale: f64,
+    ground_level: i32,
+    min_ground_level: i32,
+    disable_height_limit: bool,
+    extended_max_y: i32,
+    policy: AffinePolicy,
+    top_reserve: i32,
 ) -> (Vec<Vec<f64>>, ElevationAffine) {
     let ceiling = terrain_ceiling(disable_height_limit, extended_max_y);
     let upper_clamp = ceiling as f64;
@@ -2876,6 +2944,7 @@ pub fn scale_to_minecraft_with(
                 min_ground_level,
                 disable_height_limit,
                 extended_max_y,
+                top_reserve,
             );
             fit = Some(range);
             affine
@@ -2888,6 +2957,7 @@ pub fn scale_to_minecraft_with(
                 min_ground_level,
                 disable_height_limit,
                 extended_max_y,
+                top_reserve,
             );
             // A flat first area chose no slope; later areas need one.
             if affine.blocks_per_meter <= 0.0 {

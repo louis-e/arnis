@@ -3419,6 +3419,62 @@ impl BuildingConfig {
 // Never render as buildings: Eiffel Tower, London Eye, Utah Capitol, Starbase Pad 2 trench + mount ring.
 const SKIP_WAY_IDS: &[u64] = &[5013364, 204068874, 32920861, 1352374225, 1486731987];
 
+/// Bridge towers, piers and anchorages, which are structure rather than rooms.
+pub(crate) fn is_bridge_support(tags: &HashMap<String, String>) -> bool {
+    tags.contains_key("bridge:support")
+        || (tags.get("man_made").map(String::as_str) == Some("tower")
+            && tags.get("tower:type").map(String::as_str) == Some("bridge"))
+}
+
+/// One block for the whole support: its paint, then its material, then concrete.
+/// Paint goes first because a steel tower is the colour it was painted.
+pub(crate) fn bridge_support_block(tags: &HashMap<String, String>) -> Block {
+    if let Some(rgb) = tags
+        .get("building:colour")
+        .or_else(|| tags.get("colour"))
+        .and_then(|c| color_text_to_rgb_tuple(c))
+    {
+        return crate::block_palette::paint_block_for_color(rgb);
+    }
+    let material = tags
+        .get("building:material")
+        .or_else(|| tags.get("material"))
+        .map(|m| m.to_ascii_lowercase());
+    match material.as_deref() {
+        Some("steel" | "metal" | "iron") => IRON_BLOCK,
+        Some("stone" | "granite" | "masonry") => STONE_BRICKS,
+        Some("brick") => BRICK,
+        _ => SMOOTH_STONE,
+    }
+}
+
+/// A solid support: no rooms, windows, floors or lights. A part standing on the
+/// ground reaches down to the terrain and, in water, on to the bed.
+fn generate_bridge_support(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    cells: &[(i32, i32)],
+    base_y: i32,
+    height: i32,
+    grounded: bool,
+) {
+    let block = bridge_support_block(&element.tags);
+    let top = base_y + height.max(1);
+    for &(x, z) in cells {
+        let bottom = if grounded {
+            (editor.get_ground_level(x, z) + 1).min(base_y + 1)
+        } else {
+            base_y + 1
+        };
+        for y in bottom..=top {
+            editor.set_block_absolute(block, x, y, z, None, None);
+        }
+        if grounded {
+            editor.register_support_column(x, z, block);
+        }
+    }
+}
+
 /// Darker stone family plinth matching the wall material tone.
 fn base_course_for_wall(wall: Block) -> Block {
     match wall {
@@ -4095,6 +4151,7 @@ fn determine_wall_block_from_tags(
         .get("building:material")
         .or_else(|| element.tags.get("building:facade:material"))
         .or_else(|| element.tags.get("facade:material"))
+        .filter(|m| !painted_metal(m, &element.tags))
     {
         if let Some(block) = get_wall_block_for_material(material, rng) {
             return Some(block);
@@ -4148,6 +4205,14 @@ fn wall_block_for_colour_tag(rgb: (u8, u8, u8), rng: &mut impl Rng) -> Block {
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map_or(WHITE_CONCRETE, |(b, _)| b)
+}
+
+/// Steel shows its paint, so a metal with a colour tag defers to the colour.
+fn painted_metal(material: &str, tags: &HashMap<String, String>) -> bool {
+    matches!(
+        material.trim().to_ascii_lowercase().as_str(),
+        "steel" | "metal" | "iron"
+    ) && (tags.contains_key("building:colour") || tags.contains_key("colour"))
 }
 
 /// Wall block for a building without material or colour tags (those are
@@ -10282,6 +10347,28 @@ pub fn generate_buildings(
     // through to the full building pipeline and render as small boxy buildings.
     if element.tags.get("building:part").map(|v| v.as_str()) == Some("roof") {
         generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
+        return None;
+    }
+
+    if is_bridge_support(&element.tags) {
+        let (height, _) = calculate_building_height(
+            element,
+            building_type,
+            min_level,
+            scale_factor,
+            relation_levels,
+            floor_cycle,
+            cached_footprint_size,
+            group_seed,
+        );
+        generate_bridge_support(
+            editor,
+            element,
+            &cached_floor_area,
+            start_y_offset + abs_terrain_offset,
+            height,
+            min_level_offset == 0,
+        );
         return None;
     }
 

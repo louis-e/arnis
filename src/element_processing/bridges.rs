@@ -3,11 +3,13 @@ use crate::element_processing::bridge_modules;
 use crate::element_processing::bridge_styles::{
     default_pylons, resolve_bridge_style_with_outline, BridgeOutlineIndex, BridgeStyle,
 };
+use crate::element_processing::bridge_towers::{self, CableSpan, DEFAULT_SIDE_SPAN};
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::railways;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 const LAYER_HEIGHT_STEP: i32 = 6;
 const FLAT_TERRAIN_DIP_THRESHOLD: i32 = 4;
@@ -37,6 +39,12 @@ const PROFILE_MONOTONIC_TOLERANCE: f32 = 2.0;
 const OBSTACLE_GRID_CELL: i32 = 64;
 /// A deck at least this far below another in the same column is a separate, lower level.
 const LOWER_DECK_GAP: i32 = STACKED_DECK_HEADROOM - 1;
+/// A way passing a mapped tower within its half width plus this (blocks) runs through it.
+const TOWER_PASS_MARGIN: i32 = 12;
+/// Lesser piers this close (metres) to a structure can end its side spans.
+const SIDE_PIER_REACH_M: f64 = 30.0;
+/// A same-named approach this close (metres) to a mapped tower belongs to its bridge.
+const APPROACH_REACH_M: f64 = 1500.0;
 /// Rows a deck's own structure reaches below its surface.
 const DECK_STRUCTURE_DEPTH: i32 = 2;
 /// How far off a road deck a rail bridge's track may run and still ride on it.
@@ -63,6 +71,8 @@ pub struct BridgeMemberInfo {
     pub covered_by_wider: bool,
     // Cable spans: pylon positions from the main span; None stands on piers.
     pub cable_pylons: Option<Vec<(i32, i32)>>,
+    // Cables hung from towers mapped in OSM; where set, piers stand only outside it.
+    pub cable_span: Option<Arc<CableSpan>>,
 }
 
 impl BridgeMemberInfo {
@@ -297,6 +307,27 @@ impl BridgeStructureMap {
             .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
             .unwrap_or_default();
         let obstacles = GradeObstacles::build(elements, scale, bounds);
+
+        let mapped = bridge_towers::collect(elements, editor, scale);
+        // Names of the bridges that run through a mapped tower.
+        let passes_tower = |w: &ProcessedWay| {
+            let reach = i64::from(way_half_width(w, scale) + TOWER_PASS_MARGIN).pow(2);
+            way_cells(w).iter().any(|&(x, z)| {
+                mapped
+                    .towers
+                    .iter()
+                    .any(|t| dist2((x, z), (t.x, t.z)) <= reach)
+            })
+        };
+        let tower_names: HashSet<&str> = if mapped.towers.is_empty() {
+            HashSet::new()
+        } else {
+            bridge_ways
+                .iter()
+                .filter(|w| passes_tower(w))
+                .flat_map(|w| bridge_names(w))
+                .collect()
+        };
 
         // Track ramp ways to make sure each ramp attaches to only one structure.
         let mut claimed_ramp_ways: HashSet<u64> = HashSet::new();
@@ -690,6 +721,35 @@ impl BridgeStructureMap {
                 reqs.push((u, raised_top as f32));
             }
 
+            // Towers mapped in OSM along this suspension structure, in axis order.
+            let mut towers: Vec<(f32, &bridge_towers::MappedTower)> = Vec::new();
+            if group_style == BridgeStyle::Suspension && follows_axis {
+                let reach = i64::from(
+                    way_half_width_max(group_indices, &bridge_ways, scale) + TOWER_PASS_MARGIN,
+                )
+                .pow(2);
+                for t in &mapped.towers {
+                    let close = cells
+                        .iter()
+                        .flatten()
+                        .any(|&(x, z)| dist2((x, z), (t.x, t.z)) <= reach);
+                    if close {
+                        towers.push((along(t.x, t.z), t));
+                    }
+                }
+                towers.sort_by(|a, b| a.0.total_cmp(&b.0));
+                if towers.len() >= 2 {
+                    // The road runs through each portal at its mapped level.
+                    for &(u, t) in &towers {
+                        if let Some(y) = t.deck_y {
+                            reqs.push((u, y as f32));
+                        }
+                    }
+                } else {
+                    towers.clear();
+                }
+            }
+
             let hull = if follows_axis {
                 upper_hull(reqs)
             } else {
@@ -776,13 +836,91 @@ impl BridgeStructureMap {
                 );
             }
 
+            // Cables from mapped towers, down to a pier or a typical side span each side.
+            let mut cable_span: Option<Arc<CableSpan>> = None;
+            if !towers.is_empty() {
+                let (u_lo, u_hi) = us
+                    .iter()
+                    .flatten()
+                    .fold((f32::MAX, f32::MIN), |(lo, hi), &u| (lo.min(u), hi.max(u)));
+                let (first, last) = (towers[0].0, towers[towers.len() - 1].0);
+                let main = (last - first) / (towers.len() - 1) as f32;
+                let pier_reach = ((SIDE_PIER_REACH_M * scale) as i64).pow(2);
+                let near_path = |x: i32, z: i32| {
+                    cells
+                        .iter()
+                        .flatten()
+                        .any(|&(cx, cz)| dist2((cx, cz), (x, z)) <= pier_reach)
+                };
+                let pier_us: Vec<f32> = mapped
+                    .minor
+                    .iter()
+                    .filter(|&&(x, z)| near_path(x, z))
+                    .map(|&(x, z)| along(x, z))
+                    .collect();
+                // The nearest pier past a typical minimum side span ends it.
+                let side_end = |tower_u: f32, dir: f32| {
+                    pier_us
+                        .iter()
+                        .map(|&u| (u - tower_u) * dir)
+                        .filter(|&d| d >= 0.15 * main && d <= 0.6 * main)
+                        .fold(None, |best: Option<f32>, d| {
+                            Some(best.map_or(d, |b| b.min(d)))
+                        })
+                        .map_or(tower_u + dir * DEFAULT_SIDE_SPAN * main, |d| {
+                            tower_u + dir * d
+                        })
+                };
+                let anchors = (
+                    side_end(first, -1.0).max(u_lo),
+                    side_end(last, 1.0).min(u_hi),
+                );
+                let deck_at = |u: f32| hull_at(&hull, u).round() as i32;
+                let saddles: Vec<(f32, i32)> = towers
+                    .iter()
+                    .map(|&(u, t)| (u, t.top_y - bridge_towers::SADDLE_BELOW_TOP))
+                    .collect();
+                cable_span = CableSpan::new(
+                    (ax, az),
+                    (dir_x, dir_z),
+                    &saddles,
+                    anchors,
+                    deck_at,
+                    towers[0].1.paint,
+                    scale,
+                )
+                .map(Arc::new);
+            }
+
+            // An approach tagged with its bridge's structure: made-up pylons there
+            // would stand a second, smaller bridge beside the real towers.
+            let approach_reach = ((APPROACH_REACH_M * scale) as i64).pow(2);
+            let approach_of_mapped = towers.is_empty()
+                && group_indices
+                    .iter()
+                    .any(|&i| bridge_names(bridge_ways[i]).any(|n| tower_names.contains(n)))
+                && cells.iter().flatten().any(|&(x, z)| {
+                    mapped
+                        .towers
+                        .iter()
+                        .any(|t| dist2((x, z), (t.x, t.z)) <= approach_reach)
+                });
+
             // One pylon set per cable structure, from its longest way.
             let mut cable_carriers: Vec<usize> = Vec::new();
             let mut pylon_points: Vec<(i32, i32)> = Vec::new();
-            if matches!(
+            if let Some(span) = &cable_span {
+                pylon_points = towers.iter().map(|(_, t)| (t.x, t.z)).collect();
+                cable_carriers = group_indices
+                    .iter()
+                    .copied()
+                    .filter(|&i| !is_covered(i) && cells_suspended(&cells, group_indices, i, span))
+                    .collect();
+            } else if matches!(
                 group_style,
                 BridgeStyle::Suspension | BridgeStyle::CableStayed
-            ) {
+            ) && !approach_of_mapped
+            {
                 let main = group_indices
                     .iter()
                     .enumerate()
@@ -877,6 +1015,10 @@ impl BridgeStructureMap {
                         module_idx,
                         covered_by_wider,
                         cable_pylons: cable_carriers.contains(&idx).then(|| pylon_points.clone()),
+                        cable_span: cable_span
+                            .as_ref()
+                            .filter(|_| cable_carriers.contains(&idx))
+                            .cloned(),
                     },
                 );
             }
@@ -1578,6 +1720,40 @@ fn effective_layer(way: &ProcessedWay) -> i32 {
         .and_then(|v| v.parse::<i32>().ok())
         .map(|l| l.max(0))
         .unwrap_or_else(|| if is_bridge_way(way) { 1 } else { 0 })
+}
+
+/// Squared distance between two cells, wide enough for any world.
+fn dist2(a: (i32, i32), b: (i32, i32)) -> i64 {
+    let (dx, dz) = (i64::from(a.0 - b.0), i64::from(a.1 - b.1));
+    dx * dx + dz * dz
+}
+
+fn way_half_width_max(indices: &[usize], ways: &[&ProcessedWay], scale: f64) -> i32 {
+    indices
+        .iter()
+        .map(|&i| way_half_width(ways[i], scale))
+        .max()
+        .unwrap_or(0)
+}
+
+/// The names a bridge way goes by.
+fn bridge_names(way: &ProcessedWay) -> impl Iterator<Item = &str> {
+    ["bridge:name", "name"]
+        .into_iter()
+        .filter_map(|k| way.tags.get(k).map(String::as_str))
+}
+
+/// Whether any of member `idx`'s cells hangs from `span`.
+fn cells_suspended(
+    cells: &[Vec<(i32, i32)>],
+    indices: &[usize],
+    idx: usize,
+    span: &CableSpan,
+) -> bool {
+    indices
+        .iter()
+        .position(|&i| i == idx)
+        .is_some_and(|m| cells[m].iter().any(|&(x, z)| span.suspends(x, z)))
 }
 
 fn way_half_width(way: &ProcessedWay, scale: f64) -> i32 {

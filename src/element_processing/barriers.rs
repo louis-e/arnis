@@ -87,14 +87,21 @@ pub fn generate_barriers(
     }
 
     if let ProcessedElement::Way(way) = element {
+        // A 3D-mapped railing, say on a bridge tower, floats at min_height and its
+        // height is measured from the ground, not from where it starts.
+        let lift: i32 = element
+            .tags()
+            .get("min_height")
+            .and_then(|h| h.trim_end_matches('m').trim().parse::<f32>().ok())
+            .map_or(0, |h| h.round().max(0.0) as i32);
         // Determine wall height
         let wall_height: i32 = element
             .tags()
             .get("height")
             .and_then(|height: &String| height.parse::<f32>().ok())
-            .map(|height: f32| height.round() as i32)
+            .map(|height: f32| height.round() as i32 - lift)
             .unwrap_or(barrier_height)
-            .max(2); // Minimum height of 2
+            .max(if lift > 0 { 1 } else { 2 }); // Minimum height of 2 on the ground
         let joined = is_connectable(barrier_material);
         // Only masonry gets a coping.
         let capped = wall_height > 1 && !matches!(barrier_material, OAK_LEAVES | OAK_FENCE);
@@ -113,7 +120,15 @@ pub fn generate_barriers(
             cells = four_connected_line(&cells);
         }
 
-        let bases = barrier_bases(editor, bridge_surface, &cells);
+        let mut bases = barrier_bases(editor, bridge_surface, &cells);
+        // A floating part keeps one level, measured from the structure's lowest footing.
+        if lift > 0 {
+            let low = cells
+                .iter()
+                .map(|&(x, z)| editor.get_absolute_y(x, 0, z))
+                .min();
+            bases = cells.iter().map(|_| low).collect();
+        }
         for (&(bx, bz), base) in cells.iter().zip(bases) {
             let Some(base) = base else {
                 continue;
@@ -125,7 +140,7 @@ pub fn generate_barriers(
             {
                 editor.set_block_absolute(GRASS_BLOCK, bx, base, bz, None, None);
             }
-            for y in 1..=wall_height {
+            for y in (lift + 1)..=(lift + wall_height) {
                 if joined {
                     place_connected(editor, barrier_material, bx, base + y, bz);
                 } else {
@@ -136,7 +151,7 @@ pub fn generate_barriers(
                 editor.set_block_absolute(
                     STONE_BRICK_SLAB,
                     bx,
-                    base + wall_height + 1,
+                    base + lift + wall_height + 1,
                     bz,
                     None,
                     None,

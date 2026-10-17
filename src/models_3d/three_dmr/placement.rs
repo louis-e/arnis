@@ -1,8 +1,11 @@
 //! 3DMR pre-scan, suppression set, and end-to-end placement orchestration.
 
 use crate::args::Args;
+use crate::block_definitions::{Block, BROWN_TERRACOTTA, MUD_BRICKS};
+use crate::block_palette::{closest_block, closest_of};
+use crate::colors::RGBTuple;
 use crate::models_3d::three_dmr::client::{fetch_glb, fetch_info, ModelInfo};
-use crate::models_3d::voxelize::{voxelize_glb, WorldTransform};
+use crate::models_3d::voxelize::{voxelize_glb_paint, WorldTransform};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
@@ -36,6 +39,33 @@ impl Bbox {
 pub struct PrescanResult {
     pub suppressed_ids: HashSet<(&'static str, u64)>,
     placements: Vec<Placement>,
+}
+
+/// Corrections for a model its 3DMR metadata leaves turned, sized or coloured wrong.
+struct ModelOverride {
+    id: u64,
+    /// Extra yaw, degrees clockwise, on top of the model's own and `direction`.
+    yaw_deg: f64,
+    /// Extra uniform scale.
+    scale: f64,
+    /// Matched against instead of the whole palette, to hold the model to one family.
+    palette: &'static [(RGBTuple, Block)],
+}
+
+const MODEL_OVERRIDES: &[ModelOverride] = &[ModelOverride {
+    // Eiffel Tower: legs point N/E/S/W with the base edges at 44.3 degrees, the
+    // base is 125 m, and the iron is one brown rather than a texture patchwork.
+    id: 4,
+    yaw_deg: 44.3,
+    scale: 1.035,
+    palette: &[
+        ((77, 51, 36), BROWN_TERRACOTTA),
+        ((137, 104, 79), MUD_BRICKS),
+    ],
+}];
+
+fn model_override(id: u64) -> Option<&'static ModelOverride> {
+    MODEL_OVERRIDES.iter().find(|o| o.id == id)
 }
 
 /// Assumed max XZ half-extent (m) for the otherwise-uncapped 3DMR models, so their regions can
@@ -200,18 +230,32 @@ pub fn place_three_dmr_models(editor: &mut WorldEditor, args: &Args, prescan: &P
         let ground_y =
             crate::models_3d::lowest_ground_in_bbox(editor, fp.min_x, fp.min_z, fp.max_x, fp.max_z);
 
+        let fix = model_override(placement.model_id);
         let transform = WorldTransform::new(
             info.rotation,
-            info.scale,
+            info.scale * fix.map_or(1.0, |o| o.scale),
             info.translation,
             scale,
-            placement.world_yaw_degrees,
+            placement.world_yaw_degrees + fix.map_or(0.0, |o| o.yaw_deg),
             placement.anchor_x as f32,
             ground_y as f32,
             placement.anchor_z as f32,
         );
 
-        let mut voxels = match voxelize_glb(glb_bytes, transform) {
+        let painted = voxelize_glb_paint(glb_bytes, transform).map(|v| {
+            v.into_iter()
+                .map(|(pos, paint)| {
+                    let block = match fix {
+                        Some(o) if !o.palette.is_empty() => {
+                            paint.block_with(|c| closest_of(o.palette, c))
+                        }
+                        _ => paint.block_with(closest_block),
+                    };
+                    (pos, block)
+                })
+                .collect::<Vec<_>>()
+        });
+        let mut voxels = match painted {
             Ok(v) => v,
             Err(e) => {
                 eprintln!(
@@ -234,9 +278,7 @@ pub fn place_three_dmr_models(editor: &mut WorldEditor, args: &Args, prescan: &P
             }
         }
 
-        for ([x, y, z], block) in &voxels {
-            editor.set_block_absolute(*block, *x, *y, *z, None, None);
-        }
+        crate::models_3d::stamp_voxels(editor, &voxels);
         total_voxels += voxels.len();
         placed_count += 1;
 

@@ -18,6 +18,9 @@ pub struct IndexEntry {
     pub artist: Option<String>,
     #[serde(default)]
     pub height_m: Option<f64>,
+    /// Clockwise turn of the fitted model, for one whose OSM element has no `direction`.
+    #[serde(default)]
+    pub yaw_deg: Option<f64>,
     /// Y-banded block pools; beats the OSM-derived palette when present.
     #[serde(default)]
     pub palette_layers: Option<Vec<PaletteLayer>>,
