@@ -109,6 +109,7 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
         false,
         compute_grid_dims(&bbox, preview_scale),
         crate::elevation::AffinePolicy::Fit,
+        &crate::elevation::PeakSource::none(),
     )
     .map_err(|e| format!("Elevation fetch failed: {e}"))?;
 

@@ -495,6 +495,7 @@ fn run_cli() {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
     }
     let fetch_start = std::time::Instant::now();
+    let (peak_tx, peaks) = crate::elevation::PeakSource::channel();
     let (raw_data, overture_data, mut ground) = std::thread::scope(|s| {
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
@@ -512,7 +513,7 @@ fn run_cli() {
         });
         let ground_handle = s.spawn(|| {
             let t = std::time::Instant::now();
-            let ground = ground::generate_ground_data(&args, effective_bbox);
+            let ground = ground::generate_ground_data(&args, effective_bbox, &peaks);
             (ground, t.elapsed())
         });
 
@@ -539,6 +540,15 @@ fn run_cli() {
             })
         };
         bench.report("osm_fetch", t.elapsed());
+        // The terrain thread waits on this before fitting its height range.
+        let _ = peak_tx.send(crate::elevation::TerrainHints {
+            peaks: crate::elevation::peaks::peaks_in(&raw_data),
+            tall_models: if args.use_3d {
+                crate::models_3d::wikidata::tall_models_in(&raw_data)
+            } else {
+                Vec::new()
+            },
+        });
 
         // A panicked worker already reported itself through the panic hook, so
         // degrade instead of taking the whole run down with it.
