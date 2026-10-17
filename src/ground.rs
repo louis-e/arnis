@@ -7,8 +7,8 @@ use crate::coordinate_system::{
 };
 use crate::ecoregion::{EcoMap, Ecoregion};
 use crate::elevation::{
-    compute_grid_dims, compute_grid_dims_for_world_with_detail, compute_grid_dims_with_detail,
-    AffinePolicy, ElevationAffine,
+    compute_grid_dims_for_world_with_detail, compute_grid_dims_with_detail, AffinePolicy,
+    ElevationAffine,
 };
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
@@ -291,9 +291,10 @@ impl Ground {
         scale: f64,
         ground_level: i32,
         canopy_height: bool,
+        terrain_detail_level: TerrainDetailLevel,
         frame: &GroundFrame,
     ) -> Self {
-        let plan = frame.fetch_plan(bbox, scale);
+        let plan = frame.fetch_plan(bbox, scale, terrain_detail_level);
         let fetch_bbox = plan.bbox;
         let (grid_w, grid_h) = plan.grid_dims();
         // Canopy depends on neither, so it downloads alongside the land cover.
@@ -1389,6 +1390,7 @@ pub fn generate_ground_data(args: &Args, bbox: LLBBox) -> Ground {
         args.scale,
         args.ground_level,
         args.canopy_height,
+        args.terrain_detail_level,
         &frame,
     );
     crate::world_editor::set_base_chunk_y(ground.base_level());
@@ -1829,8 +1831,8 @@ mod frame_tests {
     #[test]
     fn the_local_frame_reads_everything_off_the_bbox() {
         let bbox = LLBBox::new(48.13, 11.56, 48.14, 11.58).unwrap();
-        let plan = GroundFrame::local().fetch_plan(&bbox, 1.0);
-        let (ww, wh, gw, gh) = compute_grid_dims(&bbox, 1.0);
+        let plan = GroundFrame::local().fetch_plan(&bbox, 1.0, TerrainDetailLevel::High);
+        let (ww, wh, gw, gh) = crate::elevation::compute_grid_dims(&bbox, 1.0);
         assert_eq!(plan.dims, (ww, wh, gw, gh));
         assert_eq!(plan.pad, 0);
         assert_eq!(plan.final_dims, (ww, wh));
@@ -1844,7 +1846,7 @@ mod frame_tests {
         let (rect, eff) = snap_bbox_to_chunks(&proj, &req).unwrap();
         let w = (rect.max_x() - rect.min_x() + 1) as usize;
         let h = (rect.max_z() - rect.min_z() + 1) as usize;
-        let plan = projected_frame(100, w, h).fetch_plan(&eff, 1.0);
+        let plan = projected_frame(100, w, h).fetch_plan(&eff, 1.0, TerrainDetailLevel::High);
         assert_eq!(plan.pad, 100);
         assert_eq!(plan.dims, (w + 200, h + 200, w + 200, h + 200));
         assert_eq!(plan.final_dims, (w, h));
@@ -1873,7 +1875,7 @@ mod frame_tests {
         let proj = WebMercatorProjection::new(0.0, 0.0, 1.0);
         let rect = XZBBox::rect_from_min_max(0, 0, side as i32 - 1, 15).unwrap();
         let eff = llbbox_for_rect(&proj, &rect).unwrap();
-        let plan = projected_frame(100, side, 16).fetch_plan(&eff, 1.0);
+        let plan = projected_frame(100, side, 16).fetch_plan(&eff, 1.0, TerrainDetailLevel::High);
         assert_eq!(plan.pad, 0);
         assert_eq!(plan.final_dims, (side, 16));
     }
@@ -1912,3 +1914,4 @@ mod frame_tests {
         );
     }
 }
+
