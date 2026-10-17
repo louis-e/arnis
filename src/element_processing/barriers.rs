@@ -89,17 +89,20 @@ pub fn generate_barriers(
     if let ProcessedElement::Way(way) = element {
         // A 3D-mapped railing, say on a bridge tower, floats at min_height and its
         // height is measured from the ground, not from where it starts.
+        // Both scale with the world, like the structure it is attached to.
+        let scale = editor.scale();
         let lift: i32 = element
             .tags()
             .get("min_height")
-            .and_then(|h| h.trim_end_matches('m').trim().parse::<f32>().ok())
-            .map_or(0, |h| h.round().max(0.0) as i32);
+            .and_then(|h| h.trim_end_matches('m').trim().parse::<f64>().ok())
+            .map_or(0, |h| (h * scale).round().max(0.0) as i32);
+        let height_scale = if lift > 0 { scale } else { 1.0 };
         // Determine wall height
         let wall_height: i32 = element
             .tags()
             .get("height")
-            .and_then(|height: &String| height.parse::<f32>().ok())
-            .map(|height: f32| height.round() as i32 - lift)
+            .and_then(|height: &String| height.parse::<f64>().ok())
+            .map(|height: f64| (height * height_scale).round() as i32 - lift)
             .unwrap_or(barrier_height)
             .max(if lift > 0 { 1 } else { 2 }); // Minimum height of 2 on the ground
         let joined = is_connectable(barrier_material);

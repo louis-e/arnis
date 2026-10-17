@@ -2706,17 +2706,63 @@ fn terrain_ceiling(disable_height_limit: bool, extended_max_y: i32) -> i32 {
     effective_max_y - TERRAIN_HEIGHT_BUFFER
 }
 
+/// The fit `derive_affine` makes under `ceiling`: the base level, sunk towards
+/// `min_ground_level` when the relief needs it, and the relief in blocks.
+fn fit_geometry(
+    height_range: f64,
+    scale: f64,
+    ceiling: i32,
+    ground_level: i32,
+    min_ground_level: i32,
+    disable_height_limit: bool,
+) -> (i32, f64) {
+    let ideal_scaled_range: f64 = height_range * scale;
+    // Sink the terrain base to reach the extended floor, but only as far as the relief
+    // actually needs. Blindly sinking would drop a low-relief bbox thousands of blocks down
+    // with an empty sky above it; not sinking at all would waste the pack's lower half.
+    // Only ever fires with the extended floor: callers pass min_ground_level == ground_level
+    // otherwise, so an explicit --ground-level is never silently overridden.
+    let ground_level = if disable_height_limit
+        && min_ground_level < ground_level
+        && ideal_scaled_range.is_finite()
+    {
+        let needed = ideal_scaled_range.ceil() as i32;
+        (ceiling.saturating_sub(needed)).clamp(min_ground_level, ground_level)
+    } else {
+        ground_level
+    };
+    let available_y_range: f64 = (ceiling - ground_level) as f64;
+    let scaled_range = if ideal_scaled_range <= available_y_range {
+        ideal_scaled_range
+    } else {
+        let compression_factor: f64 = available_y_range / height_range;
+        height_range * compression_factor
+    };
+    (ground_level, scaled_range)
+}
+
+/// Blocks `FitWithHeadroom` lifts the terrain by, leaving room below for lower neighbours.
+fn headroom_margin(ceiling: i32, ground_level: i32, scaled_range: f64) -> f64 {
+    let free = (ceiling - ground_level) as f64 - scaled_range;
+    (free * 0.5).min(HEADROOM_MAX_BLOCKS).floor().max(0.0)
+}
+
 /// Blocks to take off the top of the height fit so each model, `height_m` tall at
-/// `model_scale` blocks per metre on terrain of `ground_m`, ends under the ceiling.
-/// Estimated with the fit's own compression; the terrain buffer counts as room.
+/// `model_scale` blocks per metre on terrain of `ground_m`, ends under the build
+/// limit; the terrain buffer counts as room. Zero when no model needs it. Solved
+/// against the fit itself: a lower ceiling lowers a model by less than the
+/// reserve unless it stands on the highest terrain.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn top_reserve_for(
     heights: &[Vec<f64>],
     models: &[(f64, f64)],
     scale: f64,
     model_scale: f64,
     ground_level: i32,
+    min_ground_level: i32,
     disable_height_limit: bool,
     extended_max_y: i32,
+    headroom: bool,
 ) -> i32 {
     if models.is_empty() {
         return 0;
@@ -2729,23 +2775,51 @@ pub(crate) fn top_reserve_for(
     if lo > hi {
         return 0;
     }
-    let available = (terrain_ceiling(disable_height_limit, extended_max_y) - ground_level) as f64;
     let range = hi - lo;
-    let bpm = if range * scale <= available || range <= 0.0 {
-        scale
-    } else {
-        available / range
+    let ceiling = terrain_ceiling(disable_height_limit, extended_max_y);
+    let limit = (ceiling + TERRAIN_HEIGHT_BUFFER - 2) as f64;
+    let model_top = |reserve: i32| {
+        let top = ceiling - reserve;
+        let (base, scaled) = fit_geometry(
+            range,
+            scale,
+            top,
+            ground_level,
+            min_ground_level,
+            disable_height_limit,
+        );
+        let bpm = if range > 0.0 { scaled / range } else { 0.0 };
+        let lift = if headroom {
+            headroom_margin(top, base, scaled)
+        } else {
+            0.0
+        };
+        models
+            .iter()
+            .map(|&(ground_m, height_m)| {
+                base as f64 + lift + (ground_m - lo) * bpm + height_m * model_scale
+            })
+            .fold(f64::MIN, f64::max)
     };
-    let room = available + (TERRAIN_HEIGHT_BUFFER - 2) as f64;
-    let need = models
-        .iter()
-        .map(|&(ground_m, height_m)| (ground_m - lo) * bpm + height_m * model_scale - room)
-        .fold(0.0f64, f64::max);
-    if need <= 0.0 {
+    if model_top(0) <= limit {
         return 0;
     }
     // Never more than half the column, or the terrain would flatten to nothing.
-    (need.ceil() as i32 + 2).min(available as i32 / 2)
+    let cap = (ceiling - ground_level).max(0) / 2;
+    // Model tops only fall as the reserve grows, so the smallest that fits is a bisection.
+    let (mut fits, mut short) = (cap, 0);
+    if model_top(cap) > limit {
+        return cap;
+    }
+    while fits - short > 1 {
+        let mid = (fits + short) / 2;
+        if model_top(mid) <= limit {
+            fits = mid;
+        } else {
+            short = mid;
+        }
+    }
+    fits
 }
 
 fn derive_affine(
@@ -2794,42 +2868,29 @@ fn derive_affine(
 
     let ideal_scaled_range: f64 = height_range * scale;
     let ceiling = terrain_ceiling(disable_height_limit, extended_max_y) - top_reserve;
-
-    // Sink the terrain base to reach the extended floor, but only as far as the relief
-    // actually needs. Blindly sinking would drop a low-relief bbox thousands of blocks down
-    // with an empty sky above it; not sinking at all would waste the pack's lower half.
-    // Only ever fires with the extended floor: callers pass min_ground_level == ground_level
-    // otherwise, so an explicit --ground-level is never silently overridden.
-    let ground_level = if disable_height_limit
-        && min_ground_level < ground_level
-        && ideal_scaled_range.is_finite()
-    {
-        let needed = ideal_scaled_range.ceil() as i32;
-        (ceiling.saturating_sub(needed)).clamp(min_ground_level, ground_level)
-    } else {
-        ground_level
-    };
-
+    let (ground_level, scaled_range) = fit_geometry(
+        height_range,
+        scale,
+        ceiling,
+        ground_level,
+        min_ground_level,
+        disable_height_limit,
+    );
     let available_y_range: f64 = (ceiling - ground_level) as f64;
-
-    let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
+    if ideal_scaled_range <= available_y_range {
         eprintln!(
             "Realistic elevation: {:.1}m range fits in {} available blocks",
             height_range, available_y_range as i32
         );
-        ideal_scaled_range
     } else {
-        let compression_factor: f64 = available_y_range / height_range;
-        let compressed_range: f64 = height_range * compression_factor;
         eprintln!(
             "Elevation compressed: {:.1}m range -> {:.0} blocks ({:.2}:1 ratio, 1 block = {:.2}m)",
             height_range,
-            compressed_range,
-            height_range / compressed_range,
-            compressed_range / height_range
+            scaled_range,
+            height_range / scaled_range,
+            scaled_range / height_range
         );
-        compressed_range
-    };
+    }
 
     let blocks_per_meter = if height_range > 0.0 {
         scaled_range / height_range
@@ -2963,8 +3024,12 @@ pub fn scale_to_minecraft_reserving(
             if affine.blocks_per_meter <= 0.0 {
                 affine.blocks_per_meter = scale;
             }
-            let free = (ceiling - affine.ground_level) as f64 - range.scaled_range;
-            let margin_blocks = (free * 0.5).min(HEADROOM_MAX_BLOCKS).floor().max(0.0);
+            // Measured under the reserved ceiling, or the lift would fill the models' room.
+            let margin_blocks = headroom_margin(
+                ceiling - top_reserve,
+                affine.ground_level,
+                range.scaled_range,
+            );
             if margin_blocks > 0.0 {
                 affine.min_height_m -= margin_blocks / affine.blocks_per_meter;
                 eprintln!(
@@ -4119,5 +4184,67 @@ mod affine_policy_tests {
         assert_eq!(mc[0][1], -1594.0);
         assert_eq!(mc[0][2], -1064.0);
         assert!(mc[1][0] < mc[1][1] && mc[1][1] < mc[1][2] && mc[1][2] <= 2016.0);
+    }
+}
+
+#[cfg(test)]
+mod top_reserve_tests {
+    use super::*;
+
+    const LIMIT: f64 = (MAX_Y - 2) as f64;
+
+    /// Model top after fitting `grid` with the reserve the solver picks.
+    fn fitted_top(grid: &[Vec<f64>], model: (f64, f64), policy: AffinePolicy) -> (i32, f64) {
+        let headroom = matches!(policy, AffinePolicy::FitWithHeadroom);
+        let reserve = top_reserve_for(grid, &[model], 1.0, 1.0, -62, -62, false, 0, headroom);
+        let (_, affine) =
+            scale_to_minecraft_reserving(grid, 1.0, -62, -62, false, 0, policy, reserve);
+        (reserve, affine.y_for_metres(model.0) + model.1)
+    }
+
+    fn relief_0_to_1000() -> Vec<Vec<f64>> {
+        vec![vec![0.0, 500.0, 1000.0]]
+    }
+
+    #[test]
+    fn no_model_or_a_model_that_fits_reserves_nothing() {
+        let grid = relief_0_to_1000();
+        assert_eq!(
+            top_reserve_for(&grid, &[], 1.0, 1.0, -62, -62, false, 0, false),
+            0
+        );
+        let low = top_reserve_for(&grid, &[(0.0, 30.0)], 1.0, 1.0, -62, -62, false, 0, false);
+        assert_eq!(low, 0);
+    }
+
+    #[test]
+    fn a_model_halfway_up_the_relief_ends_under_the_limit() {
+        let (reserve, top) = fitted_top(&relief_0_to_1000(), (500.0, 250.0), AffinePolicy::Fit);
+        assert!(reserve > 0);
+        assert!(top <= LIMIT, "top {top} with reserve {reserve}");
+        // The smallest such reserve: one block less overflows.
+        let grid = relief_0_to_1000();
+        let (_, affine) = scale_to_minecraft_reserving(
+            &grid,
+            1.0,
+            -62,
+            -62,
+            false,
+            0,
+            AffinePolicy::Fit,
+            reserve - 1,
+        );
+        assert!(affine.y_for_metres(500.0) + 250.0 > LIMIT);
+    }
+
+    #[test]
+    fn one_world_headroom_stays_out_of_the_reserve() {
+        let (reserve, top) = fitted_top(
+            &relief_0_to_1000(),
+            (1000.0, 110.0),
+            AffinePolicy::FitWithHeadroom,
+        );
+        assert!(reserve > 0);
+        assert!(top <= LIMIT, "top {top} with reserve {reserve}");
     }
 }

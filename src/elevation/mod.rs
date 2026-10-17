@@ -299,8 +299,10 @@ pub fn fetch_elevation_data(
             scale * height_multiplier,
             scale,
             ground_level,
+            min_ground_level,
             disable_height_limit,
             extended_max_y,
+            matches!(affine, AffinePolicy::FitWithHeadroom),
         ),
     };
     emit_gui_progress_update(16.0, "Processing elevation...");

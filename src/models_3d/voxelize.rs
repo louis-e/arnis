@@ -148,8 +148,12 @@ struct VoxelAccum {
     /// Sum of per-sample coverage, normalised so 0.5 is the material's cutoff.
     coverage: f32,
     samples: u16,
-    glass: u16,
-    uncolored: u16,
+    /// Best mean coverage of any one triangle here, so a see-through surface
+    /// crossing an opaque one cannot thin it out.
+    occupancy: f32,
+    /// Coverage of samples that are glass, and of samples with no colour.
+    glass: f32,
+    uncolored: f32,
 }
 
 impl VoxelAccum {
@@ -160,8 +164,15 @@ impl VoxelAccum {
         self.weight += s.weight;
         self.coverage += s.coverage;
         self.samples = self.samples.saturating_add(s.samples);
-        self.glass = self.glass.saturating_add(s.glass);
-        self.uncolored = self.uncolored.saturating_add(s.uncolored);
+        self.occupancy = self.occupancy.max(s.occupancy);
+        self.glass += s.glass;
+        self.uncolored += s.uncolored;
+        self
+    }
+
+    /// This one triangle's samples, closed off so their mean is its occupancy.
+    fn of_triangle(mut self) -> Self {
+        self.occupancy = self.coverage / self.samples.max(1) as f32;
         self
     }
 }
@@ -250,7 +261,13 @@ struct MipTexture {
 }
 
 impl MipTexture {
-    fn new(img: &gltf::image::Data, wrap: [gltf::texture::WrappingMode; 2]) -> Option<Self> {
+    /// `use_alpha` is false for opaque materials, whose texture alpha glTF ignores;
+    /// premultiplying would lose the colour under transparent texels.
+    fn new(
+        img: &gltf::image::Data,
+        wrap: [gltf::texture::WrappingMode; 2],
+        use_alpha: bool,
+    ) -> Option<Self> {
         use gltf::image::Format;
         let (stride, has_alpha) = match img.format {
             Format::R8G8B8 => (3, false),
@@ -270,7 +287,11 @@ impl MipTexture {
             .chunks_exact(stride)
             .take(w * h)
             .map(|c| {
-                let a = if has_alpha { c[3] as f32 / 255.0 } else { 1.0 };
+                let a = if has_alpha && use_alpha {
+                    c[3] as f32 / 255.0
+                } else {
+                    1.0
+                };
                 [
                     lut[c[0] as usize] * a,
                     lut[c[1] as usize] * a,
@@ -419,7 +440,9 @@ fn accumulate_glb(
         gltf::import_slice(glb_bytes).map_err(|e| format!("glTF parse: {e}"))?;
 
     let mut accum: HashMap<[i32; 3], VoxelAccum> = HashMap::new();
-    let mut textures: Vec<Option<Option<MipTexture>>> = (0..images.len()).map(|_| None).collect();
+    // Keyed by glTF texture, which pairs an image with its sampler, and by
+    // whether alpha counts.
+    let mut textures: HashMap<(usize, bool), Option<MipTexture>> = HashMap::new();
 
     let scenes: Vec<_> = if let Some(scene) = document.default_scene() {
         scene.nodes().collect()
@@ -444,28 +467,28 @@ fn accumulate_glb(
                 let pbr = mat.pbr_metallic_roughness();
                 let factor = pbr.base_color_factor();
                 let tex_info = pbr.base_color_texture();
-                let texture = tex_info.as_ref().and_then(|info| {
+                let cutoff = match mat.alpha_mode() {
+                    gltf::material::AlphaMode::Opaque => None,
+                    gltf::material::AlphaMode::Mask => Some(mat.alpha_cutoff().unwrap_or(0.5)),
+                    gltf::material::AlphaMode::Blend => Some(BLEND_CUTOFF),
+                };
+                let key = tex_info.as_ref().map(|info| {
                     let tex = info.texture();
-                    let idx = tex.source().index();
-                    let sampler = tex.sampler();
-                    let slot = textures.get_mut(idx)?;
-                    slot.get_or_insert_with(|| {
-                        images.get(idx).and_then(|img| {
-                            MipTexture::new(img, [sampler.wrap_s(), sampler.wrap_t()])
+                    let key = (tex.index(), cutoff.is_some());
+                    textures.entry(key).or_insert_with(|| {
+                        let sampler = tex.sampler();
+                        images.get(tex.source().index()).and_then(|img| {
+                            MipTexture::new(img, [sampler.wrap_s(), sampler.wrap_t()], key.1)
                         })
                     });
-                    Some(idx)
+                    key
                 });
-                let texture = texture.and_then(|i| textures[i].as_ref()?.as_ref());
+                let texture = key.and_then(|k| textures.get(&k)?.as_ref());
                 let material = Material {
                     factor,
                     texture,
                     tex_coord: tex_info.as_ref().map_or(0, |i| i.tex_coord()),
-                    cutoff: match mat.alpha_mode() {
-                        gltf::material::AlphaMode::Opaque => None,
-                        gltf::material::AlphaMode::Mask => Some(mat.alpha_cutoff().unwrap_or(0.5)),
-                        gltf::material::AlphaMode::Blend => Some(BLEND_CUTOFF),
-                    },
+                    cutoff,
                     uncolored: texture.is_none() && is_default_white(factor),
                 };
 
@@ -508,30 +531,36 @@ fn accumulate_glb(
                         .as_ref()
                         .and_then(|t| Some([*t.get(ia)?, *t.get(ib)?, *t.get(ic)?]));
                     let tri = [wa, wb, wc];
-                    let Some(frame) = TriFrame::new(&tri) else {
-                        continue;
-                    };
                     let texels_per_voxel = match (material.texture, tri_uv) {
                         (Some(tex), Some(uv)) => texel_density(tex.size(), &uv, tri),
                         _ => 1.0,
                     };
+                    // Only a textured triangle needs its frame; untextured ones
+                    // are one colour throughout.
+                    let frame = tri_uv.and(TriFrame::new(&tri));
                     // The DDA picks the cells; its weights drift on diagonal
                     // lines, so each cell is shaded from its own footprint.
                     let mut cells: DdaVoxelizer<()> = DdaVoxelizer::new();
                     cells.add_triangle(&tri, &|_: Option<&()>, _: [i32; 3], _: [f32; 3]| {});
                     for cell in cells.finalize().into_keys() {
-                        let s = if tri_uv.is_some() {
-                            shade_footprint(
+                        let s = match &frame {
+                            Some(frame) => shade_footprint(
                                 &material,
-                                &frame,
+                                frame,
                                 tri_uv.as_ref(),
                                 texels_per_voxel,
                                 vcol,
                                 cell,
-                            )
-                        } else {
-                            shade_sample(&material, None, 1.0, vcol, [1.0 / 3.0; 3])
-                        };
+                            ),
+                            None => shade_sample(
+                                &material,
+                                tri_uv.as_ref(),
+                                texels_per_voxel,
+                                vcol,
+                                [1.0 / 3.0; 3],
+                            ),
+                        }
+                        .of_triangle();
                         accum
                             .entry(cell)
                             .and_modify(|a| *a = a.add(&s))
@@ -561,10 +590,11 @@ pub fn voxelize_glb_paint(
     let mut out = Vec::with_capacity(kept.len());
     for pos in kept {
         let acc = &accum[&pos];
-        let n = acc.samples.max(1) as f32;
-        let paint = if acc.glass as f32 * 2.0 >= n {
+        // Votes among the samples that are there, not the see-through ones.
+        let n = acc.coverage.max(1e-6);
+        let paint = if acc.glass * 2.0 >= n {
             VoxelPaint::Glass
-        } else if acc.weight <= 0.0 || acc.uncolored as f32 * 2.0 > n {
+        } else if acc.weight <= 0.0 || acc.uncolored * 2.0 > n {
             VoxelPaint::Uncolored
         } else {
             let c = acc
@@ -602,7 +632,7 @@ fn texel_density(size: (f32, f32), uv: &[[f32; 2]; 3], p: [[f32; 3]; 3]) -> f32 
 
 /// Share of a voxel's samples that count as solid, 0.5 at the material cutoff.
 fn coverage_of(acc: &VoxelAccum) -> f32 {
-    acc.coverage / acc.samples.max(1) as f32
+    acc.occupancy
 }
 
 /// Touched voxels that become blocks. Half covered is solid. A strip thinner
@@ -695,43 +725,41 @@ struct TriFrame {
     p0: [f32; 3],
     e1: [f32; 3],
     e2: [f32; 3],
+    /// Unnormalised normal over its squared length, for barycentrics.
+    n_scaled: [f32; 3],
     n: [f32; 3],
     u: [f32; 3],
     v: [f32; 3],
-    d00: f32,
-    d01: f32,
-    d11: f32,
-    inv_den: f32,
 }
 
 impl TriFrame {
+    /// None only for a triangle with no area at all. Barycentrics come from
+    /// cross products: the Gram determinant cancels to zero in f32 on slivers.
     fn new(t: &[[f32; 3]; 3]) -> Option<Self> {
         let e1 = sub3(t[1], t[0]);
         let e2 = sub3(t[2], t[0]);
-        let n = unit3(cross3(e1, e2))?;
+        let normal = cross3(e1, e2);
+        let len2 = dot3(normal, normal);
+        if !(len2 > 0.0 && len2.is_finite()) {
+            return None;
+        }
+        let n = unit3(normal)?;
         let u = unit3(e1)?;
-        let v = cross3(n, u);
-        let (d00, d01, d11) = (dot3(e1, e1), dot3(e1, e2), dot3(e2, e2));
-        let den = d00 * d11 - d01 * d01;
-        (den.abs() > 1e-12).then(|| Self {
+        Some(Self {
             p0: t[0],
             e1,
             e2,
+            n_scaled: normal.map(|c| c / len2),
             n,
             u,
-            v,
-            d00,
-            d01,
-            d11,
-            inv_den: 1.0 / den,
+            v: cross3(n, u),
         })
     }
 
     fn barycentric(&self, p: [f32; 3]) -> [f32; 3] {
         let d = sub3(p, self.p0);
-        let (d20, d21) = (dot3(d, self.e1), dot3(d, self.e2));
-        let b1 = (self.d11 * d20 - self.d01 * d21) * self.inv_den;
-        let b2 = (self.d00 * d21 - self.d01 * d20) * self.inv_den;
+        let b1 = dot3(cross3(d, self.e2), self.n_scaled);
+        let b2 = dot3(cross3(self.e1, d), self.n_scaled);
         [1.0 - b1 - b2, b1, b2]
     }
 }
@@ -815,8 +843,13 @@ fn shade_sample(
         weight,
         coverage,
         samples: 1,
-        glass: is_glass_sentinel(rgb) as u16,
-        uncolored: uncolored as u16,
+        occupancy: 0.0,
+        glass: if is_glass_sentinel(rgb) {
+            coverage
+        } else {
+            0.0
+        },
+        uncolored: if uncolored { coverage } else { 0.0 },
     }
 }
 
@@ -843,8 +876,8 @@ pub fn voxelize_solid_triangles(
         if hits.len() % 2 != 0 {
             continue;
         }
-        for pair in hits.chunks_exact(2) {
-            for y in pair[0].ceil() as i32..=pair[1].floor() as i32 {
+        for &[enter, leave] in hits.as_chunks::<2>().0 {
+            for y in enter.ceil() as i32..=leave.floor() as i32 {
                 cells.insert([x, y, z]);
             }
         }
@@ -982,6 +1015,7 @@ mod tests {
             samples: 1,
             ..Default::default()
         }
+        .of_triangle()
     }
 
     #[test]
@@ -1016,6 +1050,53 @@ mod tests {
         let kept = kept_voxels(&accum);
         assert!(!kept.contains(&[0, 0, 0]));
         assert!(kept.contains(&[10, 0, 0]));
+    }
+
+    #[test]
+    fn see_through_surface_does_not_erase_an_opaque_one() {
+        let opaque = VoxelAccum {
+            coverage: 1.0,
+            samples: 1,
+            ..Default::default()
+        }
+        .of_triangle();
+        let clear = VoxelAccum {
+            coverage: 0.0,
+            samples: 16,
+            ..Default::default()
+        }
+        .of_triangle();
+        let mut accum = HashMap::new();
+        accum.insert([0, 0, 0], opaque.add(&clear));
+        assert!(kept_voxels(&accum).contains(&[0, 0, 0]));
+    }
+
+    #[test]
+    fn sliver_triangles_keep_their_frame() {
+        let frame = TriFrame::new(&[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [100.0, 0.01, 0.0]])
+            .expect("a thin but real triangle");
+        let w = frame.barycentric([100.0, 0.01, 0.0]);
+        assert!((w[2] - 1.0).abs() < 1e-3, "{w:?}");
+        assert!(TriFrame::new(&[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]).is_none());
+    }
+
+    #[test]
+    fn opaque_texture_keeps_colour_under_zero_alpha() {
+        let img = gltf::image::Data {
+            pixels: vec![255, 0, 0, 0],
+            format: gltf::image::Format::R8G8B8A8,
+            width: 1,
+            height: 1,
+        };
+        let wrap = [gltf::texture::WrappingMode::Repeat; 2];
+        let opaque = MipTexture::new(&img, wrap, false)
+            .unwrap()
+            .sample([0.5, 0.5], 1.0);
+        assert_eq!(opaque, [1.0, 0.0, 0.0, 1.0]);
+        let cutout = MipTexture::new(&img, wrap, true)
+            .unwrap()
+            .sample([0.5, 0.5], 1.0);
+        assert_eq!(cutout[3], 0.0);
     }
 
     #[test]
