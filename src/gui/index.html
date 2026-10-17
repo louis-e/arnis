@@ -537,6 +537,26 @@
                   </div>
                 </div>
 
+                <div class="settings-row setting-choice">
+                  <label class="setting-label">
+                    <span class="setting-heading"><span data-localize="terrain_detail_level">Terrain detail level</span></span>
+                  </label>
+                  <div class="segmented-control choice-cards" id="terrain-detail-level-group">
+                    <button type="button" class="segment" data-terrain-detail-level="low">
+                      <span class="choice-title" data-localize="terrain_detail_low">Low</span>
+                      <span class="choice-desc" data-localize="terrain_detail_low_desc">Aim for one sample per 4 blocks. Faster generation with less detail.</span>
+                    </button>
+                    <button type="button" class="segment active" data-default data-terrain-detail-level="balanced">
+                      <span class="choice-title" data-localize="terrain_detail_balanced">Balanced</span>
+                      <span class="choice-desc" data-localize="terrain_detail_balanced_desc">Aim for one sample per 2 blocks. Balance detail and performance.</span>
+                    </button>
+                    <button type="button" class="segment" data-terrain-detail-level="high">
+                      <span class="choice-title" data-localize="terrain_detail_high">High</span>
+                      <span class="choice-desc" data-localize="terrain_detail_high_desc">Use up to one sample per block for the best available detail.</span>
+                    </button>
+                  </div>
+                </div>
+
                 <div class="settings-row setting-tile">
                   <label for="fillground-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-pickaxe"></use></svg>
