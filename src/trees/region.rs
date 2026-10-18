@@ -1,7 +1,9 @@
 //! Region-aware tree library: loads a realm pack + vanilla-plus and picks a schematic per cell. Seam-safe.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
+use rayon::prelude::*;
 use serde::Deserialize;
 
 use crate::ecoregion::{EcoBiome, Ecoregion};
@@ -50,7 +52,9 @@ const PALM_GENERA: &[&str] = &[
     "Archontophoenix",
     "Areca",
     "Astrocarym",
+    "Astrocaryum",
     "Attalea",
+    "Bactris",
     "Beccariophoenix",
     "Bismarckia",
     "Borassus",
@@ -62,6 +66,7 @@ const PALM_GENERA: &[&str] = &[
     "Euterpe",
     "Hyphaene",
     "Jubaea",
+    "Leopoldinia",
     "Livistona",
     "Mauritia",
     "Nypa",
@@ -245,8 +250,8 @@ fn build_pools(
 /// What a caller already knows about the slot it is asking for.
 #[derive(Clone, Copy, Default)]
 pub struct SlotRequest {
-    /// Size tier from a measured canopy height, when there is one.
-    pub want_size: Option<TreeSize>,
+    /// Model height in blocks the slot asks for, when anything measured it.
+    pub want_height: Option<i32>,
     /// The caller fixed the density itself, so skip the pack's grove noise.
     pub density_decided: bool,
     /// Ecoregion at the slot; its mix picks the community instead of the hint.
@@ -264,7 +269,8 @@ pub struct SlotRequest {
 pub struct MappedRequest<'a> {
     pub genus: Option<&'a str>,
     pub conifer: Option<bool>,
-    pub want_size: Option<TreeSize>,
+    /// Model height in blocks, from the tags or the canopy map.
+    pub want_height: Option<i32>,
     pub eco: Option<Ecoregion>,
     pub beach: bool,
 }
@@ -289,6 +295,10 @@ pub struct RegionLibrary {
     /// Palms where no ecoregion says otherwise, by the area's latitude.
     palms_default: bool,
     mixes: HashMap<u16, EcoMix>,
+    /// Mean leaf columns of the models by height, index = height in blocks.
+    crowns: Vec<f64>,
+    /// Model files parsed so far, for the communities mixes borrow from other packs.
+    loaded: Loaded,
 }
 
 // Metres above the selection's lowest point at which a cell counts as montane.
@@ -299,12 +309,102 @@ const GROVE_BLOCKS: i32 = 48;
 const BEACH_PALMS: u64 = 70;
 const SALT_MIX: u32 = 0x3C0_A11E;
 const SALT_VANILLA: u32 = 0x3C0_B22F;
+/// Tallest model height the crown table covers.
+const CROWN_TABLE_MAX: usize = 64;
 
-/// One manifest community's trees, minus `excluded` species or genera.
+/// How far a model may miss the wanted height and still count as a match.
+fn height_tolerance(want: i32) -> i32 {
+    ((f64::from(want) * 0.15).round() as i32).max(2)
+}
+
+/// How far past the nearest model a pick may still go, so a crowd of
+/// slightly smaller models does not pull every pick below the wanted height.
+fn height_slack(want: i32) -> i32 {
+    ((f64::from(want) * 0.08).round() as i32).max(1)
+}
+
+/// Crown top in metres for a slot nothing measured: typical of mixed woodland
+/// and parks, where most trees stand 7 to 18 m and few pass 25 m.
+fn default_height_m(x: i32, z: i32) -> f64 {
+    // (cumulative per mille, low m, high m)
+    const BANDS: [(u64, f64, f64); 5] = [
+        (150, 4.0, 7.0),
+        (500, 7.0, 12.0),
+        (830, 12.0, 18.0),
+        (965, 18.0, 25.0),
+        (1000, 25.0, 32.0),
+    ];
+    let roll = coord_hash(x + 101, z + 233) % 1000;
+    let t = (coord_hash(x ^ 0x2C61, z ^ 0x5E0B) % 1000) as f64 / 1000.0;
+    let (lo, hi) = BANDS
+        .iter()
+        .find(|b| roll < b.0)
+        .map_or((7.0, 12.0), |b| (b.1, b.2));
+    lo + (hi - lo) * t
+}
+
+/// Reads one model file of a pack.
+type ReadFile<'a> = dyn Fn(&str) -> Option<Cow<'static, [u8]>> + Sync + 'a;
+
+/// Where each parsed model file sits in `entries`, by `pack/rel`; `None` for one
+/// that is missing or has no leaves. A model many communities list is parsed once.
+type Loaded = HashMap<String, Option<usize>>;
+
+fn species_skipped(sp: &MSpecies, exclude_palms: bool, excluded: &[&str]) -> bool {
+    let genus = sp.name.split('_').next().unwrap_or_default();
+    (exclude_palms && is_palm(&sp.name)) || excluded.iter().any(|&x| x == sp.name || x == genus)
+}
+
+/// Parses every file `communities` list that is not loaded yet, in parallel.
+fn preload<'a>(
+    pack: &str,
+    communities: impl IntoIterator<Item = &'a MCommunity>,
+    read_file: &ReadFile,
+    entries: &mut Vec<(Schematic, TreeSize, u8)>,
+    loaded: &mut Loaded,
+    exclude_palms: bool,
+    excluded: &[&str],
+) {
+    let mut todo: Vec<(String, u8)> = Vec::new();
+    let mut queued: HashSet<&str> = HashSet::new();
+    for mc in communities {
+        for sp in &mc.species {
+            if species_skipped(sp, exclude_palms, excluded) {
+                continue;
+            }
+            for (rels, wclass) in [(&sp.w1, 1u8), (&sp.w2, 2u8), (&sp.w3, 3u8)] {
+                for rel in rels {
+                    if !loaded.contains_key(&format!("{pack}/{rel}")) && queued.insert(rel) {
+                        todo.push((rel.clone(), wclass));
+                    }
+                }
+            }
+        }
+    }
+    let parsed: Vec<Option<Schematic>> = todo
+        .par_iter()
+        .map(|(rel, _)| {
+            read_file(rel)
+                .and_then(|bytes| load_schem(&bytes).ok())
+                .filter(Schematic::has_leaves)
+        })
+        .collect();
+    for ((rel, wclass), schem) in todo.into_iter().zip(parsed) {
+        let idx = schem.map(|schem| {
+            let size = size_for_height(schem.height);
+            entries.push((schem, size, wclass));
+            entries.len() - 1
+        });
+        loaded.insert(format!("{pack}/{rel}"), idx);
+    }
+}
+
+/// One manifest community's trees, minus `excluded` species or genera. Its files
+/// must have gone through `preload`.
 fn build_community(
     mc: &MCommunity,
-    read_file: &dyn Fn(&str) -> Option<Vec<u8>>,
-    entries: &mut Vec<(Schematic, TreeSize, u8)>,
+    pack: &str,
+    loaded: &Loaded,
     exclude_palms: bool,
     excluded: &[&str],
 ) -> Option<Community> {
@@ -312,27 +412,15 @@ fn build_community(
     let mut names: Vec<String> = Vec::new();
     let mut genera: Vec<String> = Vec::new();
     for sp in &mc.species {
-        let genus = sp.name.split('_').next().unwrap_or_default();
-        if (exclude_palms && is_palm(&sp.name))
-            || excluded.iter().any(|&x| x == sp.name || x == genus)
-        {
+        if species_skipped(sp, exclude_palms, excluded) {
             continue;
         }
-        let mut idxs: Vec<usize> = Vec::new();
-        for (rels, wclass) in [(&sp.w1, 1u8), (&sp.w2, 2u8), (&sp.w3, 3u8)] {
-            for rel in rels {
-                let Some(bytes) = read_file(rel) else {
-                    continue;
-                };
-                if let Ok(schem) = load_schem(&bytes) {
-                    if schem.has_leaves() {
-                        let size = size_for_height(schem.height);
-                        entries.push((schem, size, wclass));
-                        idxs.push(entries.len() - 1);
-                    }
-                }
-            }
-        }
+        let genus = sp.name.split('_').next().unwrap_or_default();
+        let idxs: Vec<usize> = [&sp.w1, &sp.w2, &sp.w3]
+            .into_iter()
+            .flatten()
+            .filter_map(|rel| loaded.get(&format!("{pack}/{rel}")).copied().flatten())
+            .collect();
         if !idxs.is_empty() {
             species.push(idxs);
             names.push(sp.name.clone());
@@ -352,14 +440,25 @@ fn build_community(
 /// Load a manifest's files into `entries` via `read_file`, returning the built `Pack`.
 fn load_pack(
     m: &MRegion,
-    read_file: &dyn Fn(&str) -> Option<Vec<u8>>,
+    pack: &str,
+    read_file: &ReadFile,
     entries: &mut Vec<(Schematic, TreeSize, u8)>,
+    loaded: &mut Loaded,
     exclude_palms: bool,
 ) -> Pack {
+    preload(
+        pack,
+        &m.communities,
+        read_file,
+        entries,
+        loaded,
+        exclude_palms,
+        &[],
+    );
     let communities: Vec<Community> = m
         .communities
         .iter()
-        .filter_map(|mc| build_community(mc, read_file, entries, exclude_palms, &[]))
+        .filter_map(|mc| build_community(mc, pack, loaded, exclude_palms, &[]))
         .collect();
     let default_idx = communities
         .iter()
@@ -504,8 +603,16 @@ impl RegionLibrary {
             .map_err(|e| format!("region: parse region.json: {e}"))?;
 
         let mut entries: Vec<(Schematic, TreeSize, u8)> = Vec::new();
-        let realm_read = |rel: &str| source.realm_file(rel).map(|c| c.into_owned());
-        let realm_pack = load_pack(&m, &realm_read, &mut entries, exclude_palms);
+        let mut loaded = Loaded::new();
+        let realm_read = |rel: &str| source.realm_file(rel);
+        let realm_pack = load_pack(
+            &m,
+            source.code(),
+            &realm_read,
+            &mut entries,
+            &mut loaded,
+            exclude_palms,
+        );
         if realm_pack.is_empty() {
             return Err("region: no usable trees in realm pack".to_string());
         }
@@ -520,8 +627,15 @@ impl RegionLibrary {
         if m.realm != "vnplus" {
             if let Some(vbytes) = source.vanilla_manifest() {
                 if let Ok(vm) = serde_json::from_slice::<MRegion>(&vbytes) {
-                    let vanilla_read = |rel: &str| source.vanilla_file(rel).map(|c| c.into_owned());
-                    vanilla_pack = load_pack(&vm, &vanilla_read, &mut entries, exclude_palms);
+                    let vanilla_read = |rel: &str| source.vanilla_file(rel);
+                    vanilla_pack = load_pack(
+                        &vm,
+                        "vanilla-plus",
+                        &vanilla_read,
+                        &mut entries,
+                        &mut loaded,
+                        exclude_palms,
+                    );
                 }
             }
         }
@@ -543,9 +657,46 @@ impl RegionLibrary {
             palms_stripped: exclude_palms,
             palms_default: true,
             mixes: HashMap::new(),
+            crowns: Vec::new(),
+            loaded,
         };
         lib.mark_palms();
+        lib.build_crowns();
         Ok(lib)
+    }
+
+    /// Mean leaf columns by model height, filled over gaps from the nearest
+    /// heights so every height up to the table's end has an answer.
+    fn build_crowns(&mut self) {
+        let mut sum = vec![0.0f64; CROWN_TABLE_MAX + 1];
+        let mut n = vec![0u32; CROWN_TABLE_MAX + 1];
+        for (schem, _, _) in &self.entries {
+            let h = (schem.height.max(1) as usize).min(CROWN_TABLE_MAX);
+            sum[h] += f64::from(schem.leaf_columns);
+            n[h] += 1;
+        }
+        self.crowns = (0..=CROWN_TABLE_MAX)
+            .map(|h| {
+                // Widen the window until it holds a few models.
+                for w in 0..=CROWN_TABLE_MAX {
+                    let lo = h.saturating_sub(w).max(1);
+                    let hi = (h + w).min(CROWN_TABLE_MAX);
+                    let cnt: u32 = n[lo..=hi].iter().sum();
+                    if cnt >= 3 || (lo == 1 && hi == CROWN_TABLE_MAX) {
+                        let s: f64 = sum[lo..=hi].iter().sum();
+                        return if cnt > 0 { s / f64::from(cnt) } else { 50.0 };
+                    }
+                }
+                50.0
+            })
+            .collect();
+    }
+
+    /// Leaf columns a tree of `height` blocks covers in this pack, on average,
+    /// held to the size cap the picker obeys.
+    pub fn crown_columns(&self, height: i32) -> f64 {
+        let h = (self.capped_height(height).max(1) as usize).min(CROWN_TABLE_MAX);
+        self.crowns.get(h).copied().unwrap_or(50.0).max(4.0)
     }
 
     fn mark_palms(&mut self) {
@@ -637,6 +788,8 @@ impl RegionLibrary {
                 },
             );
         }
+        // Mixes load models from other packs.
+        self.build_crowns();
     }
 
     /// The palm species of `communities` as one appended community, if there are any.
@@ -735,11 +888,20 @@ impl RegionLibrary {
             .communities
             .iter()
             .find(|c| c.name == spec.community)?;
-        let read = |rel: &str| source.realm_file(rel).map(|c| c.into_owned());
-        let community = build_community(
-            mc,
+        let read = |rel: &str| source.realm_file(rel);
+        preload(
+            spec.pack,
+            [mc],
             &read,
             &mut self.entries,
+            &mut self.loaded,
+            self.palms_stripped,
+            &spec.excluded,
+        );
+        let community = build_community(
+            mc,
+            spec.pack,
+            &self.loaded,
             self.palms_stripped,
             &spec.excluded,
         )?;
@@ -762,48 +924,20 @@ impl RegionLibrary {
         &self.entries[idx].0
     }
 
-    /// The size tier wanted at this cell, by the scale band. Tall rare, Giant only at 1:1.
-    fn size_pick(&self, x: i32, z: i32) -> TreeSize {
-        let roll = coord_hash(x + 101, z + 233) % 1000;
-        if self.scale < 0.3 {
-            if roll < 650 {
-                TreeSize::Small
-            } else if roll < 985 {
-                TreeSize::Medium
-            } else {
-                TreeSize::Big
-            }
-        } else if self.scale < 0.7 {
-            if roll < 380 {
-                TreeSize::Small
-            } else if roll < 820 {
-                TreeSize::Medium
-            } else if roll < 985 {
-                TreeSize::Big
-            } else {
-                TreeSize::Tall
-            }
-        } else if self.scale < 1.0 {
-            if roll < 260 {
-                TreeSize::Small
-            } else if roll < 700 {
-                TreeSize::Medium
-            } else if roll < 930 {
-                TreeSize::Big
-            } else {
-                TreeSize::Tall
-            }
-        } else if roll < 200 {
-            TreeSize::Small
-        } else if roll < 600 {
-            TreeSize::Medium
-        } else if roll < 880 {
-            TreeSize::Big
-        } else if roll < 975 {
-            TreeSize::Tall
+    /// Model height in blocks for a slot nothing measured.
+    fn default_height(&self, x: i32, z: i32) -> i32 {
+        ((default_height_m(x, z) * self.scale).round() as i32).max(1)
+    }
+
+    /// `want` held under the size cap and the 1:1 giant gate, so communities are
+    /// judged by what they can grow within it.
+    fn capped_height(&self, want: i32) -> i32 {
+        let gate = if self.scale >= 1.0 {
+            i32::MAX
         } else {
-            TreeSize::Giant
-        }
+            crate::trees::tree_library::size_cap_height(TreeSize::Tall)
+        };
+        want.min(self.sizes.max_height()).min(gate)
     }
 
     /// Whether a size may appear: the UI tier toggle AND a scale gate (Giant only at 1:1).
@@ -822,82 +956,74 @@ impl RegionLibrary {
         mix.map_or(self.palms_default, |m| m.palms)
     }
 
-    /// Pick one variant from a community, honoring the size filter (falls back to any size if none fit).
-    /// `want` overrides the scale-band size roll, so a measured canopy height can ask for its own tier.
+    /// Whether `c` has a model within reach of `want` blocks.
+    fn fits(&self, c: &Community, want: i32, no_palms: bool) -> bool {
+        let tol = height_tolerance(want);
+        c.species.iter().flatten().any(|&i| {
+            !(no_palms && self.palm[i])
+                && self.size_allowed(self.entries[i].1)
+                && (self.entries[i].0.height - want).abs() <= tol
+        })
+    }
+
+    /// The model of `c` closest to `want` blocks. The species is rolled among
+    /// those with a model that close, then the trunk width roll picks within it.
+    /// Past the size cap only where nothing under it is left: a tree beats a hole.
     fn pick_in_community(
         &self,
         c: &Community,
         x: i32,
         z: i32,
-        want: Option<TreeSize>,
+        want: i32,
         no_palms: bool,
     ) -> Option<usize> {
         let usable = |i: usize| !(no_palms && self.palm[i]);
-        // Tier a hint resolves to here, stepping down when the cap or the 1:1
-        // giant gate rules the wanted one out. Species without it drop out of
-        // the pick below, else the hint loses to the species roll.
-        let tier: Option<TreeSize> = want.and_then(|w| {
-            let sizes = || {
-                c.species
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .filter(|&i| usable(i) && self.size_allowed(self.entries[i].1))
-                    .map(|i| self.entries[i].1)
-            };
-            sizes().filter(|&s| s <= w).max().or_else(|| sizes().min())
-        });
-        let in_tier = |i: usize| match tier {
-            Some(t) => self.entries[i].1 == t,
-            None => true,
-        };
-        let allowed_count = |sp: &Vec<usize>| {
-            sp.iter()
-                .filter(|&&i| usable(i) && self.size_allowed(self.entries[i].1) && in_tier(i))
-                .count()
-        };
-        let total: usize = c.species.iter().map(&allowed_count).sum();
-        if total == 0 {
-            let species: Vec<&Vec<usize>> = c
-                .species
+        let capped = |i: usize| usable(i) && self.size_allowed(self.entries[i].1);
+        let any_capped = c.species.iter().flatten().any(|&i| capped(i));
+        let cand = |i: usize| if any_capped { capped(i) } else { usable(i) };
+        // Nothing under the cap: the community's smallest come closest to it.
+        let want = if any_capped {
+            want
+        } else {
+            c.species
                 .iter()
-                .filter(|sp| sp.iter().any(|&i| usable(i)))
-                .collect();
-            let any: usize = species.iter().map(|sp| sp.len()).sum();
-            if any == 0 {
-                return None;
-            }
-            let mut r = (coord_hash(x + 31, z + 57) % any as u64) as usize;
-            for sp in species {
-                if r < sp.len() {
-                    let h = coord_hash(x + 313, z + 727) as usize;
-                    return Some(sp[h % sp.len()]);
-                }
-                r -= sp.len();
-            }
-            return None;
-        }
+                .flatten()
+                .copied()
+                .filter(|&i| usable(i))
+                .map(|i| self.entries[i].0.height)
+                .min()?
+        };
+        let dist = |i: usize| (self.entries[i].0.height - want).abs();
+        let best = c
+            .species
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|&i| cand(i))
+            .map(dist)
+            .min()?;
+        let tol = best + height_slack(want);
+        let close = |i: usize| cand(i) && dist(i) <= tol;
+        let counts: Vec<usize> = c
+            .species
+            .iter()
+            .map(|sp| sp.iter().filter(|&&i| close(i)).count())
+            .collect();
+        let total: usize = counts.iter().sum();
         let mut r = (coord_hash(x + 31, z + 57) % total as u64) as usize;
-        let mut chosen: &Vec<usize> = &c.species[0];
-        for sp in &c.species {
-            let w = allowed_count(sp);
-            if r < w {
-                chosen = sp;
+        let mut chosen = 0;
+        for (k, &n) in counts.iter().enumerate() {
+            if r < n {
+                chosen = k;
                 break;
             }
-            r -= w;
+            r -= n;
         }
-        let want = tier.unwrap_or_else(|| self.size_pick(x, z));
-        // The tier filters before the width walk, since a measured height beats
-        // a look. Without a hint `in_tier` passes everything.
-        let allowed: Vec<usize> = chosen
+        let pool: Vec<usize> = c.species[chosen]
             .iter()
             .copied()
-            .filter(|&i| usable(i) && self.size_allowed(self.entries[i].1) && in_tier(i))
+            .filter(|&i| close(i))
             .collect();
-        if allowed.is_empty() {
-            return None;
-        }
         let roll = coord_hash(x + 5, z + 11) % 100;
         let target_wc: u8 = if roll < WIDTH_W1 {
             1
@@ -908,7 +1034,7 @@ impl RegionLibrary {
         };
         let mut group: Vec<usize> = Vec::new();
         for wc in (1..=target_wc).rev() {
-            group = allowed
+            group = pool
                 .iter()
                 .copied()
                 .filter(|&i| self.entries[i].2 == wc)
@@ -918,19 +1044,10 @@ impl RegionLibrary {
             }
         }
         if group.is_empty() {
-            group = allowed;
-        }
-        let of_want: Vec<usize> = group
-            .iter()
-            .copied()
-            .filter(|&i| self.entries[i].1 == want)
-            .collect();
-        let pool: &[usize] = if of_want.is_empty() { &group } else { &of_want };
-        if pool.is_empty() {
-            return None;
+            group = pool;
         }
         let h = coord_hash(x + 313, z + 727) as usize;
-        Some(pool[h % pool.len()])
+        Some(group[h % group.len()])
     }
 
     /// Choose a community for `habitat_hint`; on a montane cell lowland/wet swap to conifer.
@@ -974,10 +1091,38 @@ impl RegionLibrary {
     }
 
     /// Community from an ecoregion's mix; `None` for a tagged conifer the mix lacks.
-    fn pick_from_mix(&self, mix: &EcoMix, want: Want, x: i32, z: i32) -> Option<&Community> {
+    /// One without a model near `height` gives way to one of the mix that has,
+    /// then to the biome's sprinkle, before settling for the nearest it grows.
+    fn pick_from_mix(
+        &self,
+        mix: &EcoMix,
+        want: Want,
+        x: i32,
+        z: i32,
+        height: i32,
+        no_palms: bool,
+    ) -> Option<&Community> {
         let (place, tag) = want.pool();
-        let idx = weighted(&mix.pools[place][tag], Self::grove_roll(x, z, SALT_MIX))?;
-        Some(&self.realm_pack.communities[idx])
+        let pool = &mix.pools[place][tag];
+        let roll = Self::grove_roll(x, z, SALT_MIX);
+        let c = &self.realm_pack.communities[weighted(pool, roll)?];
+        if self.fits(c, height, no_palms) {
+            return Some(c);
+        }
+        let fitting = |pack: &Pack, pool: &[(usize, u32)]| -> Vec<(usize, u32)> {
+            pool.iter()
+                .copied()
+                .filter(|&(i, _)| self.fits(&pack.communities[i], height, no_palms))
+                .collect()
+        };
+        if let Some(i) = weighted(&fitting(&self.realm_pack, pool), roll) {
+            return Some(&self.realm_pack.communities[i]);
+        }
+        let sprinkle = fitting(&self.vanilla_pack, &mix.vanilla[place][tag]);
+        Some(
+            weighted(&sprinkle, Self::grove_roll(x, z, SALT_VANILLA))
+                .map_or(c, |i| &self.vanilla_pack.communities[i]),
+        )
     }
 
     /// Vanilla sprinkle for the mix's biome; the pack's own conifers where it has none.
@@ -1004,6 +1149,18 @@ impl RegionLibrary {
         }
     }
 
+    /// Lattice for slots whose density the canopy map decided. Their odds already
+    /// keep big crowns apart, so below 1:1 it can be fine enough for the small
+    /// crowns a scaled-down forest needs.
+    pub fn slot_spacing(&self, density_decided: bool) -> i32 {
+        let micro = self.scale < crate::element_processing::tree::MICRO_TREE_MAX_SCALE;
+        if density_decided && !micro && self.scale < 0.7 {
+            4
+        } else {
+            self.base_spacing()
+        }
+    }
+
     /// WorldPainter community density (~10..150) -> fraction of slots that keep a tree.
     fn keep_prob(density: u32) -> f64 {
         (0.34 + density as f64 / 90.0).clamp(0.30, 1.0)
@@ -1020,13 +1177,17 @@ impl RegionLibrary {
         elev_y: i32,
         req: SlotRequest,
     ) -> Option<(i32, i32, usize, u8)> {
-        let s = self.base_spacing();
+        let s = self.slot_spacing(req.density_decided);
         let (sx, sz) = crate::trees::schematic::trunk_slot_s(x, z, s);
         let montane =
             self.is_montane(elev_y) && crate::ground_generation::value_noise_01(sx, sz, 64) < 0.6;
         let blend = coord_hash(sx + 7, sz + 13) % 100;
         let mix = req.eco.and_then(|e| self.mixes.get(&e.id));
         let no_palms = !self.palms_at(mix);
+        let height = self.capped_height(
+            req.want_height
+                .unwrap_or_else(|| self.default_height(sx, sz)),
+        );
         let from_mix = mix.and_then(|mix| {
             let want = Want {
                 tagged: req.tagged.then_some(hint),
@@ -1039,17 +1200,21 @@ impl RegionLibrary {
             if let Some(c) = shore.then(|| self.beach_palms(mix, sx, sz)).flatten() {
                 Some(c)
             } else if vanilla && (67..97).contains(&blend) {
-                Some(self.pick_vanilla(mix, want, sx, sz))
+                // The sprinkle only stands in for trees its models can reach.
+                let sprinkle = self.pick_vanilla(mix, want, sx, sz);
+                if self.fits(sprinkle, height, no_palms) {
+                    Some(sprinkle)
+                } else {
+                    self.pick_from_mix(mix, want, sx, sz, height, no_palms)
+                        .or(Some(sprinkle))
+                }
             } else {
-                self.pick_from_mix(mix, want, sx, sz)
+                self.pick_from_mix(mix, want, sx, sz, height, no_palms)
                     .or_else(|| vanilla.then(|| self.pick_vanilla(mix, want, sx, sz)))
             }
         });
         let (community, idx): (&Community, Option<usize>) = if let Some(c) = from_mix {
-            (
-                c,
-                self.pick_in_community(c, sx, sz, req.want_size, no_palms),
-            )
+            (c, self.pick_in_community(c, sx, sz, height, no_palms))
         } else if blend >= 97 {
             let n = self.realm_pack.own;
             if n == 0 {
@@ -1057,22 +1222,19 @@ impl RegionLibrary {
             }
             let ci = (coord_hash(sx + 5, sz + 9) % n as u64) as usize;
             let c = &self.realm_pack.communities[ci];
-            (
-                c,
-                self.pick_in_community(c, sx, sz, req.want_size, no_palms),
-            )
-        } else if blend >= 67 && !self.vanilla_pack.is_empty() {
-            let c = self.pick_community(&self.vanilla_pack, hint, sx, sz, montane);
-            (
-                c,
-                self.pick_in_community(c, sx, sz, req.want_size, no_palms),
-            )
+            let c = if self.fits(c, height, no_palms) {
+                c
+            } else {
+                self.pick_community(&self.realm_pack, hint, sx, sz, montane)
+            };
+            (c, self.pick_in_community(c, sx, sz, height, no_palms))
         } else {
-            let c = self.pick_community(&self.realm_pack, hint, sx, sz, montane);
-            (
-                c,
-                self.pick_in_community(c, sx, sz, req.want_size, no_palms),
-            )
+            let sprinkle = (blend >= 67 && !self.vanilla_pack.is_empty())
+                .then(|| self.pick_community(&self.vanilla_pack, hint, sx, sz, montane))
+                .filter(|c| self.fits(c, height, no_palms));
+            let c = sprinkle
+                .unwrap_or_else(|| self.pick_community(&self.realm_pack, hint, sx, sz, montane));
+            (c, self.pick_in_community(c, sx, sz, height, no_palms))
         };
         // The grove noise invents clearings, which would thin the same trees
         // twice when the caller already measured the density.
@@ -1101,6 +1263,8 @@ impl RegionLibrary {
         let rot = (coord_hash(x ^ 0x5bd1, z ^ 0x9e37) % 4) as u8;
         let mix = req.eco.and_then(|e| self.mixes.get(&e.id));
         let no_palms = !self.palms_at(mix);
+        let height =
+            self.capped_height(req.want_height.unwrap_or_else(|| self.default_height(x, z)));
         let pick = |species: Vec<Vec<usize>>, no_palms: bool| {
             if species.is_empty() {
                 return None;
@@ -1113,7 +1277,7 @@ impl RegionLibrary {
                 genera: Vec::new(),
                 density: 0,
             };
-            self.pick_in_community(&pool, x, z, req.want_size, no_palms)
+            self.pick_in_community(&pool, x, z, height, no_palms)
         };
         let mix_communities = || {
             mix.into_iter()
@@ -1150,7 +1314,7 @@ impl RegionLibrary {
             .filter(|_| req.beach && !want.wet && req.conifer != Some(true))
             .and_then(|m| self.beach_palms(m, x, z));
         let community = beach
-            .or_else(|| mix.and_then(|m| self.pick_from_mix(m, want, x, z)))
+            .or_else(|| mix.and_then(|m| self.pick_from_mix(m, want, x, z, height, no_palms)))
             .unwrap_or_else(|| self.pick_community(&self.realm_pack, hint, x, z, montane));
         let idx = match req.conifer {
             Some(conifer) => {
@@ -1163,12 +1327,12 @@ impl RegionLibrary {
                             no_palms,
                         )
                     })
-                    .or_else(|| self.pick_in_community(community, x, z, req.want_size, no_palms))
+                    .or_else(|| self.pick_in_community(community, x, z, height, no_palms))
             }
-            None => self.pick_in_community(community, x, z, req.want_size, no_palms),
+            None => self.pick_in_community(community, x, z, height, no_palms),
         }
         // A mapped tree always stands, even if only a palm is left to stand for it.
-        .or_else(|| self.pick_in_community(community, x, z, req.want_size, false))?;
+        .or_else(|| self.pick_in_community(community, x, z, height, false))?;
         Some((x, z, idx, rot))
     }
 
@@ -1355,69 +1519,55 @@ mod tests {
         }
     }
 
-    // A canopy height hint should steer the pick toward that tier, and must never
-    // exceed it: a 5 m crown cannot become a 30 m tree.
+    /// Heights of the models a run of slots plants for `want` blocks.
+    fn heights_for(lib: &RegionLibrary, want: Option<i32>) -> Vec<i32> {
+        let req = SlotRequest {
+            want_height: want,
+            density_decided: true,
+            ..Default::default()
+        };
+        (0..2000)
+            .filter_map(|k| lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0, req))
+            .map(|(_, _, idx, _)| lib.entries[idx].0.height)
+            .collect()
+    }
+
+    fn median(v: &mut [i32]) -> i32 {
+        v.sort_unstable();
+        v[v.len() / 2]
+    }
+
+    // The slot asks for a height, and the model it gets is the nearest one: a
+    // 20 m crown is no longer a uniform roll over every tree of 13 to 20 blocks.
     #[test]
-    fn canopy_size_hint_steers_the_pick() {
+    fn picks_the_model_nearest_the_wanted_height() {
         let src = TreePackSource::embedded("eur");
         let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
             .expect("load eur");
-        let tally = |hint: Option<TreeSize>| {
-            let req = SlotRequest {
-                want_size: hint,
-                ..Default::default()
-            };
-            let mut counts = [0u32; 5];
-            for k in 0..2000 {
-                if let Some((_, _, idx, _)) = lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0, req)
-                {
-                    counts[lib.entries[idx].1 as usize] += 1;
-                }
-            }
-            counts
-        };
-        let small = tally(Some(TreeSize::Small));
-        let medium = tally(Some(TreeSize::Medium));
-        let tall = tally(Some(TreeSize::Tall));
-        assert!(small.iter().sum::<u32>() > 100, "some slots must fill");
-
-        // A hint never overshoots except where a community has nothing that
-        // small, in which case its own smallest stands in.
-        assert_eq!((small[3], small[4]), (0, 0), "{small:?}");
-        assert!(small[2] * 100 < small.iter().sum::<u32>(), "{small:?}");
-        assert_eq!((medium[0], medium[3], medium[4]), (0, 0, 0), "{medium:?}");
-        assert_eq!((tall[0], tall[4]), (0, 0), "{tall:?}");
-
-        // And it binds: the wanted tier dominates what the pack can offer.
-        assert!(
-            medium[1] * 10 > medium.iter().sum::<u32>() * 9,
-            "{medium:?}"
-        );
-        assert!(tall[3] * 2 > tall.iter().sum::<u32>(), "{tall:?}");
-        let mean = |c: &[u32; 5]| -> f64 {
-            let n: u32 = c.iter().sum();
-            c.iter()
-                .enumerate()
-                .map(|(i, &v)| (i * v as usize) as f64)
-                .sum::<f64>()
-                / f64::from(n)
-        };
-        assert!(mean(&small) < mean(&medium), "{small:?} {medium:?}");
-        assert!(mean(&medium) < mean(&tall), "{medium:?} {tall:?}");
-
-        // The slot count is the canopy fraction's job, not the height's, so the
-        // hint must not change how many trees stand.
-        let plain: u32 = tally(None).iter().sum();
-        assert_eq!(plain, small.iter().sum::<u32>());
-        assert_eq!(plain, tall.iter().sum::<u32>());
+        let mut last = 0;
+        for want in [5, 10, 15, 20, 25] {
+            let mut got = heights_for(&lib, Some(want));
+            assert!(got.len() > 1000, "every slot still gets a tree");
+            let close = got
+                .iter()
+                .filter(|&&h| (h - want).abs() <= height_tolerance(want))
+                .count();
+            assert!(close * 10 > got.len() * 8, "want {want}: {got:?}");
+            let m = median(&mut got);
+            assert!(m > last, "medians must rise with the wanted height");
+            last = m;
+        }
+        // The height does not change how many trees stand, only which.
+        let plain = heights_for(&lib, None).len();
+        assert_eq!(plain, heights_for(&lib, Some(5)).len());
+        assert_eq!(plain, heights_for(&lib, Some(25)).len());
     }
 
     // The user's cap outranks the canopy: asking for a 30 m crown under a Small
-    // cap must not grow a single tree past what the cap alone would have placed.
-    // Communities with nothing that small still fall back to their own smallest,
-    // which is the pack's long-standing "a tree beats a hole" rule.
+    // cap picks the tallest small models, never anything past the cap where the
+    // community has something under it.
     #[test]
-    fn max_tree_size_clamps_the_canopy_hint() {
+    fn max_tree_size_clamps_the_wanted_height() {
         let src = TreePackSource::embedded("eur");
         let lib = RegionLibrary::load(
             &src,
@@ -1428,32 +1578,164 @@ mod tests {
             false,
         )
         .expect("load eur");
-        let tally = |want_size| {
+        let got = heights_for(&lib, Some(30));
+        assert!(got.len() > 1000, "the cap must not empty the pack");
+        // Communities with nothing that small stand in their own smallest.
+        let small = got.iter().filter(|&&h| h <= 6).count();
+        assert!(small * 2 > got.len(), "{got:?}");
+        assert!(got.iter().all(|&h| h <= 12), "{got:?}");
+    }
+
+    #[test]
+    fn crowns_grow_with_the_model() {
+        let src = TreePackSource::embedded("eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
+            .expect("load eur");
+        let (small, mid, tall) = (
+            lib.crown_columns(5),
+            lib.crown_columns(15),
+            lib.crown_columns(30),
+        );
+        assert!(small < mid && mid < tall, "{small} {mid} {tall}");
+        assert!((10.0..80.0).contains(&small), "{small}");
+        assert!((60.0..400.0).contains(&tall), "{tall}");
+        // Past the table it holds the tallest models' crown.
+        assert_eq!(
+            lib.crown_columns(500),
+            lib.crown_columns(CROWN_TABLE_MAX as i32)
+        );
+    }
+
+    #[test]
+    fn crowns_follow_the_size_cap() {
+        let src = TreePackSource::embedded("eur");
+        let load = |sizes| RegionLibrary::load(&src, 1.0, -62, 1.0, sizes, false).expect("eur");
+        let capped = load(SizeFilter::up_to(TreeSize::Small));
+        let full = load(SizeFilter::default());
+        assert_eq!(capped.crown_columns(25), capped.crown_columns(6));
+        assert!(full.crown_columns(25) > full.crown_columns(6));
+    }
+
+    #[test]
+    fn yellow_cedar_grows_in_needleleaved_stands_only() {
+        let lib = with_ecoregions("wna", &[364], 47.6);
+        let req = SlotRequest {
+            tagged: true,
+            ..Default::default()
+        };
+        let conifers = planted(&lib, 364, req, Habitat::Conifer, 0);
+        let broadleaves = planted(&lib, 364, req, Habitat::Lowland, 0);
+        assert!(
+            conifers.contains_key("Callitropsis_nootkatensis"),
+            "{conifers:?}"
+        );
+        assert!(
+            !broadleaves.contains_key("Callitropsis_nootkatensis"),
+            "{broadleaves:?}"
+        );
+    }
+
+    #[test]
+    fn unmeasured_slots_get_plausible_heights() {
+        let mut hs: Vec<f64> = (0..5000).map(|k| default_height_m(k * 13, k * 7)).collect();
+        assert!(hs.iter().all(|h| (4.0..=32.0).contains(h)));
+        hs.sort_by(f64::total_cmp);
+        let (med, p95) = (hs[hs.len() / 2], hs[hs.len() * 95 / 100]);
+        assert!((9.0..15.0).contains(&med), "median {med}");
+        assert!((18.0..27.0).contains(&p95), "p95 {p95}");
+    }
+
+    // In Berlin's mixed forest a 25 m crown must not land on the sprinkle's
+    // 10-block oaks or a hazel thicket: those give way to a community that
+    // grows trees that tall.
+    #[test]
+    fn a_tall_crown_finds_a_community_that_grows_it() {
+        let lib = with_ecoregions("eur", &[654], 52.5);
+        for (want, lo, hi) in [(25, 19, 31), (6, 2, 9)] {
             let req = SlotRequest {
-                want_size,
+                want_height: Some(want),
+                eco: crate::ecoregion::lookup(654),
                 density_decided: true,
                 ..Default::default()
             };
-            let mut counts = [0u32; 5];
-            for k in 0..2000 {
-                if let Some((_, _, idx, _)) = lib.pick_slot(k * 3, k * 7, Habitat::Lowland, 0, req)
-                {
-                    counts[lib.entries[idx].1 as usize] += 1;
-                }
-            }
-            counts
+            let mut got: Vec<i32> = (0..3000)
+                .filter_map(|k| {
+                    lib.pick_slot(k * 11 % 997 * 5, k * 7 % 991 * 5, Habitat::Lowland, 0, req)
+                })
+                .map(|(_, _, idx, _)| lib.entries[idx].0.height)
+                .collect();
+            assert!(got.len() > 1000);
+            let close = got.iter().filter(|&&h| (lo..=hi).contains(&h)).count();
+            assert!(
+                close * 10 > got.len() * 8,
+                "want {want}: median {}",
+                median(&mut got)
+            );
+        }
+    }
+
+    #[test]
+    fn a_crown_the_mix_cannot_reach_borrows_the_sprinkle() {
+        // The Puget mix grows nothing under 4 blocks; the sprinkle's shrubs do.
+        let lib = with_ecoregions("wna", &[364], 47.6);
+        let req = SlotRequest {
+            want_height: Some(1),
+            eco: crate::ecoregion::lookup(364),
+            density_decided: true,
+            ..Default::default()
         };
-        let capped = tally(None);
-        let hinted = tally(Some(TreeSize::Giant));
-        assert!(
-            capped.iter().sum::<u32>() > 100,
-            "the cap must not empty the pack"
-        );
-        assert_eq!(hinted, capped, "a Giant hint must not beat a Small cap");
-        assert!(
-            hinted[0] > hinted[1..].iter().copied().max().unwrap_or(0),
-            "the cap should still dominate ({hinted:?})"
-        );
+        let mut got: Vec<i32> = (0..3000)
+            .filter_map(|k| {
+                lib.pick_slot(k * 11 % 997 * 5, k * 7 % 991 * 5, Habitat::Lowland, 0, req)
+            })
+            .map(|(_, _, idx, _)| lib.entries[idx].0.height)
+            .collect();
+        assert!(got.len() > 1000);
+        let close = got.iter().filter(|&&h| h <= 3).count();
+        assert!(close * 10 > got.len() * 8, "median {}", median(&mut got));
+    }
+
+    #[test]
+    fn every_ecoregion_has_small_and_medium_trees() {
+        let mut by_pack: HashMap<&str, Vec<u16>> = HashMap::new();
+        for id in 0..2000u16 {
+            if let Some((pack, _)) = crate::ecoregion::tree_mix(id) {
+                by_pack.entry(pack).or_default().push(id);
+            }
+        }
+        assert!(by_pack.values().map(Vec::len).sum::<usize>() > 800);
+        for (pack, ids) in by_pack {
+            let src = TreePackSource::embedded(pack);
+            let mut lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
+                .expect("load pack");
+            lib.attach_ecoregions(&ids, 30.0);
+            for id in ids {
+                let mix = &lib.mixes[&id];
+                let mut small: HashSet<&str> = HashSet::new();
+                let mut medium: HashSet<&str> = HashSet::new();
+                let pools = [
+                    (&lib.realm_pack, &mix.pools[PLAIN][UNTAGGED]),
+                    (&lib.vanilla_pack, &mix.vanilla[PLAIN][UNTAGGED]),
+                ];
+                for (pack, pool) in pools {
+                    for &(c, _) in pool {
+                        let c = &pack.communities[c];
+                        for (models, name) in c.species.iter().zip(&c.names) {
+                            for &i in models {
+                                let h = lib.entries[i].0.height;
+                                if h <= 6 {
+                                    small.insert(name);
+                                } else if h <= 12 {
+                                    medium.insert(name);
+                                }
+                            }
+                        }
+                    }
+                }
+                assert!(small.len() >= 3, "ecoregion {id}: small {small:?}");
+                assert!(medium.len() >= 2, "ecoregion {id}: medium {medium:?}");
+            }
+        }
     }
 
     /// A library for `pack` with the given ecoregions attached.
@@ -1564,10 +1846,15 @@ mod tests {
             ..Default::default()
         };
         let wet = planted(&lib, 689, wet_req, Habitat::Lowland, 0);
-        let riparian: u32 = ["Alnus_glutinosa", "Populus_nigra", "Salix_alba"]
-            .iter()
-            .filter_map(|n| wet.get(*n))
-            .sum();
+        let riparian: u32 = [
+            "Alnus_glutinosa",
+            "Populus_nigra",
+            "Salix_alba",
+            "Ulmus_minor",
+        ]
+        .iter()
+        .filter_map(|n| wet.get(*n))
+        .sum();
         assert!(
             riparian > 0 && riparian == regional(&wet),
             "wet ground: {wet:?}"

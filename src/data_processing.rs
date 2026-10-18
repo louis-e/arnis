@@ -973,9 +973,10 @@ pub fn generate_world_with_options(
     };
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
-    let mapped_trunks = Arc::new(crate::trees::mapped::MappedTrunks::collect(
-        &elements, args.scale,
-    ));
+    let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
+    let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
+    mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
+    let mapped_trunks = Arc::new(mapped_trunks);
     editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
 
     let traffic_signals =

@@ -269,6 +269,8 @@ pub struct WorldEditor<'a> {
     strict_bounds: Option<(i32, i32, i32, i32)>,
     /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
     frame_cells: FnvHashSet<(i32, i32, i32)>,
+    /// Trunk slots a schematic tree already stands in.
+    tree_slots: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
     climate_anchor: Option<(f64, f64)>,
@@ -319,6 +321,7 @@ impl<'a> WorldEditor<'a> {
             car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
@@ -374,6 +377,7 @@ impl<'a> WorldEditor<'a> {
             car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
@@ -429,6 +433,7 @@ impl<'a> WorldEditor<'a> {
             car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
@@ -609,19 +614,39 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
-    /// Side of the lattice cell that holds at most one trunk.
+    /// Side of the lattice cell that holds at most one canopy-decided trunk.
     #[inline(always)]
     pub fn tree_slot_spacing(&self) -> i32 {
-        self.tree_pack.as_ref().map_or(5, |p| p.base_spacing())
+        self.tree_pack.as_ref().map_or(5, |p| p.slot_spacing(true))
     }
 
-    /// Size tier the measured canopy asks for at this column, if it was measured.
-    pub fn canopy_size_hint(&self, x: i32, z: i32) -> Option<crate::trees::tree_library::TreeSize> {
-        let h = self
-            .ground
-            .as_ref()?
-            .canopy_height_m(self.ground_point(x, z))?;
-        (h >= crate::canopy::CANOPY_MIN_M).then(|| crate::trees::tree_library::size_for_canopy_m(h))
+    /// Tallest crown the canopy map measured within `r` of (x, z): `None` where
+    /// nothing there was measured, `Some(None)` where it was measured bare.
+    pub fn canopy_top_m(&self, x: i32, z: i32, r: i32) -> Option<Option<u8>> {
+        let ground = self.ground.as_ref()?;
+        if !ground.has_canopy() {
+            return None;
+        }
+        let mut measured = false;
+        let mut top: Option<u8> = None;
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if let Some(h) = ground.canopy_height_m(self.ground_point(x + dx, z + dz)) {
+                    measured = true;
+                    if h >= crate::canopy::CANOPY_MIN_M {
+                        top = top.max(Some(h));
+                    }
+                }
+            }
+        }
+        measured.then_some(top)
+    }
+
+    /// Typical height in metres of the mapped trees the canopy map sees.
+    pub fn typical_mapped_height_m(&self) -> Option<f64> {
+        self.mapped_trunks
+            .as_ref()
+            .and_then(|t| t.typical_height_m())
     }
 
     /// ESA distance-to-shore (BFS capped at 15): 0 = non-water or open water past the
@@ -664,6 +689,11 @@ impl<'a> WorldEditor<'a> {
     /// Attach the signage context (decal registry, styles, intersections).
     pub fn set_signage(&mut self, ctx: Arc<crate::element_processing::signage::SignageContext>) {
         self.signage = Some(ctx);
+    }
+
+    /// Claims the trunk slot (x, z); false when a tree already stands in it.
+    pub fn claim_tree_slot(&mut self, x: i32, z: i32) -> bool {
+        self.tree_slots.insert((x, z))
     }
 
     /// Strict bounds of a tile editor (inclusive), used by placements that must run in

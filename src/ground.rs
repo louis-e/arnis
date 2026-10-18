@@ -362,6 +362,29 @@ impl Ground {
     }
 
     #[cfg(test)]
+    pub(crate) fn new_flat_canopy_test(
+        canopy: CanopyData,
+        world_width: usize,
+        world_height: usize,
+    ) -> Self {
+        Self {
+            elevation_enabled: false,
+            extended_ceiling: false,
+            ground_level: 0,
+            elevation_data: None,
+            land_cover: None,
+            canopy: Some(canopy),
+            world_width,
+            world_height,
+            rotation_mask: None,
+            snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::Temperate,
+            body: CelestialBody::Earth,
+            ecoregions: None,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn new_elevation_test(
         heights: Vec<Vec<f32>>,
         world_width: usize,
@@ -645,23 +668,31 @@ impl Ground {
     /// Share of a `span` square at `origin` that carries canopy, or `None` where
     /// nothing in it was measured. Unmeasured columns stay out of the average,
     /// so a cell with none at all hands the decision back to the land cover.
+    #[cfg(test)]
     pub fn canopy_fraction(&self, origin: XZPoint, span: i32) -> Option<f64> {
+        self.canopy_cell(origin, span).map(|(fraction, _)| fraction)
+    }
+
+    /// The canopy share of a `span` square at `origin` and its tallest crown in
+    /// metres, or `None` where nothing in it was measured.
+    pub fn canopy_cell(&self, origin: XZPoint, span: i32) -> Option<(f64, u8)> {
         self.canopy.as_ref()?;
         if span <= 0 {
             return None;
         }
-        let (mut measured, mut wooded) = (0u32, 0u32);
+        let (mut measured, mut wooded, mut top) = (0u32, 0u32, 0u8);
         for dz in 0..span {
             for dx in 0..span {
                 if let Some(h) = self.canopy_height_m(XZPoint::new(origin.x + dx, origin.z + dz)) {
                     measured += 1;
                     if h >= canopy::CANOPY_MIN_M {
                         wooded += 1;
+                        top = top.max(h);
                     }
                 }
             }
         }
-        (measured > 0).then(|| f64::from(wooded) / f64::from(measured))
+        (measured > 0).then(|| (f64::from(wooded) / f64::from(measured), top))
     }
 
     /// Force LC_WATER inside OSM water, sinking those cells onto that water's surface.
