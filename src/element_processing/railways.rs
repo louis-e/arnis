@@ -2,10 +2,15 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::bridge_styles::{
-    decorate_bridge_above_deck, place_arch_below_deck, place_pier_bent,
+    decorate_rail_bridge_above_deck, place_arch_below_deck, place_pier_bent, place_pillar,
     resolve_bridge_style_with_outline, BridgeOutlineIndex, BridgePathSample, BridgeStyle,
 };
-use crate::element_processing::bridges::{BridgeStructureMap, BridgeSurfaceMap, RailDeck};
+use crate::element_processing::bridges::{
+    BridgeStructureMap, BridgeSurfaceMap, RailDeck, ARCH_MIN_CLEARANCE,
+};
+use crate::element_processing::connected_blocks::{
+    cross_cells, four_connected_line, place_connected, stair_steps,
+};
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -23,8 +28,14 @@ pub(crate) const RAIL_BRIDGE_DIP_THRESHOLD: i32 = 4;
 const RAIL_BRIDGE_RAMP_MIN: usize = 8;
 const RAIL_BRIDGE_RAMP_MAX: usize = 30;
 const RAIL_BRIDGE_RAMP_FRACTION: f32 = 0.25;
-
-pub type RailBridgeInternalEndpoints = HashSet<(i32, i32)>;
+/// Half width of a rail deck: ballast beside the track, then the curb.
+pub(crate) const RAIL_DECK_HALF_WIDTH: i32 = 2;
+/// Widest gap between side-by-side rail decks that gets decked over.
+pub(crate) const RAIL_DECK_GAP_FILL: i32 = 4;
+/// Deck rows above the terrain up to which a rail deck rests on solid masonry.
+const RAIL_ABUTMENT_MAX_HEIGHT: i32 = 3;
+/// Height step between neighbouring rail decks still joined without a railing.
+const RAIL_DECK_MAX_STEP: i32 = 2;
 
 const RAIL_TRACK_TYPES: &[&str] = &[
     "rail",
@@ -74,7 +85,6 @@ pub fn generate_railways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     rail_tunnel_points: &mut Vec<(i32, i32)>,
-    rail_bridge_internal_endpoints: &RailBridgeInternalEndpoints,
     bridge_outlines: &BridgeOutlineIndex,
     bridge_structures: &BridgeStructureMap,
     bridge_surface: &BridgeSurfaceMap,
@@ -109,7 +119,6 @@ pub fn generate_railways(
         generate_rail_bridge(
             editor,
             element,
-            rail_bridge_internal_endpoints,
             bridge_outlines,
             bridge_structures,
             bridge_surface,
@@ -193,18 +202,10 @@ pub(crate) fn renders_as_rail_bridge(way: &ProcessedWay) -> bool {
     true
 }
 
-/// Endpoints shared by 2+ rendered rail-bridge ways — used to suppress per-way ramps mid-bridge.
-pub fn collect_rail_bridge_internal_endpoints(
-    elements: &[ProcessedElement],
-) -> RailBridgeInternalEndpoints {
+/// Endpoints shared by 2+ rail-bridge ways, where a way runs on without a ramp.
+pub(crate) fn rail_bridge_internal_endpoints(ways: &[&ProcessedWay]) -> HashSet<(i32, i32)> {
     let mut counts: HashMap<(i32, i32), u32> = HashMap::new();
-    for elem in elements {
-        let ProcessedElement::Way(w) = elem else {
-            continue;
-        };
-        if !renders_as_rail_bridge(w) {
-            continue;
-        }
+    for w in ways {
         let s = &w.nodes[0];
         let e = &w.nodes[w.nodes.len() - 1];
         *counts.entry((s.x, s.z)).or_default() += 1;
@@ -501,105 +502,29 @@ pub fn add_tunnel_footprint(
     }
 }
 
-fn generate_rail_bridge(
-    editor: &mut WorldEditor,
-    way: &ProcessedWay,
-    internal_endpoints: &RailBridgeInternalEndpoints,
-    bridge_outlines: &BridgeOutlineIndex,
-    bridge_structures: &BridgeStructureMap,
-    bridge_surface: &BridgeSurfaceMap,
-) {
-    if way.nodes.len() < 2 {
-        return;
+/// Deck Y per centerline cell, ramping from loose ends up to `level`.
+pub(crate) fn rail_bridge_profile(
+    terrain: &[i32],
+    level: i32,
+    start_internal: bool,
+    end_internal: bool,
+) -> Vec<i32> {
+    let total = terrain.len();
+    if total == 0 {
+        return Vec::new();
     }
-
-    let style = resolve_bridge_style_with_outline(way, bridge_outlines);
-
-    let mut all_points: Vec<(i32, i32)> = Vec::new();
-    for window in way.nodes.windows(2) {
-        let bp = bresenham_line(window[0].x, 0, window[0].z, window[1].x, 0, window[1].z);
-        let smoothed = smooth_diagonal_rails(&bp);
-        for (bx, _, bz) in smoothed.iter() {
-            if all_points.last() != Some(&(*bx, *bz)) {
-                all_points.push((*bx, *bz));
-            }
-        }
-    }
-    if all_points.is_empty() {
-        return;
-    }
-
-    // Track on a road deck; the road bridge brings the supports.
-    if let Some(RailDeck::Carried(ys)) = bridge_structures.rail_deck(way.id) {
-        let y_at = |i: usize| ys.get(i).or(ys.last()).copied().unwrap_or_default();
-        for (i, &(bx, bz)) in all_points.iter().enumerate() {
-            let y = y_at(i);
-            let prev = i.checked_sub(1).map(|p| (all_points[p], y_at(p)));
-            let next = all_points.get(i + 1).map(|&n| (n, y_at(i + 1)));
-            let rail_block = determine_rail_with_slope(
-                (bx, bz),
-                prev.map(|p| p.0),
-                next.map(|n| n.0),
-                prev.map_or(y, |p| p.1),
-                y,
-                next.map_or(y, |n| n.1),
-            );
-            editor.set_block_absolute(GRAVEL, bx, y, bz, None, None);
-            editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
-        }
-        return;
-    }
-
-    // Sample terrain at every centerline cell, not just OSM nodes, so a hill mid-span still clears the deck.
-    let mut terrain_ys: Vec<i32> = Vec::with_capacity(all_points.len());
-    let mut max_y = i32::MIN;
-    let mut min_y = i32::MAX;
-    for &(bx, bz) in &all_points {
-        let y = editor.get_ground_level(bx, bz);
-        terrain_ys.push(y);
-        max_y = max_y.max(y);
-        min_y = min_y.min(y);
-    }
-    let dip = max_y - min_y;
-    // Shared viaduct level; the fallback covers ways the prescan did not see.
-    let own_level = match bridge_structures.rail_deck(way.id) {
-        Some(RailDeck::Level(y)) => Some(*y),
-        _ => None,
-    };
-    let deck_y = own_level.unwrap_or_else(|| {
-        // Arch needs vertical room for its curve on flat terrain.
-        let flat_clearance = if style == BridgeStyle::Arch {
-            RAIL_BRIDGE_FLAT_CLEARANCE.max(8)
-        } else {
-            RAIL_BRIDGE_FLAT_CLEARANCE
-        };
-        // Flat span: lift by clearance so the structure is visible. Canyon span: deck at terrain_max.
-        if dip < RAIL_BRIDGE_DIP_THRESHOLD {
-            max_y + flat_clearance
-        } else {
-            max_y
-        }
-    });
-
-    let total = all_points.len();
     let last_idx = total - 1;
-
-    let start_xz = all_points[0];
-    let end_xz = all_points[last_idx];
-    let start_ground = terrain_ys[0];
-    let end_ground = terrain_ys[last_idx];
-    // Shared endpoints stay at deck Y to avoid a mid-bridge dip between adjacent segments.
-    let start_internal = internal_endpoints.contains(&start_xz);
-    let end_internal = internal_endpoints.contains(&end_xz);
+    let start_ground = terrain[0];
+    let end_ground = terrain[last_idx];
 
     // Ramp length sized so per-cell linear delta stays <= 1 (rail step limit). No horizontal cap:
     // when needed > total/2 the start/end ramps overlap and min(start, end) below produces a pyramid.
     let mut needed = 0usize;
     if !start_internal {
-        needed = needed.max((deck_y - start_ground).max(0) as usize);
+        needed = needed.max((level - start_ground).max(0) as usize);
     }
     if !end_internal {
-        needed = needed.max((deck_y - end_ground).max(0) as usize);
+        needed = needed.max((level - end_ground).max(0) as usize);
     }
     let needed = needed + 1;
 
@@ -609,85 +534,461 @@ fn generate_rail_bridge(
         .max(needed);
     let denom = ramp_length.saturating_sub(1).max(1) as f32;
 
-    let bridge_ys: Vec<i32> = (0..total)
+    (0..total)
         .map(|tds| {
-            // Two rising ramps from each endpoint, capped at deck_y. min combines them: trapezoid
-            // for long bridges (both ramps reach deck_y mid-span), pyramid for short ones.
+            // Two rising ramps from each endpoint, capped at the level. min combines them: trapezoid
+            // for long bridges (both ramps reach the level mid-span), pyramid for short ones.
             let start_ramp_y = if start_internal {
-                deck_y
+                level
             } else {
                 let t = (tds as f32 / denom).min(1.0);
-                let span = (deck_y - start_ground) as f32;
+                let span = (level - start_ground) as f32;
                 (start_ground as f32 + span * t).round() as i32
             };
             let end_ramp_y = if end_internal {
-                deck_y
+                level
             } else {
                 let dist_from_end = last_idx.saturating_sub(tds);
                 let t = (dist_from_end as f32 / denom).min(1.0);
-                let span = (deck_y - end_ground) as f32;
+                let span = (level - end_ground) as f32;
                 (end_ground as f32 + span * t).round() as i32
             };
-            let linear_y = start_ramp_y.min(end_ramp_y);
-            // Clamp to local terrain so a mid-ramp hillside doesn't bury the deck/foundation.
-            linear_y.max(terrain_ys[tds])
+            // Clamp to local terrain so a mid-ramp hillside doesn't bury the deck.
+            start_ramp_y.min(end_ramp_y).max(terrain[tds])
+        })
+        .collect()
+}
+
+/// What lies beside one side of a rail deck.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum RailDeckSide {
+    /// Nothing: a curb and a railing.
+    Open,
+    /// Another track's deck close in height, decked over up to this far from the track.
+    Joined(f32),
+    /// Another deck right alongside at another height, or a road deck: no railing.
+    Closed,
+}
+
+impl RailDeckSide {
+    fn reach(self) -> f32 {
+        match self {
+            RailDeckSide::Joined(reach) => reach.max(RAIL_BALLAST_REACH),
+            _ => RAIL_BALLAST_REACH,
+        }
+    }
+}
+
+/// Ballast reaches this far either side of the track; the curb comes after it.
+const RAIL_BALLAST_REACH: f32 = RAIL_DECK_HALF_WIDTH as f32 - 0.5;
+
+fn probe_rail_deck_side(
+    surface: &BridgeSurfaceMap,
+    way_id: u64,
+    (x, z): (i32, i32),
+    y: i32,
+    out: (f32, f32),
+) -> RailDeckSide {
+    let half = RAIL_DECK_HALF_WIDTH;
+    for (cx, cz) in cross_cells(x, z, out, 1, 2 * half + 1 + RAIL_DECK_GAP_FILL) {
+        let Some((id, other_y)) = surface.rail_track_at(cx, cz) else {
+            continue;
+        };
+        if id == way_id {
+            continue;
+        }
+        let dist = (cx - x) as f32 * out.0 + (cz - z) as f32 * out.1;
+        if other_y == y {
+            // Up to and including its curb.
+            return RailDeckSide::Joined(dist - half as f32 + 0.5);
+        }
+        // Ramps out of step: each deck takes its half of the gap.
+        if (other_y - y).abs() <= RAIL_DECK_MAX_STEP {
+            return RailDeckSide::Joined(dist / 2.0 + 0.25);
+        }
+        if dist <= (2 * half + 1) as f32 {
+            return RailDeckSide::Closed;
+        }
+        break;
+    }
+    let road_alongside = cross_cells(x, z, out, half, half + 1)
+        .into_iter()
+        .any(|(cx, cz)| surface.deck_near(cx, cz, y, 1));
+    if road_alongside {
+        RailDeckSide::Closed
+    } else {
+        RailDeckSide::Open
+    }
+}
+
+/// Cells either side used to steady the direction across stair-stepped centerlines.
+const RAIL_HEADING_REACH: usize = 4;
+
+/// Unit perpendicular from the centerline a few cells either side.
+fn centerline_perp(points: &[(i32, i32)], i: usize) -> (f32, f32) {
+    let prev = points[i.saturating_sub(RAIL_HEADING_REACH)];
+    let next = points[(i + RAIL_HEADING_REACH).min(points.len() - 1)];
+    let dx = (next.0 - prev.0) as f32;
+    let dz = (next.1 - prev.1) as f32;
+    let mag = (dx * dx + dz * dz).sqrt().max(1e-6);
+    (-dz / mag, dx / mag)
+}
+
+/// Deck cells beside the track, each with the centerline cell whose Y it takes.
+fn rail_deck_cells(
+    points: &[(i32, i32)],
+    perps: &[(f32, f32)],
+    sides: &[[RailDeckSide; 2]],
+) -> Vec<((i32, i32), usize)> {
+    // Nearest centerline cell, so a column on a ramp gets one deck height.
+    let mut nearest: HashMap<(i32, i32), (i32, usize)> = HashMap::new();
+    for (i, &(x, z)) in points.iter().enumerate() {
+        let r = sides[i][0].reach().max(sides[i][1].reach()).ceil() as i32;
+        for dx in -r..=r {
+            for dz in -r..=r {
+                let d2 = dx * dx + dz * dz;
+                nearest
+                    .entry((x + dx, z + dz))
+                    .and_modify(|e| {
+                        if d2 < e.0 {
+                            *e = (d2, i);
+                        }
+                    })
+                    .or_insert((d2, i));
+            }
+        }
+    }
+    let mut cells: Vec<((i32, i32), usize)> = nearest
+        .into_iter()
+        .filter_map(|(cell, (d2, i))| {
+            if d2 == 0 {
+                return None;
+            }
+            let (perp, (x, z)) = (perps[i], points[i]);
+            let (dx, dz) = ((cell.0 - x) as f32, (cell.1 - z) as f32);
+            let across = dx * perp.0 + dz * perp.1;
+            let along = dx * perp.1 - dz * perp.0;
+            // Nothing past the bridge ends.
+            if (i == 0 || i + 1 == points.len()) && along.abs() >= 0.75 {
+                return None;
+            }
+            let side = sides[i][usize::from(across < 0.0)];
+            (across.abs() <= side.reach()).then_some((cell, i))
         })
         .collect();
+    cells.sort_unstable();
+    cells
+}
 
-    let foundation_block = style.foundation_block();
-    let mut bridge_path: Vec<BridgePathSample> = Vec::with_capacity(total);
-    let start_is_boundary = !start_internal;
-    let end_is_boundary = !end_internal;
-    // Suspension and cable-stayed spans hang from their pylons, not from piers.
-    let cables_carry_deck = style.cables_carry_deck(total, start_is_boundary, end_is_boundary);
-
-    for (i, &(bx, bz)) in all_points.iter().enumerate() {
-        let y = bridge_ys[i];
-        let prev_xz = if i > 0 { Some(all_points[i - 1]) } else { None };
-        let next_xz = if i + 1 < total {
-            Some(all_points[i + 1])
-        } else {
-            None
-        };
-        let prev_y = if i > 0 { bridge_ys[i - 1] } else { y };
-        let next_y = if i + 1 < total { bridge_ys[i + 1] } else { y };
-        let rail_block = determine_rail_with_slope((bx, bz), prev_xz, next_xz, prev_y, y, next_y);
-
-        editor.set_block_absolute(foundation_block, bx, y - 1, bz, None, None);
-        let bed_block = if i % 4 == 0 { OAK_LOG } else { GRAVEL };
-        editor.set_block_absolute(bed_block, bx, y, bz, None, None);
-        editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
-
-        // Smooth perpendicular from neighbouring centerline points.
-        let p_prev = prev_xz.unwrap_or((bx, bz));
-        let p_next = next_xz.unwrap_or((bx, bz));
-        let dxp = (p_next.0 - p_prev.0) as f32;
-        let dzp = (p_next.1 - p_prev.1) as f32;
-        let mag = (dxp * dxp + dzp * dzp).sqrt().max(1e-6);
-        let perp = (-dzp / mag, dxp / mag);
-        bridge_path.push((bx, y, bz, perp));
-
-        let blocked = bridge_surface.support_blocked(bx, bz, y);
-        if style == BridgeStyle::Arch && !blocked {
-            place_arch_below_deck(editor, bx, y, bz, terrain_ys[i], i, total, true, true);
+/// Deck slab and surface at `y`; low enough over the terrain, solid masonry underneath.
+fn lay_rail_deck_column(
+    editor: &mut WorldEditor,
+    surface: &BridgeSurfaceMap,
+    (x, z): (i32, i32),
+    y: i32,
+    slab: Block,
+    top: Block,
+) {
+    editor.set_block_absolute(top, x, y, z, None, None);
+    editor.set_block_absolute(slab, x, y - 1, z, None, None);
+    let ground = editor.get_ground_level(x, z);
+    if y - ground <= RAIL_ABUTMENT_MAX_HEIGHT && !surface.support_blocked(x, z, y) {
+        for fy in (ground + 1)..(y - 1) {
+            editor.set_block_absolute(slab, x, fy, z, None, None);
         }
-        let interval = style.pier_interval(0);
-        if !cables_carry_deck && interval > 0 && i % interval == interval / 2 {
-            place_pier_bent(editor, bridge_surface, style, bx, bz, y, perp, 0);
+    }
+}
+
+/// Curb block and railing for a rail deck's open edges.
+fn rail_deck_edge(style: BridgeStyle) -> (Block, Option<Block>) {
+    match style {
+        BridgeStyle::Boardwalk => (OAK_PLANKS, Some(OAK_FENCE)),
+        // The truss or the walls stand on the edge.
+        BridgeStyle::Truss | BridgeStyle::Covered => (STONE_BRICKS, None),
+        BridgeStyle::Arch => (STONE_BRICKS, Some(STONE_BRICK_WALL)),
+        _ => (STONE_BRICKS, Some(IRON_BARS)),
+    }
+}
+
+fn generate_rail_bridge(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    bridge_outlines: &BridgeOutlineIndex,
+    bridge_structures: &BridgeStructureMap,
+    bridge_surface: &BridgeSurfaceMap,
+) {
+    let all_points = build_smoothed_centerline(way);
+    if all_points.is_empty() {
+        return;
+    }
+
+    let deck = match bridge_structures.rail_deck(way.id) {
+        // Track on a road deck; the road bridge brings the supports.
+        Some(RailDeck::Carried(ys)) => {
+            let y_at = |i: usize| ys.get(i).or(ys.last()).copied().unwrap_or_default();
+            for (i, &(bx, bz)) in all_points.iter().enumerate() {
+                let y = y_at(i);
+                let prev = i.checked_sub(1).map(|p| (all_points[p], y_at(p)));
+                let next = all_points.get(i + 1).map(|&n| (n, y_at(i + 1)));
+                let rail_block = determine_rail_with_slope(
+                    (bx, bz),
+                    prev.map(|p| p.0),
+                    next.map(|n| n.0),
+                    prev.map_or(y, |p| p.1),
+                    y,
+                    next.map_or(y, |n| n.1),
+                );
+                editor.set_block_absolute(GRAVEL, bx, y, bz, None, None);
+                editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
+            }
+            return;
+        }
+        Some(RailDeck::Own(deck)) => deck,
+        None => return,
+    };
+
+    let style = resolve_bridge_style_with_outline(way, bridge_outlines);
+    let total = all_points.len().min(deck.ys.len());
+    let points = &all_points[..total];
+    let ys = &deck.ys[..total];
+    let perps: Vec<(f32, f32)> = (0..total).map(|i| centerline_perp(points, i)).collect();
+    let sides: Vec<[RailDeckSide; 2]> = (0..total)
+        .map(|i| {
+            let (px, pz) = perps[i];
+            [(px, pz), (-px, -pz)]
+                .map(|out| probe_rail_deck_side(bridge_surface, way.id, points[i], ys[i], out))
+        })
+        .collect();
+    let slab = style.foundation_block();
+    // Every deck column with its centerline index, for the arch pass.
+    let mut deck_cells: Vec<((i32, i32), usize)> = Vec::new();
+
+    // The track goes first: later writes only fill empty cells.
+    for (i, &(bx, bz)) in points.iter().enumerate() {
+        let y = ys[i];
+        let prev = i.checked_sub(1).map(|p| (points[p], ys[p]));
+        let next = points.get(i + 1).map(|&n| (n, ys[i + 1]));
+        let rail_block = determine_rail_with_slope(
+            (bx, bz),
+            prev.map(|p| p.0),
+            next.map(|n| n.0),
+            prev.map_or(y, |p| p.1),
+            y,
+            next.map_or(y, |n| n.1),
+        );
+        editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
+        let bed = if i % 4 == 0 { OAK_LOG } else { GRAVEL };
+        lay_rail_deck_column(editor, bridge_surface, (bx, bz), y, slab, bed);
+        deck_cells.push(((bx, bz), i));
+    }
+
+    if catenary_wanted(way) {
+        place_bridge_catenary(editor, points, ys, &perps, &sides);
+    }
+
+    let open_share = |s: usize| {
+        sides
+            .iter()
+            .filter(|side| side[s] == RailDeckSide::Open)
+            .count()
+    };
+    let open = [0, 1].map(|s| open_share(s) * 2 >= total);
+    let path: Vec<BridgePathSample> = (0..total)
+        .map(|i| (points[i].0, ys[i], points[i].1, perps[i]))
+        .collect();
+    decorate_rail_bridge_above_deck(
+        editor,
+        style,
+        &path,
+        RAIL_DECK_HALF_WIDTH - 1,
+        open,
+        deck.start_is_boundary,
+        deck.end_is_boundary,
+    );
+
+    // Curbs and railings on the open sides, stepped so the railing stays joined.
+    let (curb, railing) = rail_deck_edge(style);
+    let other_track = |x: i32, z: i32| {
+        bridge_surface
+            .rail_track_at(x, z)
+            .is_some_and(|(id, _)| id != way.id)
+    };
+    let mut runs: [Option<(i32, i32)>; 2] = [None, None];
+    let mut prev_tops: [Option<((i32, i32), i32)>; 2] = [None, None];
+    for i in 0..total {
+        let (bx, bz) = points[i];
+        let y = ys[i];
+        let (px, pz) = perps[i];
+        let edge_dist = (RAIL_DECK_HALF_WIDTH - 1) as f32 * (px.abs() + pz.abs()) + 1.0;
+        for (s, sign) in [(0, 1.0f32), (1, -1.0)] {
+            if sides[i][s] != RailDeckSide::Open {
+                runs[s] = None;
+                prev_tops[s] = None;
+                continue;
+            }
+            let cell = (
+                (bx as f32 + px * sign * edge_dist).round() as i32,
+                (bz as f32 + pz * sign * edge_dist).round() as i32,
+            );
+            let run = match runs[s] {
+                Some(prev) if prev != cell => stair_steps(prev, cell),
+                _ => vec![cell],
+            };
+            runs[s] = Some(cell);
+            for (cx, cz) in run {
+                if other_track(cx, cz) {
+                    continue;
+                }
+                let ground = editor.get_ground_level(cx, cz);
+                lay_rail_deck_column(editor, bridge_surface, (cx, cz), y, slab, curb);
+                deck_cells.push(((cx, cz), i));
+                // Edge girder, so the deck reads thicker than the slab.
+                if y - 2 > ground && style != BridgeStyle::Boardwalk {
+                    editor.set_block_absolute(slab, cx, y - 2, cz, None, None);
+                }
+                let Some(railing) = railing else {
+                    continue;
+                };
+                // No railing where the ramp is nearly back on the ground.
+                if y - ground < 2 {
+                    prev_tops[s] = None;
+                    continue;
+                }
+                let top = y + 1;
+                place_connected(editor, railing, cx, top, cz);
+                // Step the railing where the deck changes height.
+                if let Some(((qx, qz), prev_top)) = prev_tops[s] {
+                    let adjacent = (qx - cx).abs() + (qz - cz).abs() == 1;
+                    if adjacent && prev_top == top - 1 {
+                        place_connected(editor, railing, qx, top, qz);
+                    } else if adjacent && prev_top == top + 1 {
+                        place_connected(editor, railing, cx, prev_top, cz);
+                    }
+                }
+                prev_tops[s] = Some(((cx, cz), top));
+            }
         }
     }
 
-    decorate_bridge_above_deck(
-        editor,
-        bridge_surface,
-        style,
-        &bridge_path,
-        0,
-        start_is_boundary,
-        end_is_boundary,
-        None,
-        None,
-    );
+    // Ballast, and the gap over to a joined deck.
+    let ballast = if style == BridgeStyle::Boardwalk {
+        OAK_PLANKS
+    } else {
+        GRAVEL
+    };
+    for ((cx, cz), i) in rail_deck_cells(points, &perps, &sides) {
+        if other_track(cx, cz) {
+            continue;
+        }
+        lay_rail_deck_column(editor, bridge_surface, (cx, cz), ys[i], slab, ballast);
+        deck_cells.push(((cx, cz), i));
+    }
+
+    // Arches need room to read; a deck that never gets it stands on piers.
+    let arch_room = points
+        .iter()
+        .zip(ys)
+        .any(|(&(x, z), &y)| y - editor.get_ground_level(x, z) >= ARCH_MIN_CLEARANCE);
+    let support = if style == BridgeStyle::Arch && !arch_room {
+        BridgeStyle::Beam
+    } else {
+        style
+    };
+    if support == BridgeStyle::Arch {
+        for &((cx, cz), i) in &deck_cells {
+            if !bridge_surface.support_blocked(cx, cz, ys[i]) {
+                let (bx, bz) = points[i];
+                let ground = editor.get_ground_level(bx, bz);
+                let centre = (cx, cz) == (bx, bz);
+                place_arch_below_deck(editor, cx, ys[i], cz, ground, i, total, true, centre);
+            }
+        }
+    }
+
+    // Piers on a world grid, so the piers of parallel tracks line up.
+    let cables_carry_deck =
+        support.cables_carry_deck(total, deck.start_is_boundary, deck.end_is_boundary);
+    let interval = if cables_carry_deck {
+        0
+    } else {
+        support.pier_interval(RAIL_DECK_HALF_WIDTH) as i32
+    };
+    for i in (0..total).filter(|_| interval > 0) {
+        let (bx, bz) = points[i];
+        let y = ys[i];
+        let perp = perps[i];
+        let along_x = perp.1.abs() >= perp.0.abs();
+        let key = |(x, z): (i32, i32)| if along_x { x } else { z };
+        if key(points[i]).rem_euclid(interval) != 0
+            || (i > 0 && key(points[i - 1]) == key(points[i]))
+        {
+            continue;
+        }
+        if style == BridgeStyle::Boardwalk {
+            place_pier_bent(
+                editor,
+                bridge_surface,
+                style,
+                bx,
+                bz,
+                y,
+                perp,
+                RAIL_DECK_HALF_WIDTH,
+            );
+            continue;
+        }
+        for (cx, cz) in cross_cells(bx, bz, perp, -1, 1) {
+            if !bridge_surface.support_blocked(cx, cz, y) {
+                place_pillar(editor, cx, y - 1, cz, STONE_BRICKS, true);
+            }
+        }
+    }
+}
+
+/// Contact wire over a bridge track, with masts standing on an open edge.
+fn place_bridge_catenary(
+    editor: &mut WorldEditor,
+    points: &[(i32, i32)],
+    ys: &[i32],
+    perps: &[(f32, f32)],
+    sides: &[[RailDeckSide; 2]],
+) {
+    for (i, &(cx, cz)) in points.iter().enumerate() {
+        let (dx, _) = travel_dir(points, i);
+        let wire_y = ys[i] + CATENARY_WIRE_HEIGHT;
+        let wire = if dx != 0 { CHAIN_X } else { CHAIN_Z };
+        editor.set_block_absolute(wire, cx, wire_y, cz, None, None);
+
+        if !i.is_multiple_of(CATENARY_MAST_INTERVAL) {
+            continue;
+        }
+        let Some(s) = (0..2).find(|&s| sides[i][s] == RailDeckSide::Open) else {
+            continue;
+        };
+        let sign = if s == 0 { 1.0 } else { -1.0 };
+        let out = (perps[i].0 * sign, perps[i].1 * sign);
+        let edge_dist = (RAIL_DECK_HALF_WIDTH - 1) as f32 * (out.0.abs() + out.1.abs()) + 1.0;
+        let mast = (
+            (cx as f32 + out.0 * edge_dist).round() as i32,
+            (cz as f32 + out.1 * edge_dist).round() as i32,
+        );
+        for y in (ys[i] + 1)..=wire_y {
+            place_connected(editor, COBBLESTONE_WALL, mast.0, y, mast.1);
+        }
+        let arm = if out.0.abs() >= out.1.abs() {
+            CHAIN_X
+        } else {
+            CHAIN_Z
+        };
+        let line: Vec<(i32, i32)> = bresenham_line(cx, 0, cz, mast.0, 0, mast.1)
+            .into_iter()
+            .map(|(x, _, z)| (x, z))
+            .collect();
+        let line = four_connected_line(&line);
+        for &(ax, az) in line.iter().filter(|&&c| c != (cx, cz) && c != mast) {
+            editor.set_block_absolute(arm, ax, wire_y, az, None, None);
+        }
+    }
 }
 
 /// Choose between a flat or ascending rail block based on the ground-level
@@ -1194,14 +1495,12 @@ mod tests {
     ) -> Vec<(i32, i32)> {
         let clear = CoordinateBitmap::new(rail_mask_bbox());
         let mut rail_tunnel_points = Vec::new();
-        let internal = HashSet::new();
         let outlines = BridgeOutlineIndex::build(&[]);
         let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
         generate_railways(
             editor,
             way,
             &mut rail_tunnel_points,
-            &internal,
             &outlines,
             &structures,
             &BridgeSurfaceMap::empty(),
@@ -1410,6 +1709,93 @@ mod tests {
             !footprint.contains(40, 53),
             "footprint stops outside the 5x5 shell"
         );
+    }
+
+    // A rail bridge from x=20 to x=60 along row `z`.
+    fn rail_bridge(id: u64, z: i32) -> ProcessedWay {
+        let mut way = straight_rail(&[("railway", "rail"), ("bridge", "yes")]);
+        way.id = id;
+        for (i, node) in way.nodes.iter_mut().enumerate() {
+            node.id = id * 10 + i as u64;
+            node.z = z;
+        }
+        way
+    }
+
+    fn render_rail_bridges(editor: &mut WorldEditor, ways: &[ProcessedWay]) {
+        let elements: Vec<ProcessedElement> =
+            ways.iter().cloned().map(ProcessedElement::Way).collect();
+        let outlines = BridgeOutlineIndex::build(&elements);
+        let structures = BridgeStructureMap::build(&elements, editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&elements, &structures, 1.0);
+        let clear = CoordinateBitmap::new(rail_mask_bbox());
+        for way in ways {
+            generate_railways(
+                editor,
+                way,
+                &mut Vec::new(),
+                &outlines,
+                &structures,
+                &surface,
+                &clear,
+                &clear,
+                &clear,
+            );
+        }
+    }
+
+    #[test]
+    fn rail_bridge_deck_has_ballast_curbs_and_railings() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        render_rail_bridges(&mut editor, &[rail_bridge(1, 50)]);
+
+        let deck = RAIL_BRIDGE_FLAT_CLEARANCE;
+        let at = |editor: &WorldEditor, y: i32, z: i32, blocks: &[Block]| {
+            editor.check_for_block_absolute(41, y, z, Some(blocks), None)
+        };
+        assert!(
+            at(&editor, deck + 1, 50, &[RAIL_EAST_WEST]),
+            "track on the deck"
+        );
+        for z in [49, 51] {
+            assert!(at(&editor, deck, z, &[GRAVEL]), "ballast beside the track");
+        }
+        for z in [48, 52] {
+            assert!(at(&editor, deck, z, &[STONE_BRICKS]), "curb");
+            assert!(at(&editor, deck + 1, z, &[IRON_BARS]), "railing");
+            assert!(at(&editor, deck - 2, z, &[STONE_BRICKS]), "edge girder");
+        }
+        assert!(!at(&editor, deck, 53, &[GRAVEL, STONE_BRICKS]), "five wide");
+    }
+
+    #[test]
+    fn side_by_side_rail_bridges_share_one_deck() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        render_rail_bridges(&mut editor, &[rail_bridge(1, 50), rail_bridge(2, 57)]);
+
+        let deck = RAIL_BRIDGE_FLAT_CLEARANCE;
+        let at = |editor: &WorldEditor, y: i32, z: i32, blocks: &[Block]| {
+            editor.check_for_block_absolute(41, y, z, Some(blocks), None)
+        };
+        for z in 51..57 {
+            assert!(at(&editor, deck, z, &[GRAVEL]), "decked over at z={z}");
+            assert!(
+                !at(&editor, deck + 1, z, &[IRON_BARS]),
+                "no railing at z={z}"
+            );
+        }
+        assert!(at(&editor, deck + 1, 48, &[IRON_BARS]), "outer railing");
+        assert!(at(&editor, deck + 1, 59, &[IRON_BARS]), "outer railing");
+    }
+
+    #[test]
+    fn rail_bridge_profile_ramps_from_loose_ends_only() {
+        let profile = rail_bridge_profile(&[0; 40], 6, false, true);
+        assert_eq!(profile[0], 0, "loose end starts on the ground");
+        assert!(profile.windows(2).all(|w| (w[1] - w[0]).abs() <= 1));
+        assert_eq!(*profile.last().unwrap(), 6, "joined end stays at the level");
     }
 
     #[test]

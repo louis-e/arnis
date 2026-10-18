@@ -598,6 +598,58 @@ pub fn decorate_bridge_above_deck(
         );
         return;
     }
+    decorate_with_sides(
+        editor,
+        style,
+        path,
+        block_range,
+        sides,
+        start_is_boundary,
+        end_is_boundary,
+        pylon_points,
+    );
+}
+
+/// Above-deck decoration for a rail deck, whose open sides the caller worked out.
+pub fn decorate_rail_bridge_above_deck(
+    editor: &mut WorldEditor,
+    style: BridgeStyle,
+    path: &[BridgePathSample],
+    block_range: i32,
+    open: [bool; 2],
+    start_is_boundary: bool,
+    end_is_boundary: bool,
+) {
+    if path.len() < 4 {
+        return;
+    }
+    let sides = OpenSides {
+        left: open[0],
+        right: open[1],
+    };
+    decorate_with_sides(
+        editor,
+        style,
+        path,
+        block_range,
+        sides,
+        start_is_boundary,
+        end_is_boundary,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decorate_with_sides(
+    editor: &mut WorldEditor,
+    style: BridgeStyle,
+    path: &[BridgePathSample],
+    block_range: i32,
+    sides: OpenSides,
+    start_is_boundary: bool,
+    end_is_boundary: bool,
+    pylon_points: Option<&[(i32, i32)]>,
+) {
     let pylons = || -> Vec<usize> {
         let mut pylons = match pylon_points {
             Some(points) => points
