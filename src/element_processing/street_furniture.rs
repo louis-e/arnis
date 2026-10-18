@@ -1,7 +1,7 @@
-//! Bicycle stands, shelters and picnic tables.
+//! Covered bicycle parking, shelters and picnic tables.
 
 use crate::block_definitions::*;
-use crate::element_processing::connected_blocks::{connected_iron_bars, place_connected};
+use crate::element_processing::connected_blocks::place_connected;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
@@ -9,11 +9,6 @@ use std::collections::HashMap;
 
 /// Radius searched for the roads a node lines up with.
 const ROAD_FRAME_RADIUS: i32 = 8;
-/// Stands a bicycle parking node gets without a `capacity` tag.
-const DEFAULT_STANDS: i32 = 3;
-const MAX_STANDS_PER_NODE: i32 = 8;
-/// Rows of stands in a parking area are this many blocks apart, aisle included.
-const STAND_ROW_PITCH: i32 = 4;
 
 fn tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
     tags.get(key).map(String::as_str)
@@ -53,37 +48,7 @@ fn road_frame(x: i32, z: i32, road_mask: &RoadMaskBitmap, seed: u64) -> (bool, (
     )
 }
 
-/// Iron bars spanning the cell along x or z, the side view of a hoop stand.
-fn hoop(spans_x: bool) -> BlockWithProperties {
-    connected_iron_bars(!spans_x, !spans_x, spans_x, spans_x)
-}
-
-/// A row of hoop stands, two bikes each, lined up with the street.
-pub fn generate_bicycle_stands(
-    editor: &mut WorldEditor,
-    node: &ProcessedNode,
-    road_mask: &RoadMaskBitmap,
-) {
-    let stands = tag(&node.tags, "capacity")
-        .and_then(|c| c.trim().parse::<i32>().ok())
-        .map_or(DEFAULT_STANDS, |c| (c + 1) / 2)
-        .clamp(1, MAX_STANDS_PER_NODE);
-    let (along_x, _) = road_frame(node.x, node.z, road_mask, node.id);
-    // Hoops stand across the row so the bikes park between them.
-    let stand = hoop(!along_x);
-    for k in 0..stands {
-        let offset = 2 * k - (stands - 1);
-        let (x, z) = if along_x {
-            (node.x + offset, node.z)
-        } else {
-            (node.x, node.z + offset)
-        };
-        let y = editor.get_absolute_y(x, 1, z);
-        editor.set_block_with_properties_absolute(stand.clone(), x, y, z, None, None);
-    }
-}
-
-/// Rows of stands across a parking area; a roof only when it is covered.
+/// A parking area keeps its paving, and gets a roof only when it is covered.
 pub fn generate_bicycle_parking_area(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -97,45 +62,6 @@ pub fn generate_bicycle_parking_area(
         for &(x, z) in area {
             editor.set_block(floor, x, 0, z, None, None);
         }
-    }
-
-    let (Some(min_x), Some(max_x), Some(min_z), Some(max_z)) = (
-        area.iter().map(|c| c.0).min(),
-        area.iter().map(|c| c.0).max(),
-        area.iter().map(|c| c.1).min(),
-        area.iter().map(|c| c.1).max(),
-    ) else {
-        return;
-    };
-    // Rows follow the long side.
-    let along_x = max_x - min_x >= max_z - min_z;
-    let (across_min, across_max) = if along_x {
-        (min_z, max_z)
-    } else {
-        (min_x, max_x)
-    };
-    let span = across_max - across_min + 1;
-    let in_row = |across: i32| {
-        if span < STAND_ROW_PITCH + 1 {
-            across == across_min + span / 2
-        } else {
-            (across - across_min) % STAND_ROW_PITCH == STAND_ROW_PITCH / 2
-        }
-    };
-    let stand = hoop(!along_x);
-    let inside: std::collections::HashSet<(i32, i32)> = area.iter().copied().collect();
-    for &(x, z) in area {
-        let (along, across) = if along_x { (x, z) } else { (z, x) };
-        if along % 2 != 0 || !in_row(across) {
-            continue;
-        }
-        // Keep the hoops off the outline so the bikes stay inside.
-        let (ax, az) = if along_x { (1, 0) } else { (0, 1) };
-        if !inside.contains(&(x + ax, z + az)) || !inside.contains(&(x - ax, z - az)) {
-            continue;
-        }
-        let y = editor.get_absolute_y(x, 1, z);
-        editor.set_block_with_properties_absolute(stand.clone(), x, y, z, None, None);
     }
 
     let covered = tag(tags, "covered") == Some("yes")
@@ -336,7 +262,6 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::element_processing::building_test_support::{tag_map, test_editor};
-    use fastnbt::Value;
 
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
         ProcessedNode {
@@ -367,25 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn stands_line_up_with_the_street_and_count_from_capacity() {
-        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
-        let mut editor = test_editor(&xzbbox);
-        let mask = road_along_x(&xzbbox, 24);
-        generate_bicycle_stands(&mut editor, &node(1, 20, 20, &[("capacity", "10")]), &mask);
-        let y = editor.get_absolute_y(20, 1, 20);
-        let hoops: Vec<i32> = (10..=30)
-            .filter(|&x| editor.get_block_absolute(x, y, 20) == Some(IRON_BARS))
-            .collect();
-        assert_eq!(hoops, vec![16, 18, 20, 22, 24]);
-        // Each hoop spans the cell across the row.
-        let Some(Value::Compound(p)) = editor.block_properties_absolute(20, y, 20) else {
-            panic!("hoop without state");
-        };
-        assert_eq!(p.get("north"), Some(&Value::String("true".into())));
-        assert_eq!(p.get("east"), Some(&Value::String("false".into())));
-    }
-
-    #[test]
     fn a_bus_shelter_turns_its_open_side_to_the_road() {
         let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
         let mut editor = test_editor(&xzbbox);
@@ -409,28 +315,24 @@ mod tests {
     }
 
     #[test]
-    fn parking_areas_get_rows_of_stands_and_a_roof_only_when_covered() {
+    fn a_parking_area_gets_a_roof_only_when_covered() {
         use crate::element_processing::building_test_support::rect_way;
         let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
         let area: Vec<(i32, i32)> = (10..=20)
             .flat_map(|x| (10..=13).map(move |z| (x, z)))
             .collect();
-        let draw = |tags: &[(&str, &str)]| {
+        let roofed = |tags: &[(&str, &str)]| {
             let mut editor = test_editor(&xzbbox);
             let way = ProcessedElement::Way(rect_way(1, 10, 10, 20, 13, tags));
             generate_bicycle_parking_area(&mut editor, &way, &area);
-            let y = editor.get_absolute_y(12, 1, 12);
-            let stands = area
-                .iter()
-                .filter(|&&(x, z)| editor.get_block_absolute(x, y, z) == Some(IRON_BARS))
-                .count();
-            let roofed = editor.get_block_absolute(15, y + 3, 12) == Some(SMOOTH_STONE_SLAB);
-            (stands, roofed)
+            let y = editor.get_absolute_y(15, 4, 12);
+            editor.get_block_absolute(15, y, 12) == Some(SMOOTH_STONE_SLAB)
         };
-        let (stands, roofed) = draw(&[("amenity", "bicycle_parking")]);
-        assert!(stands >= 4, "only {stands} stands");
-        assert!(!roofed);
-        assert!(draw(&[("amenity", "bicycle_parking"), ("covered", "yes")]).1);
+        assert!(!roofed(&[("amenity", "bicycle_parking")]));
+        assert!(roofed(&[
+            ("amenity", "bicycle_parking"),
+            ("covered", "yes")
+        ]));
     }
 
     #[test]

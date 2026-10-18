@@ -108,8 +108,7 @@ pub fn generate_amenities(
                 }
             }
             "bicycle_parking" => {
-                if let ProcessedElement::Node(node) = element {
-                    street_furniture::generate_bicycle_stands(editor, node, road_mask);
+                if matches!(element, ProcessedElement::Node(_)) {
                     return;
                 }
                 let floor_area =
