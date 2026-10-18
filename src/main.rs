@@ -18,6 +18,7 @@ mod coordinate_system;
 mod data_processing;
 mod datapack;
 mod decals;
+mod deferred_placement;
 mod deterministic_rng;
 mod ecoregion;
 mod element_processing;

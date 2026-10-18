@@ -78,11 +78,11 @@ impl PrescanResult {
     }
 
     /// Regions each placement may write to (stream-to-disk deferral); see ASSUMED_HALF_EXTENT_M.
-    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+    pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
         let r = (ASSUMED_HALF_EXTENT_M * scale).ceil() as i32;
         self.placements
             .iter()
-            .flat_map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
+            .map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
             .collect()
     }
 }
@@ -167,25 +167,28 @@ pub fn prescan(
 }
 
 /// Fetches models (with cache), voxelizes them, and writes blocks into the editor.
-pub fn place_three_dmr_models(editor: &mut WorldEditor, args: &Args, prescan: &PrescanResult) {
-    if prescan.placements.is_empty() {
+/// Places `indices` (into the prescan's placements, ascending).
+pub fn place_three_dmr_models(
+    editor: &mut WorldEditor,
+    args: &Args,
+    prescan: &PrescanResult,
+    indices: &[usize],
+) {
+    if indices.is_empty() {
         return;
     }
+    let placements = || indices.iter().map(|&i| &prescan.placements[i]);
 
     println!(
         "{} Fetching {} 3DMR model{}...",
         "  [+]".bold(),
-        prescan.placements.len(),
-        if prescan.placements.len() == 1 {
-            ""
-        } else {
-            "s"
-        }
+        indices.len(),
+        if indices.len() == 1 { "" } else { "s" }
     );
 
     let unique_ids: Vec<u64> = {
         let mut set: HashSet<u64> = HashSet::new();
-        prescan.placements.iter().for_each(|p| {
+        placements().for_each(|p| {
             set.insert(p.model_id);
         });
         set.into_iter().collect()
@@ -221,7 +224,7 @@ pub fn place_three_dmr_models(editor: &mut WorldEditor, args: &Args, prescan: &P
     let mut placed_count = 0usize;
     let mut total_voxels = 0usize;
 
-    for placement in &prescan.placements {
+    for placement in placements() {
         let Some((glb_bytes, info)) = fetched.get(&placement.model_id) else {
             continue;
         };

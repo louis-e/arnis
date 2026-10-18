@@ -1173,6 +1173,34 @@ pub fn generate_world_with_options(
     let landmark_suppressed: &HashSet<(&'static str, u64)> = landmarks.suppressed();
     let has_landmarks = !landmark_suppressed.is_empty();
 
+    // Post-merge placements, numbered in the order they go in: 3D models, planes, then
+    // landmarks, last because they clear their own footprint.
+    let model_count = models_3d_pipeline
+        .as_ref()
+        .map_or(0, |p| p.placement_count());
+    let landmark_from = model_count + planes.placement_count();
+    let placement_total = landmark_from + landmarks.placement_count();
+    let place_units = |editor: &mut WorldEditor, units: &[usize]| {
+        let pick = |lo: usize, hi: usize| -> Vec<usize> {
+            units
+                .iter()
+                .filter(|&&u| (lo..hi).contains(&u))
+                .map(|&u| u - lo)
+                .collect()
+        };
+        if let Some(p) = models_3d_pipeline.as_ref() {
+            p.place(editor, args, &pick(0, model_count));
+        }
+        crate::structures::plane::place_plane_models(
+            editor,
+            &planes,
+            &pick(model_count, landmark_from),
+        );
+        landmarks.place(editor, args, &pick(landmark_from, placement_total));
+    };
+    // Filled in by the streaming tile path; otherwise everything is placed after the merge.
+    let mut deferred = crate::deferred_placement::DeferredPlacements::new(Vec::new(), |_| false);
+
     bench.mark("precompute");
 
     println!("{} Generating area...", "[5/7]".bold());
@@ -1244,19 +1272,24 @@ pub fn generate_world_with_options(
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
 
-        // Regions any 3D placement may write to: kept resident (not evicted in-loop)
-        // so the post-merge placement pass lands in RAM, then flushed at finalize.
-        let model_regions: HashSet<(i32, i32)> = if eviction_active {
-            let mut regions: HashSet<(i32, i32)> = models_3d_pipeline
+        let region_of_tile: Vec<(i32, i32)> =
+            tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
+        real_regions = region_of_tile.iter().copied().collect();
+
+        // Regions a post-merge placement may write to stay resident until it has gone in,
+        // which under streaming is as soon as all of its regions have merged their tiles.
+        if eviction_active {
+            let mut units = models_3d_pipeline
                 .as_ref()
-                .map(|p| p.deferred_region_keys(args.scale))
+                .map(|p| p.placement_regions(args.scale))
                 .unwrap_or_default();
-            regions.extend(landmarks.deferred_region_keys(args.scale));
-            regions.extend(planes.deferred_region_keys());
-            regions
-        } else {
-            HashSet::new()
-        };
+            units.extend(planes.placement_regions());
+            units.extend(landmarks.placement_regions(args.scale));
+            deferred = crate::deferred_placement::DeferredPlacements::new(units, |r| {
+                real_regions.contains(&r)
+            });
+        }
+        let model_regions: HashSet<(i32, i32)> = deferred.regions().copied().collect();
 
         if eviction_active {
             let (flush_threads, flush_queue) = crate::world_editor::flush_pool_params(
@@ -1298,9 +1331,6 @@ pub fn generate_world_with_options(
             });
         }
 
-        let region_of_tile: Vec<(i32, i32)> =
-            tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
-        real_regions = region_of_tile.iter().copied().collect();
         // remaining[R] = 1 (owner) + count of R's in-grid region neighbours; R is
         // flushable when this reaches 0 (owner + all neighbour tiles merged).
         let mut remaining: HashMap<(i32, i32), u32> = HashMap::new();
@@ -1587,43 +1617,49 @@ pub fn generate_world_with_options(
                         }
 
                         if eviction_active {
-                            // This tile contributes to its own region and its 8 neighbours;
-                            // flush each non-deferred region whose contributors are all merged.
+                            // This tile contributes to its own region and its 8 neighbours.
+                            // A region whose contributors have all merged releases the
+                            // placements waiting on it, and is flushed once none still is.
                             // (Rail tunnels are carved in-tile above, so they don't defer regions.)
                             let rt = region_of_tile[tile_idx];
+                            let mut flushable: Vec<(i32, i32)> = Vec::new();
                             for dz in -1..=1 {
                                 for dx in -1..=1 {
                                     let d = (rt.0 + dx, rt.1 + dz);
-                                    if let Some(c) = remaining.get_mut(&d) {
-                                        *c -= 1;
-                                        if *c == 0
-                                            && !evicted_regions.contains(&d)
-                                            && !model_regions.contains(&d)
-                                            && Some(d) != spawn_region
-                                        {
-                                            if hash_check {
-                                                hash_acc = hash_acc.wrapping_add(
-                                                    editor.region_content_hash(d.0, d.1),
-                                                );
-                                            }
-                                            // Facade panels check the region's final blocks
-                                            // and must be in before it leaves memory.
-                                            crate::mapillary::displays::flush_region(
-                                                &mut editor,
-                                                d.0,
-                                                d.1,
-                                            );
-                                            crate::building_facades::flush_region(
-                                                &mut editor,
-                                                d.0,
-                                                d.1,
-                                            );
-                                            if let Some(w) = flush_worker.as_ref() {
-                                                editor.flush_region_via(w, d.0, d.1)?;
-                                            }
-                                            evicted_regions.insert(d);
+                                    let Some(c) = remaining.get_mut(&d) else {
+                                        continue;
+                                    };
+                                    *c -= 1;
+                                    if *c > 0 {
+                                        continue;
+                                    }
+                                    flushable.push(d);
+                                    for wave in deferred.complete(d) {
+                                        place_units(&mut editor, &wave);
+                                        for &unit in &wave {
+                                            flushable.extend_from_slice(deferred.regions_of(unit));
                                         }
                                     }
+                                }
+                            }
+                            for d in flushable {
+                                if remaining.get(&d) == Some(&0)
+                                    && !evicted_regions.contains(&d)
+                                    && !deferred.holds(d)
+                                    && Some(d) != spawn_region
+                                {
+                                    if hash_check {
+                                        hash_acc = hash_acc
+                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                    }
+                                    // Facade panels check the region's final blocks
+                                    // and must be in before it leaves memory.
+                                    crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
+                                    crate::building_facades::flush_region(&mut editor, d.0, d.1);
+                                    if let Some(w) = flush_worker.as_ref() {
+                                        editor.flush_region_via(w, d.0, d.1)?;
+                                    }
+                                    evicted_regions.insert(d);
                                 }
                             }
                         }
@@ -1875,16 +1911,18 @@ pub fn generate_world_with_options(
         );
     }
 
-    // Run after ground generation so anchor Y reflects the final terrain.
-    if let Some(p) = models_3d_pipeline.as_ref() {
-        p.place(&mut editor, args);
-    }
-    crate::structures::plane::place_plane_models(&mut editor, &planes);
-    // Last, because they clear their own footprint.
-    let landmarks_start = args.benchmark.then(std::time::Instant::now);
-    landmarks.place(&mut editor, args);
-    if let Some(t) = landmarks_start {
-        bench.report("landmark_place", t.elapsed());
+    // Run after ground generation so anchor Y reflects the final terrain. Streaming placed
+    // them as their regions completed; only stragglers are left.
+    if eviction_active {
+        place_units(&mut editor, &deferred.drain());
+    } else {
+        let all: Vec<usize> = (0..placement_total).collect();
+        place_units(&mut editor, &all[..landmark_from]);
+        let landmarks_start = args.benchmark.then(std::time::Instant::now);
+        place_units(&mut editor, &all[landmark_from..]);
+        if let Some(t) = landmarks_start {
+            bench.report("landmark_place", t.elapsed());
+        }
     }
     bench.mark("post_passes");
 

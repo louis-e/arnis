@@ -63,10 +63,10 @@ impl PrescanResult {
 
     /// Regions each placement may write to (stream-to-disk deferral). The model is a
     /// rotated long×short rectangle centred on the anchor, so its half-diagonal (+ ring) bounds it.
-    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+    pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
         self.placements
             .iter()
-            .flat_map(|p| {
+            .map(|p| {
                 let r = (p.long_m.hypot(p.short_m) as f64 * 0.5 * scale).ceil() as i32;
                 crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r)
             })
@@ -290,8 +290,14 @@ fn in_model_rect(p: &Placement, args_scale: f64, x: i32, z: i32, margin: f64) ->
         && b.abs() <= p.short_m as f64 * args_scale / 2.0 + margin
 }
 
-pub fn place_stadium_models(editor: &mut WorldEditor, args: &Args, prescan: &PrescanResult) {
-    if prescan.placements.is_empty() {
+/// Places `indices` (into the prescan's placements, ascending).
+pub fn place_stadium_models(
+    editor: &mut WorldEditor,
+    args: &Args,
+    prescan: &PrescanResult,
+    indices: &[usize],
+) {
+    if indices.is_empty() {
         return;
     }
     let Some(model_bytes) = prescan.model_bytes.as_deref() else {
@@ -331,19 +337,15 @@ pub fn place_stadium_models(editor: &mut WorldEditor, args: &Args, prescan: &Pre
     println!(
         "{} Placing {} stadium model{}...",
         "  [+]".bold(),
-        prescan.placements.len(),
-        if prescan.placements.len() == 1 {
-            ""
-        } else {
-            "s"
-        }
+        indices.len(),
+        if indices.len() == 1 { "" } else { "s" }
     );
 
     let block_per_meter = args.scale as f32;
     let mut placed = 0usize;
     let mut total_voxels = 0usize;
 
-    for placement in &prescan.placements {
+    for placement in indices.iter().map(|&i| &prescan.placements[i]) {
         let target_long_blocks = placement.long_m * block_per_meter;
         let target_short_blocks = placement.short_m * block_per_meter;
         let target_height_blocks = placement.osm_height_m.unwrap_or(DEFAULT_HEIGHT_M)
