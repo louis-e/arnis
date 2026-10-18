@@ -514,11 +514,7 @@ pub fn generate_ground_region(
                         // can only EXTEND water into land (organic fringe), never
                         // retract it — so OSM rivers that overlap ESA water pixels
                         // are never overwritten with grass.
-                        let water_blend = if has_land_cover {
-                            ground.water_blend(coord)
-                        } else {
-                            0.0
-                        };
+                        let blend_is_water = has_land_cover && ground.water_blend_is_water(coord);
                         let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
                         // Probe a column for water at its *own* ground level.
                         // Previously this closed over the outer-cell ground_y,
@@ -584,7 +580,7 @@ pub fn generate_ground_region(
                         // instead of either the raw ESA 10 m rectangle grid
                         // or a stochastic noise-dithered transition.
                         let is_esa_water =
-                            grid_is_water || placed_water || osm_gap || water_blend > 0.5;
+                            grid_is_water || placed_water || osm_gap || blend_is_water;
 
                         let mut water_y = 0;
                         let mut place_esa_water = false;
@@ -852,7 +848,7 @@ pub fn generate_ground_region(
                             let surface_block = if (snow == terrain_surface::Snow::Block
                                 || snow != terrain_surface::Snow::None
                                     && terrain_surface::is_ice(surface_block))
-                                && water_blend <= 0.5
+                                && !blend_is_water
                                 && surface_block != WATER
                             {
                                 SNOW_BLOCK
@@ -918,7 +914,7 @@ pub fn generate_ground_region(
                             // surfaces only get a dusting.
                             if snow != terrain_surface::Snow::None
                                 && !surface_is_water
-                                && water_blend <= 0.5
+                                && !blend_is_water
                             {
                                 let eighths =
                                     if top == Some(surface_block) || top == Some(PACKED_ICE) {
