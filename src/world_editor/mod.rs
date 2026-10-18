@@ -202,6 +202,8 @@ pub struct WorldEditor<'a> {
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
+    /// Where `man_made=crane` stands, shared via Arc with the tile editors.
+    mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -215,6 +217,8 @@ pub struct WorldEditor<'a> {
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
     /// Bridge pier columns and their material, extended to the bed by the water carve.
     support_columns: FnvHashMap<(i32, i32), Block>,
+    /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
+    hedge_columns: FnvHashSet<(i32, i32)>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -292,9 +296,11 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             mapped_trunks: None,
+            mapped_cranes: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
+            hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -348,9 +354,11 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             mapped_trunks: None,
+            mapped_cranes: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
+            hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -404,9 +412,11 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             mapped_trunks: None,
+            mapped_cranes: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
+            hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -515,6 +525,16 @@ impl<'a> WorldEditor<'a> {
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
         self.mapped_trunks = None;
+    }
+
+    /// Sets where mapped cranes stand (shared across the main and tile editors).
+    pub fn set_mapped_cranes(&mut self, cranes: Arc<Vec<(i32, i32)>>) {
+        self.mapped_cranes = Some(cranes);
+    }
+
+    /// Where mapped cranes stand, whatever order the elements render in.
+    pub fn mapped_cranes(&self) -> &[(i32, i32)] {
+        self.mapped_cranes.as_deref().map_or(&[], Vec::as_slice)
     }
 
     /// Sets the mapped tree trunks (shared across the main and tile editors).
@@ -1282,6 +1302,18 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_support_column(&mut self, x: i32, z: i32, block: Block) {
         self.support_columns.insert((x, z), block);
+    }
+
+    /// Record a hedge standing at (x, z).
+    #[inline]
+    pub fn register_hedge(&mut self, x: i32, z: i32) {
+        self.hedge_columns.insert((x, z));
+    }
+
+    /// Whether a hedge stands at (x, z).
+    #[inline]
+    pub fn is_hedge(&self, x: i32, z: i32) -> bool {
+        !self.hedge_columns.is_empty() && self.hedge_columns.contains(&(x, z))
     }
 
     /// Material of the support column standing at (x, z), if any.
@@ -2188,41 +2220,6 @@ impl<'a> WorldEditor<'a> {
         if should_insert {
             self.world
                 .set_block_with_properties(x, absolute_y, z, block_with_props);
-        }
-    }
-
-    /// Fills a cuboid area with the specified block between two coordinates.
-    #[allow(clippy::too_many_arguments)]
-    #[inline]
-    pub fn fill_blocks(
-        &mut self,
-        block: Block,
-        x1: i32,
-        y1: i32,
-        z1: i32,
-        x2: i32,
-        y2: i32,
-        z2: i32,
-        override_whitelist: Option<&[Block]>,
-        override_blacklist: Option<&[Block]>,
-    ) {
-        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-        let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
-        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
-
-        for x in min_x..=max_x {
-            for y_offset in min_y..=max_y {
-                for z in min_z..=max_z {
-                    self.set_block(
-                        block,
-                        x,
-                        y_offset,
-                        z,
-                        override_whitelist,
-                        override_blacklist,
-                    );
-                }
-            }
         }
     }
 

@@ -592,28 +592,25 @@ fn assign_node_ids_preserving_endpoints(
         return Vec::new();
     }
 
-    // First ID wins where two original nodes share a block, so the answer does
+    // First node wins where two original nodes share a block, so the answer does
     // not depend on iteration order.
-    let mut by_block: HashMap<(i32, i32), u64> = HashMap::with_capacity(original_nodes.len());
+    let mut by_block: HashMap<(i32, i32), &ProcessedNode> =
+        HashMap::with_capacity(original_nodes.len());
     for n in original_nodes {
-        by_block.entry((n.x, n.z)).or_insert(n.id);
+        by_block.entry((n.x, n.z)).or_insert(n);
     }
 
+    // A kept vertex keeps its tags too, so a gate on a clipped fence still opens.
     let mut out: Vec<ProcessedNode> = clipped_coords
         .into_iter()
         .enumerate()
         .map(|(i, coord)| {
             let (x, z) = (coord.0.round() as i32, coord.1.round() as i32);
-            let id = match by_block.get(&(x, z)) {
-                Some(&id) => id,
-                None => invented_node_id(way_id, i as u64),
+            let (id, tags) = match by_block.get(&(x, z)) {
+                Some(n) => (n.id, n.tags.clone()),
+                None => (invented_node_id(way_id, i as u64), HashMap::new()),
             };
-            ProcessedNode {
-                id,
-                x,
-                z,
-                tags: HashMap::new(),
-            }
+            ProcessedNode { id, x, z, tags }
         })
         .collect();
 
@@ -673,6 +670,28 @@ mod tests {
         assert!(!clipped.iter().any(|n| n.id == 2 || n.id == 3));
         // Still closed by id, which is the signal the ring assembly reads.
         assert_eq!(clipped.first().map(|n| n.id), clipped.last().map(|n| n.id));
+    }
+
+    /// A gate on a fence the world's edge cuts must still be a gate.
+    #[test]
+    fn a_clipped_ring_keeps_the_tags_of_the_nodes_that_survived() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 30, 30).unwrap();
+        let mut gate = node(4, 10, 25);
+        gate.tags.insert("barrier".to_string(), "gate".to_string());
+        let ring = vec![
+            node(1, 10, 10),
+            node(2, 40, 10),
+            node(3, 40, 25),
+            gate,
+            node(1, 10, 10),
+        ];
+        let clipped = clip_way_to_bbox(&ring, &bbox);
+        let kept = clipped.iter().find(|n| n.id == 4).expect("node 4 survives");
+        assert_eq!(kept.tags.get("barrier").map(String::as_str), Some("gate"));
+        assert!(clipped
+            .iter()
+            .filter(|n| n.id != 4)
+            .all(|n| n.tags.is_empty()));
     }
 
     #[test]

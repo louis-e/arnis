@@ -458,8 +458,12 @@ impl FloodFillCache {
             if !Self::relation_fills_members(rel) {
                 continue;
             }
+            // Piers and breakwaters also cut their holes out of the fill.
+            let holes = Self::is_waterfront(&rel.tags);
             for member in &rel.members {
-                if member.role == ProcessedMemberRole::Outer && seen.insert(member.way.id) {
+                let wanted = member.role == ProcessedMemberRole::Outer
+                    || (holes && member.role == ProcessedMemberRole::Inner);
+                if wanted && seen.insert(member.way.id) {
                     ways_needing_fill.push(&member.way);
                 }
             }
@@ -584,13 +588,16 @@ impl FloodFillCache {
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
             // Historic tomb polygons (e.g. tomb=pyramid)
             || way.tags.get("tomb").map(|v| v == "pyramid").unwrap_or(false)
+            // Pier and breakwater areas -> waterfront
+            || Self::is_waterfront(&way.tags)
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar"))
     }
 
     /// Relations `process_element` renders by filling each outer member: natural, landuse
-    /// that paints ground, and parks. Mirrors its dispatch; keep the two in sync.
+    /// that paints ground, parks, piers and breakwaters. Mirrors its dispatch; keep the two
+    /// in sync.
     fn relation_fills_members(rel: &crate::osm_parser::ProcessedRelation) -> bool {
         let tags = &rel.tags;
         if tags.contains_key("building")
@@ -611,7 +618,15 @@ impl FloodFillCache {
             // generate_landuse returns before filling these.
             return !matches!(landuse.as_str(), "residential" | "commercial");
         }
-        tags.get("leisure").map(String::as_str) == Some("park")
+        tags.get("leisure").map(String::as_str) == Some("park") || Self::is_waterfront(tags)
+    }
+
+    /// Piers, breakwaters and groynes, which the waterfront code fills as decks and mounds.
+    fn is_waterfront(tags: &std::collections::HashMap<String, String>) -> bool {
+        matches!(
+            tags.get("man_made").map(String::as_str),
+            Some("pier" | "breakwater" | "groyne")
+        )
     }
 
     /// Collects all building footprint coordinates from the pre-computed cache.

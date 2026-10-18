@@ -191,6 +191,9 @@ pub fn generate_barriers(
             {
                 editor.set_block_absolute(GRASS_BLOCK, bx, base, bz, None, None);
             }
+            if hedge {
+                editor.register_hedge(bx, bz);
+            }
             for y in (lift + 1)..=(lift + wall_height) {
                 if joined {
                     place_connected(editor, material, bx, base + y, bz);
@@ -1223,6 +1226,12 @@ mod tests {
         assert!(!capped(&[("barrier", "fence"), ("fence_type", "wood")]));
         assert!(on_soil(&[("barrier", "hedge")]));
         assert!(!on_soil(&[("barrier", "wall")]));
+    }
+
+    #[test]
+    fn hedges_mark_their_columns_so_plant_cleanups_spare_them() {
+        assert!(draw(&[("barrier", "hedge")], |editor| editor.is_hedge(15, 5)));
+        assert!(!draw(&[("barrier", "wall")], |editor| editor.is_hedge(15, 5)));
     }
 
     #[test]

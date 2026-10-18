@@ -18,7 +18,7 @@ enum Family {
 
 fn family(block: Block) -> Option<Family> {
     let name = block.name();
-    if block == IRON_BARS || name.ends_with("_wall") {
+    if is_bars_or_pane(block) || name.ends_with("_wall") {
         Some(Family::WallOrBars)
     } else if name.ends_with("_fence") {
         Some(Family::Fence)
@@ -32,13 +32,18 @@ pub(crate) fn is_connectable(block: Block) -> bool {
     family(block).is_some()
 }
 
+/// Iron bars and glass panes: thin, joined like fences, never to a gate.
+fn is_bars_or_pane(block: Block) -> bool {
+    block == IRON_BARS || block.name().ends_with("_pane")
+}
+
 fn is_gate(block: Block) -> bool {
     block.name().ends_with("_fence_gate")
 }
 
-/// Whether `own` joins `neighbour`: its own family, or a fence gate (bars never do).
+/// Whether `own` joins `neighbour`: its own family, or a fence gate (bars and panes never do).
 fn joins(own: Block, neighbour: Block) -> bool {
-    family(neighbour) == family(own) || (own != IRON_BARS && is_gate(neighbour))
+    family(neighbour) == family(own) || (!is_bars_or_pane(own) && is_gate(neighbour))
 }
 
 /// Places a wall, bar or fence (into an empty cell) joined to its neighbours, updating them too.
@@ -115,9 +120,7 @@ fn refresh(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32) {
             .get_block_absolute(x + dx, y, z + dz)
             .is_some_and(|b| joins(block, b))
     });
-    let joined = if block == IRON_BARS {
-        connected_iron_bars(north, south, east, west)
-    } else if own == Some(Family::Fence) {
+    let joined = if is_bars_or_pane(block) || own == Some(Family::Fence) {
         connected_fence(block, north, south, east, west)
     } else {
         connected_wall(block, north, south, east, west)

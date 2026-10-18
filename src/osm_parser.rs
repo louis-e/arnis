@@ -1810,9 +1810,16 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     false
 }
 
-/// Relations whose outer members are filled as areas: natural, landuse and leisure.
+/// Relations whose outer members are filled as areas: natural, landuse, leisure, and
+/// the piers and breakwaters drawn as decks and mounds.
 fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
-    tags.contains_key("natural") || tags.contains_key("landuse") || tags.contains_key("leisure")
+    tags.contains_key("natural")
+        || tags.contains_key("landuse")
+        || tags.contains_key("leisure")
+        || matches!(
+            tags.get("man_made").map(String::as_str),
+            Some("pier" | "breakwater" | "groyne")
+        )
 }
 
 /// Outer or inner, the two roles a multipolygon ring can have.
@@ -1921,6 +1928,14 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
         if element.tags().contains_key(tag) {
             return i;
         }
+    }
+    // Masts and chimneys stand on the roof they are mapped on, so they wait for every
+    // building part, which has the default priority and comes after nodes.
+    if matches!(
+        element.tags().get("man_made").map(String::as_str),
+        Some("antenna" | "mast" | "chimney")
+    ) {
+        return PRIORITY_ORDER.len() + 1;
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
@@ -2544,6 +2559,33 @@ mod osm_xml_tests {
             !crate::floodfill::flood_fill_area(&coords, None).is_empty(),
             "the ring fills, instead of leaving an outline"
         );
+    }
+
+    /// A pier relation split over open ways gets the same assembled ring.
+    #[test]
+    fn a_split_pier_relation_arrives_as_one_closed_ring() {
+        let xml = SPLIT_BEACH.replace(
+            r#"<tag k="natural" v="beach"/>"#,
+            r#"<tag k="man_made" v="pier"/>"#,
+        );
+        let (data, bounds) = parse(&xml);
+        let (elements, _, _, _) = parse_osm_data(
+            data,
+            bounds.unwrap(),
+            false,
+            &crate::projection::ProjectionSpec::local(1.0),
+        );
+        let rel = elements
+            .iter()
+            .find_map(|e| match e {
+                ProcessedElement::Relation(r) if r.id == 30 => Some(r),
+                _ => None,
+            })
+            .expect("the pier relation is kept");
+        assert_eq!(rel.members.len(), 1, "two open ways make one ring");
+        let ring = &rel.members[0].way.nodes;
+        let (first, last) = (&ring[0], ring.last().unwrap());
+        assert_eq!((first.x, first.z), (last.x, last.z), "the ring is closed");
     }
 
     #[test]

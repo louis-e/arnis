@@ -318,7 +318,10 @@ fn process_element(
                 );
             }
 
-            if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+            // A pier also tagged as a building or a path is still a deck on piles.
+            if way.tags.get("man_made").map(String::as_str) == Some("pier") {
+                waterfront::generate_pier(editor, element, flood_fill_cache, args);
+            } else if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                 // parts of one building share a style seed so untagged parts match
                 let group_seed = part_groups.get(&way.id).copied().unwrap_or(way.id);
                 let ctx = BuildingContext {
@@ -436,7 +439,13 @@ fn process_element(
             } else if way.tags.get("tomb").map(String::as_str) == Some("pyramid") {
                 historic::generate_pyramid(editor, way, args, flood_fill_cache);
             } else if way.tags.contains_key("man_made") {
-                man_made::generate_man_made(editor, element, args);
+                man_made::generate_man_made(
+                    editor,
+                    element,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             } else if way.tags.contains_key("power") {
                 power::generate_power(
                     editor,
@@ -467,6 +476,8 @@ fn process_element(
                     building_footprints,
                     bridge_surface,
                 );
+            } else if man_made::is_summit_cross(&node.tags) {
+                man_made::generate_cross(editor, node, args, true);
             } else if node.tags.contains_key("amenity") {
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
             } else if node.tags.contains_key("barrier") {
@@ -492,7 +503,7 @@ fn process_element(
             } else if node.tags.contains_key("tourism") {
                 tourisms::generate_tourisms(editor, node, road_mask);
             } else if node.tags.contains_key("man_made") {
-                man_made::generate_man_made_nodes(editor, node, args);
+                man_made::generate_man_made_nodes(editor, node, args, building_footprints);
             } else if node.tags.contains_key("power") {
                 power::generate_power_nodes(editor, node);
             } else if node.tags.contains_key("historic") {
@@ -563,7 +574,13 @@ fn process_element(
                     bridge_surface,
                 );
             } else if rel.tags.contains_key("man_made") {
-                man_made::generate_man_made(editor, element, args);
+                man_made::generate_man_made(
+                    editor,
+                    element,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
         }
     }
@@ -663,6 +680,10 @@ pub fn generate_world_with_options(
     if dropped > 0 {
         println!("  Skipped {dropped} building(s) on runways, taxiways and aprons");
     }
+    // A footpath mapped along a pier is the pier's deck, not a path down at the water.
+    waterfront::drop_paths_on_piers(&mut elements, args.scale, args.timeout.as_ref());
+    // A peak's summit cross that is also mapped on its own stands once, as the mapped one.
+    man_made::drop_doubled_summit_crosses(&mut elements, args.scale);
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
@@ -985,6 +1006,9 @@ pub fn generate_world_with_options(
     mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
     let mapped_trunks = Arc::new(mapped_trunks);
     editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+    // Indexed up front, so a construction site skips its own crane whichever renders first.
+    let mapped_cranes = Arc::new(man_made::mapped_crane_points(&elements));
+    editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
 
     let traffic_signals =
         (extras.traffic_lights && world_format == WorldFormat::JavaAnvil).then(|| {
@@ -1298,6 +1322,7 @@ pub fn generate_world_with_options(
             }
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+            tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
             }

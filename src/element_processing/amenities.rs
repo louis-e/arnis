@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::get_nearest_road_block;
+use crate::element_processing::street_furniture;
 use crate::element_processing::surfaces::{get_blocks_for_surface, semirandom_surface};
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
@@ -107,44 +108,13 @@ pub fn generate_amenities(
                 }
             }
             "bicycle_parking" => {
-                // Honor an explicit surface=* tag; default to a wooden deck.
-                let ground_block: Block = element
-                    .tags()
-                    .get("surface")
-                    .and_then(|s| get_blocks_for_surface(s))
-                    .map(|blocks| blocks[0])
-                    .unwrap_or(OAK_PLANKS);
-                let roof_block: Block = STONE_BLOCK_SLAB;
-
-                // Use pre-computed flood fill from cache
-                let floor_area =
-                    flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
-
-                if floor_area.is_empty() {
+                if matches!(element, ProcessedElement::Node(_)) {
                     return;
                 }
-
-                // Fill the floor area
-                for (x, z) in floor_area.iter() {
-                    editor.set_block(ground_block, *x, 0, *z, None, None);
-                }
-
-                // Place fences and roof slabs at each corner node
-                for node in element.nodes() {
-                    let x: i32 = node.x;
-                    let z: i32 = node.z;
-
-                    // Set ground block and fences
-                    editor.set_block(ground_block, x, 0, z, None, None);
-                    for y in 1..=4 {
-                        editor.set_block(OAK_FENCE, x, y, z, None, None);
-                    }
-                    editor.set_block(roof_block, x, 5, z, None, None);
-                }
-
-                // Flood fill the roof area
-                for (x, z) in floor_area.iter() {
-                    editor.set_block(roof_block, *x, 5, *z, None, None);
+                let floor_area =
+                    flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
+                if !floor_area.is_empty() {
+                    street_furniture::generate_bicycle_parking_area(editor, element, &floor_area);
                 }
             }
             "bench" => {
@@ -209,6 +179,10 @@ pub fn generate_amenities(
                 }
             }
             "shelter" => {
+                if let ProcessedElement::Node(node) = element {
+                    street_furniture::generate_shelter_node(editor, node, road_mask);
+                    return;
+                }
                 let roof_block: Block = STONE_BRICK_SLAB;
 
                 // Use pre-computed flood fill from cache
