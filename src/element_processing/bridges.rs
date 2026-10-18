@@ -30,7 +30,7 @@ const STREAM_HEADROOM: i32 = 2;
 /// Deck Y above a lower bridge deck this one crosses.
 const STACKED_DECK_HEADROOM: i32 = 6;
 /// Room an arch needs over flat ground for its curve to read.
-const ARCH_MIN_CLEARANCE: i32 = 8;
+pub(crate) const ARCH_MIN_CLEARANCE: i32 = 8;
 /// Steepest climb (blocks per cell) a clearance may force from a deck end.
 const MAX_CLEARANCE_SLOPE: f32 = 1.0;
 /// How far a member may double back along its group's axis and still share one profile.
@@ -49,6 +49,9 @@ const APPROACH_REACH_M: f64 = 1500.0;
 const DECK_STRUCTURE_DEPTH: i32 = 2;
 /// How far off a road deck a rail bridge's track may run and still ride on it.
 const RAIL_ON_DECK_REACH: i32 = 2;
+/// Track spacing up to which parallel rail decks are decked over as one.
+const RAIL_SIDE_BY_SIDE_DISTANCE: f32 =
+    (2 * railways::RAIL_DECK_HALF_WIDTH + 1 + railways::RAIL_DECK_GAP_FILL) as f32 + 0.5;
 
 fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
     matches!(
@@ -114,10 +117,18 @@ impl BridgeRampInfo {
 
 /// How a rail bridge way is carried.
 pub enum RailDeck {
-    /// Its own deck at one Y, shared by every way of the viaduct.
-    Level(i32),
+    /// Its own deck, at a level shared by every way of the viaduct and its side-by-side tracks.
+    Own(OwnRailDeck),
     /// Rides a road deck, at its Y per smoothed centerline cell.
     Carried(Vec<i32>),
+}
+
+pub struct OwnRailDeck {
+    /// Deck Y per smoothed centerline cell, ramps included.
+    pub ys: Vec<i32>,
+    // False where the way continues into another rail bridge.
+    pub start_is_boundary: bool,
+    pub end_is_boundary: bool,
 }
 
 pub struct BridgeStructureMap {
@@ -1084,6 +1095,29 @@ impl BridgeStructureMap {
             rail_decks.insert(way.id, RailDeck::Carried(ys));
         }
 
+        // Tracks running side by side share a level, so their decks can join.
+        let rail_bboxes: Vec<(i32, i32, i32, i32)> =
+            rail_bridge_ways.iter().map(|w| way_bbox(w)).collect();
+        for a in 0..rail_bridge_ways.len() {
+            for b in (a + 1)..rail_bridge_ways.len() {
+                if rail_decks.contains_key(&rail_bridge_ways[a].id)
+                    || rail_decks.contains_key(&rail_bridge_ways[b].id)
+                    || rail_uf.find(a) == rail_uf.find(b)
+                    || !bboxes_touch(
+                        rail_bboxes[a],
+                        rail_bboxes[b],
+                        RAIL_SIDE_BY_SIDE_DISTANCE.ceil() as i32,
+                    )
+                {
+                    continue;
+                }
+                if rails_side_by_side(rail_bridge_ways[a], rail_bridge_ways[b]) {
+                    rail_uf.union(a, b);
+                }
+            }
+        }
+
+        let rail_internal = railways::rail_bridge_internal_endpoints(&rail_bridge_ways);
         let mut rail_groups: HashMap<usize, Vec<usize>> = HashMap::new();
         for (i, way) in rail_bridge_ways.iter().enumerate() {
             if rail_decks.contains_key(&way.id) {
@@ -1144,8 +1178,32 @@ impl BridgeStructureMap {
             } else {
                 terrain_max
             };
+            let level = deck.max(floor);
             for &i in group {
-                rail_decks.insert(rail_bridge_ways[i].id, RailDeck::Level(deck.max(floor)));
+                let way = rail_bridge_ways[i];
+                let terrain: Vec<i32> = railways::build_smoothed_centerline(way)
+                    .iter()
+                    .map(|&(x, z)| editor.get_ground_level(x, z))
+                    .collect();
+                let internal = |n: usize| {
+                    let node = &way.nodes[n];
+                    rail_internal.contains(&(node.x, node.z))
+                };
+                let start_internal = internal(0);
+                let end_internal = internal(way.nodes.len() - 1);
+                rail_decks.insert(
+                    way.id,
+                    RailDeck::Own(OwnRailDeck {
+                        ys: railways::rail_bridge_profile(
+                            &terrain,
+                            level,
+                            start_internal,
+                            end_internal,
+                        ),
+                        start_is_boundary: !start_internal,
+                        end_is_boundary: !end_internal,
+                    }),
+                );
             }
         }
 
@@ -1202,8 +1260,10 @@ pub struct BridgeSurfaceMap {
     cells: HashMap<(i32, i32), DeckSpan>,
     // Columns under a deck with a road or track at grade.
     grade_crossings: HashSet<(i32, i32)>,
-    // Rail viaduct deck Y per column.
+    // Lowest rail viaduct deck Y per column.
     rail_decks: HashMap<(i32, i32), i32>,
+    // Rail viaduct centerline cells: (way id, deck Y).
+    rail_tracks: HashMap<(i32, i32), (u64, i32)>,
 }
 
 impl BridgeSurfaceMap {
@@ -1236,7 +1296,13 @@ impl BridgeSurfaceMap {
             cells: HashMap::new(),
             grade_crossings: HashSet::new(),
             rail_decks: HashMap::new(),
+            rail_tracks: HashMap::new(),
         }
+    }
+
+    /// Deck Y of a rail viaduct track running through (x, z), with its way id.
+    pub fn rail_track_at(&self, x: i32, z: i32) -> Option<(u64, i32)> {
+        self.rail_tracks.get(&(x, z)).copied()
     }
 
     /// True when a road or track runs at grade under the deck at (x, z).
@@ -1349,22 +1415,37 @@ impl BridgeSurfaceMap {
         }
 
         // Rail viaducts are rendered on their own, but still shelter what runs beneath them.
-        let mut rail_decks: HashMap<(i32, i32), i32> = HashMap::new();
-        for elem in elements {
-            if let ProcessedElement::Way(way) = elem {
-                let Some(RailDeck::Level(y)) = structures.rail_deck(way.id) else {
-                    continue;
-                };
-                for (x, z) in railways::build_smoothed_centerline(way) {
-                    for dx in -1..=1 {
-                        for dz in -1..=1 {
-                            let deck = rail_decks.entry((x + dx, z + dz)).or_insert(*y);
-                            *deck = (*deck).min(*y);
-                        }
-                    }
-                }
+        let own_rail_decks = || {
+            elements.iter().filter_map(|elem| match elem {
+                ProcessedElement::Way(way) => match structures.rail_deck(way.id) {
+                    Some(RailDeck::Own(deck)) => Some((way, deck)),
+                    _ => None,
+                },
+                _ => None,
+            })
+        };
+        let mut rail_tracks: HashMap<(i32, i32), (u64, i32)> = HashMap::new();
+        for (way, deck) in own_rail_decks() {
+            let path = railways::build_smoothed_centerline(way);
+            for (&cell, &y) in path.iter().zip(&deck.ys) {
+                rail_tracks.entry(cell).or_insert((way.id, y));
             }
         }
+        let mut map = Self {
+            cells,
+            grade_crossings: HashSet::new(),
+            rail_decks: HashMap::new(),
+            rail_tracks,
+        };
+        // The footprint the renderer lays, gaps to joined tracks included.
+        let mut rail_decks: HashMap<(i32, i32), i32> = HashMap::new();
+        for (way, deck) in own_rail_decks() {
+            for (cell, y) in railways::rail_deck_footprint(&map, way, &deck.ys) {
+                let low = rail_decks.entry(cell).or_insert(y);
+                *low = (*low).min(y);
+            }
+        }
+        let cells = &map.cells;
 
         let mut grade_crossings: HashSet<(i32, i32)> = HashSet::new();
         if !cells.is_empty() || !rail_decks.is_empty() {
@@ -1424,11 +1505,9 @@ impl BridgeSurfaceMap {
             }
         }
 
-        Self {
-            cells,
-            grade_crossings,
-            rail_decks,
-        }
+        map.grade_crossings = grade_crossings;
+        map.rail_decks = rail_decks;
+        map
     }
 }
 
@@ -1808,6 +1887,30 @@ fn headings_parallel(ha: f32, hb: f32) -> bool {
     // Parallel or antiparallel both count — carriageways may be drawn either direction.
     diff <= DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG
         || (180.0 - diff).abs() <= DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG
+}
+
+/// Rail bridges on one layer close enough for their decks to join.
+fn rails_side_by_side(a: &ProcessedWay, b: &ProcessedWay) -> bool {
+    if effective_layer(a) != effective_layer(b) {
+        return false;
+    }
+    let (Some(ha), Some(hb)) = (heading_deg(a), heading_deg(b)) else {
+        return false;
+    };
+    if !headings_parallel(ha, hb) {
+        return false;
+    }
+    let (short, long) = if way_length_blocks(a) <= way_length_blocks(b) {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let samples = coverage_samples(short);
+    let alongside = samples
+        .iter()
+        .filter(|&&(px, pz)| lateral_offset_to_way(px, pz, long) <= RAIL_SIDE_BY_SIDE_DISTANCE)
+        .count();
+    alongside * 2 > samples.len()
 }
 
 /// Parallel bridge ways forming one deck, across layers only when the decks touch.
@@ -2291,11 +2394,12 @@ mod tests {
             &[(40, 10), (40, 70)],
         );
         let (structures, surface) = structures_over(&[rail, road], |_| 0.0);
-        let Some(RailDeck::Level(rail_y)) = structures.rail_deck(1) else {
+        let Some(RailDeck::Own(deck)) = structures.rail_deck(1) else {
             panic!("rail viaduct has its own deck");
         };
+        let rail_y = deck.ys[30];
         assert!(surface.support_blocked(40, 40, rail_y + STACKED_DECK_HEADROOM));
-        assert!(!surface.support_blocked(40, 40, *rail_y));
+        assert!(!surface.support_blocked(40, 40, rail_y));
     }
 
     #[test]
@@ -2325,10 +2429,40 @@ mod tests {
         let b = way_with(2, tags, &[(40, 40), (70, 40)]);
         let (structures, _) = structures_over(&[a, b], |x| if x > 50 { 12.0 } else { 0.0 });
         let level = |id| match structures.rail_deck(id) {
-            Some(RailDeck::Level(y)) => *y,
+            Some(RailDeck::Own(deck)) => deck.ys.iter().copied().max().unwrap_or_default(),
             _ => panic!("rail bridge {id} has its own deck"),
         };
         assert_eq!(level(1), level(2));
         assert!(level(1) >= 12);
+    }
+
+    #[test]
+    fn decked_gap_between_rail_tracks_blocks_supports_above() {
+        let tags = &[("railway", "rail"), ("bridge", "yes")];
+        let a = way_with(1, tags, &[(10, 40), (70, 40)]);
+        let b = way_with(2, tags, &[(10, 47), (70, 47)]);
+        let (structures, surface) = structures_over(&[a, b], |_| 0.0);
+        let Some(RailDeck::Own(deck)) = structures.rail_deck(1) else {
+            panic!("rail bridge has its own deck");
+        };
+        let upper = deck.ys[30] + STACKED_DECK_HEADROOM;
+        for z in [43, 44] {
+            assert!(surface.support_blocked(40, z, upper), "gap column z={z}");
+        }
+    }
+
+    #[test]
+    fn side_by_side_rail_bridges_share_a_level() {
+        let tags = &[("railway", "rail"), ("bridge", "yes")];
+        let a = way_with(1, tags, &[(10, 40), (70, 40)]);
+        let b = way_with(2, tags, &[(10, 46), (45, 46)]);
+        let far = way_with(3, tags, &[(10, 70), (45, 70)]);
+        let (structures, _) = structures_over(&[a, b, far], |x| if x > 50 { 12.0 } else { 0.0 });
+        let level = |id| match structures.rail_deck(id) {
+            Some(RailDeck::Own(deck)) => deck.ys.iter().copied().max().unwrap_or_default(),
+            _ => panic!("rail bridge {id} has its own deck"),
+        };
+        assert_eq!(level(1), level(2), "neighbouring tracks line up");
+        assert!(level(3) < level(1), "a track further off keeps its own");
     }
 }

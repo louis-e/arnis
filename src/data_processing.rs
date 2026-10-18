@@ -291,7 +291,6 @@ fn process_element(
     bridge_structures: &bridges::BridgeStructureMap,
     bridge_surface: &bridges::BridgeSurfaceMap,
     bridge_outlines: &bridge_styles::BridgeOutlineIndex,
-    rail_bridge_internal_endpoints: &railways::RailBridgeInternalEndpoints,
     rail_tunnel_points: &mut Vec<(i32, i32)>,
     tunnel_internal_endpoints: &highways::TunnelInternalEndpoints,
     tunnel_portals: &highways::TunnelPortalMap,
@@ -414,7 +413,6 @@ fn process_element(
                     editor,
                     way,
                     rail_tunnel_points,
-                    rail_bridge_internal_endpoints,
                     bridge_outlines,
                     bridge_structures,
                     bridge_surface,
@@ -1017,9 +1015,6 @@ pub fn generate_world_with_options(
     let bridge_surface =
         bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
 
-    let rail_bridge_internal_endpoints =
-        railways::collect_rail_bridge_internal_endpoints(&elements);
-
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
 
@@ -1342,7 +1337,6 @@ pub fn generate_world_with_options(
                     &bridge_structures,
                     &bridge_surface,
                     &bridge_outlines,
-                    &rail_bridge_internal_endpoints,
                     &mut tile_rail_tunnel_points,
                     &tunnel_internal_endpoints,
                     &tunnel_portals,
@@ -1717,7 +1711,6 @@ pub fn generate_world_with_options(
                 &bridge_structures,
                 &bridge_surface,
                 &bridge_outlines,
-                &rail_bridge_internal_endpoints,
                 &mut rail_tunnel_points,
                 &tunnel_internal_endpoints,
                 &tunnel_portals,
@@ -1797,7 +1790,6 @@ pub fn generate_world_with_options(
     drop(bridge_structures);
     drop(bridge_surface);
     drop(bridge_outlines);
-    drop(rail_bridge_internal_endpoints);
 
     // Carve railway tunnel interiors now that underground is filled with stone.
     // Under eviction this already ran in-tile (regions get freed before here).
