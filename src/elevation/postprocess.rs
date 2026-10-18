@@ -489,7 +489,7 @@ fn level_water_surfaces(
             // tight bulk (near-zero IQR) even with a few noisy cells; a
             // river descending 5+ m over the bbox has a broad bulk because
             // roughly half the cells are at each end of the gradient.
-            let iqr = interquartile_range(&values);
+            let iqr = interquartile_range(&mut values);
 
             // In place: the mode below does not depend on the order.
             let fallback_median = {
@@ -778,11 +778,11 @@ fn smooth_sparse_field(cells: &[(u32, u32, f32)], sigma_cells: f64) -> Vec<f64> 
 /// Compute the interquartile range of a slice of elevations.
 /// Uses `select_nth_unstable_by` twice — O(n) total, no full sort.
 /// Returns 0.0 for slices with fewer than 4 elements.
-fn interquartile_range(values: &[f64]) -> f64 {
-    if values.len() < 4 {
+/// Reorders `v`; quantiles don't depend on the order, so no copy is made.
+fn interquartile_range(v: &mut [f64]) -> f64 {
+    if v.len() < 4 {
         return 0.0;
     }
-    let mut v = values.to_vec();
     let q1_idx = v.len() / 4;
     let q3_idx = (v.len() * 3) / 4;
     v.select_nth_unstable_by(q1_idx, |a, b| a.partial_cmp(b).unwrap());
