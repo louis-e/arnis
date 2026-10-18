@@ -692,9 +692,10 @@ impl RegionLibrary {
             .collect();
     }
 
-    /// Leaf columns a tree of `height` blocks covers in this pack, on average.
+    /// Leaf columns a tree of `height` blocks covers in this pack, on average,
+    /// held to the size cap the picker obeys.
     pub fn crown_columns(&self, height: i32) -> f64 {
-        let h = (height.max(1) as usize).min(CROWN_TABLE_MAX);
+        let h = (self.capped_height(height).max(1) as usize).min(CROWN_TABLE_MAX);
         self.crowns.get(h).copied().unwrap_or(50.0).max(4.0)
     }
 
@@ -1148,6 +1149,18 @@ impl RegionLibrary {
         }
     }
 
+    /// Lattice for slots whose density the canopy map decided. Their odds already
+    /// keep big crowns apart, so below 1:1 it can be fine enough for the small
+    /// crowns a scaled-down forest needs.
+    pub fn slot_spacing(&self, density_decided: bool) -> i32 {
+        let micro = self.scale < crate::element_processing::tree::MICRO_TREE_MAX_SCALE;
+        if density_decided && !micro && self.scale < 0.7 {
+            4
+        } else {
+            self.base_spacing()
+        }
+    }
+
     /// WorldPainter community density (~10..150) -> fraction of slots that keep a tree.
     fn keep_prob(density: u32) -> f64 {
         (0.34 + density as f64 / 90.0).clamp(0.30, 1.0)
@@ -1164,7 +1177,7 @@ impl RegionLibrary {
         elev_y: i32,
         req: SlotRequest,
     ) -> Option<(i32, i32, usize, u8)> {
-        let s = self.base_spacing();
+        let s = self.slot_spacing(req.density_decided);
         let (sx, sz) = crate::trees::schematic::trunk_slot_s(x, z, s);
         let montane =
             self.is_montane(elev_y) && crate::ground_generation::value_noise_01(sx, sz, 64) < 0.6;
@@ -1590,6 +1603,35 @@ mod tests {
         assert_eq!(
             lib.crown_columns(500),
             lib.crown_columns(CROWN_TABLE_MAX as i32)
+        );
+    }
+
+    #[test]
+    fn crowns_follow_the_size_cap() {
+        let src = TreePackSource::embedded("eur");
+        let load = |sizes| RegionLibrary::load(&src, 1.0, -62, 1.0, sizes, false).expect("eur");
+        let capped = load(SizeFilter::up_to(TreeSize::Small));
+        let full = load(SizeFilter::default());
+        assert_eq!(capped.crown_columns(25), capped.crown_columns(6));
+        assert!(full.crown_columns(25) > full.crown_columns(6));
+    }
+
+    #[test]
+    fn yellow_cedar_grows_in_needleleaved_stands_only() {
+        let lib = with_ecoregions("wna", &[364], 47.6);
+        let req = SlotRequest {
+            tagged: true,
+            ..Default::default()
+        };
+        let conifers = planted(&lib, 364, req, Habitat::Conifer, 0);
+        let broadleaves = planted(&lib, 364, req, Habitat::Lowland, 0);
+        assert!(
+            conifers.contains_key("Callitropsis_nootkatensis"),
+            "{conifers:?}"
+        );
+        assert!(
+            !broadleaves.contains_key("Callitropsis_nootkatensis"),
+            "{broadleaves:?}"
         );
     }
 

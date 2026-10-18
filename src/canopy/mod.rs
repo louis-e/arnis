@@ -45,7 +45,7 @@ const SLOT_P_MAX: f64 = 0.85;
 
 /// Leaf columns a slot assumed per tree before crowns were measured per height,
 /// kept for micro trees, whose few-block crowns hardly overlap.
-const COLUMNS_PER_TREE_MICRO: f64 = 52.0;
+pub const COLUMNS_PER_TREE_MICRO: f64 = 52.0;
 
 /// Cover the overlap correction aims for at most; a closed canopy would ask for
 /// a tree in every slot.
@@ -117,10 +117,10 @@ impl CanopyData {
     }
 }
 
-/// The flat rate micro trees keep: the fraction over a fixed crown, no overlap.
-pub fn micro_slot_probability(fraction: f64, spacing: i32) -> f64 {
+/// The flat rate procedural and micro trees keep: the fraction over a fixed crown, no overlap.
+pub fn flat_slot_probability(fraction: f64, spacing: i32, crown_columns: f64) -> f64 {
     let area = f64::from(spacing * spacing);
-    (fraction * area / COLUMNS_PER_TREE_MICRO).clamp(0.0, SLOT_P_MAX)
+    (fraction * area / crown_columns.max(1.0)).clamp(0.0, SLOT_P_MAX)
 }
 
 /// Trunk probability for one lattice cell of `spacing` squared columns, where one

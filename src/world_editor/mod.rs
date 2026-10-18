@@ -269,6 +269,8 @@ pub struct WorldEditor<'a> {
     strict_bounds: Option<(i32, i32, i32, i32)>,
     /// Cells holding a decal frame. Frames are entities, so `set_block` reads them as empty.
     frame_cells: FnvHashSet<(i32, i32, i32)>,
+    /// Trunk slots a schematic tree already stands in.
+    tree_slots: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
     climate_anchor: Option<(f64, f64)>,
@@ -319,6 +321,7 @@ impl<'a> WorldEditor<'a> {
             car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
@@ -374,6 +377,7 @@ impl<'a> WorldEditor<'a> {
             car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
@@ -429,6 +433,7 @@ impl<'a> WorldEditor<'a> {
             car_network: None,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
+            tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
             climate_anchor: None,
             metadata_extent: None,
@@ -609,10 +614,10 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
-    /// Side of the lattice cell that holds at most one trunk.
+    /// Side of the lattice cell that holds at most one canopy-decided trunk.
     #[inline(always)]
     pub fn tree_slot_spacing(&self) -> i32 {
-        self.tree_pack.as_ref().map_or(5, |p| p.base_spacing())
+        self.tree_pack.as_ref().map_or(5, |p| p.slot_spacing(true))
     }
 
     /// Tallest crown the canopy map measured within `r` of (x, z): `None` where
@@ -684,6 +689,11 @@ impl<'a> WorldEditor<'a> {
     /// Attach the signage context (decal registry, styles, intersections).
     pub fn set_signage(&mut self, ctx: Arc<crate::element_processing::signage::SignageContext>) {
         self.signage = Some(ctx);
+    }
+
+    /// Claims the trunk slot (x, z); false when a tree already stands in it.
+    pub fn claim_tree_slot(&mut self, x: i32, z: i32) -> bool {
+        self.tree_slots.insert((x, z))
     }
 
     /// Strict bounds of a tile editor (inclusive), used by placements that must run in

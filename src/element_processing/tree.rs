@@ -760,8 +760,11 @@ impl Tree {
                 None => {
                     // Read at the slot, not the request, so the hint describes the
                     // column the trunk lands in.
-                    let (hx, hz) =
-                        crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
+                    let (hx, hz) = crate::trees::schematic::trunk_slot_s(
+                        x,
+                        z,
+                        region.slot_spacing(density_decided),
+                    );
                     let eco = editor.ecoregion(hx, hz);
                     let req = crate::trees::region::SlotRequest {
                         want_height: wanted_height_m(editor, hx, hz, None).map(blocks),
@@ -815,6 +818,20 @@ impl Tree {
                     fpmin = fpmin.min(editor.get_absolute_y(sx + dx, y, sz + dz));
                 }
                 let slot_base_y = center.min(fpmin + 2);
+                // Requests from several cells snap to one slot: its first tree stands,
+                // and a later one would only stamp itself into that trunk.
+                let trunk_taken = (slot_base_y..=slot_base_y + 2).any(|wy| {
+                    editor.check_for_block_absolute(
+                        sx,
+                        wy,
+                        sz,
+                        Some(crate::ground_decoration::WOOD),
+                        None,
+                    )
+                });
+                if trunk_taken || !editor.claim_tree_slot(sx, sz) {
+                    return;
+                }
                 crate::trees::schematic::place_schematic_tree(
                     editor,
                     schem,
@@ -2007,6 +2024,50 @@ mod height_tests {
             .collect();
         assert!(!ys.is_empty(), "a tree stands at scale {scale}");
         ys.iter().max().unwrap() - ys.iter().min().unwrap() + 1
+    }
+
+    #[test]
+    fn a_slot_keeps_the_first_tree_planted_in_it() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let mut editor = editor_with_canopy(&xzbbox, 1.0, true);
+        let snapshot = |e: &WorldEditor| -> Vec<Option<Block>> {
+            (0..64)
+                .flat_map(|x| (0..64).map(move |z| (x, z)))
+                .flat_map(|(x, z)| (0..60).map(move |y| (x, y, z)))
+                .map(|(x, y, z)| e.get_block_absolute(x, y, z))
+                .collect()
+        };
+        // Two requests in one lattice cell share its slot; the second asks for
+        // another leaf type, so stamping it too would graft a second tree on.
+        let before = snapshot(&editor);
+        let cell = (25..45)
+            .step_by(5)
+            .flat_map(|x| (25..45).step_by(5).map(move |z| (x, z)))
+            .find(|&(x, z)| {
+                Tree::create_of_type(
+                    &mut editor,
+                    (x, 1, z),
+                    TreeType::Spruce,
+                    None,
+                    None,
+                    true,
+                    true,
+                );
+                snapshot(&editor) != before
+            })
+            .expect("some cell holds a tree");
+        let planted = snapshot(&editor);
+        let (x, z) = (cell.0 + 2, cell.1 + 3);
+        Tree::create_of_type(
+            &mut editor,
+            (x, 1, z),
+            TreeType::Oak,
+            None,
+            None,
+            true,
+            true,
+        );
+        assert!(snapshot(&editor) == planted, "the slot was stamped twice");
     }
 
     // A 20 m crown is a 20 m tree next to equally scaled buildings: 20 blocks
