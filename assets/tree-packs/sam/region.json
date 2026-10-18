@@ -11,7 +11,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -20,7 +23,8 @@
      "name": "Anacardium_occidentale",
      "w1": [
       "Anacardium_occidentale1.schem",
-      "Anacardium_occidentale2.schem"
+      "Anacardium_occidentale2.schem",
+      "contrib/arnis/Anacardium_occidentale_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -33,7 +37,10 @@
       "Astrocarym_jauari3.schem",
       "Astrocarym_jauari4.schem",
       "contrib/lentebriesje/Astrocarym_jauari_sa4L.schem",
-      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem"
+      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem",
+      "contrib/arnis/Astrocarym_jauari_y4.schem",
+      "contrib/arnis/Astrocarym_jauari_y6.schem",
+      "contrib/arnis/Astrocarym_jauari_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -44,7 +51,10 @@
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
       "Astronium_fraxinifolium3.schem",
-      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y4.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y6.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
@@ -58,7 +68,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -66,7 +78,10 @@
     {
      "name": "Calophyllum_brasiliense",
      "w1": [
-      "Calophyllum_brasiliense3.schem"
+      "Calophyllum_brasiliense3.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y4.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y6.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -76,7 +91,10 @@
      "w1": [
       "Cedrela_odorata1.schem",
       "Cedrela_odorata2.schem",
-      "Cedrela_odorata3.schem"
+      "Cedrela_odorata3.schem",
+      "contrib/arnis/Cedrela_odorata_y4.schem",
+      "contrib/arnis/Cedrela_odorata_y6.schem",
+      "contrib/arnis/Cedrela_odorata_y8.schem"
      ],
      "w2": [
       "Cedrela_odorata4.schem"
@@ -85,7 +103,11 @@
     },
     {
      "name": "Ceiba_pentandra",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ceiba_pentandra_y4.schem",
+      "contrib/arnis/Ceiba_pentandra_y6.schem",
+      "contrib/arnis/Ceiba_pentandra_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ceiba_pentandra4.schem"
@@ -93,7 +115,11 @@
     },
     {
      "name": "Ficus_insipida",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_insipida_y4.schem",
+      "contrib/arnis/Ficus_insipida_y6.schem",
+      "contrib/arnis/Ficus_insipida_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_insipida2.schem",
@@ -108,7 +134,10 @@
       "Hevea_brasiliensis4.schem",
       "Hevea_brasiliensis5.schem",
       "contrib/lentebriesje/Hevea_brasiliensis_sa13L.schem",
-      "contrib/lentebriesje/Hevea_brasiliensis_sa13S.schem"
+      "contrib/lentebriesje/Hevea_brasiliensis_sa13S.schem",
+      "contrib/arnis/Hevea_brasiliensis_y4.schem",
+      "contrib/arnis/Hevea_brasiliensis_y6.schem",
+      "contrib/arnis/Hevea_brasiliensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -116,7 +145,10 @@
     {
      "name": "Bertholletia_excelsa",
      "w1": [
-      "contrib/lentebriesje/Bertholletia_excelsa_sa10S.schem"
+      "contrib/lentebriesje/Bertholletia_excelsa_sa10S.schem",
+      "contrib/arnis/Bertholletia_excelsa_y4.schem",
+      "contrib/arnis/Bertholletia_excelsa_y6.schem",
+      "contrib/arnis/Bertholletia_excelsa_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Bertholletia_excelsa_sa10L.schem"
@@ -125,7 +157,11 @@
     },
     {
      "name": "Hura_crepitans",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Hura_crepitans_y4.schem",
+      "contrib/arnis/Hura_crepitans_y6.schem",
+      "contrib/arnis/Hura_crepitans_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Hura_crepitans_sa14L.schem",
       "contrib/lentebriesje/Hura_crepitans_sa14S.schem"
@@ -164,7 +200,10 @@
     {
      "name": "Schefflera_morototoni",
      "w1": [
-      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem"
+      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem",
+      "contrib/arnis/Schefflera_morototoni_y4.schem",
+      "contrib/arnis/Schefflera_morototoni_y6.schem",
+      "contrib/arnis/Schefflera_morototoni_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Schefflera_morototoni_sa19S.schem"
@@ -175,7 +214,10 @@
      "name": "Schizolobium_amazonicum",
      "w1": [
       "contrib/lentebriesje/Schizolobium_amazonicum_sa2L.schem",
-      "contrib/lentebriesje/Schizolobium_amazonicum_sa2S.schem"
+      "contrib/lentebriesje/Schizolobium_amazonicum_sa2S.schem",
+      "contrib/arnis/Schizolobium_amazonicum_y4.schem",
+      "contrib/arnis/Schizolobium_amazonicum_y6.schem",
+      "contrib/arnis/Schizolobium_amazonicum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -184,7 +226,10 @@
      "name": "Astrocaryum_vulgare",
      "w1": [
       "contrib/lentebriesje/Astrocaryum_vulgare_sa5L.schem",
-      "contrib/lentebriesje/Astrocaryum_vulgare_sa5S.schem"
+      "contrib/lentebriesje/Astrocaryum_vulgare_sa5S.schem",
+      "contrib/arnis/Astrocaryum_vulgare_y4.schem",
+      "contrib/arnis/Astrocaryum_vulgare_y6.schem",
+      "contrib/arnis/Astrocaryum_vulgare_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -193,7 +238,10 @@
      "name": "Astronium_lecointei",
      "w1": [
       "contrib/lentebriesje/Astronium_lecointei_sa7L.schem",
-      "contrib/lentebriesje/Astronium_lecointei_sa7S.schem"
+      "contrib/lentebriesje/Astronium_lecointei_sa7S.schem",
+      "contrib/arnis/Astronium_lecointei_y4.schem",
+      "contrib/arnis/Astronium_lecointei_y6.schem",
+      "contrib/arnis/Astronium_lecointei_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -210,7 +258,9 @@
      "w1": [
       "Annona_glabra1.schem",
       "Annona_glabra2.schem",
-      "Annona_glabra3.schem"
+      "Annona_glabra3.schem",
+      "contrib/arnis/Annona_glabra_y4.schem",
+      "contrib/arnis/Annona_glabra_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -223,7 +273,10 @@
       "Astrocarym_jauari3.schem",
       "Astrocarym_jauari4.schem",
       "contrib/lentebriesje/Astrocarym_jauari_sa4L.schem",
-      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem"
+      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem",
+      "contrib/arnis/Astrocarym_jauari_y4.schem",
+      "contrib/arnis/Astrocarym_jauari_y6.schem",
+      "contrib/arnis/Astrocarym_jauari_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -235,14 +288,20 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ceiba_pentandra",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ceiba_pentandra_y4.schem",
+      "contrib/arnis/Ceiba_pentandra_y6.schem",
+      "contrib/arnis/Ceiba_pentandra_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ceiba_pentandra4.schem"
@@ -253,14 +312,21 @@
      "w1": [
       "Euterpe_oleracea1.schem",
       "Euterpe_oleracea2.schem",
-      "Euterpe_oleracea3.schem"
+      "Euterpe_oleracea3.schem",
+      "contrib/arnis/Euterpe_oleracea_y4.schem",
+      "contrib/arnis/Euterpe_oleracea_y6.schem",
+      "contrib/arnis/Euterpe_oleracea_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_citrifolia",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_citrifolia_y4.schem",
+      "contrib/arnis/Ficus_citrifolia_y6.schem",
+      "contrib/arnis/Ficus_citrifolia_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_citrifolia (1).schem",
@@ -271,7 +337,10 @@
      "name": "Pachira_aquatica",
      "w1": [
       "Pachira_aquatica1.schem",
-      "Pachira_aquatica3.schem"
+      "Pachira_aquatica3.schem",
+      "contrib/arnis/Pachira_aquatica_y4.schem",
+      "contrib/arnis/Pachira_aquatica_y6.schem",
+      "contrib/arnis/Pachira_aquatica_y8.schem"
      ],
      "w2": [
       "Pachira_aquatica2.schem"
@@ -283,7 +352,10 @@
      "w1": [
       "Pterocarpus_officinalis1.schem",
       "Pterocarpus_officinalis2.schem",
-      "Pterocarpus_officinalis3.schem"
+      "Pterocarpus_officinalis3.schem",
+      "contrib/arnis/Pterocarpus_officinalis_y4.schem",
+      "contrib/arnis/Pterocarpus_officinalis_y6.schem",
+      "contrib/arnis/Pterocarpus_officinalis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -296,7 +368,10 @@
       "Socratea_exorrhiza3.schem",
       "Socratea_exorrhiza4.schem",
       "Socratea_exorrhiza5.schem",
-      "contrib/lentebriesje/Socratea_exorrhiza_sa20L.schem"
+      "contrib/lentebriesje/Socratea_exorrhiza_sa20L.schem",
+      "contrib/arnis/Socratea_exorrhiza_y4.schem",
+      "contrib/arnis/Socratea_exorrhiza_y6.schem",
+      "contrib/arnis/Socratea_exorrhiza_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Socratea_exorrhiza_sa20S.schem"
@@ -328,7 +403,10 @@
      "name": "Bactris_gasipaes",
      "w1": [
       "contrib/lentebriesje/Bactris_gasipaes_sa9L.schem",
-      "contrib/lentebriesje/Bactris_gasipaes_sa9S.schem"
+      "contrib/lentebriesje/Bactris_gasipaes_sa9S.schem",
+      "contrib/arnis/Bactris_gasipaes_y4.schem",
+      "contrib/arnis/Bactris_gasipaes_y6.schem",
+      "contrib/arnis/Bactris_gasipaes_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -344,7 +422,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -355,7 +436,10 @@
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
       "Astronium_fraxinifolium3.schem",
-      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y4.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y6.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
@@ -369,7 +453,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -392,7 +478,8 @@
       "Myracrodruon_urundeuva1.schem",
       "Myracrodruon_urundeuva2.schem",
       "Myracrodruon_urundeuva3.schem",
-      "Myracrodruon_urundeuva4.schem"
+      "Myracrodruon_urundeuva4.schem",
+      "contrib/arnis/Myracrodruon_urundeuva_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -401,7 +488,10 @@
      "name": "Parapiptadenia_rigida",
      "w1": [
       "Parapiptadenia_rigida1.schem",
-      "Parapiptadenia_rigida2.schem"
+      "Parapiptadenia_rigida2.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y4.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y6.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -411,7 +501,9 @@
      "w1": [
       "Schinopsis_brasiliensis1.schem",
       "Schinopsis_brasiliensis2.schem",
-      "Schinopsis_brasiliensis3.schem"
+      "Schinopsis_brasiliensis3.schem",
+      "contrib/arnis/Schinopsis_brasiliensis_y4.schem",
+      "contrib/arnis/Schinopsis_brasiliensis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -449,7 +541,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -458,7 +553,8 @@
      "name": "Anacardium_occidentale",
      "w1": [
       "Anacardium_occidentale1.schem",
-      "Anacardium_occidentale2.schem"
+      "Anacardium_occidentale2.schem",
+      "contrib/arnis/Anacardium_occidentale_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -467,7 +563,10 @@
      "name": "Anadenanthera_colubrina",
      "w1": [
       "Anadenanthera_colubrina2.schem",
-      "Anadenanthera_colubrina3.schem"
+      "Anadenanthera_colubrina3.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y4.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y6.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y8.schem"
      ],
      "w2": [
       "Anadenanthera_colubrina1.schem"
@@ -480,7 +579,10 @@
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
       "Astronium_fraxinifolium3.schem",
-      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y4.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y6.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
@@ -494,7 +596,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -503,14 +607,20 @@
      "name": "Caryocar_brasiliense",
      "w1": [
       "Caryocar_brasiliense1.schem",
-      "Caryocar_brasiliense2.schem"
+      "Caryocar_brasiliense2.schem",
+      "contrib/arnis/Caryocar_brasiliense_y4.schem",
+      "contrib/arnis/Caryocar_brasiliense_y6.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_citrifolia",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_citrifolia_y4.schem",
+      "contrib/arnis/Ficus_citrifolia_y6.schem",
+      "contrib/arnis/Ficus_citrifolia_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_citrifolia (1).schem",
@@ -521,7 +631,10 @@
      "name": "Handroanthus_impetiginosus",
      "w1": [
       "Handroanthus_impetiginosus1.schem",
-      "Handroanthus_impetiginosus2.schem"
+      "Handroanthus_impetiginosus2.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y4.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y6.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y8.schem"
      ],
      "w2": [
       "Handroanthus_impetiginosus3.schem"
@@ -533,7 +646,10 @@
      "w1": [
       "Mauritia_flexuosa1.schem",
       "Mauritia_flexuosa2.schem",
-      "Mauritia_flexuosa3.schem"
+      "Mauritia_flexuosa3.schem",
+      "contrib/arnis/Mauritia_flexuosa_y4.schem",
+      "contrib/arnis/Mauritia_flexuosa_y6.schem",
+      "contrib/arnis/Mauritia_flexuosa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -542,7 +658,10 @@
      "name": "Parapiptadenia_rigida",
      "w1": [
       "Parapiptadenia_rigida1.schem",
-      "Parapiptadenia_rigida2.schem"
+      "Parapiptadenia_rigida2.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y4.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y6.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -553,7 +672,9 @@
       "Prosopis_affinis1.schem",
       "Prosopis_affinis2.schem",
       "Prosopis_affinis3.schem",
-      "Prosopis_affinis4.schem"
+      "Prosopis_affinis4.schem",
+      "contrib/arnis/Prosopis_affinis_y4.schem",
+      "contrib/arnis/Prosopis_affinis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -563,7 +684,9 @@
      "w1": [
       "Schinopsis_brasiliensis1.schem",
       "Schinopsis_brasiliensis2.schem",
-      "Schinopsis_brasiliensis3.schem"
+      "Schinopsis_brasiliensis3.schem",
+      "contrib/arnis/Schinopsis_brasiliensis_y4.schem",
+      "contrib/arnis/Schinopsis_brasiliensis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -579,7 +702,11 @@
     },
     {
      "name": "Platypodium_elegans",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Platypodium_elegans_y4.schem",
+      "contrib/arnis/Platypodium_elegans_y6.schem",
+      "contrib/arnis/Platypodium_elegans_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Platypodium_elegans_sa18L.schem"
      ],
@@ -602,7 +729,10 @@
       "Araucaria_araucana5.schem",
       "Araucaria_araucana6.schem",
       "Araucaria_araucana7.schem",
-      "Araucaria_araucana8.schem"
+      "Araucaria_araucana8.schem",
+      "contrib/arnis/Araucaria_araucana_y5.schem",
+      "contrib/arnis/Araucaria_araucana_y7.schem",
+      "contrib/arnis/Araucaria_araucana_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -632,7 +762,10 @@
       "Fitzroya_cupressoides4.schem",
       "Fitzroya_cupressoides5.schem",
       "Fitzroya_cupressoides6.schem",
-      "Fitzroya_cupressoides7.schem"
+      "Fitzroya_cupressoides7.schem",
+      "contrib/arnis/Fitzroya_cupressoides_y4.schem",
+      "contrib/arnis/Fitzroya_cupressoides_y6.schem",
+      "contrib/arnis/Fitzroya_cupressoides_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -643,7 +776,10 @@
       "Pilgerodendron_uviferum1.schem",
       "Pilgerodendron_uviferum2.schem",
       "Pilgerodendron_uviferum3.schem",
-      "Pilgerodendron_uviferum4.schem"
+      "Pilgerodendron_uviferum4.schem",
+      "contrib/arnis/Pilgerodendron_uviferum_y4.schem",
+      "contrib/arnis/Pilgerodendron_uviferum_y6.schem",
+      "contrib/arnis/Pilgerodendron_uviferum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -653,7 +789,9 @@
      "w1": [
       "Saxegothea_conspicua1.schem",
       "Saxegothea_conspicua2.schem",
-      "Saxegothea_conspicua3.schem"
+      "Saxegothea_conspicua3.schem",
+      "contrib/arnis/Saxegothea_conspicua_y4.schem",
+      "contrib/arnis/Saxegothea_conspicua_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -669,7 +807,10 @@
      "name": "Jubaea_chilensis",
      "w1": [
       "Jubaea_chilensis1.schem",
-      "Jubaea_chilensis2.schem"
+      "Jubaea_chilensis2.schem",
+      "contrib/arnis/Jubaea_chilensis_y4.schem",
+      "contrib/arnis/Jubaea_chilensis_y6.schem",
+      "contrib/arnis/Jubaea_chilensis_y8.schem"
      ],
      "w2": [
       "Jubaea_chilensis3.schem",
@@ -692,7 +833,9 @@
      "name": "Prosopis_chilensis",
      "w1": [
       "Prosopis_chilensis1.schem",
-      "Prosopis_chilensis2.schem"
+      "Prosopis_chilensis2.schem",
+      "contrib/arnis/Prosopis_chilensis_y4.schem",
+      "contrib/arnis/Prosopis_chilensis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -701,7 +844,9 @@
      "name": "Quillaja_saponaria",
      "w1": [
       "Quillaja_saponaria2.schem",
-      "Quillaja_saponaria3.schem"
+      "Quillaja_saponaria3.schem",
+      "contrib/arnis/Quillaja_saponaria_y4.schem",
+      "contrib/arnis/Quillaja_saponaria_y6.schem"
      ],
      "w2": [
       "Quillaja_saponaria1.schem"
@@ -719,7 +864,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -727,7 +875,10 @@
     {
      "name": "Calophyllum_brasiliense",
      "w1": [
-      "Calophyllum_brasiliense3.schem"
+      "Calophyllum_brasiliense3.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y4.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y6.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -737,7 +888,10 @@
      "w1": [
       "Cedrela_odorata1.schem",
       "Cedrela_odorata2.schem",
-      "Cedrela_odorata3.schem"
+      "Cedrela_odorata3.schem",
+      "contrib/arnis/Cedrela_odorata_y4.schem",
+      "contrib/arnis/Cedrela_odorata_y6.schem",
+      "contrib/arnis/Cedrela_odorata_y8.schem"
      ],
      "w2": [
       "Cedrela_odorata4.schem"
@@ -746,7 +900,11 @@
     },
     {
      "name": "Ceiba_pentandra",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ceiba_pentandra_y4.schem",
+      "contrib/arnis/Ceiba_pentandra_y6.schem",
+      "contrib/arnis/Ceiba_pentandra_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ceiba_pentandra4.schem"
@@ -754,7 +912,11 @@
     },
     {
      "name": "Enterolobium_cyclocarpum",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Enterolobium_cyclocarpum_y4.schem",
+      "contrib/arnis/Enterolobium_cyclocarpum_y6.schem",
+      "contrib/arnis/Enterolobium_cyclocarpum_y8.schem"
+     ],
      "w2": [
       "Enterolobium_cyclocarpum1.schem"
      ],
@@ -765,7 +927,11 @@
     },
     {
      "name": "Ficus_citrifolia",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_citrifolia_y4.schem",
+      "contrib/arnis/Ficus_citrifolia_y6.schem",
+      "contrib/arnis/Ficus_citrifolia_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_citrifolia (1).schem",
@@ -774,7 +940,11 @@
     },
     {
      "name": "Ficus_insipida",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_insipida_y4.schem",
+      "contrib/arnis/Ficus_insipida_y6.schem",
+      "contrib/arnis/Ficus_insipida_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_insipida2.schem",
@@ -785,7 +955,10 @@
      "name": "Ochroma_pyrimidale",
      "w1": [
       "Ochroma_pyrimidale1.schem",
-      "Ochroma_pyrimidale2.schem"
+      "Ochroma_pyrimidale2.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y4.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y6.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -794,14 +967,21 @@
      "name": "Pentaclethra_macroloba",
      "w1": [
       "Pentaclethra_macroloba1.schem",
-      "Pentaclethra_macroloba2.schem"
+      "Pentaclethra_macroloba2.schem",
+      "contrib/arnis/Pentaclethra_macroloba_y4.schem",
+      "contrib/arnis/Pentaclethra_macroloba_y6.schem",
+      "contrib/arnis/Pentaclethra_macroloba_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Sterculia_apetala",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Sterculia_apetala_y4.schem",
+      "contrib/arnis/Sterculia_apetala_y6.schem",
+      "contrib/arnis/Sterculia_apetala_y8.schem"
+     ],
      "w2": [
       "Sterculia_apetala1.schem",
       "Sterculia_apetala3.schem"
@@ -812,7 +992,10 @@
      "name": "Swietenia_macrophylla",
      "w1": [
       "Swietenia_macrophylla1.schem",
-      "Swietenia_macrophylla2.schem"
+      "Swietenia_macrophylla2.schem",
+      "contrib/arnis/Swietenia_macrophylla_y4.schem",
+      "contrib/arnis/Swietenia_macrophylla_y6.schem",
+      "contrib/arnis/Swietenia_macrophylla_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -820,7 +1003,10 @@
     {
      "name": "Terminalia_buceras",
      "w1": [
-      "Terminalia_buceras2.schem"
+      "Terminalia_buceras2.schem",
+      "contrib/arnis/Terminalia_buceras_y4.schem",
+      "contrib/arnis/Terminalia_buceras_y6.schem",
+      "contrib/arnis/Terminalia_buceras_y8.schem"
      ],
      "w2": [
       "Terminalia_buceras1.schem"
@@ -843,7 +1029,11 @@
     },
     {
      "name": "Hura_crepitans",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Hura_crepitans_y4.schem",
+      "contrib/arnis/Hura_crepitans_y6.schem",
+      "contrib/arnis/Hura_crepitans_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Hura_crepitans_sa14L.schem",
       "contrib/lentebriesje/Hura_crepitans_sa14S.schem"
@@ -863,7 +1053,10 @@
      "name": "Bactris_gasipaes",
      "w1": [
       "contrib/lentebriesje/Bactris_gasipaes_sa9L.schem",
-      "contrib/lentebriesje/Bactris_gasipaes_sa9S.schem"
+      "contrib/lentebriesje/Bactris_gasipaes_sa9S.schem",
+      "contrib/arnis/Bactris_gasipaes_y4.schem",
+      "contrib/arnis/Bactris_gasipaes_y6.schem",
+      "contrib/arnis/Bactris_gasipaes_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -878,7 +1071,10 @@
     {
      "name": "Cedrela_odorata",
      "w1": [
-      "Cedrela_odorata3.schem"
+      "Cedrela_odorata3.schem",
+      "contrib/arnis/Cedrela_odorata_y4.schem",
+      "contrib/arnis/Cedrela_odorata_y6.schem",
+      "contrib/arnis/Cedrela_odorata_y8.schem"
      ],
      "w2": [
       "Cedrela_odorata4.schem"
@@ -900,7 +1096,10 @@
      "name": "Erythrina_fusca",
      "w1": [
       "Erythrina_fusca1.schem",
-      "Erythrina_fusca2.schem"
+      "Erythrina_fusca2.schem",
+      "contrib/arnis/Erythrina_fusca_y4.schem",
+      "contrib/arnis/Erythrina_fusca_y6.schem",
+      "contrib/arnis/Erythrina_fusca_y8.schem"
      ],
      "w2": [
       "Erythrina_fusca3.schem"
@@ -912,7 +1111,10 @@
      "w1": [
       "Mauritia_flexuosa1.schem",
       "Mauritia_flexuosa2.schem",
-      "Mauritia_flexuosa3.schem"
+      "Mauritia_flexuosa3.schem",
+      "contrib/arnis/Mauritia_flexuosa_y4.schem",
+      "contrib/arnis/Mauritia_flexuosa_y6.schem",
+      "contrib/arnis/Mauritia_flexuosa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -941,7 +1143,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -950,7 +1155,10 @@
      "name": "Anadenanthera_colubrina",
      "w1": [
       "Anadenanthera_colubrina2.schem",
-      "Anadenanthera_colubrina3.schem"
+      "Anadenanthera_colubrina3.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y4.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y6.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y8.schem"
      ],
      "w2": [
       "Anadenanthera_colubrina1.schem"
@@ -972,7 +1180,10 @@
      "name": "Handroanthus_impetiginosus",
      "w1": [
       "Handroanthus_impetiginosus1.schem",
-      "Handroanthus_impetiginosus2.schem"
+      "Handroanthus_impetiginosus2.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y4.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y6.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y8.schem"
      ],
      "w2": [
       "Handroanthus_impetiginosus3.schem"
@@ -996,7 +1207,9 @@
       "Prosopis_affinis1.schem",
       "Prosopis_affinis2.schem",
       "Prosopis_affinis3.schem",
-      "Prosopis_affinis4.schem"
+      "Prosopis_affinis4.schem",
+      "contrib/arnis/Prosopis_affinis_y4.schem",
+      "contrib/arnis/Prosopis_affinis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1006,7 +1219,9 @@
      "w1": [
       "Prosopis_alba1.schem",
       "Prosopis_alba2.schem",
-      "Prosopis_alba4.schem"
+      "Prosopis_alba4.schem",
+      "contrib/arnis/Prosopis_alba_y4.schem",
+      "contrib/arnis/Prosopis_alba_y6.schem"
      ],
      "w2": [
       "Prosopis_alba3.schem"
@@ -1018,7 +1233,10 @@
      "w1": [
       "Schinopsis_lorentzii1.schem",
       "Schinopsis_lorentzii2.schem",
-      "Schinopsis_lorentzii3.schem"
+      "Schinopsis_lorentzii3.schem",
+      "contrib/arnis/Schinopsis_lorentzii_y4.schem",
+      "contrib/arnis/Schinopsis_lorentzii_y6.schem",
+      "contrib/arnis/Schinopsis_lorentzii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1034,7 +1252,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1042,7 +1263,10 @@
     {
      "name": "Calophyllum_brasiliense",
      "w1": [
-      "Calophyllum_brasiliense3.schem"
+      "Calophyllum_brasiliense3.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y4.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y6.schem",
+      "contrib/arnis/Calophyllum_brasiliense_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1051,7 +1275,10 @@
      "name": "Caropa_guianensis",
      "w1": [
       "Caropa_guianensis1.schem",
-      "Caropa_guianensis2.schem"
+      "Caropa_guianensis2.schem",
+      "contrib/arnis/Caropa_guianensis_y4.schem",
+      "contrib/arnis/Caropa_guianensis_y6.schem",
+      "contrib/arnis/Caropa_guianensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1061,7 +1288,10 @@
      "w1": [
       "Cedrela_odorata1.schem",
       "Cedrela_odorata2.schem",
-      "Cedrela_odorata3.schem"
+      "Cedrela_odorata3.schem",
+      "contrib/arnis/Cedrela_odorata_y4.schem",
+      "contrib/arnis/Cedrela_odorata_y6.schem",
+      "contrib/arnis/Cedrela_odorata_y8.schem"
      ],
      "w2": [
       "Cedrela_odorata4.schem"
@@ -1070,7 +1300,11 @@
     },
     {
      "name": "Ceiba_pentandra",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ceiba_pentandra_y4.schem",
+      "contrib/arnis/Ceiba_pentandra_y6.schem",
+      "contrib/arnis/Ceiba_pentandra_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ceiba_pentandra4.schem"
@@ -1078,7 +1312,11 @@
     },
     {
      "name": "Enterolobium_cyclocarpum",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Enterolobium_cyclocarpum_y4.schem",
+      "contrib/arnis/Enterolobium_cyclocarpum_y6.schem",
+      "contrib/arnis/Enterolobium_cyclocarpum_y8.schem"
+     ],
      "w2": [
       "Enterolobium_cyclocarpum1.schem"
      ],
@@ -1089,7 +1327,11 @@
     },
     {
      "name": "Ficus_citrifolia",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_citrifolia_y4.schem",
+      "contrib/arnis/Ficus_citrifolia_y6.schem",
+      "contrib/arnis/Ficus_citrifolia_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_citrifolia (1).schem",
@@ -1098,7 +1340,11 @@
     },
     {
      "name": "Ficus_insipida",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_insipida_y4.schem",
+      "contrib/arnis/Ficus_insipida_y6.schem",
+      "contrib/arnis/Ficus_insipida_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_insipida2.schem",
@@ -1109,7 +1355,10 @@
      "name": "Ochroma_pyrimidale",
      "w1": [
       "Ochroma_pyrimidale1.schem",
-      "Ochroma_pyrimidale2.schem"
+      "Ochroma_pyrimidale2.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y4.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y6.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1118,14 +1367,21 @@
      "name": "Pentaclethra_macroloba",
      "w1": [
       "Pentaclethra_macroloba1.schem",
-      "Pentaclethra_macroloba2.schem"
+      "Pentaclethra_macroloba2.schem",
+      "contrib/arnis/Pentaclethra_macroloba_y4.schem",
+      "contrib/arnis/Pentaclethra_macroloba_y6.schem",
+      "contrib/arnis/Pentaclethra_macroloba_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Sterculia_apetala",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Sterculia_apetala_y4.schem",
+      "contrib/arnis/Sterculia_apetala_y6.schem",
+      "contrib/arnis/Sterculia_apetala_y8.schem"
+     ],
      "w2": [
       "Sterculia_apetala1.schem",
       "Sterculia_apetala3.schem"
@@ -1136,7 +1392,10 @@
      "name": "Swietenia_macrophylla",
      "w1": [
       "Swietenia_macrophylla1.schem",
-      "Swietenia_macrophylla2.schem"
+      "Swietenia_macrophylla2.schem",
+      "contrib/arnis/Swietenia_macrophylla_y4.schem",
+      "contrib/arnis/Swietenia_macrophylla_y6.schem",
+      "contrib/arnis/Swietenia_macrophylla_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1144,7 +1403,10 @@
     {
      "name": "Bertholletia_excelsa",
      "w1": [
-      "contrib/lentebriesje/Bertholletia_excelsa_sa10S.schem"
+      "contrib/lentebriesje/Bertholletia_excelsa_sa10S.schem",
+      "contrib/arnis/Bertholletia_excelsa_y4.schem",
+      "contrib/arnis/Bertholletia_excelsa_y6.schem",
+      "contrib/arnis/Bertholletia_excelsa_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Bertholletia_excelsa_sa10L.schem"
@@ -1183,7 +1445,10 @@
     {
      "name": "Schefflera_morototoni",
      "w1": [
-      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem"
+      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem",
+      "contrib/arnis/Schefflera_morototoni_y4.schem",
+      "contrib/arnis/Schefflera_morototoni_y6.schem",
+      "contrib/arnis/Schefflera_morototoni_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Schefflera_morototoni_sa19S.schem"
@@ -1203,7 +1468,10 @@
      "name": "Astrocaryum_vulgare",
      "w1": [
       "contrib/lentebriesje/Astrocaryum_vulgare_sa5L.schem",
-      "contrib/lentebriesje/Astrocaryum_vulgare_sa5S.schem"
+      "contrib/lentebriesje/Astrocaryum_vulgare_sa5S.schem",
+      "contrib/arnis/Astrocaryum_vulgare_y4.schem",
+      "contrib/arnis/Astrocaryum_vulgare_y6.schem",
+      "contrib/arnis/Astrocaryum_vulgare_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1219,7 +1487,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1228,7 +1499,10 @@
      "name": "Anadenanthera_colubrina",
      "w1": [
       "Anadenanthera_colubrina2.schem",
-      "Anadenanthera_colubrina3.schem"
+      "Anadenanthera_colubrina3.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y4.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y6.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y8.schem"
      ],
      "w2": [
       "Anadenanthera_colubrina1.schem"
@@ -1242,7 +1516,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1252,7 +1528,8 @@
      "w1": [
       "Feijoa_sellowiana1.schem",
       "Feijoa_sellowiana2.schem",
-      "Feijoa_sellowiana3.schem"
+      "Feijoa_sellowiana3.schem",
+      "contrib/arnis/Feijoa_sellowiana_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1261,7 +1538,10 @@
      "name": "Handroanthus_impetiginosus",
      "w1": [
       "Handroanthus_impetiginosus1.schem",
-      "Handroanthus_impetiginosus2.schem"
+      "Handroanthus_impetiginosus2.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y4.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y6.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y8.schem"
      ],
      "w2": [
       "Handroanthus_impetiginosus3.schem"
@@ -1273,7 +1553,10 @@
      "w1": [
       "Mauritia_flexuosa1.schem",
       "Mauritia_flexuosa2.schem",
-      "Mauritia_flexuosa3.schem"
+      "Mauritia_flexuosa3.schem",
+      "contrib/arnis/Mauritia_flexuosa_y4.schem",
+      "contrib/arnis/Mauritia_flexuosa_y6.schem",
+      "contrib/arnis/Mauritia_flexuosa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1284,7 +1567,8 @@
       "Myracrodruon_urundeuva1.schem",
       "Myracrodruon_urundeuva2.schem",
       "Myracrodruon_urundeuva3.schem",
-      "Myracrodruon_urundeuva4.schem"
+      "Myracrodruon_urundeuva4.schem",
+      "contrib/arnis/Myracrodruon_urundeuva_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1295,7 +1579,9 @@
       "Prosopis_affinis1.schem",
       "Prosopis_affinis2.schem",
       "Prosopis_affinis3.schem",
-      "Prosopis_affinis4.schem"
+      "Prosopis_affinis4.schem",
+      "contrib/arnis/Prosopis_affinis_y4.schem",
+      "contrib/arnis/Prosopis_affinis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1305,7 +1591,10 @@
      "w1": [
       "Schinopsis_balansae1.schem",
       "Schinopsis_balansae2.schem",
-      "Schinopsis_balansae3.schem"
+      "Schinopsis_balansae3.schem",
+      "contrib/arnis/Schinopsis_balansae_y4.schem",
+      "contrib/arnis/Schinopsis_balansae_y6.schem",
+      "contrib/arnis/Schinopsis_balansae_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1360,7 +1649,10 @@
      "w1": [
       "Pterocarpus_officinalis1.schem",
       "Pterocarpus_officinalis2.schem",
-      "Pterocarpus_officinalis3.schem"
+      "Pterocarpus_officinalis3.schem",
+      "contrib/arnis/Pterocarpus_officinalis_y4.schem",
+      "contrib/arnis/Pterocarpus_officinalis_y6.schem",
+      "contrib/arnis/Pterocarpus_officinalis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1373,7 +1665,9 @@
       "Rhizopora_mangle12.schem",
       "Rhizopora_mangle13.schem",
       "Rhizopora_mangle14.schem",
-      "Rhizopora_mangle15.schem"
+      "Rhizopora_mangle15.schem",
+      "contrib/arnis/Rhizopora_mangle_y4.schem",
+      "contrib/arnis/Rhizopora_mangle_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -1402,7 +1696,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1411,7 +1708,8 @@
      "name": "Anacardium_occidentale",
      "w1": [
       "Anacardium_occidentale1.schem",
-      "Anacardium_occidentale2.schem"
+      "Anacardium_occidentale2.schem",
+      "contrib/arnis/Anacardium_occidentale_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1420,7 +1718,10 @@
      "name": "Anadenanthera_colubrina",
      "w1": [
       "Anadenanthera_colubrina2.schem",
-      "Anadenanthera_colubrina3.schem"
+      "Anadenanthera_colubrina3.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y4.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y6.schem",
+      "contrib/arnis/Anadenanthera_colubrina_y8.schem"
      ],
      "w2": [
       "Anadenanthera_colubrina1.schem"
@@ -1433,7 +1734,10 @@
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
       "Astronium_fraxinifolium3.schem",
-      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y4.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y6.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
@@ -1447,7 +1751,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1457,7 +1763,10 @@
      "w1": [
       "Dalbergia_nigra1.schem",
       "Dalbergia_nigra2.schem",
-      "Dalbergia_nigra3.schem"
+      "Dalbergia_nigra3.schem",
+      "contrib/arnis/Dalbergia_nigra_y4.schem",
+      "contrib/arnis/Dalbergia_nigra_y6.schem",
+      "contrib/arnis/Dalbergia_nigra_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1466,7 +1775,10 @@
      "name": "Erythrina_fusca",
      "w1": [
       "Erythrina_fusca1.schem",
-      "Erythrina_fusca2.schem"
+      "Erythrina_fusca2.schem",
+      "contrib/arnis/Erythrina_fusca_y4.schem",
+      "contrib/arnis/Erythrina_fusca_y6.schem",
+      "contrib/arnis/Erythrina_fusca_y8.schem"
      ],
      "w2": [
       "Erythrina_fusca3.schem"
@@ -1477,7 +1789,10 @@
      "name": "Ocotea_porosa",
      "w1": [
       "Ocotea_porosa1.schem",
-      "Ocotea_porosa3.schem"
+      "Ocotea_porosa3.schem",
+      "contrib/arnis/Ocotea_porosa_y4.schem",
+      "contrib/arnis/Ocotea_porosa_y6.schem",
+      "contrib/arnis/Ocotea_porosa_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1489,7 +1804,9 @@
      "w1": [
       "Paubrasilia_echinata2.schem",
       "Paubrasilia_echinata4.schem",
-      "Paubrasilia_echinata5.schem"
+      "Paubrasilia_echinata5.schem",
+      "contrib/arnis/Paubrasilia_echinata_y4.schem",
+      "contrib/arnis/Paubrasilia_echinata_y6.schem"
      ],
      "w2": [
       "Paubrasilia_echinata1.schem"
@@ -1511,7 +1828,11 @@
     },
     {
      "name": "Platypodium_elegans",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Platypodium_elegans_y4.schem",
+      "contrib/arnis/Platypodium_elegans_y6.schem",
+      "contrib/arnis/Platypodium_elegans_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Platypodium_elegans_sa18L.schem"
      ],
@@ -1522,7 +1843,10 @@
     {
      "name": "Schefflera_morototoni",
      "w1": [
-      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem"
+      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem",
+      "contrib/arnis/Schefflera_morototoni_y4.schem",
+      "contrib/arnis/Schefflera_morototoni_y6.schem",
+      "contrib/arnis/Schefflera_morototoni_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Schefflera_morototoni_sa19S.schem"
@@ -1540,7 +1864,9 @@
      "name": "Cedrela_montana",
      "w1": [
       "Cedrela_montana2.schem",
-      "Cedrela_montana3.schem"
+      "Cedrela_montana3.schem",
+      "contrib/arnis/Cedrela_montana_y4.schem",
+      "contrib/arnis/Cedrela_montana_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -1564,7 +1890,9 @@
      "w1": [
       "Quercus_humboldtii1.schem",
       "Quercus_humboldtii2.schem",
-      "Quercus_humboldtii3.schem"
+      "Quercus_humboldtii3.schem",
+      "contrib/arnis/Quercus_humboldtii_y4.schem",
+      "contrib/arnis/Quercus_humboldtii_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1573,7 +1901,10 @@
      "name": "Cinchona_calisaya",
      "w1": [
       "contrib/lentebriesje/Cinchona_calisaya_sa11L.schem",
-      "contrib/lentebriesje/Cinchona_calisaya_sa11S.schem"
+      "contrib/lentebriesje/Cinchona_calisaya_sa11S.schem",
+      "contrib/arnis/Cinchona_calisaya_y4.schem",
+      "contrib/arnis/Cinchona_calisaya_y6.schem",
+      "contrib/arnis/Cinchona_calisaya_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1589,7 +1920,10 @@
      "name": "Acrocomia_aculeata",
      "w1": [
       "Acrocomia_aculeata1.schem",
-      "Acrocomia_aculeata2.schem"
+      "Acrocomia_aculeata2.schem",
+      "contrib/arnis/Acrocomia_aculeata_y4.schem",
+      "contrib/arnis/Acrocomia_aculeata_y6.schem",
+      "contrib/arnis/Acrocomia_aculeata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1601,7 +1935,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1611,7 +1947,10 @@
      "w1": [
       "Mauritia_flexuosa1.schem",
       "Mauritia_flexuosa2.schem",
-      "Mauritia_flexuosa3.schem"
+      "Mauritia_flexuosa3.schem",
+      "contrib/arnis/Mauritia_flexuosa_y4.schem",
+      "contrib/arnis/Mauritia_flexuosa_y6.schem",
+      "contrib/arnis/Mauritia_flexuosa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1667,7 +2006,8 @@
      "name": "Erythrina_crista-galli",
      "w1": [
       "Erythrina_crista-galli2.schem",
-      "Erythrina_crista-galli3.schem"
+      "Erythrina_crista-galli3.schem",
+      "contrib/arnis/Erythrina_crista-galli_y4.schem"
      ],
      "w2": [
       "Erythrina_crista-galli1.schem"
@@ -1678,7 +2018,10 @@
      "name": "Handroanthus_impetiginosus",
      "w1": [
       "Handroanthus_impetiginosus1.schem",
-      "Handroanthus_impetiginosus2.schem"
+      "Handroanthus_impetiginosus2.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y4.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y6.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y8.schem"
      ],
      "w2": [
       "Handroanthus_impetiginosus3.schem"
@@ -1699,7 +2042,10 @@
     {
      "name": "Jacaranda_mimosifolia",
      "w1": [
-      "Jacaranda_mimosifolia1.schem"
+      "Jacaranda_mimosifolia1.schem",
+      "contrib/arnis/Jacaranda_mimosifolia_y4.schem",
+      "contrib/arnis/Jacaranda_mimosifolia_y6.schem",
+      "contrib/arnis/Jacaranda_mimosifolia_y8.schem"
      ],
      "w2": [
       "Jacaranda_mimosifolia2.schem",
@@ -1713,7 +2059,8 @@
       "Myracrodruon_urundeuva1.schem",
       "Myracrodruon_urundeuva2.schem",
       "Myracrodruon_urundeuva3.schem",
-      "Myracrodruon_urundeuva4.schem"
+      "Myracrodruon_urundeuva4.schem",
+      "contrib/arnis/Myracrodruon_urundeuva_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1722,7 +2069,10 @@
      "name": "Parapiptadenia_rigida",
      "w1": [
       "Parapiptadenia_rigida1.schem",
-      "Parapiptadenia_rigida2.schem"
+      "Parapiptadenia_rigida2.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y4.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y6.schem",
+      "contrib/arnis/Parapiptadenia_rigida_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1730,7 +2080,10 @@
     {
      "name": "Phytolacca_dioica",
      "w1": [
-      "Phytolacca_dioica2.schem"
+      "Phytolacca_dioica2.schem",
+      "contrib/arnis/Phytolacca_dioica_y4.schem",
+      "contrib/arnis/Phytolacca_dioica_y6.schem",
+      "contrib/arnis/Phytolacca_dioica_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1761,7 +2114,9 @@
      "w1": [
       "Annona_glabra1.schem",
       "Annona_glabra2.schem",
-      "Annona_glabra3.schem"
+      "Annona_glabra3.schem",
+      "contrib/arnis/Annona_glabra_y4.schem",
+      "contrib/arnis/Annona_glabra_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1774,7 +2129,10 @@
       "Astrocarym_jauari3.schem",
       "Astrocarym_jauari4.schem",
       "contrib/lentebriesje/Astrocarym_jauari_sa4L.schem",
-      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem"
+      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem",
+      "contrib/arnis/Astrocarym_jauari_y4.schem",
+      "contrib/arnis/Astrocarym_jauari_y6.schem",
+      "contrib/arnis/Astrocarym_jauari_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1786,7 +2144,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1795,7 +2155,8 @@
      "name": "Erythrina_crista-galli",
      "w1": [
       "Erythrina_crista-galli2.schem",
-      "Erythrina_crista-galli3.schem"
+      "Erythrina_crista-galli3.schem",
+      "contrib/arnis/Erythrina_crista-galli_y4.schem"
      ],
      "w2": [
       "Erythrina_crista-galli1.schem"
@@ -1805,7 +2166,10 @@
     {
      "name": "Jacaranda_mimosifolia",
      "w1": [
-      "Jacaranda_mimosifolia1.schem"
+      "Jacaranda_mimosifolia1.schem",
+      "contrib/arnis/Jacaranda_mimosifolia_y4.schem",
+      "contrib/arnis/Jacaranda_mimosifolia_y6.schem",
+      "contrib/arnis/Jacaranda_mimosifolia_y8.schem"
      ],
      "w2": [
       "Jacaranda_mimosifolia2.schem",
@@ -1819,7 +2183,8 @@
       "Myracrodruon_urundeuva1.schem",
       "Myracrodruon_urundeuva2.schem",
       "Myracrodruon_urundeuva3.schem",
-      "Myracrodruon_urundeuva4.schem"
+      "Myracrodruon_urundeuva4.schem",
+      "contrib/arnis/Myracrodruon_urundeuva_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1828,7 +2193,10 @@
      "name": "Ochroma_pyrimidale",
      "w1": [
       "Ochroma_pyrimidale1.schem",
-      "Ochroma_pyrimidale2.schem"
+      "Ochroma_pyrimidale2.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y4.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y6.schem",
+      "contrib/arnis/Ochroma_pyrimidale_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1837,7 +2205,10 @@
      "name": "Pachira_aquatica",
      "w1": [
       "Pachira_aquatica1.schem",
-      "Pachira_aquatica3.schem"
+      "Pachira_aquatica3.schem",
+      "contrib/arnis/Pachira_aquatica_y4.schem",
+      "contrib/arnis/Pachira_aquatica_y6.schem",
+      "contrib/arnis/Pachira_aquatica_y8.schem"
      ],
      "w2": [
       "Pachira_aquatica2.schem"
@@ -1850,7 +2221,9 @@
       "Salix_humboldtiana1.schem",
       "Salix_humboldtiana2.schem",
       "Salix_humboldtiana3.schem",
-      "Salix_humboldtiana4.schem"
+      "Salix_humboldtiana4.schem",
+      "contrib/arnis/Salix_humboldtiana_y5.schem",
+      "contrib/arnis/Salix_humboldtiana_y7.schem"
      ],
      "w2": [],
      "w3": [
@@ -1862,7 +2235,10 @@
      "w1": [
       "Schinopsis_balansae1.schem",
       "Schinopsis_balansae2.schem",
-      "Schinopsis_balansae3.schem"
+      "Schinopsis_balansae3.schem",
+      "contrib/arnis/Schinopsis_balansae_y4.schem",
+      "contrib/arnis/Schinopsis_balansae_y6.schem",
+      "contrib/arnis/Schinopsis_balansae_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1875,7 +2251,10 @@
       "Socratea_exorrhiza3.schem",
       "Socratea_exorrhiza4.schem",
       "Socratea_exorrhiza5.schem",
-      "contrib/lentebriesje/Socratea_exorrhiza_sa20L.schem"
+      "contrib/lentebriesje/Socratea_exorrhiza_sa20L.schem",
+      "contrib/arnis/Socratea_exorrhiza_y4.schem",
+      "contrib/arnis/Socratea_exorrhiza_y6.schem",
+      "contrib/arnis/Socratea_exorrhiza_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Socratea_exorrhiza_sa20S.schem"
@@ -1884,7 +2263,11 @@
     },
     {
      "name": "Sterculia_apetala",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Sterculia_apetala_y4.schem",
+      "contrib/arnis/Sterculia_apetala_y6.schem",
+      "contrib/arnis/Sterculia_apetala_y8.schem"
+     ],
      "w2": [
       "Sterculia_apetala1.schem",
       "Sterculia_apetala3.schem"
@@ -1903,7 +2286,10 @@
      "w1": [
       "Araucaria_angustifolia2.schem",
       "Araucaria_angustifolia3.schem",
-      "Araucaria_angustifolia4.schem"
+      "Araucaria_angustifolia4.schem",
+      "contrib/arnis/Araucaria_angustifolia_y5.schem",
+      "contrib/arnis/Araucaria_angustifolia_y7.schem",
+      "contrib/arnis/Araucaria_angustifolia_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -1913,7 +2299,8 @@
      "w1": [
       "Feijoa_sellowiana1.schem",
       "Feijoa_sellowiana2.schem",
-      "Feijoa_sellowiana3.schem"
+      "Feijoa_sellowiana3.schem",
+      "contrib/arnis/Feijoa_sellowiana_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1933,7 +2320,10 @@
      "name": "Ocotea_porosa",
      "w1": [
       "Ocotea_porosa1.schem",
-      "Ocotea_porosa3.schem"
+      "Ocotea_porosa3.schem",
+      "contrib/arnis/Ocotea_porosa_y4.schem",
+      "contrib/arnis/Ocotea_porosa_y6.schem",
+      "contrib/arnis/Ocotea_porosa_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1952,7 +2342,10 @@
      "w1": [
       "Ceroxylon_quindiuense2.schem",
       "Ceroxylon_quindiuense3.schem",
-      "Ceroxylon_quindiuense4.schem"
+      "Ceroxylon_quindiuense4.schem",
+      "contrib/arnis/Ceroxylon_quindiuense_y4.schem",
+      "contrib/arnis/Ceroxylon_quindiuense_y6.schem",
+      "contrib/arnis/Ceroxylon_quindiuense_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1968,7 +2361,8 @@
      "name": "Anacardium_occidentale",
      "w1": [
       "Anacardium_occidentale1.schem",
-      "Anacardium_occidentale2.schem"
+      "Anacardium_occidentale2.schem",
+      "contrib/arnis/Anacardium_occidentale_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1979,7 +2373,10 @@
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
       "Astronium_fraxinifolium3.schem",
-      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y4.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y6.schem",
+      "contrib/arnis/Astronium_fraxinifolium_y8.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
@@ -1993,7 +2390,9 @@
       "Attalea_speciosa2.schem",
       "Attalea_speciosa3.schem",
       "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
-      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem",
+      "contrib/arnis/Attalea_speciosa_y4.schem",
+      "contrib/arnis/Attalea_speciosa_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -2017,7 +2416,10 @@
      "w1": [
       "Cedrela_odorata1.schem",
       "Cedrela_odorata2.schem",
-      "Cedrela_odorata3.schem"
+      "Cedrela_odorata3.schem",
+      "contrib/arnis/Cedrela_odorata_y4.schem",
+      "contrib/arnis/Cedrela_odorata_y6.schem",
+      "contrib/arnis/Cedrela_odorata_y8.schem"
      ],
      "w2": [
       "Cedrela_odorata4.schem"
@@ -2055,7 +2457,10 @@
      "name": "Handroanthus_impetiginosus",
      "w1": [
       "Handroanthus_impetiginosus1.schem",
-      "Handroanthus_impetiginosus2.schem"
+      "Handroanthus_impetiginosus2.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y4.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y6.schem",
+      "contrib/arnis/Handroanthus_impetiginosus_y8.schem"
      ],
      "w2": [
       "Handroanthus_impetiginosus3.schem"
@@ -2067,7 +2472,10 @@
      "w1": [
       "Mauritia_flexuosa1.schem",
       "Mauritia_flexuosa2.schem",
-      "Mauritia_flexuosa3.schem"
+      "Mauritia_flexuosa3.schem",
+      "contrib/arnis/Mauritia_flexuosa_y4.schem",
+      "contrib/arnis/Mauritia_flexuosa_y6.schem",
+      "contrib/arnis/Mauritia_flexuosa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2076,7 +2484,10 @@
      "name": "Pachira_aquatica",
      "w1": [
       "Pachira_aquatica1.schem",
-      "Pachira_aquatica3.schem"
+      "Pachira_aquatica3.schem",
+      "contrib/arnis/Pachira_aquatica_y4.schem",
+      "contrib/arnis/Pachira_aquatica_y6.schem",
+      "contrib/arnis/Pachira_aquatica_y8.schem"
      ],
      "w2": [
       "Pachira_aquatica2.schem"
@@ -2152,7 +2563,10 @@
       "Nothofagus_betuloides4.schem",
       "Nothofagus_betuloides5.schem",
       "Nothofagus_betuloides6.schem",
-      "Nothofagus_betuloides7.schem"
+      "Nothofagus_betuloides7.schem",
+      "contrib/arnis/Nothofagus_betuloides_y4.schem",
+      "contrib/arnis/Nothofagus_betuloides_y6.schem",
+      "contrib/arnis/Nothofagus_betuloides_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2163,7 +2577,10 @@
       "Pilgerodendron_uviferum1.schem",
       "Pilgerodendron_uviferum2.schem",
       "Pilgerodendron_uviferum3.schem",
-      "Pilgerodendron_uviferum4.schem"
+      "Pilgerodendron_uviferum4.schem",
+      "contrib/arnis/Pilgerodendron_uviferum_y4.schem",
+      "contrib/arnis/Pilgerodendron_uviferum_y6.schem",
+      "contrib/arnis/Pilgerodendron_uviferum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2173,7 +2590,9 @@
      "w1": [
       "Saxegothea_conspicua1.schem",
       "Saxegothea_conspicua2.schem",
-      "Saxegothea_conspicua3.schem"
+      "Saxegothea_conspicua3.schem",
+      "contrib/arnis/Saxegothea_conspicua_y4.schem",
+      "contrib/arnis/Saxegothea_conspicua_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -2199,7 +2618,10 @@
      "w1": [
       "Nothofagus_betuloides1.schem",
       "Nothofagus_betuloides2.schem",
-      "Nothofagus_betuloides3.schem"
+      "Nothofagus_betuloides3.schem",
+      "contrib/arnis/Nothofagus_betuloides_y4.schem",
+      "contrib/arnis/Nothofagus_betuloides_y6.schem",
+      "contrib/arnis/Nothofagus_betuloides_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2216,7 +2638,10 @@
      "w1": [
       "Aextoxicon_punctatum1.schem",
       "Aextoxicon_punctatum3.schem",
-      "Aextoxicon_punctatum4.schem"
+      "Aextoxicon_punctatum4.schem",
+      "contrib/arnis/Aextoxicon_punctatum_y4.schem",
+      "contrib/arnis/Aextoxicon_punctatum_y6.schem",
+      "contrib/arnis/Aextoxicon_punctatum_y8.schem"
      ],
      "w2": [
       "Aextoxicon_punctatum2.schem"
@@ -2240,7 +2665,10 @@
      "w1": [
       "Laurelia_sempervirens1.schem",
       "Laurelia_sempervirens2.schem",
-      "Laurelia_sempervirens3.schem"
+      "Laurelia_sempervirens3.schem",
+      "contrib/arnis/Laurelia_sempervirens_y4.schem",
+      "contrib/arnis/Laurelia_sempervirens_y6.schem",
+      "contrib/arnis/Laurelia_sempervirens_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2249,7 +2677,9 @@
      "name": "Luma_apiculata",
      "w1": [
       "Luma_apiculata1.schem",
-      "Luma_apiculata3.schem"
+      "Luma_apiculata3.schem",
+      "contrib/arnis/Luma_apiculata_y4.schem",
+      "contrib/arnis/Luma_apiculata_y6.schem"
      ],
      "w2": [
       "Luma_apiculata4.schem"
@@ -2274,7 +2704,10 @@
      "name": "Nothofagus_obliqua",
      "w1": [
       "Nothofagus_obliqua1.schem",
-      "Nothofagus_obliqua2.schem"
+      "Nothofagus_obliqua2.schem",
+      "contrib/arnis/Nothofagus_obliqua_y4.schem",
+      "contrib/arnis/Nothofagus_obliqua_y6.schem",
+      "contrib/arnis/Nothofagus_obliqua_y8.schem"
      ],
      "w2": [
       "Nothofagus_obliqua3.schem"

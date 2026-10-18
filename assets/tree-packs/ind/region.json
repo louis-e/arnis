@@ -13,7 +13,10 @@
       "Musa_acuminata1.schem",
       "Musa_acuminata2.schem",
       "Musa_acuminata3.schem",
-      "Musa_acuminata4.schem"
+      "Musa_acuminata4.schem",
+      "contrib/arnis/Musa_acuminata_y4.schem",
+      "contrib/arnis/Musa_acuminata_y6.schem",
+      "contrib/arnis/Musa_acuminata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -32,7 +35,10 @@
       "Areca_catechu2.schem",
       "Areca_catechu3.schem",
       "Areca_catechu4.schem",
-      "Areca_catechu5.schem"
+      "Areca_catechu5.schem",
+      "contrib/arnis/Areca_catechu_y4.schem",
+      "contrib/arnis/Areca_catechu_y6.schem",
+      "contrib/arnis/Areca_catechu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -50,7 +56,10 @@
       "Borassus_flabellifer1.schem",
       "Borassus_flabellifer2.schem",
       "Borassus_flabellifer3.schem",
-      "Borassus_flabellifer4.schem"
+      "Borassus_flabellifer4.schem",
+      "contrib/arnis/Borassus_flabellifer_y4.schem",
+      "contrib/arnis/Borassus_flabellifer_y6.schem",
+      "contrib/arnis/Borassus_flabellifer_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -66,14 +75,21 @@
      "name": "Aleurites_moluccanus",
      "w1": [
       "Aleurites_moluccanus1.schem",
-      "Aleurites_moluccanus2.schem"
+      "Aleurites_moluccanus2.schem",
+      "contrib/arnis/Aleurites_moluccanus_y4.schem",
+      "contrib/arnis/Aleurites_moluccanus_y6.schem",
+      "contrib/arnis/Aleurites_moluccanus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -87,7 +103,10 @@
       "Areca_catechu2.schem",
       "Areca_catechu3.schem",
       "Areca_catechu4.schem",
-      "Areca_catechu5.schem"
+      "Areca_catechu5.schem",
+      "contrib/arnis/Areca_catechu_y4.schem",
+      "contrib/arnis/Areca_catechu_y6.schem",
+      "contrib/arnis/Areca_catechu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -97,7 +116,10 @@
      "w1": [
       "Diospyros_melanoxylon1.schem",
       "Diospyros_melanoxylon2.schem",
-      "Diospyros_melanoxylon3.schem"
+      "Diospyros_melanoxylon3.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y4.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -105,14 +127,21 @@
     {
      "name": "Durio_zibethinus",
      "w1": [
-      "Durio_zibethinus1.schem"
+      "Durio_zibethinus1.schem",
+      "contrib/arnis/Durio_zibethinus_y4.schem",
+      "contrib/arnis/Durio_zibethinus_y6.schem",
+      "contrib/arnis/Durio_zibethinus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -124,7 +153,9 @@
      "w1": [
       "Garcinia_mangostana.schem",
       "Garcinia_mangostana2.schem",
-      "Garcinia_mangostana3.schem"
+      "Garcinia_mangostana3.schem",
+      "contrib/arnis/Garcinia_mangostana_y4.schem",
+      "contrib/arnis/Garcinia_mangostana_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -134,7 +165,10 @@
      "w1": [
       "Gnetum_gnemon1.schem",
       "Gnetum_gnemon2.schem",
-      "Gnetum_gnemon3.schem"
+      "Gnetum_gnemon3.schem",
+      "contrib/arnis/Gnetum_gnemon_y4.schem",
+      "contrib/arnis/Gnetum_gnemon_y6.schem",
+      "contrib/arnis/Gnetum_gnemon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -142,7 +176,10 @@
     {
      "name": "Hopea_beccariana",
      "w1": [
-      "Hopea_beccariana1.schem"
+      "Hopea_beccariana1.schem",
+      "contrib/arnis/Hopea_beccariana_y4.schem",
+      "contrib/arnis/Hopea_beccariana_y6.schem",
+      "contrib/arnis/Hopea_beccariana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -152,7 +189,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -162,7 +202,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -171,7 +214,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -191,7 +237,9 @@
       "Tectona_grandis5.schem",
       "Tectona_grandis6.schem",
       "Tectona_grandis7.schem",
-      "Tectona_grandis8.schem"
+      "Tectona_grandis8.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -200,7 +248,11 @@
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -211,7 +263,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -221,7 +276,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -251,7 +309,10 @@
       "Glyptostrobus_pensilis1.schem",
       "Glyptostrobus_pensilis2.schem",
       "Glyptostrobus_pensilis3.schem",
-      "Glyptostrobus_pensilis4.schem"
+      "Glyptostrobus_pensilis4.schem",
+      "contrib/arnis/Glyptostrobus_pensilis_y5.schem",
+      "contrib/arnis/Glyptostrobus_pensilis_y7.schem",
+      "contrib/arnis/Glyptostrobus_pensilis_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -266,7 +327,10 @@
     {
      "name": "Albizia_amara",
      "w1": [
-      "Albizia_amara3.schem"
+      "Albizia_amara3.schem",
+      "contrib/arnis/Albizia_amara_y4.schem",
+      "contrib/arnis/Albizia_amara_y6.schem",
+      "contrib/arnis/Albizia_amara_y8.schem"
      ],
      "w2": [
       "Albizia_amara1.schem",
@@ -279,7 +343,9 @@
      "w1": [
       "Hardwickia_binata1.schem",
       "Hardwickia_binata3.schem",
-      "Hardwickia_binata4.schem"
+      "Hardwickia_binata4.schem",
+      "contrib/arnis/Hardwickia_binata_y4.schem",
+      "contrib/arnis/Hardwickia_binata_y6.schem"
      ],
      "w2": [
       "Hardwickia_binata2.schem"
@@ -290,7 +356,9 @@
      "name": "Lagerstroemia_parviflora",
      "w1": [
       "Lagerstroemia_parviflora1.schem",
-      "Lagerstroemia_parviflora2.schem"
+      "Lagerstroemia_parviflora2.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y4.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -310,7 +378,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -339,7 +410,10 @@
     {
      "name": "Albizia_amara",
      "w1": [
-      "Albizia_amara3.schem"
+      "Albizia_amara3.schem",
+      "contrib/arnis/Albizia_amara_y4.schem",
+      "contrib/arnis/Albizia_amara_y6.schem",
+      "contrib/arnis/Albizia_amara_y8.schem"
      ],
      "w2": [
       "Albizia_amara1.schem",
@@ -353,7 +427,10 @@
       "Borassus_flabellifer1.schem",
       "Borassus_flabellifer2.schem",
       "Borassus_flabellifer3.schem",
-      "Borassus_flabellifer4.schem"
+      "Borassus_flabellifer4.schem",
+      "contrib/arnis/Borassus_flabellifer_y4.schem",
+      "contrib/arnis/Borassus_flabellifer_y6.schem",
+      "contrib/arnis/Borassus_flabellifer_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -363,14 +440,21 @@
      "w1": [
       "Diospyros_melanoxylon4.schem",
       "Diospyros_melanoxylon5.schem",
-      "Diospyros_melanoxylon6.schem"
+      "Diospyros_melanoxylon6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y4.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_benghalensis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_benghalensis_y4.schem",
+      "contrib/arnis/Ficus_benghalensis_y6.schem",
+      "contrib/arnis/Ficus_benghalensis_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_benghalensis1.schem",
@@ -383,7 +467,9 @@
      "w1": [
       "Hardwickia_binata1.schem",
       "Hardwickia_binata3.schem",
-      "Hardwickia_binata4.schem"
+      "Hardwickia_binata4.schem",
+      "contrib/arnis/Hardwickia_binata_y4.schem",
+      "contrib/arnis/Hardwickia_binata_y6.schem"
      ],
      "w2": [
       "Hardwickia_binata2.schem"
@@ -394,7 +480,9 @@
      "name": "Lagerstroemia_parviflora",
      "w1": [
       "Lagerstroemia_parviflora1.schem",
-      "Lagerstroemia_parviflora2.schem"
+      "Lagerstroemia_parviflora2.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y4.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -404,7 +492,10 @@
      "w1": [
       "Manilkara_hexandra1.schem",
       "Manilkara_hexandra2.schem",
-      "Manilkara_hexandra3.schem"
+      "Manilkara_hexandra3.schem",
+      "contrib/arnis/Manilkara_hexandra_y4.schem",
+      "contrib/arnis/Manilkara_hexandra_y6.schem",
+      "contrib/arnis/Manilkara_hexandra_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -413,7 +504,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -427,7 +521,9 @@
       "Tectona_grandis1.schem",
       "Tectona_grandis2.schem",
       "Tectona_grandis3.schem",
-      "Tectona_grandis4.schem"
+      "Tectona_grandis4.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -441,7 +537,11 @@
    "species": [
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -453,7 +553,10 @@
      "w1": [
       "Bombax_ceiba1.schem",
       "Bombax_ceiba2.schem",
-      "Bombax_ceiba4.schem"
+      "Bombax_ceiba4.schem",
+      "contrib/arnis/Bombax_ceiba_y4.schem",
+      "contrib/arnis/Bombax_ceiba_y6.schem",
+      "contrib/arnis/Bombax_ceiba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -462,14 +565,21 @@
      "name": "Dipterocarpus_turbinatus",
      "w1": [
       "Dipterocarpus_turbinatus3.schem",
-      "Dipterocarpus_turbinatus4.schem"
+      "Dipterocarpus_turbinatus4.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y4.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y6.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_benghalensis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_benghalensis_y4.schem",
+      "contrib/arnis/Ficus_benghalensis_y6.schem",
+      "contrib/arnis/Ficus_benghalensis_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_benghalensis1.schem",
@@ -479,7 +589,11 @@
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -490,7 +604,9 @@
      "name": "Lagerstroemia_parviflora",
      "w1": [
       "Lagerstroemia_parviflora1.schem",
-      "Lagerstroemia_parviflora2.schem"
+      "Lagerstroemia_parviflora2.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y4.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -499,7 +615,10 @@
      "name": "Madhuca_longifolia",
      "w1": [
       "Madhuca_longifolia2.schem",
-      "Madhuca_longifolia4.schem"
+      "Madhuca_longifolia4.schem",
+      "contrib/arnis/Madhuca_longifolia_y4.schem",
+      "contrib/arnis/Madhuca_longifolia_y6.schem",
+      "contrib/arnis/Madhuca_longifolia_y8.schem"
      ],
      "w2": [
       "Madhuca_longifolia1.schem"
@@ -514,7 +633,10 @@
       "Musa_acuminata1.schem",
       "Musa_acuminata2.schem",
       "Musa_acuminata3.schem",
-      "Musa_acuminata4.schem"
+      "Musa_acuminata4.schem",
+      "contrib/arnis/Musa_acuminata_y4.schem",
+      "contrib/arnis/Musa_acuminata_y6.schem",
+      "contrib/arnis/Musa_acuminata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -523,7 +645,10 @@
      "name": "Pterocarpus_indicus",
      "w1": [
       "Pterocarpus_indicus1.schem",
-      "Pterocarpus_indicus3.schem"
+      "Pterocarpus_indicus3.schem",
+      "contrib/arnis/Pterocarpus_indicus_y4.schem",
+      "contrib/arnis/Pterocarpus_indicus_y6.schem",
+      "contrib/arnis/Pterocarpus_indicus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -532,7 +657,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -546,7 +674,10 @@
       "Shorea_robusta1.schem",
       "Shorea_robusta2.schem",
       "Shorea_robusta3.schem",
-      "Shorea_robusta6.schem"
+      "Shorea_robusta6.schem",
+      "contrib/arnis/Shorea_robusta_y4.schem",
+      "contrib/arnis/Shorea_robusta_y6.schem",
+      "contrib/arnis/Shorea_robusta_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -558,14 +689,20 @@
       "Terminalia_elliptica2.schem",
       "Terminalia_elliptica3.schem",
       "Terminalia_elliptica4.schem",
-      "Terminalia_elliptica5.schem"
+      "Terminalia_elliptica5.schem",
+      "contrib/arnis/Terminalia_elliptica_y4.schem",
+      "contrib/arnis/Terminalia_elliptica_y6.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -576,7 +713,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -586,7 +726,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -603,7 +746,9 @@
      "w1": [
       "Lagerstroemia_indica1.schem",
       "Lagerstroemia_indica2.schem",
-      "Lagerstroemia_indica3.schem"
+      "Lagerstroemia_indica3.schem",
+      "contrib/arnis/Lagerstroemia_indica_y4.schem",
+      "contrib/arnis/Lagerstroemia_indica_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -613,7 +758,10 @@
      "w1": [
       "Pinus_roxburghii1.schem",
       "Pinus_roxburghii2.schem",
-      "Pinus_roxburghii3.schem"
+      "Pinus_roxburghii3.schem",
+      "contrib/arnis/Pinus_roxburghii_y5.schem",
+      "contrib/arnis/Pinus_roxburghii_y7.schem",
+      "contrib/arnis/Pinus_roxburghii_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -632,7 +780,10 @@
       "Abies_spectabilis2.schem",
       "Abies_spectabilis3.schem",
       "Abies_spectabilis4.schem",
-      "Abies_spectabilis5.schem"
+      "Abies_spectabilis5.schem",
+      "contrib/arnis/Abies_spectabilis_y5.schem",
+      "contrib/arnis/Abies_spectabilis_y7.schem",
+      "contrib/arnis/Abies_spectabilis_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -642,7 +793,9 @@
      "w1": [
       "Betula_utilis1.schem",
       "Betula_utilis2.schem",
-      "Betula_utilis3.schem"
+      "Betula_utilis3.schem",
+      "contrib/arnis/Betula_utilis_y4.schem",
+      "contrib/arnis/Betula_utilis_y6.schem"
      ],
      "w2": [
       "Betula_utilis4.schem"
@@ -655,7 +808,10 @@
       "Taxus_wallichiana1.schem",
       "Taxus_wallichiana2.schem",
       "Taxus_wallichiana3.schem",
-      "Taxus_wallichiana4.schem"
+      "Taxus_wallichiana4.schem",
+      "contrib/arnis/Taxus_wallichiana_y5.schem",
+      "contrib/arnis/Taxus_wallichiana_y7.schem",
+      "contrib/arnis/Taxus_wallichiana_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -671,7 +827,10 @@
      "name": "Lannea_coromandelica",
      "w1": [
       "Lannea_coromandelica1.schem",
-      "Lannea_coromandelica3.schem"
+      "Lannea_coromandelica3.schem",
+      "contrib/arnis/Lannea_coromandelica_y4.schem",
+      "contrib/arnis/Lannea_coromandelica_y6.schem",
+      "contrib/arnis/Lannea_coromandelica_y8.schem"
      ],
      "w2": [
       "Lannea_coromandelica2.schem"
@@ -683,7 +842,9 @@
      "w1": [
       "Mangifera_indica1.schem",
       "Mangifera_indica2.schem",
-      "Mangifera_indica3.schem"
+      "Mangifera_indica3.schem",
+      "contrib/arnis/Mangifera_indica_y4.schem",
+      "contrib/arnis/Mangifera_indica_y6.schem"
      ],
      "w2": [
       "Mangifera_indica4.schem"
@@ -694,7 +855,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -705,7 +869,9 @@
       "Tectona_grandis1.schem",
       "Tectona_grandis2.schem",
       "Tectona_grandis3.schem",
-      "Tectona_grandis4.schem"
+      "Tectona_grandis4.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -717,7 +883,9 @@
       "Terminalia_elliptica6.schem",
       "Terminalia_elliptica7.schem",
       "Terminalia_elliptica8.schem",
-      "Terminalia_elliptica9.schem"
+      "Terminalia_elliptica9.schem",
+      "contrib/arnis/Terminalia_elliptica_y4.schem",
+      "contrib/arnis/Terminalia_elliptica_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -727,7 +895,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -736,7 +907,10 @@
      "name": "Ziziphus_mauritiana",
      "w1": [
       "Ziziphus_mauritiana1.schem",
-      "Ziziphus_mauritiana2.schem"
+      "Ziziphus_mauritiana2.schem",
+      "contrib/arnis/Ziziphus_mauritiana_y4.schem",
+      "contrib/arnis/Ziziphus_mauritiana_y6.schem",
+      "contrib/arnis/Ziziphus_mauritiana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -765,7 +939,10 @@
      "w1": [
       "Castanopsis_hystrix1.schem",
       "Castanopsis_hystrix2.schem",
-      "Castanopsis_hystrix3.schem"
+      "Castanopsis_hystrix3.schem",
+      "contrib/arnis/Castanopsis_hystrix_y4.schem",
+      "contrib/arnis/Castanopsis_hystrix_y6.schem",
+      "contrib/arnis/Castanopsis_hystrix_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -775,7 +952,10 @@
      "w1": [
       "Cinnamomum_cassia1.schem",
       "Cinnamomum_cassia2.schem",
-      "Cinnamomum_cassia3.schem"
+      "Cinnamomum_cassia3.schem",
+      "contrib/arnis/Cinnamomum_cassia_y4.schem",
+      "contrib/arnis/Cinnamomum_cassia_y6.schem",
+      "contrib/arnis/Cinnamomum_cassia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -784,7 +964,9 @@
      "name": "Eriobotrya_japonica",
      "w1": [
       "Eriobotrya_japonica1.schem",
-      "Eriobotrya_japonica3.schem"
+      "Eriobotrya_japonica3.schem",
+      "contrib/arnis/Eriobotrya_japonica_y4.schem",
+      "contrib/arnis/Eriobotrya_japonica_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -796,7 +978,10 @@
      "w1": [
       "Magnolia_doltsopa1.schem",
       "Magnolia_doltsopa2.schem",
-      "Magnolia_doltsopa3.schem"
+      "Magnolia_doltsopa3.schem",
+      "contrib/arnis/Magnolia_doltsopa_y4.schem",
+      "contrib/arnis/Magnolia_doltsopa_y6.schem",
+      "contrib/arnis/Magnolia_doltsopa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -805,7 +990,10 @@
      "name": "Magnolia_hodgsonii",
      "w1": [
       "Magnolia_hodgsonii1.schem",
-      "Magnolia_hodgsonii2.schem"
+      "Magnolia_hodgsonii2.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y4.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y6.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -814,7 +1002,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -824,7 +1015,10 @@
      "w1": [
       "Sassafras_tzumu1.schem",
       "Sassafras_tzumu2.schem",
-      "Sassafras_tzumu3.schem"
+      "Sassafras_tzumu3.schem",
+      "contrib/arnis/Sassafras_tzumu_y4.schem",
+      "contrib/arnis/Sassafras_tzumu_y6.schem",
+      "contrib/arnis/Sassafras_tzumu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -834,7 +1028,10 @@
      "w1": [
       "Toona_sinensis1.schem",
       "Toona_sinensis2.schem",
-      "Toona_sinensis3.schem"
+      "Toona_sinensis3.schem",
+      "contrib/arnis/Toona_sinensis_y4.schem",
+      "contrib/arnis/Toona_sinensis_y6.schem",
+      "contrib/arnis/Toona_sinensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -860,7 +1057,11 @@
    "species": [
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -870,7 +1071,10 @@
     {
      "name": "Artocarpus_heterophyllus",
      "w1": [
-      "Artocarpus_heterophyllus1.schem"
+      "Artocarpus_heterophyllus1.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y4.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y6.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y8.schem"
      ],
      "w2": [
       "Artocarpus_heterophyllus2.schem"
@@ -882,7 +1086,10 @@
      "w1": [
       "Bombax_ceiba1.schem",
       "Bombax_ceiba2.schem",
-      "Bombax_ceiba4.schem"
+      "Bombax_ceiba4.schem",
+      "contrib/arnis/Bombax_ceiba_y4.schem",
+      "contrib/arnis/Bombax_ceiba_y6.schem",
+      "contrib/arnis/Bombax_ceiba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -891,7 +1098,10 @@
      "name": "Erythrina_fusca",
      "w1": [
       "Erythrina_fusca1.schem",
-      "Erythrina_fusca2.schem"
+      "Erythrina_fusca2.schem",
+      "contrib/arnis/Erythrina_fusca_y4.schem",
+      "contrib/arnis/Erythrina_fusca_y6.schem",
+      "contrib/arnis/Erythrina_fusca_y8.schem"
      ],
      "w2": [
       "Erythrina_fusca3.schem"
@@ -900,7 +1110,11 @@
     },
     {
      "name": "Ficus_elastica",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_elastica_y4.schem",
+      "contrib/arnis/Ficus_elastica_y6.schem",
+      "contrib/arnis/Ficus_elastica_y8.schem"
+     ],
      "w2": [
       "Ficus_elastica1.schem",
       "Ficus_elastica2.schem"
@@ -911,7 +1125,9 @@
      "name": "Lagerstroemia_parviflora",
      "w1": [
       "Lagerstroemia_parviflora1.schem",
-      "Lagerstroemia_parviflora2.schem"
+      "Lagerstroemia_parviflora2.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y4.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -920,7 +1136,10 @@
      "name": "Madhuca_longifolia",
      "w1": [
       "Madhuca_longifolia2.schem",
-      "Madhuca_longifolia4.schem"
+      "Madhuca_longifolia4.schem",
+      "contrib/arnis/Madhuca_longifolia_y4.schem",
+      "contrib/arnis/Madhuca_longifolia_y6.schem",
+      "contrib/arnis/Madhuca_longifolia_y8.schem"
      ],
      "w2": [
       "Madhuca_longifolia1.schem"
@@ -935,7 +1154,10 @@
       "Shorea_robusta1.schem",
       "Shorea_robusta2.schem",
       "Shorea_robusta3.schem",
-      "Shorea_robusta6.schem"
+      "Shorea_robusta6.schem",
+      "contrib/arnis/Shorea_robusta_y4.schem",
+      "contrib/arnis/Shorea_robusta_y6.schem",
+      "contrib/arnis/Shorea_robusta_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -947,7 +1169,9 @@
       "Tectona_grandis5.schem",
       "Tectona_grandis6.schem",
       "Tectona_grandis7.schem",
-      "Tectona_grandis8.schem"
+      "Tectona_grandis8.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -961,14 +1185,20 @@
       "Terminalia_elliptica2.schem",
       "Terminalia_elliptica3.schem",
       "Terminalia_elliptica4.schem",
-      "Terminalia_elliptica5.schem"
+      "Terminalia_elliptica5.schem",
+      "contrib/arnis/Terminalia_elliptica_y4.schem",
+      "contrib/arnis/Terminalia_elliptica_y6.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -979,7 +1209,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -993,7 +1226,11 @@
    "species": [
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -1005,7 +1242,10 @@
      "w1": [
       "Bombax_ceiba1.schem",
       "Bombax_ceiba2.schem",
-      "Bombax_ceiba4.schem"
+      "Bombax_ceiba4.schem",
+      "contrib/arnis/Bombax_ceiba_y4.schem",
+      "contrib/arnis/Bombax_ceiba_y6.schem",
+      "contrib/arnis/Bombax_ceiba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1015,7 +1255,10 @@
      "w1": [
       "Cyrtostachys_renda1.schem",
       "Cyrtostachys_renda2.schem",
-      "Cyrtostachys_renda3.schem"
+      "Cyrtostachys_renda3.schem",
+      "contrib/arnis/Cyrtostachys_renda_y4.schem",
+      "contrib/arnis/Cyrtostachys_renda_y6.schem",
+      "contrib/arnis/Cyrtostachys_renda_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1024,14 +1267,21 @@
      "name": "Dipterocarpus_turbinatus",
      "w1": [
       "Dipterocarpus_turbinatus3.schem",
-      "Dipterocarpus_turbinatus4.schem"
+      "Dipterocarpus_turbinatus4.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y4.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y6.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -1043,7 +1293,10 @@
      "w1": [
       "Gnetum_gnemon1.schem",
       "Gnetum_gnemon2.schem",
-      "Gnetum_gnemon3.schem"
+      "Gnetum_gnemon3.schem",
+      "contrib/arnis/Gnetum_gnemon_y4.schem",
+      "contrib/arnis/Gnetum_gnemon_y6.schem",
+      "contrib/arnis/Gnetum_gnemon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1051,7 +1304,10 @@
     {
      "name": "Hopea_beccariana",
      "w1": [
-      "Hopea_beccariana1.schem"
+      "Hopea_beccariana1.schem",
+      "contrib/arnis/Hopea_beccariana_y4.schem",
+      "contrib/arnis/Hopea_beccariana_y6.schem",
+      "contrib/arnis/Hopea_beccariana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1061,7 +1317,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1071,7 +1330,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1080,7 +1342,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1091,7 +1356,10 @@
       "Musa_acuminata1.schem",
       "Musa_acuminata2.schem",
       "Musa_acuminata3.schem",
-      "Musa_acuminata4.schem"
+      "Musa_acuminata4.schem",
+      "contrib/arnis/Musa_acuminata_y4.schem",
+      "contrib/arnis/Musa_acuminata_y6.schem",
+      "contrib/arnis/Musa_acuminata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1100,7 +1368,10 @@
      "name": "Pterocarpus_indicus",
      "w1": [
       "Pterocarpus_indicus1.schem",
-      "Pterocarpus_indicus3.schem"
+      "Pterocarpus_indicus3.schem",
+      "contrib/arnis/Pterocarpus_indicus_y4.schem",
+      "contrib/arnis/Pterocarpus_indicus_y6.schem",
+      "contrib/arnis/Pterocarpus_indicus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1120,7 +1391,9 @@
       "Tectona_grandis5.schem",
       "Tectona_grandis6.schem",
       "Tectona_grandis7.schem",
-      "Tectona_grandis8.schem"
+      "Tectona_grandis8.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -1129,7 +1402,11 @@
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -1140,7 +1417,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1168,14 +1448,21 @@
      "name": "Aleurites_moluccanus",
      "w1": [
       "Aleurites_moluccanus1.schem",
-      "Aleurites_moluccanus2.schem"
+      "Aleurites_moluccanus2.schem",
+      "contrib/arnis/Aleurites_moluccanus_y4.schem",
+      "contrib/arnis/Aleurites_moluccanus_y6.schem",
+      "contrib/arnis/Aleurites_moluccanus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -1189,7 +1476,10 @@
       "Areca_catechu2.schem",
       "Areca_catechu3.schem",
       "Areca_catechu4.schem",
-      "Areca_catechu5.schem"
+      "Areca_catechu5.schem",
+      "contrib/arnis/Areca_catechu_y4.schem",
+      "contrib/arnis/Areca_catechu_y6.schem",
+      "contrib/arnis/Areca_catechu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1197,7 +1487,10 @@
     {
      "name": "Durio_zibethinus",
      "w1": [
-      "Durio_zibethinus1.schem"
+      "Durio_zibethinus1.schem",
+      "contrib/arnis/Durio_zibethinus_y4.schem",
+      "contrib/arnis/Durio_zibethinus_y6.schem",
+      "contrib/arnis/Durio_zibethinus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1206,7 +1499,10 @@
      "name": "Epicharis_parasitica",
      "w1": [
       "Epicharis_parasitica1.schem",
-      "Epicharis_parasitica2.schem"
+      "Epicharis_parasitica2.schem",
+      "contrib/arnis/Epicharis_parasitica_y4.schem",
+      "contrib/arnis/Epicharis_parasitica_y6.schem",
+      "contrib/arnis/Epicharis_parasitica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1214,14 +1510,21 @@
     {
      "name": "Eucalyptus_deglupta",
      "w1": [
-      "Eucalyptus_deglupta1.schem"
+      "Eucalyptus_deglupta1.schem",
+      "contrib/arnis/Eucalyptus_deglupta_y4.schem",
+      "contrib/arnis/Eucalyptus_deglupta_y6.schem",
+      "contrib/arnis/Eucalyptus_deglupta_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -1233,7 +1536,10 @@
      "w1": [
       "Gnetum_gnemon1.schem",
       "Gnetum_gnemon2.schem",
-      "Gnetum_gnemon3.schem"
+      "Gnetum_gnemon3.schem",
+      "contrib/arnis/Gnetum_gnemon_y4.schem",
+      "contrib/arnis/Gnetum_gnemon_y6.schem",
+      "contrib/arnis/Gnetum_gnemon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1243,7 +1549,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1253,7 +1562,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1262,7 +1574,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1271,7 +1586,10 @@
      "name": "Pterocarpus_indicus",
      "w1": [
       "Pterocarpus_indicus1.schem",
-      "Pterocarpus_indicus3.schem"
+      "Pterocarpus_indicus3.schem",
+      "contrib/arnis/Pterocarpus_indicus_y4.schem",
+      "contrib/arnis/Pterocarpus_indicus_y6.schem",
+      "contrib/arnis/Pterocarpus_indicus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1289,7 +1607,11 @@
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -1300,7 +1622,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1330,7 +1655,10 @@
       "Borassus_flabellifer1.schem",
       "Borassus_flabellifer2.schem",
       "Borassus_flabellifer3.schem",
-      "Borassus_flabellifer4.schem"
+      "Borassus_flabellifer4.schem",
+      "contrib/arnis/Borassus_flabellifer_y4.schem",
+      "contrib/arnis/Borassus_flabellifer_y6.schem",
+      "contrib/arnis/Borassus_flabellifer_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1340,7 +1668,10 @@
      "w1": [
       "Diospyros_melanoxylon4.schem",
       "Diospyros_melanoxylon5.schem",
-      "Diospyros_melanoxylon6.schem"
+      "Diospyros_melanoxylon6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y4.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1348,7 +1679,10 @@
     {
      "name": "Drypetes_sepiaria",
      "w1": [
-      "Drypetes_sepiaria2.schem"
+      "Drypetes_sepiaria2.schem",
+      "contrib/arnis/Drypetes_sepiaria_y4.schem",
+      "contrib/arnis/Drypetes_sepiaria_y6.schem",
+      "contrib/arnis/Drypetes_sepiaria_y8.schem"
      ],
      "w2": [
       "Drypetes_sepiaria1.schem"
@@ -1360,7 +1694,9 @@
      "w1": [
       "Hardwickia_binata1.schem",
       "Hardwickia_binata3.schem",
-      "Hardwickia_binata4.schem"
+      "Hardwickia_binata4.schem",
+      "contrib/arnis/Hardwickia_binata_y4.schem",
+      "contrib/arnis/Hardwickia_binata_y6.schem"
      ],
      "w2": [
       "Hardwickia_binata2.schem"
@@ -1371,7 +1707,9 @@
      "name": "Lagerstroemia_parviflora",
      "w1": [
       "Lagerstroemia_parviflora1.schem",
-      "Lagerstroemia_parviflora2.schem"
+      "Lagerstroemia_parviflora2.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y4.schem",
+      "contrib/arnis/Lagerstroemia_parviflora_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1380,7 +1718,10 @@
      "name": "Madhuca_longifolia",
      "w1": [
       "Madhuca_longifolia2.schem",
-      "Madhuca_longifolia4.schem"
+      "Madhuca_longifolia4.schem",
+      "contrib/arnis/Madhuca_longifolia_y4.schem",
+      "contrib/arnis/Madhuca_longifolia_y6.schem",
+      "contrib/arnis/Madhuca_longifolia_y8.schem"
      ],
      "w2": [
       "Madhuca_longifolia1.schem"
@@ -1394,7 +1735,9 @@
      "w1": [
       "Mangifera_indica1.schem",
       "Mangifera_indica2.schem",
-      "Mangifera_indica3.schem"
+      "Mangifera_indica3.schem",
+      "contrib/arnis/Mangifera_indica_y4.schem",
+      "contrib/arnis/Mangifera_indica_y6.schem"
      ],
      "w2": [
       "Mangifera_indica4.schem"
@@ -1405,7 +1748,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -1419,7 +1765,9 @@
       "Tectona_grandis1.schem",
       "Tectona_grandis2.schem",
       "Tectona_grandis3.schem",
-      "Tectona_grandis4.schem"
+      "Tectona_grandis4.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1431,7 +1779,9 @@
       "Terminalia_elliptica6.schem",
       "Terminalia_elliptica7.schem",
       "Terminalia_elliptica8.schem",
-      "Terminalia_elliptica9.schem"
+      "Terminalia_elliptica9.schem",
+      "contrib/arnis/Terminalia_elliptica_y4.schem",
+      "contrib/arnis/Terminalia_elliptica_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1440,7 +1790,10 @@
      "name": "Ziziphus_mauritiana",
      "w1": [
       "Ziziphus_mauritiana1.schem",
-      "Ziziphus_mauritiana2.schem"
+      "Ziziphus_mauritiana2.schem",
+      "contrib/arnis/Ziziphus_mauritiana_y4.schem",
+      "contrib/arnis/Ziziphus_mauritiana_y6.schem",
+      "contrib/arnis/Ziziphus_mauritiana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1455,7 +1808,10 @@
     {
      "name": "Agathis_dammara",
      "w1": [
-      "Agathis_dammara2.schem"
+      "Agathis_dammara2.schem",
+      "contrib/arnis/Agathis_dammara_y5.schem",
+      "contrib/arnis/Agathis_dammara_y7.schem",
+      "contrib/arnis/Agathis_dammara_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -1464,14 +1820,21 @@
      "name": "Aleurites_moluccanus",
      "w1": [
       "Aleurites_moluccanus1.schem",
-      "Aleurites_moluccanus2.schem"
+      "Aleurites_moluccanus2.schem",
+      "contrib/arnis/Aleurites_moluccanus_y4.schem",
+      "contrib/arnis/Aleurites_moluccanus_y6.schem",
+      "contrib/arnis/Aleurites_moluccanus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -1485,7 +1848,10 @@
       "Areca_catechu2.schem",
       "Areca_catechu3.schem",
       "Areca_catechu4.schem",
-      "Areca_catechu5.schem"
+      "Areca_catechu5.schem",
+      "contrib/arnis/Areca_catechu_y4.schem",
+      "contrib/arnis/Areca_catechu_y6.schem",
+      "contrib/arnis/Areca_catechu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1493,7 +1859,10 @@
     {
      "name": "Durio_zibethinus",
      "w1": [
-      "Durio_zibethinus1.schem"
+      "Durio_zibethinus1.schem",
+      "contrib/arnis/Durio_zibethinus_y4.schem",
+      "contrib/arnis/Durio_zibethinus_y6.schem",
+      "contrib/arnis/Durio_zibethinus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1502,7 +1871,10 @@
      "name": "Epicharis_parasitica",
      "w1": [
       "Epicharis_parasitica1.schem",
-      "Epicharis_parasitica2.schem"
+      "Epicharis_parasitica2.schem",
+      "contrib/arnis/Epicharis_parasitica_y4.schem",
+      "contrib/arnis/Epicharis_parasitica_y6.schem",
+      "contrib/arnis/Epicharis_parasitica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1510,14 +1882,21 @@
     {
      "name": "Eucalyptus_deglupta",
      "w1": [
-      "Eucalyptus_deglupta1.schem"
+      "Eucalyptus_deglupta1.schem",
+      "contrib/arnis/Eucalyptus_deglupta_y4.schem",
+      "contrib/arnis/Eucalyptus_deglupta_y6.schem",
+      "contrib/arnis/Eucalyptus_deglupta_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -1529,7 +1908,10 @@
      "w1": [
       "Gnetum_gnemon1.schem",
       "Gnetum_gnemon2.schem",
-      "Gnetum_gnemon3.schem"
+      "Gnetum_gnemon3.schem",
+      "contrib/arnis/Gnetum_gnemon_y4.schem",
+      "contrib/arnis/Gnetum_gnemon_y6.schem",
+      "contrib/arnis/Gnetum_gnemon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1539,7 +1921,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1548,7 +1933,8 @@
      "name": "Litchi_sinensis",
      "w1": [
       "Litchi_sinensis1.schem",
-      "Litchi_sinensis2.schem"
+      "Litchi_sinensis2.schem",
+      "contrib/arnis/Litchi_sinensis_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1558,7 +1944,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1567,7 +1956,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1576,7 +1968,10 @@
      "name": "Pterocarpus_indicus",
      "w1": [
       "Pterocarpus_indicus1.schem",
-      "Pterocarpus_indicus3.schem"
+      "Pterocarpus_indicus3.schem",
+      "contrib/arnis/Pterocarpus_indicus_y4.schem",
+      "contrib/arnis/Pterocarpus_indicus_y6.schem",
+      "contrib/arnis/Pterocarpus_indicus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1607,7 +2002,9 @@
       "Tectona_grandis5.schem",
       "Tectona_grandis6.schem",
       "Tectona_grandis7.schem",
-      "Tectona_grandis8.schem"
+      "Tectona_grandis8.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -1618,7 +2015,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1628,7 +2028,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1657,7 +2060,10 @@
      "w1": [
       "Castanopsis_hystrix1.schem",
       "Castanopsis_hystrix2.schem",
-      "Castanopsis_hystrix3.schem"
+      "Castanopsis_hystrix3.schem",
+      "contrib/arnis/Castanopsis_hystrix_y4.schem",
+      "contrib/arnis/Castanopsis_hystrix_y6.schem",
+      "contrib/arnis/Castanopsis_hystrix_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1667,7 +2073,10 @@
      "w1": [
       "Cinnamomum_cassia1.schem",
       "Cinnamomum_cassia2.schem",
-      "Cinnamomum_cassia3.schem"
+      "Cinnamomum_cassia3.schem",
+      "contrib/arnis/Cinnamomum_cassia_y4.schem",
+      "contrib/arnis/Cinnamomum_cassia_y6.schem",
+      "contrib/arnis/Cinnamomum_cassia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1677,7 +2086,10 @@
      "w1": [
       "Magnolia_doltsopa1.schem",
       "Magnolia_doltsopa2.schem",
-      "Magnolia_doltsopa3.schem"
+      "Magnolia_doltsopa3.schem",
+      "contrib/arnis/Magnolia_doltsopa_y4.schem",
+      "contrib/arnis/Magnolia_doltsopa_y6.schem",
+      "contrib/arnis/Magnolia_doltsopa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1686,7 +2098,10 @@
      "name": "Magnolia_hodgsonii",
      "w1": [
       "Magnolia_hodgsonii1.schem",
-      "Magnolia_hodgsonii2.schem"
+      "Magnolia_hodgsonii2.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y4.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y6.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1705,7 +2120,10 @@
      "w1": [
       "Sassafras_tzumu1.schem",
       "Sassafras_tzumu2.schem",
-      "Sassafras_tzumu3.schem"
+      "Sassafras_tzumu3.schem",
+      "contrib/arnis/Sassafras_tzumu_y4.schem",
+      "contrib/arnis/Sassafras_tzumu_y6.schem",
+      "contrib/arnis/Sassafras_tzumu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1731,7 +2149,11 @@
    "species": [
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -1743,7 +2165,10 @@
      "w1": [
       "Bombax_ceiba1.schem",
       "Bombax_ceiba2.schem",
-      "Bombax_ceiba4.schem"
+      "Bombax_ceiba4.schem",
+      "contrib/arnis/Bombax_ceiba_y4.schem",
+      "contrib/arnis/Bombax_ceiba_y6.schem",
+      "contrib/arnis/Bombax_ceiba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1753,7 +2178,10 @@
      "w1": [
       "Castanopsis_hystrix1.schem",
       "Castanopsis_hystrix2.schem",
-      "Castanopsis_hystrix3.schem"
+      "Castanopsis_hystrix3.schem",
+      "contrib/arnis/Castanopsis_hystrix_y4.schem",
+      "contrib/arnis/Castanopsis_hystrix_y6.schem",
+      "contrib/arnis/Castanopsis_hystrix_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1763,7 +2191,10 @@
      "w1": [
       "Cinnamomum_cassia1.schem",
       "Cinnamomum_cassia2.schem",
-      "Cinnamomum_cassia3.schem"
+      "Cinnamomum_cassia3.schem",
+      "contrib/arnis/Cinnamomum_cassia_y4.schem",
+      "contrib/arnis/Cinnamomum_cassia_y6.schem",
+      "contrib/arnis/Cinnamomum_cassia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1773,7 +2204,10 @@
      "w1": [
       "Dalbergia_tonkinensis1.schem",
       "Dalbergia_tonkinensis2.schem",
-      "Dalbergia_tonkinensis3.schem"
+      "Dalbergia_tonkinensis3.schem",
+      "contrib/arnis/Dalbergia_tonkinensis_y4.schem",
+      "contrib/arnis/Dalbergia_tonkinensis_y6.schem",
+      "contrib/arnis/Dalbergia_tonkinensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1782,7 +2216,9 @@
      "name": "Eriobotrya_japonica",
      "w1": [
       "Eriobotrya_japonica1.schem",
-      "Eriobotrya_japonica3.schem"
+      "Eriobotrya_japonica3.schem",
+      "contrib/arnis/Eriobotrya_japonica_y4.schem",
+      "contrib/arnis/Eriobotrya_japonica_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -1791,7 +2227,11 @@
     },
     {
      "name": "Ficus_elastica",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_elastica_y4.schem",
+      "contrib/arnis/Ficus_elastica_y6.schem",
+      "contrib/arnis/Ficus_elastica_y8.schem"
+     ],
      "w2": [
       "Ficus_elastica1.schem",
       "Ficus_elastica2.schem"
@@ -1802,7 +2242,10 @@
      "name": "Lannea_coromandelica",
      "w1": [
       "Lannea_coromandelica1.schem",
-      "Lannea_coromandelica3.schem"
+      "Lannea_coromandelica3.schem",
+      "contrib/arnis/Lannea_coromandelica_y4.schem",
+      "contrib/arnis/Lannea_coromandelica_y6.schem",
+      "contrib/arnis/Lannea_coromandelica_y8.schem"
      ],
      "w2": [
       "Lannea_coromandelica2.schem"
@@ -1813,7 +2256,8 @@
      "name": "Litchi_sinensis",
      "w1": [
       "Litchi_sinensis1.schem",
-      "Litchi_sinensis2.schem"
+      "Litchi_sinensis2.schem",
+      "contrib/arnis/Litchi_sinensis_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1823,7 +2267,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1832,7 +2279,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1841,7 +2291,10 @@
      "name": "Pterocarpus_indicus",
      "w1": [
       "Pterocarpus_indicus1.schem",
-      "Pterocarpus_indicus3.schem"
+      "Pterocarpus_indicus3.schem",
+      "contrib/arnis/Pterocarpus_indicus_y4.schem",
+      "contrib/arnis/Pterocarpus_indicus_y6.schem",
+      "contrib/arnis/Pterocarpus_indicus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1851,7 +2304,10 @@
      "w1": [
       "Sassafras_tzumu1.schem",
       "Sassafras_tzumu2.schem",
-      "Sassafras_tzumu3.schem"
+      "Sassafras_tzumu3.schem",
+      "contrib/arnis/Sassafras_tzumu_y4.schem",
+      "contrib/arnis/Sassafras_tzumu_y6.schem",
+      "contrib/arnis/Sassafras_tzumu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1860,7 +2316,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -1873,7 +2332,10 @@
      "w1": [
       "Toona_sinensis1.schem",
       "Toona_sinensis2.schem",
-      "Toona_sinensis3.schem"
+      "Toona_sinensis3.schem",
+      "contrib/arnis/Toona_sinensis_y4.schem",
+      "contrib/arnis/Toona_sinensis_y6.schem",
+      "contrib/arnis/Toona_sinensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1882,7 +2344,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1892,7 +2357,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1918,7 +2386,11 @@
    "species": [
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -1930,7 +2402,10 @@
      "w1": [
       "Bombax_ceiba1.schem",
       "Bombax_ceiba2.schem",
-      "Bombax_ceiba4.schem"
+      "Bombax_ceiba4.schem",
+      "contrib/arnis/Bombax_ceiba_y4.schem",
+      "contrib/arnis/Bombax_ceiba_y6.schem",
+      "contrib/arnis/Bombax_ceiba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1940,7 +2415,10 @@
      "w1": [
       "Cinnamomum_cassia1.schem",
       "Cinnamomum_cassia2.schem",
-      "Cinnamomum_cassia3.schem"
+      "Cinnamomum_cassia3.schem",
+      "contrib/arnis/Cinnamomum_cassia_y4.schem",
+      "contrib/arnis/Cinnamomum_cassia_y6.schem",
+      "contrib/arnis/Cinnamomum_cassia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1949,7 +2427,10 @@
      "name": "Dalbergia_cochinchinensis",
      "w1": [
       "Dalbergia_cochinchinensis1.schem",
-      "Dalbergia_cochinchinensis2.schem"
+      "Dalbergia_cochinchinensis2.schem",
+      "contrib/arnis/Dalbergia_cochinchinensis_y4.schem",
+      "contrib/arnis/Dalbergia_cochinchinensis_y6.schem",
+      "contrib/arnis/Dalbergia_cochinchinensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1958,14 +2439,21 @@
      "name": "Dipterocarpus_turbinatus",
      "w1": [
       "Dipterocarpus_turbinatus3.schem",
-      "Dipterocarpus_turbinatus4.schem"
+      "Dipterocarpus_turbinatus4.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y4.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y6.schem",
+      "contrib/arnis/Dipterocarpus_turbinatus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -1977,7 +2465,10 @@
      "w1": [
       "Gnetum_gnemon1.schem",
       "Gnetum_gnemon2.schem",
-      "Gnetum_gnemon3.schem"
+      "Gnetum_gnemon3.schem",
+      "contrib/arnis/Gnetum_gnemon_y4.schem",
+      "contrib/arnis/Gnetum_gnemon_y6.schem",
+      "contrib/arnis/Gnetum_gnemon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1987,7 +2478,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1997,7 +2491,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2006,7 +2503,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2017,7 +2517,10 @@
       "Musa_acuminata1.schem",
       "Musa_acuminata2.schem",
       "Musa_acuminata3.schem",
-      "Musa_acuminata4.schem"
+      "Musa_acuminata4.schem",
+      "contrib/arnis/Musa_acuminata_y4.schem",
+      "contrib/arnis/Musa_acuminata_y6.schem",
+      "contrib/arnis/Musa_acuminata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2026,7 +2529,10 @@
      "name": "Pterocarpus_indicus",
      "w1": [
       "Pterocarpus_indicus1.schem",
-      "Pterocarpus_indicus3.schem"
+      "Pterocarpus_indicus3.schem",
+      "contrib/arnis/Pterocarpus_indicus_y4.schem",
+      "contrib/arnis/Pterocarpus_indicus_y6.schem",
+      "contrib/arnis/Pterocarpus_indicus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2038,7 +2544,9 @@
       "Tectona_grandis5.schem",
       "Tectona_grandis6.schem",
       "Tectona_grandis7.schem",
-      "Tectona_grandis8.schem"
+      "Tectona_grandis8.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -2047,7 +2555,11 @@
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -2058,7 +2570,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2088,7 +2603,10 @@
       "Borassus_flabellifer1.schem",
       "Borassus_flabellifer2.schem",
       "Borassus_flabellifer3.schem",
-      "Borassus_flabellifer4.schem"
+      "Borassus_flabellifer4.schem",
+      "contrib/arnis/Borassus_flabellifer_y4.schem",
+      "contrib/arnis/Borassus_flabellifer_y6.schem",
+      "contrib/arnis/Borassus_flabellifer_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2097,7 +2615,10 @@
      "name": "Dalbergia_cochinchinensis",
      "w1": [
       "Dalbergia_cochinchinensis1.schem",
-      "Dalbergia_cochinchinensis2.schem"
+      "Dalbergia_cochinchinensis2.schem",
+      "contrib/arnis/Dalbergia_cochinchinensis_y4.schem",
+      "contrib/arnis/Dalbergia_cochinchinensis_y6.schem",
+      "contrib/arnis/Dalbergia_cochinchinensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2106,7 +2627,10 @@
      "name": "Lannea_coromandelica",
      "w1": [
       "Lannea_coromandelica1.schem",
-      "Lannea_coromandelica3.schem"
+      "Lannea_coromandelica3.schem",
+      "contrib/arnis/Lannea_coromandelica_y4.schem",
+      "contrib/arnis/Lannea_coromandelica_y6.schem",
+      "contrib/arnis/Lannea_coromandelica_y8.schem"
      ],
      "w2": [
       "Lannea_coromandelica2.schem"
@@ -2118,7 +2642,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2127,7 +2654,10 @@
      "name": "Madhuca_longifolia",
      "w1": [
       "Madhuca_longifolia2.schem",
-      "Madhuca_longifolia4.schem"
+      "Madhuca_longifolia4.schem",
+      "contrib/arnis/Madhuca_longifolia_y4.schem",
+      "contrib/arnis/Madhuca_longifolia_y6.schem",
+      "contrib/arnis/Madhuca_longifolia_y8.schem"
      ],
      "w2": [
       "Madhuca_longifolia1.schem"
@@ -2141,7 +2671,10 @@
      "w1": [
       "Manilkara_hexandra1.schem",
       "Manilkara_hexandra2.schem",
-      "Manilkara_hexandra3.schem"
+      "Manilkara_hexandra3.schem",
+      "contrib/arnis/Manilkara_hexandra_y4.schem",
+      "contrib/arnis/Manilkara_hexandra_y6.schem",
+      "contrib/arnis/Manilkara_hexandra_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2150,7 +2683,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -2164,7 +2700,9 @@
       "Tectona_grandis1.schem",
       "Tectona_grandis2.schem",
       "Tectona_grandis3.schem",
-      "Tectona_grandis4.schem"
+      "Tectona_grandis4.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -2176,7 +2714,9 @@
       "Terminalia_elliptica6.schem",
       "Terminalia_elliptica7.schem",
       "Terminalia_elliptica8.schem",
-      "Terminalia_elliptica9.schem"
+      "Terminalia_elliptica9.schem",
+      "contrib/arnis/Terminalia_elliptica_y4.schem",
+      "contrib/arnis/Terminalia_elliptica_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -2186,7 +2726,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2227,7 +2770,10 @@
      "w1": [
       "Bruguiera_parviflora2.schem",
       "Bruguiera_parviflora4.schem",
-      "Bruguiera_parviflora5.schem"
+      "Bruguiera_parviflora5.schem",
+      "contrib/arnis/Bruguiera_parviflora_y4.schem",
+      "contrib/arnis/Bruguiera_parviflora_y6.schem",
+      "contrib/arnis/Bruguiera_parviflora_y8.schem"
      ],
      "w2": [
       "Bruguiera_parviflora1.schem",
@@ -2250,7 +2796,8 @@
      "w1": [
       "Phoenix_paludosa1.schem",
       "Phoenix_paludosa2.schem",
-      "Phoenix_paludosa3.schem"
+      "Phoenix_paludosa3.schem",
+      "contrib/arnis/Phoenix_paludosa_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -2261,7 +2808,8 @@
       "Rhizopora_apiculata1.schem",
       "Rhizopora_apiculata2.schem",
       "Rhizopora_apiculata3.schem",
-      "Rhizopora_apiculata4.schem"
+      "Rhizopora_apiculata4.schem",
+      "contrib/arnis/Rhizopora_apiculata_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -2275,7 +2823,11 @@
    "species": [
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -2289,7 +2841,10 @@
       "Areca_catechu2.schem",
       "Areca_catechu3.schem",
       "Areca_catechu4.schem",
-      "Areca_catechu5.schem"
+      "Areca_catechu5.schem",
+      "contrib/arnis/Areca_catechu_y4.schem",
+      "contrib/arnis/Areca_catechu_y6.schem",
+      "contrib/arnis/Areca_catechu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2300,7 +2855,10 @@
       "Borassus_flabellifer1.schem",
       "Borassus_flabellifer2.schem",
       "Borassus_flabellifer3.schem",
-      "Borassus_flabellifer4.schem"
+      "Borassus_flabellifer4.schem",
+      "contrib/arnis/Borassus_flabellifer_y4.schem",
+      "contrib/arnis/Borassus_flabellifer_y6.schem",
+      "contrib/arnis/Borassus_flabellifer_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2309,7 +2867,10 @@
      "name": "Erythrina_fusca",
      "w1": [
       "Erythrina_fusca1.schem",
-      "Erythrina_fusca2.schem"
+      "Erythrina_fusca2.schem",
+      "contrib/arnis/Erythrina_fusca_y4.schem",
+      "contrib/arnis/Erythrina_fusca_y6.schem",
+      "contrib/arnis/Erythrina_fusca_y8.schem"
      ],
      "w2": [
       "Erythrina_fusca3.schem"
@@ -2318,7 +2879,11 @@
     },
     {
      "name": "Ficus_benghalensis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_benghalensis_y4.schem",
+      "contrib/arnis/Ficus_benghalensis_y6.schem",
+      "contrib/arnis/Ficus_benghalensis_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_benghalensis1.schem",
@@ -2328,7 +2893,11 @@
     },
     {
      "name": "Ficus_elastica",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_elastica_y4.schem",
+      "contrib/arnis/Ficus_elastica_y6.schem",
+      "contrib/arnis/Ficus_elastica_y8.schem"
+     ],
      "w2": [
       "Ficus_elastica1.schem",
       "Ficus_elastica2.schem"
@@ -2337,7 +2906,11 @@
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -2349,7 +2922,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2359,7 +2935,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2368,7 +2947,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2378,7 +2960,8 @@
      "w1": [
       "Phoenix_paludosa1.schem",
       "Phoenix_paludosa2.schem",
-      "Phoenix_paludosa3.schem"
+      "Phoenix_paludosa3.schem",
+      "contrib/arnis/Phoenix_paludosa_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -2387,7 +2970,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -2419,7 +3005,10 @@
      "w1": [
       "Castanopsis_hystrix1.schem",
       "Castanopsis_hystrix2.schem",
-      "Castanopsis_hystrix3.schem"
+      "Castanopsis_hystrix3.schem",
+      "contrib/arnis/Castanopsis_hystrix_y4.schem",
+      "contrib/arnis/Castanopsis_hystrix_y6.schem",
+      "contrib/arnis/Castanopsis_hystrix_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2429,7 +3018,10 @@
      "w1": [
       "Cinnamomum_cassia1.schem",
       "Cinnamomum_cassia2.schem",
-      "Cinnamomum_cassia3.schem"
+      "Cinnamomum_cassia3.schem",
+      "contrib/arnis/Cinnamomum_cassia_y4.schem",
+      "contrib/arnis/Cinnamomum_cassia_y6.schem",
+      "contrib/arnis/Cinnamomum_cassia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2439,7 +3031,10 @@
      "w1": [
       "Magnolia_doltsopa1.schem",
       "Magnolia_doltsopa2.schem",
-      "Magnolia_doltsopa3.schem"
+      "Magnolia_doltsopa3.schem",
+      "contrib/arnis/Magnolia_doltsopa_y4.schem",
+      "contrib/arnis/Magnolia_doltsopa_y6.schem",
+      "contrib/arnis/Magnolia_doltsopa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2448,7 +3043,10 @@
      "name": "Magnolia_hodgsonii",
      "w1": [
       "Magnolia_hodgsonii1.schem",
-      "Magnolia_hodgsonii2.schem"
+      "Magnolia_hodgsonii2.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y4.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y6.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2458,7 +3056,10 @@
      "w1": [
       "Sassafras_tzumu1.schem",
       "Sassafras_tzumu2.schem",
-      "Sassafras_tzumu3.schem"
+      "Sassafras_tzumu3.schem",
+      "contrib/arnis/Sassafras_tzumu_y4.schem",
+      "contrib/arnis/Sassafras_tzumu_y6.schem",
+      "contrib/arnis/Sassafras_tzumu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2468,7 +3069,10 @@
      "w1": [
       "Toona_sinensis1.schem",
       "Toona_sinensis2.schem",
-      "Toona_sinensis3.schem"
+      "Toona_sinensis3.schem",
+      "contrib/arnis/Toona_sinensis_y4.schem",
+      "contrib/arnis/Toona_sinensis_y6.schem",
+      "contrib/arnis/Toona_sinensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2495,7 +3099,10 @@
     {
      "name": "Albizia_amara",
      "w1": [
-      "Albizia_amara3.schem"
+      "Albizia_amara3.schem",
+      "contrib/arnis/Albizia_amara_y4.schem",
+      "contrib/arnis/Albizia_amara_y6.schem",
+      "contrib/arnis/Albizia_amara_y8.schem"
      ],
      "w2": [
       "Albizia_amara1.schem",
@@ -2506,7 +3113,10 @@
     {
      "name": "Artocarpus_heterophyllus",
      "w1": [
-      "Artocarpus_heterophyllus1.schem"
+      "Artocarpus_heterophyllus1.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y4.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y6.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y8.schem"
      ],
      "w2": [
       "Artocarpus_heterophyllus2.schem"
@@ -2517,7 +3127,10 @@
      "name": "Chloroxylon_swietenia",
      "w1": [
       "Chloroxylon_swietenia1.schem",
-      "Chloroxylon_swietenia2.schem"
+      "Chloroxylon_swietenia2.schem",
+      "contrib/arnis/Chloroxylon_swietenia_y4.schem",
+      "contrib/arnis/Chloroxylon_swietenia_y6.schem",
+      "contrib/arnis/Chloroxylon_swietenia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2536,7 +3149,10 @@
      "w1": [
       "Diospyros_melanoxylon4.schem",
       "Diospyros_melanoxylon5.schem",
-      "Diospyros_melanoxylon6.schem"
+      "Diospyros_melanoxylon6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y4.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2544,7 +3160,10 @@
     {
      "name": "Drypetes_sepiaria",
      "w1": [
-      "Drypetes_sepiaria2.schem"
+      "Drypetes_sepiaria2.schem",
+      "contrib/arnis/Drypetes_sepiaria_y4.schem",
+      "contrib/arnis/Drypetes_sepiaria_y6.schem",
+      "contrib/arnis/Drypetes_sepiaria_y8.schem"
      ],
      "w2": [
       "Drypetes_sepiaria1.schem"
@@ -2553,7 +3172,11 @@
     },
     {
      "name": "Ficus_elastica",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_elastica_y4.schem",
+      "contrib/arnis/Ficus_elastica_y6.schem",
+      "contrib/arnis/Ficus_elastica_y8.schem"
+     ],
      "w2": [
       "Ficus_elastica1.schem",
       "Ficus_elastica2.schem"
@@ -2564,7 +3187,10 @@
      "name": "Lannea_coromandelica",
      "w1": [
       "Lannea_coromandelica1.schem",
-      "Lannea_coromandelica3.schem"
+      "Lannea_coromandelica3.schem",
+      "contrib/arnis/Lannea_coromandelica_y4.schem",
+      "contrib/arnis/Lannea_coromandelica_y6.schem",
+      "contrib/arnis/Lannea_coromandelica_y8.schem"
      ],
      "w2": [
       "Lannea_coromandelica2.schem"
@@ -2576,7 +3202,10 @@
      "w1": [
       "Manilkara_hexandra1.schem",
       "Manilkara_hexandra2.schem",
-      "Manilkara_hexandra3.schem"
+      "Manilkara_hexandra3.schem",
+      "contrib/arnis/Manilkara_hexandra_y4.schem",
+      "contrib/arnis/Manilkara_hexandra_y6.schem",
+      "contrib/arnis/Manilkara_hexandra_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2585,7 +3214,10 @@
      "name": "Senegalia_catechu",
      "w1": [
       "Senegalia_catechu1.schem",
-      "Senegalia_catechu2.schem"
+      "Senegalia_catechu2.schem",
+      "contrib/arnis/Senegalia_catechu_y4.schem",
+      "contrib/arnis/Senegalia_catechu_y6.schem",
+      "contrib/arnis/Senegalia_catechu_y8.schem"
      ],
      "w2": [
       "Senegalia_catechu3.schem",
@@ -2599,7 +3231,9 @@
       "Tectona_grandis1.schem",
       "Tectona_grandis2.schem",
       "Tectona_grandis3.schem",
-      "Tectona_grandis4.schem"
+      "Tectona_grandis4.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -2608,7 +3242,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2624,14 +3261,21 @@
      "name": "Aleurites_moluccanus",
      "w1": [
       "Aleurites_moluccanus1.schem",
-      "Aleurites_moluccanus2.schem"
+      "Aleurites_moluccanus2.schem",
+      "contrib/arnis/Aleurites_moluccanus_y4.schem",
+      "contrib/arnis/Aleurites_moluccanus_y6.schem",
+      "contrib/arnis/Aleurites_moluccanus_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Alstonia_scholaris",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Alstonia_scholaris_y4.schem",
+      "contrib/arnis/Alstonia_scholaris_y6.schem",
+      "contrib/arnis/Alstonia_scholaris_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Alstonia_scholaris1.schem",
@@ -2645,7 +3289,10 @@
       "Areca_catechu2.schem",
       "Areca_catechu3.schem",
       "Areca_catechu4.schem",
-      "Areca_catechu5.schem"
+      "Areca_catechu5.schem",
+      "contrib/arnis/Areca_catechu_y4.schem",
+      "contrib/arnis/Areca_catechu_y6.schem",
+      "contrib/arnis/Areca_catechu_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2653,7 +3300,10 @@
     {
      "name": "Artocarpus_heterophyllus",
      "w1": [
-      "Artocarpus_heterophyllus1.schem"
+      "Artocarpus_heterophyllus1.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y4.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y6.schem",
+      "contrib/arnis/Artocarpus_heterophyllus_y8.schem"
      ],
      "w2": [
       "Artocarpus_heterophyllus2.schem"
@@ -2665,7 +3315,10 @@
      "w1": [
       "Cyrtostachys_renda1.schem",
       "Cyrtostachys_renda2.schem",
-      "Cyrtostachys_renda3.schem"
+      "Cyrtostachys_renda3.schem",
+      "contrib/arnis/Cyrtostachys_renda_y4.schem",
+      "contrib/arnis/Cyrtostachys_renda_y6.schem",
+      "contrib/arnis/Cyrtostachys_renda_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2675,7 +3328,10 @@
      "w1": [
       "Diospyros_melanoxylon1.schem",
       "Diospyros_melanoxylon2.schem",
-      "Diospyros_melanoxylon3.schem"
+      "Diospyros_melanoxylon3.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y4.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y6.schem",
+      "contrib/arnis/Diospyros_melanoxylon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2683,7 +3339,10 @@
     {
      "name": "Durio_zibethinus",
      "w1": [
-      "Durio_zibethinus1.schem"
+      "Durio_zibethinus1.schem",
+      "contrib/arnis/Durio_zibethinus_y4.schem",
+      "contrib/arnis/Durio_zibethinus_y6.schem",
+      "contrib/arnis/Durio_zibethinus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2692,14 +3351,21 @@
      "name": "Epicharis_parasitica",
      "w1": [
       "Epicharis_parasitica1.schem",
-      "Epicharis_parasitica2.schem"
+      "Epicharis_parasitica2.schem",
+      "contrib/arnis/Epicharis_parasitica_y4.schem",
+      "contrib/arnis/Epicharis_parasitica_y6.schem",
+      "contrib/arnis/Epicharis_parasitica_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_virens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_virens_y4.schem",
+      "contrib/arnis/Ficus_virens_y6.schem",
+      "contrib/arnis/Ficus_virens_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ficus_virens1.schem",
@@ -2711,7 +3377,10 @@
      "w1": [
       "Gnetum_gnemon1.schem",
       "Gnetum_gnemon2.schem",
-      "Gnetum_gnemon3.schem"
+      "Gnetum_gnemon3.schem",
+      "contrib/arnis/Gnetum_gnemon_y4.schem",
+      "contrib/arnis/Gnetum_gnemon_y6.schem",
+      "contrib/arnis/Gnetum_gnemon_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2719,7 +3388,10 @@
     {
      "name": "Hopea_beccariana",
      "w1": [
-      "Hopea_beccariana1.schem"
+      "Hopea_beccariana1.schem",
+      "contrib/arnis/Hopea_beccariana_y4.schem",
+      "contrib/arnis/Hopea_beccariana_y6.schem",
+      "contrib/arnis/Hopea_beccariana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2729,7 +3401,10 @@
      "w1": [
       "Intsia_biguja1.schem",
       "Intsia_biguja2.schem",
-      "Intsia_biguja3.schem"
+      "Intsia_biguja3.schem",
+      "contrib/arnis/Intsia_biguja_y4.schem",
+      "contrib/arnis/Intsia_biguja_y6.schem",
+      "contrib/arnis/Intsia_biguja_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2739,7 +3414,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2748,7 +3426,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2759,7 +3440,10 @@
       "Musa_acuminata1.schem",
       "Musa_acuminata2.schem",
       "Musa_acuminata3.schem",
-      "Musa_acuminata4.schem"
+      "Musa_acuminata4.schem",
+      "contrib/arnis/Musa_acuminata_y4.schem",
+      "contrib/arnis/Musa_acuminata_y6.schem",
+      "contrib/arnis/Musa_acuminata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2782,7 +3466,9 @@
       "Tectona_grandis5.schem",
       "Tectona_grandis6.schem",
       "Tectona_grandis7.schem",
-      "Tectona_grandis8.schem"
+      "Tectona_grandis8.schem",
+      "contrib/arnis/Tectona_grandis_y4.schem",
+      "contrib/arnis/Tectona_grandis_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -2791,7 +3477,11 @@
     },
     {
      "name": "Toona_ciliata",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Toona_ciliata_y4.schem",
+      "contrib/arnis/Toona_ciliata_y6.schem",
+      "contrib/arnis/Toona_ciliata_y8.schem"
+     ],
      "w2": [
       "Toona_ciliata1.schem",
       "Toona_ciliata2.schem"
@@ -2802,7 +3492,10 @@
      "name": "Vitex_altissima",
      "w1": [
       "Vitex_altissima1.schem",
-      "Vitex_altissima2.schem"
+      "Vitex_altissima2.schem",
+      "contrib/arnis/Vitex_altissima_y4.schem",
+      "contrib/arnis/Vitex_altissima_y6.schem",
+      "contrib/arnis/Vitex_altissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2812,7 +3505,10 @@
      "w1": [
       "Xylia_xylocarpa1.schem",
       "Xylia_xylocarpa2.schem",
-      "Xylia_xylocarpa3.schem"
+      "Xylia_xylocarpa3.schem",
+      "contrib/arnis/Xylia_xylocarpa_y4.schem",
+      "contrib/arnis/Xylia_xylocarpa_y6.schem",
+      "contrib/arnis/Xylia_xylocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2892,14 +3588,21 @@
      "w1": [
       "Castanopsis_hystrix1.schem",
       "Castanopsis_hystrix2.schem",
-      "Castanopsis_hystrix3.schem"
+      "Castanopsis_hystrix3.schem",
+      "contrib/arnis/Castanopsis_hystrix_y4.schem",
+      "contrib/arnis/Castanopsis_hystrix_y6.schem",
+      "contrib/arnis/Castanopsis_hystrix_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ficus_elastica",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_elastica_y4.schem",
+      "contrib/arnis/Ficus_elastica_y6.schem",
+      "contrib/arnis/Ficus_elastica_y8.schem"
+     ],
      "w2": [
       "Ficus_elastica1.schem",
       "Ficus_elastica2.schem"
@@ -2911,7 +3614,9 @@
      "w1": [
       "Lagerstroemia_indica1.schem",
       "Lagerstroemia_indica2.schem",
-      "Lagerstroemia_indica3.schem"
+      "Lagerstroemia_indica3.schem",
+      "contrib/arnis/Lagerstroemia_indica_y4.schem",
+      "contrib/arnis/Lagerstroemia_indica_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -2920,7 +3625,8 @@
      "name": "Litchi_sinensis",
      "w1": [
       "Litchi_sinensis1.schem",
-      "Litchi_sinensis2.schem"
+      "Litchi_sinensis2.schem",
+      "contrib/arnis/Litchi_sinensis_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -2930,7 +3636,10 @@
      "w1": [
       "Livistona_saribus1.schem",
       "Livistona_saribus2.schem",
-      "Livistona_saribus3.schem"
+      "Livistona_saribus3.schem",
+      "contrib/arnis/Livistona_saribus_y4.schem",
+      "contrib/arnis/Livistona_saribus_y6.schem",
+      "contrib/arnis/Livistona_saribus_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2939,7 +3648,10 @@
      "name": "Magnolia_hodgsonii",
      "w1": [
       "Magnolia_hodgsonii1.schem",
-      "Magnolia_hodgsonii2.schem"
+      "Magnolia_hodgsonii2.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y4.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y6.schem",
+      "contrib/arnis/Magnolia_hodgsonii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2957,7 +3669,10 @@
      "name": "Melia_azaderach",
      "w1": [
       "Melia_azaderach1.schem",
-      "Melia_azaderach2.schem"
+      "Melia_azaderach2.schem",
+      "contrib/arnis/Melia_azaderach_y4.schem",
+      "contrib/arnis/Melia_azaderach_y6.schem",
+      "contrib/arnis/Melia_azaderach_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -2967,7 +3682,10 @@
      "w1": [
       "Sassafras_tzumu1.schem",
       "Sassafras_tzumu2.schem",
-      "Sassafras_tzumu3.schem"
+      "Sassafras_tzumu3.schem",
+      "contrib/arnis/Sassafras_tzumu_y4.schem",
+      "contrib/arnis/Sassafras_tzumu_y6.schem",
+      "contrib/arnis/Sassafras_tzumu_y8.schem"
      ],
      "w2": [],
      "w3": []

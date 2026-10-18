@@ -317,6 +317,12 @@ fn height_tolerance(want: i32) -> i32 {
     ((f64::from(want) * 0.15).round() as i32).max(2)
 }
 
+/// How far past the nearest model a pick may still go, so a crowd of
+/// slightly smaller models does not pull every pick below the wanted height.
+fn height_slack(want: i32) -> i32 {
+    ((f64::from(want) * 0.08).round() as i32).max(1)
+}
+
 /// Crown top in metres for a slot nothing measured: typical of mixed woodland
 /// and parks, where most trees stand 7 to 18 m and few pass 25 m.
 fn default_height_m(x: i32, z: i32) -> f64 {
@@ -995,7 +1001,7 @@ impl RegionLibrary {
             .filter(|&i| cand(i))
             .map(dist)
             .min()?;
-        let tol = best.max(height_tolerance(want));
+        let tol = best + height_slack(want);
         let close = |i: usize| cand(i) && dist(i) <= tol;
         let counts: Vec<usize> = c
             .species
@@ -1627,11 +1633,11 @@ mod tests {
     }
 
     #[test]
-    fn a_small_crown_borrows_the_sprinkle_where_the_mix_grows_none() {
-        // Puget lowland forests map only the temperate rainforest, 10 blocks and up.
+    fn a_crown_the_mix_cannot_reach_borrows_the_sprinkle() {
+        // The Puget mix grows nothing under 4 blocks; the sprinkle's shrubs do.
         let lib = with_ecoregions("wna", &[364], 47.6);
         let req = SlotRequest {
-            want_height: Some(4),
+            want_height: Some(1),
             eco: crate::ecoregion::lookup(364),
             density_decided: true,
             ..Default::default()
@@ -1643,8 +1649,51 @@ mod tests {
             .map(|(_, _, idx, _)| lib.entries[idx].0.height)
             .collect();
         assert!(got.len() > 1000);
-        let close = got.iter().filter(|&&h| h <= 6).count();
+        let close = got.iter().filter(|&&h| h <= 3).count();
         assert!(close * 10 > got.len() * 8, "median {}", median(&mut got));
+    }
+
+    #[test]
+    fn every_ecoregion_has_small_and_medium_trees() {
+        let mut by_pack: HashMap<&str, Vec<u16>> = HashMap::new();
+        for id in 0..2000u16 {
+            if let Some((pack, _)) = crate::ecoregion::tree_mix(id) {
+                by_pack.entry(pack).or_default().push(id);
+            }
+        }
+        assert!(by_pack.values().map(Vec::len).sum::<usize>() > 800);
+        for (pack, ids) in by_pack {
+            let src = TreePackSource::embedded(pack);
+            let mut lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
+                .expect("load pack");
+            lib.attach_ecoregions(&ids, 30.0);
+            for id in ids {
+                let mix = &lib.mixes[&id];
+                let mut small: HashSet<&str> = HashSet::new();
+                let mut medium: HashSet<&str> = HashSet::new();
+                let pools = [
+                    (&lib.realm_pack, &mix.pools[PLAIN][UNTAGGED]),
+                    (&lib.vanilla_pack, &mix.vanilla[PLAIN][UNTAGGED]),
+                ];
+                for (pack, pool) in pools {
+                    for &(c, _) in pool {
+                        let c = &pack.communities[c];
+                        for (models, name) in c.species.iter().zip(&c.names) {
+                            for &i in models {
+                                let h = lib.entries[i].0.height;
+                                if h <= 6 {
+                                    small.insert(name);
+                                } else if h <= 12 {
+                                    medium.insert(name);
+                                }
+                            }
+                        }
+                    }
+                }
+                assert!(small.len() >= 3, "ecoregion {id}: small {small:?}");
+                assert!(medium.len() >= 2, "ecoregion {id}: medium {medium:?}");
+            }
+        }
     }
 
     /// A library for `pack` with the given ecoregions attached.

@@ -12,7 +12,10 @@
      "w1": [
       "Borassus_aethiopum (1).schem",
       "Borassus_aethiopum (5).schem",
-      "Borassus_aethiopum (6).schem"
+      "Borassus_aethiopum (6).schem",
+      "contrib/arnis/Borassus_aethiopum_y4.schem",
+      "contrib/arnis/Borassus_aethiopum_y6.schem",
+      "contrib/arnis/Borassus_aethiopum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -21,7 +24,9 @@
      "name": "Raphia_farinifera",
      "w1": [
       "Raphia_farinifera1.schem",
-      "Raphia_farinifera2.schem"
+      "Raphia_farinifera2.schem",
+      "contrib/arnis/Raphia_farinifera_y4.schem",
+      "contrib/arnis/Raphia_farinifera_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -40,7 +45,9 @@
       "Phoenix_canariensis2.schem",
       "Phoenix_canariensis3.schem",
       "Phoenix_canariensis4.schem",
-      "Phoenix_canariensis5.schem"
+      "Phoenix_canariensis5.schem",
+      "contrib/arnis/Phoenix_canariensis_y4.schem",
+      "contrib/arnis/Phoenix_canariensis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -58,7 +65,10 @@
       "Brachystegia_spiciformis1.schem",
       "Brachystegia_spiciformis2.schem",
       "Brachystegia_spiciformis3.schem",
-      "Brachystegia_spiciformis4.schem"
+      "Brachystegia_spiciformis4.schem",
+      "contrib/arnis/Brachystegia_spiciformis_y4.schem",
+      "contrib/arnis/Brachystegia_spiciformis_y6.schem",
+      "contrib/arnis/Brachystegia_spiciformis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -70,7 +80,8 @@
       "Colophospermum_mopane3.schem",
       "Colophospermum_mopane4.schem",
       "Colophospermum_mopane5.schem",
-      "contrib/lentebriesje/Colophospermum_mopane_afr8S.schem"
+      "contrib/lentebriesje/Colophospermum_mopane_afr8S.schem",
+      "contrib/arnis/Colophospermum_mopane_y4.schem"
      ],
      "w2": [
       "Colophospermum_mopane1.schem",
@@ -83,7 +94,10 @@
      "w1": [
       "Julbernardia_globiflora1.schem",
       "Julbernardia_globiflora3.schem",
-      "Julbernardia_globiflora4.schem"
+      "Julbernardia_globiflora4.schem",
+      "contrib/arnis/Julbernardia_globiflora_y4.schem",
+      "contrib/arnis/Julbernardia_globiflora_y6.schem",
+      "contrib/arnis/Julbernardia_globiflora_y8.schem"
      ],
      "w2": [
       "Julbernardia_globiflora2.schem"
@@ -95,7 +109,10 @@
      "w1": [
       "Kigelia_africana1.schem",
       "Kigelia_africana2.schem",
-      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem",
+      "contrib/arnis/Kigelia_africana_y4.schem",
+      "contrib/arnis/Kigelia_africana_y6.schem",
+      "contrib/arnis/Kigelia_africana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -106,7 +123,10 @@
      "name": "Prunus_africana",
      "w1": [
       "Prunus_africana3.schem",
-      "Prunus_africana4.schem"
+      "Prunus_africana4.schem",
+      "contrib/arnis/Prunus_africana_y4.schem",
+      "contrib/arnis/Prunus_africana_y6.schem",
+      "contrib/arnis/Prunus_africana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -114,7 +134,10 @@
     {
      "name": "Sclerocarya_birrea",
      "w1": [
-      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem",
+      "contrib/arnis/Sclerocarya_birrea_y4.schem",
+      "contrib/arnis/Sclerocarya_birrea_y6.schem",
+      "contrib/arnis/Sclerocarya_birrea_y8.schem"
      ],
      "w2": [
       "Sclerocarya_birrea1.schem",
@@ -127,7 +150,8 @@
      "name": "Spirostachys_africana",
      "w1": [
       "contrib/lentebriesje/Spirostachys_africana_afr10L.schem",
-      "contrib/lentebriesje/Spirostachys_africana_afr10S.schem"
+      "contrib/lentebriesje/Spirostachys_africana_afr10S.schem",
+      "contrib/arnis/Spirostachys_africana_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -151,7 +175,10 @@
     {
      "name": "Afzelia_africana",
      "w1": [
-      "Afzelia_africana2.schem"
+      "Afzelia_africana2.schem",
+      "contrib/arnis/Afzelia_africana_y4.schem",
+      "contrib/arnis/Afzelia_africana_y6.schem",
+      "contrib/arnis/Afzelia_africana_y8.schem"
      ],
      "w2": [
       "Afzelia_africana1.schem"
@@ -160,7 +187,11 @@
     },
     {
      "name": "Ceiba_pentandra",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ceiba_pentandra_y4.schem",
+      "contrib/arnis/Ceiba_pentandra_y6.schem",
+      "contrib/arnis/Ceiba_pentandra_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ceiba_pentandra4.schem"
@@ -171,7 +202,10 @@
      "w1": [
       "Coffea_liberica1.schem",
       "Coffea_liberica2.schem",
-      "Coffea_liberica3.schem"
+      "Coffea_liberica3.schem",
+      "contrib/arnis/Coffea_liberica_y4.schem",
+      "contrib/arnis/Coffea_liberica_y6.schem",
+      "contrib/arnis/Coffea_liberica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -182,7 +216,9 @@
       "Diospyros_crassiflora2.schem",
       "Diospyros_crassiflora3.schem",
       "Diospyros_crassiflora4.schem",
-      "Diospyros_crassiflora5.schem"
+      "Diospyros_crassiflora5.schem",
+      "contrib/arnis/Diospyros_crassiflora_y4.schem",
+      "contrib/arnis/Diospyros_crassiflora_y6.schem"
      ],
      "w2": [
       "Diospyros_crassiflora1.schem"
@@ -196,7 +232,9 @@
       "Encephalartos_laurentianus2.schem",
       "Encephalartos_laurentianus3.schem",
       "Encephalartos_laurentianus4.schem",
-      "Encephalartos_laurentianus5.schem"
+      "Encephalartos_laurentianus5.schem",
+      "contrib/arnis/Encephalartos_laurentianus_y4.schem",
+      "contrib/arnis/Encephalartos_laurentianus_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -206,7 +244,10 @@
      "w1": [
       "Kigelia_africana1.schem",
       "Kigelia_africana2.schem",
-      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem",
+      "contrib/arnis/Kigelia_africana_y4.schem",
+      "contrib/arnis/Kigelia_africana_y6.schem",
+      "contrib/arnis/Kigelia_africana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -216,7 +257,10 @@
     {
      "name": "Milicia_excelsa",
      "w1": [
-      "Milicia_excelsa4.schem"
+      "Milicia_excelsa4.schem",
+      "contrib/arnis/Milicia_excelsa_y4.schem",
+      "contrib/arnis/Milicia_excelsa_y6.schem",
+      "contrib/arnis/Milicia_excelsa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -225,7 +269,10 @@
      "name": "Pericopsis_elata",
      "w1": [
       "Pericopsis_elata2.schem",
-      "Pericopsis_elata3.schem"
+      "Pericopsis_elata3.schem",
+      "contrib/arnis/Pericopsis_elata_y4.schem",
+      "contrib/arnis/Pericopsis_elata_y6.schem",
+      "contrib/arnis/Pericopsis_elata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -234,7 +281,10 @@
      "name": "Prunus_africana",
      "w1": [
       "Prunus_africana3.schem",
-      "Prunus_africana4.schem"
+      "Prunus_africana4.schem",
+      "contrib/arnis/Prunus_africana_y4.schem",
+      "contrib/arnis/Prunus_africana_y6.schem",
+      "contrib/arnis/Prunus_africana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -244,7 +294,10 @@
      "w1": [
       "Pterocarpus_soyauxii1.schem",
       "Pterocarpus_soyauxii2.schem",
-      "Pterocarpus_soyauxii3.schem"
+      "Pterocarpus_soyauxii3.schem",
+      "contrib/arnis/Pterocarpus_soyauxii_y4.schem",
+      "contrib/arnis/Pterocarpus_soyauxii_y6.schem",
+      "contrib/arnis/Pterocarpus_soyauxii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -253,7 +306,9 @@
      "name": "Raphia_farinifera",
      "w1": [
       "Raphia_farinifera1.schem",
-      "Raphia_farinifera2.schem"
+      "Raphia_farinifera2.schem",
+      "contrib/arnis/Raphia_farinifera_y4.schem",
+      "contrib/arnis/Raphia_farinifera_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -263,7 +318,8 @@
      "w1": [
       "Vitellaria_paradoxa1.schem",
       "Vitellaria_paradoxa2.schem",
-      "Vitellaria_paradoxa3.schem"
+      "Vitellaria_paradoxa3.schem",
+      "contrib/arnis/Vitellaria_paradoxa_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -278,7 +334,10 @@
     {
      "name": "Adansonia_digitata",
      "w1": [
-      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem",
+      "contrib/arnis/Adansonia_digitata_y4.schem",
+      "contrib/arnis/Adansonia_digitata_y6.schem",
+      "contrib/arnis/Adansonia_digitata_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -293,7 +352,10 @@
     {
      "name": "Afzelia_africana",
      "w1": [
-      "Afzelia_africana2.schem"
+      "Afzelia_africana2.schem",
+      "contrib/arnis/Afzelia_africana_y4.schem",
+      "contrib/arnis/Afzelia_africana_y6.schem",
+      "contrib/arnis/Afzelia_africana_y8.schem"
      ],
      "w2": [
       "Afzelia_africana1.schem"
@@ -304,7 +366,9 @@
      "name": "Balanites_aegyptiaca",
      "w1": [
       "Balanites_aegyptiaca1.schem",
-      "Balanites_aegyptiaca3.schem"
+      "Balanites_aegyptiaca3.schem",
+      "contrib/arnis/Balanites_aegyptiaca_y4.schem",
+      "contrib/arnis/Balanites_aegyptiaca_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -316,7 +380,10 @@
      "w1": [
       "Borassus_aethiopum (1).schem",
       "Borassus_aethiopum (5).schem",
-      "Borassus_aethiopum (6).schem"
+      "Borassus_aethiopum (6).schem",
+      "contrib/arnis/Borassus_aethiopum_y4.schem",
+      "contrib/arnis/Borassus_aethiopum_y6.schem",
+      "contrib/arnis/Borassus_aethiopum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -325,7 +392,10 @@
      "name": "Hyphaene_compressa",
      "w1": [
       "Hyphaene_compressa1.schem",
-      "Hyphaene_compressa2.schem"
+      "Hyphaene_compressa2.schem",
+      "contrib/arnis/Hyphaene_compressa_y4.schem",
+      "contrib/arnis/Hyphaene_compressa_y6.schem",
+      "contrib/arnis/Hyphaene_compressa_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -338,7 +408,10 @@
      "w1": [
       "Kigelia_africana1.schem",
       "Kigelia_africana2.schem",
-      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem",
+      "contrib/arnis/Kigelia_africana_y4.schem",
+      "contrib/arnis/Kigelia_africana_y6.schem",
+      "contrib/arnis/Kigelia_africana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -348,7 +421,10 @@
     {
      "name": "Sclerocarya_birrea",
      "w1": [
-      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem",
+      "contrib/arnis/Sclerocarya_birrea_y4.schem",
+      "contrib/arnis/Sclerocarya_birrea_y6.schem",
+      "contrib/arnis/Sclerocarya_birrea_y8.schem"
      ],
      "w2": [
       "Sclerocarya_birrea1.schem",
@@ -388,7 +464,11 @@
     },
     {
      "name": "Diospyros_mespiliformis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Diospyros_mespiliformis_y4.schem",
+      "contrib/arnis/Diospyros_mespiliformis_y6.schem",
+      "contrib/arnis/Diospyros_mespiliformis_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Diospyros_mespiliformis_afr5L.schem",
       "contrib/lentebriesje/Diospyros_mespiliformis_afr5S.schem"
@@ -397,7 +477,11 @@
     },
     {
      "name": "Senegalia_nigrescens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Senegalia_nigrescens_y4.schem",
+      "contrib/arnis/Senegalia_nigrescens_y6.schem",
+      "contrib/arnis/Senegalia_nigrescens_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Senegalia_nigrescens_afr6L.schem",
       "contrib/lentebriesje/Senegalia_nigrescens_afr6S.schem"
@@ -416,7 +500,8 @@
      "w1": [
       "Vachellia_xanthophloea1.schem",
       "Vachellia_xanthophloea2.schem",
-      "Vachellia_xanthophloea4.schem"
+      "Vachellia_xanthophloea4.schem",
+      "contrib/arnis/Vachellia_xanthophloea_y4.schem"
      ],
      "w2": [
       "Vachellia_xanthophloea3.schem",
@@ -434,7 +519,10 @@
     {
      "name": "Afzelia_africana",
      "w1": [
-      "Afzelia_africana2.schem"
+      "Afzelia_africana2.schem",
+      "contrib/arnis/Afzelia_africana_y4.schem",
+      "contrib/arnis/Afzelia_africana_y6.schem",
+      "contrib/arnis/Afzelia_africana_y8.schem"
      ],
      "w2": [
       "Afzelia_africana1.schem"
@@ -446,14 +534,21 @@
      "w1": [
       "Borassus_aethiopum (1).schem",
       "Borassus_aethiopum (5).schem",
-      "Borassus_aethiopum (6).schem"
+      "Borassus_aethiopum (6).schem",
+      "contrib/arnis/Borassus_aethiopum_y4.schem",
+      "contrib/arnis/Borassus_aethiopum_y6.schem",
+      "contrib/arnis/Borassus_aethiopum_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Ceiba_pentandra",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ceiba_pentandra_y4.schem",
+      "contrib/arnis/Ceiba_pentandra_y6.schem",
+      "contrib/arnis/Ceiba_pentandra_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Ceiba_pentandra4.schem"
@@ -478,7 +573,10 @@
      "w1": [
       "Coffea_liberica1.schem",
       "Coffea_liberica2.schem",
-      "Coffea_liberica3.schem"
+      "Coffea_liberica3.schem",
+      "contrib/arnis/Coffea_liberica_y4.schem",
+      "contrib/arnis/Coffea_liberica_y6.schem",
+      "contrib/arnis/Coffea_liberica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -486,7 +584,10 @@
     {
      "name": "Cola_nitida",
      "w1": [
-      "Cola_nitida1.schem"
+      "Cola_nitida1.schem",
+      "contrib/arnis/Cola_nitida_y4.schem",
+      "contrib/arnis/Cola_nitida_y6.schem",
+      "contrib/arnis/Cola_nitida_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -498,7 +599,10 @@
      "w1": [
       "Khaya_ivoriensis (2).schem",
       "Khaya_ivoriensis (4).schem",
-      "Khaya_ivoriensis (5).schem"
+      "Khaya_ivoriensis (5).schem",
+      "contrib/arnis/Khaya_ivoriensis_y4.schem",
+      "contrib/arnis/Khaya_ivoriensis_y6.schem",
+      "contrib/arnis/Khaya_ivoriensis_y8.schem"
      ],
      "w2": [
       "Khaya_ivoriensis (3).schem",
@@ -511,7 +615,10 @@
     {
      "name": "Milicia_excelsa",
      "w1": [
-      "Milicia_excelsa4.schem"
+      "Milicia_excelsa4.schem",
+      "contrib/arnis/Milicia_excelsa_y4.schem",
+      "contrib/arnis/Milicia_excelsa_y6.schem",
+      "contrib/arnis/Milicia_excelsa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -520,7 +627,10 @@
      "name": "Pericopsis_elata",
      "w1": [
       "Pericopsis_elata2.schem",
-      "Pericopsis_elata3.schem"
+      "Pericopsis_elata3.schem",
+      "contrib/arnis/Pericopsis_elata_y4.schem",
+      "contrib/arnis/Pericopsis_elata_y6.schem",
+      "contrib/arnis/Pericopsis_elata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -529,7 +639,9 @@
      "name": "Raphia_farinifera",
      "w1": [
       "Raphia_farinifera1.schem",
-      "Raphia_farinifera2.schem"
+      "Raphia_farinifera2.schem",
+      "contrib/arnis/Raphia_farinifera_y4.schem",
+      "contrib/arnis/Raphia_farinifera_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -545,7 +657,9 @@
      "name": "Balanites_aegyptiaca",
      "w1": [
       "Balanites_aegyptiaca1.schem",
-      "Balanites_aegyptiaca3.schem"
+      "Balanites_aegyptiaca3.schem",
+      "contrib/arnis/Balanites_aegyptiaca_y4.schem",
+      "contrib/arnis/Balanites_aegyptiaca_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -559,7 +673,9 @@
       "Phoenix_canariensis2.schem",
       "Phoenix_canariensis3.schem",
       "Phoenix_canariensis4.schem",
-      "Phoenix_canariensis5.schem"
+      "Phoenix_canariensis5.schem",
+      "contrib/arnis/Phoenix_canariensis_y4.schem",
+      "contrib/arnis/Phoenix_canariensis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -578,7 +694,10 @@
     {
      "name": "Sideroxylon_spinosum",
      "w1": [
-      "Sideroxylon_spinosum2.schem"
+      "Sideroxylon_spinosum2.schem",
+      "contrib/arnis/Sideroxylon_spinosum_y4.schem",
+      "contrib/arnis/Sideroxylon_spinosum_y6.schem",
+      "contrib/arnis/Sideroxylon_spinosum_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -611,7 +730,11 @@
    "species": [
     {
      "name": "Adansonia_grandidieri",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Adansonia_grandidieri_y4.schem",
+      "contrib/arnis/Adansonia_grandidieri_y6.schem",
+      "contrib/arnis/Adansonia_grandidieri_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Adansonia_grandidieri_afr1S.schem"
      ],
@@ -627,7 +750,11 @@
     },
     {
      "name": "Adansonia_suarezensis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Adansonia_suarezensis_y4.schem",
+      "contrib/arnis/Adansonia_suarezensis_y6.schem",
+      "contrib/arnis/Adansonia_suarezensis_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_suarezensis1.schem",
@@ -638,7 +765,11 @@
     },
     {
      "name": "Adansonia_za",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Adansonia_za_y4.schem",
+      "contrib/arnis/Adansonia_za_y6.schem",
+      "contrib/arnis/Adansonia_za_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_za1.schem",
@@ -655,7 +786,9 @@
       "Bismarckia_nobilis2.schem",
       "Bismarckia_nobilis3.schem",
       "Bismarckia_nobilis4.schem",
-      "Bismarckia_nobilis5.schem"
+      "Bismarckia_nobilis5.schem",
+      "contrib/arnis/Bismarckia_nobilis_y4.schem",
+      "contrib/arnis/Bismarckia_nobilis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -665,7 +798,10 @@
      "w1": [
       "Borassus_aethiopum (1).schem",
       "Borassus_aethiopum (5).schem",
-      "Borassus_aethiopum (6).schem"
+      "Borassus_aethiopum (6).schem",
+      "contrib/arnis/Borassus_aethiopum_y4.schem",
+      "contrib/arnis/Borassus_aethiopum_y6.schem",
+      "contrib/arnis/Borassus_aethiopum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -674,7 +810,10 @@
      "name": "Delonix_regia",
      "w1": [
       "Delonix_regia3.schem",
-      "Delonix_regia5.schem"
+      "Delonix_regia5.schem",
+      "contrib/arnis/Delonix_regia_y4.schem",
+      "contrib/arnis/Delonix_regia_y6.schem",
+      "contrib/arnis/Delonix_regia_y8.schem"
      ],
      "w2": [
       "Delonix_regia1.schem"
@@ -684,7 +823,10 @@
     {
      "name": "Sclerocarya_birrea",
      "w1": [
-      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem",
+      "contrib/arnis/Sclerocarya_birrea_y4.schem",
+      "contrib/arnis/Sclerocarya_birrea_y6.schem",
+      "contrib/arnis/Sclerocarya_birrea_y8.schem"
      ],
      "w2": [
       "Sclerocarya_birrea1.schem",
@@ -705,7 +847,10 @@
      "w1": [
       "Beccariophoenix_alfredii1.schem",
       "Beccariophoenix_alfredii2.schem",
-      "Beccariophoenix_alfredii3.schem"
+      "Beccariophoenix_alfredii3.schem",
+      "contrib/arnis/Beccariophoenix_alfredii_y4.schem",
+      "contrib/arnis/Beccariophoenix_alfredii_y6.schem",
+      "contrib/arnis/Beccariophoenix_alfredii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -717,7 +862,9 @@
       "Bismarckia_nobilis2.schem",
       "Bismarckia_nobilis3.schem",
       "Bismarckia_nobilis4.schem",
-      "Bismarckia_nobilis5.schem"
+      "Bismarckia_nobilis5.schem",
+      "contrib/arnis/Bismarckia_nobilis_y4.schem",
+      "contrib/arnis/Bismarckia_nobilis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -768,7 +915,10 @@
       "Dalbergia_baronii1.schem",
       "Dalbergia_baronii2.schem",
       "Dalbergia_baronii3.schem",
-      "Dalbergia_baronii4.schem"
+      "Dalbergia_baronii4.schem",
+      "contrib/arnis/Dalbergia_baronii_y4.schem",
+      "contrib/arnis/Dalbergia_baronii_y6.schem",
+      "contrib/arnis/Dalbergia_baronii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -779,7 +929,9 @@
       "Diospyros_crassiflora2.schem",
       "Diospyros_crassiflora3.schem",
       "Diospyros_crassiflora4.schem",
-      "Diospyros_crassiflora5.schem"
+      "Diospyros_crassiflora5.schem",
+      "contrib/arnis/Diospyros_crassiflora_y4.schem",
+      "contrib/arnis/Diospyros_crassiflora_y6.schem"
      ],
      "w2": [
       "Diospyros_crassiflora1.schem"
@@ -790,7 +942,10 @@
      "name": "Prunus_africana",
      "w1": [
       "Prunus_africana3.schem",
-      "Prunus_africana4.schem"
+      "Prunus_africana4.schem",
+      "contrib/arnis/Prunus_africana_y4.schem",
+      "contrib/arnis/Prunus_africana_y6.schem",
+      "contrib/arnis/Prunus_africana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -799,7 +954,9 @@
      "name": "Raphia_farinifera",
      "w1": [
       "Raphia_farinifera1.schem",
-      "Raphia_farinifera2.schem"
+      "Raphia_farinifera2.schem",
+      "contrib/arnis/Raphia_farinifera_y4.schem",
+      "contrib/arnis/Raphia_farinifera_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -810,7 +967,10 @@
       "Ravenala_madagascariensis1.schem",
       "Ravenala_madagascariensis2.schem",
       "Ravenala_madagascariensis3.schem",
-      "Ravenala_madagascariensis4.schem"
+      "Ravenala_madagascariensis4.schem",
+      "contrib/arnis/Ravenala_madagascariensis_y4.schem",
+      "contrib/arnis/Ravenala_madagascariensis_y6.schem",
+      "contrib/arnis/Ravenala_madagascariensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -824,7 +984,11 @@
    "species": [
     {
      "name": "Adansonia_grandidieri",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Adansonia_grandidieri_y4.schem",
+      "contrib/arnis/Adansonia_grandidieri_y6.schem",
+      "contrib/arnis/Adansonia_grandidieri_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Adansonia_grandidieri_afr1S.schem"
      ],
@@ -840,7 +1004,11 @@
     },
     {
      "name": "Adansonia_suarezensis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Adansonia_suarezensis_y4.schem",
+      "contrib/arnis/Adansonia_suarezensis_y6.schem",
+      "contrib/arnis/Adansonia_suarezensis_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_suarezensis1.schem",
@@ -851,7 +1019,11 @@
     },
     {
      "name": "Adansonia_za",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Adansonia_za_y4.schem",
+      "contrib/arnis/Adansonia_za_y6.schem",
+      "contrib/arnis/Adansonia_za_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_za1.schem",
@@ -868,7 +1040,9 @@
       "Bismarckia_nobilis2.schem",
       "Bismarckia_nobilis3.schem",
       "Bismarckia_nobilis4.schem",
-      "Bismarckia_nobilis5.schem"
+      "Bismarckia_nobilis5.schem",
+      "contrib/arnis/Bismarckia_nobilis_y4.schem",
+      "contrib/arnis/Bismarckia_nobilis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -878,7 +1052,10 @@
      "w1": [
       "Borassus_aethiopum (1).schem",
       "Borassus_aethiopum (5).schem",
-      "Borassus_aethiopum (6).schem"
+      "Borassus_aethiopum (6).schem",
+      "contrib/arnis/Borassus_aethiopum_y4.schem",
+      "contrib/arnis/Borassus_aethiopum_y6.schem",
+      "contrib/arnis/Borassus_aethiopum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -887,7 +1064,10 @@
      "name": "Delonix_regia",
      "w1": [
       "Delonix_regia3.schem",
-      "Delonix_regia5.schem"
+      "Delonix_regia5.schem",
+      "contrib/arnis/Delonix_regia_y4.schem",
+      "contrib/arnis/Delonix_regia_y6.schem",
+      "contrib/arnis/Delonix_regia_y8.schem"
      ],
      "w2": [
       "Delonix_regia1.schem"
@@ -897,7 +1077,10 @@
     {
      "name": "Sclerocarya_birrea",
      "w1": [
-      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem",
+      "contrib/arnis/Sclerocarya_birrea_y4.schem",
+      "contrib/arnis/Sclerocarya_birrea_y6.schem",
+      "contrib/arnis/Sclerocarya_birrea_y8.schem"
      ],
      "w2": [
       "Sclerocarya_birrea1.schem",
@@ -919,7 +1102,10 @@
       "Podocarpus_milanjianus1.schem",
       "Podocarpus_milanjianus2.schem",
       "Podocarpus_milanjianus3.schem",
-      "Podocarpus_milanjianus4.schem"
+      "Podocarpus_milanjianus4.schem",
+      "contrib/arnis/Podocarpus_milanjianus_y5.schem",
+      "contrib/arnis/Podocarpus_milanjianus_y7.schem",
+      "contrib/arnis/Podocarpus_milanjianus_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -928,7 +1114,10 @@
      "name": "Prunus_africana",
      "w1": [
       "Prunus_africana3.schem",
-      "Prunus_africana4.schem"
+      "Prunus_africana4.schem",
+      "contrib/arnis/Prunus_africana_y4.schem",
+      "contrib/arnis/Prunus_africana_y6.schem",
+      "contrib/arnis/Prunus_africana_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -943,7 +1132,10 @@
     {
      "name": "Adansonia_digitata",
      "w1": [
-      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem",
+      "contrib/arnis/Adansonia_digitata_y4.schem",
+      "contrib/arnis/Adansonia_digitata_y6.schem",
+      "contrib/arnis/Adansonia_digitata_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -956,7 +1148,9 @@
      "name": "Balanites_aegyptiaca",
      "w1": [
       "Balanites_aegyptiaca1.schem",
-      "Balanites_aegyptiaca3.schem"
+      "Balanites_aegyptiaca3.schem",
+      "contrib/arnis/Balanites_aegyptiaca_y4.schem",
+      "contrib/arnis/Balanites_aegyptiaca_y6.schem"
      ],
      "w2": [],
      "w3": [
@@ -1015,7 +1209,10 @@
     {
      "name": "Adansonia_digitata",
      "w1": [
-      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem",
+      "contrib/arnis/Adansonia_digitata_y4.schem",
+      "contrib/arnis/Adansonia_digitata_y6.schem",
+      "contrib/arnis/Adansonia_digitata_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1034,7 +1231,8 @@
       "Colophospermum_mopane3.schem",
       "Colophospermum_mopane4.schem",
       "Colophospermum_mopane5.schem",
-      "contrib/lentebriesje/Colophospermum_mopane_afr8S.schem"
+      "contrib/lentebriesje/Colophospermum_mopane_afr8S.schem",
+      "contrib/arnis/Colophospermum_mopane_y4.schem"
      ],
      "w2": [
       "Colophospermum_mopane1.schem",
@@ -1045,7 +1243,10 @@
     {
      "name": "Combretum_imberbe",
      "w1": [
-      "Combretum_imberbe1.schem"
+      "Combretum_imberbe1.schem",
+      "contrib/arnis/Combretum_imberbe_y4.schem",
+      "contrib/arnis/Combretum_imberbe_y6.schem",
+      "contrib/arnis/Combretum_imberbe_y8.schem"
      ],
      "w2": [
       "Combretum_imberbe2.schem",
@@ -1056,7 +1257,10 @@
     {
      "name": "Sclerocarya_birrea",
      "w1": [
-      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem",
+      "contrib/arnis/Sclerocarya_birrea_y4.schem",
+      "contrib/arnis/Sclerocarya_birrea_y6.schem",
+      "contrib/arnis/Sclerocarya_birrea_y8.schem"
      ],
      "w2": [
       "Sclerocarya_birrea1.schem",
@@ -1072,7 +1276,8 @@
       "Vachellia_erioloba2.schem",
       "Vachellia_erioloba3.schem",
       "Vachellia_erioloba4.schem",
-      "Vachellia_erioloba8.schem"
+      "Vachellia_erioloba8.schem",
+      "contrib/arnis/Vachellia_erioloba_y4.schem"
      ],
      "w2": [
       "Vachellia_erioloba10.schem",
@@ -1103,7 +1308,8 @@
      "name": "Spirostachys_africana",
      "w1": [
       "contrib/lentebriesje/Spirostachys_africana_afr10L.schem",
-      "contrib/lentebriesje/Spirostachys_africana_afr10S.schem"
+      "contrib/lentebriesje/Spirostachys_africana_afr10S.schem",
+      "contrib/arnis/Spirostachys_africana_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1111,7 +1317,8 @@
     {
      "name": "Schotia_brachypetala",
      "w1": [
-      "contrib/lentebriesje/Schotia_brachypetala_afr12S.schem"
+      "contrib/lentebriesje/Schotia_brachypetala_afr12S.schem",
+      "contrib/arnis/Schotia_brachypetala_y4.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Schotia_brachypetala_afr12L.schem"
@@ -1139,7 +1346,11 @@
     },
     {
      "name": "Diospyros_mespiliformis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Diospyros_mespiliformis_y4.schem",
+      "contrib/arnis/Diospyros_mespiliformis_y6.schem",
+      "contrib/arnis/Diospyros_mespiliformis_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Diospyros_mespiliformis_afr5L.schem",
       "contrib/lentebriesje/Diospyros_mespiliformis_afr5S.schem"
@@ -1148,7 +1359,11 @@
     },
     {
      "name": "Senegalia_nigrescens",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Senegalia_nigrescens_y4.schem",
+      "contrib/arnis/Senegalia_nigrescens_y6.schem",
+      "contrib/arnis/Senegalia_nigrescens_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Senegalia_nigrescens_afr6L.schem",
       "contrib/lentebriesje/Senegalia_nigrescens_afr6S.schem"
@@ -1165,7 +1380,10 @@
     {
      "name": "Adansonia_digitata",
      "w1": [
-      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem",
+      "contrib/arnis/Adansonia_digitata_y4.schem",
+      "contrib/arnis/Adansonia_digitata_y6.schem",
+      "contrib/arnis/Adansonia_digitata_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1182,7 +1400,10 @@
      "w1": [
       "Borassus_aethiopum (1).schem",
       "Borassus_aethiopum (5).schem",
-      "Borassus_aethiopum (6).schem"
+      "Borassus_aethiopum (6).schem",
+      "contrib/arnis/Borassus_aethiopum_y4.schem",
+      "contrib/arnis/Borassus_aethiopum_y6.schem",
+      "contrib/arnis/Borassus_aethiopum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1192,7 +1413,10 @@
      "w1": [
       "Kigelia_africana1.schem",
       "Kigelia_africana2.schem",
-      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem",
+      "contrib/arnis/Kigelia_africana_y4.schem",
+      "contrib/arnis/Kigelia_africana_y6.schem",
+      "contrib/arnis/Kigelia_africana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1202,7 +1426,10 @@
     {
      "name": "Sclerocarya_birrea",
      "w1": [
-      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem",
+      "contrib/arnis/Sclerocarya_birrea_y4.schem",
+      "contrib/arnis/Sclerocarya_birrea_y6.schem",
+      "contrib/arnis/Sclerocarya_birrea_y8.schem"
      ],
      "w2": [
       "Sclerocarya_birrea1.schem",
@@ -1249,7 +1476,8 @@
      "w1": [
       "Vitellaria_paradoxa1.schem",
       "Vitellaria_paradoxa2.schem",
-      "Vitellaria_paradoxa3.schem"
+      "Vitellaria_paradoxa3.schem",
+      "contrib/arnis/Vitellaria_paradoxa_y4.schem"
      ],
      "w2": [],
      "w3": []
@@ -1266,7 +1494,11 @@
     },
     {
      "name": "Diospyros_mespiliformis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Diospyros_mespiliformis_y4.schem",
+      "contrib/arnis/Diospyros_mespiliformis_y6.schem",
+      "contrib/arnis/Diospyros_mespiliformis_y8.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Diospyros_mespiliformis_afr5L.schem",
       "contrib/lentebriesje/Diospyros_mespiliformis_afr5S.schem"

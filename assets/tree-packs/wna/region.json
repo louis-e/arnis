@@ -14,7 +14,10 @@
       "NAwest/Populus_fremontii2.schem",
       "NAwest/Populus_fremontii3.schem",
       "NAwest/Populus_fremontii4.schem",
-      "NAwest/Populus_fremontii5.schem"
+      "NAwest/Populus_fremontii5.schem",
+      "contrib/arnis/Populus_fremontii_y4.schem",
+      "contrib/arnis/Populus_fremontii_y6.schem",
+      "contrib/arnis/Populus_fremontii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -96,7 +99,9 @@
       "NAwest/Betula_papyrifera7.schem",
       "NAwest/Betula_papyrifera8.schem",
       "contrib/lentebriesje/Betula_papyrifera_na15L.schem",
-      "contrib/lentebriesje/Betula_papyrifera_na15S.schem"
+      "contrib/lentebriesje/Betula_papyrifera_na15S.schem",
+      "contrib/arnis/Betula_papyrifera_y4.schem",
+      "contrib/arnis/Betula_papyrifera_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -109,7 +114,10 @@
       "NAwest/Populus_tremuloides3.schem",
       "NAwest/Populus_tremuloides5.schem",
       "contrib/lentebriesje/Populus_tremuloides_na7L.schem",
-      "contrib/lentebriesje/Populus_tremuloides_na7S.schem"
+      "contrib/lentebriesje/Populus_tremuloides_na7S.schem",
+      "contrib/arnis/Populus_tremuloides_y4.schem",
+      "contrib/arnis/Populus_tremuloides_y6.schem",
+      "contrib/arnis/Populus_tremuloides_y8.schem"
      ],
      "w2": [
       "NAwest/Populus_tremuloides4.schem"
@@ -127,7 +135,8 @@
      "name": "Pinus_longaeva",
      "w1": [
       "NAwest/Pinus_longaeva2.schem",
-      "NAwest/Pinus_longaeva6.schem"
+      "NAwest/Pinus_longaeva6.schem",
+      "contrib/arnis/Pinus_longaeva_y5.schem"
      ],
      "w2": [
       "NAwest/Pinus_longaeva1.schem",
@@ -161,7 +170,10 @@
       "NAwest/Quercus_agrifolia (1).schem",
       "NAwest/Quercus_agrifolia (3).schem",
       "NAwest/Quercus_agrifolia (5).schem",
-      "NAwest/Quercus_agrifolia (6).schem"
+      "NAwest/Quercus_agrifolia (6).schem",
+      "contrib/arnis/Quercus_agrifolia_y4.schem",
+      "contrib/arnis/Quercus_agrifolia_y6.schem",
+      "contrib/arnis/Quercus_agrifolia_y8.schem"
      ],
      "w2": [
       "NAwest/Quercus_agrifolia (4).schem"
@@ -175,14 +187,21 @@
      "w1": [
       "NAwest/Quercus_kelloggi3.schem",
       "NAwest/Quercus_kelloggi4.schem",
-      "NAwest/Quercus_kelloggi5.schem"
+      "NAwest/Quercus_kelloggi5.schem",
+      "contrib/arnis/Quercus_kelloggi_y4.schem",
+      "contrib/arnis/Quercus_kelloggi_y6.schem",
+      "contrib/arnis/Quercus_kelloggi_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Quercus_kelloggii",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Quercus_kelloggii_y4.schem",
+      "contrib/arnis/Quercus_kelloggii_y6.schem",
+      "contrib/arnis/Quercus_kelloggii_y8.schem"
+     ],
      "w2": [],
      "w3": [
       "NAwest/Quercus_kelloggii1.schem",
@@ -193,7 +212,10 @@
      "name": "Umbellularia_californica",
      "w1": [
       "NAwest/Umbellularia_californica2.schem",
-      "NAwest/Umbellularia_californica3.schem"
+      "NAwest/Umbellularia_californica3.schem",
+      "contrib/arnis/Umbellularia_californica_y4.schem",
+      "contrib/arnis/Umbellularia_californica_y6.schem",
+      "contrib/arnis/Umbellularia_californica_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -213,7 +235,10 @@
       "NAwest/Larix_laricina1.schem",
       "NAwest/Larix_laricina2.schem",
       "NAwest/Larix_laricina3.schem",
-      "NAwest/Larix_laricina4.schem"
+      "NAwest/Larix_laricina4.schem",
+      "contrib/arnis/Larix_laricina_y5.schem",
+      "contrib/arnis/Larix_laricina_y7.schem",
+      "contrib/arnis/Larix_laricina_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -225,7 +250,10 @@
       "NAwest/Picea_glauca2.schem",
       "NAwest/Picea_glauca3.schem",
       "NAwest/Picea_glauca4.schem",
-      "NAwest/Picea_glauca5.schem"
+      "NAwest/Picea_glauca5.schem",
+      "contrib/arnis/Picea_glauca_y5.schem",
+      "contrib/arnis/Picea_glauca_y7.schem",
+      "contrib/arnis/Picea_glauca_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -237,14 +265,19 @@
       "NAwest/Picea_mariana2.schem",
       "NAwest/Picea_mariana3.schem",
       "NAwest/Picea_mariana4.schem",
-      "NAwest/Picea_mariana5.schem"
+      "NAwest/Picea_mariana5.schem",
+      "contrib/arnis/Picea_mariana_y5.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Pinus_contorta",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Pinus_contorta_y5.schem",
+      "contrib/arnis/Pinus_contorta_y7.schem",
+      "contrib/arnis/Pinus_contorta_y9.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Pinus_contorta_na9L.schem",
       "contrib/lentebriesje/Pinus_contorta_na9S.schem"
@@ -311,14 +344,20 @@
       "NAwest/Pinus_jeffreyi3.schem",
       "NAwest/Pinus_jeffreyi4.schem",
       "NAwest/Pinus_jeffreyi5.schem",
-      "NAwest/Pinus_jeffreyi6.schem"
+      "NAwest/Pinus_jeffreyi6.schem",
+      "contrib/arnis/Pinus_jeffreyi_y5.schem",
+      "contrib/arnis/Pinus_jeffreyi_y7.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Abies_magnifica",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Abies_magnifica_y5.schem",
+      "contrib/arnis/Abies_magnifica_y7.schem",
+      "contrib/arnis/Abies_magnifica_y9.schem"
+     ],
      "w2": [],
      "w3": [
       "contrib/lentebriesje/Abies_magnifica_na19L.schem",
@@ -327,7 +366,11 @@
     },
     {
      "name": "Pinus_contorta",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Pinus_contorta_y5.schem",
+      "contrib/arnis/Pinus_contorta_y7.schem",
+      "contrib/arnis/Pinus_contorta_y9.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Pinus_contorta_na9L.schem",
       "contrib/lentebriesje/Pinus_contorta_na9S.schem"
@@ -372,7 +415,10 @@
       "NAwest/Washingtonia_robusta4.schem",
       "NAwest/Washingtonia_robusta5.schem",
       "NAwest/Washingtonia_robusta6.schem",
-      "NAwest/Washingtonia_robusta7.schem"
+      "NAwest/Washingtonia_robusta7.schem",
+      "contrib/arnis/Washingtonia_robusta_y4.schem",
+      "contrib/arnis/Washingtonia_robusta_y6.schem",
+      "contrib/arnis/Washingtonia_robusta_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -410,7 +456,10 @@
      "w1": [
       "NAwest/Acer_macrophyllum1.schem",
       "NAwest/Acer_macrophyllum2.schem",
-      "NAwest/Acer_macrophyllum3.schem"
+      "NAwest/Acer_macrophyllum3.schem",
+      "contrib/arnis/Acer_macrophyllum_y4.schem",
+      "contrib/arnis/Acer_macrophyllum_y6.schem",
+      "contrib/arnis/Acer_macrophyllum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -423,7 +472,10 @@
       "NAwest/Alnus_rubra3.schem",
       "NAwest/Alnus_rubra4.schem",
       "contrib/lentebriesje/Alnus_rubra_na11L.schem",
-      "contrib/lentebriesje/Alnus_rubra_na11S.schem"
+      "contrib/lentebriesje/Alnus_rubra_na11S.schem",
+      "contrib/arnis/Alnus_rubra_y4.schem",
+      "contrib/arnis/Alnus_rubra_y6.schem",
+      "contrib/arnis/Alnus_rubra_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -434,7 +486,10 @@
       "NAwest/Arbutus_menziesii1.schem",
       "NAwest/Arbutus_menziesii2.schem",
       "NAwest/Arbutus_menziesii3.schem",
-      "NAwest/Arbutus_menziesii4.schem"
+      "NAwest/Arbutus_menziesii4.schem",
+      "contrib/arnis/Arbutus_menziesii_y4.schem",
+      "contrib/arnis/Arbutus_menziesii_y6.schem",
+      "contrib/arnis/Arbutus_menziesii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -445,7 +500,10 @@
       "NAwest/Fraxinus_latifolia1.schem",
       "NAwest/Fraxinus_latifolia2.schem",
       "NAwest/Fraxinus_latifolia3.schem",
-      "NAwest/Fraxinus_latifolia4.schem"
+      "NAwest/Fraxinus_latifolia4.schem",
+      "contrib/arnis/Fraxinus_latifolia_y4.schem",
+      "contrib/arnis/Fraxinus_latifolia_y6.schem",
+      "contrib/arnis/Fraxinus_latifolia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -455,7 +513,10 @@
      "w1": [
       "NAwest/Picea_sitchensis4.schem",
       "NAwest/Picea_sitchensis5.schem",
-      "NAwest/Picea_sitchensis6.schem"
+      "NAwest/Picea_sitchensis6.schem",
+      "contrib/arnis/Picea_sitchensis_y5.schem",
+      "contrib/arnis/Picea_sitchensis_y7.schem",
+      "contrib/arnis/Picea_sitchensis_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -465,7 +526,10 @@
      "w1": [
       "NAwest/Populus_trichocarpa1.schem",
       "NAwest/Populus_trichocarpa2.schem",
-      "NAwest/Populus_trichocarpa3.schem"
+      "NAwest/Populus_trichocarpa3.schem",
+      "contrib/arnis/Populus_trichocarpa_y4.schem",
+      "contrib/arnis/Populus_trichocarpa_y6.schem",
+      "contrib/arnis/Populus_trichocarpa_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -473,7 +537,10 @@
     {
      "name": "Pseudotsuga_menziesii",
      "w1": [
-      "NAwest/Pseudotsuga_menziesii5.schem"
+      "NAwest/Pseudotsuga_menziesii5.schem",
+      "contrib/arnis/Pseudotsuga_menziesii_y5.schem",
+      "contrib/arnis/Pseudotsuga_menziesii_y7.schem",
+      "contrib/arnis/Pseudotsuga_menziesii_y9.schem"
      ],
      "w2": [
       "contrib/lentebriesje/Pseudotsuga_menziesii_na6S.schem"
@@ -487,7 +554,10 @@
      "name": "Thuja_plicata",
      "w1": [
       "NAwest/Thuja_plicata3.schem",
-      "NAwest/Thuja_plicata4.schem"
+      "NAwest/Thuja_plicata4.schem",
+      "contrib/arnis/Thuja_plicata_y5.schem",
+      "contrib/arnis/Thuja_plicata_y7.schem",
+      "contrib/arnis/Thuja_plicata_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -496,14 +566,21 @@
      "name": "Callitropsis_nootkatensis",
      "w1": [
       "contrib/lentebriesje/Callitropsis_nootkatensis_na17L.schem",
-      "contrib/lentebriesje/Callitropsis_nootkatensis_na17S.schem"
+      "contrib/lentebriesje/Callitropsis_nootkatensis_na17S.schem",
+      "contrib/arnis/Callitropsis_nootkatensis_y4.schem",
+      "contrib/arnis/Callitropsis_nootkatensis_y6.schem",
+      "contrib/arnis/Callitropsis_nootkatensis_y8.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Abies_grandis",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Abies_grandis_y5.schem",
+      "contrib/arnis/Abies_grandis_y7.schem",
+      "contrib/arnis/Abies_grandis_y9.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Abies_grandis_na21L.schem",
       "contrib/lentebriesje/Abies_grandis_na21S.schem"
@@ -512,7 +589,11 @@
     },
     {
      "name": "Pinus_contorta",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Pinus_contorta_y5.schem",
+      "contrib/arnis/Pinus_contorta_y7.schem",
+      "contrib/arnis/Pinus_contorta_y9.schem"
+     ],
      "w2": [
       "contrib/lentebriesje/Pinus_contorta_na9L.schem",
       "contrib/lentebriesje/Pinus_contorta_na9S.schem"

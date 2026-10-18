@@ -18,7 +18,15 @@
       "contrib/sijmen_v_b/Vachellia_generica_acacia2.schem",
       "contrib/sijmen_v_b/Vachellia_generica_acacia3.schem",
       "contrib/sijmen_v_b/Vachellia_generica_acacia5.schem",
-      "contrib/sijmen_v_b/Vachellia_generica_badlands_tree_03.schem"
+      "contrib/sijmen_v_b/Vachellia_generica_badlands_tree_03.schem",
+      "contrib/arnis/Vachellia_generica_y4a.schem",
+      "contrib/arnis/Vachellia_generica_y4b.schem",
+      "contrib/arnis/Vachellia_generica_y5a.schem",
+      "contrib/arnis/Vachellia_generica_y5b.schem",
+      "contrib/arnis/Vachellia_generica_y6a.schem",
+      "contrib/arnis/Vachellia_generica_y6b.schem",
+      "contrib/arnis/Vachellia_generica_b2a.schem",
+      "contrib/arnis/Vachellia_generica_b3a.schem"
      ],
      "w2": [
       "acacia/Vachellia_generica2.schem",
@@ -52,7 +60,11 @@
       "azalea/Rhododendon_spelaea1.schem",
       "azalea/Rhododendon_spelaea3.schem",
       "azalea/Rhododendon_spelaea4.schem",
-      "azalea/Rhododendon_spelaea6.schem"
+      "azalea/Rhododendon_spelaea6.schem",
+      "contrib/arnis/Rhododendon_spelaea_b2a.schem",
+      "contrib/arnis/Rhododendon_spelaea_b2b.schem",
+      "contrib/arnis/Rhododendon_spelaea_b3a.schem",
+      "contrib/arnis/Rhododendon_spelaea_b3b.schem"
      ],
      "w2": [
       "azalea/Rhododendon_spelaea5.schem",
@@ -88,7 +100,15 @@
       "contrib/exsilit/Betula_generica_t255.schem",
       "contrib/exsilit/Betula_generica_t256.schem",
       "contrib/exsilit/Betula_generica_t257.schem",
-      "contrib/exsilit/Betula_generica_t258.schem"
+      "contrib/exsilit/Betula_generica_t258.schem",
+      "contrib/arnis/Betula_generica_y4a.schem",
+      "contrib/arnis/Betula_generica_y4b.schem",
+      "contrib/arnis/Betula_generica_y5a.schem",
+      "contrib/arnis/Betula_generica_y5b.schem",
+      "contrib/arnis/Betula_generica_y6a.schem",
+      "contrib/arnis/Betula_generica_y6b.schem",
+      "contrib/arnis/Betula_generica_b2a.schem",
+      "contrib/arnis/Betula_generica_b3a.schem"
      ],
      "w2": [
       "contrib/exsilit/Betula_generica_t121.schem",
@@ -114,7 +134,11 @@
     {
      "name": "Quercus_obscura",
      "w1": [
-      "dark oak/Quercus_obscura11.schem"
+      "dark oak/Quercus_obscura11.schem",
+      "contrib/arnis/Quercus_obscura_y4a.schem",
+      "contrib/arnis/Quercus_obscura_y5a.schem",
+      "contrib/arnis/Quercus_obscura_y6a.schem",
+      "contrib/arnis/Quercus_obscura_y8a.schem"
      ],
      "w2": [
       "dark oak/Quercus_obscura12.schem",
@@ -155,7 +179,11 @@
       "jungle/Cocos_caduca1.schem",
       "jungle/Cocos_caduca2.schem",
       "jungle/Cocos_caduca4.schem",
-      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_01.schem"
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_01.schem",
+      "contrib/arnis/Cocos_caduca_y4a.schem",
+      "contrib/arnis/Cocos_caduca_y4b.schem",
+      "contrib/arnis/Cocos_caduca_y6a.schem",
+      "contrib/arnis/Cocos_caduca_y6b.schem"
      ],
      "w2": [
       "jungle/Cocos_caduca3.schem",
@@ -194,7 +222,10 @@
       "contrib/sijmen_v_b/Swietenia_generica_jungle_small_1.schem",
       "contrib/sijmen_v_b/Swietenia_generica_jungle_small_2.schem",
       "contrib/sijmen_v_b/Swietenia_generica_jungle_small_3.schem",
-      "contrib/aks_jun/Swietenia_generica_1.schem"
+      "contrib/aks_jun/Swietenia_generica_1.schem",
+      "contrib/arnis/Swietenia_generica_y4a.schem",
+      "contrib/arnis/Swietenia_generica_y5a.schem",
+      "contrib/arnis/Swietenia_generica_y6a.schem"
      ],
      "w2": [
       "contrib/exsilit/Swietenia_generica_t065.schem",
@@ -248,7 +279,11 @@
       "jungle/Cocos_caduca1.schem",
       "jungle/Cocos_caduca2.schem",
       "jungle/Cocos_caduca4.schem",
-      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_01.schem"
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_01.schem",
+      "contrib/arnis/Cocos_caduca_y4a.schem",
+      "contrib/arnis/Cocos_caduca_y4b.schem",
+      "contrib/arnis/Cocos_caduca_y6a.schem",
+      "contrib/arnis/Cocos_caduca_y6b.schem"
      ],
      "w2": [
       "jungle/Cocos_caduca3.schem",
@@ -287,7 +322,10 @@
       "contrib/sijmen_v_b/Swietenia_generica_jungle_small_1.schem",
       "contrib/sijmen_v_b/Swietenia_generica_jungle_small_2.schem",
       "contrib/sijmen_v_b/Swietenia_generica_jungle_small_3.schem",
-      "contrib/aks_jun/Swietenia_generica_1.schem"
+      "contrib/aks_jun/Swietenia_generica_1.schem",
+      "contrib/arnis/Swietenia_generica_y4a.schem",
+      "contrib/arnis/Swietenia_generica_y5a.schem",
+      "contrib/arnis/Swietenia_generica_y6a.schem"
      ],
      "w2": [
       "contrib/exsilit/Swietenia_generica_t065.schem",
@@ -386,7 +424,17 @@
       "contrib/andyways/Quercus_generica_a0.schem",
       "contrib/andyways/Quercus_generica_a1.schem",
       "contrib/andyways/Quercus_generica_a2.schem",
-      "contrib/vico37/Quercus_generica_v5.schem"
+      "contrib/vico37/Quercus_generica_v5.schem",
+      "contrib/arnis/Quercus_generica_y4a.schem",
+      "contrib/arnis/Quercus_generica_y4b.schem",
+      "contrib/arnis/Quercus_generica_y5a.schem",
+      "contrib/arnis/Quercus_generica_y5b.schem",
+      "contrib/arnis/Quercus_generica_y6a.schem",
+      "contrib/arnis/Quercus_generica_y6b.schem",
+      "contrib/arnis/Quercus_generica_b2a.schem",
+      "contrib/arnis/Quercus_generica_b2b.schem",
+      "contrib/arnis/Quercus_generica_b3a.schem",
+      "contrib/arnis/Quercus_generica_b3b.schem"
      ],
      "w2": [
       "contrib/exsilit/Quercus_generica_t018.schem",
@@ -526,7 +574,15 @@
       "birch/Betula_generica8.schem",
       "contrib/exsilit/Betula_generica_t232.schem",
       "contrib/exsilit/Betula_generica_t256.schem",
-      "contrib/exsilit/Betula_generica_t338.schem"
+      "contrib/exsilit/Betula_generica_t338.schem",
+      "contrib/arnis/Betula_generica_y4a.schem",
+      "contrib/arnis/Betula_generica_y4b.schem",
+      "contrib/arnis/Betula_generica_y5a.schem",
+      "contrib/arnis/Betula_generica_y5b.schem",
+      "contrib/arnis/Betula_generica_y6a.schem",
+      "contrib/arnis/Betula_generica_y6b.schem",
+      "contrib/arnis/Betula_generica_b2a.schem",
+      "contrib/arnis/Betula_generica_b3a.schem"
      ],
      "w2": [
       "contrib/exsilit/Betula_generica_t067.schem",
@@ -572,7 +628,11 @@
       "taiga/Pinus_piceoides4.schem",
       "taiga/Pinus_piceoides5.schem",
       "taiga/Pinus_piceoides6.schem",
-      "taiga/Pinus_piceoides7.schem"
+      "taiga/Pinus_piceoides7.schem",
+      "contrib/arnis/Pinus_piceoides_y5a.schem",
+      "contrib/arnis/Pinus_piceoides_y5b.schem",
+      "contrib/arnis/Pinus_piceoides_y7a.schem",
+      "contrib/arnis/Pinus_piceoides_y7b.schem"
      ],
      "w2": [],
      "w3": [
@@ -607,7 +667,15 @@
       "contrib/exsilit/Picea_generica_t230.schem",
       "contrib/sijmen_v_b/Picea_generica_spruce_tree_big_01.schem",
       "contrib/sijmen_v_b/Picea_generica_spruce_tree_big_02.schem",
-      "contrib/sijmen_v_b/Picea_generica_spruce_tree_mid_wide_01.schem"
+      "contrib/sijmen_v_b/Picea_generica_spruce_tree_mid_wide_01.schem",
+      "contrib/arnis/Picea_generica_y4a.schem",
+      "contrib/arnis/Picea_generica_y4b.schem",
+      "contrib/arnis/Picea_generica_y5a.schem",
+      "contrib/arnis/Picea_generica_y5b.schem",
+      "contrib/arnis/Picea_generica_y6a.schem",
+      "contrib/arnis/Picea_generica_y6b.schem",
+      "contrib/arnis/Picea_generica_b2a.schem",
+      "contrib/arnis/Picea_generica_b3a.schem"
      ],
      "w2": [
       "contrib/exsilit/Picea_generica_t008.schem",
@@ -672,7 +740,11 @@
       "taiga/Pinus_piceoides4.schem",
       "taiga/Pinus_piceoides5.schem",
       "taiga/Pinus_piceoides6.schem",
-      "taiga/Pinus_piceoides7.schem"
+      "taiga/Pinus_piceoides7.schem",
+      "contrib/arnis/Pinus_piceoides_y5a.schem",
+      "contrib/arnis/Pinus_piceoides_y5b.schem",
+      "contrib/arnis/Pinus_piceoides_y7a.schem",
+      "contrib/arnis/Pinus_piceoides_y7b.schem"
      ],
      "w2": [],
      "w3": []
@@ -733,7 +805,15 @@
       "contrib/bealzechan/Picea_generica_sap_snowy_large_3.schem",
       "contrib/bealzechan/Picea_generica_sap_snowy_small_1.schem",
       "contrib/bealzechan/Picea_generica_sap_snowy_small_2.schem",
-      "contrib/bealzechan/Picea_generica_sap_snowy_small_3.schem"
+      "contrib/bealzechan/Picea_generica_sap_snowy_small_3.schem",
+      "contrib/arnis/Picea_generica_y4a.schem",
+      "contrib/arnis/Picea_generica_y4b.schem",
+      "contrib/arnis/Picea_generica_y5a.schem",
+      "contrib/arnis/Picea_generica_y5b.schem",
+      "contrib/arnis/Picea_generica_y6a.schem",
+      "contrib/arnis/Picea_generica_y6b.schem",
+      "contrib/arnis/Picea_generica_b2a.schem",
+      "contrib/arnis/Picea_generica_b3a.schem"
      ],
      "w2": [
       "contrib/exsilit/Picea_generica_t004.schem",
@@ -783,7 +863,9 @@
       "swamp/Quercus_vinifera9.schem",
       "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree1.schem",
       "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree2.schem",
-      "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree3.schem"
+      "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree3.schem",
+      "contrib/arnis/Quercus_vinifera_y4a.schem",
+      "contrib/arnis/Quercus_vinifera_y5a.schem"
      ],
      "w2": [
       "swamp/Quercus_vinifera6.schem",
@@ -795,7 +877,11 @@
     {
      "name": "Salix_generica",
      "w1": [
-      "contrib/exsilit/Salix_generica_t361.schem"
+      "contrib/exsilit/Salix_generica_t361.schem",
+      "contrib/arnis/Salix_generica_y5a.schem",
+      "contrib/arnis/Salix_generica_y5b.schem",
+      "contrib/arnis/Salix_generica_y7a.schem",
+      "contrib/arnis/Salix_generica_y7b.schem"
      ],
      "w2": [
       "contrib/exsilit/Salix_generica_t087.schem"
