@@ -560,10 +560,8 @@ impl FloodFillCache {
 
     /// Determines if a way element needs flood fill based on its tags.
     ///
-    /// This checks for tag presence (not specific values) because:
-    /// - Only some values within each tag type actually use flood fill
-    /// - But caching extra results is harmless (small memory overhead)
-    /// - And avoids duplicating value-checking logic from processors
+    /// Mostly tag presence, so most values are cached whether read or not; the big
+    /// polygons whose fill is never read are left out by `fill_goes_unread`.
     ///
     /// Covered cases:
     /// - building/building:part -> buildings::generate_buildings (includes bridge)
@@ -573,7 +571,7 @@ impl FloodFillCache {
     /// - natural (except tree and tree_row) -> natural::generate_natural
     /// - highway with area=yes -> highways::generate_highways (area fill)
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
-        way.tags.contains_key("building")
+        (way.tags.contains_key("building")
             || way.tags.contains_key("building:part")
             || way.tags.contains_key("landuse")
             || way.tags.contains_key("leisure")
@@ -592,7 +590,36 @@ impl FloodFillCache {
             || Self::is_waterfront(&way.tags)
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
-                && way.tags.get("generator:source").map(String::as_str) == Some("solar"))
+                && way.tags.get("generator:source").map(String::as_str) == Some("solar")))
+            && !Self::fill_goes_unread(way)
+    }
+
+    /// Ways `process_element` hands to a branch that never reads their fill, and no pre-pass
+    /// reads either. Residential and commercial landuse are the largest polygons around.
+    fn fill_goes_unread(way: &ProcessedWay) -> bool {
+        let tags = &way.tags;
+        if ["building", "building:part", "highway", "power"]
+            .iter()
+            .any(|k| tags.contains_key(*k))
+            || Self::is_waterfront(tags)
+            || is_sealed_surface_way(way)
+        {
+            return false;
+        }
+        if let Some(landuse) = tags.get("landuse") {
+            return matches!(landuse.as_str(), "residential" | "commercial");
+        }
+        if tags.contains_key("natural")
+            && tags.get("amenity").map(String::as_str) != Some("fountain")
+        {
+            return false;
+        }
+        tags.get("amenity").is_some_and(|amenity| {
+            !matches!(
+                amenity.as_str(),
+                "bicycle_parking" | "shelter" | "fountain" | "parking"
+            )
+        })
     }
 
     /// Relations `process_element` renders by filling each outer member: natural, landuse
