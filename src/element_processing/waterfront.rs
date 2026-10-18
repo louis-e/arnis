@@ -6,6 +6,7 @@ use crate::bresenham::bresenham_line;
 use crate::element_processing::connected_blocks::place_connected;
 use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::{FloodFillCache, FloodFillResult};
+use crate::mapillary::geometry::parse_length_m;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::{min_y, WorldEditor};
 use std::collections::{HashMap, HashSet};
@@ -45,7 +46,7 @@ fn tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
 
 fn width_blocks(tags: &HashMap<String, String>, default_m: f64, scale: f64) -> f64 {
     let metres = tag(tags, "width")
-        .and_then(|w| w.trim_end_matches(" m").trim().parse::<f64>().ok())
+        .and_then(parse_length_m)
         .filter(|w| *w > 0.0 && *w < 200.0)
         .unwrap_or(default_m);
     (metres * scale).max(1.0)
@@ -557,7 +558,7 @@ pub fn generate_breakwater(
     let base = *grounds.iter().min().unwrap_or(&0);
     let rise = if tag(tags, "submerged") == Some("yes") {
         0
-    } else if let Some(h) = tag(tags, "height").and_then(|h| h.parse::<f64>().ok()) {
+    } else if let Some(h) = tag(tags, "height").and_then(parse_length_m) {
         ((h * args.scale).round() as i32).clamp(1, BREAKWATER_MAX_HEIGHT)
     } else if groyne {
         1
@@ -860,6 +861,50 @@ mod tests {
             }
             assert_eq!(got, want, "segment {a:?} to {b:?}, width {width}");
         }
+    }
+
+    #[test]
+    fn a_pier_hole_keeps_its_edge_and_widths_read_units() {
+        let ring = |id: u64, (x0, z0): (i32, i32), (x1, z1): (i32, i32)| {
+            Arc::new(way(
+                id,
+                &[],
+                &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)],
+            ))
+        };
+        let pier = ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+            id: 9,
+            tags: HashMap::new(),
+            members: vec![
+                crate::osm_parser::ProcessedMember {
+                    role: ProcessedMemberRole::Outer,
+                    way: ring(1, (10, 10), (60, 60)),
+                },
+                crate::osm_parser::ProcessedMember {
+                    role: ProcessedMemberRole::Inner,
+                    way: ring(2, (20, 20), (50, 50)),
+                },
+            ],
+        });
+        let fill = |w: &ProcessedWay| -> FloodFillResult {
+            let pts: Vec<(i32, i32)> = w.nodes.iter().map(|n| (n.x, n.z)).collect();
+            Arc::new(flood_fill_area(&pts, None))
+        };
+        let cells = area_cells(&pier, fill);
+        // The hole's outline is the deck's inner edge, its inside is open.
+        assert!(cells.contains(&(20, 35)) && cells.contains(&(35, 50)));
+        assert!(!cells.contains(&(21, 35)) && !cells.contains(&(35, 35)));
+        assert!(cells.contains(&(10, 35)) && cells.contains(&(15, 35)));
+
+        let tags = |w: &str| {
+            [("width", w)]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<HashMap<String, String>>()
+        };
+        assert_eq!(width_blocks(&tags("6m"), 3.0, 1.0), 6.0);
+        assert_eq!(width_blocks(&tags("6 m"), 3.0, 1.0), 6.0);
+        assert_eq!(width_blocks(&tags("wide"), 3.0, 1.0), 3.0);
     }
 
     #[test]

@@ -164,6 +164,20 @@ fn fit_height(metres: f64, scale: f64, base: i32, min: i32) -> i32 {
     ((metres * scale).round() as i32).clamp(min, (world_max_y() - base - 1).max(min))
 }
 
+/// Blocks a feature rises above `base`. OSM heights count from the ground, so on a roof
+/// a height taller than the building reaches that height overall; a shorter one is the
+/// feature's own.
+fn rise_above(metres: f64, scale: f64, ground: i32, base: i32, min: i32) -> i32 {
+    let blocks = (metres * scale).round() as i32;
+    let roof = base - ground;
+    let own = if roof > 0 && blocks > roof + 1 {
+        blocks - roof
+    } else {
+        blocks
+    };
+    fit_height(f64::from(own), 1.0, base, min)
+}
+
 /// Mast shapes worth telling apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MastShape {
@@ -199,7 +213,8 @@ fn generate_mast(
     let antenna = tags.get("man_made").map(String::as_str) == Some("antenna");
     let lighting = tags.get("tower:type").map(String::as_str) == Some("lighting");
     let roof = roof_top(editor, footprints, x, z);
-    let base = roof.unwrap_or_else(|| editor.get_absolute_y(x, 0, z));
+    let ground = editor.get_absolute_y(x, 0, z);
+    let base = roof.unwrap_or(ground);
     let default_m = match (roof.is_some(), antenna, lighting) {
         (true, true, _) => 3.0,
         (true, false, _) => 6.0,
@@ -208,7 +223,7 @@ fn generate_mast(
         (false, false, false) => 30.0,
     };
     let metres = tag_metres(element, "height").unwrap_or(default_m);
-    let height = fit_height(metres, args.scale, base, 2);
+    let height = rise_above(metres, args.scale, ground, base, 2);
     let top = base + height;
 
     match mast_shape(element, height, roof.is_some()) {
@@ -335,10 +350,11 @@ fn generate_chimney(
         return;
     };
     let roof = roof_top(editor, footprints, x, z);
-    let base = roof.unwrap_or_else(|| editor.get_absolute_y(x, 0, z));
+    let ground = editor.get_absolute_y(x, 0, z);
+    let base = roof.unwrap_or(ground);
     let default_m = if roof.is_some() { 2.0 } else { 40.0 };
     let metres = tag_metres(element, "height").unwrap_or(default_m);
-    let height = fit_height(metres, args.scale, base, 2);
+    let height = rise_above(metres, args.scale, ground, base, 2);
     let material = element
         .tags()
         .get("building:material")
@@ -352,7 +368,7 @@ fn generate_chimney(
         _ => BRICK,
     };
 
-    if roof.is_some() || height <= CHIMNEY_STACK_MAX_HEIGHT {
+    if height <= CHIMNEY_STACK_MAX_HEIGHT {
         for y in (base + 1)..=(base + height) {
             editor.set_block_absolute(body, x, y, z, Some(CANOPY), None);
         }
@@ -361,8 +377,15 @@ fn generate_chimney(
 
     // Base radius from the outline or `diameter`, else from the height; the top is narrower.
     let mapped = TankFootprint::from_element(element);
-    let base_r = if element.nodes().count() >= 3 {
-        mapped.radius
+    let outlined = element.nodes().count() >= 3;
+    let base_r = if outlined {
+        // The widest circle the outline holds, so a long or narrow one is not overrun.
+        let pts: Vec<(i32, i32)> = element.nodes().map(|n| (n.x, n.z)).collect();
+        let span = |axis: fn(&(i32, i32)) -> i32| {
+            pts.iter().map(axis).max().unwrap_or(0) - pts.iter().map(axis).min().unwrap_or(0)
+        };
+        let (span_x, span_z) = (span(|p| p.0), span(|p| p.1));
+        f64::from(span_x.min(span_z)) / 2.0 - 0.5
     } else {
         tag_metres(element, "diameter")
             .map(|d| d * args.scale / 2.0)
@@ -390,10 +413,18 @@ fn generate_chimney(
             body
         };
         let reach = (r + 0.5).ceil() as i32;
+        // Kept to the outline, with a cell of slack so the wall stays closed along it.
+        let on_outline = |cx: i32, cz: i32| {
+            !outlined
+                || mapped.cells.is_empty()
+                || [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|(ox, oz)| mapped.cells.contains(&(cx + ox, cz + oz)))
+        };
         for dz in -reach..=reach {
             for dx in -reach..=reach {
                 let d2 = f64::from(dx * dx + dz * dz);
-                if d2 <= (r + 0.5).powi(2) && d2 > (r - 0.5).powi(2) {
+                if d2 <= (r + 0.5).powi(2) && d2 > (r - 0.5).powi(2) && on_outline(x + dx, z + dz) {
                     editor.set_block_absolute(block, x + dx, y, z + dz, Some(CANOPY), None);
                 }
             }
@@ -1042,6 +1073,73 @@ mod tests {
         assert_eq!(
             editor.get_block_absolute(30, ground + 1, 30 + foot),
             Some(BRICK)
+        );
+    }
+
+    #[test]
+    fn a_rooftop_chimney_reaches_its_tagged_height_from_the_ground() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let ground = editor.get_absolute_y(10, 0, 10);
+        let mut footprints = CoordinateBitmap::new(&xzbbox);
+        footprints.set(10, 10);
+        for y in (ground + 1)..=(ground + 15) {
+            editor.set_block_absolute(STONE, 10, y, 10, None, None);
+        }
+        // Twenty metres from the ground on a fifteen-block building: five above the roof.
+        let tall = node(9, 10, 10, &[("man_made", "chimney"), ("height", "20")]);
+        generate_man_made_nodes(&mut editor, &tall, &args(), &footprints);
+        assert!(editor.block_exists_absolute(10, ground + 20, 10));
+        assert!(!editor.block_exists_absolute(10, ground + 21, 10));
+        // A height below the roof is the stack's own.
+        let mut editor = test_editor(&xzbbox);
+        for y in (ground + 1)..=(ground + 15) {
+            editor.set_block_absolute(STONE, 10, y, 10, None, None);
+        }
+        let short = node(10, 10, 10, &[("man_made", "chimney"), ("height", "3")]);
+        generate_man_made_nodes(&mut editor, &short, &args(), &footprints);
+        assert!(editor.block_exists_absolute(10, ground + 18, 10));
+        assert!(!editor.block_exists_absolute(10, ground + 19, 10));
+    }
+
+    #[test]
+    fn a_mapped_chimney_stays_inside_its_outline() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let ground = editor.get_absolute_y(30, 0, 30);
+        // A long, narrow chimney outline: 6 wide, 20 long.
+        let chimney = ProcessedElement::Way(ProcessedWay {
+            id: 11,
+            nodes: [(27, 20), (33, 20), (33, 40), (27, 40), (27, 20)]
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: 1100 + i as u64,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: tag_map(&[("man_made", "chimney"), ("height", "40")]),
+        });
+        generate_man_made(
+            &mut editor,
+            &chimney,
+            &args(),
+            &FloodFillCache::new(),
+            &CoordinateBitmap::new_empty(),
+        );
+        let y = ground + 5;
+        let placed: Vec<(i32, i32)> = (15..=45)
+            .flat_map(|x| (10..=50).map(move |z| (x, z)))
+            .filter(|&(x, z)| editor.block_exists_absolute(x, y, z))
+            .collect();
+        assert!(!placed.is_empty(), "the shaft is there");
+        assert!(
+            placed
+                .iter()
+                .all(|&(x, z)| (26..=34).contains(&x) && (19..=41).contains(&z)),
+            "nothing past the outline: {placed:?}"
         );
     }
 
