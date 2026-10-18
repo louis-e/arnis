@@ -291,7 +291,7 @@ fn process_element(
     bridge_structures: &bridges::BridgeStructureMap,
     bridge_surface: &bridges::BridgeSurfaceMap,
     bridge_outlines: &bridge_styles::BridgeOutlineIndex,
-    rail_tunnel_points: &mut Vec<(i32, i32)>,
+    rail_tunnel_points: &mut Vec<railways::RailTunnelPoint>,
     tunnel_internal_endpoints: &highways::TunnelInternalEndpoints,
     tunnel_portals: &highways::TunnelPortalMap,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
@@ -649,9 +649,38 @@ fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: b
 
 /// Free RAM in MB.
 fn available_memory_mb() -> u64 {
+    #[cfg(target_os = "macos")]
+    if let Some(mb) = macos_available_memory_mb() {
+        return mb;
+    }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
     sys.available_memory() / (1024 * 1024)
+}
+
+/// sysinfo subtracts the compressor's pages from free + inactive, so a busy compressor reads as
+/// a few hundred MB free and pins the run to one tile thread; the kernel's own level does not.
+#[cfg(target_os = "macos")]
+fn macos_available_memory_mb() -> Option<u64> {
+    fn sysctl<T: Default>(name: &std::ffi::CStr) -> Option<T> {
+        let mut value = T::default();
+        let mut len = std::mem::size_of::<T>();
+        let ok = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                (&mut value as *mut T).cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        } == 0;
+        (ok && len == std::mem::size_of::<T>()).then_some(value)
+    }
+    let level: u32 = sysctl(c"kern.memorystatus_level")?;
+    let total: u64 = sysctl(c"hw.memsize")?;
+    (1..=100)
+        .contains(&level)
+        .then(|| total / 100 * u64::from(level) / (1024 * 1024))
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -949,7 +978,7 @@ pub fn generate_world_with_options(
     let extras = crate::datapack::Extras::from_args(args);
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
-    let mut rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
+    let mut rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
     let mut tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
 
     // Set ground reference in the editor to enable elevation-aware block placement
@@ -1339,7 +1368,7 @@ pub fn generate_world_with_options(
                 tile_bounds.max_z - 1,
             );
 
-            let mut tile_rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
+            let mut tile_rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
             let mut tile_tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
 
             for &elem_idx in &tile_assignments[tile_idx] {

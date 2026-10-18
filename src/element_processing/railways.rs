@@ -62,6 +62,9 @@ const INTERIOR_HEIGHT: i32 = 4;
 /// Interval in centerline points between ceiling lights.
 const LIGHT_INTERVAL: usize = 8;
 
+/// Rail-tunnel centerline point and whether it carries a ceiling lantern.
+pub type RailTunnelPoint = (i32, i32, bool);
+
 /// Deterministic spatial hash for tunnel wall/ceiling block variety.
 /// Returns CRACKED_STONE_BRICKS (~15%), MOSSY_STONE_BRICKS (~3%),
 /// or STONE_BRICKS (~82%).
@@ -84,7 +87,7 @@ fn rail_tunnel_shell_block(x: i32, y: i32, z: i32) -> Block {
 pub fn generate_railways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    rail_tunnel_points: &mut Vec<(i32, i32)>,
+    rail_tunnel_points: &mut Vec<RailTunnelPoint>,
     bridge_outlines: &BridgeOutlineIndex,
     bridge_structures: &BridgeStructureMap,
     bridge_surface: &BridgeSurfaceMap,
@@ -1275,8 +1278,12 @@ pub fn generate_roller_coaster(editor: &mut WorldEditor, element: &ProcessedWay)
 fn generate_rail_tunnel_shell(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    rail_tunnel_points: &mut Vec<(i32, i32)>,
+    rail_tunnel_points: &mut Vec<RailTunnelPoint>,
 ) {
+    // Lanterns are counted along the way, not the shared list, so they don't move with
+    // how many tiles recorded the tunnel or in which order they merged.
+    let mut recorded = 0usize;
+    let mut last = None;
     for i in 1..element.nodes.len() {
         let prev_node = element.nodes[i - 1].xz();
         let cur_node = element.nodes[i].xz();
@@ -1289,8 +1296,10 @@ fn generate_rail_tunnel_shell(
 
             // Record centerline point for phase 2 air-carving, skipping
             // duplicate shared endpoints between adjacent segments.
-            if rail_tunnel_points.last().copied() != Some((bx, bz)) {
-                rail_tunnel_points.push((bx, bz));
+            if last != Some((bx, bz)) {
+                rail_tunnel_points.push((bx, bz, recorded.is_multiple_of(LIGHT_INTERVAL)));
+                recorded += 1;
+                last = Some((bx, bz));
             }
 
             let ground_y = editor.get_ground_level(bx, bz);
@@ -1385,8 +1394,11 @@ fn generate_rail_tunnel_shell(
 /// Every tile a tunnel crosses records the whole centerline, so the merged list holds each
 /// point once per tile. A point is carved only the first time: carving just turns
 /// whitelisted blocks to air, and a lantern is never on the whitelist, so a second carve
-/// changes nothing. The lanterns still follow their positions in the full list.
-pub fn carve_rail_tunnel_interior(editor: &mut WorldEditor, rail_tunnel_points: &[(i32, i32)]) {
+/// changes nothing. Lanterns come flagged per way, so neither order nor repeats matter.
+pub fn carve_rail_tunnel_interior(
+    editor: &mut WorldEditor,
+    rail_tunnel_points: &[RailTunnelPoint],
+) {
     // Whitelist: allow overwriting shell blocks and ground-fill STONE
     // so the tunnel is actually hollow.
     let carve_whitelist: &[Block] = &[
@@ -1396,9 +1408,8 @@ pub fn carve_rail_tunnel_interior(editor: &mut WorldEditor, rail_tunnel_points: 
         STONE,
     ];
     let mut carved: HashSet<(i32, i32)> = HashSet::with_capacity(rail_tunnel_points.len());
-    for (idx, &(bx, bz)) in rail_tunnel_points.iter().enumerate() {
+    for &(bx, bz, lantern) in rail_tunnel_points {
         let first = carved.insert((bx, bz));
-        let lantern = idx % LIGHT_INTERVAL == 0;
         if !first && !lantern {
             continue;
         }
@@ -1451,14 +1462,14 @@ mod tests {
     }
 
     // The same carve as before deduplication: every listed point, in order.
-    fn carve_every_point(editor: &mut WorldEditor, points: &[(i32, i32)]) {
+    fn carve_every_point(editor: &mut WorldEditor, points: &[RailTunnelPoint]) {
         let wl: &[Block] = &[
             STONE_BRICKS,
             CRACKED_STONE_BRICKS,
             MOSSY_STONE_BRICKS,
             STONE,
         ];
-        for (idx, &(bx, bz)) in points.iter().enumerate() {
+        for &(bx, bz, lantern) in points {
             let ceil_y = editor.get_ground_level(bx, bz) - RAIL_TUNNEL_DEPTH;
             let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
             for dx in -AIR_RADIUS..=AIR_RADIUS {
@@ -1470,7 +1481,7 @@ mod tests {
                     }
                 }
             }
-            if idx % LIGHT_INTERVAL == 0 {
+            if lantern {
                 editor.set_block_absolute(SEA_LANTERN, bx, ceil_y - 1, bz, None, None);
             }
         }
@@ -1481,15 +1492,17 @@ mod tests {
     #[test]
     fn repeated_tunnel_points_carve_the_same_bore() {
         let xzbbox = XZBBox::rect_from_min_max(0, 0, 80, 80).unwrap();
-        let line: Vec<(i32, i32)> = (20..=50)
+        let line: Vec<RailTunnelPoint> = (20..=50)
             .map(|x| (x, 40))
             .chain((41..=60).map(|z| (50, z)))
+            .enumerate()
+            .map(|(i, (x, z))| (x, z, i % LIGHT_INTERVAL == 0))
             .collect();
         // Two tiles' copies, the second starting mid-way, plus a stray repeat.
         let mut points = line.clone();
         points.extend_from_slice(&line[7..]);
         points.extend_from_slice(&line);
-        points.push((33, 40));
+        points.push((33, 40, false));
 
         let build = |carve: &dyn Fn(&mut WorldEditor)| {
             let mut editor = test_editor(&xzbbox);
@@ -1550,7 +1563,7 @@ mod tests {
         editor: &mut WorldEditor,
         way: &ProcessedWay,
         rail_mask: &CoordinateBitmap,
-    ) -> Vec<(i32, i32)> {
+    ) -> Vec<RailTunnelPoint> {
         let clear = CoordinateBitmap::new(rail_mask_bbox());
         let mut rail_tunnel_points = Vec::new();
         let outlines = BridgeOutlineIndex::build(&[]);
