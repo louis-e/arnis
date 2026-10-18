@@ -1075,6 +1075,11 @@ pub fn to_bedrock_block_with_properties(
             return convert_connected_wall(to_bedrock_block(block), props);
         }
     }
+    if java_name.ends_with("_fence_gate") {
+        if let Some(props) = props_map {
+            return convert_fence_gate(to_bedrock_block(block), props);
+        }
+    }
 
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
@@ -1105,6 +1110,37 @@ fn convert_connected_wall(
         BedrockBlockStateValue::Bool(prop("up") != Some("false")),
     );
     wall
+}
+
+/// Carries a Java fence gate's facing, open and in_wall states over to Bedrock.
+fn convert_fence_gate(
+    mut gate: BedrockBlock,
+    props: &std::collections::HashMap<String, fastnbt::Value>,
+) -> BedrockBlock {
+    let prop = |key: &str| match props.get(key) {
+        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
+        _ => None,
+    };
+    // Bedrock's legacy direction: 0=south, 1=west, 2=north, 3=east.
+    let direction = match prop("facing") {
+        Some("west") => 1,
+        Some("north") => 2,
+        Some("east") => 3,
+        _ => 0,
+    };
+    gate.states.insert(
+        "direction".to_string(),
+        BedrockBlockStateValue::Int(direction),
+    );
+    gate.states.insert(
+        "open_bit".to_string(),
+        BedrockBlockStateValue::Bool(prop("open") == Some("true")),
+    );
+    gate.states.insert(
+        "in_wall_bit".to_string(),
+        BedrockBlockStateValue::Bool(prop("in_wall") == Some("true")),
+    );
+    gate
 }
 
 /// Blocks the cave passes place whose Bedrock form differs from Java's. Like the rest of this
@@ -2132,6 +2168,34 @@ mod tests {
             Some(BedrockBlockStateValue::Bool(false))
         );
         assert!(bedrock.states.contains_key("wall_block_type"));
+    }
+
+    #[test]
+    fn fence_gates_carry_facing_and_in_wall() {
+        use crate::block_definitions::OAK_FENCE_GATE;
+        let props = fastnbt::Value::Compound(std::collections::HashMap::from([
+            (
+                "facing".to_string(),
+                fastnbt::Value::String("east".to_string()),
+            ),
+            (
+                "in_wall".to_string(),
+                fastnbt::Value::String("true".to_string()),
+            ),
+            (
+                "open".to_string(),
+                fastnbt::Value::String("false".to_string()),
+            ),
+        ]));
+        let bedrock = to_bedrock_block_with_properties(OAK_FENCE_GATE, Some(&props));
+        assert_eq!(bedrock.name, "minecraft:fence_gate");
+        let state = |k: &str| bedrock.states.get(k).cloned();
+        assert_eq!(state("direction"), Some(BedrockBlockStateValue::Int(3)));
+        assert_eq!(
+            state("in_wall_bit"),
+            Some(BedrockBlockStateValue::Bool(true))
+        );
+        assert_eq!(state("open_bit"), Some(BedrockBlockStateValue::Bool(false)));
     }
 
     #[test]

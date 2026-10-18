@@ -826,7 +826,12 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         491 => return conv_stair(props, "mcl_stairs:stair_deepslate_tiles"),
         492 => "mcl_stairs:slab_nether_brick",
         493 => "mcl_stairs:slab_copper_oxidized_cut",
-        494 => "mcl_fences:oak_fence_gate",
+        494 => {
+            return LuantiNode {
+                name: "mcl_fences:oak_fence_gate",
+                param2: facing_to_facedir(prop_str(props, "facing").unwrap_or("north")),
+            }
+        }
         495 => "mcl_sponges:sponge",
         496 => "mcl_noteblock:noteblock",
         497 => "mcl_colorblocks:hardened_clay_pink",
@@ -842,7 +847,9 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_definitions::{RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE, WHITE_BED};
+    use crate::block_definitions::{
+        OAK_FENCE_GATE, RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE, WHITE_BED,
+    };
     use std::collections::HashMap;
 
     /// Blocks Mineclonia has no node for, so they can only fall back. Keep this
@@ -902,6 +909,17 @@ mod tests {
         ]));
         let white = to_mineclonia_node(WHITE_BED, Some(&props));
         assert_eq!((white.name, white.param2), ("mcl_beds:bed_white_top", 2));
+    }
+
+    #[test]
+    fn fence_gates_keep_their_facing() {
+        let props = Value::Compound(HashMap::from([(
+            "facing".to_string(),
+            Value::String("east".to_string()),
+        )]));
+        let gate = to_mineclonia_node(OAK_FENCE_GATE, Some(&props));
+        assert_eq!((gate.name, gate.param2), ("mcl_fences:oak_fence_gate", 1));
+        assert_eq!(to_mineclonia_node(OAK_FENCE_GATE, None).param2, 0);
     }
 
     #[test]
