@@ -2191,41 +2191,6 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    /// Fills a cuboid area with the specified block between two coordinates.
-    #[allow(clippy::too_many_arguments)]
-    #[inline]
-    pub fn fill_blocks(
-        &mut self,
-        block: Block,
-        x1: i32,
-        y1: i32,
-        z1: i32,
-        x2: i32,
-        y2: i32,
-        z2: i32,
-        override_whitelist: Option<&[Block]>,
-        override_blacklist: Option<&[Block]>,
-    ) {
-        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-        let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
-        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
-
-        for x in min_x..=max_x {
-            for y_offset in min_y..=max_y {
-                for z in min_z..=max_z {
-                    self.set_block(
-                        block,
-                        x,
-                        y_offset,
-                        z,
-                        override_whitelist,
-                        override_blacklist,
-                    );
-                }
-            }
-        }
-    }
-
     /// Fill a rectangular volume with a block using absolute Y coordinates.
     #[inline]
     #[allow(clippy::too_many_arguments)]

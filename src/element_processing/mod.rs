@@ -28,12 +28,14 @@ pub mod road_markings;
 pub mod rooftops;
 pub mod signage;
 pub mod sport_pitches;
+pub mod street_furniture;
 pub mod subprocessor;
 mod surfaces;
 pub mod tourisms;
 pub mod traffic_lights;
 pub mod tree;
 pub mod water_areas;
+pub mod waterfront;
 pub mod waterways;
 
 use crate::floodfill_cache::RoadMaskBitmap;

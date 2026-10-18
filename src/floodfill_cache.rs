@@ -584,6 +584,11 @@ impl FloodFillCache {
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
             // Historic tomb polygons (e.g. tomb=pyramid)
             || way.tags.get("tomb").map(|v| v == "pyramid").unwrap_or(false)
+            // Pier and breakwater areas -> waterfront
+            || matches!(
+                way.tags.get("man_made").map(String::as_str),
+                Some("pier" | "breakwater" | "groyne")
+            )
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar"))
