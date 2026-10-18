@@ -132,6 +132,15 @@ fn anchor_point(element: &ProcessedElement) -> Option<(i32, i32)> {
     Some(((sx / n) as i32, (sz / n) as i32))
 }
 
+/// Where each `man_made=crane` stands, for construction sites to leave room for.
+pub fn mapped_crane_points(elements: &[ProcessedElement]) -> Vec<(i32, i32)> {
+    elements
+        .iter()
+        .filter(|e| e.tags().get("man_made").map(String::as_str) == Some("crane"))
+        .filter_map(anchor_point)
+        .collect()
+}
+
 /// Top block of the roof at (x, z) when it lies on a building.
 fn roof_top(editor: &WorldEditor, footprints: &CoordinateBitmap, x: i32, z: i32) -> Option<i32> {
     if !footprints.contains(x, z) {
@@ -530,8 +539,9 @@ pub fn drop_doubled_summit_crosses(elements: &mut [ProcessedElement], scale: f64
         if !is_summit_cross(&node.tags) {
             continue;
         }
+        // In floats, so peaks far apart on a big map cannot overflow the square.
         let near = crosses.iter().any(|&(cx, cz)| {
-            f64::from((cx - node.x).pow(2) + (cz - node.z).pow(2)).sqrt() <= reach
+            (f64::from(cx) - f64::from(node.x)).hypot(f64::from(cz) - f64::from(node.z)) <= reach
         });
         if near {
             node.tags.remove("summit:cross");
@@ -1059,6 +1069,28 @@ mod tests {
             );
         }
         assert_eq!(editor.get_block_absolute(20, base, 20), Some(WATER));
+    }
+
+    #[test]
+    fn masts_and_chimneys_wait_for_the_building_parts_they_stand_on() {
+        use crate::osm_parser::get_priority;
+        let part = ProcessedElement::Way(ProcessedWay {
+            id: 1,
+            nodes: Vec::new(),
+            tags: tag_map(&[("building:part", "yes")]),
+        });
+        for kind in ["antenna", "mast", "chimney"] {
+            let feature = ProcessedElement::Node(node(2, 0, 0, &[("man_made", kind)]));
+            assert!(get_priority(&feature) > get_priority(&part), "{kind}");
+        }
+        // A chimney mapped as a building is still drawn with the buildings.
+        let building = ProcessedElement::Node(node(
+            3,
+            0,
+            0,
+            &[("man_made", "chimney"), ("building", "yes")],
+        ));
+        assert!(get_priority(&building) < get_priority(&part));
     }
 
     #[test]

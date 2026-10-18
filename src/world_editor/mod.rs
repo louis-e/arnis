@@ -202,6 +202,8 @@ pub struct WorldEditor<'a> {
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
+    /// Where `man_made=crane` stands, shared via Arc with the tile editors.
+    mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -294,6 +296,7 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             mapped_trunks: None,
+            mapped_cranes: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
@@ -351,6 +354,7 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             mapped_trunks: None,
+            mapped_cranes: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
@@ -408,6 +412,7 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             mapped_trunks: None,
+            mapped_cranes: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
@@ -520,6 +525,16 @@ impl<'a> WorldEditor<'a> {
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
         self.mapped_trunks = None;
+    }
+
+    /// Sets where mapped cranes stand (shared across the main and tile editors).
+    pub fn set_mapped_cranes(&mut self, cranes: Arc<Vec<(i32, i32)>>) {
+        self.mapped_cranes = Some(cranes);
+    }
+
+    /// Where mapped cranes stand, whatever order the elements render in.
+    pub fn mapped_cranes(&self) -> &[(i32, i32)] {
+        self.mapped_cranes.as_deref().map_or(&[], Vec::as_slice)
     }
 
     /// Sets the mapped tree trunks (shared across the main and tile editors).

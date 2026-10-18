@@ -5,7 +5,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::connected_blocks::place_connected;
 use crate::floodfill::flood_fill_area;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{FloodFillCache, FloodFillResult};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::{min_y, WorldEditor};
 use std::collections::{HashMap, HashSet};
@@ -68,10 +68,34 @@ fn line_footprint(way: &ProcessedWay, width: f64) -> Vec<FootCell> {
         let (bx, bz) = (pair[1].x as f64, pair[1].z as f64);
         let (dx, dz) = (bx - ax, bz - az);
         let len2 = (dx * dx + dz * dz).max(1e-9);
-        let (x0, x1) = (ax.min(bx) as i32 - reach, ax.max(bx) as i32 + reach);
-        let (z0, z1) = (az.min(bz) as i32 - reach, az.max(bz) as i32 + reach);
-        for x in x0..=x1 {
-            for z in z0..=z1 {
+        // Walk the long axis and scan only the band across it the width can reach,
+        // so a long diagonal costs its length times its width, not its bounding box.
+        let x_major = dx.abs() >= dz.abs();
+        let (major_a, minor_a, d_major, d_minor) = if x_major {
+            (ax, az, dx, dz)
+        } else {
+            (az, ax, dz, dx)
+        };
+        let major_b = major_a + d_major;
+        let slope = if d_major.abs() > 1e-9 {
+            d_minor / d_major
+        } else {
+            0.0
+        };
+        let band = (half * (1.0 + slope.abs())).ceil() as i32 + 1;
+        let (m0, m1) = (
+            major_a.min(major_b) as i32 - reach,
+            major_a.max(major_b) as i32 + reach,
+        );
+        for m in m0..=m1 {
+            let along = if d_major.abs() > 1e-9 {
+                ((m as f64 - major_a) / d_major).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let centre = (minor_a + along * d_minor).round() as i32;
+            for n in (centre - band)..=(centre + band) {
+                let (x, z) = if x_major { (m, n) } else { (n, m) };
                 let t = (((x as f64 - ax) * dx + (z as f64 - az) * dz) / len2).clamp(0.0, 1.0);
                 let d =
                     ((x as f64 - ax - t * dx).powi(2) + (z as f64 - az - t * dz).powi(2)).sqrt();
@@ -94,6 +118,55 @@ fn line_footprint(way: &ProcessedWay, width: f64) -> Vec<FootCell> {
     cells
 }
 
+/// A ring's outline cells, which the flood fill leaves to the caller.
+fn ring_outline(way: &ProcessedWay) -> impl Iterator<Item = (i32, i32)> + '_ {
+    way.nodes
+        .windows(2)
+        .flat_map(|p| bresenham_line(p[0].x, 0, p[0].z, p[1].x, 0, p[1].z))
+        .map(|(x, _, z)| (x, z))
+}
+
+/// A closed ring's fill with its outline; an aborted fill stays empty instead of an outline.
+fn add_ring(cells: &mut HashSet<(i32, i32)>, way: &ProcessedWay, fill: &[(i32, i32)]) {
+    if !fill.is_empty() {
+        cells.extend(fill.iter().copied());
+        cells.extend(ring_outline(way));
+    }
+}
+
+/// Cells of an area with its outline, or of a relation's outer rings less the inside of
+/// its inner ones; `fill` floods one ring.
+fn area_cells(
+    element: &ProcessedElement,
+    fill: impl Fn(&ProcessedWay) -> FloodFillResult,
+) -> HashSet<(i32, i32)> {
+    let mut inside: HashSet<(i32, i32)> = HashSet::new();
+    match element {
+        ProcessedElement::Way(way) => add_ring(&mut inside, way, &fill(way)),
+        ProcessedElement::Relation(rel) => {
+            for member in rel
+                .members
+                .iter()
+                .filter(|m| m.role == ProcessedMemberRole::Outer)
+            {
+                add_ring(&mut inside, &member.way, &fill(&member.way));
+            }
+            // The hole's own outline stays deck, as the edge around it.
+            for member in rel
+                .members
+                .iter()
+                .filter(|m| m.role == ProcessedMemberRole::Inner)
+            {
+                for cell in fill(&member.way).iter() {
+                    inside.remove(cell);
+                }
+            }
+        }
+        ProcessedElement::Node(_) => {}
+    }
+    inside
+}
+
 /// Filled cells of an area, or of a relation's outer rings less its inner ones.
 fn area_footprint(
     element: &ProcessedElement,
@@ -101,29 +174,7 @@ fn area_footprint(
     args: &Args,
 ) -> Vec<FootCell> {
     let timeout = args.timeout.as_ref();
-    let mut inside: HashSet<(i32, i32)> = HashSet::new();
-    match element {
-        ProcessedElement::Way(way) => inside.extend(cache.get_or_compute(way, timeout).iter()),
-        ProcessedElement::Relation(rel) => {
-            for member in rel
-                .members
-                .iter()
-                .filter(|m| m.role == ProcessedMemberRole::Outer)
-            {
-                inside.extend(cache.get_or_compute(&member.way, timeout).iter());
-            }
-            for member in rel
-                .members
-                .iter()
-                .filter(|m| m.role == ProcessedMemberRole::Inner)
-            {
-                for cell in cache.get_or_compute(&member.way, timeout).iter() {
-                    inside.remove(cell);
-                }
-            }
-        }
-        ProcessedElement::Node(_) => {}
-    }
+    let inside = area_cells(element, |way| cache.get_or_compute(way, timeout));
     let mut cells: Vec<FootCell> = inside
         .iter()
         .map(|&(x, z)| FootCell {
@@ -295,7 +346,16 @@ pub fn generate_pier(
                 edge_piles.push(cell);
             }
         } else {
-            edge_piles.push((sx.round() as i32, sz.round() as i32));
+            // Onto the nearest edge cell, as a sampled point can round just off the outline.
+            let (x, z) = (sx.round() as i32, sz.round() as i32);
+            let on_edge = |c: &(i32, i32)| footprint.get(c).is_some_and(|&(edge, _)| edge);
+            let snapped = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|(dx, dz)| (x + dx, z + dz))
+                .find(on_edge);
+            if let Some(cell) = snapped {
+                edge_piles.push(cell);
+            }
         }
     }
     edge_piles.dedup();
@@ -355,9 +415,10 @@ pub fn generate_pier(
     for (c, &ground) in cells.iter().zip(&grounds) {
         let y = deck_at(ground);
         // Open where the pier meets the land.
-        let at_land_end = land_ends
-            .iter()
-            .any(|&(x, z)| ((c.x - x).pow(2) + (c.z - z).pow(2)) as f64 <= gate);
+        let at_land_end = land_ends.iter().any(|&(x, z)| {
+            let (dx, dz) = (i64::from(c.x - x), i64::from(c.z - z));
+            (dx * dx + dz * dz) as f64 <= gate
+        });
         if !c.edge || y - ground < 2 || at_land_end {
             continue;
         }
@@ -401,31 +462,25 @@ pub fn drop_paths_on_piers(
     timeout: Option<&Duration>,
 ) -> usize {
     let mut deck: HashSet<(i32, i32)> = HashSet::new();
-    let ring =
-        |way: &ProcessedWay| -> Vec<(i32, i32)> { way.nodes.iter().map(|n| (n.x, n.z)).collect() };
+    let fill = |way: &ProcessedWay| -> FloodFillResult {
+        let ring: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+        std::sync::Arc::new(flood_fill_area(&ring, timeout))
+    };
     for element in elements.iter() {
         if tag(element.tags(), "man_made") != Some("pier") {
             continue;
         }
         match element {
-            ProcessedElement::Way(way) if way.nodes.len() >= 2 => {
-                if is_area(way) {
-                    deck.extend(flood_fill_area(&ring(way), timeout));
-                } else {
-                    let width = width_blocks(&way.tags, PIER_WIDTH_M, scale);
-                    deck.extend(line_footprint(way, width).iter().map(|c| (c.x, c.z)));
-                }
+            ProcessedElement::Way(way) if way.nodes.len() < 2 => {}
+            ProcessedElement::Way(way) if !is_area(way) => {
+                let width = width_blocks(&way.tags, PIER_WIDTH_M, scale);
+                deck.extend(line_footprint(way, width).iter().map(|c| (c.x, c.z)));
             }
-            ProcessedElement::Relation(rel) => {
-                for m in rel
-                    .members
-                    .iter()
-                    .filter(|m| m.role == ProcessedMemberRole::Outer)
-                {
-                    deck.extend(flood_fill_area(&ring(&m.way), timeout));
-                }
+            // Each pier's holes come off its own cells, never off another pier's deck.
+            ProcessedElement::Way(_) | ProcessedElement::Relation(_) => {
+                deck.extend(area_cells(element, fill));
             }
-            _ => {}
+            ProcessedElement::Node(_) => {}
         }
     }
     if deck.is_empty() {
@@ -511,9 +566,9 @@ pub fn generate_breakwater(
     };
     for (c, &ground) in cells.iter().zip(&grounds) {
         if wooden {
-            // Weathered piles of uneven height.
-            let uneven = i32::from((c.x + c.z).rem_euclid(3) == 0);
-            drive_pile(editor, c.x, c.z, base + rise.max(1) + uneven, SPRUCE_LOG);
+            // Weathered piles of uneven height; submerged ones stop at the waterline.
+            let uneven = i32::from(rise > 0 && (c.x + c.z).rem_euclid(3) == 0);
+            drive_pile(editor, c.x, c.z, base + rise + uneven, SPRUCE_LOG);
             continue;
         }
         // The crown stands a row above the flanks.
@@ -715,6 +770,134 @@ mod tests {
         );
         assert!(is(&editor, 30, -3, 50, &[SPRUCE_LOG]), "pile into the bed");
         assert!(!is(&editor, 30, 1, 51, &[SPRUCE_LOG]), "one pile wide");
+    }
+
+    #[test]
+    fn a_submerged_wooden_groyne_stops_at_the_waterline() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let mut editor = editor(&xzbbox);
+        carved_lake(&mut editor);
+        let groyne = way(
+            1,
+            &[
+                ("man_made", "groyne"),
+                ("material", "wood"),
+                ("submerged", "yes"),
+            ],
+            &[(20, 50), (40, 50)],
+        );
+        generate_breakwater(
+            &mut editor,
+            &ProcessedElement::Way(groyne),
+            &FloodFillCache::new(),
+            &args(),
+        );
+
+        assert!(is(&editor, 30, -3, 50, &[SPRUCE_LOG]), "piles are there");
+        assert!(
+            !(20..=40).any(|x| (1..=3).any(|y| is(&editor, x, y, 50, &[SPRUCE_LOG]))),
+            "none stands above the water"
+        );
+    }
+
+    #[test]
+    fn an_area_pier_reaches_its_outline_and_stands_on_edge_piles() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let mut editor = editor(&xzbbox);
+        carved_lake(&mut editor);
+        let pier = way(
+            1,
+            &[("man_made", "pier")],
+            &[(20, 40), (40, 40), (40, 50), (20, 50), (20, 40)],
+        );
+        generate_pier(
+            &mut editor,
+            &ProcessedElement::Way(pier),
+            &FloodFillCache::new(),
+            &args(),
+        );
+
+        let deck = |x: i32, z: i32| (1..=4).any(|y| is(&editor, x, y, z, &[SPRUCE_PLANKS]));
+        assert!(
+            deck(30, 40) && deck(20, 45) && deck(40, 45),
+            "deck on the outline"
+        );
+        assert!(!deck(30, 39), "and not past it");
+        let piles = (20..=40)
+            .filter(|&x| is(&editor, x, -3, 40, &[SPRUCE_LOG]))
+            .count();
+        assert!(piles >= 3, "piles along the edge, found {piles}");
+    }
+
+    #[test]
+    fn the_corridor_scan_finds_the_same_cells_as_a_full_scan() {
+        for (a, b, width) in [
+            ((0, 0), (37, 11), 3.0),
+            ((5, 40), (19, -3), 5.0),
+            ((0, 0), (0, 25), 4.0),
+            ((3, 3), (3, 3), 3.0),
+            ((-10, 7), (30, 47), 2.0),
+        ] {
+            let line = way(1, &[], &[a, b]);
+            let got: HashSet<(i32, i32)> = line_footprint(&line, width)
+                .iter()
+                .map(|c| (c.x, c.z))
+                .collect();
+            let half = width / 2.0;
+            let (ax, az, bx, bz) = (a.0 as f64, a.1 as f64, b.0 as f64, b.1 as f64);
+            let (dx, dz) = (bx - ax, bz - az);
+            let len2 = (dx * dx + dz * dz).max(1e-9);
+            let mut want = HashSet::new();
+            for x in a.0.min(b.0) - 5..=a.0.max(b.0) + 5 {
+                for z in a.1.min(b.1) - 5..=a.1.max(b.1) + 5 {
+                    let t = (((x as f64 - ax) * dx + (z as f64 - az) * dz) / len2).clamp(0.0, 1.0);
+                    let d = ((x as f64 - ax - t * dx).powi(2) + (z as f64 - az - t * dz).powi(2))
+                        .sqrt();
+                    if d <= half {
+                        want.insert((x, z));
+                    }
+                }
+            }
+            assert_eq!(got, want, "segment {a:?} to {b:?}, width {width}");
+        }
+    }
+
+    #[test]
+    fn a_path_through_a_pier_hole_is_kept() {
+        let ring = |id: u64, (x0, z0): (i32, i32), (x1, z1): (i32, i32)| {
+            Arc::new(way(
+                id,
+                &[],
+                &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)],
+            ))
+        };
+        let pier = crate::osm_parser::ProcessedRelation {
+            id: 9,
+            tags: [("man_made", "pier"), ("type", "multipolygon")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            members: vec![
+                crate::osm_parser::ProcessedMember {
+                    role: ProcessedMemberRole::Outer,
+                    way: ring(1, (10, 10), (60, 60)),
+                },
+                crate::osm_parser::ProcessedMember {
+                    role: ProcessedMemberRole::Inner,
+                    way: ring(2, (20, 20), (50, 50)),
+                },
+            ],
+        };
+        let in_hole = way(3, &[("highway", "footway")], &[(25, 35), (45, 35)]);
+        let on_deck = way(4, &[("highway", "footway")], &[(12, 15), (58, 15)]);
+        let mut elements = vec![
+            ProcessedElement::Relation(pier),
+            ProcessedElement::Way(in_hole),
+            ProcessedElement::Way(on_deck),
+        ];
+        assert_eq!(drop_paths_on_piers(&mut elements, 1.0, None), 1);
+        let ids: Vec<u64> = elements.iter().map(|e| e.id()).collect();
+        assert_eq!(ids, vec![9, 3]);
     }
 
     #[test]

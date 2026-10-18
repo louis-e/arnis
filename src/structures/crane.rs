@@ -16,8 +16,6 @@ static CRANE_BYTES: &[u8] = include_bytes!("../../assets/structures/crane.schem"
 const CRANE_MIN_CELLS: usize = 1500;
 /// Chance (percent) that a large-enough site actually gets a crane.
 const CRANE_SPAWN_PERCENT: u64 = 60;
-/// Height above the ground where a block means a crane already stands on the site.
-const CRANE_STANDING_PROBE: i32 = 50;
 /// How far out a mapped crane looks for water to swing its jib over.
 const CRANE_WATER_REACH: i32 = 40;
 /// Crane types the tower crane model does not fit.
@@ -67,10 +65,7 @@ pub fn maybe_place_crane(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
     if editor.is_lc_water(ax, az) {
         return;
     }
-    // A mapped crane on the site was stamped first, nodes sorting ahead of the landuse.
-    if cells.iter().step_by(3).any(|&(x, z)| {
-        editor.block_exists_absolute(x, editor.get_absolute_y(x, CRANE_STANDING_PROBE, z), z)
-    }) {
+    if site_has_mapped_crane(editor.mapped_cranes(), cells) {
         return;
     }
     // Not every site gets one; random facing, seeded by anchor for tile-seam determinism.
@@ -81,6 +76,22 @@ pub fn maybe_place_crane(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
     let rot = ((h >> 8) & 3) as u8;
     let base_y = editor.get_absolute_y(ax, 1, az);
     place_structure(editor, schem, ax, az, base_y, rot, None);
+}
+
+/// Whether a mapped crane stands on the site, which then gets no crane of its own.
+fn site_has_mapped_crane(cranes: &[(i32, i32)], cells: &[(i32, i32)]) -> bool {
+    let (Some(min_x), Some(max_x), Some(min_z), Some(max_z)) = (
+        cells.iter().map(|c| c.0).min(),
+        cells.iter().map(|c| c.0).max(),
+        cells.iter().map(|c| c.1).min(),
+        cells.iter().map(|c| c.1).max(),
+    ) else {
+        return false;
+    };
+    cranes
+        .iter()
+        .filter(|&&(x, z)| (min_x..=max_x).contains(&x) && (min_z..=max_z).contains(&z))
+        .any(|crane| cells.contains(crane))
 }
 
 /// Unit step from the mast toward the jib tip once the model is turned `rot` quarters.
@@ -187,6 +198,14 @@ mod tests {
         }
         assert_eq!(jib_direction(c, quarter_for_bearing(c, 90.0)), (1, 0));
         assert_eq!(jib_direction(c, quarter_for_bearing(c, 180.0)), (0, 1));
+    }
+
+    #[test]
+    fn a_site_with_a_mapped_crane_on_it_gets_none_of_its_own() {
+        let site: Vec<(i32, i32)> = (0..40).flat_map(|x| (0..40).map(move |z| (x, z))).collect();
+        assert!(site_has_mapped_crane(&[(100, 100), (20, 20)], &site));
+        assert!(!site_has_mapped_crane(&[(100, 100), (45, 20)], &site));
+        assert!(!site_has_mapped_crane(&[], &site));
     }
 
     #[test]

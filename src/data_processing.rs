@@ -1006,6 +1006,9 @@ pub fn generate_world_with_options(
     mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
     let mapped_trunks = Arc::new(mapped_trunks);
     editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+    // Indexed up front, so a construction site skips its own crane whichever renders first.
+    let mapped_cranes = Arc::new(man_made::mapped_crane_points(&elements));
+    editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
 
     let traffic_signals =
         (extras.traffic_lights && world_format == WorldFormat::JavaAnvil).then(|| {
@@ -1319,6 +1322,7 @@ pub fn generate_world_with_options(
             }
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+            tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
             }
