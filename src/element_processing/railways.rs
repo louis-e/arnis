@@ -566,7 +566,7 @@ enum RailDeckSide {
     Open,
     /// Another track's deck close in height, decked over up to this far from the track.
     Joined(f32),
-    /// Another deck right alongside at another height, or a road deck: no railing.
+    /// A road deck alongside: no railing.
     Closed,
 }
 
@@ -605,9 +605,6 @@ fn probe_rail_deck_side(
         // Ramps out of step: each deck takes its half of the gap.
         if (other_y - y).abs() <= RAIL_DECK_MAX_STEP {
             return RailDeckSide::Joined(dist / 2.0 + 0.25);
-        }
-        if dist <= (2 * half + 1) as f32 {
-            return RailDeckSide::Closed;
         }
         break;
     }
@@ -678,6 +675,88 @@ fn rail_deck_cells(
         .collect();
     cells.sort_unstable();
     cells
+}
+
+/// Where a rail deck's columns go, shared by the renderer and the prescan footprint.
+struct RailDeckLayout {
+    perps: Vec<(f32, f32)>,
+    sides: Vec<[RailDeckSide; 2]>,
+    /// Curb cells per centerline cell and open side, stair-stepped from the previous ones.
+    curbs: Vec<[Vec<(i32, i32)>; 2]>,
+    /// Ballast and gap cells with the centerline cell whose Y they take.
+    ballast: Vec<((i32, i32), usize)>,
+}
+
+fn rail_deck_layout(
+    surface: &BridgeSurfaceMap,
+    way_id: u64,
+    points: &[(i32, i32)],
+    ys: &[i32],
+) -> RailDeckLayout {
+    let perps: Vec<(f32, f32)> = (0..points.len())
+        .map(|i| centerline_perp(points, i))
+        .collect();
+    let sides: Vec<[RailDeckSide; 2]> = (0..points.len())
+        .map(|i| {
+            let (px, pz) = perps[i];
+            [(px, pz), (-px, -pz)]
+                .map(|out| probe_rail_deck_side(surface, way_id, points[i], ys[i], out))
+        })
+        .collect();
+    let mut prev: [Option<(i32, i32)>; 2] = [None, None];
+    let curbs = (0..points.len())
+        .map(|i| {
+            let (bx, bz) = points[i];
+            let (px, pz) = perps[i];
+            let edge_dist = (RAIL_DECK_HALF_WIDTH - 1) as f32 * (px.abs() + pz.abs()) + 1.0;
+            [(0, 1.0f32), (1, -1.0)].map(|(s, sign)| {
+                if sides[i][s] != RailDeckSide::Open {
+                    prev[s] = None;
+                    return Vec::new();
+                }
+                let cell = (
+                    (bx as f32 + px * sign * edge_dist).round() as i32,
+                    (bz as f32 + pz * sign * edge_dist).round() as i32,
+                );
+                let run = match prev[s] {
+                    Some(p) if p != cell => stair_steps(p, cell),
+                    _ => vec![cell],
+                };
+                prev[s] = Some(cell);
+                run
+            })
+        })
+        .collect();
+    let ballast = rail_deck_cells(points, &perps, &sides);
+    RailDeckLayout {
+        perps,
+        sides,
+        curbs,
+        ballast,
+    }
+}
+
+/// Every column of a rail bridge's own deck with its deck Y, as the renderer lays it.
+pub(crate) fn rail_deck_footprint(
+    surface: &BridgeSurfaceMap,
+    way: &ProcessedWay,
+    ys: &[i32],
+) -> Vec<((i32, i32), i32)> {
+    let mut points = build_smoothed_centerline(way);
+    points.truncate(ys.len());
+    let layout = rail_deck_layout(surface, way.id, &points, ys);
+    let curbs = layout
+        .curbs
+        .iter()
+        .enumerate()
+        .flat_map(|(i, sides)| sides.iter().flatten().map(move |&c| (c, ys[i])));
+    points
+        .iter()
+        .zip(ys.iter().copied())
+        .map(|(&c, y)| (c, y))
+        .chain(curbs)
+        .chain(layout.ballast.iter().map(|&(c, i)| (c, ys[i])))
+        .collect()
 }
 
 /// Deck slab and surface at `y`; low enough over the terrain, solid masonry underneath.
@@ -751,14 +830,8 @@ fn generate_rail_bridge(
     let total = all_points.len().min(deck.ys.len());
     let points = &all_points[..total];
     let ys = &deck.ys[..total];
-    let perps: Vec<(f32, f32)> = (0..total).map(|i| centerline_perp(points, i)).collect();
-    let sides: Vec<[RailDeckSide; 2]> = (0..total)
-        .map(|i| {
-            let (px, pz) = perps[i];
-            [(px, pz), (-px, -pz)]
-                .map(|out| probe_rail_deck_side(bridge_surface, way.id, points[i], ys[i], out))
-        })
-        .collect();
+    let layout = rail_deck_layout(bridge_surface, way.id, points, ys);
+    let (perps, sides) = (&layout.perps, &layout.sides);
     let slab = style.foundation_block();
     // Every deck column with its centerline index, for the arch pass.
     let mut deck_cells: Vec<((i32, i32), usize)> = Vec::new();
@@ -783,7 +856,7 @@ fn generate_rail_bridge(
     }
 
     if catenary_wanted(way) {
-        place_bridge_catenary(editor, points, ys, &perps, &sides);
+        place_bridge_catenary(editor, points, ys, perps, sides);
     }
 
     let open_share = |s: usize| {
@@ -808,35 +881,20 @@ fn generate_rail_bridge(
 
     // Curbs and railings on the open sides, stepped so the railing stays joined.
     let (curb, railing) = rail_deck_edge(style);
-    let other_track = |x: i32, z: i32| {
+    // Another track whose bed or rail a deck column at `y` would cut through.
+    let other_track = |x: i32, z: i32, y: i32| {
         bridge_surface
             .rail_track_at(x, z)
-            .is_some_and(|(id, _)| id != way.id)
+            .is_some_and(|(id, other_y)| id != way.id && (y - 3..=y + 2).contains(&other_y))
     };
-    let mut runs: [Option<(i32, i32)>; 2] = [None, None];
     let mut prev_tops: [Option<((i32, i32), i32)>; 2] = [None, None];
-    for i in 0..total {
-        let (bx, bz) = points[i];
-        let y = ys[i];
-        let (px, pz) = perps[i];
-        let edge_dist = (RAIL_DECK_HALF_WIDTH - 1) as f32 * (px.abs() + pz.abs()) + 1.0;
-        for (s, sign) in [(0, 1.0f32), (1, -1.0)] {
-            if sides[i][s] != RailDeckSide::Open {
-                runs[s] = None;
+    for (i, (&y, curbs)) in ys.iter().zip(&layout.curbs).enumerate() {
+        for (s, run) in curbs.iter().enumerate() {
+            if run.is_empty() {
                 prev_tops[s] = None;
-                continue;
             }
-            let cell = (
-                (bx as f32 + px * sign * edge_dist).round() as i32,
-                (bz as f32 + pz * sign * edge_dist).round() as i32,
-            );
-            let run = match runs[s] {
-                Some(prev) if prev != cell => stair_steps(prev, cell),
-                _ => vec![cell],
-            };
-            runs[s] = Some(cell);
-            for (cx, cz) in run {
-                if other_track(cx, cz) {
+            for &(cx, cz) in run {
+                if other_track(cx, cz, y) {
                     continue;
                 }
                 let ground = editor.get_ground_level(cx, cz);
@@ -876,8 +934,8 @@ fn generate_rail_bridge(
     } else {
         GRAVEL
     };
-    for ((cx, cz), i) in rail_deck_cells(points, &perps, &sides) {
-        if other_track(cx, cz) {
+    for &((cx, cz), i) in &layout.ballast {
+        if other_track(cx, cz, ys[i]) {
             continue;
         }
         lay_rail_deck_column(editor, bridge_surface, (cx, cz), ys[i], slab, ballast);
@@ -1788,6 +1846,60 @@ mod tests {
         }
         assert!(at(&editor, deck + 1, 48, &[IRON_BARS]), "outer railing");
         assert!(at(&editor, deck + 1, 59, &[IRON_BARS]), "outer railing");
+    }
+
+    fn rail_bridge_between(id: u64, a: (i32, i32), b: (i32, i32), layer: &str) -> ProcessedWay {
+        let mut way = rail_bridge(id, a.1);
+        way.tags.insert("layer".to_string(), layer.to_string());
+        way.nodes[0].x = a.0;
+        way.nodes[1].x = b.0;
+        way.nodes[1].z = b.1;
+        way
+    }
+
+    #[test]
+    fn rail_decks_far_apart_in_height_keep_their_railings() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let low = rail_bridge_between(1, (20, 50), (60, 50), "1");
+        let high = rail_bridge_between(2, (20, 54), (60, 54), "3");
+        render_rail_bridges(&mut editor, &[low, high]);
+
+        let low_y = RAIL_BRIDGE_FLAT_CLEARANCE;
+        let high_y = low_y + 2 * 6;
+        for y in [low_y, high_y] {
+            assert!(
+                editor.check_for_block_absolute(41, y + 1, 52, Some(&[IRON_BARS]), None),
+                "facing railing at y={y}"
+            );
+        }
+    }
+
+    #[test]
+    fn upper_rail_deck_stays_whole_over_a_lower_track() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let low = rail_bridge_between(1, (20, 50), (60, 50), "1");
+        let high = rail_bridge_between(2, (40, 20), (40, 80), "3");
+        render_rail_bridges(&mut editor, &[low, high]);
+
+        let high_y = RAIL_BRIDGE_FLAT_CLEARANCE + 2 * 6;
+        for x in [39, 41] {
+            assert!(
+                editor.check_for_block_absolute(x, high_y, 50, Some(&[GRAVEL]), None),
+                "upper ballast over the lower track at x={x}"
+            );
+        }
+        assert!(
+            editor.check_for_block_absolute(
+                39,
+                RAIL_BRIDGE_FLAT_CLEARANCE + 1,
+                50,
+                Some(&[RAIL_EAST_WEST]),
+                None
+            ),
+            "lower track keeps its rail"
+        );
     }
 
     #[test]
