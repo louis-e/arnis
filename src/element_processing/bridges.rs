@@ -1276,6 +1276,10 @@ impl BridgeSurfaceMap {
         self.cells.contains_key(&(x, z))
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
     /// True when a deck over (x, z) lies within `tolerance` of `y`.
     pub fn deck_near(&self, x: i32, z: i32, y: i32, tolerance: i32) -> bool {
         self.cells

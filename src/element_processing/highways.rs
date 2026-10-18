@@ -2497,7 +2497,7 @@ fn runway_centerline_dash_on(s: f32, scale: f64) -> bool {
 
 /// Parses an OSM `width=*` value in metres (tolerates a trailing "m").
 // Parse an OSM width=* tag in metres, tolerating a trailing "m"/" m".
-fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
+pub(crate) fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
     let raw = tags.get("width")?;
     let s = raw.trim().trim_end_matches('m').trim();
     s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
@@ -3117,21 +3117,65 @@ pub fn collect_carriageway_coords(
     xzbbox: &XZBBox,
     scale: f64,
 ) -> CoordinateBitmap {
-    collect_highway_surface_coords(elements, None, xzbbox, scale, |highway| {
-        !matches!(
-            highway,
-            "footway"
-                | "path"
-                | "steps"
-                | "pedestrian"
-                | "cycleway"
-                | "bridleway"
-                | "corridor"
-                | "track"
-                | "elevator"
-                | "platform"
-        )
-    })
+    collect_highway_surface_coords(elements, None, xzbbox, scale, is_carriageway)
+}
+
+/// True for highway types that carry vehicles rather than people on foot, bike or horse.
+pub(crate) fn is_carriageway(highway_type: &str) -> bool {
+    !matches!(
+        highway_type,
+        "footway"
+            | "path"
+            | "steps"
+            | "pedestrian"
+            | "cycleway"
+            | "bridleway"
+            | "corridor"
+            | "track"
+            | "elevator"
+            | "platform"
+    )
+}
+
+/// The type of a highway way the renderer stamps as a surface; tunnels still need
+/// `tunnel_renders_at_surface`.
+pub(crate) fn surface_highway_type(way: &ProcessedWay) -> Option<&str> {
+    let highway_type = way.tags.get("highway")?.as_str();
+    // Node-only types have no surface.
+    if matches!(highway_type, "street_lamp" | "crossing" | "bus_stop") {
+        return None;
+    }
+    // Area highways (pedestrian plazas etc.) are flood-filled separately.
+    if way.tags.get("area").is_some_and(|v| v == "yes") {
+        return None;
+    }
+    // Same indoor guard as generate_highways_internal.
+    if way.tags.get("indoor").is_some_and(|v| v == "yes") {
+        return None;
+    }
+    // Jet bridges render as a schematic, so the apron under them is not road.
+    if way.tags.get("aeroway").is_some_and(|v| v == "jet_bridge") {
+        return None;
+    }
+    // Negative levels are indoor mapping.
+    if way
+        .tags
+        .get("level")
+        .and_then(|l| l.parse::<i32>().ok())
+        .is_some_and(|l| l < 0)
+    {
+        return None;
+    }
+    Some(highway_type)
+}
+
+/// Tunnels render underground, unless there is no room to bore one.
+pub(crate) fn tunnel_renders_at_surface(
+    way: &ProcessedWay,
+    editor: Option<&WorldEditor>,
+    scale: f64,
+) -> bool {
+    !renders_as_highway_tunnel(way) || editor.is_some_and(|e| !tunnel_bore_fits(e, way, scale))
 }
 
 /// Shared stamping loop for the road-surface bitmaps; `include` filters by highway type.
@@ -3149,47 +3193,10 @@ fn collect_highway_surface_coords(
             continue;
         };
 
-        let Some(highway_type) = way.tags.get("highway") else {
+        let Some(highway_type) = surface_highway_type(way) else {
             continue;
         };
-
-        // Exclude non-surface node-only highway types
-        match highway_type.as_str() {
-            "street_lamp" | "crossing" | "bus_stop" => continue,
-            _ => {}
-        }
-        if !include(highway_type) {
-            continue;
-        }
-
-        // Exclude area highways (pedestrian plazas etc.) — flood-filled separately
-        if way.tags.get("area").is_some_and(|v| v == "yes") {
-            continue;
-        }
-
-        // Exclude indoor ways (same guard as generate_highways_internal)
-        if way.tags.get("indoor").is_some_and(|v| v == "yes") {
-            continue;
-        }
-
-        // Jet bridges render as a schematic, so the apron under them is not road.
-        if way.tags.get("aeroway").is_some_and(|v| v == "jet_bridge") {
-            continue;
-        }
-
-        // Exclude negative-level ways (indoor mapping)
-        if way
-            .tags
-            .get("level")
-            .and_then(|l| l.parse::<i32>().ok())
-            .is_some_and(|l| l < 0)
-        {
-            continue;
-        }
-
-        // Tunnels render underground, unless there is no room to bore one.
-        if renders_as_highway_tunnel(way) && editor.is_none_or(|e| tunnel_bore_fits(e, way, scale))
-        {
+        if !include(highway_type) || !tunnel_renders_at_surface(way, editor, scale) {
             continue;
         }
 

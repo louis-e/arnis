@@ -299,6 +299,7 @@ fn process_element(
     group_members: &FnvHashMap<u64, Vec<u64>>,
     still_surfaces: &water_areas::StillWaterSurfaces,
     interior_uses: &InteriorUseIndex,
+    barrier_clearance: &barriers::RoadClearance,
 ) {
     let signage = editor.signage_enabled();
     match element {
@@ -392,7 +393,13 @@ fn process_element(
                     bridge_surface,
                 );
             } else if way.tags.contains_key("barrier") {
-                barriers::generate_barriers(editor, element, bridge_surface);
+                barriers::generate_barriers(
+                    editor,
+                    element,
+                    bridge_surface,
+                    barrier_clearance,
+                    building_footprints,
+                );
             } else if let Some(val) = way.tags.get("waterway") {
                 if val == "dock" || val == "riverbank" {
                     // docks and (legacy) riverbank areas count as water areas
@@ -959,6 +966,8 @@ pub fn generate_world_with_options(
     let road_mask = Arc::new(highways::collect_road_surface_coords(
         &elements, &editor, &xzbbox, args.scale,
     ));
+    let barrier_clearance =
+        barriers::RoadClearance::build(&elements, &editor, args.scale, Arc::clone(&road_mask));
 
     // Roads plus every paved area footprint, resolved before anything is placed so
     // vegetation passes can tell a man-made surface from natural ground. With no
@@ -1345,6 +1354,7 @@ pub fn generate_world_with_options(
                     &group_members,
                     &still_surfaces,
                     &interior_uses,
+                    &barrier_clearance,
                 );
             }
 
@@ -1719,6 +1729,7 @@ pub fn generate_world_with_options(
                 &group_members,
                 &still_surfaces,
                 &interior_uses,
+                &barrier_clearance,
             );
 
             // Release flood fill cache entries for memory optimization.
