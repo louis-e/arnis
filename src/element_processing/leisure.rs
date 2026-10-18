@@ -164,8 +164,12 @@ pub fn generate_leisure(
             }
 
             if leisure_type == "pitch" {
-                // Clear park/ground vegetation scattered onto the pitch before marking.
+                // Clear park/ground vegetation scattered onto the pitch before marking,
+                // but not the hedge around it.
                 for &(x, z) in filled_area.iter() {
+                    if editor.is_hedge(x, z) {
+                        continue;
+                    }
                     editor.set_block(
                         AIR,
                         x,

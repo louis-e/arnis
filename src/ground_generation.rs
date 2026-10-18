@@ -1430,7 +1430,15 @@ pub fn generate_ground_region(
                         ]),
                         None,
                     );
-                    if editor.check_for_block_absolute(x, ground_y + 1, z, Some(LOOSE_PLANTS), None)
+                    // A hedge on the paving is a barrier, not a stray bush.
+                    if !editor.is_hedge(x, z)
+                        && editor.check_for_block_absolute(
+                            x,
+                            ground_y + 1,
+                            z,
+                            Some(LOOSE_PLANTS),
+                            None,
+                        )
                         && (stray_surface
                             || editor.check_for_block_absolute(
                                 x,

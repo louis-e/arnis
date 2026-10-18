@@ -215,6 +215,8 @@ pub struct WorldEditor<'a> {
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
     /// Bridge pier columns and their material, extended to the bed by the water carve.
     support_columns: FnvHashMap<(i32, i32), Block>,
+    /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
+    hedge_columns: FnvHashSet<(i32, i32)>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -295,6 +297,7 @@ impl<'a> WorldEditor<'a> {
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
+            hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -351,6 +354,7 @@ impl<'a> WorldEditor<'a> {
             format,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
+            hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -407,6 +411,7 @@ impl<'a> WorldEditor<'a> {
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             support_columns: FnvHashMap::default(),
+            hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -1282,6 +1287,18 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_support_column(&mut self, x: i32, z: i32, block: Block) {
         self.support_columns.insert((x, z), block);
+    }
+
+    /// Record a hedge standing at (x, z).
+    #[inline]
+    pub fn register_hedge(&mut self, x: i32, z: i32) {
+        self.hedge_columns.insert((x, z));
+    }
+
+    /// Whether a hedge stands at (x, z).
+    #[inline]
+    pub fn is_hedge(&self, x: i32, z: i32) -> bool {
+        !self.hedge_columns.is_empty() && self.hedge_columns.contains(&(x, z))
     }
 
     /// Material of the support column standing at (x, z), if any.
