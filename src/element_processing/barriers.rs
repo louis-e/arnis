@@ -2,7 +2,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::bridges::{is_bridge_way, BridgeSurfaceMap};
 use crate::element_processing::connected_blocks::{
-    four_connected_line, is_connectable, place_connected, place_gate, stair_steps,
+    four_connected_line, is_connectable, place_connected, place_gate,
 };
 use crate::element_processing::highways::{
     highway_block_range, is_carriageway, parse_width_tag_m, surface_highway_type,
@@ -134,8 +134,34 @@ pub fn generate_barriers(
     let hedge = material == OAK_LEAVES;
 
     // A floating part is off the street, so it keeps its mapped line.
-    let roads = (lift == 0).then_some((clearance, building_footprints));
-    let runs = lay_out(way, &style, joined, roads, scale);
+    let grounded = lift == 0;
+    let trace = trace(way, scale, grounded);
+    let spots: Vec<Spot> = if grounded {
+        // Stretches on a bridge deck stay clear of the roads underneath.
+        let deck = deck_cells(editor, bridge_surface, &trace.cells);
+        trace
+            .cells
+            .iter()
+            .zip(&trace.dirs)
+            .zip(deck)
+            .map(|((&(x, z), &dir), on_deck)| {
+                if on_deck {
+                    Spot::Post(x, z)
+                } else {
+                    clearance.place(x, z, dir, style.crosses_roads, building_footprints)
+                }
+            })
+            .collect()
+    } else {
+        trace.cells.iter().map(|&(x, z)| Spot::Post(x, z)).collect()
+    };
+    // Links between posts keep out of buildings and off the road they cleared.
+    let cost = |x: i32, z: i32| match grounded {
+        true if building_footprints.contains(x, z) => 2,
+        true if !style.crosses_roads && clearance.on_road(x, z) => 1,
+        _ => 0,
+    };
+    let runs = lay_out(&trace, spots, style.spaced, joined, cost);
     // A floating part keeps one level, measured from the structure's lowest footing.
     let low = (lift > 0)
         .then(|| {
@@ -250,23 +276,23 @@ fn node_role(node: &ProcessedNode, scale: f64) -> Option<(NodeRole, usize)> {
     Some((role, width))
 }
 
-/// The runs of posts a barrier way is drawn as: moved off roads it was drawn beside,
-/// open where it crosses one, with its gates and openings. `roads` is None for a
-/// barrier that keeps its mapped line.
-fn lay_out(
-    way: &ProcessedWay,
-    style: &Style,
-    joined: bool,
-    roads: Option<(&RoadClearance, &CoordinateBitmap)>,
-    scale: f64,
-) -> Vec<Vec<Post>> {
-    let mut traced: Vec<(i32, i32)> = Vec::new();
-    let mut dirs: Vec<(f32, f32)> = Vec::new();
-    let mut spots: Vec<Spot> = Vec::new();
-    let mut marks: Vec<(usize, NodeRole, usize)> = Vec::new();
-    let mut mark = |node: &ProcessedNode, at: usize| {
+/// A barrier way traced cell by cell, with each cell's heading and the gates and
+/// openings mapped on its nodes.
+struct Trace {
+    cells: Vec<(i32, i32)>,
+    dirs: Vec<(f32, f32)>,
+    marks: Vec<(usize, NodeRole, usize)>,
+}
+
+fn trace(way: &ProcessedWay, scale: f64, with_marks: bool) -> Trace {
+    let mut trace = Trace {
+        cells: Vec::new(),
+        dirs: Vec::new(),
+        marks: Vec::new(),
+    };
+    let mark = |marks: &mut Vec<_>, node: &ProcessedNode, at: usize| {
         // A bollard node on a line of bollards is just one of them.
-        if roads.is_some() && node.tags.get("barrier") != way.tags.get("barrier") {
+        if with_marks && node.tags.get("barrier") != way.tags.get("barrier") {
             if let Some((role, width)) = node_role(node, scale) {
                 marks.push((at, role, width));
             }
@@ -286,26 +312,33 @@ fn lay_out(
             .into_iter()
             .enumerate()
         {
-            if traced.last() != Some(&(x, z)) {
-                traced.push((x, z));
-                dirs.push(dir);
-                spots.push(match roads {
-                    Some((clearance, buildings)) => {
-                        clearance.place(x, z, dir, style.crosses_roads, buildings)
-                    }
-                    None => Spot::Post(x, z),
-                });
+            if trace.cells.last() != Some(&(x, z)) {
+                trace.cells.push((x, z));
+                trace.dirs.push(dir);
             }
             if k == 0 {
-                mark(a, traced.len() - 1);
+                mark(&mut trace.marks, a, trace.cells.len() - 1);
             }
         }
         if i + 1 == segments {
-            mark(b, traced.len() - 1);
+            mark(&mut trace.marks, b, trace.cells.len() - 1);
         }
     }
+    trace
+}
 
-    for &(at, role, width) in &marks {
+/// The runs of posts a barrier is drawn as, from what became of each traced cell, with
+/// its gates and openings. Links between posts avoid cells by `cost`: 0 is clear, 1 is
+/// road and 2 building.
+fn lay_out(
+    trace: &Trace,
+    mut spots: Vec<Spot>,
+    spaced: bool,
+    joined: bool,
+    cost: impl Fn(i32, i32) -> u8,
+) -> Vec<Vec<Post>> {
+    let traced = &trace.cells;
+    for &(at, role, width) in &trace.marks {
         match (role, spots[at]) {
             // A gate on a footway spans the path.
             (NodeRole::Gate, Spot::PathGap) => {
@@ -344,16 +377,15 @@ fn lay_out(
         }
     }
 
-    // Links between moved and unmoved posts must not cross the road they cleared.
-    let on_road = |x: i32, z: i32| {
-        !style.crosses_roads && roads.is_some_and(|(clearance, _)| clearance.on_road(x, z))
-    };
     let mut runs: Vec<Vec<Post>> = Vec::new();
     let mut run: Vec<Post> = Vec::new();
     for (j, spot) in spots.iter().enumerate() {
         let (x, z, gate) = match *spot {
             Spot::Post(x, z) => (x, z, None),
-            Spot::Gate(x, z) => (x, z, Some(dirs[j].0.abs() >= dirs[j].1.abs())),
+            Spot::Gate(x, z) => {
+                let (dx, dz) = trace.dirs[j];
+                (x, z, Some(dx.abs() >= dz.abs()))
+            }
             _ => {
                 if !run.is_empty() {
                     runs.push(std::mem::take(&mut run));
@@ -366,9 +398,9 @@ fn lay_out(
                 prev.gate = prev.gate.or(gate);
                 continue;
             }
-            let from = (prev.x, prev.z);
-            let far = (x - from.0).abs().max((z - from.1).abs()) > 1;
-            if far {
+            let (from, from_gate) = ((prev.x, prev.z), prev.gate);
+            let (dx, dz) = (x - from.0, z - from.1);
+            if dx.abs().max(dz.abs()) > 1 {
                 let line: Vec<(i32, i32)> = bresenham_line(from.0, 0, from.1, x, 0, z)
                     .into_iter()
                     .map(|(x, _, z)| (x, z))
@@ -379,7 +411,7 @@ fn lay_out(
                     line
                 };
                 for &(lx, lz) in &line[1..line.len() - 1] {
-                    if !on_road(lx, lz) {
+                    if cost(lx, lz) == 0 {
                         run.push(Post {
                             x: lx,
                             z: lz,
@@ -387,16 +419,19 @@ fn lay_out(
                         });
                     }
                 }
-            } else if joined {
-                // Walls and fences only join edge to edge.
-                let steps = stair_steps(from, (x, z));
-                for &(sx, sz) in &steps[..steps.len() - 1] {
-                    run.push(Post {
-                        x: sx,
-                        z: sz,
-                        gate: None,
-                    });
-                }
+            } else if joined && dx != 0 && dz != 0 {
+                // Walls and fences only join edge to edge: a diagonal step takes a corner,
+                // the clearer one where there is a choice.
+                let (cx, cz) = [(x, from.1), (from.0, z)]
+                    .into_iter()
+                    .min_by_key(|&(cx, cz)| cost(cx, cz))
+                    .unwrap();
+                // Beside a gate the corner opens too, or the gate leads into a post.
+                run.push(Post {
+                    x: cx,
+                    z: cz,
+                    gate: from_gate.or(gate),
+                });
             }
         }
         run.push(Post { x, z, gate });
@@ -404,7 +439,10 @@ fn lay_out(
     if !run.is_empty() {
         runs.push(run);
     }
-    if style.spaced {
+    for run in &mut runs {
+        orient_gates(run);
+    }
+    if spaced {
         for run in &mut runs {
             let mut i = 0;
             run.retain(|_| {
@@ -414,6 +452,23 @@ fn lay_out(
         }
     }
     runs
+}
+
+/// Turns each gate across the run where its neighbours line up on one axis; at a corner
+/// it keeps the heading of the barrier.
+fn orient_gates(run: &mut [Post]) {
+    for i in 0..run.len() {
+        if run[i].gate.is_none() {
+            continue;
+        }
+        let (x, z) = (run[i].x, run[i].z);
+        let near = [i.checked_sub(1).map(|j| run[j]), run.get(i + 1).copied()];
+        let along_x = near.iter().flatten().any(|p| p.z == z);
+        let along_z = near.iter().flatten().any(|p| p.x == x);
+        if along_x != along_z {
+            run[i].gate = Some(along_x);
+        }
+    }
 }
 
 /// Indices `width` wide centred on `at`, within `len`.
@@ -635,6 +690,8 @@ impl RoadClearance {
         }
         let (nx, nz) = (-uz * side.signum(), ux * side.signum());
         let mut edge: Option<(i32, (i32, i32))> = None;
+        // Furthest out short of a building, for a barrier with a building right behind it.
+        let mut last = (x, z);
         for k in 1..=MAX_SHIFT {
             let c = (
                 (x as f32 + nx * k as f32).round() as i32,
@@ -646,6 +703,7 @@ impl RoadClearance {
             if !self.roads.contains(c.0, c.1) {
                 return Spot::Post(c.0, c.1);
             }
+            last = c;
             match edge {
                 None if road.chebyshev(c.0 as f32, c.1 as f32) > road.reach => edge = Some((k, c)),
                 Some((k0, _)) if k >= k0 + EXTRA_SHIFT => break,
@@ -653,7 +711,7 @@ impl RoadClearance {
             }
         }
         // Squeezed between two roads, as a kerb railing is: at its own road's edge.
-        let (ex, ez) = edge.map_or((x, z), |(_, c)| c);
+        let (ex, ez) = edge.map_or(last, |(_, c)| c);
         Spot::Post(ex, ez)
     }
 }
@@ -668,7 +726,33 @@ fn barrier_bases(
 ) -> Vec<Option<i32>> {
     let ground = |(x, z): (i32, i32)| editor.get_absolute_y(x, 0, z);
     let deck = |(x, z): (i32, i32)| surface.nearby_deck_y(x, z, BRIDGE_BARRIER_NEARBY_RADIUS);
-    let mut bases: Vec<Option<i32>> = cells.iter().map(|&c| Some(ground(c))).collect();
+    deck_cells(editor, surface, cells)
+        .into_iter()
+        .zip(cells)
+        .map(|(on_deck, &cell)| {
+            if !on_deck {
+                return Some(ground(cell));
+            }
+            surface
+                .supported_top(editor, cell.0, cell.1, BRIDGE_BARRIER_NEARBY_RADIUS)
+                .or_else(|| {
+                    // Beside the deck: only where the deck is still at grade.
+                    let g = ground(cell);
+                    deck(cell).is_some_and(|d| d - g <= 1).then_some(g)
+                })
+        })
+        .collect()
+}
+
+/// Whether each cell of a barrier line belongs on a bridge deck: a stretch near a deck gets
+/// onto it only where the deck meets the ground; otherwise it passes underneath.
+fn deck_cells(editor: &WorldEditor, surface: &BridgeSurfaceMap, cells: &[(i32, i32)]) -> Vec<bool> {
+    let mut on_deck = vec![false; cells.len()];
+    if surface.is_empty() {
+        return on_deck;
+    }
+    let ground = |(x, z): (i32, i32)| editor.get_absolute_y(x, 0, z);
+    let deck = |(x, z): (i32, i32)| surface.nearby_deck_y(x, z, BRIDGE_BARRIER_NEARBY_RADIUS);
     let mut i = 0;
     while i < cells.len() {
         if deck(cells[i]).is_none() {
@@ -679,28 +763,17 @@ fn barrier_bases(
         while i < cells.len() && deck(cells[i]).is_some() {
             i += 1;
         }
-        // A barrier gets onto a deck only where the deck meets the ground; otherwise it
-        // passes underneath.
         let at_grade = |inside: usize, outside: usize| {
             deck(cells[inside]).is_some_and(|d| d - ground(cells[outside]) <= 2)
         };
         let on_bridge = (start == 0 && i == cells.len())
             || (start > 0 && at_grade(start, start - 1))
             || (i < cells.len() && at_grade(i - 1, i));
-        if !on_bridge {
-            continue;
-        }
-        for (cell, base) in cells[start..i].iter().zip(&mut bases[start..i]) {
-            *base = surface
-                .supported_top(editor, cell.0, cell.1, BRIDGE_BARRIER_NEARBY_RADIUS)
-                .or_else(|| {
-                    // Beside the deck: only where the deck is still at grade.
-                    let g = ground(*cell);
-                    deck(*cell).is_some_and(|d| d - g <= 1).then_some(g)
-                });
+        if on_bridge {
+            on_deck[start..i].fill(true);
         }
     }
-    bases
+    on_deck
 }
 
 pub fn generate_barrier_nodes(
@@ -792,6 +865,16 @@ mod tests {
         elements: &[ProcessedElement],
         read: impl FnOnce(&WorldEditor, &RoadClearance) -> R,
     ) -> R {
+        render_beside(size, elements, &[], read)
+    }
+
+    /// As `render`, with building footprints over the given cells.
+    fn render_beside<R>(
+        size: f64,
+        elements: &[ProcessedElement],
+        building_cells: &[(i32, i32)],
+        read: impl FnOnce(&WorldEditor, &RoadClearance) -> R,
+    ) -> R {
         let xzbbox = XZBBox::rect_from_xz_lengths(size, size).unwrap();
         let mut editor = test_editor(&xzbbox);
         let outlines = BridgeOutlineIndex::build(elements);
@@ -799,7 +882,10 @@ mod tests {
         let surface = BridgeSurfaceMap::build(elements, &structures, 1.0);
         let roads = Arc::new(collect_road_surface_coords(elements, &editor, &xzbbox, 1.0));
         let clearance = RoadClearance::build(elements, &editor, 1.0, roads);
-        let buildings = CoordinateBitmap::new_empty();
+        let mut buildings = CoordinateBitmap::new(&xzbbox);
+        for &(x, z) in building_cells {
+            buildings.set(x, z);
+        }
         for element in elements.iter().filter(|e| e.tags().contains_key("barrier")) {
             generate_barriers(&mut editor, element, &surface, &clearance, &buildings);
         }
@@ -829,8 +915,12 @@ mod tests {
         let along = wall(2, &[(12, 40), (68, 40)]);
         let under = wall(3, &[(35, 10), (35, 70)]);
         let beside = wall(4, &[(12, 44), (68, 44)]);
+        // A ground road crossing under the bridge must not cut the railing on the deck.
+        let below =
+            ProcessedElement::Way(way(5, &[("highway", "residential")], &[(40, 0), (40, 99)]));
         let elements = vec![
             ProcessedElement::Way(bridge),
+            below,
             along.clone(),
             under.clone(),
             beside.clone(),
@@ -1021,6 +1111,61 @@ mod tests {
         let no_barrier = [road(1, "residential", 15)];
         render(300.0, &no_barrier, |_, clearance| {
             assert!(clearance.segments.is_empty() && clearance.buckets.is_empty());
+        });
+    }
+
+    #[test]
+    fn a_gate_in_a_diagonal_wall_leaves_a_way_through() {
+        let elements = [barrier(
+            1,
+            &[("barrier", "wall")],
+            &[(10, 10), (20, 20), (30, 30)],
+            1,
+            &[("barrier", "gate")],
+        )];
+        render(100.0, &elements, |editor, _| {
+            assert_eq!(editor.get_block_absolute(20, 1, 20), Some(OAK_FENCE_GATE));
+            // The staircase cells beside the gate open with it, so it can be walked through.
+            for (x, z) in [(20, 19), (21, 20)] {
+                assert_eq!(editor.get_block_absolute(x, 1, z), Some(OAK_FENCE_GATE));
+                assert!(!editor.block_exists_absolute(x, 2, z));
+            }
+            assert_eq!(editor.get_block_absolute(19, 1, 19), Some(STONE_BRICK_WALL));
+        });
+    }
+
+    #[test]
+    fn a_barrier_beside_a_diagonal_road_steps_around_its_surface() {
+        let elements = [
+            ProcessedElement::Way(way(1, &[("highway", "residential")], &[(0, 0), (99, 99)])),
+            fence(2, &[(10, 13), (85, 88)]),
+        ];
+        render(100.0, &elements, |editor, clearance| {
+            let mut posts = 0;
+            for x in 20..75 {
+                for z in 20..80 {
+                    if post(editor, x, z) {
+                        posts += 1;
+                        assert!(!clearance.on_road(x, z), "post on the road at ({x}, {z})");
+                    }
+                }
+            }
+            assert!(posts > 50);
+        });
+    }
+
+    #[test]
+    fn a_barrier_moved_off_a_road_stays_out_of_buildings() {
+        let r = reach("residential");
+        let building: Vec<(i32, i32)> = (50..70)
+            .flat_map(|x| (40 + r + 1..40 + r + 8).map(move |z| (x, z)))
+            .collect();
+        let elements = [road(1, "residential", 40), fence(2, &[(10, 41), (90, 41)])];
+        render_beside(100.0, &elements, &building, |editor, _| {
+            for &(x, z) in &building {
+                assert!(!post(editor, x, z), "post in the building at ({x}, {z})");
+            }
+            assert!(post(editor, 30, 40 + r + 1));
         });
     }
 
