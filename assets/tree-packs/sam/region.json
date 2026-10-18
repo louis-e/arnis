@@ -31,7 +31,9 @@
       "Astrocarym_jauari1.schem",
       "Astrocarym_jauari2.schem",
       "Astrocarym_jauari3.schem",
-      "Astrocarym_jauari4.schem"
+      "Astrocarym_jauari4.schem",
+      "contrib/lentebriesje/Astrocarym_jauari_sa4L.schem",
+      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem"
      ],
      "w2": [],
      "w3": []
@@ -41,9 +43,12 @@
      "w1": [
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
-      "Astronium_fraxinifolium3.schem"
+      "Astronium_fraxinifolium3.schem",
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
+     ],
      "w3": []
     },
     {
@@ -51,7 +56,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -99,7 +106,94 @@
       "Hevea_brasiliensis1.schem",
       "Hevea_brasiliensis3.schem",
       "Hevea_brasiliensis4.schem",
-      "Hevea_brasiliensis5.schem"
+      "Hevea_brasiliensis5.schem",
+      "contrib/lentebriesje/Hevea_brasiliensis_sa13L.schem",
+      "contrib/lentebriesje/Hevea_brasiliensis_sa13S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Bertholletia_excelsa",
+     "w1": [
+      "contrib/lentebriesje/Bertholletia_excelsa_sa10S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Bertholletia_excelsa_sa10L.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Hura_crepitans",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Hura_crepitans_sa14L.schem",
+      "contrib/lentebriesje/Hura_crepitans_sa14S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Attalea_maripa",
+     "w1": [
+      "contrib/lentebriesje/Attalea_maripa_sa17L.schem",
+      "contrib/lentebriesje/Attalea_maripa_sa17S.schem",
+      "contrib/maripa/Attalea_maripa_m01.schem",
+      "contrib/maripa/Attalea_maripa_m10.schem",
+      "contrib/maripa/Attalea_maripa_m12.schem",
+      "contrib/maripa/Attalea_maripa_m13.schem",
+      "contrib/maripa/Attalea_maripa_m14.schem",
+      "contrib/maripa/Attalea_maripa_m15.schem",
+      "contrib/maripa/Attalea_maripa_m16.schem",
+      "contrib/maripa/Attalea_maripa_m17.schem",
+      "contrib/maripa/Attalea_maripa_m18.schem",
+      "contrib/maripa/Attalea_maripa_m02.schem",
+      "contrib/maripa/Attalea_maripa_m03.schem",
+      "contrib/maripa/Attalea_maripa_m04.schem",
+      "contrib/maripa/Attalea_maripa_m05.schem",
+      "contrib/maripa/Attalea_maripa_m06.schem",
+      "contrib/maripa/Attalea_maripa_m09.schem"
+     ],
+     "w2": [
+      "contrib/maripa/Attalea_maripa_m11.schem",
+      "contrib/maripa/Attalea_maripa_m19.schem",
+      "contrib/maripa/Attalea_maripa_m07.schem",
+      "contrib/maripa/Attalea_maripa_m08.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Schefflera_morototoni",
+     "w1": [
+      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Schefflera_morototoni_sa19S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Schizolobium_amazonicum",
+     "w1": [
+      "contrib/lentebriesje/Schizolobium_amazonicum_sa2L.schem",
+      "contrib/lentebriesje/Schizolobium_amazonicum_sa2S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astrocaryum_vulgare",
+     "w1": [
+      "contrib/lentebriesje/Astrocaryum_vulgare_sa5L.schem",
+      "contrib/lentebriesje/Astrocaryum_vulgare_sa5S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astronium_lecointei",
+     "w1": [
+      "contrib/lentebriesje/Astronium_lecointei_sa7L.schem",
+      "contrib/lentebriesje/Astronium_lecointei_sa7S.schem"
      ],
      "w2": [],
      "w3": []
@@ -127,7 +221,9 @@
       "Astrocarym_jauari1.schem",
       "Astrocarym_jauari2.schem",
       "Astrocarym_jauari3.schem",
-      "Astrocarym_jauari4.schem"
+      "Astrocarym_jauari4.schem",
+      "contrib/lentebriesje/Astrocarym_jauari_sa4L.schem",
+      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem"
      ],
      "w2": [],
      "w3": []
@@ -137,7 +233,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -197,7 +295,40 @@
       "Socratea_exorrhiza2.schem",
       "Socratea_exorrhiza3.schem",
       "Socratea_exorrhiza4.schem",
-      "Socratea_exorrhiza5.schem"
+      "Socratea_exorrhiza5.schem",
+      "contrib/lentebriesje/Socratea_exorrhiza_sa20L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Socratea_exorrhiza_sa20S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Leopoldinia_piassaba",
+     "w1": [
+      "contrib/lentebriesje/Leopoldinia_piassaba_sa15L.schem",
+      "contrib/lentebriesje/Leopoldinia_piassaba_sa15S.schem",
+      "contrib/lentebriesje/Leopoldinia_piassaba_sa3L.schem",
+      "contrib/lentebriesje/Leopoldinia_piassaba_sa3S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Myrciaria_dubia",
+     "w1": [
+      "contrib/lentebriesje/Myrciaria_dubia_sa16S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Myrciaria_dubia_sa16L.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Bactris_gasipaes",
+     "w1": [
+      "contrib/lentebriesje/Bactris_gasipaes_sa9L.schem",
+      "contrib/lentebriesje/Bactris_gasipaes_sa9S.schem"
      ],
      "w2": [],
      "w3": []
@@ -223,9 +354,12 @@
      "w1": [
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
-      "Astronium_fraxinifolium3.schem"
+      "Astronium_fraxinifolium3.schem",
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
+     ],
      "w3": []
     },
     {
@@ -233,7 +367,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -292,6 +428,15 @@
      "w3": [
       "Vachellia_farnesiana4.schem"
      ]
+    },
+    {
+     "name": "Hancornia_speciosa",
+     "w1": [
+      "contrib/lentebriesje/Hancornia_speciosa_sa12L.schem",
+      "contrib/lentebriesje/Hancornia_speciosa_sa12S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -334,9 +479,12 @@
      "w1": [
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
-      "Astronium_fraxinifolium3.schem"
+      "Astronium_fraxinifolium3.schem",
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
+     ],
      "w3": []
     },
     {
@@ -344,7 +492,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -417,6 +567,25 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Hancornia_speciosa",
+     "w1": [
+      "contrib/lentebriesje/Hancornia_speciosa_sa12L.schem",
+      "contrib/lentebriesje/Hancornia_speciosa_sa12S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Platypodium_elegans",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Platypodium_elegans_sa18L.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Platypodium_elegans_sa18S.schem"
+     ]
     }
    ]
   },
@@ -663,12 +832,41 @@
      "w1": [
       "Theobroma_cacao2.schem",
       "Theobroma_cacao3.schem",
-      "Theobroma_cacao4.schem"
+      "Theobroma_cacao4.schem",
+      "contrib/lentebriesje/Theobroma_cacao_sa21L.schem",
+      "contrib/lentebriesje/Theobroma_cacao_sa21S.schem"
      ],
      "w2": [],
      "w3": [
       "Theobroma_cacao1.schem"
      ]
+    },
+    {
+     "name": "Hura_crepitans",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Hura_crepitans_sa14L.schem",
+      "contrib/lentebriesje/Hura_crepitans_sa14S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Annona_purpurea",
+     "w1": [
+      "contrib/lentebriesje/Annona_purpurea_sa1L.schem",
+      "contrib/lentebriesje/Annona_purpurea_sa1S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Bactris_gasipaes",
+     "w1": [
+      "contrib/lentebriesje/Bactris_gasipaes_sa9L.schem",
+      "contrib/lentebriesje/Bactris_gasipaes_sa9S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -942,6 +1140,73 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Bertholletia_excelsa",
+     "w1": [
+      "contrib/lentebriesje/Bertholletia_excelsa_sa10S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Bertholletia_excelsa_sa10L.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Attalea_maripa",
+     "w1": [
+      "contrib/lentebriesje/Attalea_maripa_sa17L.schem",
+      "contrib/lentebriesje/Attalea_maripa_sa17S.schem",
+      "contrib/maripa/Attalea_maripa_m01.schem",
+      "contrib/maripa/Attalea_maripa_m10.schem",
+      "contrib/maripa/Attalea_maripa_m12.schem",
+      "contrib/maripa/Attalea_maripa_m13.schem",
+      "contrib/maripa/Attalea_maripa_m14.schem",
+      "contrib/maripa/Attalea_maripa_m15.schem",
+      "contrib/maripa/Attalea_maripa_m16.schem",
+      "contrib/maripa/Attalea_maripa_m17.schem",
+      "contrib/maripa/Attalea_maripa_m18.schem",
+      "contrib/maripa/Attalea_maripa_m02.schem",
+      "contrib/maripa/Attalea_maripa_m03.schem",
+      "contrib/maripa/Attalea_maripa_m04.schem",
+      "contrib/maripa/Attalea_maripa_m05.schem",
+      "contrib/maripa/Attalea_maripa_m06.schem",
+      "contrib/maripa/Attalea_maripa_m09.schem"
+     ],
+     "w2": [
+      "contrib/maripa/Attalea_maripa_m11.schem",
+      "contrib/maripa/Attalea_maripa_m19.schem",
+      "contrib/maripa/Attalea_maripa_m07.schem",
+      "contrib/maripa/Attalea_maripa_m08.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Schefflera_morototoni",
+     "w1": [
+      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Schefflera_morototoni_sa19S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Annona_purpurea",
+     "w1": [
+      "contrib/lentebriesje/Annona_purpurea_sa1L.schem",
+      "contrib/lentebriesje/Annona_purpurea_sa1S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astrocaryum_vulgare",
+     "w1": [
+      "contrib/lentebriesje/Astrocaryum_vulgare_sa5L.schem",
+      "contrib/lentebriesje/Astrocaryum_vulgare_sa5S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -975,7 +1240,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1165,9 +1432,12 @@
      "w1": [
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
-      "Astronium_fraxinifolium3.schem"
+      "Astronium_fraxinifolium3.schem",
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
+     ],
      "w3": []
     },
     {
@@ -1175,7 +1445,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1236,6 +1508,26 @@
       "Schinus_terebinthifolia2.schem"
      ],
      "w3": []
+    },
+    {
+     "name": "Platypodium_elegans",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Platypodium_elegans_sa18L.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Platypodium_elegans_sa18S.schem"
+     ]
+    },
+    {
+     "name": "Schefflera_morototoni",
+     "w1": [
+      "contrib/lentebriesje/Schefflera_morototoni_sa19L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Schefflera_morototoni_sa19S.schem"
+     ],
+     "w3": []
     }
    ]
   },
@@ -1276,6 +1568,15 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Cinchona_calisaya",
+     "w1": [
+      "contrib/lentebriesje/Cinchona_calisaya_sa11L.schem",
+      "contrib/lentebriesje/Cinchona_calisaya_sa11S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -1298,7 +1599,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1311,6 +1614,35 @@
       "Mauritia_flexuosa3.schem"
      ],
      "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_maripa",
+     "w1": [
+      "contrib/lentebriesje/Attalea_maripa_sa17L.schem",
+      "contrib/lentebriesje/Attalea_maripa_sa17S.schem",
+      "contrib/maripa/Attalea_maripa_m01.schem",
+      "contrib/maripa/Attalea_maripa_m10.schem",
+      "contrib/maripa/Attalea_maripa_m12.schem",
+      "contrib/maripa/Attalea_maripa_m13.schem",
+      "contrib/maripa/Attalea_maripa_m14.schem",
+      "contrib/maripa/Attalea_maripa_m15.schem",
+      "contrib/maripa/Attalea_maripa_m16.schem",
+      "contrib/maripa/Attalea_maripa_m17.schem",
+      "contrib/maripa/Attalea_maripa_m18.schem",
+      "contrib/maripa/Attalea_maripa_m02.schem",
+      "contrib/maripa/Attalea_maripa_m03.schem",
+      "contrib/maripa/Attalea_maripa_m04.schem",
+      "contrib/maripa/Attalea_maripa_m05.schem",
+      "contrib/maripa/Attalea_maripa_m06.schem",
+      "contrib/maripa/Attalea_maripa_m09.schem"
+     ],
+     "w2": [
+      "contrib/maripa/Attalea_maripa_m11.schem",
+      "contrib/maripa/Attalea_maripa_m19.schem",
+      "contrib/maripa/Attalea_maripa_m07.schem",
+      "contrib/maripa/Attalea_maripa_m08.schem"
+     ],
      "w3": []
     }
    ]
@@ -1440,7 +1772,9 @@
       "Astrocarym_jauari1.schem",
       "Astrocarym_jauari2.schem",
       "Astrocarym_jauari3.schem",
-      "Astrocarym_jauari4.schem"
+      "Astrocarym_jauari4.schem",
+      "contrib/lentebriesje/Astrocarym_jauari_sa4L.schem",
+      "contrib/lentebriesje/Astrocarym_jauari_sa4S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1450,7 +1784,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1538,9 +1874,12 @@
       "Socratea_exorrhiza2.schem",
       "Socratea_exorrhiza3.schem",
       "Socratea_exorrhiza4.schem",
-      "Socratea_exorrhiza5.schem"
+      "Socratea_exorrhiza5.schem",
+      "contrib/lentebriesje/Socratea_exorrhiza_sa20L.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Socratea_exorrhiza_sa20S.schem"
+     ],
      "w3": []
     },
     {
@@ -1639,9 +1978,12 @@
      "w1": [
       "Astronium_fraxinifolium1.schem",
       "Astronium_fraxinifolium2.schem",
-      "Astronium_fraxinifolium3.schem"
+      "Astronium_fraxinifolium3.schem",
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Astronium_fraxinifolium_sa6L.schem"
+     ],
      "w3": []
     },
     {
@@ -1649,7 +1991,9 @@
      "w1": [
       "Attalea_speciosa1.schem",
       "Attalea_speciosa2.schem",
-      "Attalea_speciosa3.schem"
+      "Attalea_speciosa3.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8L.schem",
+      "contrib/lentebriesje/Attalea_speciosa_sa8S.schem"
      ],
      "w2": [],
      "w3": []

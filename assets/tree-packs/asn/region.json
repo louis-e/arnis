@@ -15,7 +15,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -27,7 +29,9 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -104,7 +108,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -169,7 +175,9 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -287,7 +295,18 @@
      ],
      "w2": [],
      "w3": [
-      "Prunus_serrulata4.schem"
+      "Prunus_serrulata4.schem",
+      "contrib/exsilit/Prunus_serrulata_t031.schem",
+      "contrib/exsilit/Prunus_serrulata_t032.schem",
+      "contrib/exsilit/Prunus_serrulata_t033.schem",
+      "contrib/exsilit/Prunus_serrulata_t034.schem",
+      "contrib/exsilit/Prunus_serrulata_t035.schem",
+      "contrib/exsilit/Prunus_serrulata_t036.schem",
+      "contrib/exsilit/Prunus_serrulata_t300.schem",
+      "contrib/exsilit/Prunus_serrulata_t305.schem",
+      "contrib/exsilit/Prunus_serrulata_t310.schem",
+      "contrib/exsilit/Prunus_serrulata_t347.schem",
+      "contrib/exsilit/Prunus_serrulata_t348.schem"
      ]
     },
     {
@@ -494,7 +513,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -531,7 +552,9 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -598,7 +621,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -828,7 +853,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -850,7 +877,9 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -927,7 +956,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -950,7 +981,9 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1159,7 +1192,18 @@
      ],
      "w2": [],
      "w3": [
-      "Prunus_serrulata4.schem"
+      "Prunus_serrulata4.schem",
+      "contrib/exsilit/Prunus_serrulata_t031.schem",
+      "contrib/exsilit/Prunus_serrulata_t032.schem",
+      "contrib/exsilit/Prunus_serrulata_t033.schem",
+      "contrib/exsilit/Prunus_serrulata_t034.schem",
+      "contrib/exsilit/Prunus_serrulata_t035.schem",
+      "contrib/exsilit/Prunus_serrulata_t036.schem",
+      "contrib/exsilit/Prunus_serrulata_t300.schem",
+      "contrib/exsilit/Prunus_serrulata_t305.schem",
+      "contrib/exsilit/Prunus_serrulata_t310.schem",
+      "contrib/exsilit/Prunus_serrulata_t347.schem",
+      "contrib/exsilit/Prunus_serrulata_t348.schem"
      ]
     },
     {
@@ -1283,7 +1327,18 @@
      ],
      "w2": [],
      "w3": [
-      "Prunus_serrulata4.schem"
+      "Prunus_serrulata4.schem",
+      "contrib/exsilit/Prunus_serrulata_t031.schem",
+      "contrib/exsilit/Prunus_serrulata_t032.schem",
+      "contrib/exsilit/Prunus_serrulata_t033.schem",
+      "contrib/exsilit/Prunus_serrulata_t034.schem",
+      "contrib/exsilit/Prunus_serrulata_t035.schem",
+      "contrib/exsilit/Prunus_serrulata_t036.schem",
+      "contrib/exsilit/Prunus_serrulata_t300.schem",
+      "contrib/exsilit/Prunus_serrulata_t305.schem",
+      "contrib/exsilit/Prunus_serrulata_t310.schem",
+      "contrib/exsilit/Prunus_serrulata_t347.schem",
+      "contrib/exsilit/Prunus_serrulata_t348.schem"
      ]
     },
     {
@@ -1334,7 +1389,9 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1368,7 +1425,9 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1455,7 +1514,25 @@
       "Cupressus_sempervirens2.schem",
       "Cupressus_sempervirens4.schem",
       "Cupressus_sempervirens6.schem",
-      "Cupressus_sempervirens7.schem"
+      "Cupressus_sempervirens7.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_02.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_03.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_04.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_06.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_07.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_08.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_09.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_10.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_11.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_12.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_13.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_14.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_15.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_16.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_17.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_18.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_19.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_20.schem"
      ],
      "w2": [],
      "w3": []

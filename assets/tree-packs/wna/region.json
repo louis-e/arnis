@@ -94,7 +94,9 @@
       "NAwest/Betula_papyrifera5.schem",
       "NAwest/Betula_papyrifera6.schem",
       "NAwest/Betula_papyrifera7.schem",
-      "NAwest/Betula_papyrifera8.schem"
+      "NAwest/Betula_papyrifera8.schem",
+      "contrib/lentebriesje/Betula_papyrifera_na15L.schem",
+      "contrib/lentebriesje/Betula_papyrifera_na15S.schem"
      ],
      "w2": [],
      "w3": []
@@ -105,7 +107,9 @@
       "NAwest/Populus_tremuloides1.schem",
       "NAwest/Populus_tremuloides2.schem",
       "NAwest/Populus_tremuloides3.schem",
-      "NAwest/Populus_tremuloides5.schem"
+      "NAwest/Populus_tremuloides5.schem",
+      "contrib/lentebriesje/Populus_tremuloides_na7L.schem",
+      "contrib/lentebriesje/Populus_tremuloides_na7S.schem"
      ],
      "w2": [
       "NAwest/Populus_tremuloides4.schem"
@@ -237,6 +241,15 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Pinus_contorta",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Pinus_contorta_na9L.schem",
+      "contrib/lentebriesje/Pinus_contorta_na9S.schem"
+     ],
+     "w3": []
     }
    ]
   },
@@ -301,6 +314,24 @@
       "NAwest/Pinus_jeffreyi6.schem"
      ],
      "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Abies_magnifica",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "contrib/lentebriesje/Abies_magnifica_na19L.schem",
+      "contrib/lentebriesje/Abies_magnifica_na19S.schem"
+     ]
+    },
+    {
+     "name": "Pinus_contorta",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Pinus_contorta_na9L.schem",
+      "contrib/lentebriesje/Pinus_contorta_na9S.schem"
+     ],
      "w3": []
     }
    ]
@@ -390,7 +421,9 @@
       "NAwest/Alnus_rubra1.schem",
       "NAwest/Alnus_rubra2.schem",
       "NAwest/Alnus_rubra3.schem",
-      "NAwest/Alnus_rubra4.schem"
+      "NAwest/Alnus_rubra4.schem",
+      "contrib/lentebriesje/Alnus_rubra_na11L.schem",
+      "contrib/lentebriesje/Alnus_rubra_na11S.schem"
      ],
      "w2": [],
      "w3": []
@@ -442,8 +475,13 @@
      "w1": [
       "NAwest/Pseudotsuga_menziesii5.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/lentebriesje/Pseudotsuga_menziesii_na6S.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Pseudotsuga_menziesii_na6L.schem",
+      "contrib/lentebriesje/Pseudotsuga_menziesii_na6XL.schem"
+     ]
     },
     {
      "name": "Thuja_plicata",
@@ -452,6 +490,33 @@
       "NAwest/Thuja_plicata4.schem"
      ],
      "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Callitropsis_nootkatensis",
+     "w1": [
+      "contrib/lentebriesje/Callitropsis_nootkatensis_na17L.schem",
+      "contrib/lentebriesje/Callitropsis_nootkatensis_na17S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Abies_grandis",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Abies_grandis_na21L.schem",
+      "contrib/lentebriesje/Abies_grandis_na21S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Pinus_contorta",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Pinus_contorta_na9L.schem",
+      "contrib/lentebriesje/Pinus_contorta_na9S.schem"
+     ],
      "w3": []
     }
    ]

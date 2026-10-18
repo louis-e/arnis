@@ -69,10 +69,12 @@
       "Colophospermum_mopane2.schem",
       "Colophospermum_mopane3.schem",
       "Colophospermum_mopane4.schem",
-      "Colophospermum_mopane5.schem"
+      "Colophospermum_mopane5.schem",
+      "contrib/lentebriesje/Colophospermum_mopane_afr8S.schem"
      ],
      "w2": [
-      "Colophospermum_mopane1.schem"
+      "Colophospermum_mopane1.schem",
+      "contrib/lentebriesje/Colophospermum_mopane_afr8L.schem"
      ],
      "w3": []
     },
@@ -92,10 +94,13 @@
      "name": "Kigelia_africana",
      "w1": [
       "Kigelia_africana1.schem",
-      "Kigelia_africana2.schem"
+      "Kigelia_africana2.schem",
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Kigelia_africana_afr9L.schem"
+     ]
     },
     {
      "name": "Prunus_africana",
@@ -108,11 +113,32 @@
     },
     {
      "name": "Sclerocarya_birrea",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+     ],
      "w2": [
       "Sclerocarya_birrea1.schem",
-      "Sclerocarya_birrea2.schem"
+      "Sclerocarya_birrea2.schem",
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7L.schem"
      ],
+     "w3": []
+    },
+    {
+     "name": "Spirostachys_africana",
+     "w1": [
+      "contrib/lentebriesje/Spirostachys_africana_afr10L.schem",
+      "contrib/lentebriesje/Spirostachys_africana_afr10S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Combretum_apiculatum",
+     "w1": [
+      "contrib/lentebriesje/Combretum_apiculatum_afr4L.schem",
+      "contrib/lentebriesje/Combretum_apiculatum_afr4S.schem"
+     ],
+     "w2": [],
      "w3": []
     }
    ]
@@ -179,10 +205,13 @@
      "name": "Kigelia_africana",
      "w1": [
       "Kigelia_africana1.schem",
-      "Kigelia_africana2.schem"
+      "Kigelia_africana2.schem",
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Kigelia_africana_afr9L.schem"
+     ]
     },
     {
      "name": "Milicia_excelsa",
@@ -248,14 +277,17 @@
    "species": [
     {
      "name": "Adansonia_digitata",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_digitata1.schem",
       "Adansonia_digitata2.schem",
       "Adansonia_digitata3.schem",
       "Adansonia_digitata4.schem",
-      "Adansonia_digitata5.schem"
+      "Adansonia_digitata5.schem",
+      "contrib/lentebriesje/Adansonia_digitata_afr2L.schem"
      ]
     },
     {
@@ -305,17 +337,23 @@
      "name": "Kigelia_africana",
      "w1": [
       "Kigelia_africana1.schem",
-      "Kigelia_africana2.schem"
+      "Kigelia_africana2.schem",
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Kigelia_africana_afr9L.schem"
+     ]
     },
     {
      "name": "Sclerocarya_birrea",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+     ],
      "w2": [
       "Sclerocarya_birrea1.schem",
-      "Sclerocarya_birrea2.schem"
+      "Sclerocarya_birrea2.schem",
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7L.schem"
      ],
      "w3": []
     },
@@ -327,14 +365,44 @@
       "Vachellia_tortilis4.schem",
       "Vachellia_tortilis6.schem",
       "Vachellia_tortilis7.schem",
-      "Vachellia_tortilis8.schem"
+      "Vachellia_tortilis8.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11S.schem"
      ],
      "w2": [
       "Vachellia_tortilis5.schem"
      ],
      "w3": [
-      "Vachellia_tortilis3.schem"
+      "Vachellia_tortilis3.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11L.schem"
      ]
+    },
+    {
+     "name": "Ziziphus_mucronata",
+     "w1": [
+      "contrib/lentebriesje/Ziziphus_mucronata_afr3L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Ziziphus_mucronata_afr3S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_mespiliformis",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Diospyros_mespiliformis_afr5L.schem",
+      "contrib/lentebriesje/Diospyros_mespiliformis_afr5S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_nigrescens",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Senegalia_nigrescens_afr6L.schem",
+      "contrib/lentebriesje/Senegalia_nigrescens_afr6S.schem"
+     ],
+     "w3": []
     }
    ]
   },
@@ -523,13 +591,15 @@
       "Vachellia_tortilis1.schem",
       "Vachellia_tortilis6.schem",
       "Vachellia_tortilis7.schem",
-      "Vachellia_tortilis8.schem"
+      "Vachellia_tortilis8.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11S.schem"
      ],
      "w2": [
       "Vachellia_tortilis5.schem"
      ],
      "w3": [
-      "Vachellia_tortilis3.schem"
+      "Vachellia_tortilis3.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11L.schem"
      ]
     }
    ]
@@ -542,14 +612,17 @@
     {
      "name": "Adansonia_grandidieri",
      "w1": [],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Adansonia_grandidieri_afr1S.schem"
+     ],
      "w3": [
       "Adansonia_grandidieri1.schem",
       "Adansonia_grandidieri2.schem",
       "Adansonia_grandidieri3.schem",
       "Adansonia_grandidieri4.schem",
       "Adansonia_grandidieri5.schem",
-      "Adansonia_grandidieri6.schem"
+      "Adansonia_grandidieri6.schem",
+      "contrib/lentebriesje/Adansonia_grandidieri_afr1L.schem"
      ]
     },
     {
@@ -610,10 +683,13 @@
     },
     {
      "name": "Sclerocarya_birrea",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+     ],
      "w2": [
       "Sclerocarya_birrea1.schem",
-      "Sclerocarya_birrea2.schem"
+      "Sclerocarya_birrea2.schem",
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7L.schem"
      ],
      "w3": []
     }
@@ -749,14 +825,17 @@
     {
      "name": "Adansonia_grandidieri",
      "w1": [],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Adansonia_grandidieri_afr1S.schem"
+     ],
      "w3": [
       "Adansonia_grandidieri1.schem",
       "Adansonia_grandidieri2.schem",
       "Adansonia_grandidieri3.schem",
       "Adansonia_grandidieri4.schem",
       "Adansonia_grandidieri5.schem",
-      "Adansonia_grandidieri6.schem"
+      "Adansonia_grandidieri6.schem",
+      "contrib/lentebriesje/Adansonia_grandidieri_afr1L.schem"
      ]
     },
     {
@@ -817,10 +896,13 @@
     },
     {
      "name": "Sclerocarya_birrea",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+     ],
      "w2": [
       "Sclerocarya_birrea1.schem",
-      "Sclerocarya_birrea2.schem"
+      "Sclerocarya_birrea2.schem",
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7L.schem"
      ],
      "w3": []
     }
@@ -860,11 +942,14 @@
    "species": [
     {
      "name": "Adansonia_digitata",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_digitata4.schem",
-      "Adansonia_digitata5.schem"
+      "Adansonia_digitata5.schem",
+      "contrib/lentebriesje/Adansonia_digitata_afr2L.schem"
      ]
     },
     {
@@ -909,13 +994,15 @@
       "Vachellia_tortilis1.schem",
       "Vachellia_tortilis6.schem",
       "Vachellia_tortilis7.schem",
-      "Vachellia_tortilis8.schem"
+      "Vachellia_tortilis8.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11S.schem"
      ],
      "w2": [
       "Vachellia_tortilis5.schem"
      ],
      "w3": [
-      "Vachellia_tortilis3.schem"
+      "Vachellia_tortilis3.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11L.schem"
      ]
     }
    ]
@@ -927,14 +1014,17 @@
    "species": [
     {
      "name": "Adansonia_digitata",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_digitata1.schem",
       "Adansonia_digitata2.schem",
       "Adansonia_digitata3.schem",
       "Adansonia_digitata4.schem",
-      "Adansonia_digitata5.schem"
+      "Adansonia_digitata5.schem",
+      "contrib/lentebriesje/Adansonia_digitata_afr2L.schem"
      ]
     },
     {
@@ -943,10 +1033,12 @@
       "Colophospermum_mopane2.schem",
       "Colophospermum_mopane3.schem",
       "Colophospermum_mopane4.schem",
-      "Colophospermum_mopane5.schem"
+      "Colophospermum_mopane5.schem",
+      "contrib/lentebriesje/Colophospermum_mopane_afr8S.schem"
      ],
      "w2": [
-      "Colophospermum_mopane1.schem"
+      "Colophospermum_mopane1.schem",
+      "contrib/lentebriesje/Colophospermum_mopane_afr8L.schem"
      ],
      "w3": []
     },
@@ -963,10 +1055,13 @@
     },
     {
      "name": "Sclerocarya_birrea",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+     ],
      "w2": [
       "Sclerocarya_birrea1.schem",
-      "Sclerocarya_birrea2.schem"
+      "Sclerocarya_birrea2.schem",
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7L.schem"
      ],
      "w3": []
     },
@@ -994,10 +1089,69 @@
       "Vachellia_tortilis2.schem",
       "Vachellia_tortilis6.schem",
       "Vachellia_tortilis7.schem",
-      "Vachellia_tortilis8.schem"
+      "Vachellia_tortilis8.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11S.schem"
      ],
      "w2": [
       "Vachellia_tortilis5.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Vachellia_tortilis_afr11L.schem"
+     ]
+    },
+    {
+     "name": "Spirostachys_africana",
+     "w1": [
+      "contrib/lentebriesje/Spirostachys_africana_afr10L.schem",
+      "contrib/lentebriesje/Spirostachys_africana_afr10S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schotia_brachypetala",
+     "w1": [
+      "contrib/lentebriesje/Schotia_brachypetala_afr12S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Schotia_brachypetala_afr12L.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ziziphus_mucronata",
+     "w1": [
+      "contrib/lentebriesje/Ziziphus_mucronata_afr3L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Ziziphus_mucronata_afr3S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Combretum_apiculatum",
+     "w1": [
+      "contrib/lentebriesje/Combretum_apiculatum_afr4L.schem",
+      "contrib/lentebriesje/Combretum_apiculatum_afr4S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_mespiliformis",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Diospyros_mespiliformis_afr5L.schem",
+      "contrib/lentebriesje/Diospyros_mespiliformis_afr5S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_nigrescens",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Senegalia_nigrescens_afr6L.schem",
+      "contrib/lentebriesje/Senegalia_nigrescens_afr6S.schem"
      ],
      "w3": []
     }
@@ -1010,14 +1164,17 @@
    "species": [
     {
      "name": "Adansonia_digitata",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Adansonia_digitata_afr2S.schem"
+     ],
      "w2": [],
      "w3": [
       "Adansonia_digitata1.schem",
       "Adansonia_digitata2.schem",
       "Adansonia_digitata3.schem",
       "Adansonia_digitata4.schem",
-      "Adansonia_digitata5.schem"
+      "Adansonia_digitata5.schem",
+      "contrib/lentebriesje/Adansonia_digitata_afr2L.schem"
      ]
     },
     {
@@ -1034,17 +1191,23 @@
      "name": "Kigelia_africana",
      "w1": [
       "Kigelia_africana1.schem",
-      "Kigelia_africana2.schem"
+      "Kigelia_africana2.schem",
+      "contrib/lentebriesje/Kigelia_africana_afr9S.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Kigelia_africana_afr9L.schem"
+     ]
     },
     {
      "name": "Sclerocarya_birrea",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7S.schem"
+     ],
      "w2": [
       "Sclerocarya_birrea1.schem",
-      "Sclerocarya_birrea2.schem"
+      "Sclerocarya_birrea2.schem",
+      "contrib/lentebriesje/Sclerocarya_birrea_afr7L.schem"
      ],
      "w3": []
     },
@@ -1070,13 +1233,15 @@
       "Vachellia_tortilis4.schem",
       "Vachellia_tortilis6.schem",
       "Vachellia_tortilis7.schem",
-      "Vachellia_tortilis8.schem"
+      "Vachellia_tortilis8.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11S.schem"
      ],
      "w2": [
       "Vachellia_tortilis5.schem"
      ],
      "w3": [
-      "Vachellia_tortilis3.schem"
+      "Vachellia_tortilis3.schem",
+      "contrib/lentebriesje/Vachellia_tortilis_afr11L.schem"
      ]
     },
     {
@@ -1087,6 +1252,25 @@
       "Vitellaria_paradoxa3.schem"
      ],
      "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ziziphus_mucronata",
+     "w1": [
+      "contrib/lentebriesje/Ziziphus_mucronata_afr3L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Ziziphus_mucronata_afr3S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_mespiliformis",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Diospyros_mespiliformis_afr5L.schem",
+      "contrib/lentebriesje/Diospyros_mespiliformis_afr5S.schem"
+     ],
      "w3": []
     }
    ]

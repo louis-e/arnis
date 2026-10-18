@@ -13,7 +13,9 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -83,7 +85,9 @@
      "name": "Cornus_florida",
      "w1": [
       "Cornus_florida2.schem",
-      "Cornus_florida4.schem"
+      "Cornus_florida4.schem",
+      "contrib/lentebriesje/Cornus_florida_na8L.schem",
+      "contrib/lentebriesje/Cornus_florida_na8S.schem"
      ],
      "w2": [
       "Cornus_florida5.schem"
@@ -109,7 +113,9 @@
      "w1": [
       "Liquidambar_styraciflua1.schem",
       "Liquidambar_styraciflua2.schem",
-      "Liquidambar_styraciflua3.schem"
+      "Liquidambar_styraciflua3.schem",
+      "contrib/lentebriesje/Liquidambar_styraciflua_na4L.schem",
+      "contrib/lentebriesje/Liquidambar_styraciflua_na4S.schem"
      ],
      "w2": [],
      "w3": []
@@ -327,10 +333,13 @@
     {
      "name": "Taxodium_distichum",
      "w1": [
-      "Taxodium_distichum3.schem"
+      "Taxodium_distichum3.schem",
+      "contrib/lentebriesje/Taxodium_distichum_na16L.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Taxodium_distichum_na16S.schem"
+     ]
     }
    ]
   },

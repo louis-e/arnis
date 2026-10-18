@@ -28,7 +28,9 @@
       "4. europe/Larix_decidua5.schem",
       "4. europe/Larix_decidua6.schem",
       "4. europe/Larix_decidua7.schem",
-      "4. europe/Larix_decidua8.schem"
+      "4. europe/Larix_decidua8.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21L.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21S.schem"
      ],
      "w2": [],
      "w3": [
@@ -66,7 +68,9 @@
       "4. europe/Pinus_sylvestris5.schem",
       "4. europe/Pinus_sylvestris6.schem",
       "4. europe/Pinus_sylvestris7.schem",
-      "4. europe/Pinus_sylvestris8.schem"
+      "4. europe/Pinus_sylvestris8.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14L.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14S.schem"
      ],
      "w2": [],
      "w3": [
@@ -79,6 +83,14 @@
       "4. europe/Taxus_baccata1.schem",
       "4. europe/Taxus_baccata2.schem",
       "4. europe/Taxus_baccata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sorbus_aucuparia",
+     "w1": [
+      "contrib/lentebriesje/Sorbus_aucuparia_eur16L.schem"
      ],
      "w2": [],
      "w3": []
@@ -104,7 +116,9 @@
      "w1": [
       "4. europe/Larix_decidua6.schem",
       "4. europe/Larix_decidua7.schem",
-      "4. europe/Larix_decidua8.schem"
+      "4. europe/Larix_decidua8.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21L.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21S.schem"
      ],
      "w2": [],
      "w3": []
@@ -134,7 +148,18 @@
      "name": "Pinus_sylvestris",
      "w1": [
       "4. europe/Pinus_sylvestris6.schem",
-      "4. europe/Pinus_sylvestris7.schem"
+      "4. europe/Pinus_sylvestris7.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14L.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Juniperus_communis",
+     "w1": [
+      "contrib/lentebriesje/Juniperus_communis_eur11L.schem",
+      "contrib/lentebriesje/Juniperus_communis_eur11S.schem"
      ],
      "w2": [],
      "w3": []
@@ -187,7 +212,9 @@
      "w1": [
       "4. europe/Pinus_nigra1.schem",
       "4. europe/Pinus_nigra2.schem",
-      "4. europe/Pinus_nigra4.schem"
+      "4. europe/Pinus_nigra4.schem",
+      "contrib/lentebriesje/Pinus_nigra_eur19L.schem",
+      "contrib/lentebriesje/Pinus_nigra_eur19S.schem"
      ],
      "w2": [],
      "w3": [
@@ -203,7 +230,9 @@
       "4. europe/Pinus_sylvestris5.schem",
       "4. europe/Pinus_sylvestris6.schem",
       "4. europe/Pinus_sylvestris7.schem",
-      "4. europe/Pinus_sylvestris8.schem"
+      "4. europe/Pinus_sylvestris8.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14L.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14S.schem"
      ],
      "w2": [],
      "w3": [
@@ -234,9 +263,12 @@
       "4. europe/Fagus_sylvatica2.schem",
       "4. europe/Fagus_sylvatica3.schem",
       "4. europe/Fagus_sylvatica4.schem",
-      "4. europe/Fagus_sylvatica6.schem"
+      "4. europe/Fagus_sylvatica6.schem",
+      "contrib/lentebriesje/Fagus_sylvatica_eur4S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Fagus_sylvatica_eur4L.schem"
+     ],
      "w3": []
     },
     {
@@ -245,6 +277,15 @@
       "4. europe/Taxus_baccata1.schem",
       "4. europe/Taxus_baccata2.schem",
       "4. europe/Taxus_baccata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ilex_aquifolium",
+     "w1": [
+      "contrib/lentebriesje/Ilex_aquifolium_eur10L.schem",
+      "contrib/lentebriesje/Ilex_aquifolium_eur10S.schem"
      ],
      "w2": [],
      "w3": []
@@ -285,7 +326,9 @@
       "4. europe/Picea_abies4.schem",
       "4. europe/Picea_abies5.schem",
       "4. europe/Picea_abies6.schem",
-      "4. europe/Picea_abies7.schem"
+      "4. europe/Picea_abies7.schem",
+      "contrib/lentebriesje/Picea_abies_eur20L.schem",
+      "contrib/lentebriesje/Picea_abies_eur20S.schem"
      ],
      "w2": [],
      "w3": []
@@ -299,7 +342,9 @@
       "4. europe/Pinus_sylvestris5.schem",
       "4. europe/Pinus_sylvestris6.schem",
       "4. europe/Pinus_sylvestris7.schem",
-      "4. europe/Pinus_sylvestris8.schem"
+      "4. europe/Pinus_sylvestris8.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14L.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14S.schem"
      ],
      "w2": [],
      "w3": [
@@ -318,6 +363,24 @@
       "4. europe/Quercus_robur4.schem",
       "4. europe/Quercus_robur5.schem"
      ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_petraea",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Quercus_petraea_eur13L.schem",
+      "contrib/lentebriesje/Quercus_petraea_eur13S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Carpinus_betulus",
+     "w1": [
+      "contrib/lentebriesje/Carpinus_betulus_eur9L.schem",
+      "contrib/lentebriesje/Carpinus_betulus_eur9S.schem"
+     ],
+     "w2": [],
      "w3": []
     }
    ]
@@ -347,7 +410,9 @@
       "4. europe/Betula_pendula1.schem",
       "4. europe/Betula_pendula2.schem",
       "4. europe/Betula_pendula3.schem",
-      "4. europe/Betula_pendula4.schem"
+      "4. europe/Betula_pendula4.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -369,7 +434,17 @@
       "4. europe/Populus_tremula2.schem",
       "4. europe/Populus_tremula3.schem",
       "4. europe/Populus_tremula4.schem",
-      "4. europe/Populus_tremula5.schem"
+      "4. europe/Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sorbus_aucuparia",
+     "w1": [
+      "contrib/lentebriesje/Sorbus_aucuparia_eur16L.schem"
      ],
      "w2": [],
      "w3": []
@@ -441,9 +516,29 @@
       "4. europe/Cupressus_sempervirens4.schem",
       "4. europe/Cupressus_sempervirens5.schem",
       "4. europe/Cupressus_sempervirens6.schem",
-      "4. europe/Cupressus_sempervirens7.schem"
+      "4. europe/Cupressus_sempervirens7.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_02.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_03.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_04.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_06.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_07.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_08.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_09.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_10.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_11.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_12.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_13.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_14.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_15.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_16.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_17.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_18.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_19.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_20.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/mellowhat/Cupressus_sempervirens_tall.schem"
+     ],
      "w3": []
     },
     {
@@ -537,9 +632,29 @@
       "4. europe/Cupressus_sempervirens4.schem",
       "4. europe/Cupressus_sempervirens5.schem",
       "4. europe/Cupressus_sempervirens6.schem",
-      "4. europe/Cupressus_sempervirens7.schem"
+      "4. europe/Cupressus_sempervirens7.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_02.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_03.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_04.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_06.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_07.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_08.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_09.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_10.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_11.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_12.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_13.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_14.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_15.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_16.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_17.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_18.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_19.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_20.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/mellowhat/Cupressus_sempervirens_tall.schem"
+     ],
      "w3": []
     },
     {
@@ -547,7 +662,9 @@
      "w1": [
       "4. europe/Pinus_nigra1.schem",
       "4. europe/Pinus_nigra2.schem",
-      "4. europe/Pinus_nigra4.schem"
+      "4. europe/Pinus_nigra4.schem",
+      "contrib/lentebriesje/Pinus_nigra_eur19L.schem",
+      "contrib/lentebriesje/Pinus_nigra_eur19S.schem"
      ],
      "w2": [],
      "w3": [
@@ -587,7 +704,9 @@
       "4. europe/Corylus_avellana1.schem",
       "4. europe/Corylus_avellana2.schem",
       "4. europe/Corylus_avellana3.schem",
-      "4. europe/Corylus_avellana4.schem"
+      "4. europe/Corylus_avellana4.schem",
+      "contrib/lentebriesje/Corylus_avellana_eur8L.schem",
+      "contrib/lentebriesje/Corylus_avellana_eur8S.schem"
      ],
      "w2": [],
      "w3": []
@@ -599,9 +718,12 @@
       "4. europe/Fagus_sylvatica2.schem",
       "4. europe/Fagus_sylvatica3.schem",
       "4. europe/Fagus_sylvatica4.schem",
-      "4. europe/Fagus_sylvatica6.schem"
+      "4. europe/Fagus_sylvatica6.schem",
+      "contrib/lentebriesje/Fagus_sylvatica_eur4S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Fagus_sylvatica_eur4L.schem"
+     ],
      "w3": []
     },
     {
@@ -609,10 +731,12 @@
      "w1": [
       "4. europe/Fraxinus_excelsior1.schem",
       "4. europe/Fraxinus_excelsior2.schem",
-      "4. europe/Fraxinus_excelsior4.schem"
+      "4. europe/Fraxinus_excelsior4.schem",
+      "contrib/lentebriesje/Fraxinus_excelsior_eur2L.schem"
      ],
      "w2": [
-      "4. europe/Fraxinus_excelsior3.schem"
+      "4. europe/Fraxinus_excelsior3.schem",
+      "contrib/lentebriesje/Fraxinus_excelsior_eur2S.schem"
      ],
      "w3": []
     },
@@ -623,9 +747,12 @@
       "4. europe/Tilia_cordata2.schem",
       "4. europe/Tilia_cordata3.schem",
       "4. europe/Tilia_cordata4.schem",
-      "4. europe/Tilia_cordata5.schem"
+      "4. europe/Tilia_cordata5.schem",
+      "contrib/lentebriesje/Tilia_cordata_eur12S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Tilia_cordata_eur12L.schem"
+     ],
      "w3": []
     },
     {
@@ -647,6 +774,60 @@
       "4. europe/Viburnum_lantana3.schem",
       "4. europe/Viburnum_lantana4.schem",
       "4. europe/Viburnum_lantana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ilex_aquifolium",
+     "w1": [
+      "contrib/lentebriesje/Ilex_aquifolium_eur10L.schem",
+      "contrib/lentebriesje/Ilex_aquifolium_eur10S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_petraea",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Quercus_petraea_eur13L.schem",
+      "contrib/lentebriesje/Quercus_petraea_eur13S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Sorbus_aucuparia",
+     "w1": [
+      "contrib/lentebriesje/Sorbus_aucuparia_eur16L.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_minor",
+     "w1": [
+      "contrib/lentebriesje/Ulmus_minor_eur6S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Ulmus_minor_eur6L.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Crataegus_monogyna",
+     "w1": [
+      "contrib/lentebriesje/Crataegus_monogyna_eur7L.schem",
+      "contrib/lentebriesje/Crataegus_monogyna_eur7S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Carpinus_betulus",
+     "w1": [
+      "contrib/lentebriesje/Carpinus_betulus_eur9L.schem",
+      "contrib/lentebriesje/Carpinus_betulus_eur9S.schem"
      ],
      "w2": [],
      "w3": []
@@ -696,6 +877,42 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Quercus_petraea",
+     "w1": [],
+     "w2": [
+      "contrib/lentebriesje/Quercus_petraea_eur13L.schem",
+      "contrib/lentebriesje/Quercus_petraea_eur13S.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Prunus_spinosa",
+     "w1": [
+      "contrib/lentebriesje/Prunus_spinosa_eur5L.schem",
+      "contrib/lentebriesje/Prunus_spinosa_eur5S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Crataegus_monogyna",
+     "w1": [
+      "contrib/lentebriesje/Crataegus_monogyna_eur7L.schem",
+      "contrib/lentebriesje/Crataegus_monogyna_eur7S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Carpinus_betulus",
+     "w1": [
+      "contrib/lentebriesje/Carpinus_betulus_eur9L.schem",
+      "contrib/lentebriesje/Carpinus_betulus_eur9S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -708,7 +925,9 @@
      "name": "Alnus_glutinosa",
      "w1": [
       "4. europe/Alnus_glutinosa1.schem",
-      "4. europe/Alnus_glutinosa2.schem"
+      "4. europe/Alnus_glutinosa2.schem",
+      "contrib/lentebriesje/Alnus_glutinosa_eur1L.schem",
+      "contrib/lentebriesje/Alnus_glutinosa_eur1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -719,16 +938,21 @@
       "4. europe/Corylus_avellana1.schem",
       "4. europe/Corylus_avellana2.schem",
       "4. europe/Corylus_avellana3.schem",
-      "4. europe/Corylus_avellana4.schem"
+      "4. europe/Corylus_avellana4.schem",
+      "contrib/lentebriesje/Corylus_avellana_eur8L.schem",
+      "contrib/lentebriesje/Corylus_avellana_eur8S.schem"
      ],
      "w2": [],
      "w3": []
     },
     {
      "name": "Fraxinus_excelsior",
-     "w1": [],
+     "w1": [
+      "contrib/lentebriesje/Fraxinus_excelsior_eur2L.schem"
+     ],
      "w2": [
-      "4. europe/Fraxinus_excelsior3.schem"
+      "4. europe/Fraxinus_excelsior3.schem",
+      "contrib/lentebriesje/Fraxinus_excelsior_eur2S.schem"
      ],
      "w3": []
     },
@@ -783,9 +1007,12 @@
      "name": "Tilia_cordata",
      "w1": [
       "4. europe/Tilia_cordata1.schem",
-      "4. europe/Tilia_cordata5.schem"
+      "4. europe/Tilia_cordata5.schem",
+      "contrib/lentebriesje/Tilia_cordata_eur12S.schem"
      ],
-     "w2": [],
+     "w2": [
+      "contrib/lentebriesje/Tilia_cordata_eur12L.schem"
+     ],
      "w3": []
     },
     {
@@ -808,6 +1035,43 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Juniperus_communis",
+     "w1": [
+      "contrib/lentebriesje/Juniperus_communis_eur11L.schem",
+      "contrib/lentebriesje/Juniperus_communis_eur11S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_spinosa",
+     "w1": [
+      "contrib/lentebriesje/Prunus_spinosa_eur5L.schem",
+      "contrib/lentebriesje/Prunus_spinosa_eur5S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_minor",
+     "w1": [
+      "contrib/lentebriesje/Ulmus_minor_eur6S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Ulmus_minor_eur6L.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Crataegus_monogyna",
+     "w1": [
+      "contrib/lentebriesje/Crataegus_monogyna_eur7L.schem",
+      "contrib/lentebriesje/Crataegus_monogyna_eur7S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -825,7 +1089,9 @@
       "4. europe/Larix_decidua5.schem",
       "4. europe/Larix_decidua6.schem",
       "4. europe/Larix_decidua7.schem",
-      "4. europe/Larix_decidua8.schem"
+      "4. europe/Larix_decidua8.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21L.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21S.schem"
      ],
      "w2": [],
      "w3": [
@@ -841,7 +1107,9 @@
       "4. europe/Picea_abies4.schem",
       "4. europe/Picea_abies5.schem",
       "4. europe/Picea_abies6.schem",
-      "4. europe/Picea_abies7.schem"
+      "4. europe/Picea_abies7.schem",
+      "contrib/lentebriesje/Picea_abies_eur20L.schem",
+      "contrib/lentebriesje/Picea_abies_eur20S.schem"
      ],
      "w2": [],
      "w3": []
@@ -855,7 +1123,9 @@
       "4. europe/Pinus_sylvestris5.schem",
       "4. europe/Pinus_sylvestris6.schem",
       "4. europe/Pinus_sylvestris7.schem",
-      "4. europe/Pinus_sylvestris8.schem"
+      "4. europe/Pinus_sylvestris8.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14L.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14S.schem"
      ],
      "w2": [],
      "w3": [
@@ -873,6 +1143,14 @@
       "4. europe/Rhamnus_cathartica1.schem",
       "4. europe/Rhamnus_cathartica4.schem"
      ]
+    },
+    {
+     "name": "Sorbus_aucuparia",
+     "w1": [
+      "contrib/lentebriesje/Sorbus_aucuparia_eur16L.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -885,7 +1163,9 @@
      "name": "Larix_decidua",
      "w1": [
       "4. europe/Larix_decidua7.schem",
-      "4. europe/Larix_decidua8.schem"
+      "4. europe/Larix_decidua8.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21L.schem",
+      "contrib/lentebriesje/Larix_decidua_eur21S.schem"
      ],
      "w2": [],
      "w3": []
@@ -895,7 +1175,9 @@
      "w1": [
       "4. europe/Picea_abies5.schem",
       "4. europe/Picea_abies6.schem",
-      "4. europe/Picea_abies7.schem"
+      "4. europe/Picea_abies7.schem",
+      "contrib/lentebriesje/Picea_abies_eur20L.schem",
+      "contrib/lentebriesje/Picea_abies_eur20S.schem"
      ],
      "w2": [],
      "w3": []
@@ -904,7 +1186,18 @@
      "name": "Pinus_sylvestris",
      "w1": [
       "4. europe/Pinus_sylvestris6.schem",
-      "4. europe/Pinus_sylvestris7.schem"
+      "4. europe/Pinus_sylvestris7.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14L.schem",
+      "contrib/lentebriesje/Pinus_sylvestris_eur14S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Juniperus_communis",
+     "w1": [
+      "contrib/lentebriesje/Juniperus_communis_eur11L.schem",
+      "contrib/lentebriesje/Juniperus_communis_eur11S.schem"
      ],
      "w2": [],
      "w3": []
@@ -920,7 +1213,9 @@
      "name": "Alnus_glutinosa",
      "w1": [
       "4. europe/Alnus_glutinosa1.schem",
-      "4. europe/Alnus_glutinosa2.schem"
+      "4. europe/Alnus_glutinosa2.schem",
+      "contrib/lentebriesje/Alnus_glutinosa_eur1L.schem",
+      "contrib/lentebriesje/Alnus_glutinosa_eur1S.schem"
      ],
      "w2": [
       "4. europe/Alnus_glutinosa3.schem"
@@ -947,9 +1242,21 @@
       "4. europe/Salix_alba4.schem",
       "4. europe/Salix_alba5.schem",
       "4. europe/Salix_alba6.schem",
-      "4. europe/Salix_alba7.schem"
+      "4. europe/Salix_alba7.schem",
+      "contrib/lentebriesje/Salix_alba_eur17L.schem",
+      "contrib/lentebriesje/Salix_alba_eur17S.schem"
      ],
      "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_minor",
+     "w1": [
+      "contrib/lentebriesje/Ulmus_minor_eur6S.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Ulmus_minor_eur6L.schem"
+     ],
      "w3": []
     }
    ]
@@ -1054,6 +1361,16 @@
       "4. europe/Quercus_suber4.schem"
      ],
      "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_pinaster",
+     "w1": [
+      "contrib/lentebriesje/Pinus_pinaster_eur18L.schem"
+     ],
+     "w2": [
+      "contrib/lentebriesje/Pinus_pinaster_eur18S.schem"
+     ],
      "w3": []
     }
    ]

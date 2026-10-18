@@ -142,6 +142,62 @@ pub fn load(
 mod tests {
     use super::*;
 
+    /// Every model a manifest lists exists and loads as a tree, and every
+    /// contributed model is listed somewhere.
+    #[test]
+    fn every_listed_model_loads_and_none_is_orphaned() {
+        let mut listed = std::collections::HashSet::new();
+        for pack in EMBEDDED.dirs() {
+            let code = pack.path().to_string_lossy().to_string();
+            let Some(manifest) = EMBEDDED.get_file(format!("{code}/region.json")) else {
+                continue;
+            };
+            let m: serde_json::Value = serde_json::from_slice(manifest.contents()).unwrap();
+            for c in m["communities"].as_array().unwrap() {
+                for sp in c["species"].as_array().unwrap() {
+                    for key in ["w1", "w2", "w3"] {
+                        for rel in sp[key].as_array().unwrap() {
+                            let path = format!("{code}/{}", rel.as_str().unwrap());
+                            if !listed.insert(path.clone()) {
+                                continue;
+                            }
+                            let file = EMBEDDED
+                                .get_file(&path)
+                                .unwrap_or_else(|| panic!("{path} is listed but missing"));
+                            let schem = crate::trees::schematic::load_schem(file.contents())
+                                .unwrap_or_else(|e| panic!("{path}: {e}"));
+                            // Cacti and snags are listed on purpose and skipped at load.
+                            if path.contains("/contrib/") {
+                                assert!(schem.has_leaves(), "{path} has no leaves");
+                                assert!(schem.height >= 2, "{path} is flat");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        fn walk(dir: &Dir<'static>, out: &mut Vec<String>) {
+            for f in dir.files() {
+                out.push(
+                    f.path()
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
+                );
+            }
+            for d in dir.dirs() {
+                walk(d, out);
+            }
+        }
+        let mut files = Vec::new();
+        walk(&EMBEDDED, &mut files);
+        let orphans: Vec<&String> = files
+            .iter()
+            .filter(|f| f.contains("/contrib/") && !listed.contains(*f))
+            .collect();
+        assert!(orphans.is_empty(), "unlisted models: {orphans:?}");
+        assert!(listed.len() > 2400, "{} models", listed.len());
+    }
+
     #[test]
     fn realm_mapping() {
         assert_eq!(realm_for_latlon(40.71, -74.01), "ena"); // NYC: temperate, palms gated off

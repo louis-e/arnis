@@ -37,16 +37,19 @@ pub const CANOPY_NODATA: u8 = 255;
 /// Shortest canopy that counts as a tree. Below this is scrub and hedges.
 pub const CANOPY_MIN_M: u8 = 3;
 
-/// Leaf-bearing columns one placed tree adds, which is what turns a canopy
-/// fraction into a trunk probability. Calibrated over the Olympiapark: 27.4%
-/// placed against 27.2% real, both over ground a tree can root in.
-const COLUMNS_PER_TREE: f64 = 52.0;
-
-/// Procedural crowns are smaller than the schematic pack's.
-const COLUMNS_PER_TREE_LEGACY: f64 = 25.0;
+/// Leaf-bearing columns of one procedural tree; the schematic pack measures its own.
+pub const COLUMNS_PER_TREE_LEGACY: f64 = 25.0;
 
 /// A slot never becomes a certainty, so even solid canopy keeps some variation.
 const SLOT_P_MAX: f64 = 0.85;
+
+/// Leaf columns a slot assumed per tree before crowns were measured per height,
+/// kept for micro trees, whose few-block crowns hardly overlap.
+const COLUMNS_PER_TREE_MICRO: f64 = 52.0;
+
+/// Cover the overlap correction aims for at most; a closed canopy would ask for
+/// a tree in every slot.
+const FRACTION_MAX: f64 = 0.95;
 
 /// Canopy heights on the same grid as the land cover, so one set of ratios
 /// addresses both.
@@ -114,17 +117,20 @@ impl CanopyData {
     }
 }
 
-/// Trunk probability for one lattice cell of `spacing` squared columns. The map
-/// measures crowns, not trunks, so the fraction is divided by what one tree
-/// covers.
-pub fn slot_probability(fraction: f64, spacing: i32, schematic_pack: bool) -> f64 {
-    let per_tree = if schematic_pack {
-        COLUMNS_PER_TREE
-    } else {
-        COLUMNS_PER_TREE_LEGACY
-    };
-    let area = (spacing * spacing) as f64;
-    (fraction * area / per_tree).clamp(0.0, SLOT_P_MAX)
+/// The flat rate micro trees keep: the fraction over a fixed crown, no overlap.
+pub fn micro_slot_probability(fraction: f64, spacing: i32) -> f64 {
+    let area = f64::from(spacing * spacing);
+    (fraction * area / COLUMNS_PER_TREE_MICRO).clamp(0.0, SLOT_P_MAX)
+}
+
+/// Trunk probability for one lattice cell of `spacing` squared columns, where one
+/// tree covers `crown_columns`. Crowns of trees in neighbouring slots overlap, so
+/// trees covering `k` times the area leave `exp(-k)` of it open: the fraction is
+/// inverted through that before it is divided by what one tree covers.
+pub fn slot_probability(fraction: f64, spacing: i32, crown_columns: f64) -> f64 {
+    let area = f64::from(spacing * spacing);
+    let cover = -(1.0 - fraction.clamp(0.0, FRACTION_MAX)).ln();
+    (cover * area / crown_columns.max(1.0)).clamp(0.0, SLOT_P_MAX)
 }
 
 /// Tile indices of the zoom-9 tile holding this point.
@@ -788,14 +794,19 @@ mod tests {
 
     #[test]
     fn slot_probability_reproduces_the_canopy_fraction() {
-        // A tree covers COLUMNS_PER_TREE columns, so p * k / area == fraction.
-        for &f in &[0.0, 0.19, 0.26, 0.44] {
-            let p = slot_probability(f, 5, true);
-            let realized = p * COLUMNS_PER_TREE / 25.0;
+        // Overlapping crowns leave exp(-p * k / area) open, so the open share
+        // that is left is exactly what the map measured.
+        let crown = 52.0;
+        for &f in &[0.0, 0.19, 0.26, 0.44, 0.7] {
+            let p = slot_probability(f, 5, crown);
+            let realized = 1.0 - (-p * crown / 25.0).exp();
             assert!((realized - f).abs() < 1e-9, "f={f} realized={realized}");
         }
+        // Bigger crowns need fewer trunks for the same cover.
+        assert!(slot_probability(0.4, 5, 120.0) < slot_probability(0.4, 5, 40.0));
         // Saturating canopy is capped so a slot never becomes a certainty.
-        assert_eq!(slot_probability(1.0, 7, true), SLOT_P_MAX);
+        assert_eq!(slot_probability(1.0, 7, 52.0), SLOT_P_MAX);
+        assert_eq!(slot_probability(0.0, 7, 52.0), 0.0);
     }
 
     /// Live fetch over the Olympiapark. Ignored by default so the suite stays

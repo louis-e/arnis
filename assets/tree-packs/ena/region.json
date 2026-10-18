@@ -13,7 +13,9 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -23,7 +25,9 @@
      "w1": [
       "Acer_saccharum1.schem",
       "Acer_saccharum2.schem",
-      "Acer_saccharum4.schem"
+      "Acer_saccharum4.schem",
+      "contrib/lentebriesje/Acer_saccharum_na2L.schem",
+      "contrib/lentebriesje/Acer_saccharum_na2S.schem"
      ],
      "w2": [
       "Acer_saccharum3.schem"
@@ -69,7 +73,9 @@
      "name": "Cornus_florida",
      "w1": [
       "Cornus_florida2.schem",
-      "Cornus_florida4.schem"
+      "Cornus_florida4.schem",
+      "contrib/lentebriesje/Cornus_florida_na8L.schem",
+      "contrib/lentebriesje/Cornus_florida_na8S.schem"
      ],
      "w2": [
       "Cornus_florida5.schem"
@@ -98,8 +104,12 @@
       "Fagus_grandifolia4.schem",
       "Fagus_grandifolia5.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13S.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13L.schem"
+     ]
     },
     {
      "name": "Hamamelis_virginiana",
@@ -148,7 +158,9 @@
      "w1": [
       "Quercus_alba (2).schem",
       "Quercus_alba (4).schem",
-      "Quercus_alba (5).schem"
+      "Quercus_alba (5).schem",
+      "contrib/lentebriesje/Quercus_alba_na10L.schem",
+      "contrib/lentebriesje/Quercus_alba_na10S.schem"
      ],
      "w2": [
       "Quercus_alba (3).schem"
@@ -192,6 +204,15 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Tilia_americana",
+     "w1": [
+      "contrib/lentebriesje/Tilia_americana_na14L.schem",
+      "contrib/lentebriesje/Tilia_americana_na14S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -206,7 +227,9 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -216,7 +239,9 @@
      "w1": [
       "Acer_saccharum1.schem",
       "Acer_saccharum2.schem",
-      "Acer_saccharum4.schem"
+      "Acer_saccharum4.schem",
+      "contrib/lentebriesje/Acer_saccharum_na2L.schem",
+      "contrib/lentebriesje/Acer_saccharum_na2S.schem"
      ],
      "w2": [
       "Acer_saccharum3.schem"
@@ -263,6 +288,42 @@
       "Ulmus_americana2.schem",
       "Ulmus_americana3.schem",
       "Ulmus_americana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Fraxinus_pennsylvanica",
+     "w1": [
+      "contrib/lentebriesje/Fraxinus_pennsylvanica_na12L.schem",
+      "contrib/lentebriesje/Fraxinus_pennsylvanica_na12S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_americana",
+     "w1": [
+      "contrib/lentebriesje/Tilia_americana_na14L.schem",
+      "contrib/lentebriesje/Tilia_americana_na14S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Betula_papyrifera",
+     "w1": [
+      "contrib/lentebriesje/Betula_papyrifera_na15L.schem",
+      "contrib/lentebriesje/Betula_papyrifera_na15S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremuloides",
+     "w1": [
+      "contrib/lentebriesje/Populus_tremuloides_na7L.schem",
+      "contrib/lentebriesje/Populus_tremuloides_na7S.schem"
      ],
      "w2": [],
      "w3": []
@@ -742,7 +803,9 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -810,8 +873,12 @@
       "Fagus_grandifolia4.schem",
       "Fagus_grandifolia5.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13S.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13L.schem"
+     ]
     },
     {
      "name": "Gleditsia_triacanthos",
@@ -852,7 +919,9 @@
      "w1": [
       "Quercus_alba (2).schem",
       "Quercus_alba (4).schem",
-      "Quercus_alba (5).schem"
+      "Quercus_alba (5).schem",
+      "contrib/lentebriesje/Quercus_alba_na10L.schem",
+      "contrib/lentebriesje/Quercus_alba_na10S.schem"
      ],
      "w2": [
       "Quercus_alba (3).schem"
@@ -883,6 +952,24 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Fraxinus_pennsylvanica",
+     "w1": [
+      "contrib/lentebriesje/Fraxinus_pennsylvanica_na12L.schem",
+      "contrib/lentebriesje/Fraxinus_pennsylvanica_na12S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_americana",
+     "w1": [
+      "contrib/lentebriesje/Tilia_americana_na14L.schem",
+      "contrib/lentebriesje/Tilia_americana_na14S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -896,7 +983,9 @@
      "w1": [
       "Abies_balsamea1.schem",
       "Abies_balsamea2.schem",
-      "Abies_balsamea3.schem"
+      "Abies_balsamea3.schem",
+      "contrib/lentebriesje/Abies_balsamea_na5L.schem",
+      "contrib/lentebriesje/Abies_balsamea_na5S.schem"
      ],
      "w2": [],
      "w3": []
@@ -945,6 +1034,33 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Betula_papyrifera",
+     "w1": [
+      "contrib/lentebriesje/Betula_papyrifera_na15L.schem",
+      "contrib/lentebriesje/Betula_papyrifera_na15S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Abies_fraseri",
+     "w1": [
+      "contrib/lentebriesje/Abies_fraseri_na20L.schem",
+      "contrib/lentebriesje/Abies_fraseri_na20S.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremuloides",
+     "w1": [
+      "contrib/lentebriesje/Populus_tremuloides_na7L.schem",
+      "contrib/lentebriesje/Populus_tremuloides_na7S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -959,7 +1075,9 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -984,8 +1102,12 @@
       "Fagus_grandifolia4.schem",
       "Fagus_grandifolia5.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13S.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13L.schem"
+     ]
     },
     {
      "name": "Nyssa_sylvatica",
@@ -1034,6 +1156,15 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Fraxinus_pennsylvanica",
+     "w1": [
+      "contrib/lentebriesje/Fraxinus_pennsylvanica_na12L.schem",
+      "contrib/lentebriesje/Fraxinus_pennsylvanica_na12S.schem"
+     ],
+     "w2": [],
+     "w3": []
     }
    ]
   },
@@ -1048,7 +1179,9 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1084,8 +1217,12 @@
       "Fagus_grandifolia4.schem",
       "Fagus_grandifolia5.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13S.schem"
+     ],
+     "w3": [
+      "contrib/lentebriesje/Fagus_grandifolia_na13L.schem"
+     ]
     },
     {
      "name": "Hamamelis_virginiana",
@@ -1115,7 +1252,9 @@
      "w1": [
       "Liquidambar_styraciflua1.schem",
       "Liquidambar_styraciflua2.schem",
-      "Liquidambar_styraciflua3.schem"
+      "Liquidambar_styraciflua3.schem",
+      "contrib/lentebriesje/Liquidambar_styraciflua_na4L.schem",
+      "contrib/lentebriesje/Liquidambar_styraciflua_na4S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1204,6 +1343,16 @@
      ],
      "w2": [],
      "w3": []
+    },
+    {
+     "name": "Chamaecyparis_thyoides",
+     "w1": [
+      "contrib/lentebriesje/Chamaecyparis_thyoides_na18S.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "contrib/lentebriesje/Chamaecyparis_thyoides_na18L.schem"
+     ]
     }
    ]
   },
@@ -1243,7 +1392,9 @@
       "Pinus_taeda3.schem",
       "Pinus_taeda4.schem",
       "Pinus_taeda6.schem",
-      "Pinus_taeda7.schem"
+      "Pinus_taeda7.schem",
+      "contrib/lentebriesje/Pinus_taeda_na3L.schem",
+      "contrib/lentebriesje/Pinus_taeda_na3S.schem"
      ],
      "w2": [],
      "w3": []
@@ -1312,10 +1463,23 @@
       "Taxodium_distichum4.schem",
       "Taxodium_distichum5.schem",
       "Taxodium_distichum6.schem",
-      "Taxodium_distichum7.schem"
+      "Taxodium_distichum7.schem",
+      "contrib/lentebriesje/Taxodium_distichum_na16L.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Taxodium_distichum_na16S.schem"
+     ]
+    },
+    {
+     "name": "Chamaecyparis_thyoides",
+     "w1": [
+      "contrib/lentebriesje/Chamaecyparis_thyoides_na18S.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "contrib/lentebriesje/Chamaecyparis_thyoides_na18L.schem"
+     ]
     }
    ]
   },

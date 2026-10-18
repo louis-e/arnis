@@ -16,6 +16,17 @@ pub enum TreeSize {
     Giant,
 }
 
+/// Tallest height in blocks that still falls in `size`.
+pub fn size_cap_height(size: TreeSize) -> i32 {
+    match size {
+        TreeSize::Small => SMALL_MAX_HEIGHT,
+        TreeSize::Medium => MEDIUM_MAX_HEIGHT,
+        TreeSize::Big => BIG_MAX_HEIGHT,
+        TreeSize::Tall => TALL_MAX_HEIGHT,
+        TreeSize::Giant => i32::MAX,
+    }
+}
+
 /// Bucket a schematic by its height.
 pub fn size_for_height(height: i32) -> TreeSize {
     if height <= SMALL_MAX_HEIGHT {
@@ -29,11 +40,6 @@ pub fn size_for_height(height: i32) -> TreeSize {
     } else {
         TreeSize::Giant
     }
-}
-
-/// Bucket a measured canopy top. One block is one metre.
-pub fn size_for_canopy_m(metres: u8) -> TreeSize {
-    size_for_height(i32::from(metres))
 }
 
 /// The five size tiers + which are enabled. Default: all (giant stays 1:1-gated in the engine).
@@ -82,6 +88,21 @@ impl SizeFilter {
             big: TreeSize::Big <= max,
             tall: TreeSize::Tall <= max,
             giant: TreeSize::Giant <= max,
+        }
+    }
+
+    /// Tallest model height in blocks the enabled tiers let through.
+    pub fn max_height(&self) -> i32 {
+        if self.giant {
+            i32::MAX
+        } else if self.tall {
+            TALL_MAX_HEIGHT
+        } else if self.big {
+            BIG_MAX_HEIGHT
+        } else if self.medium {
+            MEDIUM_MAX_HEIGHT
+        } else {
+            SMALL_MAX_HEIGHT
         }
     }
 

@@ -12,16 +12,31 @@
      "w1": [
       "acacia/Vachellia_generica1.schem",
       "acacia/Vachellia_generica4.schem",
-      "acacia/Vachellia_generica6.schem"
+      "acacia/Vachellia_generica6.schem",
+      "contrib/exsilit/Vachellia_generica_t091.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_acacia1.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_acacia2.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_acacia3.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_acacia5.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_badlands_tree_03.schem"
      ],
      "w2": [
       "acacia/Vachellia_generica2.schem",
       "acacia/Vachellia_generica5.schem",
       "acacia/Vachellia_generica7.schem",
-      "acacia/Vachellia_generica8.schem"
+      "acacia/Vachellia_generica8.schem",
+      "contrib/exsilit/Vachellia_generica_t090.schem",
+      "contrib/exsilit/Vachellia_generica_t092.schem",
+      "contrib/exsilit/Vachellia_generica_t094.schem",
+      "contrib/exsilit/Vachellia_generica_t161.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_acacia4.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_badlands_tree_01.schem",
+      "contrib/sijmen_v_b/Vachellia_generica_badlands_tree_02.schem"
      ],
      "w3": [
-      "acacia/Vachellia_generica3.schem"
+      "acacia/Vachellia_generica3.schem",
+      "contrib/exsilit/Vachellia_generica_t093.schem",
+      "contrib/exsilit/Vachellia_generica_t151.schem"
      ]
     }
    ]
@@ -40,11 +55,13 @@
       "azalea/Rhododendon_spelaea6.schem"
      ],
      "w2": [
-      "azalea/Rhododendon_spelaea5.schem"
+      "azalea/Rhododendon_spelaea5.schem",
+      "contrib/mellowhat/Rhododendon_spelaea_small.schem"
      ],
      "w3": [
       "azalea/Rhododendon_spelaea2.schem",
-      "azalea/Rhododendon_spelaea7.schem"
+      "azalea/Rhododendon_spelaea7.schem",
+      "contrib/mellowhat/Rhododendon_spelaea_big.schem"
      ]
     }
    ]
@@ -64,10 +81,28 @@
       "birch/Betula_generica5.schem",
       "birch/Betula_generica6.schem",
       "birch/Betula_generica7.schem",
-      "birch/Betula_generica8.schem"
+      "birch/Betula_generica8.schem",
+      "contrib/exsilit/Betula_generica_t201.schem",
+      "contrib/exsilit/Betula_generica_t232.schem",
+      "contrib/exsilit/Betula_generica_t233.schem",
+      "contrib/exsilit/Betula_generica_t255.schem",
+      "contrib/exsilit/Betula_generica_t256.schem",
+      "contrib/exsilit/Betula_generica_t257.schem",
+      "contrib/exsilit/Betula_generica_t258.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Betula_generica_t121.schem",
+      "contrib/exsilit/Betula_generica_t122.schem",
+      "contrib/exsilit/Betula_generica_t134.schem",
+      "contrib/exsilit/Betula_generica_t135.schem",
+      "contrib/exsilit/Betula_generica_t150.schem",
+      "contrib/skybrawl123/Betula_generica_1.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Betula_generica_t069.schem",
+      "contrib/exsilit/Betula_generica_t252.schem",
+      "contrib/exsilit/Betula_generica_t343.schem"
+     ]
     }
    ]
   },
@@ -82,7 +117,11 @@
       "dark oak/Quercus_obscura11.schem"
      ],
      "w2": [
-      "dark oak/Quercus_obscura12.schem"
+      "dark oak/Quercus_obscura12.schem",
+      "contrib/exsilit/Quercus_obscura_t163.schem",
+      "contrib/exsilit/Quercus_obscura_t164.schem",
+      "contrib/exsilit/Quercus_obscura_t165.schem",
+      "contrib/exsilit/Quercus_obscura_t166.schem"
      ],
      "w3": [
       "dark oak/Quercus_obscura1.schem",
@@ -94,7 +133,13 @@
       "dark oak/Quercus_obscura6.schem",
       "dark oak/Quercus_obscura7.schem",
       "dark oak/Quercus_obscura8.schem",
-      "dark oak/Quercus_obscura9.schem"
+      "dark oak/Quercus_obscura9.schem",
+      "contrib/exsilit/Quercus_obscura_t159.schem",
+      "contrib/exsilit/Quercus_obscura_t160.schem",
+      "contrib/sijmen_v_b/Quercus_obscura_dark_oak_01.schem",
+      "contrib/sijmen_v_b/Quercus_obscura_dark_oak_02.schem",
+      "contrib/sijmen_v_b/Quercus_obscura_dark_oak_large_01.schem",
+      "contrib/sijmen_v_b/Quercus_obscura_dark_oak_large_02.schem"
      ]
     }
    ]
@@ -109,23 +154,70 @@
      "w1": [
       "jungle/Cocos_caduca1.schem",
       "jungle/Cocos_caduca2.schem",
-      "jungle/Cocos_caduca4.schem"
+      "jungle/Cocos_caduca4.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_01.schem"
      ],
      "w2": [
       "jungle/Cocos_caduca3.schem",
-      "jungle/Cocos_caduca5.schem"
+      "jungle/Cocos_caduca5.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_01.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_02.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_03.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_02.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_straight_01.schem"
      ],
-     "w3": []
+     "w3": [
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_small_01.schem"
+     ]
     },
     {
      "name": "Swietenia_generica",
      "w1": [
       "jungle/Swietenia_generica1.schem",
       "jungle/Swietenia_generica2.schem",
-      "jungle/Swietenia_generica3.schem"
+      "jungle/Swietenia_generica3.schem",
+      "contrib/exsilit/Swietenia_generica_t116.schem",
+      "contrib/exsilit/Swietenia_generica_t117.schem",
+      "contrib/exsilit/Swietenia_generica_t119.schem",
+      "contrib/exsilit/Swietenia_generica_t129.schem",
+      "contrib/exsilit/Swietenia_generica_t130.schem",
+      "contrib/exsilit/Swietenia_generica_t131.schem",
+      "contrib/exsilit/Swietenia_generica_t132.schem",
+      "contrib/exsilit/Swietenia_generica_t248.schem",
+      "contrib/exsilit/Swietenia_generica_t280.schem",
+      "contrib/exsilit/Swietenia_generica_t282.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_2.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_3.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_cocoa_1.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_cocoa_2.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_cocoa_3.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_small_1.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_small_2.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_small_3.schem",
+      "contrib/aks_jun/Swietenia_generica_1.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Swietenia_generica_t065.schem",
+      "contrib/exsilit/Swietenia_generica_t066.schem",
+      "contrib/exsilit/Swietenia_generica_t118.schem",
+      "contrib/exsilit/Swietenia_generica_t120.schem",
+      "contrib/exsilit/Swietenia_generica_t239.schem",
+      "contrib/exsilit/Swietenia_generica_t251.schem",
+      "contrib/exsilit/Swietenia_generica_t356.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_1.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Swietenia_generica_t061.schem",
+      "contrib/exsilit/Swietenia_generica_t062.schem",
+      "contrib/exsilit/Swietenia_generica_t063.schem",
+      "contrib/exsilit/Swietenia_generica_t064.schem",
+      "contrib/exsilit/Swietenia_generica_t089.schem",
+      "contrib/exsilit/Swietenia_generica_t260.schem",
+      "contrib/exsilit/Swietenia_generica_t261.schem",
+      "contrib/exsilit/Swietenia_generica_t263.schem",
+      "contrib/exsilit/Swietenia_generica_t330.schem",
+      "contrib/exsilit/Swietenia_generica_t332.schem"
+     ]
     },
     {
      "name": "junglebush",
@@ -155,23 +247,77 @@
      "w1": [
       "jungle/Cocos_caduca1.schem",
       "jungle/Cocos_caduca2.schem",
-      "jungle/Cocos_caduca4.schem"
+      "jungle/Cocos_caduca4.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_01.schem"
      ],
      "w2": [
       "jungle/Cocos_caduca3.schem",
-      "jungle/Cocos_caduca5.schem"
+      "jungle/Cocos_caduca5.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_01.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_02.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_03.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_split_02.schem",
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_straight_01.schem"
      ],
-     "w3": []
+     "w3": [
+      "contrib/sijmen_v_b/Cocos_caduca_palm_tree_small_01.schem"
+     ]
     },
     {
      "name": "Swietenia_generica",
      "w1": [
       "jungle/Swietenia_generica1.schem",
       "jungle/Swietenia_generica2.schem",
-      "jungle/Swietenia_generica3.schem"
+      "jungle/Swietenia_generica3.schem",
+      "contrib/exsilit/Swietenia_generica_t116.schem",
+      "contrib/exsilit/Swietenia_generica_t117.schem",
+      "contrib/exsilit/Swietenia_generica_t119.schem",
+      "contrib/exsilit/Swietenia_generica_t129.schem",
+      "contrib/exsilit/Swietenia_generica_t130.schem",
+      "contrib/exsilit/Swietenia_generica_t131.schem",
+      "contrib/exsilit/Swietenia_generica_t132.schem",
+      "contrib/exsilit/Swietenia_generica_t248.schem",
+      "contrib/exsilit/Swietenia_generica_t280.schem",
+      "contrib/exsilit/Swietenia_generica_t282.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_2.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_3.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_cocoa_1.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_cocoa_2.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_cocoa_3.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_small_1.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_small_2.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_small_3.schem",
+      "contrib/aks_jun/Swietenia_generica_1.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Swietenia_generica_t065.schem",
+      "contrib/exsilit/Swietenia_generica_t066.schem",
+      "contrib/exsilit/Swietenia_generica_t118.schem",
+      "contrib/exsilit/Swietenia_generica_t120.schem",
+      "contrib/exsilit/Swietenia_generica_t239.schem",
+      "contrib/exsilit/Swietenia_generica_t251.schem",
+      "contrib/exsilit/Swietenia_generica_t356.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_1.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_big_1.schem",
+      "contrib/sijmen_v_b/Swietenia_generica_jungle_big_2.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Swietenia_generica_t061.schem",
+      "contrib/exsilit/Swietenia_generica_t062.schem",
+      "contrib/exsilit/Swietenia_generica_t063.schem",
+      "contrib/exsilit/Swietenia_generica_t064.schem",
+      "contrib/exsilit/Swietenia_generica_t088.schem",
+      "contrib/exsilit/Swietenia_generica_t089.schem",
+      "contrib/exsilit/Swietenia_generica_t260.schem",
+      "contrib/exsilit/Swietenia_generica_t261.schem",
+      "contrib/exsilit/Swietenia_generica_t262.schem",
+      "contrib/exsilit/Swietenia_generica_t263.schem",
+      "contrib/exsilit/Swietenia_generica_t317.schem",
+      "contrib/exsilit/Swietenia_generica_t330.schem",
+      "contrib/exsilit/Swietenia_generica_t331.schem",
+      "contrib/exsilit/Swietenia_generica_t332.schem",
+      "contrib/exsilit/Swietenia_generica_t364.schem"
+     ]
     },
     {
      "name": "junglebush",
@@ -206,10 +352,159 @@
       "oak/Quercus_generica5.schem",
       "oak/Quercus_generica6.schem",
       "oak/Quercus_generica7.schem",
-      "oak/Quercus_generica8.schem"
+      "oak/Quercus_generica8.schem",
+      "contrib/exsilit/Quercus_generica_t037.schem",
+      "contrib/exsilit/Quercus_generica_t071.schem",
+      "contrib/exsilit/Quercus_generica_t072.schem",
+      "contrib/exsilit/Quercus_generica_t123.schem",
+      "contrib/exsilit/Quercus_generica_t125.schem",
+      "contrib/exsilit/Quercus_generica_t167.schem",
+      "contrib/exsilit/Quercus_generica_t168.schem",
+      "contrib/exsilit/Quercus_generica_t170.schem",
+      "contrib/exsilit/Quercus_generica_t171.schem",
+      "contrib/exsilit/Quercus_generica_t172.schem",
+      "contrib/exsilit/Quercus_generica_t173.schem",
+      "contrib/exsilit/Quercus_generica_t174.schem",
+      "contrib/exsilit/Quercus_generica_t176.schem",
+      "contrib/exsilit/Quercus_generica_t177.schem",
+      "contrib/exsilit/Quercus_generica_t178.schem",
+      "contrib/exsilit/Quercus_generica_t179.schem",
+      "contrib/exsilit/Quercus_generica_t189.schem",
+      "contrib/exsilit/Quercus_generica_t190.schem",
+      "contrib/exsilit/Quercus_generica_t199.schem",
+      "contrib/exsilit/Quercus_generica_t202.schem",
+      "contrib/exsilit/Quercus_generica_t222.schem",
+      "contrib/exsilit/Quercus_generica_t294.schem",
+      "contrib/exsilit/Quercus_generica_t359.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_02.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_03.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_small_1.schem",
+      "contrib/sijmen_v_b/Quercus_generica_old_tree1.schem",
+      "contrib/sijmen_v_b/Quercus_generica_old_tree2.schem",
+      "contrib/sijmen_v_b/Quercus_generica_old_tree_big1.schem",
+      "contrib/cowdebit/Quercus_generica_o1.schem",
+      "contrib/andyways/Quercus_generica_a0.schem",
+      "contrib/andyways/Quercus_generica_a1.schem",
+      "contrib/andyways/Quercus_generica_a2.schem",
+      "contrib/vico37/Quercus_generica_v5.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Quercus_generica_t018.schem",
+      "contrib/exsilit/Quercus_generica_t019.schem",
+      "contrib/exsilit/Quercus_generica_t020.schem",
+      "contrib/exsilit/Quercus_generica_t026.schem",
+      "contrib/exsilit/Quercus_generica_t027.schem",
+      "contrib/exsilit/Quercus_generica_t029.schem",
+      "contrib/exsilit/Quercus_generica_t039.schem",
+      "contrib/exsilit/Quercus_generica_t040.schem",
+      "contrib/exsilit/Quercus_generica_t056.schem",
+      "contrib/exsilit/Quercus_generica_t079.schem",
+      "contrib/exsilit/Quercus_generica_t080.schem",
+      "contrib/exsilit/Quercus_generica_t081.schem",
+      "contrib/exsilit/Quercus_generica_t082.schem",
+      "contrib/exsilit/Quercus_generica_t083.schem",
+      "contrib/exsilit/Quercus_generica_t096.schem",
+      "contrib/exsilit/Quercus_generica_t124.schem",
+      "contrib/exsilit/Quercus_generica_t126.schem",
+      "contrib/exsilit/Quercus_generica_t136.schem",
+      "contrib/exsilit/Quercus_generica_t149.schem",
+      "contrib/exsilit/Quercus_generica_t175.schem",
+      "contrib/exsilit/Quercus_generica_t249.schem",
+      "contrib/exsilit/Quercus_generica_t264.schem",
+      "contrib/exsilit/Quercus_generica_t274.schem",
+      "contrib/exsilit/Quercus_generica_t276.schem",
+      "contrib/exsilit/Quercus_generica_t281.schem",
+      "contrib/exsilit/Quercus_generica_t284.schem",
+      "contrib/exsilit/Quercus_generica_t289.schem",
+      "contrib/exsilit/Quercus_generica_t290.schem",
+      "contrib/exsilit/Quercus_generica_t291.schem",
+      "contrib/exsilit/Quercus_generica_t312.schem",
+      "contrib/exsilit/Quercus_generica_t334.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_01.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_05.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_big_1.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_big_2.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_small_2.schem",
+      "contrib/cowdebit/Quercus_generica_o2.schem",
+      "contrib/cowdebit/Quercus_generica_o4.schem",
+      "contrib/cowdebit/Quercus_generica_o6.schem",
+      "contrib/andyways/Quercus_generica_a5.schem",
+      "contrib/vico37/Quercus_generica_v4.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Quercus_generica_t021.schem",
+      "contrib/exsilit/Quercus_generica_t030.schem",
+      "contrib/exsilit/Quercus_generica_t038.schem",
+      "contrib/exsilit/Quercus_generica_t041.schem",
+      "contrib/exsilit/Quercus_generica_t042.schem",
+      "contrib/exsilit/Quercus_generica_t043.schem",
+      "contrib/exsilit/Quercus_generica_t053.schem",
+      "contrib/exsilit/Quercus_generica_t054.schem",
+      "contrib/exsilit/Quercus_generica_t068.schem",
+      "contrib/exsilit/Quercus_generica_t084.schem",
+      "contrib/exsilit/Quercus_generica_t095.schem",
+      "contrib/exsilit/Quercus_generica_t099.schem",
+      "contrib/exsilit/Quercus_generica_t102.schem",
+      "contrib/exsilit/Quercus_generica_t103.schem",
+      "contrib/exsilit/Quercus_generica_t104.schem",
+      "contrib/exsilit/Quercus_generica_t105.schem",
+      "contrib/exsilit/Quercus_generica_t107.schem",
+      "contrib/exsilit/Quercus_generica_t180.schem",
+      "contrib/exsilit/Quercus_generica_t187.schem",
+      "contrib/exsilit/Quercus_generica_t188.schem",
+      "contrib/exsilit/Quercus_generica_t191.schem",
+      "contrib/exsilit/Quercus_generica_t192.schem",
+      "contrib/exsilit/Quercus_generica_t193.schem",
+      "contrib/exsilit/Quercus_generica_t194.schem",
+      "contrib/exsilit/Quercus_generica_t195.schem",
+      "contrib/exsilit/Quercus_generica_t196.schem",
+      "contrib/exsilit/Quercus_generica_t197.schem",
+      "contrib/exsilit/Quercus_generica_t200.schem",
+      "contrib/exsilit/Quercus_generica_t247.schem",
+      "contrib/exsilit/Quercus_generica_t269.schem",
+      "contrib/exsilit/Quercus_generica_t270.schem",
+      "contrib/exsilit/Quercus_generica_t272.schem",
+      "contrib/exsilit/Quercus_generica_t273.schem",
+      "contrib/exsilit/Quercus_generica_t275.schem",
+      "contrib/exsilit/Quercus_generica_t292.schem",
+      "contrib/exsilit/Quercus_generica_t295.schem",
+      "contrib/exsilit/Quercus_generica_t296.schem",
+      "contrib/exsilit/Quercus_generica_t297.schem",
+      "contrib/exsilit/Quercus_generica_t298.schem",
+      "contrib/exsilit/Quercus_generica_t304.schem",
+      "contrib/exsilit/Quercus_generica_t306.schem",
+      "contrib/exsilit/Quercus_generica_t309.schem",
+      "contrib/exsilit/Quercus_generica_t311.schem",
+      "contrib/exsilit/Quercus_generica_t314.schem",
+      "contrib/exsilit/Quercus_generica_t316.schem",
+      "contrib/exsilit/Quercus_generica_t320.schem",
+      "contrib/exsilit/Quercus_generica_t321.schem",
+      "contrib/exsilit/Quercus_generica_t325.schem",
+      "contrib/exsilit/Quercus_generica_t326.schem",
+      "contrib/exsilit/Quercus_generica_t327.schem",
+      "contrib/exsilit/Quercus_generica_t329.schem",
+      "contrib/exsilit/Quercus_generica_t341.schem",
+      "contrib/exsilit/Quercus_generica_t342.schem",
+      "contrib/exsilit/Quercus_generica_t349.schem",
+      "contrib/exsilit/Quercus_generica_t350.schem",
+      "contrib/exsilit/Quercus_generica_t351.schem",
+      "contrib/exsilit/Quercus_generica_t352.schem",
+      "contrib/exsilit/Quercus_generica_t353.schem",
+      "contrib/exsilit/Quercus_generica_t354.schem",
+      "contrib/exsilit/Quercus_generica_t360.schem",
+      "contrib/exsilit/Quercus_generica_t362.schem",
+      "contrib/sijmen_v_b/Quercus_generica_lush_oak_04.schem",
+      "contrib/cowdebit/Quercus_generica_o3.schem",
+      "contrib/cowdebit/Quercus_generica_o5.schem",
+      "contrib/cowdebit/Quercus_generica_o7.schem",
+      "contrib/cowdebit/Quercus_generica_o8.schem",
+      "contrib/andyways/Quercus_generica_a3.schem",
+      "contrib/andyways/Quercus_generica_a4.schem",
+      "contrib/andyways/Quercus_generica_a6.schem",
+      "contrib/andyways/Quercus_generica_a7.schem",
+      "contrib/vico37/Quercus_generica_v3.schem",
+      "contrib/colbylines/Quercus_generica_1.schem"
+     ]
     }
    ]
   },
@@ -228,10 +523,38 @@
       "birch/Betula_generica5.schem",
       "birch/Betula_generica6.schem",
       "birch/Betula_generica7.schem",
-      "birch/Betula_generica8.schem"
+      "birch/Betula_generica8.schem",
+      "contrib/exsilit/Betula_generica_t232.schem",
+      "contrib/exsilit/Betula_generica_t256.schem",
+      "contrib/exsilit/Betula_generica_t338.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Betula_generica_t067.schem",
+      "contrib/exsilit/Betula_generica_t133.schem",
+      "contrib/exsilit/Betula_generica_t135.schem",
+      "contrib/exsilit/Betula_generica_t138.schem",
+      "contrib/exsilit/Betula_generica_t155.schem",
+      "contrib/exsilit/Betula_generica_t156.schem",
+      "contrib/skybrawl123/Betula_generica_1.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Betula_generica_t069.schem",
+      "contrib/exsilit/Betula_generica_t070.schem",
+      "contrib/exsilit/Betula_generica_t106.schem",
+      "contrib/exsilit/Betula_generica_t108.schem",
+      "contrib/exsilit/Betula_generica_t252.schem",
+      "contrib/exsilit/Betula_generica_t303.schem",
+      "contrib/exsilit/Betula_generica_t308.schem",
+      "contrib/exsilit/Betula_generica_t313.schem",
+      "contrib/exsilit/Betula_generica_t318.schem",
+      "contrib/exsilit/Betula_generica_t323.schem",
+      "contrib/exsilit/Betula_generica_t328.schem",
+      "contrib/exsilit/Betula_generica_t333.schem",
+      "contrib/exsilit/Betula_generica_t336.schem",
+      "contrib/exsilit/Betula_generica_t337.schem",
+      "contrib/exsilit/Betula_generica_t343.schem",
+      "contrib/exsilit/Betula_generica_t355.schem"
+     ]
     }
    ]
   },
@@ -252,7 +575,9 @@
       "taiga/Pinus_piceoides7.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/exsilit/Pinus_piceoides_t162.schem"
+     ]
     }
    ]
   },
@@ -271,10 +596,65 @@
       "taiga/Picea_generica5.schem",
       "taiga/Picea_generica6.schem",
       "taiga/Picea_generica7.schem",
-      "taiga/Picea_generica8.schem"
+      "taiga/Picea_generica8.schem",
+      "contrib/exsilit/Picea_generica_t001.schem",
+      "contrib/exsilit/Picea_generica_t011.schem",
+      "contrib/exsilit/Picea_generica_t012.schem",
+      "contrib/exsilit/Picea_generica_t213.schem",
+      "contrib/exsilit/Picea_generica_t214.schem",
+      "contrib/exsilit/Picea_generica_t216.schem",
+      "contrib/exsilit/Picea_generica_t217.schem",
+      "contrib/exsilit/Picea_generica_t230.schem",
+      "contrib/sijmen_v_b/Picea_generica_spruce_tree_big_01.schem",
+      "contrib/sijmen_v_b/Picea_generica_spruce_tree_big_02.schem",
+      "contrib/sijmen_v_b/Picea_generica_spruce_tree_mid_wide_01.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Picea_generica_t008.schem",
+      "contrib/exsilit/Picea_generica_t145.schem",
+      "contrib/exsilit/Picea_generica_t152.schem",
+      "contrib/exsilit/Picea_generica_t157.schem",
+      "contrib/exsilit/Picea_generica_t158.schem",
+      "contrib/exsilit/Picea_generica_t205.schem",
+      "contrib/exsilit/Picea_generica_t219.schem",
+      "contrib/exsilit/Picea_generica_t221.schem",
+      "contrib/exsilit/Picea_generica_t224.schem",
+      "contrib/exsilit/Picea_generica_t250.schem",
+      "contrib/exsilit/Picea_generica_t265.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Picea_generica_t003.schem",
+      "contrib/exsilit/Picea_generica_t005.schem",
+      "contrib/exsilit/Picea_generica_t006.schem",
+      "contrib/exsilit/Picea_generica_t025.schem",
+      "contrib/exsilit/Picea_generica_t074.schem",
+      "contrib/exsilit/Picea_generica_t169.schem",
+      "contrib/exsilit/Picea_generica_t181.schem",
+      "contrib/exsilit/Picea_generica_t182.schem",
+      "contrib/exsilit/Picea_generica_t183.schem",
+      "contrib/exsilit/Picea_generica_t184.schem",
+      "contrib/exsilit/Picea_generica_t185.schem",
+      "contrib/exsilit/Picea_generica_t186.schem",
+      "contrib/exsilit/Picea_generica_t198.schem",
+      "contrib/exsilit/Picea_generica_t215.schem",
+      "contrib/exsilit/Picea_generica_t223.schem",
+      "contrib/exsilit/Picea_generica_t225.schem",
+      "contrib/exsilit/Picea_generica_t227.schem",
+      "contrib/exsilit/Picea_generica_t228.schem",
+      "contrib/exsilit/Picea_generica_t234.schem",
+      "contrib/exsilit/Picea_generica_t235.schem",
+      "contrib/exsilit/Picea_generica_t236.schem",
+      "contrib/exsilit/Picea_generica_t237.schem",
+      "contrib/exsilit/Picea_generica_t238.schem",
+      "contrib/exsilit/Picea_generica_t277.schem",
+      "contrib/exsilit/Picea_generica_t287.schem",
+      "contrib/exsilit/Picea_generica_t340.schem",
+      "contrib/exsilit/Picea_generica_t344.schem",
+      "contrib/exsilit/Picea_generica_t363.schem",
+      "contrib/sijmen_v_b/Picea_generica_big_spruce_3.schem",
+      "contrib/sijmen_v_b/Picea_generica_large_spruce_tree_2.schem",
+      "contrib/builtbyniiiick/Picea_generica_1.schem"
+     ]
     }
    ]
   },
@@ -314,10 +694,76 @@
       "taiga/Picea_generica5.schem",
       "taiga/Picea_generica6.schem",
       "taiga/Picea_generica7.schem",
-      "taiga/Picea_generica8.schem"
+      "taiga/Picea_generica8.schem",
+      "contrib/exsilit/Picea_generica_t001.schem",
+      "contrib/exsilit/Picea_generica_t002.schem",
+      "contrib/exsilit/Picea_generica_t009.schem",
+      "contrib/exsilit/Picea_generica_t010.schem",
+      "contrib/exsilit/Picea_generica_t011.schem",
+      "contrib/exsilit/Picea_generica_t012.schem",
+      "contrib/exsilit/Picea_generica_t148.schem",
+      "contrib/exsilit/Picea_generica_t154.schem",
+      "contrib/exsilit/Picea_generica_t204.schem",
+      "contrib/exsilit/Picea_generica_t206.schem",
+      "contrib/exsilit/Picea_generica_t207.schem",
+      "contrib/exsilit/Picea_generica_t208.schem",
+      "contrib/exsilit/Picea_generica_t209.schem",
+      "contrib/exsilit/Picea_generica_t210.schem",
+      "contrib/exsilit/Picea_generica_t211.schem",
+      "contrib/exsilit/Picea_generica_t213.schem",
+      "contrib/exsilit/Picea_generica_t217.schem",
+      "contrib/exsilit/Picea_generica_t218.schem",
+      "contrib/exsilit/Picea_generica_t220.schem",
+      "contrib/exsilit/Picea_generica_t230.schem",
+      "contrib/exsilit/Picea_generica_t231.schem",
+      "contrib/exsilit/Picea_generica_t246.schem",
+      "contrib/exsilit/Picea_generica_t266.schem",
+      "contrib/exsilit/Picea_generica_t285.schem",
+      "contrib/exsilit/Picea_generica_t286.schem",
+      "contrib/exsilit/Picea_generica_t288.schem",
+      "contrib/sijmen_v_b/Picea_generica_spruce_tree_mid_wide_01.schem",
+      "contrib/bealzechan/Picea_generica_sap_large_1.schem",
+      "contrib/bealzechan/Picea_generica_sap_large_2.schem",
+      "contrib/bealzechan/Picea_generica_sap_large_3.schem",
+      "contrib/bealzechan/Picea_generica_sap_small_1.schem",
+      "contrib/bealzechan/Picea_generica_sap_small_2.schem",
+      "contrib/bealzechan/Picea_generica_sap_small_3.schem",
+      "contrib/bealzechan/Picea_generica_sap_snowy_large_1.schem",
+      "contrib/bealzechan/Picea_generica_sap_snowy_large_2.schem",
+      "contrib/bealzechan/Picea_generica_sap_snowy_large_3.schem",
+      "contrib/bealzechan/Picea_generica_sap_snowy_small_1.schem",
+      "contrib/bealzechan/Picea_generica_sap_snowy_small_2.schem",
+      "contrib/bealzechan/Picea_generica_sap_snowy_small_3.schem"
      ],
-     "w2": [],
-     "w3": []
+     "w2": [
+      "contrib/exsilit/Picea_generica_t004.schem",
+      "contrib/exsilit/Picea_generica_t007.schem",
+      "contrib/exsilit/Picea_generica_t008.schem",
+      "contrib/exsilit/Picea_generica_t028.schem",
+      "contrib/exsilit/Picea_generica_t055.schem",
+      "contrib/exsilit/Picea_generica_t145.schem",
+      "contrib/exsilit/Picea_generica_t146.schem",
+      "contrib/exsilit/Picea_generica_t147.schem",
+      "contrib/exsilit/Picea_generica_t153.schem",
+      "contrib/exsilit/Picea_generica_t157.schem",
+      "contrib/exsilit/Picea_generica_t212.schem",
+      "contrib/exsilit/Picea_generica_t229.schem",
+      "contrib/exsilit/Picea_generica_t250.schem",
+      "contrib/exsilit/Picea_generica_t265.schem",
+      "contrib/exsilit/Picea_generica_t267.schem",
+      "contrib/exsilit/Picea_generica_t268.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Picea_generica_t005.schem",
+      "contrib/exsilit/Picea_generica_t025.schem",
+      "contrib/exsilit/Picea_generica_t183.schem",
+      "contrib/exsilit/Picea_generica_t198.schem",
+      "contrib/exsilit/Picea_generica_t271.schem",
+      "contrib/exsilit/Picea_generica_t277.schem",
+      "contrib/exsilit/Picea_generica_t278.schem",
+      "contrib/exsilit/Picea_generica_t279.schem",
+      "contrib/exsilit/Picea_generica_t287.schem"
+     ]
     }
    ]
   },
@@ -334,7 +780,10 @@
       "swamp/Quercus_vinifera3.schem",
       "swamp/Quercus_vinifera4.schem",
       "swamp/Quercus_vinifera5.schem",
-      "swamp/Quercus_vinifera9.schem"
+      "swamp/Quercus_vinifera9.schem",
+      "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree1.schem",
+      "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree2.schem",
+      "contrib/sijmen_v_b/Quercus_vinifera_swamp_tree3.schem"
      ],
      "w2": [
       "swamp/Quercus_vinifera6.schem",
@@ -342,6 +791,29 @@
       "swamp/Quercus_vinifera8.schem"
      ],
      "w3": []
+    },
+    {
+     "name": "Salix_generica",
+     "w1": [
+      "contrib/exsilit/Salix_generica_t361.schem"
+     ],
+     "w2": [
+      "contrib/exsilit/Salix_generica_t087.schem"
+     ],
+     "w3": [
+      "contrib/exsilit/Salix_generica_t085.schem",
+      "contrib/exsilit/Salix_generica_t086.schem",
+      "contrib/exsilit/Salix_generica_t241.schem",
+      "contrib/exsilit/Salix_generica_t242.schem",
+      "contrib/exsilit/Salix_generica_t243.schem",
+      "contrib/exsilit/Salix_generica_t244.schem",
+      "contrib/exsilit/Salix_generica_t245.schem",
+      "contrib/exsilit/Salix_generica_t253.schem",
+      "contrib/exsilit/Salix_generica_t254.schem",
+      "contrib/exsilit/Salix_generica_t259.schem",
+      "contrib/exsilit/Salix_generica_t357.schem",
+      "contrib/exsilit/Salix_generica_t358.schem"
+     ]
     }
    ]
   }

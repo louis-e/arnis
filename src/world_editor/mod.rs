@@ -615,13 +615,33 @@ impl<'a> WorldEditor<'a> {
         self.tree_pack.as_ref().map_or(5, |p| p.base_spacing())
     }
 
-    /// Size tier the measured canopy asks for at this column, if it was measured.
-    pub fn canopy_size_hint(&self, x: i32, z: i32) -> Option<crate::trees::tree_library::TreeSize> {
-        let h = self
-            .ground
-            .as_ref()?
-            .canopy_height_m(self.ground_point(x, z))?;
-        (h >= crate::canopy::CANOPY_MIN_M).then(|| crate::trees::tree_library::size_for_canopy_m(h))
+    /// Tallest crown the canopy map measured within `r` of (x, z): `None` where
+    /// nothing there was measured, `Some(None)` where it was measured bare.
+    pub fn canopy_top_m(&self, x: i32, z: i32, r: i32) -> Option<Option<u8>> {
+        let ground = self.ground.as_ref()?;
+        if !ground.has_canopy() {
+            return None;
+        }
+        let mut measured = false;
+        let mut top: Option<u8> = None;
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if let Some(h) = ground.canopy_height_m(self.ground_point(x + dx, z + dz)) {
+                    measured = true;
+                    if h >= crate::canopy::CANOPY_MIN_M {
+                        top = top.max(Some(h));
+                    }
+                }
+            }
+        }
+        measured.then_some(top)
+    }
+
+    /// Typical height in metres of the mapped trees the canopy map sees.
+    pub fn typical_mapped_height_m(&self) -> Option<f64> {
+        self.mapped_trunks
+            .as_ref()
+            .and_then(|t| t.typical_height_m())
     }
 
     /// ESA distance-to-shore (BFS capped at 15): 0 = non-water or open water past the

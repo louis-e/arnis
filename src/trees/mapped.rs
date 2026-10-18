@@ -10,6 +10,8 @@ use crate::osm_parser::{ProcessedElement, ProcessedNode};
 
 const ROW_SPACING_M: f64 = 8.0;
 const CROWN_RADIUS_M: f64 = 5.0;
+/// Seen mapped trees needed before their median stands in for the unseen ones.
+const TYPICAL_MIN_SEEN: usize = 10;
 
 pub struct MappedTree {
     pub kind: TreeType,
@@ -193,6 +195,8 @@ pub struct MappedTrunks {
     /// (cell x, cell z, x, z), sorted by cell.
     trunks: Vec<(i32, i32, i32, i32)>,
     radius: i32,
+    /// Median crown top in metres of the mapped trees the canopy map sees.
+    typical_height_m: Option<f64>,
 }
 
 impl MappedTrunks {
@@ -219,7 +223,32 @@ impl MappedTrunks {
         }
         trunks.sort_unstable();
         trunks.shrink_to_fit();
-        MappedTrunks { trunks, radius }
+        MappedTrunks {
+            trunks,
+            radius,
+            typical_height_m: None,
+        }
+    }
+
+    /// Records the median crown top `crown` reads around the trunks it sees. The
+    /// map misses many street trees (half of Berlin's, most of Tokyo's), so the
+    /// unseen ones take the height of their seen neighbours, not a random one.
+    pub fn measure_typical_height(&mut self, crown: impl Fn(i32, i32) -> Option<u8>) {
+        let mut seen: Vec<u8> = self
+            .trunks
+            .iter()
+            .filter_map(|&(_, _, x, z)| crown(x, z))
+            .collect();
+        if seen.len() < TYPICAL_MIN_SEEN {
+            return;
+        }
+        let mid = seen.len() / 2;
+        let (_, median, _) = seen.select_nth_unstable(mid);
+        self.typical_height_m = Some(f64::from(*median));
+    }
+
+    pub fn typical_height_m(&self) -> Option<f64> {
+        self.typical_height_m
     }
 
     pub fn under_crown(&self, x: i32, z: i32) -> bool {
@@ -333,6 +362,29 @@ mod tests {
         // Half the scale, half the blocks between trees.
         assert_eq!(tree_row_positions(&row, 0.5).len(), 11);
         assert_eq!(tree_row_positions(&[node(3, 4)], 1.0), vec![(3, 4)]);
+    }
+
+    #[test]
+    fn unseen_mapped_trees_take_the_median_of_the_seen_ones() {
+        let trees: Vec<ProcessedElement> = (0..30)
+            .map(|i| {
+                ProcessedElement::Node(ProcessedNode {
+                    id: i,
+                    tags: tags(&[("natural", "tree")]),
+                    x: i as i32 * 10,
+                    z: 0,
+                })
+            })
+            .collect();
+        let mut trunks = MappedTrunks::collect(&trees, 1.0);
+        // Every other tree seen, at 4..=18 m; the rest the map misses.
+        trunks.measure_typical_height(|x, _| (x % 20 == 0).then(|| 4 + (x / 20) as u8));
+        assert_eq!(trunks.typical_height_m(), Some(11.0));
+
+        // Too few seen to stand for the rest.
+        let mut sparse = MappedTrunks::collect(&trees, 1.0);
+        sparse.measure_typical_height(|x, _| (x < 50).then_some(15));
+        assert_eq!(sparse.typical_height_m(), None);
     }
 
     #[test]

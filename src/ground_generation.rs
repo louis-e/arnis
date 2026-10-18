@@ -181,19 +181,34 @@ fn canopy_verdict(
     origin_x: i32,
     origin_z: i32,
     spacing: i32,
-    schematic_trees: bool,
+    tree_pack: Option<&crate::trees::region::RegionLibrary>,
+    scale: f64,
 ) -> (bool, bool) {
     let cell = XZPoint::new(
         x.div_euclid(spacing) * spacing - origin_x,
         z.div_euclid(spacing) * spacing - origin_z,
     );
-    let Some(fraction) = ground.canopy_fraction(cell, spacing) else {
+    let Some((fraction, top)) = ground.canopy_cell(cell, spacing) else {
         return (false, false);
     };
     if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
         return (true, false);
     }
-    let p = crate::canopy::slot_probability(fraction, spacing, schematic_trees);
+    let p = match tree_pack {
+        _ if scale < crate::element_processing::tree::MICRO_TREE_MAX_SCALE => {
+            crate::canopy::micro_slot_probability(fraction, spacing)
+        }
+        // The crown the pack grows at the height the cell measured.
+        Some(pack) => {
+            let height = ((f64::from(top) * scale).round() as i32).max(1);
+            crate::canopy::slot_probability(fraction, spacing, pack.crown_columns(height))
+        }
+        None => crate::canopy::slot_probability(
+            fraction,
+            spacing,
+            crate::canopy::COLUMNS_PER_TREE_LEGACY,
+        ),
+    };
     // Its own salt, so no existing draw shifts when the option is off.
     let roll = (land_cover::coord_hash(x ^ 0x434D, z ^ 0x484D) % 10_000) as f64 / 10_000.0;
     (true, roll < p)
@@ -258,7 +273,7 @@ pub fn generate_ground_region(
     let has_land_cover = ground.has_land_cover();
     let has_canopy = ground.has_canopy();
     let tree_spacing = editor.tree_slot_spacing();
-    let schematic_trees = editor.tree_pack().is_some();
+    let tree_pack = editor.tree_pack();
     let terrain_enabled = ground.elevation_enabled;
     let climate = ground.climate();
 
@@ -1051,7 +1066,8 @@ pub fn generate_ground_region(
                                     xzbbox.min_x(),
                                     xzbbox.min_z(),
                                     tree_spacing,
-                                    schematic_trees,
+                                    tree_pack.as_deref(),
+                                    args.scale,
                                 )
                             } else {
                                 (false, false)
