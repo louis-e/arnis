@@ -872,7 +872,7 @@ pub fn generate_world_with_options(
     } else {
         crate::decals::registry::DecalRegistry::FIRST_ID
     };
-    let signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
+    let mut signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
         == WorldFormat::JavaAnvil)
         .then(|| signage::build_context(&elements, args, llbbox, &xzbbox, first_decal_id))
         .flatten()
@@ -1882,7 +1882,21 @@ pub fn generate_world_with_options(
     // actually frees the bitmap.
     editor.release_sealed_surface();
     drop(sealed_surface);
+    // The barrier clearance shares the road mask, so it goes first.
+    drop(barrier_clearance);
     drop(road_mask);
+    drop(interior_uses);
+    drop(still_surfaces);
+    drop(tunnel_portals);
+    drop(tunnel_internal_endpoints);
+    // The tile editors are gone, so the editor and this function hold the only handles.
+    if let Some(ctx) = signage_ctx.as_mut() {
+        drop(editor.take_signage());
+        if let Some(ctx) = Arc::get_mut(ctx) {
+            ctx.release_placement_masks();
+        }
+        editor.set_signage(Arc::clone(ctx));
+    }
     drop(tunnel_footprint);
     drop(rail_mask);
     drop(big_water_field);
