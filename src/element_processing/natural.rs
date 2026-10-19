@@ -206,6 +206,11 @@ pub fn generate_natural(
 
                 let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
+                    // Nothing lands outside this editor, and no draw happens before the
+                    // ownership check below, so the rest of a large area costs nothing.
+                    if !editor.in_bounds(x, z) {
+                        continue;
+                    }
                     // Roads, paths and paved areas keep their own surface. Checked
                     // by mask because a gravel or dirt road is not in the block list.
                     let sealed = editor.surface_is_sealed(x, z);

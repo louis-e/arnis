@@ -117,7 +117,16 @@ pub fn generate_landuse(
     let climate = editor.climate();
     let site_arid = construction_site::is_arid(climate);
 
+    let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     for &(x, z) in floor_area.iter() {
+        // A tile reads the whole area, but nothing lands outside its editor; only the
+        // per-cell draw has to happen there, so the cells it owns see the same sequence.
+        if !editor.in_bounds(x, z) {
+            if draws_per_cell {
+                rng.random_range(0..100);
+            }
+            continue;
+        }
         // Apply per-block randomness for certain landuse types
         let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone

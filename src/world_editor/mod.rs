@@ -722,6 +722,12 @@ impl<'a> WorldEditor<'a> {
         self.strict_bounds = Some((min_x, min_z, max_x, max_z));
     }
 
+    /// Whether a column lies inside this editor, where its writes land.
+    #[inline]
+    pub fn in_bounds(&self, x: i32, z: i32) -> bool {
+        self.xzbbox.contains(&XZPoint::new(x, z))
+    }
+
     /// True if this editor is the single owner of (x, z): always for the main editor, and
     /// inside the strict tile bounds for a tile editor.
     #[inline]
@@ -753,6 +759,13 @@ impl<'a> WorldEditor<'a> {
 
     pub fn car_network(&self) -> Option<Arc<crate::element_processing::cars::CarNetwork>> {
         self.car_network.clone()
+    }
+
+    /// Detaches the signage context, so the caller can hold the only handle.
+    pub fn take_signage(
+        &mut self,
+    ) -> Option<Arc<crate::element_processing::signage::SignageContext>> {
+        self.signage.take()
     }
 
     /// The signage context, if decals are enabled and a registry was built.
