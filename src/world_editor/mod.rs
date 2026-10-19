@@ -1344,23 +1344,25 @@ impl<'a> WorldEditor<'a> {
         std::mem::take(&mut self.road_surface_overrides)
     }
 
-    /// Merge in road-surface overrides from a tile editor so post-merge passes stay road-aware.
-    pub(crate) fn merge_road_surface_overrides(&mut self, overrides: CoordMap<i32>) {
-        self.road_surface_overrides.extend(overrides);
-    }
-
-    /// Merge only the overrides whose cell falls in `regions`. Under stream-to-disk, only the
-    /// deferred 3D regions need road-aware ground for the post-merge placement pass.
-    pub(crate) fn merge_road_surface_overrides_in_regions(
+    /// Merge a tile's road-surface overrides so post-merge passes stay road-aware. Inside the
+    /// world only the cells in `owned` are taken: a road is redone in every tile it crosses,
+    /// with heights that depend on what that tile laid first, and the owner's are the ones its
+    /// ground was built to. That also makes each value final once its owner has merged, which
+    /// placements made during the merge rely on. `regions`, under stream-to-disk, keeps only
+    /// the cells deferred placements can read.
+    pub(crate) fn merge_road_surface_overrides(
         &mut self,
         overrides: CoordMap<i32>,
-        regions: &std::collections::HashSet<(i32, i32)>,
+        (min_x, min_z, max_x, max_z): (i32, i32, i32, i32),
+        regions: Option<&std::collections::HashSet<(i32, i32)>>,
     ) {
-        self.road_surface_overrides.extend(
-            overrides
-                .into_iter()
-                .filter(|((x, z), _)| regions.contains(&(x >> 9, z >> 9))),
-        );
+        let world = self.xzbbox;
+        self.road_surface_overrides
+            .extend(overrides.into_iter().filter(|&((x, z), _)| {
+                let owned = x >= min_x && x <= max_x && z >= min_z && z <= max_z;
+                (owned || !world.contains(&XZPoint::new(x, z)))
+                    && regions.is_none_or(|r| r.contains(&(x >> 9, z >> 9)))
+            }));
     }
 
     /// Get the water-appropriate Y level at a world coordinate.
@@ -3155,5 +3157,45 @@ mod eviction_guard_tests {
             assert!(!editor.place_wall_sign(10, 5, 10, facing, &["x"]));
         }
         assert!(editor.place_wall_sign(10, 5, 10, 2, &["x"]));
+    }
+}
+
+#[cfg(test)]
+mod road_override_merge_tests {
+    use super::*;
+    use crate::coordinate_system::geographic::LLBBox;
+    use std::collections::HashSet;
+
+    #[test]
+    fn each_cell_keeps_its_owners_road_height_whatever_the_merge_order() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 1023, 511).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // Both tiles redo one road across the world and past its western edge, at their own heights.
+        let road = |y: i32| -> CoordMap<i32> {
+            [(100, 5), (700, 5), (-10, 5)]
+                .into_iter()
+                .map(|cell| (cell, y))
+                .collect()
+        };
+        let (west, east) = ((0, 0, 511, 511), (512, 0, 1023, 511));
+        for order in [[(west, 10), (east, 20)], [(east, 20), (west, 10)]] {
+            let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+            for (owned, y) in order {
+                editor.merge_road_surface_overrides(road(y), owned, None);
+            }
+            assert_eq!(editor.get_ground_level(100, 5), 10);
+            assert_eq!(editor.get_ground_level(700, 5), 20);
+            // No tile owns a cell outside the world, so the last one merged keeps it.
+            assert_eq!(editor.get_ground_level(-10, 5), order[1].1);
+        }
+
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        let regions: HashSet<(i32, i32)> = [(0, 0)].into();
+        editor.merge_road_surface_overrides(road(20), east, Some(&regions));
+        assert_eq!(
+            editor.get_ground_level(700, 5),
+            0,
+            "outside the kept regions"
+        );
     }
 }

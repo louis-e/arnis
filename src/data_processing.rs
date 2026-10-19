@@ -1594,17 +1594,18 @@ pub fn generate_world_with_options(
                             tiles[tile_idx].max_x - 1,
                             tiles[tile_idx].max_z - 1,
                         );
-                        // Carry road-surface overrides to the main editor so the post-merge 3D-model
-                        // pass stays road-aware. Under eviction keep only the deferred 3D regions'
-                        // overrides (the rest are evicted; this caps the extra resident RAM).
-                        if eviction_active {
-                            editor.merge_road_surface_overrides_in_regions(
-                                tile_road_overrides,
-                                &model_regions,
-                            );
-                        } else {
-                            editor.merge_road_surface_overrides(tile_road_overrides);
-                        }
+                        // Under eviction only the deferred placements' regions keep theirs; the
+                        // rest are evicted, and this caps the extra resident RAM.
+                        editor.merge_road_surface_overrides(
+                            tile_road_overrides,
+                            (
+                                tiles[tile_idx].min_x,
+                                tiles[tile_idx].min_z,
+                                tiles[tile_idx].max_x - 1,
+                                tiles[tile_idx].max_z - 1,
+                            ),
+                            eviction_active.then_some(&model_regions),
+                        );
 
                         if eviction_active {
                             // This tile contributes to its own region and its 8 neighbours.
