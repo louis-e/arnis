@@ -5,7 +5,7 @@ use crate::block_definitions::*;
 use crate::block_palette::closest_blocks;
 use crate::colors::{color_text_to_rgb_tuple, RGBTuple};
 use crate::models_3d::voxelize::{
-    glb_model_bbox, voxelize_glb, voxelize_uniform_triangles, WorldTransform,
+    glb_model_bbox, voxelize_glb, voxelize_solid_triangles, WorldTransform,
 };
 use crate::models_3d::wikidata::client::fetch_model;
 use crate::models_3d::wikidata::index::lookup;
@@ -74,11 +74,11 @@ impl PrescanResult {
 
     /// Regions each placement may write to (stream-to-disk deferral). XZ extent is capped
     /// at MAX_XZ_EXTENT_M, so anchor ± that radius (+ ring) is a safe superset.
-    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+    pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
         let r = (MAX_XZ_EXTENT_M as f64 * scale).ceil() as i32;
         self.placements
             .iter()
-            .flat_map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
+            .map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
             .collect()
     }
 }
@@ -139,7 +139,7 @@ pub fn prescan(
             .get("direction")
             .and_then(|s| parse_direction(s))
             .unwrap_or(0.0);
-        let world_yaw_degrees = osm_yaw + world_rotation;
+        let world_yaw_degrees = osm_yaw + world_rotation + entry.yaw_deg.unwrap_or(0.0);
 
         let palette = resolve_palette(element);
         let palette_layers = entry
@@ -232,26 +232,28 @@ pub fn prescan(
 }
 
 /// Voxelizes pre-fetched models and places blocks.
-pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &PrescanResult) {
-    if prescan.placements.is_empty() {
+/// Places `indices` (into the prescan's placements, ascending).
+pub fn place_wikidata_models(
+    editor: &mut WorldEditor,
+    args: &Args,
+    prescan: &PrescanResult,
+    indices: &[usize],
+) {
+    if indices.is_empty() {
         return;
     }
 
     println!(
         "{} Placing {} Wikidata 3D model{}...",
         "  [+]".bold(),
-        prescan.placements.len(),
-        if prescan.placements.len() == 1 {
-            ""
-        } else {
-            "s"
-        }
+        indices.len(),
+        if indices.len() == 1 { "" } else { "s" }
     );
 
     let mut placed = 0usize;
     let mut total_voxels = 0usize;
 
-    for placement in &prescan.placements {
+    for placement in indices.iter().map(|&i| &prescan.placements[i]) {
         let Some(entry) = lookup(&placement.qid) else {
             continue;
         };
@@ -302,15 +304,18 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
         }
 
         let min_voxel_y = voxels.iter().map(|(p, _)| p[1]).min().unwrap();
-        let dy = ground_y - min_voxel_y;
+        let base_y = footprint_ground(editor, &voxels, min_voxel_y).unwrap_or(ground_y);
+        let dy = base_y - min_voxel_y;
         if dy != 0 {
             for (pos, _) in voxels.iter_mut() {
                 pos[1] += dy;
             }
         }
+        let foundation = foundation_under(editor, &voxels, base_y);
 
-        for ([x, y, z], block) in &voxels {
-            editor.set_block_absolute(*block, *x, *y, *z, None, None);
+        crate::models_3d::stamp_voxels(editor, &voxels);
+        for &([x, y, z], block) in &foundation {
+            editor.set_block_absolute(block, x, y, z, None, Some(&[]));
         }
         total_voxels += voxels.len();
         placed += 1;
@@ -328,6 +333,55 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
         if placed == 1 { "" } else { "s" },
         total_voxels
     );
+}
+
+/// Columns whose lowest voxel is this close to the model's base carry it.
+const LOAD_BEARING_BAND: i32 = 2;
+/// Deepest foundation built where the terrain falls away under a model.
+const MAX_FOUNDATION_DEPTH: i32 = 64;
+
+/// Lowest voxel of each column, with its block.
+fn column_bottoms(voxels: &[([i32; 3], Block)]) -> HashMap<(i32, i32), (i32, Block)> {
+    let mut bottoms: HashMap<(i32, i32), (i32, Block)> = HashMap::new();
+    for &([x, y, z], block) in voxels {
+        let e = bottoms.entry((x, z)).or_insert((y, block));
+        if y < e.0 {
+            *e = (y, block);
+        }
+    }
+    bottoms
+}
+
+/// Median terrain under the model's base layer, so a slope neither buries the
+/// base nor leaves it standing on its lowest corner.
+fn footprint_ground(editor: &WorldEditor, voxels: &[([i32; 3], Block)], min_y: i32) -> Option<i32> {
+    let mut levels: Vec<i32> = column_bottoms(voxels)
+        .into_iter()
+        .filter(|(_, (y, _))| *y <= min_y + LOAD_BEARING_BAND)
+        .map(|((x, z), _)| editor.get_ground_level(x, z))
+        .collect();
+    if levels.is_empty() {
+        return None;
+    }
+    levels.sort_unstable();
+    Some(levels[levels.len() / 2])
+}
+
+/// Fill from each load-bearing column down to the terrain, in the column's own block.
+fn foundation_under(
+    editor: &WorldEditor,
+    voxels: &[([i32; 3], Block)],
+    base_y: i32,
+) -> Vec<([i32; 3], Block)> {
+    let mut out = Vec::new();
+    for ((x, z), (y, block)) in column_bottoms(voxels) {
+        if y > base_y + LOAD_BEARING_BAND {
+            continue;
+        }
+        let floor = (y - MAX_FOUNDATION_DEPTH).max(editor.get_ground_level(x, z) + 1);
+        out.extend((floor..y).map(|fy| ([x, fy, z], block)));
+    }
+    out
 }
 
 // Per-category block pools modeled after `buildings::*_WALL_OPTIONS`.
@@ -492,7 +546,7 @@ fn structure_type_palette(tags: &std::collections::HashMap<String, String>) -> &
 }
 
 /// OSM `height=*` in meters; accepts bare numbers and trailing-m forms. Must be strictly positive.
-fn parse_meters(raw: &str) -> Option<f64> {
+pub(super) fn parse_meters(raw: &str) -> Option<f64> {
     let s = raw.trim();
     let parsed = s.parse::<f64>().ok().or_else(|| {
         s.trim_end_matches(['m', 'M'])
@@ -617,7 +671,7 @@ fn voxelize_stl(
         })
         .collect();
 
-    let mut voxels = voxelize_uniform_triangles(fitted, transform, STONE_BRICKS);
+    let mut voxels = voxelize_solid_triangles(&fitted, transform, STONE_BRICKS);
     let seed = qid_seed(&placement.qid);
     if let Some(layers) = &placement.palette_layers {
         let (y_min, y_max) = voxel_y_range(&voxels);
@@ -709,6 +763,7 @@ fn block_by_const_name(name: &str) -> Option<Block> {
         "BLUE_TERRACOTTA" => BLUE_TERRACOTTA,
         "BLUE_WOOL" => BLUE_WOOL,
         "BRICK" => BRICK,
+        "CALCITE" => CALCITE,
         "BROWN_CONCRETE" => BROWN_CONCRETE,
         "BROWN_TERRACOTTA" => BROWN_TERRACOTTA,
         "CHISELED_STONE_BRICKS" => CHISELED_STONE_BRICKS,

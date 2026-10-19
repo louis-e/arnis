@@ -15,7 +15,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -27,7 +31,12 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem",
+      "contrib/arnis/Populus_tremula_y4.schem",
+      "contrib/arnis/Populus_tremula_y6.schem",
+      "contrib/arnis/Populus_tremula_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -45,7 +54,9 @@
       "Pinus_hwangshanensis1.schem",
       "Pinus_hwangshanensis3.schem",
       "Pinus_hwangshanensis6.schem",
-      "Pinus_hwangshanensis8.schem"
+      "Pinus_hwangshanensis8.schem",
+      "contrib/arnis/Pinus_hwangshanensis_y5.schem",
+      "contrib/arnis/Pinus_hwangshanensis_y7.schem"
      ],
      "w2": [
       "Pinus_hwangshanensis2.schem",
@@ -71,7 +82,10 @@
     {
      "name": "Pinus_thunbergii",
      "w1": [
-      "Pinus_thunbergii3.schem"
+      "Pinus_thunbergii3.schem",
+      "contrib/arnis/Pinus_thunbergii_y5.schem",
+      "contrib/arnis/Pinus_thunbergii_y7.schem",
+      "contrib/arnis/Pinus_thunbergii_y9.schem"
      ],
      "w2": [
       "Pinus_thunbergii1.schem",
@@ -82,7 +96,10 @@
     {
      "name": "Podocarpus_macrophyllus",
      "w1": [
-      "Podocarpus_macrophyllus2.schem"
+      "Podocarpus_macrophyllus2.schem",
+      "contrib/arnis/Podocarpus_macrophyllus_y5.schem",
+      "contrib/arnis/Podocarpus_macrophyllus_y7.schem",
+      "contrib/arnis/Podocarpus_macrophyllus_y9.schem"
      ],
      "w2": [],
      "w3": [
@@ -104,7 +121,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -115,7 +136,10 @@
       "Cercidophyllum_japonicum1.schem",
       "Cercidophyllum_japonicum2.schem",
       "Cercidophyllum_japonicum3.schem",
-      "Cercidophyllum_japonicum4.schem"
+      "Cercidophyllum_japonicum4.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y4.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y6.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -123,7 +147,10 @@
     {
      "name": "Cunninghamia_lanceolata",
      "w1": [
-      "Cunninghamia_lanceolata2.schem"
+      "Cunninghamia_lanceolata2.schem",
+      "contrib/arnis/Cunninghamia_lanceolata_y5.schem",
+      "contrib/arnis/Cunninghamia_lanceolata_y7.schem",
+      "contrib/arnis/Cunninghamia_lanceolata_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -137,7 +164,10 @@
       "Ginkgo_biloba4.schem",
       "Ginkgo_biloba5.schem",
       "Ginkgo_biloba6.schem",
-      "Ginkgo_biloba7.schem"
+      "Ginkgo_biloba7.schem",
+      "contrib/arnis/Ginkgo_biloba_y4.schem",
+      "contrib/arnis/Ginkgo_biloba_y6.schem",
+      "contrib/arnis/Ginkgo_biloba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -146,7 +176,10 @@
      "name": "Metasequoia_glyptostroboides",
      "w1": [
       "Metasequoia_glyptostroboides1.schem",
-      "Metasequoia_glyptostroboides4.schem"
+      "Metasequoia_glyptostroboides4.schem",
+      "contrib/arnis/Metasequoia_glyptostroboides_y5.schem",
+      "contrib/arnis/Metasequoia_glyptostroboides_y7.schem",
+      "contrib/arnis/Metasequoia_glyptostroboides_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -157,7 +190,10 @@
       "Pinus_armandii (1).schem",
       "Pinus_armandii (2).schem",
       "Pinus_armandii (3).schem",
-      "Pinus_armandii (4).schem"
+      "Pinus_armandii (4).schem",
+      "contrib/arnis/Pinus_armandii_y5.schem",
+      "contrib/arnis/Pinus_armandii_y7.schem",
+      "contrib/arnis/Pinus_armandii_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -169,7 +205,12 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem",
+      "contrib/arnis/Populus_tremula_y4.schem",
+      "contrib/arnis/Populus_tremula_y6.schem",
+      "contrib/arnis/Populus_tremula_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -207,7 +248,8 @@
     {
      "name": "Populus_euphratica",
      "w1": [
-      "Populus_euphratica5.schem"
+      "Populus_euphratica5.schem",
+      "contrib/arnis/Populus_euphratica_y4.schem"
      ],
      "w2": [
       "Populus_euphratica1.schem",
@@ -224,7 +266,10 @@
       "Salix_babylonica1.schem",
       "Salix_babylonica2.schem",
       "Salix_babylonica3.schem",
-      "Salix_babylonica5.schem"
+      "Salix_babylonica5.schem",
+      "contrib/arnis/Salix_babylonica_y5.schem",
+      "contrib/arnis/Salix_babylonica_y7.schem",
+      "contrib/arnis/Salix_babylonica_y9.schem"
      ],
      "w2": [],
      "w3": [
@@ -249,7 +294,10 @@
      "name": "Ulmus_pumila",
      "w1": [
       "Ulmus_pumila2.schem",
-      "Ulmus_pumila3.schem"
+      "Ulmus_pumila3.schem",
+      "contrib/arnis/Ulmus_pumila_y4.schem",
+      "contrib/arnis/Ulmus_pumila_y6.schem",
+      "contrib/arnis/Ulmus_pumila_y8.schem"
      ],
      "w2": [
       "Ulmus_pumila1.schem"
@@ -283,11 +331,24 @@
       "Prunus_serrulata3.schem",
       "Prunus_serrulata5.schem",
       "Prunus_serrulata6.schem",
-      "Prunus_serrulata7.schem"
+      "Prunus_serrulata7.schem",
+      "contrib/arnis/Prunus_serrulata_y4.schem",
+      "contrib/arnis/Prunus_serrulata_y6.schem"
      ],
      "w2": [],
      "w3": [
-      "Prunus_serrulata4.schem"
+      "Prunus_serrulata4.schem",
+      "contrib/exsilit/Prunus_serrulata_t031.schem",
+      "contrib/exsilit/Prunus_serrulata_t032.schem",
+      "contrib/exsilit/Prunus_serrulata_t033.schem",
+      "contrib/exsilit/Prunus_serrulata_t034.schem",
+      "contrib/exsilit/Prunus_serrulata_t035.schem",
+      "contrib/exsilit/Prunus_serrulata_t036.schem",
+      "contrib/exsilit/Prunus_serrulata_t300.schem",
+      "contrib/exsilit/Prunus_serrulata_t305.schem",
+      "contrib/exsilit/Prunus_serrulata_t310.schem",
+      "contrib/exsilit/Prunus_serrulata_t347.schem",
+      "contrib/exsilit/Prunus_serrulata_t348.schem"
      ]
     },
     {
@@ -330,7 +391,10 @@
       "Picea_obovata2.schem",
       "Picea_obovata3.schem",
       "Picea_obovata4.schem",
-      "Picea_obovata5.schem"
+      "Picea_obovata5.schem",
+      "contrib/arnis/Picea_obovata_y5.schem",
+      "contrib/arnis/Picea_obovata_y7.schem",
+      "contrib/arnis/Picea_obovata_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -341,7 +405,10 @@
       "Pinus_koraiensis1.schem",
       "Pinus_koraiensis2.schem",
       "Pinus_koraiensis3.schem",
-      "Pinus_koraiensis4.schem"
+      "Pinus_koraiensis4.schem",
+      "contrib/arnis/Pinus_koraiensis_y5.schem",
+      "contrib/arnis/Pinus_koraiensis_y7.schem",
+      "contrib/arnis/Pinus_koraiensis_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -366,7 +433,9 @@
       "Pinus_sibirica4.schem",
       "Pinus_sibirica5.schem",
       "Pinus_sibirica6.schem",
-      "Pinus_sibirica7.schem"
+      "Pinus_sibirica7.schem",
+      "contrib/arnis/Pinus_sibirica_y5.schem",
+      "contrib/arnis/Pinus_sibirica_y7.schem"
      ],
      "w2": [],
      "w3": []
@@ -405,7 +474,10 @@
     {
      "name": "Quercus_mongolica",
      "w1": [
-      "Quercus_mongolica5.schem"
+      "Quercus_mongolica5.schem",
+      "contrib/arnis/Quercus_mongolica_y4.schem",
+      "contrib/arnis/Quercus_mongolica_y6.schem",
+      "contrib/arnis/Quercus_mongolica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -426,7 +498,11 @@
     },
     {
      "name": "Ulmus_pumila",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ulmus_pumila_y4.schem",
+      "contrib/arnis/Ulmus_pumila_y6.schem",
+      "contrib/arnis/Ulmus_pumila_y8.schem"
+     ],
      "w2": [
       "Ulmus_pumila1.schem"
      ],
@@ -446,7 +522,8 @@
       "Juniperus_tibetica2.schem",
       "Juniperus_tibetica3.schem",
       "Juniperus_tibetica4.schem",
-      "Juniperus_tibetica5.schem"
+      "Juniperus_tibetica5.schem",
+      "contrib/arnis/Juniperus_tibetica_y5.schem"
      ],
      "w2": [],
      "w3": []
@@ -457,7 +534,9 @@
       "Pinus_hwangshanensis1.schem",
       "Pinus_hwangshanensis3.schem",
       "Pinus_hwangshanensis6.schem",
-      "Pinus_hwangshanensis8.schem"
+      "Pinus_hwangshanensis8.schem",
+      "contrib/arnis/Pinus_hwangshanensis_y5.schem",
+      "contrib/arnis/Pinus_hwangshanensis_y7.schem"
      ],
      "w2": [
       "Pinus_hwangshanensis2.schem",
@@ -474,7 +553,9 @@
       "Taxus_sumatrana1.schem",
       "Taxus_sumatrana2.schem",
       "Taxus_sumatrana3.schem",
-      "Taxus_sumatrana4.schem"
+      "Taxus_sumatrana4.schem",
+      "contrib/arnis/Taxus_sumatrana_y5.schem",
+      "contrib/arnis/Taxus_sumatrana_y7.schem"
      ],
      "w2": [],
      "w3": []
@@ -494,7 +575,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -507,7 +592,9 @@
       "Picea_jezoensis4.schem",
       "Picea_jezoensis5.schem",
       "Picea_jezoensis6.schem",
-      "Picea_jezoensis7.schem"
+      "Picea_jezoensis7.schem",
+      "contrib/arnis/Picea_jezoensis_y5.schem",
+      "contrib/arnis/Picea_jezoensis_y7.schem"
      ],
      "w2": [],
      "w3": []
@@ -531,7 +618,12 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem",
+      "contrib/arnis/Populus_tremula_y4.schem",
+      "contrib/arnis/Populus_tremula_y6.schem",
+      "contrib/arnis/Populus_tremula_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -555,7 +647,10 @@
       "Quercus_mongolica2.schem",
       "Quercus_mongolica3.schem",
       "Quercus_mongolica4.schem",
-      "Quercus_mongolica5.schem"
+      "Quercus_mongolica5.schem",
+      "contrib/arnis/Quercus_mongolica_y4.schem",
+      "contrib/arnis/Quercus_mongolica_y6.schem",
+      "contrib/arnis/Quercus_mongolica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -565,7 +660,10 @@
      "w1": [
       "Tilia_amurensis1.schem",
       "Tilia_amurensis2.schem",
-      "Tilia_amurensis3.schem"
+      "Tilia_amurensis3.schem",
+      "contrib/arnis/Tilia_amurensis_y4.schem",
+      "contrib/arnis/Tilia_amurensis_y6.schem",
+      "contrib/arnis/Tilia_amurensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -598,7 +696,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -608,7 +710,10 @@
      "w1": [
       "Carpinus_laxiflora1.schem",
       "Carpinus_laxiflora2.schem",
-      "Carpinus_laxiflora3.schem"
+      "Carpinus_laxiflora3.schem",
+      "contrib/arnis/Carpinus_laxiflora_y4.schem",
+      "contrib/arnis/Carpinus_laxiflora_y6.schem",
+      "contrib/arnis/Carpinus_laxiflora_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -619,7 +724,10 @@
       "Fagus_crenata1.schem",
       "Fagus_crenata2.schem",
       "Fagus_crenata3.schem",
-      "Fagus_crenata4.schem"
+      "Fagus_crenata4.schem",
+      "contrib/arnis/Fagus_crenata_y4.schem",
+      "contrib/arnis/Fagus_crenata_y6.schem",
+      "contrib/arnis/Fagus_crenata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -643,7 +751,10 @@
       "Quercus_mongolica2.schem",
       "Quercus_mongolica3.schem",
       "Quercus_mongolica4.schem",
-      "Quercus_mongolica5.schem"
+      "Quercus_mongolica5.schem",
+      "contrib/arnis/Quercus_mongolica_y4.schem",
+      "contrib/arnis/Quercus_mongolica_y6.schem",
+      "contrib/arnis/Quercus_mongolica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -653,7 +764,10 @@
      "w1": [
       "Tilia_amurensis1.schem",
       "Tilia_amurensis2.schem",
-      "Tilia_amurensis3.schem"
+      "Tilia_amurensis3.schem",
+      "contrib/arnis/Tilia_amurensis_y4.schem",
+      "contrib/arnis/Tilia_amurensis_y6.schem",
+      "contrib/arnis/Tilia_amurensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -663,7 +777,10 @@
      "w1": [
       "Ulmus_davidiana2.schem",
       "Ulmus_davidiana3.schem",
-      "Ulmus_davidiana4.schem"
+      "Ulmus_davidiana4.schem",
+      "contrib/arnis/Ulmus_davidiana_y4.schem",
+      "contrib/arnis/Ulmus_davidiana_y6.schem",
+      "contrib/arnis/Ulmus_davidiana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -674,7 +791,10 @@
      "name": "Ulmus_pumila",
      "w1": [
       "Ulmus_pumila2.schem",
-      "Ulmus_pumila3.schem"
+      "Ulmus_pumila3.schem",
+      "contrib/arnis/Ulmus_pumila_y4.schem",
+      "contrib/arnis/Ulmus_pumila_y6.schem",
+      "contrib/arnis/Ulmus_pumila_y8.schem"
      ],
      "w2": [
       "Ulmus_pumila1.schem"
@@ -702,7 +822,11 @@
    "species": [
     {
      "name": "Camphora_officinarium",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Camphora_officinarium_y4.schem",
+      "contrib/arnis/Camphora_officinarium_y6.schem",
+      "contrib/arnis/Camphora_officinarium_y8.schem"
+     ],
      "w2": [
       "Camphora_officinarium3.schem",
       "Camphora_officinarium4.schem"
@@ -716,7 +840,10 @@
      "name": "Castanopsis_sieboldii",
      "w1": [
       "Castanopsis_sieboldii2.schem",
-      "Castanopsis_sieboldii4.schem"
+      "Castanopsis_sieboldii4.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y4.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y6.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y8.schem"
      ],
      "w2": [
       "Castanopsis_sieboldii1.schem",
@@ -730,7 +857,10 @@
       "Cercidophyllum_japonicum1.schem",
       "Cercidophyllum_japonicum2.schem",
       "Cercidophyllum_japonicum3.schem",
-      "Cercidophyllum_japonicum4.schem"
+      "Cercidophyllum_japonicum4.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y4.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y6.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -738,7 +868,10 @@
     {
      "name": "Cryptomeria_japonica",
      "w1": [
-      "Cryptomeria_japonica5.schem"
+      "Cryptomeria_japonica5.schem",
+      "contrib/arnis/Cryptomeria_japonica_y5.schem",
+      "contrib/arnis/Cryptomeria_japonica_y7.schem",
+      "contrib/arnis/Cryptomeria_japonica_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -746,7 +879,10 @@
     {
      "name": "Pinus_thunbergii",
      "w1": [
-      "Pinus_thunbergii3.schem"
+      "Pinus_thunbergii3.schem",
+      "contrib/arnis/Pinus_thunbergii_y5.schem",
+      "contrib/arnis/Pinus_thunbergii_y7.schem",
+      "contrib/arnis/Pinus_thunbergii_y9.schem"
      ],
      "w2": [
       "Pinus_thunbergii1.schem",
@@ -760,7 +896,10 @@
       "Podocarpus_macrophyllus2.schem",
       "Podocarpus_macrophyllus3.schem",
       "Podocarpus_macrophyllus4.schem",
-      "Podocarpus_macrophyllus5.schem"
+      "Podocarpus_macrophyllus5.schem",
+      "contrib/arnis/Podocarpus_macrophyllus_y5.schem",
+      "contrib/arnis/Podocarpus_macrophyllus_y7.schem",
+      "contrib/arnis/Podocarpus_macrophyllus_y9.schem"
      ],
      "w2": [],
      "w3": [
@@ -773,7 +912,10 @@
       "Quercus_acutissima1.schem",
       "Quercus_acutissima2.schem",
       "Quercus_acutissima3.schem",
-      "Quercus_acutissima4.schem"
+      "Quercus_acutissima4.schem",
+      "contrib/arnis/Quercus_acutissima_y4.schem",
+      "contrib/arnis/Quercus_acutissima_y6.schem",
+      "contrib/arnis/Quercus_acutissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -783,7 +925,10 @@
      "w1": [
       "Sciadopitys_verticillata1.schem",
       "Sciadopitys_verticillata2.schem",
-      "Sciadopitys_verticillata3.schem"
+      "Sciadopitys_verticillata3.schem",
+      "contrib/arnis/Sciadopitys_verticillata_y5.schem",
+      "contrib/arnis/Sciadopitys_verticillata_y7.schem",
+      "contrib/arnis/Sciadopitys_verticillata_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -828,7 +973,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -838,7 +987,10 @@
      "w1": [
       "Carpinus_laxiflora1.schem",
       "Carpinus_laxiflora2.schem",
-      "Carpinus_laxiflora3.schem"
+      "Carpinus_laxiflora3.schem",
+      "contrib/arnis/Carpinus_laxiflora_y4.schem",
+      "contrib/arnis/Carpinus_laxiflora_y6.schem",
+      "contrib/arnis/Carpinus_laxiflora_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -850,7 +1002,12 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem",
+      "contrib/arnis/Populus_tremula_y4.schem",
+      "contrib/arnis/Populus_tremula_y6.schem",
+      "contrib/arnis/Populus_tremula_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -862,7 +1019,10 @@
       "Quercus_mongolica2.schem",
       "Quercus_mongolica3.schem",
       "Quercus_mongolica4.schem",
-      "Quercus_mongolica5.schem"
+      "Quercus_mongolica5.schem",
+      "contrib/arnis/Quercus_mongolica_y4.schem",
+      "contrib/arnis/Quercus_mongolica_y6.schem",
+      "contrib/arnis/Quercus_mongolica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -872,7 +1032,10 @@
      "w1": [
       "Tilia_amurensis1.schem",
       "Tilia_amurensis2.schem",
-      "Tilia_amurensis3.schem"
+      "Tilia_amurensis3.schem",
+      "contrib/arnis/Tilia_amurensis_y4.schem",
+      "contrib/arnis/Tilia_amurensis_y6.schem",
+      "contrib/arnis/Tilia_amurensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -882,7 +1045,10 @@
      "w1": [
       "Ulmus_davidiana2.schem",
       "Ulmus_davidiana3.schem",
-      "Ulmus_davidiana4.schem"
+      "Ulmus_davidiana4.schem",
+      "contrib/arnis/Ulmus_davidiana_y4.schem",
+      "contrib/arnis/Ulmus_davidiana_y6.schem",
+      "contrib/arnis/Ulmus_davidiana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -893,7 +1059,10 @@
      "name": "Ulmus_pumila",
      "w1": [
       "Ulmus_pumila2.schem",
-      "Ulmus_pumila3.schem"
+      "Ulmus_pumila3.schem",
+      "contrib/arnis/Ulmus_pumila_y4.schem",
+      "contrib/arnis/Ulmus_pumila_y6.schem",
+      "contrib/arnis/Ulmus_pumila_y8.schem"
      ],
      "w2": [
       "Ulmus_pumila1.schem"
@@ -927,7 +1096,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -938,7 +1111,10 @@
       "Pinus_koraiensis1.schem",
       "Pinus_koraiensis2.schem",
       "Pinus_koraiensis3.schem",
-      "Pinus_koraiensis4.schem"
+      "Pinus_koraiensis4.schem",
+      "contrib/arnis/Pinus_koraiensis_y5.schem",
+      "contrib/arnis/Pinus_koraiensis_y7.schem",
+      "contrib/arnis/Pinus_koraiensis_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -950,7 +1126,12 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem",
+      "contrib/arnis/Populus_tremula_y4.schem",
+      "contrib/arnis/Populus_tremula_y6.schem",
+      "contrib/arnis/Populus_tremula_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -962,7 +1143,10 @@
       "Quercus_mongolica2.schem",
       "Quercus_mongolica3.schem",
       "Quercus_mongolica4.schem",
-      "Quercus_mongolica5.schem"
+      "Quercus_mongolica5.schem",
+      "contrib/arnis/Quercus_mongolica_y4.schem",
+      "contrib/arnis/Quercus_mongolica_y6.schem",
+      "contrib/arnis/Quercus_mongolica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -972,7 +1156,10 @@
      "w1": [
       "Tilia_amurensis1.schem",
       "Tilia_amurensis2.schem",
-      "Tilia_amurensis3.schem"
+      "Tilia_amurensis3.schem",
+      "contrib/arnis/Tilia_amurensis_y4.schem",
+      "contrib/arnis/Tilia_amurensis_y6.schem",
+      "contrib/arnis/Tilia_amurensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -981,7 +1168,10 @@
      "name": "Ulmus_pumila",
      "w1": [
       "Ulmus_pumila2.schem",
-      "Ulmus_pumila3.schem"
+      "Ulmus_pumila3.schem",
+      "contrib/arnis/Ulmus_pumila_y4.schem",
+      "contrib/arnis/Ulmus_pumila_y6.schem",
+      "contrib/arnis/Ulmus_pumila_y8.schem"
      ],
      "w2": [
       "Ulmus_pumila1.schem"
@@ -998,7 +1188,8 @@
     {
      "name": "Populus_euphratica",
      "w1": [
-      "Populus_euphratica5.schem"
+      "Populus_euphratica5.schem",
+      "contrib/arnis/Populus_euphratica_y4.schem"
      ],
      "w2": [
       "Populus_euphratica1.schem",
@@ -1039,7 +1230,8 @@
       "Abies_sibirica4.schem",
       "Abies_sibirica5.schem",
       "Abies_sibirica6.schem",
-      "Abies_sibirica7.schem"
+      "Abies_sibirica7.schem",
+      "contrib/arnis/Abies_sibirica_y5.schem"
      ],
      "w2": [],
      "w3": []
@@ -1050,7 +1242,9 @@
       "Larix_sibirica2.schem",
       "Larix_sibirica4.schem",
       "Larix_sibirica5.schem",
-      "Larix_sibirica6.schem"
+      "Larix_sibirica6.schem",
+      "contrib/arnis/Larix_sibirica_y5.schem",
+      "contrib/arnis/Larix_sibirica_y7.schem"
      ],
      "w2": [],
      "w3": []
@@ -1062,7 +1256,10 @@
       "Picea_obovata2.schem",
       "Picea_obovata3.schem",
       "Picea_obovata4.schem",
-      "Picea_obovata5.schem"
+      "Picea_obovata5.schem",
+      "contrib/arnis/Picea_obovata_y5.schem",
+      "contrib/arnis/Picea_obovata_y7.schem",
+      "contrib/arnis/Picea_obovata_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -1075,7 +1272,9 @@
       "Pinus_sibirica4.schem",
       "Pinus_sibirica5.schem",
       "Pinus_sibirica6.schem",
-      "Pinus_sibirica7.schem"
+      "Pinus_sibirica7.schem",
+      "contrib/arnis/Pinus_sibirica_y5.schem",
+      "contrib/arnis/Pinus_sibirica_y7.schem"
      ],
      "w2": [],
      "w3": []
@@ -1102,7 +1301,11 @@
     },
     {
      "name": "Camphora_officinarium",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Camphora_officinarium_y4.schem",
+      "contrib/arnis/Camphora_officinarium_y6.schem",
+      "contrib/arnis/Camphora_officinarium_y8.schem"
+     ],
      "w2": [
       "Camphora_officinarium3.schem",
       "Camphora_officinarium4.schem"
@@ -1117,7 +1320,10 @@
      "w1": [
       "Castanopsis_cuspidata1.schem",
       "Castanopsis_cuspidata2.schem",
-      "Castanopsis_cuspidata4.schem"
+      "Castanopsis_cuspidata4.schem",
+      "contrib/arnis/Castanopsis_cuspidata_y4.schem",
+      "contrib/arnis/Castanopsis_cuspidata_y6.schem",
+      "contrib/arnis/Castanopsis_cuspidata_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1128,7 +1334,10 @@
      "name": "Castanopsis_sieboldii",
      "w1": [
       "Castanopsis_sieboldii2.schem",
-      "Castanopsis_sieboldii4.schem"
+      "Castanopsis_sieboldii4.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y4.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y6.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y8.schem"
      ],
      "w2": [
       "Castanopsis_sieboldii1.schem",
@@ -1142,7 +1351,10 @@
       "Cercidophyllum_japonicum1.schem",
       "Cercidophyllum_japonicum2.schem",
       "Cercidophyllum_japonicum3.schem",
-      "Cercidophyllum_japonicum4.schem"
+      "Cercidophyllum_japonicum4.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y4.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y6.schem",
+      "contrib/arnis/Cercidophyllum_japonicum_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1155,11 +1367,24 @@
       "Prunus_serrulata3.schem",
       "Prunus_serrulata5.schem",
       "Prunus_serrulata6.schem",
-      "Prunus_serrulata7.schem"
+      "Prunus_serrulata7.schem",
+      "contrib/arnis/Prunus_serrulata_y4.schem",
+      "contrib/arnis/Prunus_serrulata_y6.schem"
      ],
      "w2": [],
      "w3": [
-      "Prunus_serrulata4.schem"
+      "Prunus_serrulata4.schem",
+      "contrib/exsilit/Prunus_serrulata_t031.schem",
+      "contrib/exsilit/Prunus_serrulata_t032.schem",
+      "contrib/exsilit/Prunus_serrulata_t033.schem",
+      "contrib/exsilit/Prunus_serrulata_t034.schem",
+      "contrib/exsilit/Prunus_serrulata_t035.schem",
+      "contrib/exsilit/Prunus_serrulata_t036.schem",
+      "contrib/exsilit/Prunus_serrulata_t300.schem",
+      "contrib/exsilit/Prunus_serrulata_t305.schem",
+      "contrib/exsilit/Prunus_serrulata_t310.schem",
+      "contrib/exsilit/Prunus_serrulata_t347.schem",
+      "contrib/exsilit/Prunus_serrulata_t348.schem"
      ]
     },
     {
@@ -1168,7 +1393,10 @@
       "Quercus_acutissima1.schem",
       "Quercus_acutissima2.schem",
       "Quercus_acutissima3.schem",
-      "Quercus_acutissima4.schem"
+      "Quercus_acutissima4.schem",
+      "contrib/arnis/Quercus_acutissima_y4.schem",
+      "contrib/arnis/Quercus_acutissima_y6.schem",
+      "contrib/arnis/Quercus_acutissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1178,7 +1406,10 @@
      "w1": [
       "Quercus_glauca1.schem",
       "Quercus_glauca2.schem",
-      "Quercus_glauca3.schem"
+      "Quercus_glauca3.schem",
+      "contrib/arnis/Quercus_glauca_y4.schem",
+      "contrib/arnis/Quercus_glauca_y6.schem",
+      "contrib/arnis/Quercus_glauca_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1205,7 +1436,10 @@
     {
      "name": "Wisteria_sinensis",
      "w1": [
-      "Wisteria_sinensis4.schem"
+      "Wisteria_sinensis4.schem",
+      "contrib/arnis/Wisteria_sinensis_y4.schem",
+      "contrib/arnis/Wisteria_sinensis_y6.schem",
+      "contrib/arnis/Wisteria_sinensis_y8.schem"
      ],
      "w2": [
       "Wisteria_sinensis1.schem",
@@ -1223,7 +1457,11 @@
    "species": [
     {
      "name": "Camphora_officinarium",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Camphora_officinarium_y4.schem",
+      "contrib/arnis/Camphora_officinarium_y6.schem",
+      "contrib/arnis/Camphora_officinarium_y8.schem"
+     ],
      "w2": [
       "Camphora_officinarium3.schem",
       "Camphora_officinarium4.schem"
@@ -1240,7 +1478,9 @@
       "Castanea_mollisima2.schem",
       "Castanea_mollisima3.schem",
       "Castanea_mollisima4.schem",
-      "Castanea_mollisima5.schem"
+      "Castanea_mollisima5.schem",
+      "contrib/arnis/Castanea_mollisima_y4.schem",
+      "contrib/arnis/Castanea_mollisima_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1249,7 +1489,10 @@
      "name": "Castanopsis_sieboldii",
      "w1": [
       "Castanopsis_sieboldii2.schem",
-      "Castanopsis_sieboldii4.schem"
+      "Castanopsis_sieboldii4.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y4.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y6.schem",
+      "contrib/arnis/Castanopsis_sieboldii_y8.schem"
      ],
      "w2": [
       "Castanopsis_sieboldii1.schem",
@@ -1266,7 +1509,10 @@
       "Ginkgo_biloba4.schem",
       "Ginkgo_biloba5.schem",
       "Ginkgo_biloba6.schem",
-      "Ginkgo_biloba7.schem"
+      "Ginkgo_biloba7.schem",
+      "contrib/arnis/Ginkgo_biloba_y4.schem",
+      "contrib/arnis/Ginkgo_biloba_y6.schem",
+      "contrib/arnis/Ginkgo_biloba_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1279,11 +1525,24 @@
       "Prunus_serrulata3.schem",
       "Prunus_serrulata5.schem",
       "Prunus_serrulata6.schem",
-      "Prunus_serrulata7.schem"
+      "Prunus_serrulata7.schem",
+      "contrib/arnis/Prunus_serrulata_y4.schem",
+      "contrib/arnis/Prunus_serrulata_y6.schem"
      ],
      "w2": [],
      "w3": [
-      "Prunus_serrulata4.schem"
+      "Prunus_serrulata4.schem",
+      "contrib/exsilit/Prunus_serrulata_t031.schem",
+      "contrib/exsilit/Prunus_serrulata_t032.schem",
+      "contrib/exsilit/Prunus_serrulata_t033.schem",
+      "contrib/exsilit/Prunus_serrulata_t034.schem",
+      "contrib/exsilit/Prunus_serrulata_t035.schem",
+      "contrib/exsilit/Prunus_serrulata_t036.schem",
+      "contrib/exsilit/Prunus_serrulata_t300.schem",
+      "contrib/exsilit/Prunus_serrulata_t305.schem",
+      "contrib/exsilit/Prunus_serrulata_t310.schem",
+      "contrib/exsilit/Prunus_serrulata_t347.schem",
+      "contrib/exsilit/Prunus_serrulata_t348.schem"
      ]
     },
     {
@@ -1292,7 +1551,10 @@
       "Quercus_acutissima1.schem",
       "Quercus_acutissima2.schem",
       "Quercus_acutissima3.schem",
-      "Quercus_acutissima4.schem"
+      "Quercus_acutissima4.schem",
+      "contrib/arnis/Quercus_acutissima_y4.schem",
+      "contrib/arnis/Quercus_acutissima_y6.schem",
+      "contrib/arnis/Quercus_acutissima_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1302,7 +1564,10 @@
      "w1": [
       "Quercus_glauca1.schem",
       "Quercus_glauca2.schem",
-      "Quercus_glauca3.schem"
+      "Quercus_glauca3.schem",
+      "contrib/arnis/Quercus_glauca_y4.schem",
+      "contrib/arnis/Quercus_glauca_y6.schem",
+      "contrib/arnis/Quercus_glauca_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1334,7 +1599,11 @@
       "Betula_pendula3.schem",
       "Betula_pendula4.schem",
       "Betula_pendula5.schem",
-      "Betula_pendula6.schem"
+      "Betula_pendula6.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3L.schem",
+      "contrib/lentebriesje/Betula_pendula_eur3S.schem",
+      "contrib/arnis/Betula_pendula_y4.schem",
+      "contrib/arnis/Betula_pendula_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1346,7 +1615,9 @@
       "Castanea_mollisima2.schem",
       "Castanea_mollisima3.schem",
       "Castanea_mollisima4.schem",
-      "Castanea_mollisima5.schem"
+      "Castanea_mollisima5.schem",
+      "contrib/arnis/Castanea_mollisima_y4.schem",
+      "contrib/arnis/Castanea_mollisima_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -1356,7 +1627,10 @@
      "w1": [
       "Juglans_regia1.schem",
       "Juglans_regia2.schem",
-      "Juglans_regia3.schem"
+      "Juglans_regia3.schem",
+      "contrib/arnis/Juglans_regia_y4.schem",
+      "contrib/arnis/Juglans_regia_y6.schem",
+      "contrib/arnis/Juglans_regia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1368,7 +1642,12 @@
       "Populus_tremula2.schem",
       "Populus_tremula3.schem",
       "Populus_tremula4.schem",
-      "Populus_tremula5.schem"
+      "Populus_tremula5.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15L.schem",
+      "contrib/lentebriesje/Populus_tremula_eur15S.schem",
+      "contrib/arnis/Populus_tremula_y4.schem",
+      "contrib/arnis/Populus_tremula_y6.schem",
+      "contrib/arnis/Populus_tremula_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1380,7 +1659,10 @@
       "Quercus_mongolica2.schem",
       "Quercus_mongolica3.schem",
       "Quercus_mongolica4.schem",
-      "Quercus_mongolica5.schem"
+      "Quercus_mongolica5.schem",
+      "contrib/arnis/Quercus_mongolica_y4.schem",
+      "contrib/arnis/Quercus_mongolica_y6.schem",
+      "contrib/arnis/Quercus_mongolica_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1390,7 +1672,10 @@
      "w1": [
       "Tilia_amurensis1.schem",
       "Tilia_amurensis2.schem",
-      "Tilia_amurensis3.schem"
+      "Tilia_amurensis3.schem",
+      "contrib/arnis/Tilia_amurensis_y4.schem",
+      "contrib/arnis/Tilia_amurensis_y6.schem",
+      "contrib/arnis/Tilia_amurensis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -1400,7 +1685,10 @@
      "w1": [
       "Ulmus_davidiana2.schem",
       "Ulmus_davidiana3.schem",
-      "Ulmus_davidiana4.schem"
+      "Ulmus_davidiana4.schem",
+      "contrib/arnis/Ulmus_davidiana_y4.schem",
+      "contrib/arnis/Ulmus_davidiana_y6.schem",
+      "contrib/arnis/Ulmus_davidiana_y8.schem"
      ],
      "w2": [],
      "w3": [
@@ -1411,7 +1699,10 @@
      "name": "Ulmus_pumila",
      "w1": [
       "Ulmus_pumila2.schem",
-      "Ulmus_pumila3.schem"
+      "Ulmus_pumila3.schem",
+      "contrib/arnis/Ulmus_pumila_y4.schem",
+      "contrib/arnis/Ulmus_pumila_y6.schem",
+      "contrib/arnis/Ulmus_pumila_y8.schem"
      ],
      "w2": [
       "Ulmus_pumila1.schem"
@@ -1455,7 +1746,26 @@
       "Cupressus_sempervirens2.schem",
       "Cupressus_sempervirens4.schem",
       "Cupressus_sempervirens6.schem",
-      "Cupressus_sempervirens7.schem"
+      "Cupressus_sempervirens7.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_02.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_03.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_04.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_06.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_07.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_08.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_09.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_10.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_11.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_12.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_13.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_14.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_15.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_16.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_17.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_18.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_19.schem",
+      "contrib/pink_slime/Cupressus_sempervirens_20.schem",
+      "contrib/arnis/Cupressus_sempervirens_y5.schem"
      ],
      "w2": [],
      "w3": []
@@ -1563,7 +1873,10 @@
       "Salix_babylonica1.schem",
       "Salix_babylonica2.schem",
       "Salix_babylonica3.schem",
-      "Salix_babylonica5.schem"
+      "Salix_babylonica5.schem",
+      "contrib/arnis/Salix_babylonica_y5.schem",
+      "contrib/arnis/Salix_babylonica_y7.schem",
+      "contrib/arnis/Salix_babylonica_y9.schem"
      ],
      "w2": [],
      "w3": [

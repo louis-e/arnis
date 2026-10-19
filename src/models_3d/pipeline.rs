@@ -42,26 +42,40 @@ impl Models3dPipeline {
         &self.union_suppressed
     }
 
-    /// Union of regions every 3D placement may write to, so stream-to-disk can defer (keep
-    /// resident) those regions until the post-merge placement pass. wikidata/stadium use
-    /// their size caps; 3DMR (uncapped) uses a generous assumed extent.
-    pub fn deferred_region_keys(&self, scale: f64) -> HashSet<(i32, i32)> {
-        let mut s: HashSet<(i32, i32)> = HashSet::new();
-        s.extend(self.three_dmr.deferred_region_keys(scale));
-        s.extend(self.wikidata.deferred_region_keys(scale));
-        s.extend(self.stadium.deferred_region_keys(scale));
-        s
+    /// Regions each 3D placement may write to, in `place` order, so stream-to-disk can keep
+    /// them resident until it is placed. wikidata/stadium use their size caps; 3DMR
+    /// (uncapped) uses a generous assumed extent.
+    pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
+        let mut out = self.three_dmr.placement_regions(scale);
+        out.extend(self.wikidata.placement_regions(scale));
+        out.extend(self.stadium.placement_regions(scale));
+        out
     }
 
-    pub fn place(&self, editor: &mut WorldEditor, args: &Args) {
-        if self.three_dmr.placement_count() > 0 {
-            three_dmr::place_three_dmr_models(editor, args, &self.three_dmr);
-        }
-        if self.wikidata.placement_count() > 0 {
-            wikidata::place_wikidata_models(editor, args, &self.wikidata);
-        }
-        if self.stadium.placement_count() > 0 {
-            custom::stadium::place_stadium_models(editor, args, &self.stadium);
-        }
+    pub fn placement_count(&self) -> usize {
+        self.three_dmr.placement_count()
+            + self.wikidata.placement_count()
+            + self.stadium.placement_count()
+    }
+
+    /// Places `indices` (into `placement_regions`, ascending).
+    pub fn place(&self, editor: &mut WorldEditor, args: &Args, indices: &[usize]) {
+        let dmr = self.three_dmr.placement_count();
+        let wiki = dmr + self.wikidata.placement_count();
+        let range = |lo: usize, hi: usize| -> Vec<usize> {
+            indices
+                .iter()
+                .filter(|&&i| (lo..hi).contains(&i))
+                .map(|&i| i - lo)
+                .collect()
+        };
+        three_dmr::place_three_dmr_models(editor, args, &self.three_dmr, &range(0, dmr));
+        wikidata::place_wikidata_models(editor, args, &self.wikidata, &range(dmr, wiki));
+        custom::stadium::place_stadium_models(
+            editor,
+            args,
+            &self.stadium,
+            &range(wiki, usize::MAX),
+        );
     }
 }

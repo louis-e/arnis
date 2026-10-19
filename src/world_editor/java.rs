@@ -567,7 +567,7 @@ fn live_lod_sections(
             let chunk_z = region_z * 32 + local_z;
             match region.get_chunk(local_x, local_z) {
                 Some(chunk) => {
-                    for &section_y in chunk.sections.keys() {
+                    for section_y in chunk.sections.keys() {
                         crate::voxy::mark_live(&mut live, chunk_x, section_y as i32, chunk_z);
                     }
                 }
@@ -590,7 +590,7 @@ fn region_content_span(region: &super::common::RegionToModify) -> (i32, i32) {
     let mut min_y = base_section_y.min(-4);
     let mut max_y = base_section_y;
     for chunk in region.chunks.values() {
-        for &section_y in chunk.sections.keys() {
+        for section_y in chunk.sections.keys() {
             min_y = min_y.min(section_y as i32);
             max_y = max_y.max(section_y as i32);
         }
@@ -686,7 +686,7 @@ impl RegionWriteCtx {
 /// odds of two colliding are percents, not nothing. A collision here is silent
 /// entity loss, which is the defect this key exists to fix.
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
-enum EntityIdentity {
+pub(super) enum EntityIdentity {
     Uuid([i32; 4]),
     /// Block entities carry no UUID; `Facing` separates the ones that share a
     /// cell, and -1 stands for an entity that has neither.
@@ -694,7 +694,9 @@ enum EntityIdentity {
 }
 
 #[inline]
-fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32, EntityIdentity)> {
+pub(super) fn get_entity_coords(
+    entity: &HashMap<String, Value>,
+) -> Option<(i32, i32, i32, EntityIdentity)> {
     let facing = match entity.get("UUID") {
         Some(Value::IntArray(uuid)) if uuid.len() == 4 => {
             EntityIdentity::Uuid([uuid[0], uuid[1], uuid[2], uuid[3]])
@@ -762,6 +764,10 @@ fn block_light_emission(name: &str, props: Option<&Value>) -> u8 {
         "minecraft:glow_lichen" => 7,
         "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" if !unlit => 7,
         "minecraft:sculk_catalyst" => 6,
+        // The invisible light block carries its level; 15 unless stated.
+        "minecraft:light" => prop_str(props, "level")
+            .and_then(|l| l.parse::<u8>().ok())
+            .map_or(15, |l| l.min(15)),
         "minecraft:magma_block" => 3,
         "minecraft:brewing_stand" | "minecraft:brown_mushroom" => 1,
         _ => 0,
@@ -774,7 +780,7 @@ fn is_light_transparent(name: &str) -> bool {
     if n == "tinted_glass" {
         return false; // tinted glass blocks all light, unlike other glass
     }
-    if n.ends_with("air") || n.ends_with("leaves") || n.contains("glass") {
+    if n.ends_with("air") || n == "light" || n.ends_with("leaves") || n.contains("glass") {
         return true;
     }
     const EXACT: &[&str] = &[
@@ -2070,8 +2076,8 @@ mod merge_tests {
     ) -> RegionToModify {
         let mut region = RegionToModify::default();
         for &(cx, cz) in chunks {
-            let chunk = region.chunks.entry((cx, cz)).or_default();
-            let section = chunk.sections.entry(0).or_default();
+            let chunk = region.get_or_create_chunk(cx, cz);
+            let section = chunk.sections.get_or_default(0);
             section.storage.set(0, block);
         }
         region
@@ -2350,5 +2356,19 @@ mod merge_tests {
         assert!(!m.writes_chunk(-3, 0));
         assert!(!m.writes_chunk(0, 1));
         assert!(RegionWriteMode::Fresh.writes_chunk(1000, -1000));
+    }
+
+    #[test]
+    fn invisible_light_block_lights_and_passes_light() {
+        use super::{block_light_emission, light_opacity};
+        assert_eq!(block_light_emission("minecraft:light", None), 15);
+        let level = Value::Compound(HashMap::from([(
+            "level".to_string(),
+            Value::String("9".to_string()),
+        )]));
+        assert_eq!(block_light_emission("minecraft:light", Some(&level)), 9);
+        assert_eq!(light_opacity("minecraft:light"), 0);
+        // Names merely containing "light" keep their own behaviour.
+        assert_eq!(light_opacity("minecraft:light_gray_concrete"), 15);
     }
 }

@@ -1,6 +1,6 @@
 //! Swept modular bridge decks built from bundled segment schematics.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use crate::block_definitions::*;
@@ -71,7 +71,8 @@ fn build_module(bytes: &'static [u8], street_y: i32, has_pillars: bool) -> Optio
     let mut feet = vec![Vec::new(); length];
     if has_pillars {
         for (l, slice) in slices.iter().enumerate() {
-            let mut lowest: HashMap<i32, (i32, BlockWithProperties)> = HashMap::new();
+            // Ordered: overlapping diagonal feet register support columns last-writer-wins.
+            let mut lowest: BTreeMap<i32, (i32, BlockWithProperties)> = BTreeMap::new();
             for (w, dy, block) in slice {
                 // Only solid shaft material may extend down; attachments would dangle.
                 if !is_pillar_material(block.block) {

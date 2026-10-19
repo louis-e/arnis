@@ -181,19 +181,38 @@ fn canopy_verdict(
     origin_x: i32,
     origin_z: i32,
     spacing: i32,
-    schematic_trees: bool,
+    tree_pack: Option<&crate::trees::region::RegionLibrary>,
+    scale: f64,
 ) -> (bool, bool) {
     let cell = XZPoint::new(
         x.div_euclid(spacing) * spacing - origin_x,
         z.div_euclid(spacing) * spacing - origin_z,
     );
-    let Some(fraction) = ground.canopy_fraction(cell, spacing) else {
+    let Some((fraction, top)) = ground.canopy_cell(cell, spacing) else {
         return (false, false);
     };
     if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
         return (true, false);
     }
-    let p = crate::canopy::slot_probability(fraction, spacing, schematic_trees);
+    let p = match tree_pack {
+        None => crate::canopy::flat_slot_probability(
+            fraction,
+            spacing,
+            crate::canopy::COLUMNS_PER_TREE_LEGACY,
+        ),
+        Some(_) if scale < crate::element_processing::tree::MICRO_TREE_MAX_SCALE => {
+            crate::canopy::flat_slot_probability(
+                fraction,
+                spacing,
+                crate::canopy::COLUMNS_PER_TREE_MICRO,
+            )
+        }
+        // The crown the pack grows at the height the cell measured.
+        Some(pack) => {
+            let height = ((f64::from(top) * scale).round() as i32).max(1);
+            crate::canopy::slot_probability(fraction, spacing, pack.crown_columns(height))
+        }
+    };
     // Its own salt, so no existing draw shifts when the option is off.
     let roll = (land_cover::coord_hash(x ^ 0x434D, z ^ 0x484D) % 10_000) as f64 / 10_000.0;
     (true, roll < p)
@@ -258,7 +277,7 @@ pub fn generate_ground_region(
     let has_land_cover = ground.has_land_cover();
     let has_canopy = ground.has_canopy();
     let tree_spacing = editor.tree_slot_spacing();
-    let schematic_trees = editor.tree_pack().is_some();
+    let tree_pack = editor.tree_pack();
     let terrain_enabled = ground.elevation_enabled;
     let climate = ground.climate();
 
@@ -495,11 +514,7 @@ pub fn generate_ground_region(
                         // can only EXTEND water into land (organic fringe), never
                         // retract it — so OSM rivers that overlap ESA water pixels
                         // are never overwritten with grass.
-                        let water_blend = if has_land_cover {
-                            ground.water_blend(coord)
-                        } else {
-                            0.0
-                        };
+                        let blend_is_water = has_land_cover && ground.water_blend_is_water(coord);
                         let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
                         // Probe a column for water at its *own* ground level.
                         // Previously this closed over the outer-cell ground_y,
@@ -565,7 +580,7 @@ pub fn generate_ground_region(
                         // instead of either the raw ESA 10 m rectangle grid
                         // or a stochastic noise-dithered transition.
                         let is_esa_water =
-                            grid_is_water || placed_water || osm_gap || water_blend > 0.5;
+                            grid_is_water || placed_water || osm_gap || blend_is_water;
 
                         let mut water_y = 0;
                         let mut place_esa_water = false;
@@ -833,7 +848,7 @@ pub fn generate_ground_region(
                             let surface_block = if (snow == terrain_surface::Snow::Block
                                 || snow != terrain_surface::Snow::None
                                     && terrain_surface::is_ice(surface_block))
-                                && water_blend <= 0.5
+                                && !blend_is_water
                                 && surface_block != WATER
                             {
                                 SNOW_BLOCK
@@ -899,7 +914,7 @@ pub fn generate_ground_region(
                             // surfaces only get a dusting.
                             if snow != terrain_surface::Snow::None
                                 && !surface_is_water
-                                && water_blend <= 0.5
+                                && !blend_is_water
                             {
                                 let eighths =
                                     if top == Some(surface_block) || top == Some(PACKED_ICE) {
@@ -1051,7 +1066,8 @@ pub fn generate_ground_region(
                                     xzbbox.min_x(),
                                     xzbbox.min_z(),
                                     tree_spacing,
-                                    schematic_trees,
+                                    tree_pack.as_deref(),
+                                    args.scale,
                                 )
                             } else {
                                 (false, false)
@@ -1410,7 +1426,15 @@ pub fn generate_ground_region(
                         ]),
                         None,
                     );
-                    if editor.check_for_block_absolute(x, ground_y + 1, z, Some(LOOSE_PLANTS), None)
+                    // A hedge on the paving is a barrier, not a stray bush.
+                    if !editor.is_hedge(x, z)
+                        && editor.check_for_block_absolute(
+                            x,
+                            ground_y + 1,
+                            z,
+                            Some(LOOSE_PLANTS),
+                            None,
+                        )
                         && (stray_surface
                             || editor.check_for_block_absolute(
                                 x,
@@ -1603,4 +1627,48 @@ pub(crate) fn patch_noise(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
         }
     }
     1.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canopy::CanopyData;
+
+    /// Share of trunk slots the verdict fills under a closed 20 m canopy.
+    fn filled_share(scale: f64, pack: Option<&crate::trees::region::RegionLibrary>) -> f64 {
+        let grid = CanopyData::from_grid(vec![20; 256 * 256], 256, 256);
+        let ground = Ground::new_flat_canopy_test(grid, 256, 256);
+        let (mut slots, mut trees) = (0u32, 0u32);
+        for z in 0..250 {
+            for x in 0..250 {
+                if (x, z) == crate::trees::schematic::trunk_slot_s(x, z, 5) {
+                    slots += 1;
+                    trees += u32::from(canopy_verdict(&ground, x, z, 0, 0, 5, pack, scale).1);
+                }
+            }
+        }
+        f64::from(trees) / f64::from(slots)
+    }
+
+    #[test]
+    fn procedural_and_micro_trees_keep_their_flat_rates() {
+        // Procedural crowns of 25 columns fill every slot up to the cap, at any scale.
+        for scale in [0.2, 1.0] {
+            let share = filled_share(scale, None);
+            assert!((0.8..0.9).contains(&share), "scale {scale}: {share}");
+        }
+        // Schematic micro trees assume 52 columns each.
+        let src = crate::trees::tree_pack::TreePackSource::embedded("eur");
+        let pack = crate::trees::region::RegionLibrary::load(
+            &src,
+            0.2,
+            0,
+            0.2,
+            crate::trees::tree_library::SizeFilter::default(),
+            false,
+        )
+        .expect("load eur");
+        let share = filled_share(0.2, Some(&pack));
+        assert!((0.43..0.53).contains(&share), "{share}");
+    }
 }

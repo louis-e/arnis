@@ -331,6 +331,36 @@ pub struct Args {
     /// replacement one.
     #[arg(long)]
     pub building_facades_dir: Option<PathBuf>,
+
+    /// Moon and Mars: lower gravity for players and mobs, with fall damage scaled to
+    /// match. Runs from a data pack in the world. Java 1.21.4+.
+    #[arg(long, default_value_t = false)]
+    pub body_gravity: bool,
+
+    /// Signal heads whose lamps cycle red, amber and green, with pedestrian heads at
+    /// signalised crossings. Runs from a data pack in the world. Java 1.21.4+.
+    #[arg(long, default_value_t = false)]
+    pub traffic_lights: bool,
+
+    /// An advancement tab for the area's landmarks, museums, parks, stations and more,
+    /// each unlocked by walking there. Java 1.21.4+.
+    #[arg(long, default_value_t = false)]
+    pub discoveries: bool,
+
+    /// An "Arnis" button in the pause menu with travel, discoveries and the data
+    /// credits. Java 1.21.6+; older versions get the credits in chat instead.
+    #[arg(long, default_value_t = false)]
+    pub pause_menu: bool,
+
+    /// Zombie Outbreak: five nights of growing waves through the streets, a boss on the
+    /// last, and a supply drop every morning. Starts the world in survival. Java 1.21.6+.
+    #[arg(long, default_value_t = false)]
+    pub zombie_outbreak: bool,
+
+    /// Cars that drive the streets at the speed limit, queue behind each other, turn at
+    /// junctions and, with --traffic-lights, stop at red. Java 1.21.4+.
+    #[arg(long, default_value_t = false)]
+    pub moving_cars: bool,
 }
 
 /// Accepts the panel resolutions the atlas budget logic can halve cleanly.
@@ -671,6 +701,10 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.mapillary_facades = Some(false);
     // Relief already fits vanilla height, so the pack would add only empty sky.
     args.disable_height_limit = false;
+    // No roads or places off Earth.
+    args.traffic_lights = false;
+    args.discoveries = false;
+    args.moving_cars = false;
     // Airless bodies look right at night. Only a default: comparing against the
     // flag's own default lets an explicit --world-time win.
     if args.world_time == DEFAULT_WORLD_TIME {
@@ -701,6 +735,31 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             "--terrain contradicts --mode geo-only (flat ground). Drop --terrain, or use --mode geo-terrain."
                 .to_string(),
         );
+    }
+
+    let extras = [
+        (args.pause_menu, "--pause-menu"),
+        (args.discoveries, "--discoveries"),
+        (args.traffic_lights, "--traffic-lights"),
+        (args.zombie_outbreak, "--zombie-outbreak"),
+        (args.body_gravity, "--body-gravity"),
+        (args.moving_cars, "--moving-cars"),
+    ];
+    if args.bedrock || args.luanti {
+        if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
+            return Err(format!(
+                "{flag} runs from a Java Edition data pack and is not available for Bedrock or Luanti worlds."
+            ));
+        }
+    }
+    // Each area would write its pack over the last one's.
+    if args.one_world {
+        if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
+            return Err(format!("{flag} is not available with --one-world yet."));
+        }
+    }
+    if args.body_gravity && args.body.is_earth() {
+        return Err("--body-gravity only applies to --body moon or --body mars.".to_string());
     }
 
     if args.map_preview && args.luanti {
@@ -970,6 +1029,26 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gameplay_extras_are_java_only_and_gravity_needs_another_body() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            args
+        };
+        assert!(validate_args(&parse(&["--traffic-lights", "--zombie-outbreak"])).is_ok());
+        let bedrock = validate_args(&parse(&["--bedrock", "--discoveries"])).unwrap_err();
+        assert!(bedrock.contains("--discoveries"), "{bedrock}");
+        assert!(validate_args(&parse(&["--body-gravity"])).is_err());
+        assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
+        let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();
+        assert!(one_world.contains("--pause-menu"), "{one_world}");
+    }
 
     #[test]
     fn test_generation_mode() {

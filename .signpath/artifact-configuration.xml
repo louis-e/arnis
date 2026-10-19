@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default artifact configuration of the SignPath project "arnis". SignPath reads it
+     from its web UI, not from here, so paste it there after changing it. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <!-- GitHub Actions artifacts arrive zipped. -->
+  <zip-file>
+    <pe-file path="arnis-windows.exe" product-name="Arnis" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

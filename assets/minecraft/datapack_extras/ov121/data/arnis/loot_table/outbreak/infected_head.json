@@ -1,0 +1,17 @@
+{
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:player_head",
+          "modifier": [
+            { "type": "minecraft:fill_player_head", "entity": "this" },
+            { "type": "minecraft:set_name", "entity": "this", "target": "custom_name", "name": { "selector": "@s", "color": "red" } }
+          ]
+        }
+      ]
+    }
+  ]
+}

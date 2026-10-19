@@ -46,7 +46,7 @@ jobs:
       - name: Run benchmark command with memory tracking
         id: benchmark
         run: |
-          /usr/bin/time -v ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --mode=geo-terrain --benchmark --bbox="48.114370 11.531525 48.159963 11.614609" 2> benchmark_log.txt
           grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
@@ -77,7 +77,7 @@ jobs:
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
           gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          baseline_time=17
+          baseline_time=44
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
@@ -92,7 +92,7 @@ jobs:
           fi
           eval_abs_diff=${eval_diff#-}
 
-          if [ "$eval_diff" -lt -5 ]; then
+          if [ "$eval_diff" -le -5 ]; then
             verdict="✅ This PR **improves generation time**."
           elif [ "$eval_abs_diff" -le 4 ]; then
             verdict="🟢 Generation time is unchanged."
@@ -102,7 +102,7 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=1068
+          baseline_mem=1231
           mem_diff=$((peak_mem - baseline_mem))
           mem_abs_diff=${mem_diff#-}
           mem_annotation=""

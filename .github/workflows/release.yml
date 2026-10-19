@@ -3,6 +3,8 @@ name: Build and Release Arnis
 on:
   release:
     types: [created]
+  # Builds and signs without publishing, to test the SignPath setup.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -27,7 +29,8 @@ jobs:
             asset_name: arnis-mac-arm64
 
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Windows also waits for the signing request to be approved in SignPath.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 45 }}
 
     steps:
     - uses: actions/checkout@v7
@@ -73,33 +76,43 @@ jobs:
         chmod +x target/release/arnis-linux.AppImage
         tar -czf target/release/arnis-linux-appimage.tar.gz -C target/release arnis-linux.AppImage
 
-    - name: Install Windows SDK
+    - name: Upload unsigned Windows executable
       if: matrix.os == 'windows-latest'
-      run: |
-        choco install windows-sdk-10.1 -y
-        $env:Path += ";C:\Program Files (x86)\Windows Kits\10\bin\x64"
-      shell: powershell
+      id: upload-unsigned
+      uses: actions/upload-artifact@v7
+      with:
+        name: arnis-windows-unsigned
+        path: target/release/${{ matrix.asset_name }}
 
-    - name: Locate signtool.exe
+    - name: Determine version to sign
       if: matrix.os == 'windows-latest'
-      id: locate_signtool
+      id: version
+      # On a release the tag is used, so a tag that disagrees with the version in the exe fails signing.
       run: |
-        $env:ProgramFilesX86 = [System.Environment]::GetFolderPath('ProgramFilesX86')
-        $signtoolPath = Get-ChildItem -Path "$env:ProgramFilesX86\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
-        if (-not $signtoolPath) { throw "signtool.exe not found." }
-        echo "signtool=$signtoolPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      shell: powershell
-    
-    - name: Self-sign Windows executable
-      if: matrix.os == 'windows-latest'
-      run: |
-        $password = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -Force -AsPlainText
-        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Arnis' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
-        Export-PfxCertificate -Cert $cert -FilePath arnis-cert.pfx -Password $password
-        & $env:signtool sign /f arnis-cert.pfx /p $env:WINDOWS_CERT_PASSWORD /t http://timestamp.digicert.com target/release/${{ matrix.asset_name }}
+        $version = if ($env:TAG) { $env:TAG -replace '^v', '' } else { (Get-Content tauri.conf.json -Raw | ConvertFrom-Json).version }
+        "version=$version" >> $env:GITHUB_OUTPUT
       env:
-        WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-      shell: powershell
+        TAG: ${{ github.event.release.tag_name }}
+
+    - name: Sign Windows executable with SignPath
+      if: matrix.os == 'windows-latest'
+      uses: signpath/github-action-submit-signing-request@v3
+      with:
+        api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+        organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        project-slug: arnis
+        # Switched to release-signing once the Foundation has imported the production certificate.
+        signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'test-signing' }}
+        github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+        wait-for-completion: true
+        wait-for-completion-timeout-in-seconds: 3600
+        output-artifact-directory: target/release/signed
+        parameters: |
+          version: ${{ toJSON(steps.version.outputs.version) }}
+
+    - name: Replace unsigned Windows executable with the signed one
+      if: matrix.os == 'windows-latest'
+      run: Move-Item -Force target/release/signed/${{ matrix.asset_name }} target/release/${{ matrix.asset_name }}
 
     - name: Upload artifact
       uses: actions/upload-artifact@v7
@@ -149,6 +162,7 @@ jobs:
 
   release:
     needs: [build, create-universal-macos]
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code

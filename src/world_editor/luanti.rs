@@ -608,8 +608,8 @@ fn write_map_database(
     let mut mb_max_y = i32::MIN;
 
     for (&(region_x, region_z), region) in &world.regions {
-        for (&(chunk_x, chunk_z), chunk) in &region.chunks {
-            for (&section_y, section) in &chunk.sections {
+        for ((chunk_x, chunk_z), chunk) in region.chunks.iter() {
+            for (section_y, section) in chunk.sections.iter() {
                 // region_x * 32 + chunk_x = absolute chunk X = mapblock X
                 // section_y (i8) = mapblock Y
                 // Negate Z: Luanti Z+ = North, internal Z+ = South

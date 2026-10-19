@@ -278,6 +278,15 @@ const CANOPY_CELLS: usize = CANOPY_SPAN * CANOPY_SPAN;
 pub const MICRO_TREE_MAX_SCALE: f64 = 0.35;
 /// Nominal mature-tree height in meters, scaled against the equally-scaled terrain.
 const NOMINAL_TREE_HEIGHT_M: f64 = 25.0;
+/// Radius of the canopy map read around a trunk for the top of its own crown.
+const CROWN_PROBE_M: f64 = 2.0;
+/// Radius read when the trunk's own spot is bare: a neighbour's crown, or a
+/// street tree the satellite image shows a few metres off its mapped point.
+const NEIGHBOUR_PROBE_M: f64 = 8.0;
+/// Crown top range of a young tree on ground the canopy map reads as bare.
+const YOUNG_TREE_M: (f64, f64) = (4.0, 8.0);
+/// A mapped tree on bare ground where no mapped tree is seen to compare with.
+const MAPPED_TREE_M: f64 = 9.0;
 // Sentinel for a canopy column with no building under it.
 const NO_ROOF: i32 = i32::MIN;
 
@@ -424,6 +433,59 @@ impl LeafPlacer<'_> {
             self.leaves_block
         };
         editor.set_block_absolute(block, x, y, z, None, None);
+    }
+}
+
+/// Blocks the crown probe reads around a trunk at this scale.
+pub fn crown_probe_blocks(scale: f64) -> i32 {
+    ((CROWN_PROBE_M * scale).round() as i32).max(1)
+}
+
+/// What the canopy map says about the crown of a tree at (x, z).
+enum CrownReading {
+    Top(f64),
+    Bare,
+    Unmeasured,
+}
+
+fn crown_reading(editor: &WorldEditor, x: i32, z: i32) -> CrownReading {
+    let scale = editor.scale();
+    let r = crown_probe_blocks(scale);
+    match editor.canopy_top_m(x, z, r) {
+        None => CrownReading::Unmeasured,
+        Some(Some(h)) => CrownReading::Top(f64::from(h)),
+        Some(None) => {
+            let wide = ((NEIGHBOUR_PROBE_M * scale).round() as i32).max(r + 1);
+            match editor.canopy_top_m(x, z, wide) {
+                Some(Some(h)) => CrownReading::Top(f64::from(h)),
+                _ => CrownReading::Bare,
+            }
+        }
+    }
+}
+
+/// Crown top in metres a tree at (x, z) should reach, or `None` where nothing
+/// measured it. A mapped height tag wins; the canopy map's crown comes next.
+fn wanted_height_m(
+    editor: &WorldEditor,
+    x: i32,
+    z: i32,
+    mapped: Option<&crate::trees::mapped::MappedTree>,
+) -> Option<f64> {
+    if let Some(h) = mapped.and_then(|m| m.height_m) {
+        return Some(h);
+    }
+    match crown_reading(editor, x, z) {
+        CrownReading::Top(h) => Some(h),
+        CrownReading::Unmeasured => None,
+        // The map misses many street trees, which then take their seen peers' height.
+        CrownReading::Bare if mapped.is_some() => {
+            Some(editor.typical_mapped_height_m().unwrap_or(MAPPED_TREE_M))
+        }
+        CrownReading::Bare => {
+            let t = (crate::land_cover::coord_hash(x ^ 0x9A3, z ^ 0x51F) % 1000) as f64 / 1000.0;
+            Some(YOUNG_TREE_M.0 + (YOUNG_TREE_M.1 - YOUNG_TREE_M.0) * t)
+        }
     }
 }
 
@@ -654,7 +716,9 @@ impl Tree {
 
         // Both tree models are fixed block sizes, so at low scale they tower over the world.
         let scale = editor.scale();
+        let blocks = |m: f64| ((m * scale).round() as i32).max(1);
         if scale < MICRO_TREE_MAX_SCALE {
+            // A blob of a few blocks reads as forest from altitude only at the nominal size.
             let height_m = mapped
                 .and_then(|m| m.height_m)
                 .unwrap_or(NOMINAL_TREE_HEIGHT_M);
@@ -683,18 +747,11 @@ impl Tree {
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
             let picked = match mapped {
                 Some(m) => {
-                    // A mapped height beats the canopy map.
-                    let want_size = m
-                        .height_m
-                        .map(|h| {
-                            crate::trees::tree_library::size_for_height((h * scale).round() as i32)
-                        })
-                        .or_else(|| editor.canopy_size_hint(x, z));
                     let eco = editor.ecoregion(x, z);
                     let req = crate::trees::region::MappedRequest {
                         genus: m.genus.as_deref(),
                         conifer: m.conifer,
-                        want_size,
+                        want_height: wanted_height_m(editor, x, z, Some(m)).map(blocks),
                         eco,
                         beach: eco.is_some() && near_beach(editor, x, z),
                     };
@@ -703,11 +760,14 @@ impl Tree {
                 None => {
                     // Read at the slot, not the request, so the hint describes the
                     // column the trunk lands in.
-                    let (hx, hz) =
-                        crate::trees::schematic::trunk_slot_s(x, z, region.base_spacing());
+                    let (hx, hz) = crate::trees::schematic::trunk_slot_s(
+                        x,
+                        z,
+                        region.slot_spacing(density_decided),
+                    );
                     let eco = editor.ecoregion(hx, hz);
                     let req = crate::trees::region::SlotRequest {
-                        want_size: editor.canopy_size_hint(hx, hz),
+                        want_height: wanted_height_m(editor, hx, hz, None).map(blocks),
                         density_decided,
                         eco,
                         beach: eco.is_some() && near_beach(editor, hx, hz),
@@ -758,6 +818,20 @@ impl Tree {
                     fpmin = fpmin.min(editor.get_absolute_y(sx + dx, y, sz + dz));
                 }
                 let slot_base_y = center.min(fpmin + 2);
+                // Requests from several cells snap to one slot: its first tree stands,
+                // and a later one would only stamp itself into that trunk.
+                let trunk_taken = (slot_base_y..=slot_base_y + 2).any(|wy| {
+                    editor.check_for_block_absolute(
+                        sx,
+                        wy,
+                        sz,
+                        Some(crate::ground_decoration::WOOD),
+                        None,
+                    )
+                });
+                if trunk_taken || !editor.claim_tree_slot(sx, sz) {
+                    return;
+                }
                 crate::trees::schematic::place_schematic_tree(
                     editor,
                     schem,
@@ -1857,5 +1931,152 @@ mod scale_tests {
             a <= b && b <= c,
             "height must grow with scale: {a} <= {b} <= {c}"
         );
+    }
+}
+
+#[cfg(test)]
+mod height_tests {
+    use super::*;
+    use crate::canopy::{CanopyData, CANOPY_NODATA};
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::ground::Ground;
+    use crate::trees::tree_library::SizeFilter;
+    use crate::trees::tree_pack::TreePackSource;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// 64 x 64 world: a 20 m crown over x, z in 8..=16, bare ground elsewhere,
+    /// unmeasured from x = 56 on.
+    fn editor_with_canopy(xzbbox: &XZBBox, scale: f64, pack: bool) -> WorldEditor<'_> {
+        let mut grid = vec![0u8; 64 * 64];
+        for z in 0..64 {
+            for x in 0..64 {
+                if x >= 56 {
+                    grid[z * 64 + x] = CANOPY_NODATA;
+                } else if (8..=16).contains(&x) && (8..=16).contains(&z) {
+                    grid[z * 64 + x] = 20;
+                }
+            }
+        }
+        let ground = Ground::new_flat_canopy_test(CanopyData::from_grid(grid, 64, 64), 64, 64);
+        let llbbox = LLBBox::new(48.0, 11.0, 48.001, 11.001).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
+        editor.set_ground(Arc::new(ground));
+        editor.set_ground_origin(0, 0);
+        editor.set_projection_info("local", scale);
+        if pack {
+            let src = TreePackSource::embedded("eur");
+            let lib = crate::trees::region::RegionLibrary::load(
+                &src,
+                scale,
+                0,
+                scale,
+                SizeFilter::default(),
+                false,
+            )
+            .unwrap();
+            editor.set_tree_pack(Arc::new(lib));
+        }
+        editor
+    }
+
+    #[test]
+    fn the_canopy_map_sets_the_wanted_height() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let editor = editor_with_canopy(&xzbbox, 1.0, false);
+        assert_eq!(wanted_height_m(&editor, 12, 12, None), Some(20.0));
+        // Beside the crown: a neighbour's height, not a random one.
+        assert_eq!(wanted_height_m(&editor, 22, 12, None), Some(20.0));
+        // Measured bare far from any crown: a young tree.
+        let young = wanted_height_m(&editor, 40, 40, None).unwrap();
+        assert!(
+            (YOUNG_TREE_M.0..=YOUNG_TREE_M.1).contains(&young),
+            "{young}"
+        );
+        // Unmeasured: nothing to go by.
+        assert_eq!(wanted_height_m(&editor, 60, 40, None), None);
+
+        // A mapped tree the map misses takes the fallback, never a random giant,
+        // and a height tag beats the map.
+        let untagged = crate::trees::mapped::MappedTree::from_tags(&HashMap::new(), 1);
+        assert_eq!(
+            wanted_height_m(&editor, 40, 40, Some(&untagged)),
+            Some(MAPPED_TREE_M)
+        );
+        let tagged = crate::trees::mapped::MappedTree::from_tags(
+            &HashMap::from([("height".to_string(), "7".to_string())]),
+            1,
+        );
+        assert_eq!(wanted_height_m(&editor, 12, 12, Some(&tagged)), Some(7.0));
+    }
+
+    /// Height of everything one tree placed at (12, 12) stamped, in blocks.
+    fn planted_height(scale: f64) -> i32 {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let mut editor = editor_with_canopy(&xzbbox, scale, true);
+        Tree::create_from_canopy(&mut editor, (12, 1, 12), None, None);
+        let ys: Vec<i32> = (0..64)
+            .flat_map(|x| (0..64).map(move |z| (x, z)))
+            .flat_map(|(x, z)| (0..120).map(move |y| (x, y, z)))
+            .filter(|&(x, y, z)| editor.block_exists_absolute(x, y, z))
+            .map(|(_, y, _)| y)
+            .collect();
+        assert!(!ys.is_empty(), "a tree stands at scale {scale}");
+        ys.iter().max().unwrap() - ys.iter().min().unwrap() + 1
+    }
+
+    #[test]
+    fn a_slot_keeps_the_first_tree_planted_in_it() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let mut editor = editor_with_canopy(&xzbbox, 1.0, true);
+        let snapshot = |e: &WorldEditor| -> Vec<Option<Block>> {
+            (0..64)
+                .flat_map(|x| (0..64).map(move |z| (x, z)))
+                .flat_map(|(x, z)| (0..60).map(move |y| (x, y, z)))
+                .map(|(x, y, z)| e.get_block_absolute(x, y, z))
+                .collect()
+        };
+        // Two requests in one lattice cell share its slot; the second asks for
+        // another leaf type, so stamping it too would graft a second tree on.
+        let before = snapshot(&editor);
+        let cell = (25..45)
+            .step_by(5)
+            .flat_map(|x| (25..45).step_by(5).map(move |z| (x, z)))
+            .find(|&(x, z)| {
+                Tree::create_of_type(
+                    &mut editor,
+                    (x, 1, z),
+                    TreeType::Spruce,
+                    None,
+                    None,
+                    true,
+                    true,
+                );
+                snapshot(&editor) != before
+            })
+            .expect("some cell holds a tree");
+        let planted = snapshot(&editor);
+        let (x, z) = (cell.0 + 2, cell.1 + 3);
+        Tree::create_of_type(
+            &mut editor,
+            (x, 1, z),
+            TreeType::Oak,
+            None,
+            None,
+            true,
+            true,
+        );
+        assert!(snapshot(&editor) == planted, "the slot was stamped twice");
+    }
+
+    // A 20 m crown is a 20 m tree next to equally scaled buildings: 20 blocks
+    // at 1:1, 10 at half scale, never the same blocks at every scale.
+    #[test]
+    fn a_measured_crown_scales_with_the_world() {
+        let full = planted_height(1.0);
+        let half = planted_height(0.5);
+        assert!((16..=24).contains(&full), "1:1 gave {full}");
+        assert!((7..=13).contains(&half), "1:2 gave {half}");
     }
 }

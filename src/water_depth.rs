@@ -525,7 +525,7 @@ fn is_trunk(block: Block) -> bool {
     name.ends_with("_log") || name.ends_with("_stem")
 }
 
-fn is_tree_part(block: Block) -> bool {
+pub(crate) fn is_tree_part(block: Block) -> bool {
     is_trunk(block) || block.name().ends_with("_leaves")
 }
 
@@ -536,7 +536,7 @@ const MAX_TREE_BLOCKS: usize = 4096;
 /// Erase the tree connected to (x, y, z). Clearing only the two plant layers
 /// would leave the canopy hanging in the air over the water. Blocks are set to
 /// air as they are visited, so a revisit sees air and stops; no visited set.
-fn clear_tree_from(editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+pub(crate) fn clear_tree_from(editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
     let mut stack = vec![(x, y, z)];
     let mut cleared = 0usize;
     while let Some((cx, cy, cz)) = stack.pop() {

@@ -150,7 +150,7 @@ pub struct LandCoverData {
     /// 0 = non-water, 1 = shore water, 2+ = progressively deeper water.
     pub water_distance: Vec<Vec<u8>>,
     /// Lazily computed smoothed water mask, so the blur runs once instead of after every mutation.
-    pub water_blend_cache: OnceCell<Vec<Vec<f32>>>,
+    pub water_blend_cache: OnceCell<WaterBlendMask>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -178,10 +178,17 @@ impl LandCoverData {
         self.invalidate_water_blend_grid();
     }
 
-    /// Smoothed water mask, computed on first use after the last grid mutation.
-    pub(crate) fn water_blend_grid(&self) -> &[Vec<f32>] {
+    /// Smoothed water mask thresholded per world block, computed on first use after the
+    /// last grid mutation.
+    pub(crate) fn water_blend_mask(&self, world_w: usize, world_h: usize) -> &WaterBlendMask {
         self.water_blend_cache.get_or_init(|| {
-            compute_water_blend_smooth(&self.grid, self.width, self.height, self.cells_per_meter)
+            let smooth = compute_water_blend_smooth(
+                &self.grid,
+                self.width,
+                self.height,
+                self.cells_per_meter,
+            );
+            WaterBlendMask::build(&smooth, self.width, self.height, world_w, world_h)
         })
     }
 
@@ -189,6 +196,93 @@ impl LandCoverData {
     pub(crate) fn invalidate_water_blend_grid(&mut self) {
         self.water_blend_cache = OnceCell::new();
     }
+}
+
+/// World blocks where the bilinear smoothed water mask is above one half. Readers only ever
+/// compared it to that threshold, so one bit per block replaces a float per grid cell.
+#[derive(Clone)]
+pub struct WaterBlendMask {
+    width: usize,
+    height: usize,
+    words_per_row: usize,
+    bits: Vec<u64>,
+}
+
+impl WaterBlendMask {
+    fn build(
+        smooth: &[Vec<f32>],
+        lc_w: usize,
+        lc_h: usize,
+        world_w: usize,
+        world_h: usize,
+    ) -> Self {
+        use rayon::prelude::*;
+        let words_per_row = world_w.div_ceil(64);
+        let mut bits = vec![0u64; words_per_row * world_h];
+        if lc_w > 0 && lc_h > 0 && smooth.len() >= lc_h {
+            bits.par_chunks_mut(words_per_row.max(1))
+                .enumerate()
+                .for_each(|(z, row)| {
+                    for x in 0..world_w {
+                        let blend = sample_water_blend(smooth, lc_w, lc_h, world_w, world_h, x, z);
+                        if blend > 0.5 {
+                            row[x >> 6] |= 1 << (x & 63);
+                        }
+                    }
+                });
+        }
+        Self {
+            width: world_w,
+            height: world_h,
+            words_per_row,
+            bits,
+        }
+    }
+
+    /// Coordinates outside the world clamp to its edge, as the bilinear lookup did.
+    #[inline]
+    pub fn contains(&self, x: i32, z: i32) -> bool {
+        if self.width == 0 || self.height == 0 {
+            return false;
+        }
+        let x = x.clamp(0, self.width as i32 - 1) as usize;
+        let z = z.clamp(0, self.height as i32 - 1) as usize;
+        self.bits[z * self.words_per_row + (x >> 6)] >> (x & 63) & 1 != 0
+    }
+}
+
+/// Bilinear sample of the smoothed water mask at a world block. Continuous grid
+/// coordinates (no rounding, unlike `cover_class`) so the hard `> 0.5` threshold traces a
+/// curved shoreline instead of the ESA 10 m grid edge.
+fn sample_water_blend(
+    wb: &[Vec<f32>],
+    lc_w: usize,
+    lc_h: usize,
+    world_w: usize,
+    world_h: usize,
+    x: usize,
+    z: usize,
+) -> f64 {
+    let fx = (x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0) * (lc_w - 1) as f64;
+    let fz = (z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0) * (lc_h - 1) as f64;
+
+    let x0 = (fx.floor() as usize).min(lc_w - 1);
+    let x1 = (x0 + 1).min(lc_w - 1);
+    let z0 = (fz.floor() as usize).min(lc_h - 1);
+    let z1 = (z0 + 1).min(lc_h - 1);
+
+    let tx = fx - fx.floor();
+    let tz = fz - fz.floor();
+
+    // Widened to f64 so the four multiply-adds don't add rounding on top of storage.
+    let w00 = wb[z0][x0] as f64;
+    let w10 = wb[z0][x1] as f64;
+    let w01 = wb[z1][x0] as f64;
+    let w11 = wb[z1][x1] as f64;
+
+    let top = w00 * (1.0 - tx) + w10 * tx;
+    let bottom = w01 * (1.0 - tx) + w11 * tx;
+    top * (1.0 - tz) + bottom * tz
 }
 
 /// Build a smooth `[0, 1]` water-ness field from the binary `LC_WATER` mask

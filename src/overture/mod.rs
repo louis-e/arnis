@@ -117,6 +117,10 @@ const OVERTURE_SKIP_IDS: &[&str] = &[
     // Königsplatz, Munich: a 17 x 25 m stage/tent footprint on the square in
     // front of the Propyläen (Microsoft ML Buildings, imagery of 2019-07).
     "f8c0757e-c059-49e4-9757-7e278751926f",
+    // Corcovado, Rio: two 7 x 4 m boxes on the terrace by the summit station
+    // (Google Open Buildings), where OSM already maps every building.
+    "300e8ad6-8834-4704-9f3c-f0f082439da5",
+    "e1286a9a-92bb-4d99-9f66-61d383c399f4",
 ];
 
 /// Whether a footprint is a known false positive. Both transports ask this,

@@ -13,7 +13,11 @@
       "Acer_rubrum1.schem",
       "Acer_rubrum2.schem",
       "Acer_rubrum3.schem",
-      "Acer_rubrum4.schem"
+      "Acer_rubrum4.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1L.schem",
+      "contrib/lentebriesje/Acer_rubrum_na1S.schem",
+      "contrib/arnis/Acer_rubrum_y4.schem",
+      "contrib/arnis/Acer_rubrum_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -21,7 +25,8 @@
     {
      "name": "Annona_glabra",
      "w1": [
-      "Annona_glabra1.schem"
+      "Annona_glabra1.schem",
+      "contrib/arnis/Annona_glabra_y4.schem"
      ],
      "w2": [
       "Annona_glabra2.schem"
@@ -40,7 +45,10 @@
     },
     {
      "name": "Bursera_simaruba",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Bursera_simaruba_y4.schem",
+      "contrib/arnis/Bursera_simaruba_y6.schem"
+     ],
      "w2": [
       "Bursera_simaruba1.schem",
       "Bursera_simaruba2.schem"
@@ -83,7 +91,9 @@
      "name": "Cornus_florida",
      "w1": [
       "Cornus_florida2.schem",
-      "Cornus_florida4.schem"
+      "Cornus_florida4.schem",
+      "contrib/lentebriesje/Cornus_florida_na8L.schem",
+      "contrib/lentebriesje/Cornus_florida_na8S.schem"
      ],
      "w2": [
       "Cornus_florida5.schem"
@@ -95,7 +105,11 @@
     },
     {
      "name": "Ficus_aurea",
-     "w1": [],
+     "w1": [
+      "contrib/arnis/Ficus_aurea_y4.schem",
+      "contrib/arnis/Ficus_aurea_y6.schem",
+      "contrib/arnis/Ficus_aurea_y8.schem"
+     ],
      "w2": [
       "Ficus_aurea3.schem"
      ],
@@ -109,7 +123,12 @@
      "w1": [
       "Liquidambar_styraciflua1.schem",
       "Liquidambar_styraciflua2.schem",
-      "Liquidambar_styraciflua3.schem"
+      "Liquidambar_styraciflua3.schem",
+      "contrib/lentebriesje/Liquidambar_styraciflua_na4L.schem",
+      "contrib/lentebriesje/Liquidambar_styraciflua_na4S.schem",
+      "contrib/arnis/Liquidambar_styraciflua_y4.schem",
+      "contrib/arnis/Liquidambar_styraciflua_y6.schem",
+      "contrib/arnis/Liquidambar_styraciflua_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -121,7 +140,9 @@
       "Magnolia_grandiflora3.schem",
       "Magnolia_grandiflora4.schem",
       "Magnolia_grandiflora5.schem",
-      "Magnolia_grandiflora6.schem"
+      "Magnolia_grandiflora6.schem",
+      "contrib/arnis/Magnolia_grandiflora_y4.schem",
+      "contrib/arnis/Magnolia_grandiflora_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -144,7 +165,9 @@
       "Phoenix_canariensis2.schem",
       "Phoenix_canariensis3.schem",
       "Phoenix_canariensis4.schem",
-      "Phoenix_canariensis5.schem"
+      "Phoenix_canariensis5.schem",
+      "contrib/arnis/Phoenix_canariensis_y4.schem",
+      "contrib/arnis/Phoenix_canariensis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -154,7 +177,10 @@
      "w1": [
       "Platanus_occidentalis1.schem",
       "Platanus_occidentalis2.schem",
-      "Platanus_occidentalis3.schem"
+      "Platanus_occidentalis3.schem",
+      "contrib/arnis/Platanus_occidentalis_y4.schem",
+      "contrib/arnis/Platanus_occidentalis_y6.schem",
+      "contrib/arnis/Platanus_occidentalis_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -164,7 +190,9 @@
      "w1": [
       "Quercus_laevis1.schem",
       "Quercus_laevis2.schem",
-      "Quercus_laevis3.schem"
+      "Quercus_laevis3.schem",
+      "contrib/arnis/Quercus_laevis_y4.schem",
+      "contrib/arnis/Quercus_laevis_y6.schem"
      ],
      "w2": [],
      "w3": []
@@ -173,7 +201,10 @@
      "name": "Quercus_shumardii",
      "w1": [
       "Quercus_shumardii1.schem",
-      "Quercus_shumardii2.schem"
+      "Quercus_shumardii2.schem",
+      "contrib/arnis/Quercus_shumardii_y4.schem",
+      "contrib/arnis/Quercus_shumardii_y6.schem",
+      "contrib/arnis/Quercus_shumardii_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -182,7 +213,10 @@
      "name": "Quercus_stellata",
      "w1": [
       "Quercus_stellata1.schem",
-      "Quercus_stellata2.schem"
+      "Quercus_stellata2.schem",
+      "contrib/arnis/Quercus_stellata_y4.schem",
+      "contrib/arnis/Quercus_stellata_y6.schem",
+      "contrib/arnis/Quercus_stellata_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -193,7 +227,10 @@
       "Quercus_virginiana1.schem",
       "Quercus_virginiana3.schem",
       "Quercus_virginiana5.schem",
-      "Quercus_virginiana6.schem"
+      "Quercus_virginiana6.schem",
+      "contrib/arnis/Quercus_virginiana_y4.schem",
+      "contrib/arnis/Quercus_virginiana_y6.schem",
+      "contrib/arnis/Quercus_virginiana_y8.schem"
      ],
      "w2": [
       "Quercus_virginiana4.schem"
@@ -206,7 +243,10 @@
      "name": "Swietenia_mahagoni",
      "w1": [
       "Swietenia_mahagoni2.schem",
-      "Swietenia_mahagoni3.schem"
+      "Swietenia_mahagoni3.schem",
+      "contrib/arnis/Swietenia_mahagoni_y4.schem",
+      "contrib/arnis/Swietenia_mahagoni_y6.schem",
+      "contrib/arnis/Swietenia_mahagoni_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -242,7 +282,10 @@
       "Cocos_nucifera4.schem",
       "Cocos_nucifera5.schem",
       "Cocos_nucifera6.schem",
-      "Cocos_nucifera7.schem"
+      "Cocos_nucifera7.schem",
+      "contrib/arnis/Cocos_nucifera_y4.schem",
+      "contrib/arnis/Cocos_nucifera_y6.schem",
+      "contrib/arnis/Cocos_nucifera_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -277,7 +320,10 @@
       "Roystonea_regia1.schem",
       "Roystonea_regia2.schem",
       "Roystonea_regia3.schem",
-      "Roystonea_regia4.schem"
+      "Roystonea_regia4.schem",
+      "contrib/arnis/Roystonea_regia_y4.schem",
+      "contrib/arnis/Roystonea_regia_y6.schem",
+      "contrib/arnis/Roystonea_regia_y8.schem"
      ],
      "w2": [],
      "w3": []
@@ -289,7 +335,10 @@
       "Sabal_palmetto2.schem",
       "Sabal_palmetto3.schem",
       "Sabal_palmetto4.schem",
-      "Sabal_palmetto7.schem"
+      "Sabal_palmetto7.schem",
+      "contrib/arnis/Sabal_palmetto_y4.schem",
+      "contrib/arnis/Sabal_palmetto_y6.schem",
+      "contrib/arnis/Sabal_palmetto_y8.schem"
      ],
      "w2": [
       "Sabal_palmetto5.schem",
@@ -319,7 +368,10 @@
       "Taxodium_ascendens3.schem",
       "Taxodium_ascendens4.schem",
       "Taxodium_ascendens5.schem",
-      "Taxodium_ascendens6.schem"
+      "Taxodium_ascendens6.schem",
+      "contrib/arnis/Taxodium_ascendens_y5.schem",
+      "contrib/arnis/Taxodium_ascendens_y7.schem",
+      "contrib/arnis/Taxodium_ascendens_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -327,10 +379,16 @@
     {
      "name": "Taxodium_distichum",
      "w1": [
-      "Taxodium_distichum3.schem"
+      "Taxodium_distichum3.schem",
+      "contrib/lentebriesje/Taxodium_distichum_na16L.schem",
+      "contrib/arnis/Taxodium_distichum_y5.schem",
+      "contrib/arnis/Taxodium_distichum_y7.schem",
+      "contrib/arnis/Taxodium_distichum_y9.schem"
      ],
      "w2": [],
-     "w3": []
+     "w3": [
+      "contrib/lentebriesje/Taxodium_distichum_na16S.schem"
+     ]
     }
    ]
   },
@@ -344,7 +402,8 @@
      "w1": [
       "Pinus_clausa1.schem",
       "Pinus_clausa2.schem",
-      "Pinus_clausa3.schem"
+      "Pinus_clausa3.schem",
+      "contrib/arnis/Pinus_clausa_y5.schem"
      ],
      "w2": [
       "Pinus_clausa4.schem"
@@ -360,7 +419,10 @@
       "Pinus_elliotii4.schem",
       "Pinus_elliotii5.schem",
       "Pinus_elliotii6.schem",
-      "Pinus_elliotii7.schem"
+      "Pinus_elliotii7.schem",
+      "contrib/arnis/Pinus_elliotii_y5.schem",
+      "contrib/arnis/Pinus_elliotii_y7.schem",
+      "contrib/arnis/Pinus_elliotii_y9.schem"
      ],
      "w2": [],
      "w3": []
@@ -370,7 +432,10 @@
      "w1": [
       "Torreya_taxifolia1.schem",
       "Torreya_taxifolia2.schem",
-      "Torreya_taxifolia3.schem"
+      "Torreya_taxifolia3.schem",
+      "contrib/arnis/Torreya_taxifolia_y5.schem",
+      "contrib/arnis/Torreya_taxifolia_y7.schem",
+      "contrib/arnis/Torreya_taxifolia_y9.schem"
      ],
      "w2": [],
      "w3": []

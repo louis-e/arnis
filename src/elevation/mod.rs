@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod peaks;
 pub mod postprocess;
 pub mod provider;
 pub mod providers;
@@ -9,9 +10,10 @@ use crate::{
     land_cover::LandCoverData,
     progress::emit_gui_progress_update,
 };
+pub use peaks::{PeakSource, TallModel, TerrainHints};
 use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
-    scale_to_minecraft_with,
+    scale_to_minecraft_reserving, top_reserve_for,
 };
 pub use postprocess::{AffinePolicy, ElevationAffine, SoftTop};
 use provider::{ElevationProvider, RawElevationGrid};
@@ -202,6 +204,7 @@ pub fn fetch_elevation_data(
     benchmark: bool,
     dims: (usize, usize, usize, usize),
     affine: AffinePolicy,
+    peaks: &PeakSource,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = dims;
@@ -283,12 +286,31 @@ pub fn fetch_elevation_data(
         );
     }
     bench.mark("elev_landcover_repair");
+    // After the repairs, which would smooth a restored needle back down, and
+    // before the fit, so the summit counts towards the height range.
+    let hints = peaks.take();
+    peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell);
+    // The models stand at world scale, not at the terrain's compressed one.
+    let top_reserve = match affine {
+        AffinePolicy::Fixed(_) => 0,
+        _ => top_reserve_for(
+            &height_grid,
+            &peaks::model_cells(&height_grid, bbox, &hints.tall_models),
+            scale * height_multiplier,
+            scale,
+            ground_level,
+            min_ground_level,
+            disable_height_limit,
+            extended_max_y,
+            matches!(affine, AffinePolicy::FitWithHeadroom),
+        ),
+    };
     emit_gui_progress_update(16.0, "Processing elevation...");
 
     // The multiplier stretches only the vertical axis. `slope_correction` below still
     // divides by the horizontal scale, so slopes keep their real incline and a stretched
     // hillside stays grass instead of turning to rock.
-    let (mc_heights, affine) = scale_to_minecraft_with(
+    let (mc_heights, affine) = scale_to_minecraft_reserving(
         &height_grid,
         scale * height_multiplier,
         ground_level,
@@ -296,7 +318,11 @@ pub fn fetch_elevation_data(
         disable_height_limit,
         extended_max_y,
         affine,
+        top_reserve,
     );
+    // The metre grid is done with; freeing it first keeps the downcast below from holding
+    // three full grids at once.
+    drop(height_grid);
     let ElevationAffine {
         min_height_m,
         blocks_per_meter,

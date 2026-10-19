@@ -18,7 +18,7 @@ enum Family {
 
 fn family(block: Block) -> Option<Family> {
     let name = block.name();
-    if block == IRON_BARS || name.ends_with("_wall") {
+    if is_bars_or_pane(block) || name.ends_with("_wall") {
         Some(Family::WallOrBars)
     } else if name.ends_with("_fence") {
         Some(Family::Fence)
@@ -32,6 +32,20 @@ pub(crate) fn is_connectable(block: Block) -> bool {
     family(block).is_some()
 }
 
+/// Iron bars and glass panes: thin, joined like fences, never to a gate.
+fn is_bars_or_pane(block: Block) -> bool {
+    block == IRON_BARS || block.name().ends_with("_pane")
+}
+
+fn is_gate(block: Block) -> bool {
+    block.name().ends_with("_fence_gate")
+}
+
+/// Whether `own` joins `neighbour`: its own family, or a fence gate (bars and panes never do).
+fn joins(own: Block, neighbour: Block) -> bool {
+    family(neighbour) == family(own) || (!is_bars_or_pane(own) && is_gate(neighbour))
+}
+
 /// Places a wall, bar or fence (into an empty cell) joined to its neighbours, updating them too.
 pub(crate) fn place_connected(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32) {
     editor.set_block_absolute(block, x, y, z, None, None);
@@ -39,9 +53,60 @@ pub(crate) fn place_connected(editor: &mut WorldEditor, block: Block, x: i32, y:
         return;
     }
     refresh(editor, block, x, y, z);
+    refresh_neighbours(editor, x, y, z, |n| family(n) == family(block));
+}
+
+/// Places a closed fence gate (into an empty cell) in a run along x, or else along z,
+/// and joins the walls or fences on either side to it.
+pub(crate) fn place_gate(
+    editor: &mut WorldEditor,
+    gate: Block,
+    x: i32,
+    y: i32,
+    z: i32,
+    along_x: bool,
+) {
+    let sides = if along_x {
+        [(1, 0), (-1, 0)]
+    } else {
+        [(0, 1), (0, -1)]
+    };
+    // Between walls the gate drops to their height.
+    let in_wall = sides.iter().any(|&(dx, dz)| {
+        editor
+            .get_block_absolute(x + dx, y, z + dz)
+            .is_some_and(|b| b.name().ends_with("_wall"))
+    });
+    let facing = if along_x { "north" } else { "east" };
+    let props = Value::Compound(HashMap::from([
+        ("facing".to_string(), Value::String(facing.to_string())),
+        ("open".to_string(), flag(false)),
+        ("in_wall".to_string(), flag(in_wall)),
+        ("powered".to_string(), flag(false)),
+    ]));
+    editor.set_block_with_properties_absolute(
+        BlockWithProperties::new(gate, Some(props)),
+        x,
+        y,
+        z,
+        None,
+        None,
+    );
+    if editor.get_block_absolute(x, y, z) == Some(gate) {
+        refresh_neighbours(editor, x, y, z, |n| family(n).is_some());
+    }
+}
+
+fn refresh_neighbours(
+    editor: &mut WorldEditor,
+    x: i32,
+    y: i32,
+    z: i32,
+    rejoin: impl Fn(Block) -> bool,
+) {
     for (dx, dz) in SIDES {
         if let Some(neighbour) = editor.get_block_absolute(x + dx, y, z + dz) {
-            if family(neighbour) == family(block) {
+            if rejoin(neighbour) {
                 refresh(editor, neighbour, x + dx, y, z + dz);
             }
         }
@@ -53,11 +118,9 @@ fn refresh(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32) {
     let [north, south, east, west] = SIDES.map(|(dx, dz)| {
         editor
             .get_block_absolute(x + dx, y, z + dz)
-            .is_some_and(|b| family(b) == own)
+            .is_some_and(|b| joins(block, b))
     });
-    let joined = if block == IRON_BARS {
-        connected_iron_bars(north, south, east, west)
-    } else if own == Some(Family::Fence) {
+    let joined = if is_bars_or_pane(block) || own == Some(Family::Fence) {
         connected_fence(block, north, south, east, west)
     } else {
         connected_wall(block, north, south, east, west)
