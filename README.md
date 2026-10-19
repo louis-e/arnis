@@ -93,7 +93,7 @@ Free to use press assets, including screenshots and logos, can be found [here](h
 
 Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-The Windows executable is built from this repository by the [release workflow](.github/workflows/release.yml) on GitHub-hosted runners and is only signed after a maintainer approves the signing request. All roles (committer, reviewer and approver) are held by [louis-e](https://github.com/louis-e).
+The Windows executable is built from this repository by the [release workflow](.github/workflows/release.yml) on GitHub-hosted runners and is only signed after a maintainer approves the signing request. All roles (committer, reviewer and approver) are held by [louis-&#8288;e](https://github.com/louis-e).
 
 Privacy policy: https://arnismc.com/privacypolicy.html
 
