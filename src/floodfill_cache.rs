@@ -418,6 +418,12 @@ enum CachedFill {
     Released,
 }
 
+/// A way's ring and the fill made from it.
+struct WayFill {
+    ring: Box<[(i32, i32)]>,
+    fill: Mutex<CachedFill>,
+}
+
 /// Fills prepared per pass, so a pre-pass never holds every fill of the world at once.
 const PREPASS_BATCH: usize = 512;
 
@@ -429,7 +435,7 @@ pub struct FloodFillCache {
     /// Ring and fill per way (shared via Arc so handler fetches are O(1) refcount bumps
     /// instead of deep clones). Releasable through `&self`, so tile threads can free
     /// fills mid-run.
-    way_cache: FnvHashMap<u64, (Box<[(i32, i32)]>, Mutex<CachedFill>)>,
+    way_cache: FnvHashMap<u64, WayFill>,
     timeout: Option<Duration>,
 }
 
@@ -494,8 +500,9 @@ impl FloodFillCache {
         let way_cache = ways_needing_fill
             .into_iter()
             .map(|way| {
-                let ring: Box<[(i32, i32)]> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
-                (way.id, (ring, Mutex::new(CachedFill::Pending)))
+                let ring = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                let fill = Mutex::new(CachedFill::Pending);
+                (way.id, WayFill { ring, fill })
             })
             .collect();
         Self {
@@ -507,13 +514,13 @@ impl FloodFillCache {
     /// Fill for a registered way id, computed on first read; None when absent or released.
     /// Concurrent readers of a fill still being computed wait for it instead of repeating it.
     pub fn get_cached(&self, way_id: u64) -> Option<FloodFillResult> {
-        let (ring, slot) = self.way_cache.get(&way_id)?;
-        let mut slot = slot.lock().unwrap_or_else(|p| p.into_inner());
+        let way = self.way_cache.get(&way_id)?;
+        let mut slot = way.fill.lock().unwrap_or_else(|p| p.into_inner());
         match &*slot {
             CachedFill::Ready(fill) => Some(Arc::clone(fill)),
             CachedFill::Released => None,
             CachedFill::Pending => {
-                let fill = fill_ring(ring, self.timeout.as_ref());
+                let fill = fill_ring(&way.ring, self.timeout.as_ref());
                 *slot = CachedFill::Ready(Arc::clone(&fill));
                 Some(fill)
             }
@@ -523,11 +530,11 @@ impl FloodFillCache {
     /// A registered way's fill for a pre-pass: shared if a reader already made it,
     /// otherwise computed without being kept.
     fn transient_fill(&self, way_id: u64) -> Option<FloodFillResult> {
-        let (ring, slot) = self.way_cache.get(&way_id)?;
-        if let CachedFill::Ready(fill) = &*slot.lock().unwrap_or_else(|p| p.into_inner()) {
+        let way = self.way_cache.get(&way_id)?;
+        if let CachedFill::Ready(fill) = &*way.fill.lock().unwrap_or_else(|p| p.into_inner()) {
             return Some(Arc::clone(fill));
         }
-        Some(fill_ring(ring, self.timeout.as_ref()))
+        Some(fill_ring(&way.ring, self.timeout.as_ref()))
     }
 
     /// Whether a fill is registered for this way id, released or not.
@@ -537,8 +544,8 @@ impl FloodFillCache {
 
     /// Frees a way's fill once nothing reads it again; `get_cached` is None afterwards.
     pub fn release(&self, way_id: u64) {
-        if let Some((_, slot)) = self.way_cache.get(&way_id) {
-            *slot.lock().unwrap_or_else(|p| p.into_inner()) = CachedFill::Released;
+        if let Some(way) = self.way_cache.get(&way_id) {
+            *way.fill.lock().unwrap_or_else(|p| p.into_inner()) = CachedFill::Released;
         }
     }
 
