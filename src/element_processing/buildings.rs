@@ -6526,6 +6526,7 @@ fn build_wall_ring(
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
     let columns = facade_columns(nodes, config);
     let ring_cells: FnvHashSet<(i32, i32)> = columns.iter().map(|c| (c.x, c.z)).collect();
+    let mut variety = WallVariety::new(config);
 
     for wc in columns.iter() {
         let (bx, bz) = (wc.x, wc.z);
@@ -6540,7 +6541,7 @@ fn build_wall_ring(
             let local_ground_level = editor.terrain_level(bx, bz).unwrap_or(args.ground_level);
 
             for y in local_ground_level..config.start_y_offset + 1 {
-                let block = apply_block_variety(config.wall_block, bx, y, bz, config);
+                let block = apply_block_variety(config.wall_block, bx, y, bz, config, &mut variety);
                 editor.set_block_absolute(block, bx, y + config.abs_terrain_offset, bz, None, None);
             }
         }
@@ -6596,7 +6597,8 @@ fn build_wall_ring(
             i32::MIN
         };
         for h in wall_start..=column_top {
-            let block = determine_wall_block_at_position(bx, h, bz, config, col, flat);
+            let block =
+                determine_wall_block_at_position(bx, h, bz, config, col, flat, &mut variety);
             let glazed = !flat && (block == config.window_block || block == GLASS);
             kind.windowed |= glazed;
             let (x, z) = if recess && h > door_top && config.set_back(h, col, block, glazed) {
@@ -6954,6 +6956,7 @@ fn determine_wall_block_at_position(
     config: &BuildingConfig,
     col: ColumnFacade,
     flat: bool,
+    variety: &mut WallVariety,
 ) -> Block {
     // A column with a photograph coming over it is a plain shell: the facade
     // cell or panel above it decides what shows, and a procedural window or
@@ -6965,12 +6968,38 @@ fn determine_wall_block_at_position(
     } else {
         determine_wall_block_at_position_pristine(h, config, col)
     };
-    let chosen = apply_block_variety(chosen, bx, h, bz, config);
+    let chosen = apply_block_variety(chosen, bx, h, bz, config, variety);
     apply_condition_variation(chosen, bx, h, bz, config)
 }
 
+/// Rolls `apply_block_variety` keeps for one wall instead of seeding per block.
+struct WallVariety {
+    flat_field: bool,
+    /// Last patch rolled per band (mod 64): walls go up column by column, so a
+    /// patch's blocks come together, and an evicted patch rolls the same again.
+    patches: [Option<(i32, i32, i32, Block)>; 64],
+}
+
+impl WallVariety {
+    fn new(config: &BuildingConfig) -> Self {
+        // A fifth of the buildings keep one flat field.
+        let mut rng = element_rng(config.element_id ^ 0xBABE_F1A1_2222_8888);
+        Self {
+            flat_field: rng.random_bool(0.20),
+            patches: [None; 64],
+        }
+    }
+}
+
 /// Substitutes the wall block with a same-family alternative for variety.
-fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &BuildingConfig) -> Block {
+fn apply_block_variety(
+    chosen: Block,
+    bx: i32,
+    h: i32,
+    bz: i32,
+    config: &BuildingConfig,
+    variety: &mut WallVariety,
+) -> Block {
     // From two blocks per metre up a facade texture cell wins over every
     // procedural choice for this position.
     if let Some(block) = crate::mapillary::facades::block_at(
@@ -7007,13 +7036,7 @@ fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &Buildin
         }
     }
     let pool = substitute_pool_only(chosen);
-    if pool.is_empty() {
-        return chosen;
-    }
-
-    // A fifth of the buildings keep one flat field.
-    let mut variety_mode_rng = element_rng(config.element_id ^ 0xBABE_F1A1_2222_8888);
-    if variety_mode_rng.random_bool(0.20) {
+    if pool.is_empty() || variety.flat_field {
         return chosen;
     }
 
@@ -7022,16 +7045,26 @@ fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &Buildin
     // offset like a brick course so they do not line up in columns.
     let band = h.div_euclid(2);
     let shift = band.rem_euclid(3);
+    let (px, pz) = ((bx + shift).div_euclid(3), (bz + shift).div_euclid(3));
+    let slot = &mut variety.patches[band.rem_euclid(64) as usize];
+    // `chosen` is always the wall block here, so one roll serves the whole patch.
+    if let Some((x, z, b, block)) = *slot {
+        if (x, z, b) == (px, pz, band) {
+            return block;
+        }
+    }
     let mut patch_rng = coord_rng(
-        (bx + shift).div_euclid(3),
-        (bz + shift).div_euclid(3),
+        px,
+        pz,
         config.element_id ^ 0x5050_3030_AAFF_BBCC ^ ((band as u64) << 20),
     );
-    if patch_rng.random_range(0u32..100) < 12 {
+    let block = if patch_rng.random_range(0u32..100) < 12 {
         pool[patch_rng.random_range(0..pool.len())]
     } else {
         chosen
-    }
+    };
+    *slot = Some((px, pz, band, block));
+    block
 }
 
 /// Swaps wall blocks that genuinely don't work as a roof.
@@ -7832,7 +7865,8 @@ fn apply_condition_variation(
         return chosen;
     }
 
-    let mut rng = coord_rng(bx, bz, config.element_id ^ ((h as u64) << 16));
+    // Seeded only where a roll can change the block; the seeding is the cost.
+    let rng = || coord_rng(bx, bz, config.element_id ^ ((h as u64) << 16));
     let is_window = chosen == config.window_block && config.has_windows;
 
     // Window-boarding rate for Disused/Abandoned (Ruined drops windows entirely).
@@ -7841,7 +7875,7 @@ fn apply_condition_variation(
         BuildingCondition::Abandoned => 0.50,
         _ => 0.0,
     };
-    if is_window && board_rate > 0.0 && rng.random_bool(board_rate) {
+    if is_window && board_rate > 0.0 && rng().random_bool(board_rate) {
         return config.wall_block;
     }
 
@@ -7852,33 +7886,29 @@ fn apply_condition_variation(
         BuildingCondition::Normal => normal_weather_rate,
         _ => 0.0,
     };
-    if !is_window && weather_rate > 0.0 && rng.random_bool(weather_rate) {
-        return weathered_variant(chosen, &mut rng);
+    let options = weathered_variants(chosen);
+    if !is_window && weather_rate > 0.0 && !options.is_empty() {
+        let mut rng = rng();
+        if rng.random_bool(weather_rate) {
+            return options[rng.random_range(0..options.len())];
+        }
     }
 
     chosen
 }
 
-/// Aged counterpart of `block` for damaged-condition states.
-fn weathered_variant(block: Block, rng: &mut impl Rng) -> Block {
+/// Aged counterparts of `block` for damaged-condition states, one picked at
+/// random; empty where it does not age.
+fn weathered_variants(block: Block) -> &'static [Block] {
     match block {
-        STONE_BRICKS => {
-            const OPTIONS: [Block; 3] = [MOSSY_STONE_BRICKS, CRACKED_STONE_BRICKS, STONE_BRICKS];
-            OPTIONS[rng.random_range(0..OPTIONS.len())]
-        }
-        COBBLESTONE => MOSSY_COBBLESTONE,
-        STONE => {
-            const OPTIONS: [Block; 2] = [ANDESITE, COBBLESTONE];
-            OPTIONS[rng.random_range(0..OPTIONS.len())]
-        }
-        SMOOTH_STONE => STONE,
-        POLISHED_ANDESITE => ANDESITE,
-        OAK_PLANKS => {
-            const OPTIONS: [Block; 2] = [SPRUCE_PLANKS, DARK_OAK_PLANKS];
-            OPTIONS[rng.random_range(0..OPTIONS.len())]
-        }
-        OAK_LOG => SPRUCE_LOG,
-        _ => block,
+        STONE_BRICKS => &[MOSSY_STONE_BRICKS, CRACKED_STONE_BRICKS, STONE_BRICKS],
+        COBBLESTONE => &[MOSSY_COBBLESTONE],
+        STONE => &[ANDESITE, COBBLESTONE],
+        SMOOTH_STONE => &[STONE],
+        POLISHED_ANDESITE => &[ANDESITE],
+        OAK_PLANKS => &[SPRUCE_PLANKS, DARK_OAK_PLANKS],
+        OAK_LOG => &[SPRUCE_LOG],
+        _ => &[],
     }
 }
 
@@ -9981,8 +10011,7 @@ fn generate_floors_and_ceilings(
     open_hall: bool,
     furnished: bool,
     lid: &RoofMembrane,
-) -> FnvHashSet<(i32, i32)> {
-    let mut processed_points: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+) {
     let ceiling_light_block = if config.is_abandoned_building {
         COBWEB
     } else {
@@ -9999,10 +10028,6 @@ fn generate_floors_and_ceilings(
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
     for &(x, z) in cached_floor_area {
-        if !processed_points.insert((x, z)) {
-            continue;
-        }
-
         let is_passage = building_passages.contains(x, z);
 
         // Set ground floor - skip in passage zones (the road surface is placed
@@ -10104,8 +10129,6 @@ fn generate_floors_and_ceilings(
             );
         }
     }
-
-    processed_points
 }
 
 /// Calculates floor levels for multi-story buildings
@@ -10557,11 +10580,10 @@ pub fn generate_buildings(
             (min_x, max_x) = (min_x.min(x), max_x.max(x));
             (min_z, max_z) = (min_z.min(z), max_z.max(z));
         }
-        let own: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
         let (mut ring, mut walled) = (0usize, 0usize);
         for &(x, z) in cached_floor_area.iter() {
             for c in [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)] {
-                if !own.contains(&c) {
+                if !own_fill.contains(&c) {
                     ring += 1;
                     if ctx.building_footprints.contains(c.0, c.1) {
                         walled += 1;
@@ -11166,14 +11188,14 @@ pub fn generate_buildings(
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
-    let roof_area: Vec<(i32, i32)> = {
-        let mut area: FnvHashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
-        area.extend(wall_outline.iter().copied());
-        // Sort to ensure deterministic iteration order across runs/platforms
-        let mut v: Vec<(i32, i32)> = area.into_iter().collect();
-        v.sort_unstable();
-        v
-    };
+    let roof_cells: FnvHashSet<(i32, i32)> = cached_floor_area
+        .iter()
+        .chain(&wall_outline)
+        .copied()
+        .collect();
+    // Sort to ensure deterministic iteration order across runs/platforms
+    let mut roof_area: Vec<(i32, i32)> = roof_cells.iter().copied().collect();
+    roof_area.sort_unstable();
 
     // Generate floors and ceilings
     if corner_count > 0 {
@@ -11298,20 +11320,18 @@ pub fn generate_buildings(
         let eave_blocked: FnvHashSet<(i32, i32)> = if style.roof_type == RoofType::Flat {
             FnvHashSet::default()
         } else {
-            let own: FnvHashSet<(i32, i32)> = roof_area.iter().copied().collect();
             let mut blocked = FnvHashSet::default();
             for &(x, z) in &roof_area {
                 if ROOF_SIDES
                     .iter()
-                    .all(|&(dx, dz)| own.contains(&(x + dx, z + dz)))
+                    .all(|&(dx, dz)| roof_cells.contains(&(x + dx, z + dz)))
                 {
                     continue;
                 }
                 for dx in -2..=2 {
                     for dz in -2..=2 {
                         let c = (x + dx, z + dz);
-                        if !own.contains(&c)
-                            && !own_fill.contains(&c)
+                        if !roof_cells.contains(&c)
                             && (ctx.building_footprints.contains(c.0, c.1)
                                 || group_other_cells.contains(&c))
                         {
@@ -12076,6 +12096,7 @@ fn generate_inset_tiers(
 ) -> Option<i32> {
     let mut current_base = base_rel;
     let mut placed = false;
+    let mut variety = WallVariety::new(config);
     for tier in tiers {
         let tier_cells: Vec<(i32, i32)> = roof_area
             .iter()
@@ -12111,6 +12132,7 @@ fn generate_inset_tiers(
                         config,
                         col,
                         photo,
+                        &mut variety,
                     );
                     editor.set_block_absolute(
                         block,
@@ -13132,14 +13154,76 @@ fn roof_tone_sibling(roof: Block) -> Option<RoofTone> {
 /// Share of roof patches, in percent, laid in the sibling covering.
 const ROOF_TONE_PERCENT: u32 = 8;
 
-/// Whether roof cell `(x, z)` lies in a patch of the sibling covering:
-/// two by two cells, every other row of patches offset by a cell so they do
-/// not line up.
-fn roof_tone_patch(x: i32, z: i32, seed: u64) -> bool {
+/// The tone patch roof cell `(x, z)` lies in: two by two cells, every other
+/// row of patches offset by a cell so they do not line up.
+fn roof_tone_patch_of(x: i32, z: i32) -> (i32, i32) {
     let row = z.div_euclid(2);
-    let shift = row.rem_euclid(2);
-    coord_rng((x + shift).div_euclid(2), row, seed ^ 0x7111_E5A1_0000_0005).random_range(0..100u32)
-        < ROOF_TONE_PERCENT
+    ((x + row.rem_euclid(2)).div_euclid(2), row)
+}
+
+/// Whether tone patch `(px, row)` is laid in the sibling covering.
+fn roof_tone_patch((px, row): (i32, i32), seed: u64) -> bool {
+    coord_rng(px, row, seed ^ 0x7111_E5A1_0000_0005).random_range(0..100u32) < ROOF_TONE_PERCENT
+}
+
+/// Roof levels for the dozens of neighbour lookups each cell makes: a grid on
+/// the roof's bounding box, or the map itself where that box is mostly empty.
+enum LevelGrid<'a> {
+    Dense {
+        min_x: i32,
+        min_z: i32,
+        width: i32,
+        height: i32,
+        /// `i32::MIN` off the roof.
+        levels: Vec<i32>,
+    },
+    Sparse(&'a RoofLevels),
+}
+
+impl<'a> LevelGrid<'a> {
+    fn new(levels: &'a RoofLevels) -> Self {
+        let mut cells = levels.keys();
+        let &(x0, z0) = cells.next().unwrap_or(&(0, 0));
+        let (mut min_x, mut max_x, mut min_z, mut max_z) = (x0, x0, z0, z0);
+        for &(x, z) in cells {
+            (min_x, max_x) = (min_x.min(x), max_x.max(x));
+            (min_z, max_z) = (min_z.min(z), max_z.max(z));
+        }
+        let (width, height) = (max_x - min_x + 1, max_z - min_z + 1);
+        if width as u64 * height as u64 > 8 * levels.len() as u64 + 64 {
+            return Self::Sparse(levels);
+        }
+        let mut grid = vec![i32::MIN; (width * height) as usize];
+        for (&(x, z), &l) in levels {
+            grid[((z - min_z) * width + x - min_x) as usize] = l;
+        }
+        Self::Dense {
+            min_x,
+            min_z,
+            width,
+            height,
+            levels: grid,
+        }
+    }
+
+    fn get(&self, x: i32, z: i32) -> Option<i32> {
+        match self {
+            Self::Dense {
+                min_x,
+                min_z,
+                width,
+                height,
+                levels,
+            } => {
+                let (lx, lz) = (x - min_x, z - min_z);
+                if lx < 0 || lz < 0 || lx >= *width || lz >= *height {
+                    return None;
+                }
+                Some(levels[(lz * width + lx) as usize]).filter(|&l| l != i32::MIN)
+            }
+            Self::Sparse(levels) => levels.get(&(x, z)).copied(),
+        }
+    }
 }
 
 /// Builds a pitched roof from its levels: each column is filled from the
@@ -13162,7 +13246,8 @@ fn place_roof_surface(
 ) -> FnvHashMap<(i32, i32), (i32, RoofCap)> {
     let stair_mat = get_stair_block_for_material(config.roof_block);
     let slab = roof_slab_for_stair(stair_mat);
-    let level_at = |x: i32, z: i32| levels.get(&(x, z)).copied().or_else(|| outside(x, z));
+    let grid = LevelGrid::new(levels);
+    let level_at = |x: i32, z: i32| grid.get(x, z).or_else(|| outside(x, z));
     let sheet_cells = if config.trim.sheet_top {
         capped_flat_tops(levels)
     } else {
@@ -13177,6 +13262,9 @@ fn place_roof_surface(
         .then(|| roof_tone_sibling(config.roof_block))
         .flatten();
     let mut tops = FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
+    // Patches span several cells, so each seeds its stream once.
+    let mut tone_patches: FnvHashMap<(i32, i32), bool> = FnvHashMap::default();
+    let mut sheet_patches: FnvHashMap<(i32, i32), bool> = FnvHashMap::default();
     for &(x, z) in floor_area {
         let l = levels[&(x, z)];
         let y = l.div_euclid(2);
@@ -13191,9 +13279,8 @@ fn place_roof_surface(
             let high = ROOF_QUARTERS
                 .map(|(dx, dz)| not_lower(dx, 0) && not_lower(0, dz) && not_lower(dx, dz));
             let steep = ROOF_SIDES.iter().any(|&(dx, dz)| {
-                levels
-                    .get(&(x + dx, z + dz))
-                    .is_some_and(|&n| l - n > 2 * MAX_STAIR_DROP)
+                grid.get(x + dx, z + dz)
+                    .is_some_and(|n| l - n > 2 * MAX_STAIR_DROP)
             });
             if steep {
                 RoofCap::Full
@@ -13222,7 +13309,12 @@ fn place_roof_surface(
         // A slab cap only stands where the covering has a slab, and the
         // sibling has one wherever it does.
         let cover = sibling
-            .filter(|_| roof_tone_patch(x, z, config.element_id_for_decor))
+            .filter(|_| {
+                let patch = roof_tone_patch_of(x, z);
+                *tone_patches
+                    .entry(patch)
+                    .or_insert_with(|| roof_tone_patch(patch, config.element_id_for_decor))
+            })
             .unwrap_or(RoofTone {
                 full: config.roof_block,
                 stairs: stair_mat,
@@ -13231,8 +13323,10 @@ fn place_roof_surface(
         let block = match cap {
             RoofCap::Full if sheet => {
                 // Low-frequency patches, as a patched membrane weathers.
-                let patch =
-                    coord_rng(x.div_euclid(3), z.div_euclid(3), 0x5EE7_0F7A).random_bool(0.3);
+                let (px, pz) = (x.div_euclid(3), z.div_euclid(3));
+                let patch = *sheet_patches
+                    .entry((px, pz))
+                    .or_insert_with(|| coord_rng(px, pz, 0x5EE7_0F7A).random_bool(0.3));
                 BlockWithProperties::simple(if patch {
                     LIGHT_GRAY_CONCRETE
                 } else {
@@ -13252,7 +13346,7 @@ fn place_roof_surface(
                 }
             }
         };
-        let off = |dx: i32, dz: i32| !levels.contains_key(&(x + dx, z + dz));
+        let off = |dx: i32, dz: i32| grid.get(x + dx, z + dz).is_none();
         let edge = ROOF_SIDES.iter().any(|&(dx, dz)| off(dx, dz));
         let gable = ROOF_SIDES
             .iter()
@@ -13980,20 +14074,6 @@ fn generate_gabled_roof(
         }],
     });
 
-    // Helper: scan from (x,z) in a direction until leaving the footprint
-    let scan_dir = |mut cx: i32, mut cz: i32, dx: i32, dz: i32| -> i32 {
-        let mut dist = 0;
-        loop {
-            cx += dx;
-            cz += dz;
-            if !footprint.contains(&(cx, cz)) {
-                break;
-            }
-            dist += 1;
-        }
-        dist
-    };
-
     // Hard cap: the roof peak should not exceed a fraction of the wall height.
     let cap_factor = if profile == GableProfile::Steep {
         0.9
@@ -14046,11 +14126,7 @@ fn generate_gabled_roof(
         // For each footprint position, scan all 4 cardinal directions to
         // find the distance to the nearest polygon edge. The cross-axis span
         // caps the roof by the narrowest local wing width in any direction.
-        for &(x, z) in floor_area {
-            let sm_z = scan_dir(x, z, 0, -1);
-            let sp_z = scan_dir(x, z, 0, 1);
-            let sm_x = scan_dir(x, z, -1, 0);
-            let sp_x = scan_dir(x, z, 1, 0);
+        for (&(x, z), &[sm_x, sp_x, sm_z, sp_z]) in floor_area.iter().zip(&axis_runs(floor_area)) {
             // Tent frame: distances to the turned rectangle's sides, v standing
             // in for z and u for x; the scans still bound the hip ends and trim.
             let (dm_z, dp_z, dm_x, dp_x) = match tent {
@@ -14378,6 +14454,38 @@ fn mansard_boost(dist_to_edge: i32, steep_h: i32, cap: i32) -> i32 {
     (steep + shallow).min(cap)
 }
 
+/// How many footprint cells follow each cell of `floor_area` toward -x, +x,
+/// -z and +z before the edge, from the unbroken runs of each row and column.
+/// Sorting keeps this to the footprint, however sparse its bounding box.
+fn axis_runs(floor_area: &[(i32, i32)]) -> Vec<[i32; 4]> {
+    let mut runs = vec![[0i32; 4]; floor_area.len()];
+    let mut order: Vec<u32> = (0..floor_area.len() as u32).collect();
+    for (dir, along_x) in [(0, true), (2, false)] {
+        // (line, position along it)
+        let key = |i: u32| {
+            let (x, z) = floor_area[i as usize];
+            if along_x {
+                (z, x)
+            } else {
+                (x, z)
+            }
+        };
+        order.sort_unstable_by_key(|&i| key(i));
+        for run in order.chunk_by(|&a, &b| {
+            let ((la, pa), (lb, pb)) = (key(a), key(b));
+            la == lb && pb - pa <= 1
+        }) {
+            let (first, last) = (key(run[0]).1, key(run[run.len() - 1]).1);
+            for &i in run {
+                let p = key(i).1;
+                runs[i as usize][dir] = p - first;
+                runs[i as usize][dir + 1] = last - p;
+            }
+        }
+    }
+    runs
+}
+
 /// Chebyshev distance from each cell to the outline: the run of a hip roof
 /// up from its eave. Outline cells are zero, and so is the corner cell of a
 /// re-entrant turn, so an L-shaped roof falls into a valley there instead of
@@ -14428,20 +14536,6 @@ fn generate_hipped_roof_inner(
 ) -> RoofSurface {
     let footprint: FnvHashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
-    // Scan from (x,z) in one cardinal direction until leaving the footprint.
-    let scan_dir = |mut cx: i32, mut cz: i32, dx: i32, dz: i32| -> i32 {
-        let mut dist = 0;
-        loop {
-            cx += dx;
-            cz += dz;
-            if !footprint.contains(&(cx, cz)) {
-                break;
-            }
-            dist += 1;
-        }
-        dist
-    };
-
     let wall_cap = config.peak_cap.unwrap_or_else(|| {
         (((config.building_height as f64) * 0.6).round().max(1.0) as i32)
             .min(config.max_rise.unwrap_or(i32::MAX))
@@ -14453,11 +14547,7 @@ fn generate_hipped_roof_inner(
     let ridge_runs_along_x = config.width() >= config.length();
     let mut edge_scans: FnvHashMap<(i32, i32), (i32, i32)> = FnvHashMap::default();
     let mut local_half: FnvHashMap<(i32, i32), i32> = FnvHashMap::default();
-    for &(x, z) in floor_area {
-        let dm_x = scan_dir(x, z, -1, 0);
-        let dp_x = scan_dir(x, z, 1, 0);
-        let dm_z = scan_dir(x, z, 0, -1);
-        let dp_z = scan_dir(x, z, 0, 1);
+    for (&(x, z), &[dm_x, dp_x, dm_z, dp_z]) in floor_area.iter().zip(&axis_runs(floor_area)) {
         edge_scans.insert(
             (x, z),
             if ridge_runs_along_x {
@@ -18426,7 +18516,7 @@ mod style_tests {
         let cells = 200 * 200;
         let patched = (0..200)
             .flat_map(|x| (0..200).map(move |z| (x, z)))
-            .filter(|&(x, z)| roof_tone_patch(x, z, 99))
+            .filter(|&(x, z)| roof_tone_patch(roof_tone_patch_of(x, z), 99))
             .count();
         assert!(
             (cells * 4 / 100..=cells * 12 / 100).contains(&patched),
@@ -18434,7 +18524,10 @@ mod style_tests {
         );
         let paired = (0..200)
             .flat_map(|x| (0..200).map(move |z| (x, z)))
-            .filter(|&(x, z)| roof_tone_patch(x, z, 99) && roof_tone_patch(x ^ 1, z, 99))
+            .filter(|&(x, z)| {
+                roof_tone_patch(roof_tone_patch_of(x, z), 99)
+                    && roof_tone_patch(roof_tone_patch_of(x ^ 1, z), 99)
+            })
             .count();
         assert!(paired * 2 >= patched, "patches are single cells");
     }
@@ -19950,6 +20043,44 @@ mod roof_geometry_tests {
     use crate::element_processing::building_test_support::{tag_map, test_editor};
 
     const BASE: i32 = 10;
+
+    #[test]
+    fn axis_runs_count_cells_to_each_edge() {
+        // A U with a gap, a stray diagonal far off, in scrambled order.
+        let mut cells: Vec<(i32, i32)> = (0..12)
+            .flat_map(|x| (0..9).map(move |z| (x, z)))
+            .filter(|&(x, z)| !(3..9).contains(&x) || z < 3)
+            .filter(|&c| c != (10, 4))
+            .chain((0..40).map(|i| (100 + i, 300 - i)))
+            .collect();
+        cells.sort_by_key(|&(x, z)| (x * 7919 + z * 104_729).rem_euclid(1009));
+        let footprint: FnvHashSet<(i32, i32)> = cells.iter().copied().collect();
+        let walk = |(x, z): (i32, i32), (dx, dz): (i32, i32)| {
+            (1..)
+                .take_while(|&d| footprint.contains(&(x + dx * d, z + dz * d)))
+                .count() as i32
+        };
+        for (&cell, &runs) in cells.iter().zip(&axis_runs(&cells)) {
+            let expected = [(-1, 0), (1, 0), (0, -1), (0, 1)].map(|dir| walk(cell, dir));
+            assert_eq!(runs, expected, "{cell:?}");
+        }
+    }
+
+    #[test]
+    fn level_grid_reads_like_the_map() {
+        let block: RoofLevels = (0..20)
+            .flat_map(|x| (0..10).map(move |z| ((x, z), x - z)))
+            .collect();
+        let diagonal: RoofLevels = (0..500).map(|i| ((i, -i), i)).collect();
+        assert!(matches!(LevelGrid::new(&block), LevelGrid::Dense { .. }));
+        assert!(matches!(LevelGrid::new(&diagonal), LevelGrid::Sparse(_)));
+        for levels in [&block, &diagonal] {
+            let grid = LevelGrid::new(levels);
+            for (x, z) in (-3..25).flat_map(|x| (-505..13).map(move |z| (x, z))) {
+                assert_eq!(grid.get(x, z), levels.get(&(x, z)).copied());
+            }
+        }
+    }
 
     fn roof_config(cells: &[(i32, i32)]) -> RoofConfig {
         let mut config = RoofConfig::from_roof_area(cells, 7, BASE - 1, 0, BRICK, 0);

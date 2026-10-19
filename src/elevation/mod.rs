@@ -320,6 +320,9 @@ pub fn fetch_elevation_data(
         affine,
         top_reserve,
     );
+    // The metre grid is done with; freeing it first keeps the downcast below from holding
+    // three full grids at once.
+    drop(height_grid);
     let ElevationAffine {
         min_height_m,
         blocks_per_meter,

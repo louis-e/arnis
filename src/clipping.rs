@@ -29,6 +29,17 @@ pub fn is_invented_node_id(id: u64) -> bool {
 
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
 /// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
+/// `clip_way_to_bbox` for an owned way: one lying wholly inside comes back as is, uncopied.
+pub fn clip_way_to_bbox_owned(nodes: Vec<ProcessedNode>, xzbbox: &XZBBox) -> Vec<ProcessedNode> {
+    if nodes
+        .iter()
+        .all(|node| xzbbox.contains(&XZPoint::new(node.x, node.z)))
+    {
+        return nodes;
+    }
+    clip_way_to_bbox(&nodes, xzbbox)
+}
+
 pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
     if nodes.is_empty() {
         return Vec::new();

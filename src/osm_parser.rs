@@ -1,8 +1,9 @@
-use crate::clipping::clip_way_to_bbox;
+use crate::clipping::{clip_way_to_bbox, clip_way_to_bbox_owned};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
+use fnv::{FnvHashMap, FnvHashSet};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -903,8 +904,18 @@ pub fn parse_osm_data(
         &data.nodes,
     ));
 
-    let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
+    let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
+        FnvHashMap::with_capacity_and_hasher(data.nodes.len(), Default::default());
+    // Only relation members are looked up again, so only they keep an unclipped copy.
+    let relation_way_ids: FnvHashSet<u64> = data
+        .relations
+        .iter()
+        .flat_map(|r| r.members.iter())
+        .filter(|m| m.r#type == "way")
+        .map(|m| m.r#ref)
+        .collect();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
+    let mut seen_ways: FnvHashSet<u64> = FnvHashSet::default();
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -950,7 +961,7 @@ pub fn parse_osm_data(
 
     // Second pass: process ways and clip them to bbox
     for element in data.ways {
-        if ways_map.contains_key(&element.id) {
+        if !seen_ways.insert(element.id) {
             continue;
         }
         let mut nodes: Vec<ProcessedNode> = vec![];
@@ -972,15 +983,17 @@ pub fn parse_osm_data(
         let tags = filter_tags(element.tags.unwrap_or_default());
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
-        let way = Arc::new(ProcessedWay {
-            id: element.id,
-            tags,
-            nodes,
-        });
-        ways_map.insert(element.id, Arc::clone(&way));
-
-        // Clip way nodes for standalone way processing (not relations)
-        let clipped_nodes = clip_way_to_bbox(&way.nodes, &clip_bbox);
+        let (tags, clipped_nodes) = if relation_way_ids.contains(&element.id) {
+            let way = Arc::new(ProcessedWay {
+                id: element.id,
+                tags,
+                nodes,
+            });
+            ways_map.insert(element.id, Arc::clone(&way));
+            (way.tags.clone(), clip_way_to_bbox(&way.nodes, &clip_bbox))
+        } else {
+            (tags, clip_way_to_bbox_owned(nodes, &clip_bbox))
+        };
 
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() || !touches_world(&clipped_nodes) {
@@ -989,7 +1002,7 @@ pub fn parse_osm_data(
 
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
-            tags: way.tags.clone(),
+            tags,
             nodes: clipped_nodes,
         };
 

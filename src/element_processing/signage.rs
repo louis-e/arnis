@@ -63,6 +63,11 @@ type PlacementReport = BTreeMap<&'static str, (usize, BTreeSet<(i32, i32, i32)>)
 const REPORT_SAMPLES: usize = 4;
 
 impl SignageContext {
+    /// Frees the carriageway mask, a bit per world column that only element placement reads.
+    pub fn release_placement_masks(&mut self) {
+        self.carriageway = RoadMaskBitmap::new_empty();
+    }
+
     fn has(&self, key: &DecalKey) -> bool {
         self.registry.contains(key)
     }

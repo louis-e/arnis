@@ -153,6 +153,7 @@ const SECTION_BLOCKS: usize = 4096;
 const DENSE_ID_LIMIT: u16 = u8::MAX as u16 + 1;
 const DENSE_BLOCK_IDS: usize = DENSE_ID_LIMIT as usize;
 const MAX_SECTION_PALETTE: usize = 256;
+const AIR_ID: u8 = AIR.id() as u8;
 const RECENT_PALETTE_LOOKUPS: usize = 4;
 const REVERSE_LOOKUP_THRESHOLD: usize = 32;
 const REVERSE_LOOKUP_ENTRY_BYTES: u64 = 8;
@@ -795,6 +796,23 @@ fn make_section(y: i8, palette: Vec<PaletteItem>, data: Option<LongArray>) -> Se
     }
 }
 
+/// Bulk form of a per-cell merge's property updates: every `written` cell takes `src`'s
+/// properties or loses its own; nothing else changes. Decide `written` before any write.
+fn reconcile_properties(
+    props: &mut FnvHashMap<usize, Arc<Value>>,
+    src: FnvHashMap<usize, Arc<Value>>,
+    written: impl Fn(usize) -> bool,
+) {
+    if !props.is_empty() {
+        props.retain(|&i, _| !written(i));
+    }
+    for (i, p) in src {
+        if written(i) {
+            props.insert(i, p);
+        }
+    }
+}
+
 /// A section being modified (16x16x16 blocks)
 pub(crate) struct SectionToModify {
     pub storage: BlockStorage,
@@ -816,7 +834,40 @@ impl SectionToModify {
     pub fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
         let index = Self::index(x, y, z);
         self.storage.set(index, block);
-        self.properties.remove(&index);
+        self.clear_properties_at(index);
+    }
+
+    /// Drops any properties at `index`; hashbrown hashes the key even when the map is empty.
+    #[inline(always)]
+    fn clear_properties_at(&mut self, index: usize) {
+        if !self.properties.is_empty() {
+            self.properties.remove(&index);
+        }
+    }
+
+    /// Mirrors `src`'s properties at `index`: copied if present, cleared otherwise.
+    #[inline(always)]
+    fn copy_properties_at(&mut self, index: usize, src: &FnvHashMap<usize, Arc<Value>>) {
+        let props = if src.is_empty() {
+            None
+        } else {
+            src.get(&index)
+        };
+        match props {
+            Some(props) => {
+                self.properties.insert(index, props.clone());
+            }
+            None => self.clear_properties_at(index),
+        }
+    }
+
+    /// Drops properties on AIR cells, which the per-cell merge never copies across.
+    fn retain_properties_on_blocks(&mut self) {
+        if !self.properties.is_empty() {
+            let storage = &self.storage;
+            self.properties
+                .retain(|&i, _| i < SECTION_BLOCKS && storage.get(i) != AIR);
+        }
     }
 
     #[inline]
@@ -834,8 +885,7 @@ impl SectionToModify {
         if let Some(props) = block_with_props.properties {
             self.properties.insert(index, props);
         } else {
-            // Remove any existing properties for this position
-            self.properties.remove(&index);
+            self.clear_properties_at(index);
         }
     }
 
@@ -1144,10 +1194,99 @@ impl Default for SectionToModify {
     }
 }
 
+/// A chunk's sections as a dense run of slots from the lowest present Y, so a lookup is an
+/// index rather than a hash. Iterates in ascending Y.
+#[derive(Default)]
+pub(crate) struct SectionMap {
+    base: i8,
+    slots: Vec<Option<SectionToModify>>,
+}
+
+impl SectionMap {
+    /// Slot of `y`; below `base` it wraps to an out-of-range index.
+    #[inline(always)]
+    fn offset(&self, y: i8) -> usize {
+        (i32::from(y) - i32::from(self.base)) as usize
+    }
+
+    #[inline]
+    pub fn get(&self, y: i8) -> Option<&SectionToModify> {
+        self.slots.get(self.offset(y))?.as_ref()
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, y: i8) -> Option<&mut SectionToModify> {
+        let i = self.offset(y);
+        self.slots.get_mut(i)?.as_mut()
+    }
+
+    #[inline]
+    pub fn get_or_default(&mut self, y: i8) -> &mut SectionToModify {
+        let mut i = self.offset(y);
+        if i >= self.slots.len() {
+            i = self.grow_to(y);
+        }
+        self.slots[i].get_or_insert_with(SectionToModify::default)
+    }
+
+    #[cold]
+    fn grow_to(&mut self, y: i8) -> usize {
+        if self.slots.is_empty() {
+            self.base = y;
+        } else if y < self.base {
+            let n = (i32::from(self.base) - i32::from(y)) as usize;
+            self.slots
+                .splice(0..0, std::iter::repeat_with(|| None).take(n));
+            self.base = y;
+        }
+        let i = self.offset(y);
+        if i >= self.slots.len() {
+            self.slots.resize_with(i + 1, || None);
+        }
+        i
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (i8, &SectionToModify)> + '_ {
+        let base = i32::from(self.base);
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, s)| Some(((base + i as i32) as i8, s.as_ref()?)))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = i8> + '_ {
+        self.iter().map(|(y, _)| y)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &SectionToModify> + '_ {
+        self.slots.iter().flatten()
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut SectionToModify> + '_ {
+        self.slots.iter_mut().flatten()
+    }
+
+    pub fn into_entries(self) -> impl Iterator<Item = (i8, SectionToModify)> {
+        let base = i32::from(self.base);
+        self.slots
+            .into_iter()
+            .enumerate()
+            .filter_map(move |(i, s)| Some(((base + i as i32) as i8, s?)))
+    }
+
+    pub fn len(&self) -> usize {
+        self.values().count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.slots.iter().all(Option::is_none)
+    }
+}
+
 /// A chunk being modified (16x384x16 blocks, divided into sections)
 #[derive(Default)]
 pub(crate) struct ChunkToModify {
-    pub sections: FnvHashMap<i8, SectionToModify>,
+    pub sections: SectionMap,
     pub other: FnvHashMap<String, Value>,
 }
 
@@ -1160,7 +1299,7 @@ impl ChunkToModify {
         }
         let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
-        let section = self.sections.get(&section_idx)?;
+        let section = self.sections.get(section_idx)?;
         section.get_block(x, (y & 15) as u8, z)
     }
 
@@ -1173,7 +1312,7 @@ impl ChunkToModify {
         }
         let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
-        let section = self.sections.entry(section_idx).or_default();
+        let section = self.sections.get_or_default(section_idx);
         section.set_block(x, (y & 15) as u8, z, block);
     }
 
@@ -1190,37 +1329,162 @@ impl ChunkToModify {
         }
         let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
-        let section = self.sections.entry(section_idx).or_default();
+        let section = self.sections.get_or_default(section_idx);
         section.set_block_with_properties(x, (y & 15) as u8, z, block_with_props);
     }
 
     pub fn sections(&self) -> impl Iterator<Item = Section> + '_ {
-        self.sections.iter().map(|(y, s)| s.to_section(*y))
+        self.sections.iter().map(|(y, s)| s.to_section(y))
+    }
+}
+
+const REGION_CHUNKS: usize = 32 * 32;
+
+/// A region's 32×32 chunk slots, indexed by local `(x, z)` instead of hashed.
+/// Iterates in ascending `(x, z)`.
+pub(crate) struct ChunkGrid {
+    slots: Box<[Option<ChunkToModify>; REGION_CHUNKS]>,
+}
+
+impl Default for ChunkGrid {
+    fn default() -> Self {
+        let slots: Box<[Option<ChunkToModify>]> = std::iter::repeat_with(|| None)
+            .take(REGION_CHUNKS)
+            .collect();
+        Self {
+            slots: slots.try_into().unwrap_or_else(|_| unreachable!()),
+        }
+    }
+}
+
+impl ChunkGrid {
+    #[inline(always)]
+    fn slot(x: i32, z: i32) -> usize {
+        debug_assert!((0..32).contains(&x) && (0..32).contains(&z));
+        (((x & 31) << 5) | (z & 31)) as usize
+    }
+
+    #[inline(always)]
+    fn key(slot: usize) -> (i32, i32) {
+        ((slot >> 5) as i32, (slot & 31) as i32)
+    }
+
+    #[inline]
+    pub fn get(&self, x: i32, z: i32) -> Option<&ChunkToModify> {
+        self.slots[Self::slot(x, z)].as_ref()
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, x: i32, z: i32) -> Option<&mut ChunkToModify> {
+        self.slots[Self::slot(x, z)].as_mut()
+    }
+
+    #[inline]
+    pub fn get_or_default(&mut self, x: i32, z: i32) -> &mut ChunkToModify {
+        self.slots[Self::slot(x, z)].get_or_insert_with(ChunkToModify::default)
+    }
+
+    /// The raw slot, for callers that treat an absent chunk differently.
+    #[inline]
+    pub fn slot_mut(&mut self, x: i32, z: i32) -> &mut Option<ChunkToModify> {
+        &mut self.slots[Self::slot(x, z)]
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ((i32, i32), &ChunkToModify)> + '_ {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| Some((Self::key(i), c.as_ref()?)))
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &ChunkToModify> + '_ {
+        self.slots.iter().flatten()
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut ChunkToModify> + '_ {
+        self.slots.iter_mut().flatten()
+    }
+
+    pub fn into_entries(self) -> impl Iterator<Item = ((i32, i32), ChunkToModify)> {
+        (self.slots as Box<[Option<ChunkToModify>]>)
+            .into_vec()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, c)| Some((Self::key(i), c?)))
+    }
+
+    pub fn len(&self) -> usize {
+        self.values().count()
     }
 }
 
 /// A region being modified (32x32 chunks)
 #[derive(Default)]
 pub(crate) struct RegionToModify {
-    pub chunks: FnvHashMap<(i32, i32), ChunkToModify>,
+    pub chunks: ChunkGrid,
 }
 
 impl RegionToModify {
     #[inline]
     pub fn get_or_create_chunk(&mut self, x: i32, z: i32) -> &mut ChunkToModify {
-        self.chunks.entry((x, z)).or_default()
+        self.chunks.get_or_default(x, z)
     }
 
     #[inline]
     pub fn get_chunk(&self, x: i32, z: i32) -> Option<&ChunkToModify> {
-        self.chunks.get(&(x, z))
+        self.chunks.get(x, z)
+    }
+
+    /// See [`WorldToModify::compact_sections`].
+    pub fn compact_sections(&mut self) {
+        for chunk in self.chunks.values_mut() {
+            for section in chunk.sections.values_mut() {
+                if !matches!(&section.storage, BlockStorage::Uniform(_)) {
+                    section.compact();
+                }
+            }
+        }
     }
 }
+
+/// FxHash-style hasher for `(i32, i32)` coordinate keys: two multiplies where FNV takes
+/// eight dependent byte rounds, and every block lookup starts by hashing its region key.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct CoordHasher(u64);
+
+impl CoordHasher {
+    #[inline(always)]
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for CoordHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.add(u64::from(b));
+        }
+    }
+
+    #[inline]
+    fn write_i32(&mut self, i: i32) {
+        self.add(u64::from(i as u32));
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub(crate) type CoordMap<V> =
+    std::collections::HashMap<(i32, i32), V, std::hash::BuildHasherDefault<CoordHasher>>;
 
 /// The entire world being modified.
 #[derive(Default)]
 pub(crate) struct WorldToModify {
-    pub regions: FnvHashMap<(i32, i32), RegionToModify>,
+    pub regions: CoordMap<RegionToModify>,
 }
 
 impl WorldToModify {
@@ -1244,18 +1508,14 @@ impl WorldToModify {
         };
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (rx, rz).hash(&mut h);
-        let mut chunk_keys: Vec<&(i32, i32)> = region.chunks.keys().collect();
-        chunk_keys.sort_unstable();
-        for ck in chunk_keys {
+        // Both iterate in ascending key order, which the hash depends on.
+        for (ck, chunk) in region.chunks.iter() {
             ck.hash(&mut h);
-            let chunk = &region.chunks[ck];
-            let mut sec_keys: Vec<&i8> = chunk.sections.keys().collect();
-            sec_keys.sort_unstable();
-            for sk in sec_keys {
+            for (sk, section) in chunk.sections.iter() {
                 sk.hash(&mut h);
                 // Hash logical block ids, not the raw storage, so a section
                 // is hashed identically whether it ended up paletted or direct.
-                let storage = &chunk.sections[sk].storage;
+                let storage = &section.storage;
                 match storage {
                     BlockStorage::Uniform(b) => b.hash(&mut h),
                     _ => {
@@ -1307,7 +1567,7 @@ impl WorldToModify {
         let chunk_z = z >> 4;
         let region = self.get_region(chunk_x >> 5, chunk_z >> 5)?;
         let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
-        let section = chunk.sections.get(&((y >> 4) as i8))?;
+        let section = chunk.sections.get((y >> 4) as i8)?;
         let index = SectionToModify::index((x & 15) as u8, (y & 15) as u8, (z & 15) as u8);
         section.properties.get(&index).cloned()
     }
@@ -1339,7 +1599,7 @@ impl WorldToModify {
         let max_section = (max_y >> 4) as i8;
 
         for section_y in (min_section..=max_section).rev() {
-            let Some(section) = chunk.sections.get(&section_y) else {
+            let Some(section) = chunk.sections.get(section_y) else {
                 continue;
             };
             let section_min_y = min_y.max(i32::from(section_y) << 4);
@@ -1377,6 +1637,38 @@ impl WorldToModify {
         );
     }
 
+    /// [`Self::set_block_with_properties`], except an occupied cell is only overwritten when
+    /// `replace(existing)` agrees. Resolves the cell once instead of a read and then a write.
+    #[inline]
+    pub fn set_block_with_properties_if(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_with_props: BlockWithProperties,
+        replace: impl FnOnce(Block) -> bool,
+    ) {
+        if y <= world_max_y() {
+            let (chunk_x, chunk_z) = (x >> 4, z >> 4);
+            let clamped_y = y.max(min_y());
+            let section = self
+                .regions
+                .get_mut(&(chunk_x >> 5, chunk_z >> 5))
+                .and_then(|r| r.chunks.get_mut(chunk_x & 31, chunk_z & 31))
+                .and_then(|c| c.sections.get_mut((clamped_y >> 4) as i8));
+            if let Some(section) = section {
+                let (lx, ly, lz) = ((x & 15) as u8, (clamped_y & 15) as u8, (z & 15) as u8);
+                let existing = section.storage.get(SectionToModify::index(lx, ly, lz));
+                if existing == AIR || replace(existing) {
+                    section.set_block_with_properties(lx, ly, lz, block_with_props);
+                }
+                return;
+            }
+        }
+        // A cell with no section (or above the ceiling) reads as empty, which is always written.
+        self.set_block_with_properties(x, y, z, block_with_props);
+    }
+
     /// Set a block only if the cell is empty (AIR). Thin `#[inline]` wrapper over [`set_with_props_if_absent`].
     #[inline]
     pub fn set_block_if_absent(&mut self, x: i32, y: i32, z: i32, block: Block) -> bool {
@@ -1407,17 +1699,14 @@ impl WorldToModify {
         let region_z: i32 = chunk_z >> 5;
 
         let region = self.regions.entry((region_x, region_z)).or_default();
-        let chunk = region
-            .chunks
-            .entry((chunk_x & 31, chunk_z & 31))
-            .or_default();
+        let chunk = region.chunks.get_or_default(chunk_x & 31, chunk_z & 31);
 
         if y > world_max_y() {
             return false;
         }
         let y = y.max(min_y());
         let section_idx: i8 = (y >> 4) as i8;
-        let section = chunk.sections.entry(section_idx).or_default();
+        let section = chunk.sections.get_or_default(section_idx);
 
         let local_x = (x & 15) as u8;
         let local_y = (y & 15) as u8;
@@ -1431,7 +1720,7 @@ impl WorldToModify {
         if let Some(props) = block_with_props.properties {
             section.properties.insert(idx, props);
         } else {
-            section.properties.remove(&idx);
+            section.clear_properties_at(idx);
         }
         true
     }
@@ -1454,10 +1743,7 @@ impl WorldToModify {
         let region_z: i32 = chunk_z >> 5;
 
         let region = self.regions.entry((region_x, region_z)).or_default();
-        let chunk = region
-            .chunks
-            .entry((chunk_x & 31, chunk_z & 31))
-            .or_default();
+        let chunk = region.chunks.get_or_default(chunk_x & 31, chunk_z & 31);
 
         let local_x = (x & 15) as u8;
         let local_z = (z & 15) as u8;
@@ -1471,18 +1757,18 @@ impl WorldToModify {
 
         for y in y_min..=y_max {
             let section_idx: i8 = (y >> 4) as i8;
-            let section = chunk.sections.entry(section_idx).or_default();
+            let section = chunk.sections.get_or_default(section_idx);
             let local_y = (y & 15) as u8;
             let idx = SectionToModify::index(local_x, local_y, local_z);
 
             if skip_existing {
                 if section.storage.get(idx) == AIR {
                     section.storage.set(idx, block);
-                    section.properties.remove(&idx);
+                    section.clear_properties_at(idx);
                 }
             } else {
                 section.storage.set(idx, block);
-                section.properties.remove(&idx);
+                section.clear_properties_at(idx);
             }
         }
     }
@@ -1506,20 +1792,19 @@ impl WorldToModify {
             .entry((chunk_x >> 5, chunk_z >> 5))
             .or_default()
             .chunks
-            .entry((chunk_x & 31, chunk_z & 31))
-            .or_default();
+            .get_or_default(chunk_x & 31, chunk_z & 31);
         let (local_x, local_z) = ((x & 15) as u8, (z & 15) as u8);
         let y_max = y_max.clamp(min_y(), world_max_y());
         let mut y = y_min.clamp(min_y(), world_max_y());
         while y <= y_max {
-            let section = chunk.sections.entry((y >> 4) as i8).or_default();
+            let section = chunk.sections.get_or_default((y >> 4) as i8);
             let top = y_max.min(y | 15);
             for y in y..=top {
                 let block = block_at(y);
                 let idx = SectionToModify::index(local_x, (y & 15) as u8, local_z);
                 if section.storage.get(idx) == AIR {
                     section.storage.set(idx, block);
-                    section.properties.remove(&idx);
+                    section.clear_properties_at(idx);
                 }
             }
             y = top + 1;
@@ -1542,14 +1827,11 @@ impl WorldToModify {
         let region_x = chunk_x >> 5;
         let region_z = chunk_z >> 5;
         let region = self.regions.entry((region_x, region_z)).or_default();
-        let chunk = region
-            .chunks
-            .entry((chunk_x & 31, chunk_z & 31))
-            .or_default();
+        let chunk = region.chunks.get_or_default(chunk_x & 31, chunk_z & 31);
 
         let mut all_clean = true;
         for section_y in section_y_min..=section_y_max {
-            let section = chunk.sections.entry(section_y).or_default();
+            let section = chunk.sections.get_or_default(section_y);
             let is_empty = section.properties.is_empty()
                 && matches!(&section.storage, BlockStorage::Uniform(b) if *b == AIR);
             if is_empty {
@@ -1629,44 +1911,12 @@ impl WorldToModify {
 
             if fully_authoritative {
                 // Fast path: entire region is owned by the auth tile.
-                // Wholesale chunk insert when the destination is empty;
-                // per-section reconcile when a prior tile already wrote
-                // halo data into this region (auth tile non-AIR wins;
-                // halo wins where auth tile left AIR).
                 let self_region = self.regions.entry((region_x, region_z)).or_default();
-                for (chunk_key, other_chunk) in other_region.chunks {
-                    match self_region.chunks.entry(chunk_key) {
-                        std::collections::hash_map::Entry::Vacant(e) => {
-                            e.insert(other_chunk);
-                        }
-                        std::collections::hash_map::Entry::Occupied(mut e) => {
-                            let self_chunk = e.get_mut();
-                            for (section_y, other_section) in other_chunk.sections {
-                                let self_section =
-                                    self_chunk.sections.entry(section_y).or_default();
-                                Self::merge_section_auth_overwrite_nonair(
-                                    self_section,
-                                    &other_section,
-                                );
-                            }
-                            for (key, value) in other_chunk.other {
-                                if Self::merges_as_list(&key) {
-                                    match self_chunk.other.entry(key) {
-                                        std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                            if let Value::List(self_list) = entry.get_mut() {
-                                                if let Value::List(other_list) = &value {
-                                                    Self::dedup_extend(self_list, other_list);
-                                                }
-                                            }
-                                        }
-                                        std::collections::hash_map::Entry::Vacant(entry) => {
-                                            entry.insert(value);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                for ((chunk_lx, chunk_lz), other_chunk) in other_region.chunks.into_entries() {
+                    Self::merge_chunk_auth(
+                        self_region.chunks.slot_mut(chunk_lx, chunk_lz),
+                        other_chunk,
+                    );
                 }
                 continue;
             }
@@ -1689,7 +1939,7 @@ impl WorldToModify {
             // Slow path: region partially overlaps authoritative bounds.
             // (Rare with region-aligned tiles; kept as safety net.)
             let self_region = self.regions.entry((region_x, region_z)).or_default();
-            for ((chunk_lx, chunk_lz), other_chunk) in other_region.chunks {
+            for ((chunk_lx, chunk_lz), other_chunk) in other_region.chunks.into_entries() {
                 // Check chunk-level: can we fast-path this entire chunk?
                 let c_min_x = (region_x * 32 + chunk_lx) * 16;
                 let c_max_x = c_min_x + 15;
@@ -1702,39 +1952,10 @@ impl WorldToModify {
                     && c_max_z <= authoritative_max_z;
 
                 if chunk_fully_auth {
-                    match self_region.chunks.entry((chunk_lx, chunk_lz)) {
-                        std::collections::hash_map::Entry::Vacant(e) => {
-                            e.insert(other_chunk);
-                        }
-                        std::collections::hash_map::Entry::Occupied(mut e) => {
-                            // Dest already holds a prior tile's halo data: overwrite
-                            // auth non-AIR, preserve halo at auth-AIR (matches the
-                            // region fast path) instead of clobbering the whole chunk.
-                            let self_chunk = e.get_mut();
-                            for (section_y, other_section) in other_chunk.sections {
-                                Self::merge_section_auth_overwrite_nonair(
-                                    self_chunk.sections.entry(section_y).or_default(),
-                                    &other_section,
-                                );
-                            }
-                            for (key, value) in other_chunk.other {
-                                if Self::merges_as_list(&key) {
-                                    match self_chunk.other.entry(key) {
-                                        std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                            if let Value::List(self_list) = entry.get_mut() {
-                                                if let Value::List(other_list) = &value {
-                                                    Self::dedup_extend(self_list, other_list);
-                                                }
-                                            }
-                                        }
-                                        std::collections::hash_map::Entry::Vacant(entry) => {
-                                            entry.insert(value);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Self::merge_chunk_auth(
+                        self_region.chunks.slot_mut(chunk_lx, chunk_lz),
+                        other_chunk,
+                    );
                     continue;
                 }
 
@@ -1743,22 +1964,21 @@ impl WorldToModify {
                     || c_max_z < authoritative_min_z
                     || c_min_z > authoritative_max_z;
 
-                let self_chunk = self_region.chunks.entry((chunk_lx, chunk_lz)).or_default();
+                let self_chunk = self_region.chunks.get_or_default(chunk_lx, chunk_lz);
 
                 if chunk_fully_outside {
                     // Write-if-AIR for entire chunk, no coordinate math
-                    for (section_y, other_section) in other_chunk.sections {
+                    for (section_y, other_section) in other_chunk.sections.into_entries() {
                         Self::merge_section_write_if_air(
-                            self_chunk.sections.entry(section_y).or_default(),
-                            &other_section,
+                            self_chunk.sections.get_or_default(section_y),
+                            other_section,
                         );
                     }
                 } else {
                     // Per-block merge with coordinate checks (truly partial overlap)
-                    for (section_y, other_section) in other_chunk.sections {
-                        let self_section = self_chunk.sections.entry(section_y).or_default();
+                    for (section_y, other_section) in other_chunk.sections.into_entries() {
                         Self::merge_section_with_auth_check(
-                            self_section,
+                            self_chunk.sections.get_or_default(section_y),
                             &other_section,
                             c_min_x,
                             c_min_z,
@@ -1770,22 +1990,43 @@ impl WorldToModify {
                     }
                 }
 
-                // Merge block entities and entities
-                for (key, value) in other_chunk.other {
-                    if Self::merges_as_list(&key) {
-                        match self_chunk.other.entry(key) {
-                            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                if let Value::List(self_list) = entry.get_mut() {
-                                    if let Value::List(other_list) = &value {
-                                        Self::dedup_extend(self_list, other_list);
-                                    }
-                                }
-                            }
-                            std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert(value);
-                            }
+                Self::merge_chunk_lists(self_chunk, other_chunk.other);
+            }
+        }
+    }
+
+    /// Merge an auth-tile chunk. Moved in whole into an empty slot; otherwise reconciled
+    /// per section so a prior tile's halo survives wherever this tile left AIR.
+    fn merge_chunk_auth(slot: &mut Option<ChunkToModify>, other_chunk: ChunkToModify) {
+        let Some(self_chunk) = slot else {
+            *slot = Some(other_chunk);
+            return;
+        };
+        for (section_y, other_section) in other_chunk.sections.into_entries() {
+            Self::merge_section_auth_overwrite_nonair(
+                self_chunk.sections.get_or_default(section_y),
+                other_section,
+            );
+        }
+        Self::merge_chunk_lists(self_chunk, other_chunk.other);
+    }
+
+    /// Append a tile chunk's entity lists (see `merges_as_list`); other keys are dropped.
+    fn merge_chunk_lists(self_chunk: &mut ChunkToModify, other: FnvHashMap<String, Value>) {
+        for (key, value) in other {
+            if !Self::merges_as_list(&key) {
+                continue;
+            }
+            match self_chunk.other.entry(key) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if let Value::List(self_list) = entry.get_mut() {
+                        if let Value::List(other_list) = &value {
+                            Self::dedup_extend(self_list, other_list);
                         }
                     }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(value);
                 }
             }
         }
@@ -1793,83 +2034,88 @@ impl WorldToModify {
 
     /// Merge an entire region using write-if-AIR semantics (halo zone).
     fn merge_region_write_if_air(self_region: &mut RegionToModify, other_region: RegionToModify) {
-        for ((chunk_lx, chunk_lz), other_chunk) in other_region.chunks {
-            let self_chunk = self_region.chunks.entry((chunk_lx, chunk_lz)).or_default();
-
-            for (section_y, other_section) in other_chunk.sections {
+        for ((chunk_lx, chunk_lz), mut other_chunk) in other_region.chunks.into_entries() {
+            let slot = self_region.chunks.slot_mut(chunk_lx, chunk_lz);
+            let Some(self_chunk) = slot else {
+                // Into an empty slot the chunk moves in whole, minus what the per-section
+                // merge would not carry: properties on AIR cells and non-list chunk data.
+                for section in other_chunk.sections.values_mut() {
+                    section.retain_properties_on_blocks();
+                }
+                other_chunk.other.retain(|key, _| Self::merges_as_list(key));
+                *slot = Some(other_chunk);
+                continue;
+            };
+            for (section_y, other_section) in other_chunk.sections.into_entries() {
                 Self::merge_section_write_if_air(
-                    self_chunk.sections.entry(section_y).or_default(),
-                    &other_section,
+                    self_chunk.sections.get_or_default(section_y),
+                    other_section,
                 );
             }
-
-            // Append entities/block_entities from halo
-            for (key, value) in other_chunk.other {
-                if Self::merges_as_list(&key) {
-                    match self_chunk.other.entry(key) {
-                        std::collections::hash_map::Entry::Occupied(mut entry) => {
-                            if let Value::List(self_list) = entry.get_mut() {
-                                if let Value::List(other_list) = &value {
-                                    Self::dedup_extend(self_list, other_list);
-                                }
-                            }
-                        }
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(value);
-                        }
-                    }
-                }
-            }
+            Self::merge_chunk_lists(self_chunk, other_chunk.other);
         }
     }
 
     /// Merge a single section using write-if-AIR (no coordinate checks).
     fn merge_section_write_if_air(
         self_section: &mut SectionToModify,
-        other_section: &SectionToModify,
+        other_section: SectionToModify,
     ) {
-        // Wholesale moves need both sides property-free: a clone would drop the
-        // source's properties, and the per-index loop is what clears stale ones.
-        let no_props = other_section.properties.is_empty() && self_section.properties.is_empty();
-        let dest_all_air = matches!(&self_section.storage, BlockStorage::Uniform(b) if *b == AIR);
-        if no_props && dest_all_air {
-            match &other_section.storage {
-                BlockStorage::Uniform(block) if *block == AIR => {}
-                _ => {
-                    debug_assert!(self_section.properties.is_empty());
-                    self_section.storage = other_section.storage.clone();
-                }
-            }
+        let SectionToModify {
+            storage: src,
+            properties: src_props,
+        } = other_section;
+        if matches!(&src, BlockStorage::Uniform(b) if *b == AIR) {
             return;
         }
+        match &self_section.storage {
+            // No AIR cell left to fill.
+            BlockStorage::Uniform(b) if *b != AIR => return,
+            BlockStorage::Uniform(_) if self_section.properties.is_empty() => {
+                *self_section = SectionToModify {
+                    storage: src,
+                    properties: src_props,
+                };
+                self_section.retain_properties_on_blocks();
+                return;
+            }
+            _ => {}
+        }
+        // A written cell takes the source's properties, or loses its own.
+        let dst = &self_section.storage;
+        let written = |i: usize| i < SECTION_BLOCKS && dst.get(i) == AIR && src.get(i) != AIR;
+        reconcile_properties(&mut self_section.properties, src_props, written);
 
-        match &other_section.storage {
-            BlockStorage::Uniform(block) if *block == AIR => {}
+        if let BlockStorage::Dense(dst) = &mut self_section.storage {
+            match &src {
+                BlockStorage::Dense(ids) => {
+                    for (d, &s) in dst.iter_mut().zip(ids.iter()) {
+                        *d = if *d == AIR_ID { s } else { *d };
+                    }
+                    return;
+                }
+                BlockStorage::Uniform(b) if b.id() < DENSE_ID_LIMIT => {
+                    let s = b.id() as u8;
+                    for d in dst.iter_mut() {
+                        *d = if *d == AIR_ID { s } else { *d };
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+        match &src {
             BlockStorage::Uniform(block) => {
-                let block = *block;
                 for idx in 0..SECTION_BLOCKS {
                     if self_section.storage.get(idx) == AIR {
-                        self_section.storage.set(idx, block);
-                        if let Some(props) = other_section.properties.get(&idx) {
-                            self_section.properties.insert(idx, props.clone());
-                        } else {
-                            self_section.properties.remove(&idx);
-                        }
+                        self_section.storage.set(idx, *block);
                     }
                 }
             }
             _ => {
-                for (idx, block) in other_section.storage.iter().enumerate() {
-                    if block == AIR {
-                        continue;
-                    }
-                    if self_section.storage.get(idx) == AIR {
+                for (idx, block) in src.iter().enumerate() {
+                    if block != AIR && self_section.storage.get(idx) == AIR {
                         self_section.storage.set(idx, block);
-                        if let Some(props) = other_section.properties.get(&idx) {
-                            self_section.properties.insert(idx, props.clone());
-                        } else {
-                            self_section.properties.remove(&idx);
-                        }
                     }
                 }
             }
@@ -1883,59 +2129,47 @@ impl WorldToModify {
     /// preserve whatever halo data was already written there.
     fn merge_section_auth_overwrite_nonair(
         self_section: &mut SectionToModify,
-        other_section: &SectionToModify,
+        other_section: SectionToModify,
     ) {
-        // A uniform non-AIR source overwrites every index, so it needs no empty destination.
-        // A mixed source preserves halo data at its AIR indices, so it does.
-        let no_props = other_section.properties.is_empty() && self_section.properties.is_empty();
-        if no_props {
-            let dest_all_air =
-                matches!(&self_section.storage, BlockStorage::Uniform(b) if *b == AIR);
-            match &other_section.storage {
-                BlockStorage::Uniform(block) if *block == AIR => return,
-                BlockStorage::Uniform(block) => {
-                    debug_assert!(self_section.properties.is_empty());
-                    self_section.storage = BlockStorage::Uniform(*block);
-                    return;
-                }
-                _ if dest_all_air => {
-                    debug_assert!(self_section.properties.is_empty());
-                    self_section.storage = other_section.storage.clone();
-                    return;
-                }
-                _ => {}
-            }
-        }
-
-        match &other_section.storage {
-            BlockStorage::Uniform(block) if *block == AIR => {
-                // Auth tile is entirely AIR in this section; keep all halo data.
-            }
+        let SectionToModify {
+            storage: src,
+            properties: src_props,
+        } = other_section;
+        match src {
+            BlockStorage::Uniform(block) if block == AIR => return,
             BlockStorage::Uniform(block) => {
-                // Auth tile is uniformly one non-AIR block; overwrite everything.
-                let block = *block;
-                for idx in 0..SECTION_BLOCKS {
-                    self_section.storage.set(idx, block);
-                    if let Some(props) = other_section.properties.get(&idx) {
-                        self_section.properties.insert(idx, props.clone());
-                    } else {
-                        self_section.properties.remove(&idx);
-                    }
-                }
+                // Every cell is overwritten, and with it every destination property.
+                self_section.storage = BlockStorage::Uniform(block);
+                self_section.properties = src_props;
+                self_section.properties.retain(|&i, _| i < SECTION_BLOCKS);
+                return;
             }
-            _ => {
-                for (idx, block) in other_section.storage.iter().enumerate() {
-                    if block == AIR {
-                        // Auth tile placed nothing here; preserve halo data.
-                        continue;
-                    }
-                    self_section.storage.set(idx, block);
-                    if let Some(props) = other_section.properties.get(&idx) {
-                        self_section.properties.insert(idx, props.clone());
-                    } else {
-                        self_section.properties.remove(&idx);
-                    }
-                }
+            _ => {}
+        }
+        let dest_air = matches!(&self_section.storage, BlockStorage::Uniform(b) if *b == AIR);
+        if dest_air && self_section.properties.is_empty() {
+            *self_section = SectionToModify {
+                storage: src,
+                properties: src_props,
+            };
+            self_section.retain_properties_on_blocks();
+            return;
+        }
+        let written = |i: usize| i < SECTION_BLOCKS && src.get(i) != AIR;
+        reconcile_properties(&mut self_section.properties, src_props, written);
+
+        if let (BlockStorage::Dense(dst), BlockStorage::Dense(ids)) =
+            (&mut self_section.storage, &src)
+        {
+            for (d, &s) in dst.iter_mut().zip(ids.iter()) {
+                *d = if s != AIR_ID { s } else { *d };
+            }
+            return;
+        }
+        for (idx, block) in src.iter().enumerate() {
+            // An AIR source cell keeps the halo data under it.
+            if block != AIR {
+                self_section.storage.set(idx, block);
             }
         }
     }
@@ -1969,11 +2203,7 @@ impl WorldToModify {
 
                     if is_auth || self_section.storage.get(idx) == AIR {
                         self_section.storage.set(idx, block);
-                        if let Some(props) = other_section.properties.get(&idx) {
-                            self_section.properties.insert(idx, props.clone());
-                        } else {
-                            self_section.properties.remove(&idx);
-                        }
+                        self_section.copy_properties_at(idx, &other_section.properties);
                     }
                 }
             }
@@ -1994,11 +2224,7 @@ impl WorldToModify {
 
                     if is_auth || self_section.storage.get(idx) == AIR {
                         self_section.storage.set(idx, block);
-                        if let Some(props) = other_section.properties.get(&idx) {
-                            self_section.properties.insert(idx, props.clone());
-                        } else {
-                            self_section.properties.remove(&idx);
-                        }
+                        self_section.copy_properties_at(idx, &other_section.properties);
                     }
                 }
             }
@@ -2008,15 +2234,10 @@ impl WorldToModify {
     /// Scan every section and collapse any that are entirely one block type
     /// back to `Uniform(Block)`, freeing the mixed-section allocation.
     pub fn compact_sections(&mut self) {
-        for region in self.regions.values_mut() {
-            for chunk in region.chunks.values_mut() {
-                for section in chunk.sections.values_mut() {
-                    if !matches!(&section.storage, BlockStorage::Uniform(_)) {
-                        section.compact();
-                    }
-                }
-            }
-        }
+        use rayon::prelude::*;
+        self.regions
+            .par_iter_mut()
+            .for_each(|(_, region)| region.compact_sections());
     }
 }
 
@@ -2293,12 +2514,36 @@ mod merge_fast_path_tests {
         }
     }
 
+    const SHAPES: u64 = 8;
+
     /// Random section: varies storage variant, AIR density and property presence.
     fn section(rng: &mut Lcg, shape: u64, with_props: bool) -> SectionToModify {
         let mut s = SectionToModify::default();
         match shape {
             0 => {}
             1 => s.storage = BlockStorage::Uniform(STONE),
+            4 => s.storage = BlockStorage::Uniform(NETHERITE_BLOCK),
+            5 => {
+                // Mostly solid, so write-if-air finds few holes.
+                s.storage = BlockStorage::Uniform(COBBLESTONE);
+                for _ in 0..(1 + rng.below(300)) {
+                    let block = if rng.below(2) == 0 { AIR } else { STONE };
+                    s.storage
+                        .set(rng.below(SECTION_BLOCKS as u64) as usize, block);
+                }
+                assert!(matches!(&s.storage, BlockStorage::Dense(_)));
+            }
+            6 => {
+                for _ in 0..(1 + rng.below(600)) {
+                    let block = if rng.below(4) == 0 {
+                        NETHERITE_BLOCK
+                    } else {
+                        STONE
+                    };
+                    s.storage
+                        .set(rng.below(SECTION_BLOCKS as u64) as usize, block);
+                }
+            }
             2 => {
                 for (i, &block) in DIRECT_SECTION_BLOCKS.iter().enumerate() {
                     s.storage.set(i, block);
@@ -2348,25 +2593,65 @@ mod merge_fast_path_tests {
     #[test]
     fn section_mergers_match_the_pre_fast_path_reference() {
         let mut rng = Lcg(0x5eed);
-        for case in 0..4000u64 {
-            let dst_props = case % 3 == 0;
-            let src_props = case % 5 == 0;
-            let (dst_shape, src_shape) = (rng.below(4), rng.below(4));
+        for case in 0..8000u64 {
+            let dst_props = case % 2 == 0;
+            let src_props = case % 4 < 2;
+            let (dst_shape, src_shape) = (rng.below(SHAPES), rng.below(SHAPES));
             let dst = section(&mut rng, dst_shape, dst_props);
             let src = section(&mut rng, src_shape, src_props);
 
             let (mut a, mut b) = (dup(&dst), dup(&dst));
-            WorldToModify::merge_section_write_if_air(&mut a, &src);
+            WorldToModify::merge_section_write_if_air(&mut a, dup(&src));
             merge_reference::write_if_air(&mut b, &src);
             assert!(same(&a, &b), "write_if_air diverged on case {case}");
 
             let (mut a, mut b) = (dup(&dst), dup(&dst));
-            WorldToModify::merge_section_auth_overwrite_nonair(&mut a, &src);
+            WorldToModify::merge_section_auth_overwrite_nonair(&mut a, dup(&src));
             merge_reference::auth_overwrite_nonair(&mut b, &src);
             assert!(
                 same(&a, &b),
                 "auth_overwrite_nonair diverged on case {case}"
             );
+        }
+    }
+
+    #[test]
+    fn a_halo_chunk_moved_into_an_empty_slot_matches_the_per_section_merge() {
+        let mut rng = Lcg(0xc0ffee);
+        for case in 0..300u64 {
+            let mut chunk = ChunkToModify::default();
+            for y in -4i8..6 {
+                if rng.below(3) == 0 {
+                    continue;
+                }
+                let shape = rng.below(SHAPES);
+                *chunk.sections.get_or_default(y) = section(&mut rng, shape, case % 2 == 0);
+            }
+            chunk
+                .other
+                .insert("entities".to_string(), Value::List(Vec::new()));
+            chunk
+                .other
+                .insert("Status".to_string(), Value::String("full".to_string()));
+
+            let mut want = ChunkToModify::default();
+            for (y, s) in chunk.sections.iter() {
+                merge_reference::write_if_air(want.sections.get_or_default(y), s);
+            }
+
+            let mut tile = RegionToModify::default();
+            *tile.chunks.slot_mut(3, 5) = Some(chunk);
+            let mut dest = RegionToModify::default();
+            WorldToModify::merge_region_write_if_air(&mut dest, tile);
+
+            let got = dest.get_chunk(3, 5).expect("chunk merged");
+            assert_eq!(got.sections.len(), want.sections.len(), "case {case}");
+            for ((gy, g), (wy, w)) in got.sections.iter().zip(want.sections.iter()) {
+                assert_eq!(gy, wy, "case {case}");
+                assert!(same(g, w), "section {gy} diverged on case {case}");
+            }
+            assert!(got.other.contains_key("entities"));
+            assert!(!got.other.contains_key("Status"));
         }
     }
 }
@@ -2484,7 +2769,7 @@ mod tests {
         for y in min_section_y()..=-2 {
             let section = chunk
                 .sections
-                .get(&y)
+                .get(y)
                 .unwrap_or_else(|| panic!("section {y} should have been created"));
             assert!(
                 matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
@@ -2515,14 +2800,14 @@ mod tests {
         let chunk = region.get_chunk(0, 0).unwrap();
         // Section -4 and -3 should be Uniform(STONE)
         for y in [-4i8, -3] {
-            let section = chunk.sections.get(&y).unwrap();
+            let section = chunk.sections.get(y).unwrap();
             assert!(
                 matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
                 "section {y} should be Uniform(STONE)"
             );
         }
         // Section -2 should be left alone as a mixed section with COBBLESTONE at y=-20.
-        let section = chunk.sections.get(&-2).unwrap();
+        let section = chunk.sections.get(-2).unwrap();
         assert!(
             matches!(&section.storage, BlockStorage::Dense(_)),
             "section -2 should still be dense (had COBBLESTONE)"
@@ -2559,7 +2844,7 @@ mod tests {
         assert!(!second, "second call sees Uniform(STONE) as occupied");
         let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
         for y in min_section_y()..=-2 {
-            let section = chunk.sections.get(&y).unwrap();
+            let section = chunk.sections.get(y).unwrap();
             assert!(
                 matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
                 "section {y} should still be Uniform(STONE)"
@@ -2591,6 +2876,54 @@ mod tests {
     }
 
     #[test]
+    fn conditional_set_matches_a_read_then_a_write() {
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let replace = |b: Block| b == STONE;
+        let (mut got, mut want) = (WorldToModify::default(), WorldToModify::default());
+        let mut rng = 7u64;
+        for i in 0..40_000 {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let r = (rng >> 20) as i32;
+            let (x, z) = (r % 80 - 40, (r >> 8) % 80 - 40);
+            let y = (r >> 16) % 420 - 90;
+            let write = BlockWithProperties {
+                block: [STONE, COBBLESTONE, AIR][(i % 3) as usize],
+                properties: (i % 7 == 0).then(|| Arc::new(Value::Int(i))),
+            };
+            got.set_block_with_properties_if(x, y, z, write.clone(), replace);
+            if want.get_block(x, y, z).is_none_or(replace) {
+                want.set_block_with_properties(x, y, z, write);
+            }
+        }
+
+        let mut regions: Vec<_> = want.regions.keys().copied().collect();
+        regions.sort_unstable();
+        let mut got_regions: Vec<_> = got.regions.keys().copied().collect();
+        got_regions.sort_unstable();
+        assert_eq!(got_regions, regions);
+        for key in regions {
+            let (g, w) = (&got.regions[&key], &want.regions[&key]);
+            let gc: Vec<_> = g.chunks.iter().map(|(k, _)| k).collect();
+            let wc: Vec<_> = w.chunks.iter().map(|(k, _)| k).collect();
+            assert_eq!(gc, wc);
+            for ((_, gc), (_, wc)) in g.chunks.iter().zip(w.chunks.iter()) {
+                assert_eq!(
+                    gc.sections.keys().collect::<Vec<_>>(),
+                    wc.sections.keys().collect::<Vec<_>>()
+                );
+                for ((_, gs), (_, ws)) in gc.sections.iter().zip(wc.sections.iter()) {
+                    assert!((0..SECTION_BLOCKS).all(|i| gs.storage.get(i) == ws.storage.get(i)));
+                    assert_eq!(gs.properties.len(), ws.properties.len());
+                    assert!(gs
+                        .properties
+                        .iter()
+                        .all(|(k, v)| ws.properties.get(k) == Some(v)));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn set_block_if_absent_delegates_with_same_semantics() {
         let mut world = WorldToModify::default();
         world.set_block_if_absent(1, 64, 2, STONE);
@@ -2619,7 +2952,7 @@ mod tests {
         world.set_block_if_absent(1, 64, 0, STONE);
 
         let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
-        let section = chunk.sections.get(&section_idx).unwrap();
+        let section = chunk.sections.get(section_idx).unwrap();
         assert!(
             section
                 .properties

@@ -853,55 +853,18 @@ impl Ground {
         d == 0 || d >= 4
     }
 
-    /// Returns a continuous 0.0–1.0 value indicating how "watery" a block is,
-    /// using bilinear interpolation of the water classification grid.
-    ///
-    /// Nearest-neighbor grid lookups (`cover_class`) create rectangular water
-    /// edges when the grid is coarser than block resolution.  Bilinear
-    /// interpolation produces a smooth gradient across grid cell boundaries,
-    /// allowing noise-based thresholding to create organic shorelines.
+    /// Whether the Gaussian-smoothed water mask, sampled bilinearly, makes this block water.
+    /// Noise-free thresholding of the smooth field traces organic shorelines where
+    /// nearest-neighbour `cover_class` lookups would leave rectangular grid edges.
     #[inline(always)]
-    pub fn water_blend(&self, coord: XZPoint) -> f64 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            // Continuous grid coordinates (no rounding — that's the key difference
-            // from cover_class which uses .round())
-            let fx = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0)
-                * (lc.width - 1) as f64;
-            let fz = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0)
-                * (lc.height - 1) as f64;
-
-            let x0 = (fx.floor() as usize).min(lc.width - 1);
-            let x1 = (x0 + 1).min(lc.width - 1);
-            let z0 = (fz.floor() as usize).min(lc.height - 1);
-            let z1 = (z0 + 1).min(lc.height - 1);
-
-            let tx = fx - fx.floor();
-            let tz = fz - fz.floor();
-
-            // Sample pre-smoothed water-ness at the 4 surrounding grid cells.
-            // The grid was Gaussian-blurred from the binary LC_WATER mask so
-            // that even at integer block positions (1-to-1 grid-to-world
-            // mapping, where tx == tz == 0 below) the sampled value is
-            // continuous — the renderer's hard `> 0.5` threshold then traces
-            // a clean curved shoreline contour instead of the raw ESA 10 m
-            // rectangular grid edge.
-            // Widen f32 storage to f64 for the bilinear arithmetic. This
-            // doesn't recover the ~10⁻⁷ precision lost at storage, but it
-            // prevents extra rounding from accumulating in the four
-            // multiply-adds + the threshold comparison downstream.
-            let wb = lc.water_blend_grid();
-            let w00 = wb[z0][x0] as f64;
-            let w10 = wb[z0][x1] as f64;
-            let w01 = wb[z1][x0] as f64;
-            let w11 = wb[z1][x1] as f64;
-
-            // Bilinear interpolation
-            let top = w00 * (1.0 - tx) + w10 * tx;
-            let bottom = w01 * (1.0 - tx) + w11 * tx;
-            top * (1.0 - tz) + bottom * tz
-        } else {
-            0.0
+    pub fn water_blend_is_water(&self, coord: XZPoint) -> bool {
+        match self.land_cover {
+            Some(ref lc) => {
+                let (world_w, world_h) = self.world_dims();
+                lc.water_blend_mask(world_w, world_h)
+                    .contains(coord.x, coord.z)
+            }
+            None => false,
         }
     }
 
@@ -1211,7 +1174,8 @@ impl Ground {
     /// Computes the lazy water-blend mask now; all grid mutations must be done.
     pub fn warm_water_blend(&self) {
         if let Some(ref lc) = self.land_cover {
-            let _ = lc.water_blend_grid();
+            let (world_w, world_h) = self.world_dims();
+            let _ = lc.water_blend_mask(world_w, world_h);
         }
     }
 
@@ -1581,10 +1545,7 @@ mod tests {
         let lc = LandCoverData {
             grid: vec![vec![LC_WATER, 10], vec![10, 10]],
             water_distance: vec![vec![1, 0], vec![0, 0]],
-            water_blend_cache: once_cell::sync::OnceCell::with_value(vec![
-                vec![1.0, 0.0],
-                vec![0.0, 0.0],
-            ]),
+            water_blend_cache: once_cell::sync::OnceCell::new(),
             width: 2,
             height: 2,
             cells_per_meter: 1.0,

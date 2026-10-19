@@ -74,11 +74,11 @@ impl PrescanResult {
 
     /// Regions each placement may write to (stream-to-disk deferral). XZ extent is capped
     /// at MAX_XZ_EXTENT_M, so anchor ± that radius (+ ring) is a safe superset.
-    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+    pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
         let r = (MAX_XZ_EXTENT_M as f64 * scale).ceil() as i32;
         self.placements
             .iter()
-            .flat_map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
+            .map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
             .collect()
     }
 }
@@ -232,26 +232,28 @@ pub fn prescan(
 }
 
 /// Voxelizes pre-fetched models and places blocks.
-pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &PrescanResult) {
-    if prescan.placements.is_empty() {
+/// Places `indices` (into the prescan's placements, ascending).
+pub fn place_wikidata_models(
+    editor: &mut WorldEditor,
+    args: &Args,
+    prescan: &PrescanResult,
+    indices: &[usize],
+) {
+    if indices.is_empty() {
         return;
     }
 
     println!(
         "{} Placing {} Wikidata 3D model{}...",
         "  [+]".bold(),
-        prescan.placements.len(),
-        if prescan.placements.len() == 1 {
-            ""
-        } else {
-            "s"
-        }
+        indices.len(),
+        if indices.len() == 1 { "" } else { "s" }
     );
 
     let mut placed = 0usize;
     let mut total_voxels = 0usize;
 
-    for placement in &prescan.placements {
+    for placement in indices.iter().map(|&i| &prescan.placements[i]) {
         let Some(entry) = lookup(&placement.qid) else {
             continue;
         };

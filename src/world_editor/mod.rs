@@ -24,7 +24,8 @@ pub use common::{
     DEFAULT_MAX_Y, DEFAULT_MIN_Y,
 };
 pub(crate) use common::{
-    reset_section_counters, section_counters, BlockStorage, RegionToModify, SectionToModify,
+    reset_section_counters, section_counters, BlockStorage, CoordMap, RegionToModify,
+    SectionToModify,
 };
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
@@ -212,9 +213,9 @@ pub struct WorldEditor<'a> {
     /// producing a natural-looking embankment on the low side and a cut on
     /// the high side rather than a floating strip with cliffs at the edges.
     ///
-    /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
-    /// path (called per-block during placement), so the hash cost matters.
-    road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Uses the cheap coordinate hasher (not SipHash): `get_ground_level` sits on a hot
+    /// path (called per-block during placement), and the merge thread extends it per tile.
+    road_surface_overrides: CoordMap<i32>,
     /// Bridge pier columns and their material, extended to the bed by the water carve.
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
@@ -298,7 +299,7 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             format: WorldFormat::JavaAnvil,
-            road_surface_overrides: FnvHashMap::default(),
+            road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
@@ -356,7 +357,7 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             format,
-            road_surface_overrides: FnvHashMap::default(),
+            road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
@@ -414,7 +415,7 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             format: WorldFormat::LuantiWorld,
-            road_surface_overrides: FnvHashMap::default(),
+            road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             flushed_regions: FnvHashSet::default(),
@@ -722,6 +723,12 @@ impl<'a> WorldEditor<'a> {
         self.strict_bounds = Some((min_x, min_z, max_x, max_z));
     }
 
+    /// Whether a column lies inside this editor, where its writes land.
+    #[inline]
+    pub fn in_bounds(&self, x: i32, z: i32) -> bool {
+        self.xzbbox.contains(&XZPoint::new(x, z))
+    }
+
     /// True if this editor is the single owner of (x, z): always for the main editor, and
     /// inside the strict tile bounds for a tile editor.
     #[inline]
@@ -753,6 +760,13 @@ impl<'a> WorldEditor<'a> {
 
     pub fn car_network(&self) -> Option<Arc<crate::element_processing::cars::CarNetwork>> {
         self.car_network.clone()
+    }
+
+    /// Detaches the signage context, so the caller can hold the only handle.
+    pub fn take_signage(
+        &mut self,
+    ) -> Option<Arc<crate::element_processing::signage::SignageContext>> {
+        self.signage.take()
     }
 
     /// The signage context, if decals are enabled and a registry was built.
@@ -1326,27 +1340,29 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).
-    pub(crate) fn take_road_surface_overrides(&mut self) -> FnvHashMap<(i32, i32), i32> {
+    pub(crate) fn take_road_surface_overrides(&mut self) -> CoordMap<i32> {
         std::mem::take(&mut self.road_surface_overrides)
     }
 
-    /// Merge in road-surface overrides from a tile editor so post-merge passes stay road-aware.
-    pub(crate) fn merge_road_surface_overrides(&mut self, overrides: FnvHashMap<(i32, i32), i32>) {
-        self.road_surface_overrides.extend(overrides);
-    }
-
-    /// Merge only the overrides whose cell falls in `regions`. Under stream-to-disk, only the
-    /// deferred 3D regions need road-aware ground for the post-merge placement pass.
-    pub(crate) fn merge_road_surface_overrides_in_regions(
+    /// Merge a tile's road-surface overrides so post-merge passes stay road-aware. Inside the
+    /// world only the cells in `owned` are taken: a road is redone in every tile it crosses,
+    /// with heights that depend on what that tile laid first, and the owner's are the ones its
+    /// ground was built to. That also makes each value final once its owner has merged, which
+    /// placements made during the merge rely on. `regions`, under stream-to-disk, keeps only
+    /// the cells deferred placements can read.
+    pub(crate) fn merge_road_surface_overrides(
         &mut self,
-        overrides: FnvHashMap<(i32, i32), i32>,
-        regions: &std::collections::HashSet<(i32, i32)>,
+        overrides: CoordMap<i32>,
+        (min_x, min_z, max_x, max_z): (i32, i32, i32, i32),
+        regions: Option<&std::collections::HashSet<(i32, i32)>>,
     ) {
-        self.road_surface_overrides.extend(
-            overrides
-                .into_iter()
-                .filter(|((x, z), _)| regions.contains(&(x >> 9, z >> 9))),
-        );
+        let world = self.xzbbox;
+        self.road_surface_overrides
+            .extend(overrides.into_iter().filter(|&((x, z), _)| {
+                let owned = x >= min_x && x <= max_x && z >= min_z && z <= max_z;
+                (owned || !world.contains(&XZPoint::new(x, z)))
+                    && regions.is_none_or(|r| r.contains(&(x >> 9, z >> 9)))
+            }));
     }
 
     /// Get the water-appropriate Y level at a world coordinate.
@@ -2200,8 +2216,8 @@ impl<'a> WorldEditor<'a> {
             return;
         }
 
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
+        // An empty cell is always written; an occupied one per the whitelist or blacklist.
+        let replace = |existing_block: Block| {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
@@ -2213,14 +2229,9 @@ impl<'a> WorldEditor<'a> {
             } else {
                 false
             }
-        } else {
-            true
         };
-
-        if should_insert {
-            self.world
-                .set_block_with_properties(x, absolute_y, z, block_with_props);
-        }
+        self.world
+            .set_block_with_properties_if(x, absolute_y, z, block_with_props, replace);
     }
 
     /// Fill a rectangular volume with a block using absolute Y coordinates.
@@ -2739,11 +2750,7 @@ impl FlushWorker {
                             return Ok(());
                         };
                         let started = bench.then(std::time::Instant::now);
-                        for chunk in region.chunks.values_mut() {
-                            for section in chunk.sections.values_mut() {
-                                section.compact();
-                            }
-                        }
+                        region.compact_sections();
                         let result = ctx.write(rxx, rzz, &region);
                         if let Some(t) = started {
                             write_ns.fetch_add(
@@ -2910,8 +2917,8 @@ mod eviction_guard_tests {
     /// One region with a single non-AIR block, so the writer has real work to do.
     fn flush_test_region() -> common::RegionToModify {
         let mut region = common::RegionToModify::default();
-        let chunk = region.chunks.entry((0, 0)).or_default();
-        let section = chunk.sections.entry(0).or_default();
+        let chunk = region.get_or_create_chunk(0, 0);
+        let section = chunk.sections.get_or_default(0);
         section.storage.set(0, SMOOTH_STONE);
         region
     }
@@ -3150,5 +3157,45 @@ mod eviction_guard_tests {
             assert!(!editor.place_wall_sign(10, 5, 10, facing, &["x"]));
         }
         assert!(editor.place_wall_sign(10, 5, 10, 2, &["x"]));
+    }
+}
+
+#[cfg(test)]
+mod road_override_merge_tests {
+    use super::*;
+    use crate::coordinate_system::geographic::LLBBox;
+    use std::collections::HashSet;
+
+    #[test]
+    fn each_cell_keeps_its_owners_road_height_whatever_the_merge_order() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 1023, 511).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // Both tiles redo one road across the world and past its western edge, at their own heights.
+        let road = |y: i32| -> CoordMap<i32> {
+            [(100, 5), (700, 5), (-10, 5)]
+                .into_iter()
+                .map(|cell| (cell, y))
+                .collect()
+        };
+        let (west, east) = ((0, 0, 511, 511), (512, 0, 1023, 511));
+        for order in [[(west, 10), (east, 20)], [(east, 20), (west, 10)]] {
+            let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+            for (owned, y) in order {
+                editor.merge_road_surface_overrides(road(y), owned, None);
+            }
+            assert_eq!(editor.get_ground_level(100, 5), 10);
+            assert_eq!(editor.get_ground_level(700, 5), 20);
+            // No tile owns a cell outside the world, so the last one merged keeps it.
+            assert_eq!(editor.get_ground_level(-10, 5), order[1].1);
+        }
+
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        let regions: HashSet<(i32, i32)> = [(0, 0)].into();
+        editor.merge_road_surface_overrides(road(20), east, Some(&regions));
+        assert_eq!(
+            editor.get_ground_level(700, 5),
+            0,
+            "outside the kept regions"
+        );
     }
 }

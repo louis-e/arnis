@@ -2027,17 +2027,12 @@ fn gui_start_generation(
                         parsed_elements.extend(unique_overture);
                     }
 
-                    parsed_elements.sort_by(|el1, el2| {
-                        let (el1_priority, el2_priority) =
-                            (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
-                        match (
-                            el1.tags().contains_key("landuse"),
-                            el2.tags().contains_key("landuse"),
-                        ) {
-                            (true, false) => std::cmp::Ordering::Greater,
-                            (false, true) => std::cmp::Ordering::Less,
-                            _ => el1_priority.cmp(&el2_priority),
-                        }
+                    // Landuse last, then by priority; keyed once per element, not per comparison.
+                    parsed_elements.sort_by_cached_key(|el| {
+                        (
+                            el.tags().contains_key("landuse"),
+                            osm_parser::get_priority(el),
+                        )
                     });
 
                     let mut ground = ground;

@@ -156,11 +156,11 @@ impl LandmarkPrescan {
         &self.suppressed
     }
 
-    /// Regions a landmark may write to, so stream-to-disk keeps them resident.
-    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+    /// Regions each landmark may write to, so stream-to-disk keeps them resident.
+    pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
         self.placements
             .iter()
-            .flat_map(|p| {
+            .map(|p| {
                 let r = (p.landmark.reach_m as f64 * scale).ceil() as i32;
                 crate::models_3d::region_keys_around(p.world_x, p.world_z, r)
             })
@@ -496,13 +496,17 @@ fn erode(mask: &[bool], span_x: usize, span_z: usize, r: usize) -> Vec<bool> {
 }
 
 impl LandmarkPrescan {
-    /// Stamp the landmarks, after ground generation so terrain Y is final.
-    pub fn place(&self, editor: &mut WorldEditor, args: &Args) {
-        if self.placements.is_empty() || !editor.place_schematics() {
+    pub fn placement_count(&self) -> usize {
+        self.placements.len()
+    }
+
+    /// Stamp `indices` (ascending), after ground generation so terrain Y is final.
+    pub fn place(&self, editor: &mut WorldEditor, args: &Args, indices: &[usize]) {
+        if indices.is_empty() || !editor.place_schematics() {
             return;
         }
-        for placement in &self.placements {
-            place_one(editor, args, placement);
+        for &i in indices {
+            place_one(editor, args, &self.placements[i]);
         }
     }
 }

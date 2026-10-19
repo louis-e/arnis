@@ -636,7 +636,7 @@ impl BedrockWriter {
             self.create_data3d(chunk),
         ));
         // Subchunks.
-        for (&section_y, section) in &chunk.sections {
+        for (section_y, section) in chunk.sections.iter() {
             let bytes = self.encode_subchunk(section, section_y)?;
             records.push((
                 build_chunk_key_bytes(

@@ -291,7 +291,7 @@ fn process_element(
     bridge_structures: &bridges::BridgeStructureMap,
     bridge_surface: &bridges::BridgeSurfaceMap,
     bridge_outlines: &bridge_styles::BridgeOutlineIndex,
-    rail_tunnel_points: &mut Vec<(i32, i32)>,
+    rail_tunnel_points: &mut Vec<railways::RailTunnelPoint>,
     tunnel_internal_endpoints: &highways::TunnelInternalEndpoints,
     tunnel_portals: &highways::TunnelPortalMap,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
@@ -613,21 +613,13 @@ impl Drop for AbortOnPanic<'_> {
     }
 }
 
-/// Whether to stream regions to disk (lower peak RAM) for `num_regions` regions. Auto-enabled
-/// when the estimated resident world would crowd available RAM; trades some time for RAM, output
-/// unchanged (3D models + subways preserved). `ARNIS_STREAM_TO_DISK=1/0` overrides; constants tunable.
-fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool) -> bool {
-    match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
-        Some("1") => return true,
-        Some("0") => return false,
-        _ => {}
-    }
-    const BASE_MB: u64 = 500;
-    let est_peak_mb =
-        BASE_MB + crate::world_editor::per_region_estimate_mb(fillground) * num_regions as u64;
-
-    // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
-    available_mb > 0 && est_peak_mb * 100 > available_mb * 55
+/// Whether to stream finished regions to disk during the tile loop. Writing them while tiles
+/// are still being built costs no time against one save at the end, and RAM then follows the
+/// tiles in flight rather than the area, so it is the default whatever the machine has free;
+/// that also keeps the output from depending on free RAM. `ARNIS_STREAM_TO_DISK=0` keeps the
+/// whole world resident instead.
+fn should_stream_to_disk() -> bool {
+    std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() != Some("0")
 }
 
 /// Caps concurrent tile editors (~2 regions each, region + halo) to 20% of free RAM.
@@ -649,9 +641,38 @@ fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: b
 
 /// Free RAM in MB.
 fn available_memory_mb() -> u64 {
+    #[cfg(target_os = "macos")]
+    if let Some(mb) = macos_available_memory_mb() {
+        return mb;
+    }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
     sys.available_memory() / (1024 * 1024)
+}
+
+/// sysinfo subtracts the compressor's pages from free + inactive, so a busy compressor reads as
+/// a few hundred MB free and pins the run to one tile thread; the kernel's own level does not.
+#[cfg(target_os = "macos")]
+fn macos_available_memory_mb() -> Option<u64> {
+    fn sysctl<T: Default>(name: &std::ffi::CStr) -> Option<T> {
+        let mut value = T::default();
+        let mut len = std::mem::size_of::<T>();
+        let ok = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                (&mut value as *mut T).cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        } == 0;
+        (ok && len == std::mem::size_of::<T>()).then_some(value)
+    }
+    let level: u32 = sysctl(c"kern.memorystatus_level")?;
+    let total: u64 = sysctl(c"hw.memsize")?;
+    (1..=100)
+        .contains(&level)
+        .then(|| total / 100 * u64::from(level) / (1024 * 1024))
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -843,7 +864,7 @@ pub fn generate_world_with_options(
     } else {
         crate::decals::registry::DecalRegistry::FIRST_ID
     };
-    let signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
+    let mut signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
         == WorldFormat::JavaAnvil)
         .then(|| signage::build_context(&elements, args, llbbox, &xzbbox, first_decal_id))
         .flatten()
@@ -949,7 +970,7 @@ pub fn generate_world_with_options(
     let extras = crate::datapack::Extras::from_args(args);
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
-    let mut rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
+    let mut rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
     let mut tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
 
     // Set ground reference in the editor to enable elevation-aware block placement
@@ -1144,6 +1165,34 @@ pub fn generate_world_with_options(
     let landmark_suppressed: &HashSet<(&'static str, u64)> = landmarks.suppressed();
     let has_landmarks = !landmark_suppressed.is_empty();
 
+    // Post-merge placements, numbered in the order they go in: 3D models, planes, then
+    // landmarks, last because they clear their own footprint.
+    let model_count = models_3d_pipeline
+        .as_ref()
+        .map_or(0, |p| p.placement_count());
+    let landmark_from = model_count + planes.placement_count();
+    let placement_total = landmark_from + landmarks.placement_count();
+    let place_units = |editor: &mut WorldEditor, units: &[usize]| {
+        let pick = |lo: usize, hi: usize| -> Vec<usize> {
+            units
+                .iter()
+                .filter(|&&u| (lo..hi).contains(&u))
+                .map(|&u| u - lo)
+                .collect()
+        };
+        if let Some(p) = models_3d_pipeline.as_ref() {
+            p.place(editor, args, &pick(0, model_count));
+        }
+        crate::structures::plane::place_plane_models(
+            editor,
+            &planes,
+            &pick(model_count, landmark_from),
+        );
+        landmarks.place(editor, args, &pick(landmark_from, placement_total));
+    };
+    // Filled in by the streaming tile path; otherwise everything is placed after the merge.
+    let mut deferred = crate::deferred_placement::DeferredPlacements::new(Vec::new(), |_| false);
+
     bench.mark("precompute");
 
     println!("{} Generating area...", "[5/7]".bold());
@@ -1200,11 +1249,10 @@ pub fn generate_world_with_options(
             |id| flood_fill_cache.contains(id),
         );
 
-        // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
-        // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
-        // are kept via region deferral.
+        // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge.
+        // Java only; regions a 3D placement still needs stay until it has gone in.
         // Read at the decision point: the precompute above allocates heavily, and an
-        // optimistic figure would skip streaming in exactly the runs that need it.
+        // optimistic figure would size the thread pools past what is free.
         let available_mb = available_memory_mb();
         let tile_batch_size =
             tile_processing_threads(rayon::current_num_threads(), available_mb, args.fillground);
@@ -1212,22 +1260,26 @@ pub fn generate_world_with_options(
             "  Processing {} tiles across {tile_batch_size} threads...",
             tiles.len()
         );
-        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
-            && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
+        eviction_active = matches!(world_format, WorldFormat::JavaAnvil) && should_stream_to_disk();
 
-        // Regions any 3D placement may write to: kept resident (not evicted in-loop)
-        // so the post-merge placement pass lands in RAM, then flushed at finalize.
-        let model_regions: HashSet<(i32, i32)> = if eviction_active {
-            let mut regions: HashSet<(i32, i32)> = models_3d_pipeline
+        let region_of_tile: Vec<(i32, i32)> =
+            tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
+        real_regions = region_of_tile.iter().copied().collect();
+
+        // Regions a post-merge placement may write to stay resident until it has gone in,
+        // which under streaming is as soon as all of its regions have merged their tiles.
+        if eviction_active {
+            let mut units = models_3d_pipeline
                 .as_ref()
-                .map(|p| p.deferred_region_keys(args.scale))
+                .map(|p| p.placement_regions(args.scale))
                 .unwrap_or_default();
-            regions.extend(landmarks.deferred_region_keys(args.scale));
-            regions.extend(planes.deferred_region_keys());
-            regions
-        } else {
-            HashSet::new()
-        };
+            units.extend(planes.placement_regions());
+            units.extend(landmarks.placement_regions(args.scale));
+            deferred = crate::deferred_placement::DeferredPlacements::new(units, |r| {
+                real_regions.contains(&r)
+            });
+        }
+        let model_regions: HashSet<(i32, i32)> = deferred.regions().copied().collect();
 
         if eviction_active {
             let (flush_threads, flush_queue) = crate::world_editor::flush_pool_params(
@@ -1269,9 +1321,6 @@ pub fn generate_world_with_options(
             });
         }
 
-        let region_of_tile: Vec<(i32, i32)> =
-            tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
-        real_regions = region_of_tile.iter().copied().collect();
         // remaining[R] = 1 (owner) + count of R's in-grid region neighbours; R is
         // flushable when this reaches 0 (owner + all neighbour tiles merged).
         let mut remaining: HashMap<(i32, i32), u32> = HashMap::new();
@@ -1339,7 +1388,7 @@ pub fn generate_world_with_options(
                 tile_bounds.max_z - 1,
             );
 
-            let mut tile_rail_tunnel_points: Vec<(i32, i32)> = Vec::new();
+            let mut tile_rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
             let mut tile_tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
 
             for &elem_idx in &tile_assignments[tile_idx] {
@@ -1545,56 +1594,63 @@ pub fn generate_world_with_options(
                             tiles[tile_idx].max_x - 1,
                             tiles[tile_idx].max_z - 1,
                         );
-                        // Carry road-surface overrides to the main editor so the post-merge 3D-model
-                        // pass stays road-aware. Under eviction keep only the deferred 3D regions'
-                        // overrides (the rest are evicted; this caps the extra resident RAM).
-                        if eviction_active {
-                            editor.merge_road_surface_overrides_in_regions(
-                                tile_road_overrides,
-                                &model_regions,
-                            );
-                        } else {
-                            editor.merge_road_surface_overrides(tile_road_overrides);
-                        }
+                        // Under eviction only the deferred placements' regions keep theirs; the
+                        // rest are evicted, and this caps the extra resident RAM.
+                        editor.merge_road_surface_overrides(
+                            tile_road_overrides,
+                            (
+                                tiles[tile_idx].min_x,
+                                tiles[tile_idx].min_z,
+                                tiles[tile_idx].max_x - 1,
+                                tiles[tile_idx].max_z - 1,
+                            ),
+                            eviction_active.then_some(&model_regions),
+                        );
 
                         if eviction_active {
-                            // This tile contributes to its own region and its 8 neighbours;
-                            // flush each non-deferred region whose contributors are all merged.
+                            // This tile contributes to its own region and its 8 neighbours.
+                            // A region whose contributors have all merged releases the
+                            // placements waiting on it, and is flushed once none still is.
                             // (Rail tunnels are carved in-tile above, so they don't defer regions.)
                             let rt = region_of_tile[tile_idx];
+                            let mut flushable: Vec<(i32, i32)> = Vec::new();
                             for dz in -1..=1 {
                                 for dx in -1..=1 {
                                     let d = (rt.0 + dx, rt.1 + dz);
-                                    if let Some(c) = remaining.get_mut(&d) {
-                                        *c -= 1;
-                                        if *c == 0
-                                            && !evicted_regions.contains(&d)
-                                            && !model_regions.contains(&d)
-                                            && Some(d) != spawn_region
-                                        {
-                                            if hash_check {
-                                                hash_acc = hash_acc.wrapping_add(
-                                                    editor.region_content_hash(d.0, d.1),
-                                                );
-                                            }
-                                            // Facade panels check the region's final blocks
-                                            // and must be in before it leaves memory.
-                                            crate::mapillary::displays::flush_region(
-                                                &mut editor,
-                                                d.0,
-                                                d.1,
-                                            );
-                                            crate::building_facades::flush_region(
-                                                &mut editor,
-                                                d.0,
-                                                d.1,
-                                            );
-                                            if let Some(w) = flush_worker.as_ref() {
-                                                editor.flush_region_via(w, d.0, d.1)?;
-                                            }
-                                            evicted_regions.insert(d);
+                                    let Some(c) = remaining.get_mut(&d) else {
+                                        continue;
+                                    };
+                                    *c -= 1;
+                                    if *c > 0 {
+                                        continue;
+                                    }
+                                    flushable.push(d);
+                                    for wave in deferred.complete(d) {
+                                        place_units(&mut editor, &wave);
+                                        for &unit in &wave {
+                                            flushable.extend_from_slice(deferred.regions_of(unit));
                                         }
                                     }
+                                }
+                            }
+                            for d in flushable {
+                                if remaining.get(&d) == Some(&0)
+                                    && !evicted_regions.contains(&d)
+                                    && !deferred.holds(d)
+                                    && Some(d) != spawn_region
+                                {
+                                    if hash_check {
+                                        hash_acc = hash_acc
+                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                    }
+                                    // Facade panels check the region's final blocks
+                                    // and must be in before it leaves memory.
+                                    crate::mapillary::displays::flush_region(&mut editor, d.0, d.1);
+                                    crate::building_facades::flush_region(&mut editor, d.0, d.1);
+                                    if let Some(w) = flush_worker.as_ref() {
+                                        editor.flush_region_via(w, d.0, d.1)?;
+                                    }
+                                    evicted_regions.insert(d);
                                 }
                             }
                         }
@@ -1817,7 +1873,21 @@ pub fn generate_world_with_options(
     // actually frees the bitmap.
     editor.release_sealed_surface();
     drop(sealed_surface);
+    // The barrier clearance shares the road mask, so it goes first.
+    drop(barrier_clearance);
     drop(road_mask);
+    drop(interior_uses);
+    drop(still_surfaces);
+    drop(tunnel_portals);
+    drop(tunnel_internal_endpoints);
+    // The tile editors are gone, so the editor and this function hold the only handles.
+    if let Some(ctx) = signage_ctx.as_mut() {
+        drop(editor.take_signage());
+        if let Some(ctx) = Arc::get_mut(ctx) {
+            ctx.release_placement_masks();
+        }
+        editor.set_signage(Arc::clone(ctx));
+    }
     drop(tunnel_footprint);
     drop(rail_mask);
     drop(big_water_field);
@@ -1846,16 +1916,18 @@ pub fn generate_world_with_options(
         );
     }
 
-    // Run after ground generation so anchor Y reflects the final terrain.
-    if let Some(p) = models_3d_pipeline.as_ref() {
-        p.place(&mut editor, args);
-    }
-    crate::structures::plane::place_plane_models(&mut editor, &planes);
-    // Last, because they clear their own footprint.
-    let landmarks_start = args.benchmark.then(std::time::Instant::now);
-    landmarks.place(&mut editor, args);
-    if let Some(t) = landmarks_start {
-        bench.report("landmark_place", t.elapsed());
+    // Run after ground generation so anchor Y reflects the final terrain. Streaming placed
+    // them as their regions completed; only stragglers are left.
+    if eviction_active {
+        place_units(&mut editor, &deferred.drain());
+    } else {
+        let all: Vec<usize> = (0..placement_total).collect();
+        place_units(&mut editor, &all[..landmark_from]);
+        let landmarks_start = args.benchmark.then(std::time::Instant::now);
+        place_units(&mut editor, &all[landmark_from..]);
+        if let Some(t) = landmarks_start {
+            bench.report("landmark_place", t.elapsed());
+        }
     }
     bench.mark("post_passes");
 

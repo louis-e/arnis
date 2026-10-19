@@ -63,18 +63,28 @@ fn perpendicular_median_raw(
     ys[len / 2]
 }
 
-/// Precompute one perpendicular-median Y per axial position in a
-/// centerline's stamp. Hot-loop optimization: inside a single centerline
-/// point's `(2b+1) × (2b+1)` stamp, every cell that shares a given axial
-/// offset (dx for horizontal travel, dz for vertical travel) produces
-/// the same target Y — `perpendicular_median_ground_y` ignores the
-/// cross-axis position entirely. Computing it once per axial value and
-/// reading from this table in the inner loop cuts `get_ground_level`
-/// call count by a factor of `2b+1` on the main road-stamp path.
+/// Precompute one target Y per axial position in a centerline's stamp.
 ///
-/// The table layout maps axial offset `a ∈ [-block_range, block_range]`
-/// to index `(a + block_range) as usize`. `out.len()` must be at least
-/// `2 * block_range + 1`.
+/// Each slot is the median of the ground levels along the road's width-perpendicular strip
+/// **at that cell's along-length coordinate**. Nothing is sampled in the travel direction,
+/// so the target Y follows the terrain along the road while staying identical across the
+/// width at any length position: every lateral cross-section sits flat, not pitched
+/// sideways down a slope.
+///
+/// A 3-tap median along the length axis is layered on top, purely to kill 1-cell terrain
+/// noise that would otherwise leave single-block potholes in the road surface
+/// (e.g. `…1 1 0 1 1…` → `…1 1 1 1 1…`). A monotone ramp is unaffected because the 3-tap
+/// median of any monotonic triple is the middle value.
+///
+/// Hot-loop optimization: every cell of the `(2b+1) × (2b+1)` stamp that shares an axial
+/// offset (dx for horizontal travel, dz for vertical travel) gets the same Y, and
+/// neighbouring offsets share two of their three raw strip medians, so each raw median is
+/// taken once per centerline point.
+///
+/// The table layout maps axial offset `a ∈ [-block_range, block_range]` to index
+/// `(a + block_range) as usize`. `out.len()` must be at least `2 * block_range + 1`.
+/// `dir_horizontal` is true when `|dx_segment| >= |dz_segment|`, i.e. travel is
+/// x-dominant and the strips run along z.
 #[inline]
 fn precompute_row_medians(
     editor: &WorldEditor,
@@ -87,14 +97,15 @@ fn precompute_row_medians(
     debug_assert!(block_range as usize <= MAX_BLOCK_RANGE);
     let len = 2 * block_range as usize + 1;
     debug_assert!(out.len() >= len);
-    for (i, slot) in out[..len].iter_mut().enumerate() {
-        let axial = -block_range + i as i32;
+    let mut raw = [0i32; 2 * MAX_BLOCK_RANGE + 3];
+    for (i, slot) in raw[..len + 2].iter_mut().enumerate() {
+        let axial = -block_range - 1 + i as i32;
         let (sx, sz) = if dir_horizontal {
             (centerline_x + axial, centerline_z)
         } else {
             (centerline_x, centerline_z + axial)
         };
-        *slot = perpendicular_median_ground_y(
+        *slot = perpendicular_median_raw(
             editor,
             sx,
             sz,
@@ -104,75 +115,11 @@ fn precompute_row_medians(
             dir_horizontal,
         );
     }
-}
-
-/// Median of the ground levels along the road's width-perpendicular strip
-/// **at this specific cell's along-length coordinate**. Does NOT sample
-/// anything in the travel direction, so the target Y varies naturally
-/// along the length of the road (terrain-following) while staying
-/// identical across the width at any given length position — meaning
-/// every block in one lateral cross-section sits flat (not pitched
-/// sideways down a slope).
-///
-/// A 3-tap median along the road's length axis is layered on top, purely
-/// to kill 1-cell terrain noise that would otherwise leave single-block
-/// potholes in the road surface (e.g. `…1 1 0 1 1…` → `…1 1 1 1 1…`).
-/// A monotone ramp is unaffected because the 3-tap median of any
-/// monotonic triple is the middle value.
-///
-/// - `set_x, set_z` — the cell whose Y we're computing.
-/// - `centerline_x, centerline_z` — the current centerline bresenham point.
-///   Only the axis perpendicular to travel is used (e.g. `centerline_z`
-///   for a horizontal-dominant segment); the cell's own along-length
-///   coordinate drives the other axis, which is what makes the sampling
-///   cell-specific instead of centerline-specific.
-/// - `dir_horizontal` — true when `|dx_segment| >= |dz_segment|`, telling
-///   us travel is x-dominant (so perpendicular sampling runs along z).
-#[inline]
-fn perpendicular_median_ground_y(
-    editor: &WorldEditor,
-    set_x: i32,
-    set_z: i32,
-    centerline_x: i32,
-    centerline_z: i32,
-    block_range: i32,
-    dir_horizontal: bool,
-) -> i32 {
-    let (prev_x, prev_z, next_x, next_z) = if dir_horizontal {
-        (set_x - 1, set_z, set_x + 1, set_z)
-    } else {
-        (set_x, set_z - 1, set_x, set_z + 1)
-    };
-    let t_prev = perpendicular_median_raw(
-        editor,
-        prev_x,
-        prev_z,
-        centerline_x,
-        centerline_z,
-        block_range,
-        dir_horizontal,
-    );
-    let t_curr = perpendicular_median_raw(
-        editor,
-        set_x,
-        set_z,
-        centerline_x,
-        centerline_z,
-        block_range,
-        dir_horizontal,
-    );
-    let t_next = perpendicular_median_raw(
-        editor,
-        next_x,
-        next_z,
-        centerline_x,
-        centerline_z,
-        block_range,
-        dir_horizontal,
-    );
-    let mut arr = [t_prev, t_curr, t_next];
-    arr.sort_unstable();
-    arr[1]
+    for (i, slot) in out[..len].iter_mut().enumerate() {
+        let mut taps = [raw[i], raw[i + 1], raw[i + 2]];
+        taps.sort_unstable();
+        *slot = taps[1];
+    }
 }
 
 /// Default block-mix used for road surfaces when no `surface=*` tag is

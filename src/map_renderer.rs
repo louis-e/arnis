@@ -130,14 +130,13 @@ impl PreviewAccumulator {
         let ph = ((z1 - self.min_z) as u32 / self.step - pz0 + 1) as usize;
         let mut local = vec![[0u16; 4]; pw * ph];
 
-        for (&(chunk_x, chunk_z), chunk) in &region.chunks {
+        for ((chunk_x, chunk_z), chunk) in region.chunks.iter() {
             let cbx = base_x + chunk_x * 16;
             let cbz = base_z + chunk_z * 16;
             if cbx + 15 < x0 || cbx > x1 || cbz + 15 < z0 || cbz > z1 {
                 continue;
             }
-            let mut sections: Vec<(i8, &SectionToModify)> =
-                chunk.sections.iter().map(|(y, s)| (*y, s)).collect();
+            let mut sections: Vec<(i8, &SectionToModify)> = chunk.sections.iter().collect();
             if sections.is_empty() {
                 continue;
             }

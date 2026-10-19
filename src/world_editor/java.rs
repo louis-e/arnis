@@ -567,7 +567,7 @@ fn live_lod_sections(
             let chunk_z = region_z * 32 + local_z;
             match region.get_chunk(local_x, local_z) {
                 Some(chunk) => {
-                    for &section_y in chunk.sections.keys() {
+                    for section_y in chunk.sections.keys() {
                         crate::voxy::mark_live(&mut live, chunk_x, section_y as i32, chunk_z);
                     }
                 }
@@ -590,7 +590,7 @@ fn region_content_span(region: &super::common::RegionToModify) -> (i32, i32) {
     let mut min_y = base_section_y.min(-4);
     let mut max_y = base_section_y;
     for chunk in region.chunks.values() {
-        for &section_y in chunk.sections.keys() {
+        for section_y in chunk.sections.keys() {
             min_y = min_y.min(section_y as i32);
             max_y = max_y.max(section_y as i32);
         }
@@ -2076,8 +2076,8 @@ mod merge_tests {
     ) -> RegionToModify {
         let mut region = RegionToModify::default();
         for &(cx, cz) in chunks {
-            let chunk = region.chunks.entry((cx, cz)).or_default();
-            let section = chunk.sections.entry(0).or_default();
+            let chunk = region.get_or_create_chunk(cx, cz);
+            let section = chunk.sections.get_or_default(0);
             section.storage.set(0, block);
         }
         region
