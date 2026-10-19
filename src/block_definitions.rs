@@ -988,32 +988,37 @@ pub fn create_stair_with_properties(
     facing: StairFacing,
     shape: StairShape,
 ) -> BlockWithProperties {
+    // Each thread keeps the shared compounds it has used: roofs ask for a
+    // stair per cell, and every thread queued on the one lock.
+    type Local = fnv::FnvHashMap<(u16, StairFacing, StairShape), Arc<Value>>;
+    thread_local! {
+        static LOCAL: std::cell::RefCell<Local> = std::cell::RefCell::default();
+    }
     let cache_key = (base_stair_block.id(), facing, shape);
-
-    {
-        let cache = STAIR_CACHE.lock().unwrap();
-        if let Some(cached_props) = cache.get(&cache_key) {
-            return BlockWithProperties::from_arc(base_stair_block, Some(cached_props.clone()));
-        }
+    if let Some(props) = LOCAL.with(|local| local.borrow().get(&cache_key).cloned()) {
+        return BlockWithProperties::from_arc(base_stair_block, Some(props));
     }
 
-    let mut map = HashMap::new();
-    map.insert(
-        "facing".to_string(),
-        Value::String(facing.as_str().to_string()),
-    );
-    if !matches!(shape, StairShape::Straight) {
-        map.insert(
-            "shape".to_string(),
-            Value::String(shape.as_str().to_string()),
-        );
-    }
-
-    let properties = Arc::new(Value::Compound(map));
-    {
-        let mut cache = STAIR_CACHE.lock().unwrap();
-        cache.insert(cache_key, properties.clone());
-    }
+    let properties = STAIR_CACHE
+        .lock()
+        .unwrap()
+        .entry(cache_key)
+        .or_insert_with(|| {
+            let mut map = HashMap::new();
+            map.insert(
+                "facing".to_string(),
+                Value::String(facing.as_str().to_string()),
+            );
+            if !matches!(shape, StairShape::Straight) {
+                map.insert(
+                    "shape".to_string(),
+                    Value::String(shape.as_str().to_string()),
+                );
+            }
+            Arc::new(Value::Compound(map))
+        })
+        .clone();
+    LOCAL.with(|local| local.borrow_mut().insert(cache_key, properties.clone()));
 
     BlockWithProperties::from_arc(base_stair_block, Some(properties))
 }
