@@ -613,21 +613,13 @@ impl Drop for AbortOnPanic<'_> {
     }
 }
 
-/// Whether to stream regions to disk (lower peak RAM) for `num_regions` regions. Auto-enabled
-/// when the estimated resident world would crowd available RAM; trades some time for RAM, output
-/// unchanged (3D models + subways preserved). `ARNIS_STREAM_TO_DISK=1/0` overrides; constants tunable.
-fn should_stream_to_disk(num_regions: usize, available_mb: u64, fillground: bool) -> bool {
-    match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
-        Some("1") => return true,
-        Some("0") => return false,
-        _ => {}
-    }
-    const BASE_MB: u64 = 500;
-    let est_peak_mb =
-        BASE_MB + crate::world_editor::per_region_estimate_mb(fillground) * num_regions as u64;
-
-    // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
-    available_mb > 0 && est_peak_mb * 100 > available_mb * 55
+/// Whether to stream finished regions to disk during the tile loop. Writing them while tiles
+/// are still being built costs no time against one save at the end, and RAM then follows the
+/// tiles in flight rather than the area, so it is the default whatever the machine has free;
+/// that also keeps the output from depending on free RAM. `ARNIS_STREAM_TO_DISK=0` keeps the
+/// whole world resident instead.
+fn should_stream_to_disk() -> bool {
+    std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() != Some("0")
 }
 
 /// Caps concurrent tile editors (~2 regions each, region + halo) to 20% of free RAM.
@@ -1257,11 +1249,10 @@ pub fn generate_world_with_options(
             |id| flood_fill_cache.contains(id),
         );
 
-        // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
-        // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
-        // are kept via region deferral.
+        // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge.
+        // Java only; regions a 3D placement still needs stay until it has gone in.
         // Read at the decision point: the precompute above allocates heavily, and an
-        // optimistic figure would skip streaming in exactly the runs that need it.
+        // optimistic figure would size the thread pools past what is free.
         let available_mb = available_memory_mb();
         let tile_batch_size =
             tile_processing_threads(rayon::current_num_threads(), available_mb, args.fillground);
@@ -1269,8 +1260,7 @@ pub fn generate_world_with_options(
             "  Processing {} tiles across {tile_batch_size} threads...",
             tiles.len()
         );
-        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
-            && should_stream_to_disk(tiles.len(), available_mb, args.fillground);
+        eviction_active = matches!(world_format, WorldFormat::JavaAnvil) && should_stream_to_disk();
 
         let region_of_tile: Vec<(i32, i32)> =
             tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
