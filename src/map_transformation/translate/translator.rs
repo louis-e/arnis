@@ -76,6 +76,9 @@ mod tests {
         let vector = XZVector { dx, dz };
 
         let (xzbbox1, elements1) = generate_default_example();
+        for kind in ["node", "way", "relation"] {
+            assert!(elements1.iter().any(|e| e.kind() == kind), "no {kind}");
+        }
 
         let mut xzbbox2 = xzbbox1.clone();
         let mut elements2 = elements1.clone();
