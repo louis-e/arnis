@@ -208,7 +208,8 @@ pub fn generate_natural(
                 for &(x, z) in filled_area.iter() {
                     // Nothing lands outside this editor, and no draw happens before the
                     // ownership check below, so the rest of a large area costs nothing.
-                    if !editor.in_bounds(x, z) {
+                    // Owned cells, such as One World's clip margin, still take their draws.
+                    if !editor.in_bounds(x, z) && !editor.owns(x, z) {
                         continue;
                     }
                     // Roads, paths and paved areas keep their own surface. Checked

@@ -121,7 +121,8 @@ pub fn generate_landuse(
     for &(x, z) in floor_area.iter() {
         // A tile reads the whole area, but nothing lands outside its editor; only the
         // per-cell draw has to happen there, so the cells it owns see the same sequence.
-        if !editor.in_bounds(x, z) {
+        // The main editor owns One World's clip margin, and every draw there still counts.
+        if !editor.in_bounds(x, z) && !editor.owns(x, z) {
             if draws_per_cell {
                 rng.random_range(0..100);
             }
