@@ -124,25 +124,39 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
 
     let mut total_repaired = 0usize;
     let mut passes_ran = 0usize;
-    // Cells to judge in the next pass; None for all of them.
-    let mut candidates: Option<Vec<(usize, usize)>> = None;
+    // Cells to judge in the next pass, a bit each in rows of `words`; None for all of them.
+    // A bitmap stays at one bit per cell however dense the repairs get.
+    let words = grid_w.div_ceil(64);
+    let mut candidates: Option<Vec<u64>> = None;
 
     for pass in 0..passes {
         let grid: &[Vec<f64>] = heights;
-        let repairs: Vec<(usize, usize, f64)> = match &candidates {
+        let repairs: Vec<(u32, u32, f64)> = match &candidates {
             None => (r..grid_h - r)
                 .into_par_iter()
                 .map_init(scratch, |buf, y| {
                     (r..grid_w - r)
-                        .filter_map(|x| judge(grid, y, x, buf).map(|m| (y, x, m)))
+                        .filter_map(|x| judge(grid, y, x, buf).map(|m| (y as u32, x as u32, m)))
                         .collect::<Vec<_>>()
                 })
                 .flatten()
                 .collect(),
-            Some(cells) => cells
-                .par_iter()
-                .map_init(scratch, |buf, &(y, x)| {
-                    judge(grid, y, x, buf).map(|m| (y, x, m))
+            Some(bits) => bits
+                .par_chunks(words)
+                .enumerate()
+                .map_init(scratch, |buf, (y, row)| {
+                    let mut found = Vec::new();
+                    for (w, &word) in row.iter().enumerate() {
+                        let mut word = word;
+                        while word != 0 {
+                            let x = w * 64 + word.trailing_zeros() as usize;
+                            word &= word - 1;
+                            if let Some(m) = judge(grid, y, x, buf) {
+                                found.push((y as u32, x as u32, m));
+                            }
+                        }
+                    }
+                    found
                 })
                 .flatten()
                 .collect(),
@@ -151,21 +165,23 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
             break;
         }
         for &(y, x, median) in &repairs {
-            heights[y][x] = median;
+            heights[y as usize][x as usize] = median;
         }
-        let mut next: Vec<(usize, usize)> = repairs
-            .iter()
-            .flat_map(|&(y, x, _)| {
-                let ys = y.saturating_sub(r).max(r)..(y + r + 1).min(grid_h - r);
-                let xs = x.saturating_sub(r).max(r)..(x + r + 1).min(grid_w - r);
-                ys.flat_map(move |ny| xs.clone().map(move |nx| (ny, nx)))
-            })
-            .collect();
-        next.sort_unstable();
-        next.dedup();
-        candidates = Some(next);
         total_repaired += repairs.len();
         passes_ran = pass + 1;
+        if passes_ran == passes {
+            break;
+        }
+        let bits = candidates.get_or_insert_with(|| vec![0; words * grid_h]);
+        bits.fill(0);
+        for &(y, x, _) in &repairs {
+            let (y, x) = (y as usize, x as usize);
+            for ny in y.saturating_sub(r).max(r)..(y + r + 1).min(grid_h - r) {
+                for nx in x.saturating_sub(r).max(r)..(x + r + 1).min(grid_w - r) {
+                    bits[ny * words + nx / 64] |= 1 << (nx % 64);
+                }
+            }
+        }
     }
 
     if total_repaired > 0 {
@@ -4069,6 +4085,20 @@ mod tests {
             repair_by_medians(&mut want, 1.0);
             assert_bits_eq(&got, &want);
         }
+        // Towers astride the bitmap's 64-cell words, and one on the grid's last word.
+        let mut got = vec![vec![100.0f64; 150]; 41];
+        for (i, cx) in [63usize, 128, 145].into_iter().enumerate() {
+            for row in got.iter_mut().skip(10 + 8 * i).take(7) {
+                for c in row.iter_mut().skip(cx - 3).take(7) {
+                    *c = 180.0;
+                }
+            }
+        }
+        let mut want = got.clone();
+        repair_terrain_anomalies(&mut got, 1.0);
+        repair_by_medians(&mut want, 1.0);
+        assert_bits_eq(&got, &want);
+        assert_eq!(got[13][63], 100.0, "the towers erode");
     }
 
     #[test]
