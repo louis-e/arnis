@@ -13166,19 +13166,22 @@ fn roof_tone_patch((px, row): (i32, i32), seed: u64) -> bool {
     coord_rng(px, row, seed ^ 0x7111_E5A1_0000_0005).random_range(0..100u32) < ROOF_TONE_PERCENT
 }
 
-/// Roof levels on the roof's bounding box, for the dozens of neighbour
-/// lookups each cell makes.
-struct LevelGrid {
-    min_x: i32,
-    min_z: i32,
-    width: i32,
-    height: i32,
-    /// `i32::MIN` off the roof.
-    levels: Vec<i32>,
+/// Roof levels for the dozens of neighbour lookups each cell makes: a grid on
+/// the roof's bounding box, or the map itself where that box is mostly empty.
+enum LevelGrid<'a> {
+    Dense {
+        min_x: i32,
+        min_z: i32,
+        width: i32,
+        height: i32,
+        /// `i32::MIN` off the roof.
+        levels: Vec<i32>,
+    },
+    Sparse(&'a RoofLevels),
 }
 
-impl LevelGrid {
-    fn new(levels: &RoofLevels) -> Self {
+impl<'a> LevelGrid<'a> {
+    fn new(levels: &'a RoofLevels) -> Self {
         let mut cells = levels.keys();
         let &(x0, z0) = cells.next().unwrap_or(&(0, 0));
         let (mut min_x, mut max_x, mut min_z, mut max_z) = (x0, x0, z0, z0);
@@ -13187,11 +13190,14 @@ impl LevelGrid {
             (min_z, max_z) = (min_z.min(z), max_z.max(z));
         }
         let (width, height) = (max_x - min_x + 1, max_z - min_z + 1);
+        if width as u64 * height as u64 > 8 * levels.len() as u64 + 64 {
+            return Self::Sparse(levels);
+        }
         let mut grid = vec![i32::MIN; (width * height) as usize];
         for (&(x, z), &l) in levels {
             grid[((z - min_z) * width + x - min_x) as usize] = l;
         }
-        Self {
+        Self::Dense {
             min_x,
             min_z,
             width,
@@ -13201,11 +13207,22 @@ impl LevelGrid {
     }
 
     fn get(&self, x: i32, z: i32) -> Option<i32> {
-        let (lx, lz) = (x - self.min_x, z - self.min_z);
-        if lx < 0 || lz < 0 || lx >= self.width || lz >= self.height {
-            return None;
+        match self {
+            Self::Dense {
+                min_x,
+                min_z,
+                width,
+                height,
+                levels,
+            } => {
+                let (lx, lz) = (x - min_x, z - min_z);
+                if lx < 0 || lz < 0 || lx >= *width || lz >= *height {
+                    return None;
+                }
+                Some(levels[(lz * width + lx) as usize]).filter(|&l| l != i32::MIN)
+            }
+            Self::Sparse(levels) => levels.get(&(x, z)).copied(),
         }
-        Some(self.levels[(lz * self.width + lx) as usize]).filter(|&l| l != i32::MIN)
     }
 }
 
@@ -14438,47 +14455,35 @@ fn mansard_boost(dist_to_edge: i32, steep_h: i32, cap: i32) -> i32 {
 }
 
 /// How many footprint cells follow each cell of `floor_area` toward -x, +x,
-/// -z and +z before the edge, from one sweep per row and column.
+/// -z and +z before the edge, from the unbroken runs of each row and column.
+/// Sorting keeps this to the footprint, however sparse its bounding box.
 fn axis_runs(floor_area: &[(i32, i32)]) -> Vec<[i32; 4]> {
-    let Some(&(x0, z0)) = floor_area.first() else {
-        return Vec::new();
-    };
-    let (mut min_x, mut max_x, mut min_z, mut max_z) = (x0, x0, z0, z0);
-    for &(x, z) in floor_area {
-        (min_x, max_x) = (min_x.min(x), max_x.max(x));
-        (min_z, max_z) = (min_z.min(z), max_z.max(z));
-    }
-    let (w, h) = ((max_x - min_x + 1) as usize, (max_z - min_z + 1) as usize);
-    let idx = |x: i32, z: i32| (z - min_z) as usize * w + (x - min_x) as usize;
-    let mut inside = vec![false; w * h];
-    for &(x, z) in floor_area {
-        inside[idx(x, z)] = true;
-    }
-    // Each sweep carries the count of footprint cells it has just passed.
-    fn sweep(
-        runs: &mut [[i32; 4]],
-        inside: &[bool],
-        dir: usize,
-        cells: impl Iterator<Item = usize>,
-    ) {
-        let mut run = 0;
-        for i in cells {
-            runs[i][dir] = run;
-            run = if inside[i] { run + 1 } else { 0 };
+    let mut runs = vec![[0i32; 4]; floor_area.len()];
+    let mut order: Vec<u32> = (0..floor_area.len() as u32).collect();
+    for (dir, along_x) in [(0, true), (2, false)] {
+        // (line, position along it)
+        let key = |i: u32| {
+            let (x, z) = floor_area[i as usize];
+            if along_x {
+                (z, x)
+            } else {
+                (x, z)
+            }
+        };
+        order.sort_unstable_by_key(|&i| key(i));
+        for run in order.chunk_by(|&a, &b| {
+            let ((la, pa), (lb, pb)) = (key(a), key(b));
+            la == lb && pb - pa <= 1
+        }) {
+            let (first, last) = (key(run[0]).1, key(run[run.len() - 1]).1);
+            for &i in run {
+                let p = key(i).1;
+                runs[i as usize][dir] = p - first;
+                runs[i as usize][dir + 1] = last - p;
+            }
         }
     }
-    let mut runs = vec![[0i32; 4]; w * h];
-    for z in 0..h {
-        let row = z * w..(z + 1) * w;
-        sweep(&mut runs, &inside, 0, row.clone());
-        sweep(&mut runs, &inside, 1, row.rev());
-    }
-    for x in 0..w {
-        let col = (x..w * h).step_by(w);
-        sweep(&mut runs, &inside, 2, col.clone());
-        sweep(&mut runs, &inside, 3, col.rev());
-    }
-    floor_area.iter().map(|&(x, z)| runs[idx(x, z)]).collect()
+    runs
 }
 
 /// Chebyshev distance from each cell to the outline: the run of a hip roof
@@ -20038,6 +20043,44 @@ mod roof_geometry_tests {
     use crate::element_processing::building_test_support::{tag_map, test_editor};
 
     const BASE: i32 = 10;
+
+    #[test]
+    fn axis_runs_count_cells_to_each_edge() {
+        // A U with a gap, a stray diagonal far off, in scrambled order.
+        let mut cells: Vec<(i32, i32)> = (0..12)
+            .flat_map(|x| (0..9).map(move |z| (x, z)))
+            .filter(|&(x, z)| !(3..9).contains(&x) || z < 3)
+            .filter(|&c| c != (10, 4))
+            .chain((0..40).map(|i| (100 + i, 300 - i)))
+            .collect();
+        cells.sort_by_key(|&(x, z)| (x * 7919 + z * 104_729).rem_euclid(1009));
+        let footprint: FnvHashSet<(i32, i32)> = cells.iter().copied().collect();
+        let walk = |(x, z): (i32, i32), (dx, dz): (i32, i32)| {
+            (1..)
+                .take_while(|&d| footprint.contains(&(x + dx * d, z + dz * d)))
+                .count() as i32
+        };
+        for (&cell, &runs) in cells.iter().zip(&axis_runs(&cells)) {
+            let expected = [(-1, 0), (1, 0), (0, -1), (0, 1)].map(|dir| walk(cell, dir));
+            assert_eq!(runs, expected, "{cell:?}");
+        }
+    }
+
+    #[test]
+    fn level_grid_reads_like_the_map() {
+        let block: RoofLevels = (0..20)
+            .flat_map(|x| (0..10).map(move |z| ((x, z), x - z)))
+            .collect();
+        let diagonal: RoofLevels = (0..500).map(|i| ((i, -i), i)).collect();
+        assert!(matches!(LevelGrid::new(&block), LevelGrid::Dense { .. }));
+        assert!(matches!(LevelGrid::new(&diagonal), LevelGrid::Sparse(_)));
+        for levels in [&block, &diagonal] {
+            let grid = LevelGrid::new(levels);
+            for (x, z) in (-3..25).flat_map(|x| (-505..13).map(move |z| (x, z))) {
+                assert_eq!(grid.get(x, z), levels.get(&(x, z)).copied());
+            }
+        }
+    }
 
     fn roof_config(cells: &[(i32, i32)]) -> RoofConfig {
         let mut config = RoofConfig::from_roof_area(cells, 7, BASE - 1, 0, BRICK, 0);

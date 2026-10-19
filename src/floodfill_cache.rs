@@ -8,6 +8,7 @@ use crate::floodfill::{flood_fill_area, MAX_FLOOD_FILL_AREA};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -426,6 +427,8 @@ struct WayFill {
 
 /// Fills prepared per pass, so a pre-pass never holds every fill of the world at once.
 const PREPASS_BATCH: usize = 512;
+/// Cells a pass that applies fills in order holds at once (8 bytes each).
+const PREPASS_BATCH_CELLS: usize = 1 << 22;
 
 /// Flood fills shared between handlers and tiles, keyed by way ID.
 ///
@@ -758,15 +761,13 @@ impl FloodFillCache {
     ///
     /// Returns `None` when no such area contributes a column the roads do not
     /// already own, so the caller can share the road mask instead of paying for a
-    /// second full-world bitmap. Fills are made in batches and dropped after use; the
-    /// tiles make them again when they reach them.
+    /// second full-world bitmap. Only fill sizes are kept between passes: each fill is made
+    /// again, a bounded batch at a time, when its layer is applied.
     pub fn collect_sealed_surfaces(
         &self,
         elements: &[ProcessedElement],
         roads: &RoadMaskBitmap,
     ) -> Option<SealedSurfaceBitmap> {
-        let mut managed: Vec<FloodFillResult> = Vec::new();
-        let mut paving: Vec<FloodFillResult> = Vec::new();
         let mut planted_ids: Vec<u64> = Vec::new();
         let mut sealed_ids: Vec<(u64, bool)> = Vec::new();
         for element in elements {
@@ -782,67 +783,87 @@ impl FloodFillCache {
                 planted_ids.push(w.id);
             }
         }
-        for batch in sealed_ids.chunks(PREPASS_BATCH) {
-            let fills: Vec<Option<FloodFillResult>> = batch
-                .par_iter()
-                .map(|&(id, _)| self.transient_fill(id))
-                .collect();
-            for (&(_, yields), fill) in batch.iter().zip(fills) {
-                match fill {
-                    Some(fill) if yields => paving.push(fill),
-                    Some(fill) => managed.push(fill),
-                    None => {}
-                }
-            }
-        }
 
         // A tagged area whose fill came back empty (degenerate ring, fill timeout) or that
         // sits entirely on columns the roads already own would clone a full second bitmap
-        // for nothing, so bail out before allocating. Short-circuits on the first new cell.
-        if !managed
-            .iter()
-            .chain(&paving)
-            .any(|f| f.iter().any(|&(x, z)| roads.is_unset_in_bounds(x, z)))
-        {
+        // for nothing, so bail out before allocating.
+        let off_roads = AtomicBool::new(false);
+        let sealed_lens: Vec<Option<usize>> = sealed_ids
+            .par_iter()
+            .map(|&(id, _)| {
+                let fill = self.transient_fill(id)?;
+                if !off_roads.load(Ordering::Relaxed)
+                    && fill.iter().any(|&(x, z)| roads.is_unset_in_bounds(x, z))
+                {
+                    off_roads.store(true, Ordering::Relaxed);
+                }
+                Some(fill.len())
+            })
+            .collect();
+        if !off_roads.into_inner() {
             return None;
+        }
+        // (cells, paved, way id)
+        let mut layers: Vec<(usize, bool, u64)> = Vec::new();
+        let mut managed: Vec<(usize, bool, u64)> = Vec::new();
+        for (&(id, yields), len) in sealed_ids.iter().zip(sealed_lens) {
+            match len {
+                Some(len) if yields => layers.push((len, true, id)),
+                Some(len) => managed.push((len, true, id)),
+                None => {}
+            }
         }
 
         // Anything as large as all the paving changes nothing, so planted areas that big are
         // dropped as soon as their size is known.
-        let largest = paving.iter().map(|f| f.len()).max().unwrap_or(0);
-        let mut planted: Vec<FloodFillResult> = Vec::new();
+        let largest = layers.iter().map(|l| l.0).max().unwrap_or(0);
         if largest > 0 {
-            for batch in planted_ids.chunks(PREPASS_BATCH) {
-                let fills: Vec<Option<FloodFillResult>> = batch
-                    .par_iter()
-                    .map(|&id| self.transient_fill(id))
-                    .collect();
-                planted.extend(fills.into_iter().flatten().filter(|f| f.len() < largest));
-            }
+            let planted_lens: Vec<Option<usize>> = planted_ids
+                .par_iter()
+                .map(|&id| self.transient_fill(id).map(|f| f.len()))
+                .collect();
+            layers.extend(
+                planted_ids
+                    .iter()
+                    .zip(planted_lens)
+                    .filter_map(|(&id, len)| {
+                        len.filter(|&len| len < largest).map(|len| (len, false, id))
+                    }),
+            );
         }
 
-        let mut mask = roads.clone();
         // Largest first, so each column takes the state of the smallest area over it; paving
-        // wins a tie.
-        let mut layers: Vec<(usize, bool, &FloodFillResult)> = paving
-            .iter()
-            .map(|f| (f.len(), true, f))
-            .chain(planted.iter().map(|f| (f.len(), false, f)))
-            .collect();
+        // wins a tie. The other sealed areas pave their whole footprint after that.
         layers.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        for (_, paved, fill) in layers {
-            for &(x, z) in fill.iter() {
-                if paved {
-                    mask.set(x, z);
-                } else if !roads.contains(x, z) {
-                    mask.clear(x, z);
+        layers.extend(managed);
+
+        let mut mask = roads.clone();
+        let mut rest = &layers[..];
+        while !rest.is_empty() {
+            let mut cells = 0;
+            let n = rest
+                .iter()
+                .take_while(|l| {
+                    cells += l.0;
+                    cells <= PREPASS_BATCH_CELLS
+                })
+                .count()
+                .max(1);
+            let (batch, tail) = rest.split_at(n);
+            let fills: Vec<Option<FloodFillResult>> = batch
+                .par_iter()
+                .map(|&(_, _, id)| self.transient_fill(id))
+                .collect();
+            for (&(_, paved, _), fill) in batch.iter().zip(fills) {
+                for &(x, z) in fill.iter().flat_map(|f| f.iter()) {
+                    if paved {
+                        mask.set(x, z);
+                    } else if !roads.contains(x, z) {
+                        mask.clear(x, z);
+                    }
                 }
             }
-        }
-        for fill in managed {
-            for &(x, z) in fill.iter() {
-                mask.set(x, z);
-            }
+            rest = tail;
         }
 
         Some(mask)
