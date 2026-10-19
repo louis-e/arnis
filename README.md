@@ -89,6 +89,17 @@ Arnis has been recognized in various academic and press publications after gaini
 
 Free to use press assets, including screenshots and logos, can be found [here](https://arnismc.com/presskit/).
 
+## :lock: Code Signing Policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+The Windows executable is built from this repository by the [release workflow](.github/workflows/release.yml) on GitHub-hosted runners and is only signed after a maintainer approves the signing request.
+
+- Committers and reviewers: [louis-e](https://github.com/louis-e)
+- Approvers: [louis-e](https://github.com/louis-e)
+
+Privacy policy: https://arnismc.com/privacypolicy.html
+
 ## :copyright: License Information
 Copyright (c) 2022-2026 Louis Erbkamm (louis-e)
 
