@@ -251,6 +251,54 @@ pub fn redact_url_queries(mut input: &str) -> String {
     out
 }
 
+/// Replace file system paths in `input` with `<path>`. They carry the user name, and a Bedrock
+/// world's folder is named after its area.
+pub fn redact_paths(input: &str) -> String {
+    let b = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let (mut copied, mut i) = (0, 0);
+    while i < b.len() {
+        if path_starts_at(b, i) {
+            out.push_str(&input[copied..i]);
+            out.push_str("<path>");
+            i = path_end(b, i);
+            copied = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&input[copied..]);
+    out
+}
+
+fn path_starts_at(b: &[u8], i: usize) -> bool {
+    let prev = i.checked_sub(1).map(|p| b[p]);
+    let next = |k: usize| b.get(i + k).copied();
+    let is_slash = |c: Option<u8>| matches!(c, Some(b'/' | b'\\'));
+    let opens = prev.is_none_or(|c| c.is_ascii_whitespace() || b"('\"=`".contains(&c));
+    let drive = b[i].is_ascii_alphabetic()
+        && prev.is_none_or(|c| !c.is_ascii_alphanumeric())
+        && next(1) == Some(b':')
+        && is_slash(next(2));
+    let unix = b[i] == b'/' && next(1).is_some_and(|c| c != b'/' && !c.is_ascii_whitespace());
+    let unc = b[i] == b'\\' && next(1) == Some(b'\\');
+    let home = b[i] == b'~' && is_slash(next(1));
+    drive || (opens && (unix || unc || home))
+}
+
+/// A path runs to a quote, a line end, or a colon that ends a phrase; spaces stay inside it.
+fn path_end(b: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < b.len() {
+        match b[i] {
+            b'\'' | b'"' | b'`' | b'\n' | b'\r' => return i,
+            b':' if b.get(i + 1).is_none_or(|c| c.is_ascii_whitespace()) => return i,
+            _ => i += 1,
+        }
+    }
+    b.len()
+}
+
 /// Sends a log entry to the telemetry server
 pub fn send_log(level: LogLevel, message: &str) {
     // Check user consent
@@ -265,7 +313,7 @@ pub fn send_log(level: LogLevel, message: &str) {
 
     // Redact URL query strings before anything else so bbox coordinates
     // embedded in reqwest/provider error messages never leave the client.
-    let redacted = redact_url_queries(message);
+    let redacted = redact_paths(&redact_url_queries(message));
     let truncated_message = if redacted.chars().count() > 1000 {
         redacted.chars().take(1000).collect::<String>()
     } else {
@@ -351,7 +399,9 @@ pub fn install_panic_hook() {
 
             // Combine payload and location; redact URL queries so a panic
             // message carrying a request URL can't leak bbox coordinates.
-            let mut error_message = redact_url_queries(&format!("{} @ {}", payload, location));
+            // The location is a source path in the build, not on the user's machine.
+            let mut error_message =
+                redact_url_queries(&format!("{} @ {}", redact_paths(&payload), location));
 
             // Truncate to 500 Unicode characters
             if error_message.chars().count() > 500 {
@@ -403,6 +453,42 @@ mod tests {
             redact_url_queries(input),
             "error for url https://host.tld/path"
         );
+    }
+
+    #[test]
+    fn redact_paths_hides_user_and_world_names() {
+        let bedrock = "World generation failed: Failed to save Bedrock world: I/O error while writing Bedrock world: '/home/moosa/Desktop/Arnis Malé' already exists and was not created by Arnis.";
+        assert_eq!(
+            redact_paths(bedrock),
+            "World generation failed: Failed to save Bedrock world: I/O error while writing Bedrock world: '<path>' already exists and was not created by Arnis."
+        );
+        for (input, want) in [
+            (
+                r"Failed to create C:\Users\John Doe\Desktop\Arnis World 1: Access is denied. (os error 5)",
+                "Failed to create <path>: Access is denied. (os error 5)",
+            ),
+            (
+                r#"Failed to read "C:\\Users\\jo\\AppData\\Local\\arnis\\x.json": denied"#,
+                r#"Failed to read "<path>": denied"#,
+            ),
+            ("saved to C:/Users/jo/saves/Berlin", "saved to <path>"),
+            (r"share \\nas\worlds\Paris (2) missing", "share <path>"),
+            ("in ~/worlds/Tokyo", "in <path>"),
+        ] {
+            assert_eq!(redact_paths(input), want, "for {input:?}");
+        }
+    }
+
+    #[test]
+    fn redact_paths_leaves_urls_and_fractions() {
+        for input in [
+            "error sending request for url (https://api.arnismc.com/overpass/api/interpreter)",
+            "[1/7] tile 13/4359/2842 and/or 3 / 4",
+            "Overpass fetch failed on all 1 providers (api.arnismc.com); last error: Response code: 413",
+            "io error: Os { code: 112, kind: StorageFull }",
+        ] {
+            assert_eq!(redact_paths(input), input);
+        }
     }
 
     #[test]
