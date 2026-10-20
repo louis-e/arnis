@@ -702,6 +702,24 @@ mod tests {
     }
 
     #[test]
+    fn an_area_far_from_the_origin_counts_its_stretched_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let singapore = "1.290,103.840,1.300,103.860";
+        let mut args = args_for(singapore, &[]);
+        let first = prepare(&world, &LLBBox::from_str(singapore).unwrap(), &mut args).unwrap();
+        drop(first);
+
+        let oslo = "59.910,10.730,59.920,10.760";
+        let mut args = args_for(oslo, &[]);
+        let s = prepare(&world, &LLBBox::from_str(oslo).unwrap(), &mut args).unwrap();
+        let ground = s.llbbox.area_km2() * args.scale * args.scale;
+        let ratio = crate::world_utils::blocks_km2(&args, &s.llbbox) / ground;
+        let want = (1.295f64.to_radians().cos() / 59.915f64.to_radians().cos()).powi(2);
+        assert!((ratio / want - 1.0).abs() < 0.05, "{ratio} vs {want}");
+    }
+
+    #[test]
     fn recorded_areas_survive_and_a_second_run_extends() {
         let dir = tempfile::tempdir().unwrap();
         let world = dir.path().join("w");

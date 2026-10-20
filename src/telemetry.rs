@@ -275,20 +275,25 @@ fn path_starts_at(b: &[u8], i: usize) -> bool {
     let prev = i.checked_sub(1).map(|p| b[p]);
     let next = |k: usize| b.get(i + k).copied();
     let is_slash = |c: Option<u8>| matches!(c, Some(b'/' | b'\\'));
-    let opens = prev.is_none_or(|c| c.is_ascii_whitespace() || b"('\"=`".contains(&c));
-    let drive = b[i].is_ascii_alphabetic()
-        && prev.is_none_or(|c| !c.is_ascii_alphanumeric())
-        && next(1) == Some(b':')
-        && is_slash(next(2));
+    let after_word = prev.is_some_and(|c| c.is_ascii_alphanumeric());
+    let opens = prev.is_none_or(|c| c.is_ascii_whitespace() || b"('\"=`:[,{<;|".contains(&c));
+    let file_url = !after_word && b[i..].starts_with(b"file:/");
+    let drive =
+        b[i].is_ascii_alphabetic() && !after_word && next(1) == Some(b':') && is_slash(next(2));
     let unix = b[i] == b'/' && next(1).is_some_and(|c| c != b'/' && !c.is_ascii_whitespace());
     let unc = b[i] == b'\\' && next(1) == Some(b'\\');
     let home = b[i] == b'~' && is_slash(next(1));
-    drive || (opens && (unix || unc || home))
+    file_url || drive || (opens && (unix || unc || home))
 }
 
-/// A path runs to a line end, a colon that ends a phrase, or a quote that closes it. Spaces stay
-/// inside it, and so do apostrophes in names like O'Connor or L'Aquila.
+/// A quoted path runs to the last quote of its kind on the line that closes a phrase, so an
+/// apostrophe in a name (O'Connor, Ca' Savio) stays inside it; this errs toward hiding more.
+/// An unquoted one runs to a colon that ends a phrase, or the line end. Spaces stay inside both.
 fn path_end(b: &[u8], start: usize) -> usize {
+    let line_end = b[start..]
+        .iter()
+        .position(|&c| c == b'\n' || c == b'\r')
+        .map_or(b.len(), |p| start + p);
     let breaks = |at: usize| {
         b.get(at)
             .is_none_or(|c| c.is_ascii_whitespace() || b":,;)]}".contains(c))
@@ -296,16 +301,18 @@ fn path_end(b: &[u8], start: usize) -> usize {
     let closes = |at: usize| {
         breaks(at + 1) || (matches!(b.get(at + 1), Some(b'.' | b'!' | b'?')) && breaks(at + 2))
     };
-    let mut i = start + 1;
-    while i < b.len() {
-        match b[i] {
-            b'\n' | b'\r' => return i,
-            b'\'' | b'"' | b'`' if closes(i) => return i,
-            b':' if b.get(i + 1).is_none_or(|c| c.is_ascii_whitespace()) => return i,
-            _ => i += 1,
-        }
-    }
-    b.len()
+    let quote = start
+        .checked_sub(1)
+        .map(|p| b[p])
+        .filter(|c| b"'\"`".contains(c));
+    let found = match quote {
+        Some(q) => (start + 1..line_end)
+            .rev()
+            .find(|&i| b[i] == q && closes(i)),
+        None => (start + 1..line_end)
+            .find(|&i| b[i] == b':' && b.get(i + 1).is_none_or(|c| c.is_ascii_whitespace())),
+    };
+    found.unwrap_or(line_end)
 }
 
 /// Sends a log entry to the telemetry server
@@ -493,6 +500,18 @@ mod tests {
                 r#"Failed to read "<path>": denied"#,
             ),
             ("'/home/jo/Arnis Roma'. Rename it", "'<path>'. Rename it"),
+            (
+                r"'C:\Users\jo\Desktop\Arnis Ca' Savio.mcworld.staging' already exists",
+                "'<path>' already exists",
+            ),
+            (
+                "failed:/home/moosa/Desktop/Arnis Malé.mcworld.staging",
+                "failed:<path>",
+            ),
+            ("[/home/jo/Arnis Roma]", "[<path>"),
+            ("a,/home/jo/x", "a,<path>"),
+            ("opened file:///home/jo/Arnis Malé", "opened <path>"),
+            ("ends in /home/jo/x:", "ends in <path>:"),
             ("saved to C:/Users/jo/saves/Berlin", "saved to <path>"),
             (r"share \\nas\worlds\Paris (2) missing", "share <path>"),
             ("in ~/worlds/Tokyo", "in <path>"),
@@ -508,6 +527,7 @@ mod tests {
             "[1/7] tile 13/4359/2842 and/or 3 / 4",
             "Overpass fetch failed on all 1 providers (api.arnismc.com); last error: Response code: 413",
             "io error: Os { code: 112, kind: StorageFull }",
+            "range request to http://127.0.0.1:9/v1/archives.json failed [timeout]",
         ] {
             assert_eq!(redact_paths(input), input);
         }

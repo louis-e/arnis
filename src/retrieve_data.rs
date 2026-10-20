@@ -302,14 +302,14 @@ pub fn fetch_osm_data(
     use_tile_archive: bool,
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     if use_tile_archive && !tiles_url.is_empty() {
+        // Overpass turns away what the archive does for size, after a long wait.
+        if let Err(e) = crate::osm_tiles::check_size(&bbox, scale) {
+            eprintln!("{}", format!("Error! {e}.").red().bold());
+            return Err(AREA_TOO_LARGE.into());
+        }
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
         match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url, scale) {
             Ok(data) => return Ok(data),
-            // Overpass turns away what the archive does for size, after a long wait.
-            Err(e) if fallback_reason(&e) == "area_too_large" => {
-                eprintln!("{}", format!("Error! {e}.").red().bold());
-                return Err(AREA_TOO_LARGE.into());
-            }
             Err(e) => {
                 eprintln!(
                     "{}",

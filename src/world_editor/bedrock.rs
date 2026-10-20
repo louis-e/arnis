@@ -319,6 +319,12 @@ impl BedrockWriter {
         if self.mcworld_path.exists() {
             fs::remove_file(&self.mcworld_path)?;
         }
+        // Earlier versions staged under the bare name. Only a folder they marked is theirs to
+        // remove; anything else there is a world the user unpacked.
+        let legacy = self.mcworld_path.with_extension("");
+        if legacy.join(STAGING_MARKER).is_file() {
+            let _ = fs::remove_dir_all(&legacy);
+        }
 
         fs::create_dir_all(&self.output_dir)?;
         fs::write(self.output_dir.join(STAGING_MARKER), b"")?;
@@ -1418,6 +1424,18 @@ mod tests {
         writer.prepare_output_dir().unwrap();
         assert!(writer.output_dir.join(STAGING_MARKER).is_file());
         assert!(unpacked.join("levelname.txt").is_file());
+    }
+
+    #[test]
+    fn staging_left_by_an_earlier_version_is_cleared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let legacy = tmp.path().join("Arnis Test");
+        fs::create_dir_all(legacy.join("db")).unwrap();
+        fs::write(legacy.join(STAGING_MARKER), b"").unwrap();
+
+        let writer = test_writer(legacy.with_extension("mcworld"));
+        writer.prepare_output_dir().unwrap();
+        assert!(!legacy.exists());
     }
 
     #[test]

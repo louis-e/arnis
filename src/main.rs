@@ -386,18 +386,6 @@ fn run_cli() {
         }
     }
 
-    // Before the world and the downloads: the archive and Overpass both turn such a box away.
-    let fetches_osm = !skip_osm && preloaded_osm.is_none();
-    if fetches_osm && !args.no_tile_archive && !args.osm_tiles_url.is_empty() {
-        if let Err(e) = osm_tiles::check_size(&effective_bbox, args.scale) {
-            eprintln!(
-                "{} The area is too large: {e}. Select a smaller area.",
-                "Error:".red().bold()
-            );
-            exit_failed();
-        }
-    }
-
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
@@ -407,31 +395,24 @@ fn run_cli() {
         world_editor::WorldFormat::JavaAnvil
     };
 
-    // The disk has to take the whole world and keep a few GB free.
-    if !args.mapillary_probe {
-        let disk_dir = match (&one_world_paths, world_format) {
-            (Some(dir), _) => dir.clone(),
-            (None, world_editor::WorldFormat::BedrockMcWorld) => args
-                .path
-                .clone()
-                .unwrap_or_else(world_utils::get_bedrock_output_directory),
-            (None, world_editor::WorldFormat::LuantiWorld) => args
-                .path
-                .clone()
-                .unwrap_or_else(world_utils::get_luanti_worlds_directory),
-            (None, world_editor::WorldFormat::JavaAnvil) => args.path.clone().unwrap_or_default(),
-        };
-        let r = args.body.scale_ratio();
-        let blocks_km2 = effective_bbox.area_km2() * (r * args.scale).powi(2);
-        let needed = world_utils::estimated_world_bytes(
-            blocks_km2,
-            world_format,
-            world_utils::WorldSizeOptions::of(&args),
-        );
-        if let Err(e) = world_utils::check_disk_space(&disk_dir, needed) {
-            eprintln!("{} {e}", "Error:".red().bold());
-            exit_failed();
-        }
+    // Before the downloads and a fresh world, with the run's final scale and options; the
+    // archive and Overpass both turn a box too large away. A One World this run made is
+    // already there and goes again with exit_failed.
+    let disk_dir = match (&one_world_paths, world_format) {
+        (Some(dir), _) => dir.clone(),
+        (None, world_editor::WorldFormat::BedrockMcWorld) => args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_bedrock_output_directory),
+        (None, world_editor::WorldFormat::LuantiWorld) => args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_luanti_worlds_directory),
+        (None, world_editor::WorldFormat::JavaAnvil) => args.path.clone().unwrap_or_default(),
+    };
+    if let Err(e) = world_utils::check_run_size(&args, &effective_bbox, world_format, &disk_dir) {
+        eprintln!("{} {}", "Error:".red().bold(), e.detail);
+        exit_failed();
     }
 
     // Build the generation output path and level name

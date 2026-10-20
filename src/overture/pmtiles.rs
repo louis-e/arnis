@@ -12,6 +12,7 @@
 //!
 //! Specification: <https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md>
 
+use crate::coordinate_system::geographic::LLBBox;
 use reqwest::blocking::Client;
 use std::collections::HashMap;
 use std::io::Read;
@@ -334,6 +335,19 @@ pub fn zxy_to_tile_id(z: u8, x: u32, y: u32) -> Result<u64> {
         side >>= 1;
     }
     Ok(id)
+}
+
+/// Tiles covering `bbox` at zoom `z`, as `(min_x, max_x, min_y, max_y)` inclusive. Tile y
+/// grows southward, so the corners come from opposite edges.
+pub fn tile_range(bbox: &LLBBox, z: u8) -> (u32, u32, u32, u32) {
+    let (min_x, min_y) = lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), z);
+    let (max_x, max_y) = lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), z);
+    (
+        min_x.min(max_x),
+        min_x.max(max_x),
+        min_y.min(max_y),
+        min_y.max(max_y),
+    )
 }
 
 /// Web-Mercator tile containing a coordinate at the given zoom.

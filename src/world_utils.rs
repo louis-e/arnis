@@ -393,6 +393,57 @@ pub fn estimated_world_bytes(
     ((blocks_km2.max(0.0) * per_km2 + 8.0) * MIB) as u64
 }
 
+/// km² of blocks the run writes for `bbox`, from the projection it builds with: scale²,
+/// and in a One World the Mercator stretch away from the world's origin.
+pub fn blocks_km2(args: &crate::args::Args, bbox: &LLBBox) -> f64 {
+    match crate::projection::ProjectionSpec::from_args(args).transformer(bbox) {
+        Ok((_, r)) => (r.max_x() - r.min_x() + 1) as f64 * (r.max_z() - r.min_z() + 1) as f64 / 1e6,
+        Err(_) => bbox.area_km2() * args.scale * args.scale,
+    }
+}
+
+/// Why a run is refused before it fetches anything.
+#[derive(Debug)]
+pub struct RunSizeError {
+    /// Refused for its area rather than for the disk.
+    pub area: bool,
+    /// Fits the GUI's status line.
+    pub short: &'static str,
+    pub detail: String,
+}
+
+/// Refuses a run the tile archive or the disk cannot take. Wants the run's final `args` and
+/// `bbox`, so a One World's own scale and frame and every option override are counted.
+pub fn check_run_size(
+    args: &crate::args::Args,
+    bbox: &LLBBox,
+    format: crate::world_editor::WorldFormat,
+    dir: &Path,
+) -> Result<(), RunSizeError> {
+    if args.mapillary_probe {
+        return Ok(());
+    }
+    let from_archive = !args.skip_osm()
+        && args.file.is_none()
+        && !args.no_tile_archive
+        && !args.osm_tiles_url.is_empty();
+    if from_archive {
+        if let Err(e) = crate::osm_tiles::check_size(bbox, args.scale) {
+            return Err(RunSizeError {
+                area: true,
+                short: retrieve_data::AREA_TOO_LARGE,
+                detail: format!("The area is too large: {e}. Select a smaller area."),
+            });
+        }
+    }
+    let needed = estimated_world_bytes(blocks_km2(args, bbox), format, WorldSizeOptions::of(args));
+    check_disk_space(dir, needed).map_err(|detail| RunSizeError {
+        area: false,
+        short: "Not enough disk space available.",
+        detail,
+    })
+}
+
 /// Fails when the disk that will hold `dir` has less than `needed` plus the headroom free.
 /// Reads the nearest folder that exists, since a missing one confuses the Windows volume
 /// lookup; a reading of 0 or an error is "can't tell" and lets the run go ahead (#824).
@@ -1323,8 +1374,32 @@ mod tests {
     }
 
     #[test]
+    fn off_earth_blocks_follow_the_body_scale() {
+        use clap::Parser;
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            ".",
+            "--bbox",
+            "-10,-10,10,10",
+            "--body",
+            "moon",
+        ];
+        let mut args = crate::args::Args::parse_from(cmd);
+        crate::args::apply_body_defaults(&mut args);
+        let bbox = args.bbox.unwrap();
+        let got = blocks_km2(&args, &bbox);
+        let want = bbox.area_km2() * args.scale * args.scale;
+        assert!((got / want - 1.0).abs() < 0.02, "{got} vs {want}");
+    }
+
+    #[test]
     fn a_world_larger_than_the_disk_is_refused() {
         let dir = tempfile::tempdir().unwrap();
+        // A volume that reports nothing to compare against lets every run go, by design.
+        if !fs2::available_space(dir.path()).is_ok_and(|free| free > 0) {
+            return;
+        }
         let e = check_disk_space(&dir.path().join("not yet made"), u64::MAX / 2).unwrap_err();
         assert!(e.starts_with("Not enough disk space"), "{e}");
     }

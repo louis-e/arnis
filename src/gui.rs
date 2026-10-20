@@ -1471,29 +1471,6 @@ fn gui_start_generation(
     // Send generation click telemetry
     telemetry::send_generation_click();
 
-    // Before the world prep and the downloads: the archive and Overpass both turn such a box
-    // away, and the terrain fetch would run first. Off Earth or below the object scale no OSM
-    // is fetched.
-    let fetches_osm = celestial_body.is_earth() && world_scale >= crate::args::OBJECT_SKIP_SCALE;
-    if let (true, Ok(llbbox)) = (fetches_osm, LLBBox::from_str(&bbox_text)) {
-        if let Err(e) = crate::osm_tiles::check_size(&llbbox, world_scale) {
-            eprintln!("The area is too large: {e}");
-            send_log(
-                LogLevel::Warning,
-                &format!(
-                    "area_too_large: {:.0} km² at scale {world_scale:.2}",
-                    llbbox.area_km2()
-                ),
-            );
-            let msg = crate::retrieve_data::AREA_TOO_LARGE.to_string();
-            emit_gui_error(&msg);
-            if is_new_world && world_format == "java" {
-                remove_new_java_world(&PathBuf::from(&selected_world));
-            }
-            return Err(msg);
-        }
-    }
-
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
@@ -1591,29 +1568,12 @@ fn gui_start_generation(
                 _ => PathBuf::new(),
             };
 
-            // The disk has to take the whole world and keep a few GB free.
-            let check_path = match world_format {
+            // Where the world goes, for the disk space check once the run's options are final.
+            let disk_dir = match world_format {
                 WorldFormat::JavaAnvil => world_path.clone(),
                 WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
                 WorldFormat::LuantiWorld => luanti_output_dir.clone(),
             };
-            let ground_km2 = LLBBox::from_str(&bbox_text).map_or(0.0, |b| b.area_km2());
-            let blocks_km2 = ground_km2 * (celestial_body.scale_ratio() * world_scale).powi(2);
-            let size_options = crate::world_utils::WorldSizeOptions {
-                interior: interior_enabled,
-                bake_lighting: bake_lighting_enabled,
-                voxy_lod: voxy_lod_enabled,
-                caves: caves_enabled,
-                fillground: fillground_enabled || caves_enabled,
-                tall: disable_height_limit,
-            };
-            let needed =
-                crate::world_utils::estimated_world_bytes(blocks_km2, world_format, size_options);
-            if let Err(e) = crate::world_utils::check_disk_space(&check_path, needed) {
-                eprintln!("{e}");
-                emit_gui_error("Not enough disk space available.");
-                return Err(e);
-            }
 
             // Acquire session lock for Java worlds only
             // Session lock prevents Minecraft from having the world open during generation
@@ -1840,6 +1800,26 @@ fn gui_start_generation(
                 );
             }
             let args = args;
+
+            // Same as run_cli: checked with the run's final scale and options, and a One
+            // World's own frame. A world this run made goes again with the cleanup guard.
+            if let Err(e) =
+                crate::world_utils::check_run_size(&args, &bbox, world_format, &disk_dir)
+            {
+                eprintln!("{}", e.detail);
+                if e.area {
+                    send_log(
+                        LogLevel::Warning,
+                        &format!(
+                            "area_too_large: {:.0} km² at scale {:.2}",
+                            bbox.area_km2(),
+                            args.scale
+                        ),
+                    );
+                }
+                emit_gui_error(e.short);
+                return Err(e.detail);
+            }
 
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
             // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates).

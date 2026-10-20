@@ -81,6 +81,9 @@ const MAX_AREA_KM2: f64 = 100_000.0;
 /// the poles; this still holds the area limit up to about 75 degrees of latitude.
 const MAX_TILES: usize = 65_536;
 
+/// Tiles fetched and decompressed at once.
+const TILE_BATCH: usize = 512;
+
 /// Ground the archive serves for a world at `scale`, in km².
 fn max_area_km2(scale: f64) -> f64 {
     (AREA_KM2_AT_SCALE_1 / (scale * scale)).min(MAX_AREA_KM2)
@@ -274,26 +277,15 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str, scale: f64) -> Result
     Ok(data)
 }
 
-/// [`fetch_data_from_tiles`] without progress output, for ground no world scale applies to.
+/// [`fetch_data_from_tiles`] without progress output, held to the scale 1 limit: the facade
+/// fetch reads real buildings whatever the world's scale.
 pub fn fetch_data_from_tiles_quietly(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
-    read_tiles(bbox, base_url, MAX_AREA_KM2).map(|(data, _, _)| data)
-}
-
-/// Tiles covering `bbox`, as `(min_x, max_x, min_y, max_y)` inclusive.
-fn tile_range(bbox: &LLBBox) -> (u32, u32, u32, u32) {
-    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), ZOOM);
-    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), ZOOM);
-    (
-        min_x.min(max_x),
-        min_x.max(max_x),
-        min_y.min(max_y),
-        min_y.max(max_y),
-    )
+    read_tiles(bbox, base_url, AREA_KM2_AT_SCALE_1).map(|(data, _, _)| data)
 }
 
 /// Counted, not collected: a planet-sized bbox is 67M tiles.
 fn tiles_needed(bbox: &LLBBox) -> usize {
-    let (xs, xe, ys, ye) = tile_range(bbox);
+    let (xs, xe, ys, ye) = pmtiles::tile_range(bbox, ZOOM);
     ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1)
 }
 
@@ -330,7 +322,7 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
         ));
     }
 
-    let (xs, xe, ys, ye) = tile_range(&bbox);
+    let (xs, xe, ys, ye) = pmtiles::tile_range(&bbox, ZOOM);
     let wanted: Vec<(u32, u32)> = (xs..=xe)
         .flat_map(|x| (ys..=ye).map(move |y| (x, y)))
         .collect();
@@ -374,34 +366,36 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
                 located.push((*x, *y, loc));
             }
         }
-        // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
-        // that is dominated by round trips (72 tiles took 94s, most of it waiting).
-        let fetched: Vec<Result<(u64, Vec<u8>)>> = located
-            .par_iter()
-            .map(|(x, y, loc)| {
-                let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
-                unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))
-            })
-            .collect();
-
         let k = opened.len();
         let mut is_aot2 = false;
-        for entry in fetched {
-            let (on_wire, plain) = entry?;
-            if plain.is_empty() {
-                continue;
-            }
-            bytes += on_wire;
-            is_aot2 |= plain.starts_with(b"AOT2");
-            let tile = decode(&plain)?;
-            for r in &tile.relations {
-                let list = seen_in.entry(r.0).or_default();
-                if list.last() != Some(&k) {
-                    list.push(k);
+        // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
+        // that is dominated by round trips (72 tiles took 94s, most of it waiting). In batches,
+        // so a large area holds one batch of decompressed tiles rather than all of them.
+        for batch in located.chunks(TILE_BATCH) {
+            let fetched: Vec<Result<(u64, Vec<u8>)>> = batch
+                .par_iter()
+                .map(|(x, y, loc)| {
+                    let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
+                    unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))
+                })
+                .collect();
+            for entry in fetched {
+                let (on_wire, plain) = entry?;
+                if plain.is_empty() {
+                    continue;
                 }
+                bytes += on_wire;
+                is_aot2 |= plain.starts_with(b"AOT2");
+                let tile = decode(&plain)?;
+                for r in &tile.relations {
+                    let list = seen_in.entry(r.0).or_default();
+                    if list.last() != Some(&k) {
+                        list.push(k);
+                    }
+                }
+                absorb(tile, &mut collected);
+                tiles_read += 1;
             }
-            absorb(tile, &mut collected);
-            tiles_read += 1;
         }
         opened.push(archive);
         aot2.push(is_aot2);

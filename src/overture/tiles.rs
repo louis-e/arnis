@@ -86,9 +86,7 @@ pub(super) fn covers_area(bbox: &LLBBox) -> bool {
 /// Tile y grows southward while latitude grows northward, so the corners come
 /// from opposite edges.
 fn tile_range(bbox: &LLBBox) -> (u32, u32, u32, u32) {
-    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), QUERY_ZOOM);
-    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), QUERY_ZOOM);
-    (min_x, max_x, min_y, max_y)
+    pmtiles::tile_range(bbox, QUERY_ZOOM)
 }
 
 fn tile_count(bbox: &LLBBox) -> u64 {
