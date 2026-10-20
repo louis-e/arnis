@@ -297,14 +297,30 @@ fn tiles_needed(bbox: &LLBBox) -> usize {
     ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1)
 }
 
-fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmData, usize, u64)> {
-    // Before any request, so a box that is too big fails at once.
+/// Whether the archive serves `bbox` for a world at `scale`. Needs no network, so a run can
+/// refuse a box before it fetches anything.
+pub fn check_size(bbox: &LLBBox, scale: f64) -> Result<()> {
+    size_limit(bbox, max_area_km2(scale))
+}
+
+fn size_limit(bbox: &LLBBox, max_area_km2: f64) -> Result<()> {
     let area = bbox.area_km2();
     if area > max_area_km2 {
         return Err(format!(
             "that area needs {area:.0} km², past the {max_area_km2:.0} km² the archive serves at this world scale"
         ));
     }
+    let needed = tiles_needed(bbox);
+    if needed > MAX_TILES {
+        return Err(format!(
+            "that area needs {needed} tiles, past the {MAX_TILES} cap"
+        ));
+    }
+    Ok(())
+}
+
+fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmData, usize, u64)> {
+    size_limit(&bbox, max_area_km2)?;
     let client = client()?;
     let manifest = manifest(&client, base_url)?;
     if manifest.zoom != ZOOM {
@@ -314,12 +330,6 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
         ));
     }
 
-    let needed = tiles_needed(&bbox);
-    if needed > MAX_TILES {
-        return Err(format!(
-            "that area needs {needed} tiles, past the {MAX_TILES} cap"
-        ));
-    }
     let (xs, xe, ys, ye) = tile_range(&bbox);
     let wanted: Vec<(u32, u32)> = (xs..=xe)
         .flat_map(|x| (ys..=ye).map(move |y| (x, y)))
@@ -1024,6 +1034,15 @@ mod tests {
             panic!("a 26,000 km² box was read at scale 1");
         };
         assert!(e.starts_with("that area needs 2"), "{e}");
+    }
+
+    #[test]
+    fn the_size_check_follows_the_world_scale() {
+        let b = square(65.5, 24_900.0);
+        assert!(check_size(&b, 1.0).is_ok());
+        assert!(check_size(&b, 2.0).is_err());
+        assert!(check_size(&square(0.0, 99_000.0), 0.05).is_ok());
+        assert!(check_size(&square(0.0, 101_000.0), 0.05).is_err());
     }
 
     #[test]

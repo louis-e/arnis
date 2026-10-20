@@ -75,7 +75,6 @@ pub fn failure_kind(e: &reqwest::Error) -> String {
 }
 
 /// Whether `tag` is something [`failure_kind`] returns.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 pub fn is_failure_kind(tag: &str) -> bool {
     const KINDS: [&str; 7] = ["timeout", "dns", "tls", "reset", "connect", "body", "other"];
     KINDS.contains(&tag)

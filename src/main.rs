@@ -386,6 +386,18 @@ fn run_cli() {
         }
     }
 
+    // Before the world and the downloads: the archive and Overpass both turn such a box away.
+    let fetches_osm = !skip_osm && preloaded_osm.is_none();
+    if fetches_osm && !args.no_tile_archive && !args.osm_tiles_url.is_empty() {
+        if let Err(e) = osm_tiles::check_size(&effective_bbox, args.scale) {
+            eprintln!(
+                "{} The area is too large: {e}. Select a smaller area.",
+                "Error:".red().bold()
+            );
+            exit_failed();
+        }
+    }
+
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld

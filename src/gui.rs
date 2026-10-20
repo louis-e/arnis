@@ -1471,6 +1471,29 @@ fn gui_start_generation(
     // Send generation click telemetry
     telemetry::send_generation_click();
 
+    // Before the world prep and the downloads: the archive and Overpass both turn such a box
+    // away, and the terrain fetch would run first. Off Earth or below the object scale no OSM
+    // is fetched.
+    let fetches_osm = celestial_body.is_earth() && world_scale >= crate::args::OBJECT_SKIP_SCALE;
+    if let (true, Ok(llbbox)) = (fetches_osm, LLBBox::from_str(&bbox_text)) {
+        if let Err(e) = crate::osm_tiles::check_size(&llbbox, world_scale) {
+            eprintln!("The area is too large: {e}");
+            send_log(
+                LogLevel::Warning,
+                &format!(
+                    "area_too_large: {:.0} km² at scale {world_scale:.2}",
+                    llbbox.area_km2()
+                ),
+            );
+            let msg = crate::retrieve_data::AREA_TOO_LARGE.to_string();
+            emit_gui_error(&msg);
+            if is_new_world && world_format == "java" {
+                remove_new_java_world(&PathBuf::from(&selected_world));
+            }
+            return Err(msg);
+        }
+    }
+
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)

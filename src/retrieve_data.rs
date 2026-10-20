@@ -67,6 +67,7 @@ fn download_with_reqwest(
             } else {
                 let status = resp.status();
                 let user_msg = match status.as_u16() {
+                    413 => AREA_TOO_LARGE.to_string(),
                     429 => "Rate limited. Try again later.".to_string(),
                     403 => "Server overloaded. Try again.".to_string(),
                     500 | 502 | 503 | 504 => "Server unavailable. Try again.".to_string(),
@@ -241,7 +242,6 @@ pub fn fetch_data_from_file(
 
 /// Coarse bucket for an archive miss, plus how the request failed when the error says. Only
 /// these are reported: the error text can name a tile, which locates the user to a few kilometres.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 fn fallback_reason(e: &str) -> String {
     const BUCKETS: [(&str, &str); 12] = [
         ("has no data for this area", "no_data_for_area"),
@@ -270,7 +270,6 @@ fn fallback_reason(e: &str) -> String {
 
 /// The `[kind]` tag of a failed request (see `net::failure_kind`), else the status of an
 /// `HTTP <code>` error.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 fn failure_kind(e: &str) -> Option<String> {
     let tagged = e
         .split('[')
@@ -285,6 +284,9 @@ fn failure_kind(e: &str) -> Option<String> {
     let code = &after[..digits];
     (digits == 3 && (b'1'..=b'5').contains(&code.as_bytes()[0])).then(|| format!("http_{code}"))
 }
+
+/// What a run shows for a box too large to fetch; the GUI's status line holds 35 characters.
+pub const AREA_TOO_LARGE: &str = "Area too large, try a smaller one.";
 
 /// The OSM source for a run: the tile archive, falling back to Overpass.
 ///
@@ -303,6 +305,11 @@ pub fn fetch_osm_data(
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
         match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url, scale) {
             Ok(data) => return Ok(data),
+            // Overpass turns away what the archive does for size, after a long wait.
+            Err(e) if fallback_reason(&e) == "area_too_large" => {
+                eprintln!("{}", format!("Error! {e}.").red().bold());
+                return Err(AREA_TOO_LARGE.into());
+            }
             Err(e) => {
                 eprintln!(
                     "{}",
