@@ -1568,46 +1568,12 @@ fn gui_start_generation(
                 _ => PathBuf::new(),
             };
 
-            // Check available disk space before starting generation (minimum 3GB required)
-            const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
-            let check_path = match world_format {
+            // Where the world goes, for the disk space check once the run's options are final.
+            let disk_dir = match world_format {
                 WorldFormat::JavaAnvil => world_path.clone(),
                 WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
                 WorldFormat::LuantiWorld => luanti_output_dir.clone(),
             };
-            // Probe the nearest existing ancestor: a missing or space-containing
-            // path otherwise confuses the Windows volume lookup, which then reports
-            // 0 bytes free. Only block on a confident positive reading; treat an
-            // error or a 0/undeterminable result as "can't tell" and proceed (#824).
-            let probe_path = {
-                let mut p = check_path.as_path();
-                loop {
-                    if p.exists() {
-                        break p.to_path_buf();
-                    }
-                    match p.parent() {
-                        Some(parent) => p = parent,
-                        // No existing ancestor (e.g. a bare relative path): probe
-                        // the current dir so the query always hits a real path.
-                        None => {
-                            break std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-                        }
-                    }
-                }
-            };
-            match fs2::available_space(&probe_path) {
-                Ok(available) if available > 0 && available < MIN_DISK_SPACE_BYTES => {
-                    let error_msg = "Not enough disk space available.".to_string();
-                    eprintln!("{error_msg}");
-                    emit_gui_error(&error_msg);
-                    return Err(error_msg);
-                }
-                Ok(_) => {} // Sufficient, or 0/undeterminable: don't false-block
-                Err(e) => {
-                    // Log warning but don't block generation if we can't check space
-                    eprintln!("Warning: Could not check disk space: {e}");
-                }
-            }
 
             // Acquire session lock for Java worlds only
             // Session lock prevents Minecraft from having the world open during generation
@@ -1835,6 +1801,26 @@ fn gui_start_generation(
             }
             let args = args;
 
+            // Same as run_cli: checked with the run's final scale and options, and a One
+            // World's own frame. A world this run made goes again with the cleanup guard.
+            if let Err(e) =
+                crate::world_utils::check_run_size(&args, &bbox, world_format, &disk_dir)
+            {
+                eprintln!("{}", e.detail);
+                if e.area {
+                    send_log(
+                        LogLevel::Warning,
+                        &format!(
+                            "area_too_large: {:.0} km² at scale {:.2}",
+                            bbox.area_km2(),
+                            args.scale
+                        ),
+                    );
+                }
+                emit_gui_error(e.short);
+                return Err(e.detail);
+            }
+
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
             // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates).
             // An extended One World keeps its spawn unless a marker was placed.
@@ -1963,6 +1949,7 @@ fn gui_start_generation(
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox, &peaks));
                 let fetch_result = retrieve_data::fetch_osm_data(
                     bbox,
+                    args.scale,
                     args.debug,
                     "requests",
                     None,

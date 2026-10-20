@@ -70,8 +70,24 @@ impl NodeIds {
 /// Refuse a tile that decompresses to more than this.
 const MAX_TILE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Guards against a bbox that would ask for the whole planet tile by tile.
-const MAX_TILES: usize = 4096;
+/// Ground the archive serves at world scale 1. A smaller scale builds the same blocks from more
+/// ground, so the limit grows with 1/scale², up to [`MAX_AREA_KM2`].
+const AREA_KM2_AT_SCALE_1: f64 = 25_000.0;
+
+/// Ground served at any scale: past this the OSM data alone outgrows memory.
+const MAX_AREA_KM2: f64 = 100_000.0;
+
+/// Guards against a bbox that would ask for the whole planet tile by tile. Tiles shrink toward
+/// the poles; this still holds the area limit up to about 75 degrees of latitude.
+const MAX_TILES: usize = 65_536;
+
+/// Tiles fetched and decompressed at once.
+const TILE_BATCH: usize = 512;
+
+/// Ground the archive serves for a world at `scale`, in km².
+fn max_area_km2(scale: f64) -> f64 {
+    (AREA_KM2_AT_SCALE_1 / (scale * scale)).min(MAX_AREA_KM2)
+}
 
 /// Zoom of the index's coverage cells. Continent bboxes overlap enormously - north-america,
 /// russia and antarctica all span every longitude - so a bbox test alone opens up to six
@@ -170,6 +186,8 @@ fn cache_root_for(base_url: &str) -> Option<PathBuf> {
 
 fn client() -> Result<Client> {
     Client::builder()
+        // A host that never answers would otherwise hold off the Overpass fallback for 2 min.
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(120))
         .user_agent(crate::retrieve_data::OSM_USER_AGENT)
         .build()
@@ -201,7 +219,10 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
         .send()
         .and_then(|r| r.error_for_status())
         .and_then(|r| r.bytes())
-        .map_err(|e| format!("tile archive index unreachable: {e}"))?;
+        .map_err(|e| {
+            let kind = crate::net::failure_kind(&e);
+            format!("tile archive index unreachable [{kind}]: {e}")
+        })?;
     let parsed: Manifest =
         serde_json::from_slice(&body).map_err(|e| format!("bad archive index: {e}"))?;
     if let Some(p) = &cached {
@@ -244,10 +265,10 @@ struct Collected {
     relations: HashMap<u64, RelationBody>,
 }
 
-pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
+pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str, scale: f64) -> Result<OsmData> {
     println!("{} Fetching data from the tile archive...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
-    let (data, tiles_read, bytes) = read_tiles(bbox, base_url)?;
+    let (data, tiles_read, bytes) = read_tiles(bbox, base_url, max_area_km2(scale))?;
     println!(
         "Read {tiles_read} tiles ({:.1} MB) from the archive",
         bytes as f64 / 1e6
@@ -256,12 +277,42 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     Ok(data)
 }
 
-/// [`fetch_data_from_tiles`] without progress output.
+/// [`fetch_data_from_tiles`] without progress output, held to the scale 1 limit: the facade
+/// fetch reads real buildings whatever the world's scale.
 pub fn fetch_data_from_tiles_quietly(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
-    read_tiles(bbox, base_url).map(|(data, _, _)| data)
+    read_tiles(bbox, base_url, AREA_KM2_AT_SCALE_1).map(|(data, _, _)| data)
 }
 
-fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
+/// Counted, not collected: a planet-sized bbox is 67M tiles.
+fn tiles_needed(bbox: &LLBBox) -> usize {
+    let (xs, xe, ys, ye) = pmtiles::tile_range(bbox, ZOOM);
+    ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1)
+}
+
+/// Whether the archive serves `bbox` for a world at `scale`. Needs no network, so a run can
+/// refuse a box before it fetches anything.
+pub fn check_size(bbox: &LLBBox, scale: f64) -> Result<()> {
+    size_limit(bbox, max_area_km2(scale))
+}
+
+fn size_limit(bbox: &LLBBox, max_area_km2: f64) -> Result<()> {
+    let area = bbox.area_km2();
+    if area > max_area_km2 {
+        return Err(format!(
+            "that area needs {area:.0} km², past the {max_area_km2:.0} km² the archive serves at this world scale"
+        ));
+    }
+    let needed = tiles_needed(bbox);
+    if needed > MAX_TILES {
+        return Err(format!(
+            "that area needs {needed} tiles, past the {MAX_TILES} cap"
+        ));
+    }
+    Ok(())
+}
+
+fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmData, usize, u64)> {
+    size_limit(&bbox, max_area_km2)?;
     let client = client()?;
     let manifest = manifest(&client, base_url)?;
     if manifest.zoom != ZOOM {
@@ -271,18 +322,7 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
         ));
     }
 
-    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), ZOOM);
-    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), ZOOM);
-    let (xs, xe) = (min_x.min(max_x), min_x.max(max_x));
-    let (ys, ye) = (min_y.min(max_y), min_y.max(max_y));
-    // Counted before collecting: a planet-sized bbox is 67M tiles, and the vector would be
-    // hundreds of megabytes before the cap ever ran.
-    let needed = ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1);
-    if needed > MAX_TILES {
-        return Err(format!(
-            "that area needs {needed} tiles, past the {MAX_TILES} cap"
-        ));
-    }
+    let (xs, xe, ys, ye) = pmtiles::tile_range(&bbox, ZOOM);
     let wanted: Vec<(u32, u32)> = (xs..=xe)
         .flat_map(|x| (ys..=ye).map(move |y| (x, y)))
         .collect();
@@ -326,34 +366,36 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
                 located.push((*x, *y, loc));
             }
         }
-        // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
-        // that is dominated by round trips (72 tiles took 94s, most of it waiting).
-        let fetched: Vec<Result<(u64, Vec<u8>)>> = located
-            .par_iter()
-            .map(|(x, y, loc)| {
-                let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
-                unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))
-            })
-            .collect();
-
         let k = opened.len();
         let mut is_aot2 = false;
-        for entry in fetched {
-            let (on_wire, plain) = entry?;
-            if plain.is_empty() {
-                continue;
-            }
-            bytes += on_wire;
-            is_aot2 |= plain.starts_with(b"AOT2");
-            let tile = decode(&plain)?;
-            for r in &tile.relations {
-                let list = seen_in.entry(r.0).or_default();
-                if list.last() != Some(&k) {
-                    list.push(k);
+        // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
+        // that is dominated by round trips (72 tiles took 94s, most of it waiting). In batches,
+        // so a large area holds one batch of decompressed tiles rather than all of them.
+        for batch in located.chunks(TILE_BATCH) {
+            let fetched: Vec<Result<(u64, Vec<u8>)>> = batch
+                .par_iter()
+                .map(|(x, y, loc)| {
+                    let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
+                    unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))
+                })
+                .collect();
+            for entry in fetched {
+                let (on_wire, plain) = entry?;
+                if plain.is_empty() {
+                    continue;
                 }
+                bytes += on_wire;
+                is_aot2 |= plain.starts_with(b"AOT2");
+                let tile = decode(&plain)?;
+                for r in &tile.relations {
+                    let list = seen_in.entry(r.0).or_default();
+                    if list.last() != Some(&k) {
+                        list.push(k);
+                    }
+                }
+                absorb(tile, &mut collected);
+                tiles_read += 1;
             }
-            absorb(tile, &mut collected);
-            tiles_read += 1;
         }
         opened.push(archive);
         aot2.push(is_aot2);
@@ -949,6 +991,52 @@ mod tests {
             max_lat: 1.0,
             max_lon: 1.0,
         }
+    }
+
+    /// A square of `area` km² with its south edge at `lat`, as `area_km2` measures it.
+    fn square(lat: f64, area: f64) -> LLBBox {
+        let side = area.sqrt();
+        let dlat = side / 111.32;
+        let dlon = side / (111.32 * (lat + dlat / 2.0).to_radians().cos());
+        LLBBox::new(lat, 10.0, lat + dlat, 10.0 + dlon).unwrap()
+    }
+
+    #[test]
+    fn the_area_limit_grows_with_a_smaller_scale_up_to_the_cap() {
+        assert_eq!(max_area_km2(1.0), 25_000.0);
+        assert_eq!(max_area_km2(2.0), 6_250.0);
+        assert_eq!(max_area_km2(0.5), 100_000.0);
+        assert_eq!(max_area_km2(0.05), 100_000.0);
+    }
+
+    #[test]
+    fn the_tile_guard_never_cuts_below_the_area_limit() {
+        for lat in [0.0, 45.0, 60.0, 70.0] {
+            let b = square(lat, 24_900.0);
+            assert!(b.area_km2() <= max_area_km2(1.0), "{lat}: {}", b.area_km2());
+            assert!(tiles_needed(&b) <= MAX_TILES, "{lat}: {}", tiles_needed(&b));
+        }
+        for lat in [0.0, 50.0, 70.0] {
+            let b = square(lat, 99_500.0);
+            assert!(tiles_needed(&b) <= MAX_TILES, "{lat}: {}", tiles_needed(&b));
+        }
+    }
+
+    #[test]
+    fn a_box_past_the_area_limit_is_refused_before_any_request() {
+        let Err(e) = read_tiles(square(50.0, 26_000.0), "http://127.0.0.1:9/v1", 25_000.0) else {
+            panic!("a 26,000 km² box was read at scale 1");
+        };
+        assert!(e.starts_with("that area needs 2"), "{e}");
+    }
+
+    #[test]
+    fn the_size_check_follows_the_world_scale() {
+        let b = square(65.5, 24_900.0);
+        assert!(check_size(&b, 1.0).is_ok());
+        assert!(check_size(&b, 2.0).is_err());
+        assert!(check_size(&square(0.0, 99_000.0), 0.05).is_ok());
+        assert!(check_size(&square(0.0, 101_000.0), 0.05).is_err());
     }
 
     #[test]

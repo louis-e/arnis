@@ -395,6 +395,26 @@ fn run_cli() {
         world_editor::WorldFormat::JavaAnvil
     };
 
+    // Before the downloads and a fresh world, with the run's final scale and options; the
+    // archive and Overpass both turn a box too large away. A One World this run made is
+    // already there and goes again with exit_failed.
+    let disk_dir = match (&one_world_paths, world_format) {
+        (Some(dir), _) => dir.clone(),
+        (None, world_editor::WorldFormat::BedrockMcWorld) => args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_bedrock_output_directory),
+        (None, world_editor::WorldFormat::LuantiWorld) => args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_luanti_worlds_directory),
+        (None, world_editor::WorldFormat::JavaAnvil) => args.path.clone().unwrap_or_default(),
+    };
+    if let Err(e) = world_utils::check_run_size(&args, &effective_bbox, world_format, &disk_dir) {
+        eprintln!("{} {}", "Error:".red().bold(), e.detail);
+        exit_failed();
+    }
+
     // Build the generation output path and level name
     let (generation_path, level_name) = if args.mapillary_probe {
         // The probe reports coverage and exits, so it must not allocate (and
@@ -536,6 +556,7 @@ fn run_cli() {
         } else {
             retrieve_data::fetch_osm_data(
                 effective_bbox,
+                args.scale,
                 args.debug,
                 args.downloader.as_str(),
                 args.save_json_file.as_deref(),

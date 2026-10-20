@@ -12,6 +12,7 @@
 //!
 //! Specification: <https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md>
 
+use crate::coordinate_system::geographic::LLBBox;
 use reqwest::blocking::Client;
 use std::collections::HashMap;
 use std::io::Read;
@@ -336,6 +337,19 @@ pub fn zxy_to_tile_id(z: u8, x: u32, y: u32) -> Result<u64> {
     Ok(id)
 }
 
+/// Tiles covering `bbox` at zoom `z`, as `(min_x, max_x, min_y, max_y)` inclusive. Tile y
+/// grows southward, so the corners come from opposite edges.
+pub fn tile_range(bbox: &LLBBox, z: u8) -> (u32, u32, u32, u32) {
+    let (min_x, min_y) = lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), z);
+    let (max_x, max_y) = lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), z);
+    (
+        min_x.min(max_x),
+        min_x.max(max_x),
+        min_y.min(max_y),
+        min_y.max(max_y),
+    )
+}
+
 /// Web-Mercator tile containing a coordinate at the given zoom.
 pub fn lonlat_to_tile(lon: f64, lat: f64, z: u8) -> (u32, u32) {
     let n = f64::from(1u32 << z);
@@ -637,7 +651,8 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
         {
             Ok(response) => response,
             Err(e) => {
-                last_error = format!("range request to {url} failed: {e}");
+                let kind = crate::net::failure_kind(&e);
+                last_error = format!("range request to {url} failed [{kind}]: {e}");
                 continue;
             }
         };
@@ -661,7 +676,10 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
                 stats::record_network(body.len() as u64);
                 return Ok(body.to_vec());
             }
-            Err(e) => last_error = format!("range body from {url} could not be read: {e}"),
+            Err(e) => {
+                let kind = crate::net::failure_kind(&e);
+                last_error = format!("range body from {url} could not be read [{kind}]: {e}");
+            }
         }
     }
     Err(last_error)

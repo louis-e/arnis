@@ -67,6 +67,7 @@ fn download_with_reqwest(
             } else {
                 let status = resp.status();
                 let user_msg = match status.as_u16() {
+                    413 => AREA_TOO_LARGE.to_string(),
                     429 => "Rate limited. Try again later.".to_string(),
                     403 => "Server overloaded. Try again.".to_string(),
                     500 | 502 | 503 | 504 => "Server unavailable. Try again.".to_string(),
@@ -239,10 +240,9 @@ pub fn fetch_data_from_file(
     }
 }
 
-/// Coarse bucket for an archive miss. Only the category is reported: the error text can name a
-/// tile, which locates the user to a few kilometres.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
-fn fallback_reason(e: &str) -> &'static str {
+/// Coarse bucket for an archive miss, plus how the request failed when the error says. Only
+/// these are reported: the error text can name a tile, which locates the user to a few kilometres.
+fn fallback_reason(e: &str) -> String {
     const BUCKETS: [(&str, &str); 12] = [
         ("has no data for this area", "no_data_for_area"),
         ("that area needs", "area_too_large"),
@@ -257,12 +257,36 @@ fn fallback_reason(e: &str) -> &'static str {
         ("truncated tile", "tile_decode"),
         ("implausible", "tile_decode"),
     ];
-    BUCKETS
+    let bucket = BUCKETS
         .iter()
         .find(|(needle, _)| e.contains(needle))
         .map(|(_, bucket)| *bucket)
-        .unwrap_or("other")
+        .unwrap_or("other");
+    match failure_kind(e) {
+        Some(kind) => format!("{bucket}/{kind}"),
+        None => bucket.to_string(),
+    }
 }
+
+/// The `[kind]` tag of a failed request (see `net::failure_kind`), else the status of an
+/// `HTTP <code>` error.
+fn failure_kind(e: &str) -> Option<String> {
+    let tagged = e
+        .split('[')
+        .skip(1)
+        .filter_map(|rest| rest.split_once(']').map(|(tag, _)| tag))
+        .find(|tag| crate::net::is_failure_kind(tag));
+    if let Some(tag) = tagged {
+        return Some(tag.to_string());
+    }
+    let after = &e[e.find("HTTP ")? + 5..];
+    let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+    let code = &after[..digits];
+    (digits == 3 && (b'1'..=b'5').contains(&code.as_bytes()[0])).then(|| format!("http_{code}"))
+}
+
+/// What a run shows for a box too large to fetch; the GUI's status line holds 35 characters.
+pub const AREA_TOO_LARGE: &str = "Area too large, try a smaller one.";
 
 /// The OSM source for a run: the tile archive, falling back to Overpass.
 ///
@@ -270,6 +294,7 @@ fn fallback_reason(e: &str) -> &'static str {
 /// after the CLI had moved to the archive.
 pub fn fetch_osm_data(
     bbox: LLBBox,
+    scale: f64,
     debug: bool,
     download_method: &str,
     save_file: Option<&str>,
@@ -277,8 +302,13 @@ pub fn fetch_osm_data(
     use_tile_archive: bool,
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     if use_tile_archive && !tiles_url.is_empty() {
+        // Overpass turns away what the archive does for size, after a long wait.
+        if let Err(e) = crate::osm_tiles::check_size(&bbox, scale) {
+            eprintln!("{}", format!("Error! {e}.").red().bold());
+            return Err(AREA_TOO_LARGE.into());
+        }
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
-        match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url) {
+        match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url, scale) {
             Ok(data) => return Ok(data),
             Err(e) => {
                 eprintln!(
@@ -822,6 +852,10 @@ mod tests {
                 "area_too_large",
             ),
             (
+                "that area needs 31000 km², past the 25000 km² the archive serves at this world scale",
+                "area_too_large",
+            ),
+            (
                 "tile archive index unreachable: connection refused",
                 "index_unreachable",
             ),
@@ -831,8 +865,24 @@ mod tests {
                 "zoom_mismatch",
             ),
             (
-                "HTTP 403 fetching range from https://x/y (expected 206)",
-                "range_http",
+                "HTTP 403 Forbidden fetching range from https://x/y (expected 206)",
+                "range_http/http_403",
+            ),
+            (
+                "tile archive index unreachable [http_403]: HTTP status client error (403 Forbidden) for url (https://x/archives.json)",
+                "index_unreachable/http_403",
+            ),
+            (
+                "tile archive index unreachable [timeout]: error sending request for url (https://x/archives.json)",
+                "index_unreachable/timeout",
+            ),
+            (
+                "range request to https://x/europe.pmtiles failed [reset]: error sending request",
+                "network/reset",
+            ),
+            (
+                "range body from https://x/europe.pmtiles could not be read [body]: error decoding response body",
+                "network/body",
             ),
             ("tile 13/1/2 is not readable: truncated tile", "tile_decode"),
             ("something nobody predicted", "other"),
@@ -846,5 +896,7 @@ mod tests {
     fn fallback_reasons_are_coordinate_free() {
         let e = "tile 13/4359/2842 expands past the size cap";
         assert!(!fallback_reason(e).contains("4359"));
+        let bracketed = "tile [13/4359/2842] could not be read: HTTP 4359 or so";
+        assert_eq!(fallback_reason(bracketed), "network");
     }
 }

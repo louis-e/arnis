@@ -765,7 +765,6 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     if let Some(run) = one_world {
         editor.set_merge_into_existing(crate::world_utils::WorldLayout::of(&run.world_dir));
-        editor.set_climate_anchor(run.origin_lat, run.origin_lon);
         // metadata.json describes the whole world, not this area alone.
         if let Ok(Some(manifest)) = crate::one_world::Manifest::load(&run.world_dir) {
             let union = match manifest.extent() {

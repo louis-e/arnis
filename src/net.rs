@@ -1,4 +1,4 @@
-//! Process-wide ceiling on in-flight HTTP requests.
+//! Process-wide ceiling on in-flight HTTP requests, and how a request failed.
 
 use std::sync::{Condvar, Mutex};
 
@@ -45,6 +45,42 @@ pub fn request_permit() -> RequestPermit {
     }
     *in_flight += 1;
     RequestPermit { _private: () }
+}
+
+/// How a request failed, coarse enough to report: never a URL, host or address.
+pub fn failure_kind(e: &reqwest::Error) -> String {
+    if let Some(status) = e.status() {
+        return format!("http_{}", status.as_u16());
+    }
+    let causes = std::iter::successors(std::error::Error::source(e), |s| s.source())
+        .map(|s| s.to_string().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let kind = if e.is_timeout() {
+        "timeout"
+    } else if causes.contains("dns error") {
+        "dns"
+    } else if causes.contains("certificate") || causes.contains("tls") {
+        "tls"
+    } else if causes.contains("reset") || causes.contains("forcibly closed") {
+        "reset"
+    } else if e.is_connect() {
+        "connect"
+    } else if e.is_body() || e.is_decode() {
+        "body"
+    } else {
+        "other"
+    };
+    kind.to_string()
+}
+
+/// Whether `tag` is something [`failure_kind`] returns.
+pub fn is_failure_kind(tag: &str) -> bool {
+    const KINDS: [&str; 7] = ["timeout", "dns", "tls", "reset", "connect", "body", "other"];
+    KINDS.contains(&tag)
+        || tag
+            .strip_prefix("http_")
+            .is_some_and(|code| code.len() == 3 && code.bytes().all(|b| b.is_ascii_digit()))
 }
 
 #[cfg(test)]

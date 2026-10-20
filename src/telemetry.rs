@@ -251,6 +251,70 @@ pub fn redact_url_queries(mut input: &str) -> String {
     out
 }
 
+/// Replace file system paths in `input` with `<path>`. They carry the user name, and a Bedrock
+/// world's folder is named after its area.
+pub fn redact_paths(input: &str) -> String {
+    let b = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let (mut copied, mut i) = (0, 0);
+    while i < b.len() {
+        if path_starts_at(b, i) {
+            out.push_str(&input[copied..i]);
+            out.push_str("<path>");
+            i = path_end(b, i);
+            copied = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&input[copied..]);
+    out
+}
+
+fn path_starts_at(b: &[u8], i: usize) -> bool {
+    let prev = i.checked_sub(1).map(|p| b[p]);
+    let next = |k: usize| b.get(i + k).copied();
+    let is_slash = |c: Option<u8>| matches!(c, Some(b'/' | b'\\'));
+    let after_word = prev.is_some_and(|c| c.is_ascii_alphanumeric());
+    let opens = prev.is_none_or(|c| c.is_ascii_whitespace() || b"('\"=`:[,{<;|".contains(&c));
+    let file_url = !after_word && b[i..].starts_with(b"file:/");
+    let drive =
+        b[i].is_ascii_alphabetic() && !after_word && next(1) == Some(b':') && is_slash(next(2));
+    let unix = b[i] == b'/' && next(1).is_some_and(|c| c != b'/' && !c.is_ascii_whitespace());
+    let unc = b[i] == b'\\' && next(1) == Some(b'\\');
+    let home = b[i] == b'~' && is_slash(next(1));
+    file_url || drive || (opens && (unix || unc || home))
+}
+
+/// A quoted path runs to the last quote of its kind on the line that closes a phrase, so an
+/// apostrophe in a name (O'Connor, Ca' Savio) stays inside it; this errs toward hiding more.
+/// An unquoted one runs to a colon that ends a phrase, or the line end. Spaces stay inside both.
+fn path_end(b: &[u8], start: usize) -> usize {
+    let line_end = b[start..]
+        .iter()
+        .position(|&c| c == b'\n' || c == b'\r')
+        .map_or(b.len(), |p| start + p);
+    let breaks = |at: usize| {
+        b.get(at)
+            .is_none_or(|c| c.is_ascii_whitespace() || b":,;)]}".contains(c))
+    };
+    let closes = |at: usize| {
+        breaks(at + 1) || (matches!(b.get(at + 1), Some(b'.' | b'!' | b'?')) && breaks(at + 2))
+    };
+    let quote = start
+        .checked_sub(1)
+        .map(|p| b[p])
+        .filter(|c| b"'\"`".contains(c));
+    let found = match quote {
+        Some(q) => (start + 1..line_end)
+            .rev()
+            .find(|&i| b[i] == q && closes(i)),
+        None => (start + 1..line_end)
+            .find(|&i| b[i] == b':' && b.get(i + 1).is_none_or(|c| c.is_ascii_whitespace())),
+    };
+    found.unwrap_or(line_end)
+}
+
 /// Sends a log entry to the telemetry server
 pub fn send_log(level: LogLevel, message: &str) {
     // Check user consent
@@ -265,7 +329,7 @@ pub fn send_log(level: LogLevel, message: &str) {
 
     // Redact URL query strings before anything else so bbox coordinates
     // embedded in reqwest/provider error messages never leave the client.
-    let redacted = redact_url_queries(message);
+    let redacted = redact_paths(&redact_url_queries(message));
     let truncated_message = if redacted.chars().count() > 1000 {
         redacted.chars().take(1000).collect::<String>()
     } else {
@@ -351,7 +415,9 @@ pub fn install_panic_hook() {
 
             // Combine payload and location; redact URL queries so a panic
             // message carrying a request URL can't leak bbox coordinates.
-            let mut error_message = redact_url_queries(&format!("{} @ {}", payload, location));
+            // The location is a source path in the build, not on the user's machine.
+            let mut error_message =
+                redact_url_queries(&format!("{} @ {}", redact_paths(&payload), location));
 
             // Truncate to 500 Unicode characters
             if error_message.chars().count() > 500 {
@@ -403,6 +469,68 @@ mod tests {
             redact_url_queries(input),
             "error for url https://host.tld/path"
         );
+    }
+
+    #[test]
+    fn redact_paths_hides_user_and_world_names() {
+        let bedrock = "World generation failed: Failed to save Bedrock world: I/O error while writing Bedrock world: '/home/moosa/Desktop/Arnis Malé' already exists and was not created by Arnis.";
+        assert_eq!(
+            redact_paths(bedrock),
+            "World generation failed: Failed to save Bedrock world: I/O error while writing Bedrock world: '<path>' already exists and was not created by Arnis."
+        );
+        for (input, want) in [
+            (
+                r"Failed to create C:\Users\John Doe\Desktop\Arnis World 1: Access is denied. (os error 5)",
+                "Failed to create <path>: Access is denied. (os error 5)",
+            ),
+            (
+                r#"Failed to read "C:\\Users\\jo\\AppData\\Local\\arnis\\x.json": denied"#,
+                r#"Failed to read "<path>": denied"#,
+            ),
+            (
+                "'/home/O'Connor/Desktop/Arnis Berlin.mcworld.staging' already exists",
+                "'<path>' already exists",
+            ),
+            (
+                r"Failed to write 'C:\Users\jo\Desktop\Arnis L'Aquila.mcworld': disk full",
+                "Failed to write '<path>': disk full",
+            ),
+            (
+                r#"Failed to read "C:\\Users\\O'Connor\\x.json": denied"#,
+                r#"Failed to read "<path>": denied"#,
+            ),
+            ("'/home/jo/Arnis Roma'. Rename it", "'<path>'. Rename it"),
+            (
+                r"'C:\Users\jo\Desktop\Arnis Ca' Savio.mcworld.staging' already exists",
+                "'<path>' already exists",
+            ),
+            (
+                "failed:/home/moosa/Desktop/Arnis Malé.mcworld.staging",
+                "failed:<path>",
+            ),
+            ("[/home/jo/Arnis Roma]", "[<path>"),
+            ("a,/home/jo/x", "a,<path>"),
+            ("opened file:///home/jo/Arnis Malé", "opened <path>"),
+            ("ends in /home/jo/x:", "ends in <path>:"),
+            ("saved to C:/Users/jo/saves/Berlin", "saved to <path>"),
+            (r"share \\nas\worlds\Paris (2) missing", "share <path>"),
+            ("in ~/worlds/Tokyo", "in <path>"),
+        ] {
+            assert_eq!(redact_paths(input), want, "for {input:?}");
+        }
+    }
+
+    #[test]
+    fn redact_paths_leaves_urls_and_fractions() {
+        for input in [
+            "error sending request for url (https://api.arnismc.com/overpass/api/interpreter)",
+            "[1/7] tile 13/4359/2842 and/or 3 / 4",
+            "Overpass fetch failed on all 1 providers (api.arnismc.com); last error: Response code: 413",
+            "io error: Os { code: 112, kind: StorageFull }",
+            "range request to http://127.0.0.1:9/v1/archives.json failed [timeout]",
+        ] {
+            assert_eq!(redact_paths(input), input);
+        }
     }
 
     #[test]

@@ -328,6 +328,155 @@ pub fn write_world_skeleton(
     Ok(())
 }
 
+/// What grows a world on disk beyond its block area.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WorldSizeOptions {
+    pub interior: bool,
+    pub bake_lighting: bool,
+    pub voxy_lod: bool,
+    pub caves: bool,
+    pub fillground: bool,
+    /// The extended build height, where filled ground and caves reach 2000 blocks down.
+    pub tall: bool,
+}
+
+impl WorldSizeOptions {
+    pub fn of(args: &crate::args::Args) -> Self {
+        Self {
+            interior: args.interior,
+            bake_lighting: args.bake_lighting,
+            voxy_lod: args.voxy_lod,
+            caves: args.caves,
+            fillground: args.fillground,
+            tall: args.disable_height_limit,
+        }
+    }
+}
+
+/// Free space a run leaves beside the world it writes, and the whole check for a small one.
+pub const DISK_HEADROOM_BYTES: u64 = 3 * 1024 * 1024 * 1024;
+
+/// Most disk a world of `blocks_km2` (ground times scale², in km² of blocks) takes while it is
+/// written. Measured on 9 km² boxes in Oct 2026: a Java chunk nearly always fits one 4 KiB
+/// region sector, so city, farmland, forest, sea and the Alps all took 15.4-16.7 MiB per km²
+/// whatever stood on them. The options add their worst measured cost, rounded up.
+pub fn estimated_world_bytes(
+    blocks_km2: f64,
+    format: crate::world_editor::WorldFormat,
+    o: WorldSizeOptions,
+) -> u64 {
+    const MIB: f64 = 1024.0 * 1024.0;
+    let mut per_km2 = 17.0;
+    if o.interior {
+        per_km2 += 10.0; // Manhattan +9.4
+    }
+    if o.bake_lighting {
+        per_km2 += 10.0; // Munich +9.0
+    }
+    if o.voxy_lod {
+        per_km2 += 20.0; // Munich +19.0
+    }
+    // Caves bring the filled ground with them.
+    per_km2 += match (o.caves, o.fillground, o.tall) {
+        (true, _, true) => 35.0,     // Zermatt +34.3
+        (true, _, false) => 12.0,    // Zermatt +11.4
+        (false, true, true) => 15.0, // Zermatt +14.0
+        (false, true, false) => 2.0, // Zermatt +0.8
+        (false, false, _) => 0.0,
+    };
+    // Bedrock holds its staging folder and the .mcworld at once (0.67-0.77x Java at the
+    // peak); Luanti's map.sqlite came to 0.60-0.75x.
+    if format != crate::world_editor::WorldFormat::JavaAnvil {
+        per_km2 *= 0.8;
+    }
+    // Plus level.dat, map items, signage, datapacks and region headers (about 4 MiB).
+    ((blocks_km2.max(0.0) * per_km2 + 8.0) * MIB) as u64
+}
+
+/// km² of blocks the run writes for `bbox`, from the projection it builds with: scale²,
+/// and in a One World the Mercator stretch away from the world's origin.
+pub fn blocks_km2(args: &crate::args::Args, bbox: &LLBBox) -> f64 {
+    match crate::projection::ProjectionSpec::from_args(args).transformer(bbox) {
+        Ok((_, r)) => (r.max_x() - r.min_x() + 1) as f64 * (r.max_z() - r.min_z() + 1) as f64 / 1e6,
+        Err(_) => bbox.area_km2() * args.scale * args.scale,
+    }
+}
+
+/// Why a run is refused before it fetches anything.
+#[derive(Debug)]
+pub struct RunSizeError {
+    /// Refused for its area rather than for the disk.
+    pub area: bool,
+    /// Fits the GUI's status line.
+    pub short: &'static str,
+    pub detail: String,
+}
+
+/// Refuses a run the tile archive or the disk cannot take. Wants the run's final `args` and
+/// `bbox`, so a One World's own scale and frame and every option override are counted.
+pub fn check_run_size(
+    args: &crate::args::Args,
+    bbox: &LLBBox,
+    format: crate::world_editor::WorldFormat,
+    dir: &Path,
+) -> Result<(), RunSizeError> {
+    if args.mapillary_probe {
+        return Ok(());
+    }
+    let from_archive = !args.skip_osm()
+        && args.file.is_none()
+        && !args.no_tile_archive
+        && !args.osm_tiles_url.is_empty();
+    if from_archive {
+        if let Err(e) = crate::osm_tiles::check_size(bbox, args.scale) {
+            return Err(RunSizeError {
+                area: true,
+                short: retrieve_data::AREA_TOO_LARGE,
+                detail: format!("The area is too large: {e}. Select a smaller area."),
+            });
+        }
+    }
+    let needed = estimated_world_bytes(blocks_km2(args, bbox), format, WorldSizeOptions::of(args));
+    check_disk_space(dir, needed).map_err(|detail| RunSizeError {
+        area: false,
+        short: "Not enough disk space available.",
+        detail,
+    })
+}
+
+/// Fails when the disk that will hold `dir` has less than `needed` plus the headroom free.
+/// Reads the nearest folder that exists, since a missing one confuses the Windows volume
+/// lookup; a reading of 0 or an error is "can't tell" and lets the run go ahead (#824).
+pub fn check_disk_space(dir: &Path, needed: u64) -> Result<(), String> {
+    let mut probe = dir;
+    let probe = loop {
+        if probe.exists() {
+            break probe.to_path_buf();
+        }
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => break std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        }
+    };
+    let required = needed.saturating_add(DISK_HEADROOM_BYTES);
+    match fs2::available_space(&probe) {
+        Ok(free) if free > 0 && free < required => {
+            const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+            Err(format!(
+                "Not enough disk space: this world needs about {:.1} GB and {:.0} GB should stay free, but only {:.1} GB are free.",
+                needed as f64 / GIB,
+                DISK_HEADROOM_BYTES as f64 / GIB,
+                free as f64 / GIB
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(e) => {
+            eprintln!("Warning: Could not check disk space: {e}");
+            Ok(())
+        }
+    }
+}
+
 /// Holds Minecraft's `session.lock` while Arnis writes a world.
 pub struct SessionLock {
     // On Unix it is only held: closing it releases the fcntl lock.
@@ -1136,6 +1285,124 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Disk at the peak of real runs, Oct 2026: 9 km² boxes at scale 1 unless the area says.
+    #[test]
+    fn the_disk_estimate_covers_every_measured_world() {
+        use crate::world_editor::WorldFormat::{BedrockMcWorld, JavaAnvil, LuantiWorld};
+        let o = WorldSizeOptions::default();
+        let caves = WorldSizeOptions {
+            caves: true,
+            fillground: true,
+            ..o
+        };
+        let fill = WorldSizeOptions {
+            fillground: true,
+            ..o
+        };
+        let tall = |w: WorldSizeOptions| WorldSizeOptions { tall: true, ..w };
+        let cases = [
+            ("Munich", 9.0, JavaAnvil, o, 141.0),
+            ("Munich 85 km²", 85.0, JavaAnvil, o, 1307.0),
+            ("Munich 150 km²", 150.0, JavaAnvil, o, 2302.0),
+            ("Munich scale 0.5", 2.25, JavaAnvil, o, 38.2),
+            ("Munich scale 2", 36.0, JavaAnvil, o, 563.7),
+            ("Manhattan", 9.0, JavaAnvil, o, 150.1),
+            ("farmland", 9.0, JavaAnvil, o, 138.5),
+            ("Zermatt tall", 9.0, JavaAnvil, tall(o), 138.5),
+            (
+                "Munich interior",
+                9.0,
+                JavaAnvil,
+                WorldSizeOptions {
+                    interior: true,
+                    ..o
+                },
+                168.7,
+            ),
+            (
+                "Manhattan interior",
+                9.0,
+                JavaAnvil,
+                WorldSizeOptions {
+                    interior: true,
+                    ..o
+                },
+                235.1,
+            ),
+            ("Munich caves", 9.0, JavaAnvil, caves, 164.5),
+            ("Zermatt caves", 9.0, JavaAnvil, caves, 241.1),
+            ("Zermatt tall caves", 9.0, JavaAnvil, tall(caves), 447.3),
+            ("Zermatt fillground", 9.0, JavaAnvil, fill, 145.5),
+            ("Zermatt tall fillground", 9.0, JavaAnvil, tall(fill), 264.4),
+            (
+                "Munich bake lighting",
+                9.0,
+                JavaAnvil,
+                WorldSizeOptions {
+                    bake_lighting: true,
+                    ..o
+                },
+                221.9,
+            ),
+            (
+                "Munich Voxy",
+                9.0,
+                JavaAnvil,
+                WorldSizeOptions {
+                    voxy_lod: true,
+                    ..o
+                },
+                312.7,
+            ),
+            ("Munich Bedrock", 9.0, BedrockMcWorld, o, 94.7),
+            ("Manhattan Bedrock", 9.0, BedrockMcWorld, o, 116.0),
+            ("Munich Luanti", 9.0, LuantiWorld, o, 84.5),
+            ("Manhattan Luanti", 9.0, LuantiWorld, o, 112.5),
+        ];
+        for (name, km2, format, opts, measured_mib) in cases {
+            let est = estimated_world_bytes(km2, format, opts) as f64 / (1024.0 * 1024.0);
+            assert!(
+                est >= measured_mib,
+                "{name}: {est:.0} MiB is under the {measured_mib} measured"
+            );
+            assert!(
+                est <= 2.0 * measured_mib,
+                "{name}: {est:.0} MiB is over twice the {measured_mib} measured"
+            );
+        }
+    }
+
+    #[test]
+    fn off_earth_blocks_follow_the_body_scale() {
+        use clap::Parser;
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            ".",
+            "--bbox",
+            "-10,-10,10,10",
+            "--body",
+            "moon",
+        ];
+        let mut args = crate::args::Args::parse_from(cmd);
+        crate::args::apply_body_defaults(&mut args);
+        let bbox = args.bbox.unwrap();
+        let got = blocks_km2(&args, &bbox);
+        let want = bbox.area_km2() * args.scale * args.scale;
+        assert!((got / want - 1.0).abs() < 0.02, "{got} vs {want}");
+    }
+
+    #[test]
+    fn a_world_larger_than_the_disk_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        // A volume that reports nothing to compare against lets every run go, by design.
+        if !fs2::available_space(dir.path()).is_ok_and(|free| free > 0) {
+            return;
+        }
+        let e = check_disk_space(&dir.path().join("not yet made"), u64::MAX / 2).unwrap_err();
+        assert!(e.starts_with("Not enough disk space"), "{e}");
+    }
     use std::collections::HashMap;
 
     #[test]

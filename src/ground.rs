@@ -73,8 +73,6 @@ pub struct GroundFrame {
     pub mercator: Option<WebMercatorProjection>,
     pub pad_blocks: usize,
     pub affine: AffinePolicy,
-    /// Where climate is read; `None` is the bbox centre.
-    pub climate_anchor: Option<(f64, f64)>,
 }
 
 impl GroundFrame {
@@ -84,7 +82,6 @@ impl GroundFrame {
             mercator: None,
             pad_blocks: 0,
             affine: AffinePolicy::Fit,
-            climate_anchor: None,
         }
     }
 
@@ -110,29 +107,13 @@ impl GroundFrame {
                     Some(affine) => AffinePolicy::Fixed(affine),
                     None => AffinePolicy::FitWithHeadroom,
                 },
-                climate_anchor: Some((run.origin_lat, run.origin_lon)),
             },
             None => Self {
                 world_dims: Some((world_w, world_h)),
                 mercator: Some(projection),
                 pad_blocks: 0,
                 affine: AffinePolicy::Fit,
-                climate_anchor: None,
             },
-        }
-    }
-
-    fn climate(&self, bbox: &LLBBox) -> crate::climate::Climate {
-        match self.climate_anchor {
-            Some((lat, lon)) => crate::climate::Climate::classify_at(lat, lon),
-            None => crate::climate::Climate::classify(bbox),
-        }
-    }
-
-    fn anchor_lat(&self, bbox: &LLBBox) -> f64 {
-        match self.climate_anchor {
-            Some((lat, _)) => lat,
-            None => (bbox.min().lat() + bbox.max().lat()) / 2.0,
         }
     }
 
@@ -335,7 +316,7 @@ impl Ground {
             world_height: world_h,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
-            climate: frame.climate(bbox),
+            climate: crate::climate::Climate::classify(bbox),
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
@@ -521,7 +502,7 @@ impl Ground {
                 peaks,
             ) {
                 Ok(mut elevation_data) => {
-                    let lat = frame.anchor_lat(&requested_bbox);
+                    let lat = (requested_bbox.min().lat() + requested_bbox.max().lat()) / 2.0;
                     // Must use the base the scaler actually settled on: snow_threshold_for
                     // inverts that exact affine, so a mismatched base misplaces every snow cap.
                     let base = elevation_data.ground_level;
@@ -564,7 +545,7 @@ impl Ground {
                         world_height: final_h,
                         rotation_mask: None,
                         snow_threshold_y,
-                        climate: frame.climate(&requested_bbox),
+                        climate: crate::climate::Climate::classify(&requested_bbox),
                         body,
                         ecoregions: body
                             .is_earth()
@@ -599,7 +580,7 @@ impl Ground {
                         world_height: 0,
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
-                        climate: frame.climate(&requested_bbox),
+                        climate: crate::climate::Climate::classify(&requested_bbox),
                         body,
                         ecoregions: body
                             .is_earth()
@@ -1865,7 +1846,6 @@ mod frame_tests {
             mercator: Some(WebMercatorProjection::new(48.1372, 11.5755, 1.0)),
             pad_blocks: pad,
             affine: AffinePolicy::Fit,
-            climate_anchor: Some((48.1372, 11.5755)),
         }
     }
 
