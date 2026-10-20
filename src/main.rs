@@ -407,6 +407,33 @@ fn run_cli() {
         world_editor::WorldFormat::JavaAnvil
     };
 
+    // The disk has to take the whole world and keep a few GB free.
+    if !args.mapillary_probe {
+        let disk_dir = match (&one_world_paths, world_format) {
+            (Some(dir), _) => dir.clone(),
+            (None, world_editor::WorldFormat::BedrockMcWorld) => args
+                .path
+                .clone()
+                .unwrap_or_else(world_utils::get_bedrock_output_directory),
+            (None, world_editor::WorldFormat::LuantiWorld) => args
+                .path
+                .clone()
+                .unwrap_or_else(world_utils::get_luanti_worlds_directory),
+            (None, world_editor::WorldFormat::JavaAnvil) => args.path.clone().unwrap_or_default(),
+        };
+        let r = args.body.scale_ratio();
+        let blocks_km2 = effective_bbox.area_km2() * (r * args.scale).powi(2);
+        let needed = world_utils::estimated_world_bytes(
+            blocks_km2,
+            world_format,
+            world_utils::WorldSizeOptions::of(&args),
+        );
+        if let Err(e) = world_utils::check_disk_space(&disk_dir, needed) {
+            eprintln!("{} {e}", "Error:".red().bold());
+            exit_failed();
+        }
+    }
+
     // Build the generation output path and level name
     let (generation_path, level_name) = if args.mapillary_probe {
         // The probe reports coverage and exits, so it must not allocate (and

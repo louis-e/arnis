@@ -1591,45 +1591,28 @@ fn gui_start_generation(
                 _ => PathBuf::new(),
             };
 
-            // Check available disk space before starting generation (minimum 3GB required)
-            const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
+            // The disk has to take the whole world and keep a few GB free.
             let check_path = match world_format {
                 WorldFormat::JavaAnvil => world_path.clone(),
                 WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
                 WorldFormat::LuantiWorld => luanti_output_dir.clone(),
             };
-            // Probe the nearest existing ancestor: a missing or space-containing
-            // path otherwise confuses the Windows volume lookup, which then reports
-            // 0 bytes free. Only block on a confident positive reading; treat an
-            // error or a 0/undeterminable result as "can't tell" and proceed (#824).
-            let probe_path = {
-                let mut p = check_path.as_path();
-                loop {
-                    if p.exists() {
-                        break p.to_path_buf();
-                    }
-                    match p.parent() {
-                        Some(parent) => p = parent,
-                        // No existing ancestor (e.g. a bare relative path): probe
-                        // the current dir so the query always hits a real path.
-                        None => {
-                            break std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-                        }
-                    }
-                }
+            let ground_km2 = LLBBox::from_str(&bbox_text).map_or(0.0, |b| b.area_km2());
+            let blocks_km2 = ground_km2 * (celestial_body.scale_ratio() * world_scale).powi(2);
+            let size_options = crate::world_utils::WorldSizeOptions {
+                interior: interior_enabled,
+                bake_lighting: bake_lighting_enabled,
+                voxy_lod: voxy_lod_enabled,
+                caves: caves_enabled,
+                fillground: fillground_enabled || caves_enabled,
+                tall: disable_height_limit,
             };
-            match fs2::available_space(&probe_path) {
-                Ok(available) if available > 0 && available < MIN_DISK_SPACE_BYTES => {
-                    let error_msg = "Not enough disk space available.".to_string();
-                    eprintln!("{error_msg}");
-                    emit_gui_error(&error_msg);
-                    return Err(error_msg);
-                }
-                Ok(_) => {} // Sufficient, or 0/undeterminable: don't false-block
-                Err(e) => {
-                    // Log warning but don't block generation if we can't check space
-                    eprintln!("Warning: Could not check disk space: {e}");
-                }
+            let needed =
+                crate::world_utils::estimated_world_bytes(blocks_km2, world_format, size_options);
+            if let Err(e) = crate::world_utils::check_disk_space(&check_path, needed) {
+                eprintln!("{e}");
+                emit_gui_error("Not enough disk space available.");
+                return Err(e);
             }
 
             // Acquire session lock for Java worlds only
