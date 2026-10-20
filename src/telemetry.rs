@@ -286,12 +286,21 @@ fn path_starts_at(b: &[u8], i: usize) -> bool {
     drive || (opens && (unix || unc || home))
 }
 
-/// A path runs to a quote, a line end, or a colon that ends a phrase; spaces stay inside it.
+/// A path runs to a line end, a colon that ends a phrase, or a quote that closes it. Spaces stay
+/// inside it, and so do apostrophes in names like O'Connor or L'Aquila.
 fn path_end(b: &[u8], start: usize) -> usize {
+    let breaks = |at: usize| {
+        b.get(at)
+            .is_none_or(|c| c.is_ascii_whitespace() || b":,;)]}".contains(c))
+    };
+    let closes = |at: usize| {
+        breaks(at + 1) || (matches!(b.get(at + 1), Some(b'.' | b'!' | b'?')) && breaks(at + 2))
+    };
     let mut i = start + 1;
     while i < b.len() {
         match b[i] {
-            b'\'' | b'"' | b'`' | b'\n' | b'\r' => return i,
+            b'\n' | b'\r' => return i,
+            b'\'' | b'"' | b'`' if closes(i) => return i,
             b':' if b.get(i + 1).is_none_or(|c| c.is_ascii_whitespace()) => return i,
             _ => i += 1,
         }
@@ -471,6 +480,19 @@ mod tests {
                 r#"Failed to read "C:\\Users\\jo\\AppData\\Local\\arnis\\x.json": denied"#,
                 r#"Failed to read "<path>": denied"#,
             ),
+            (
+                "'/home/O'Connor/Desktop/Arnis Berlin.mcworld.staging' already exists",
+                "'<path>' already exists",
+            ),
+            (
+                r"Failed to write 'C:\Users\jo\Desktop\Arnis L'Aquila.mcworld': disk full",
+                "Failed to write '<path>': disk full",
+            ),
+            (
+                r#"Failed to read "C:\\Users\\O'Connor\\x.json": denied"#,
+                r#"Failed to read "<path>": denied"#,
+            ),
+            ("'/home/jo/Arnis Roma'. Rename it", "'<path>'. Rename it"),
             ("saved to C:/Users/jo/saves/Berlin", "saved to <path>"),
             (r"share \\nas\worlds\Paris (2) missing", "share <path>"),
             ("in ~/worlds/Tokyo", "in <path>"),
