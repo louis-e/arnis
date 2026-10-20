@@ -632,7 +632,7 @@ fn run_cli() {
     }
     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
     // Last, once the water has stopped moving.
-    ground.mark_beaches();
+    ground.finish_land_cover(args.mode);
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_bridge_repair");
     }

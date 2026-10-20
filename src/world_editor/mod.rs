@@ -1367,6 +1367,19 @@ impl<'a> WorldEditor<'a> {
             }));
     }
 
+    /// Drops one region's road-surface overrides once it is written and nothing reads them.
+    pub(crate) fn release_road_surface_overrides(&mut self, rx: i32, rz: i32) {
+        if self.road_surface_overrides.is_empty() {
+            return;
+        }
+        let (x0, z0) = (rx << 9, rz << 9);
+        for z in z0..z0 + 512 {
+            for x in x0..x0 + 512 {
+                self.road_surface_overrides.remove(&(x, z));
+            }
+        }
+    }
+
     /// Get the water-appropriate Y level at a world coordinate.
     /// On steep terrain, snaps to the local minimum to compensate for
     /// spatial misalignment between water data and the elevation DEM.
@@ -3199,5 +3212,17 @@ mod road_override_merge_tests {
             0,
             "outside the kept regions"
         );
+    }
+
+    #[test]
+    fn a_written_region_lets_go_of_its_roads_only() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 1023, 511).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        let road: CoordMap<i32> = [((100, 5), 10), ((700, 5), 20)].into_iter().collect();
+        editor.merge_road_surface_overrides(road, (0, 0, 1023, 511), None);
+        editor.release_road_surface_overrides(0, 0);
+        assert_eq!(editor.get_ground_level(100, 5), 0);
+        assert_eq!(editor.get_ground_level(700, 5), 20);
     }
 }

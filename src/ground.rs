@@ -1,4 +1,4 @@
-use crate::args::Args;
+use crate::args::{Args, GenerationMode};
 use crate::canopy::{self, CanopyData};
 use crate::celestial::CelestialBody;
 use crate::coordinate_system::{
@@ -756,8 +756,17 @@ impl Ground {
         );
     }
 
+    /// Last land cover pass, once the OSM and bridge repairs have moved the water: returns
+    /// built-up land and fields to nature where the mode asks, then marks the beaches.
+    pub fn finish_land_cover(&mut self, mode: GenerationMode) {
+        if mode.natural_land_cover() {
+            self.naturalize_land_cover();
+        }
+        self.mark_beaches();
+    }
+
     /// Returns built-up land and fields to natural cover, for terrain-only worlds.
-    pub fn naturalize_land_cover(&mut self) {
+    fn naturalize_land_cover(&mut self) {
         let climate = self.climate;
         let Ground {
             land_cover,
@@ -1402,10 +1411,6 @@ pub fn generate_ground_data(
             &frame,
             peaks,
         );
-        // After the elevation repair, which still needs the built-up cells to smooth them.
-        if args.mode.natural_land_cover() {
-            ground.naturalize_land_cover();
-        }
         ground.set_winter(args.winter);
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.

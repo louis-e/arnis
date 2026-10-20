@@ -1,21 +1,24 @@
 //! World styles, applied to each finished region just before it is written: the ruins of
 //! a post-apocalyptic world and the snow and ice of a winter one. They work on the final
 //! blocks, so they reach everything placed before, trees, roofs and landmarks alike.
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+use fastnbt::Value;
 
 use super::common::{world_max_y, ChunkToModify, SectionToModify};
 use super::WorldEditor;
 use crate::block_definitions::{
-    Block, BlockWithProperties, AIR, ANDESITE, COARSE_DIRT, COBBLESTONE, COBBLESTONE_SLAB,
-    COBBLESTONE_STAIRS, COBBLESTONE_WALL, COBWEB, CRACKED_DEEPSLATE_BRICKS,
+    intern_props, Block, BlockWithProperties, AIR, ANDESITE, COARSE_DIRT, COBBLESTONE,
+    COBBLESTONE_SLAB, COBBLESTONE_STAIRS, COBBLESTONE_WALL, COBWEB, CRACKED_DEEPSLATE_BRICKS,
     CRACKED_DEEPSLATE_TILES, CRACKED_NETHER_BRICKS, CRACKED_POLISHED_BLACKSTONE_BRICKS,
-    CRACKED_STONE_BRICKS, DEAD_BUSH, DEEPSLATE_BRICKS, DEEPSLATE_TILES, FIRE, GRASS, GRASS_BLOCK,
-    GRAVEL, ICE, MOSSY_COBBLESTONE, MOSSY_COBBLESTONE_SLAB, MOSSY_COBBLESTONE_STAIRS,
-    MOSSY_COBBLESTONE_WALL, MOSSY_STONE_BRICKS, MOSSY_STONE_BRICK_SLAB, MOSSY_STONE_BRICK_STAIRS,
-    MOSSY_STONE_BRICK_WALL, MOSS_BLOCK, MOSS_CARPET, NETHERRACK, NETHER_BRICK, PODZOL,
-    POLISHED_ANDESITE, POLISHED_BLACKSTONE_BRICKS, SMOOTH_STONE, SNOWY_GRASS_BLOCK, SNOWY_PODZOL,
-    SNOW_LAYERS, STONE, STONE_BRICKS, STONE_BRICK_SLAB, STONE_BRICK_STAIRS, STONE_BRICK_WALL,
-    TALL_GRASS_BOTTOM, TALL_GRASS_TOP, VINES,
+    CRACKED_STONE_BRICKS, DEAD_BUSH, DEEPSLATE_BRICKS, DEEPSLATE_TILES, DIRT, DIRT_PATH, FARMLAND,
+    FIRE, GRASS, GRASS_BLOCK, GRAVEL, ICE, MOSSY_COBBLESTONE, MOSSY_COBBLESTONE_SLAB,
+    MOSSY_COBBLESTONE_STAIRS, MOSSY_COBBLESTONE_WALL, MOSSY_STONE_BRICKS, MOSSY_STONE_BRICK_SLAB,
+    MOSSY_STONE_BRICK_STAIRS, MOSSY_STONE_BRICK_WALL, MOSS_BLOCK, MOSS_CARPET, MUD, NETHERRACK,
+    NETHER_BRICK, PODZOL, POLISHED_ANDESITE, POLISHED_BLACKSTONE_BRICKS, SMOOTH_QUARTZ_SLAB,
+    SMOOTH_QUARTZ_STAIRS, SMOOTH_STONE, SNOWY_GRASS_BLOCK, SNOWY_PODZOL, SNOW_LAYERS, STONE,
+    STONE_BRICKS, STONE_BRICK_SLAB, STONE_BRICK_STAIRS, STONE_BRICK_WALL, TALL_GRASS_BOTTOM,
+    TALL_GRASS_TOP, VINES,
 };
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill_cache::{CoordinateBitmap, SealedSurfaceBitmap};
@@ -33,14 +36,18 @@ const SALT_PLOW: u32 = 0x504C_4F57;
 const SALT_ICE: u32 = 0x4943_4521;
 const SALT_VINE: u32 = 0x5649_4E45;
 const SALT_MOSS: u32 = 0x4D4F_5353;
+const SALT_ROOF: u32 = 0x524F_4F46;
 
 /// Share of street-facing wall that vines climb.
 const VINE_SHARE: f64 = 0.35;
 
+/// Share of slab and stair roofs, which snow cannot rest on, that turn white instead.
+const WHITE_ROOF_SHARE: f64 = 0.85;
+
 /// How far into the street a ruin throws its rubble, in blocks.
 const RUBBLE_REACH: i32 = 2;
 /// One rubble pile in this many burns: netherrack with a fire on it that never goes out.
-const FIRE_ODDS: u64 = 240;
+const FIRE_ODDS: u64 = 100;
 /// How high moss creeps up a ruin's walls.
 const MOSS_REACH: i32 = 6;
 /// Lamps stand on short posts, so lights are looked for this far above the ground.
@@ -142,7 +149,9 @@ const TALL_PLANTS: [&str; 8] = [
     "pitcher_plant",
 ];
 
-const LIGHTS: [&str; 6] = [
+const LIGHTS: [&str; 8] = [
+    "fire",
+    "soul_fire",
     "glowstone",
     "sea_lantern",
     "shroomlight",
@@ -152,7 +161,7 @@ const LIGHTS: [&str; 6] = [
 ];
 
 /// Parts of names that mark a block nothing can settle on.
-const THIN: [&str; 40] = [
+const THIN: [&str; 50] = [
     "fence",
     "_wall",
     "door",
@@ -193,6 +202,16 @@ const THIN: [&str; 40] = [
     "sugar_cane",
     "cactus",
     "dripstone",
+    "dripleaf",
+    "azalea",
+    "amethyst_bud",
+    "amethyst_cluster",
+    "sculk_vein",
+    "sculk_sensor",
+    "sculk_shrieker",
+    "daylight_detector",
+    "brewing_stand",
+    "composter",
 ];
 
 fn kind_of(name: &str) -> Kind {
@@ -332,11 +351,12 @@ impl WorldEditor<'_> {
             if style.ruins {
                 let in_building =
                     |col: &Column| style.footprints.is_some_and(|f| f.contains(col.x, col.z));
+                let mut fires = Vec::new();
                 for &(col, ground_y) in &columns {
                     if in_building(&col) {
-                        ruin_building(chunk, col, ground_y);
+                        ruin_building(chunk, col, ground_y, &mut fires);
                     } else {
-                        ruin_open_ground(chunk, col, ground_y, &terrain, style);
+                        ruin_open_ground(chunk, col, ground_y, &terrain, style, &mut fires);
                     }
                 }
                 // Once every wall of the chunk has come down as far as it will.
@@ -346,6 +366,10 @@ impl WorldEditor<'_> {
                             hang_vines(chunk, col, ground_y, footprints);
                         }
                     }
+                }
+                // Last, so the clearance check sees every plant and vine of the chunk.
+                for spot in fires {
+                    light_fire(chunk, spot);
                 }
             }
             if style.winter {
@@ -374,13 +398,21 @@ impl Column {
         chunk.set_block(self.lx, y, self.lz, block);
     }
 
-    /// Swaps the block at `y` for a variant of it, keeping the facing and shape it stood in.
-    fn swap(self, chunk: &mut ChunkToModify, y: i32, block: Block) {
+    /// The state of the block at `y`: what was stored with it, or else what its id bakes in.
+    fn properties(self, chunk: &ChunkToModify, y: i32, block: Block) -> Option<Arc<Value>> {
         let index = SectionToModify::index(self.lx, (y & 15) as u8, self.lz);
-        let props = chunk
+        chunk
             .sections
             .get((y >> 4) as i8)
-            .and_then(|s| s.properties.get(&index).cloned());
+            .and_then(|s| s.properties.get(&index).cloned())
+            .or_else(|| block.properties().map(intern_props))
+    }
+
+    /// Swaps the block at `y` for a variant of it, keeping the facing and shape it stood in.
+    fn swap(self, chunk: &mut ChunkToModify, y: i32, block: Block) {
+        let props = self
+            .get(chunk, y)
+            .and_then(|old| self.properties(chunk, y, old));
         chunk.set_block_with_properties(
             self.lx,
             y,
@@ -418,7 +450,7 @@ impl Column {
 }
 
 /// Breaks a building column: part of it gone, the rest holed, weathered and dark.
-fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32) {
+fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32, fires: &mut Vec<FireSpot>) {
     let Some((top, _)) = col.top(chunk) else {
         return;
     };
@@ -465,7 +497,7 @@ fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32) {
         && col.get(chunk, cut).is_some_and(|b| kind(b) == Kind::Solid)
     {
         match col.hash(cut + 1) % 6 {
-            0 | 1 => rubble_or_fire(chunk, col, cut + 1, col.hash(cut + 2)),
+            0 | 1 => rubble_or_fire(chunk, col, cut + 1, col.hash(cut + 2), fires),
             2 => col.set(chunk, cut + 1, MOSS_CARPET),
             _ => {}
         }
@@ -481,13 +513,36 @@ fn moss_creeps(col: Column, y: i32, above_ground: i32) -> bool {
     patch_noise(col.x + y, col.z - y, 5, SALT_MOSS) < 0.22 * fade
 }
 
-/// A rubble block at `y`, or now and then a fire burning on netherrack where nothing it
-/// could spread to stands within its reach.
-fn rubble_or_fire(chunk: &mut ChunkToModify, col: Column, y: i32, h: u64) {
-    if (h >> 24).is_multiple_of(FIRE_ODDS) && fire_fits(chunk, col, y) {
+/// A rubble pile kept for a fire, lit once the rest of the chunk is done.
+#[derive(Clone, Copy)]
+struct FireSpot {
+    col: Column,
+    y: i32,
+    h: u64,
+}
+
+/// A rubble block at `y`, or now and then a spot kept for a fire.
+fn rubble_or_fire(
+    chunk: &mut ChunkToModify,
+    col: Column,
+    y: i32,
+    h: u64,
+    fires: &mut Vec<FireSpot>,
+) {
+    if (h >> 24).is_multiple_of(FIRE_ODDS) {
+        fires.push(FireSpot { col, y, h });
+    } else {
+        col.set(chunk, y, rubble(h));
+    }
+}
+
+/// A fire burning on netherrack where nothing it could spread to stands within its reach,
+/// and the rubble it would have been where something does.
+fn light_fire(chunk: &mut ChunkToModify, FireSpot { col, y, h }: FireSpot) {
+    if fire_fits(chunk, col, y) {
         col.set(chunk, y, NETHERRACK);
         col.set(chunk, y + 1, FIRE);
-    } else {
+    } else if col.get(chunk, y).is_none() {
         col.set(chunk, y, rubble(h));
     }
 }
@@ -562,6 +617,7 @@ fn ruin_open_ground(
     ground_y: i32,
     terrain: &Terrain,
     style: &WorldStyle,
+    fires: &mut Vec<FireSpot>,
 ) {
     let Some((top, block)) = col.top(chunk) else {
         return;
@@ -581,7 +637,7 @@ fn ruin_open_ground(
             .any(|dz| (-RUBBLE_REACH..=RUBBLE_REACH).any(|dx| f.contains(col.x + dx, col.z + dz)))
     });
     if near_ruin && patch_noise(col.x, col.z, 6, SALT_RUBBLE) < 0.45 && h.is_multiple_of(3) {
-        rubble_or_fire(chunk, col, top + 1, h >> 8);
+        rubble_or_fire(chunk, col, top + 1, h >> 8, fires);
         return;
     }
 
@@ -689,11 +745,44 @@ fn snow_over(chunk: &mut ChunkToModify, col: Column, ground_y: i32, terrain: &Te
             if road && patch_noise(col.x, col.z, 3, SALT_PLOW) < 0.92 {
                 return;
             }
+            if kind(block) == Kind::Shaped
+                && !full_top(col.properties(chunk, top, block).as_deref())
+            {
+                // Snow slides off a bottom slab or stair, so most such roofs turn white.
+                if patch_noise(col.x, col.z, 10, SALT_ROOF) < WHITE_ROOF_SHARE {
+                    if let Some(white) = whitened(block) {
+                        col.swap(chunk, top, white);
+                    }
+                }
+                return;
+            }
             let thin = road || kind(block) == Kind::Leaves;
             col.set(chunk, top + 1, snow_layer(col, on_ground, thin));
             snowy_ground(chunk, col, top);
         }
         _ => {}
+    }
+}
+
+/// Whether a slab or stair has the full top face snow needs: a top or double slab, or a
+/// stair in the upper half. Without a state it is a bottom one.
+fn full_top(props: Option<&Value>) -> bool {
+    let Some(Value::Compound(map)) = props else {
+        return false;
+    };
+    let is = |key: &str, values: &[&str]| matches!(map.get(key), Some(Value::String(v)) if values.contains(&v.as_str()));
+    is("type", &["top", "double"]) || is("half", &["top"])
+}
+
+/// The white slab or stair a bottom one turns into under snow.
+fn whitened(block: Block) -> Option<Block> {
+    let name = block.try_name()?;
+    if name.ends_with("_stairs") {
+        Some(SMOOTH_QUARTZ_STAIRS)
+    } else if name.ends_with("_slab") {
+        Some(SMOOTH_QUARTZ_SLAB)
+    } else {
+        None
     }
 }
 
@@ -712,11 +801,13 @@ fn snow_layer(col: Column, on_ground: bool, thin: bool) -> Block {
 }
 
 /// Grass and podzol under snow turn to their snowy variants, which the game only does on
-/// a block update.
+/// a block update. Farmland, paths and mud sit lower than a full block, which snow needs,
+/// so they turn to dirt.
 fn snowy_ground(chunk: &mut ChunkToModify, col: Column, y: i32) {
     let snowy = match col.get(chunk, y) {
         Some(GRASS_BLOCK) => SNOWY_GRASS_BLOCK,
         Some(PODZOL) => SNOWY_PODZOL,
+        Some(FARMLAND | DIRT_PATH | MUD) => DIRT,
         _ => return,
     };
     col.set(chunk, y, snowy);
@@ -839,7 +930,7 @@ mod tests {
             ));
         }
         let mut chunk = chunk_with(&blocks);
-        ruin_building(&mut chunk, col, 0);
+        ruin_building(&mut chunk, col, 0, &mut Vec::new());
         assert_eq!(col.get(&chunk, 0), Some(STONE));
         assert!((1..=30).all(|y| col.get(&chunk, y) != Some(GLASS) || col.hash(y) % 100 >= 85));
         let top = col.top(&chunk).unwrap().0;
@@ -872,6 +963,100 @@ mod tests {
             z: 4,
         };
         assert!(!fire_fits(&chunk_with(&[(0, STONE)]), edge, 1));
+    }
+
+    #[test]
+    fn a_fire_is_lit_only_after_the_vines_have_grown() {
+        let col = Column {
+            lx: 3,
+            lz: 4,
+            x: 3,
+            z: 4,
+        };
+        let spot = FireSpot { col, y: 1, h: 0 };
+        let mut chunk = chunk_with(&[(0, STONE)]);
+        light_fire(&mut chunk, spot);
+        assert_eq!(col.get(&chunk, 1), Some(NETHERRACK));
+        assert_eq!(col.get(&chunk, 2), Some(FIRE));
+        assert_eq!(kind(FIRE), Kind::Light);
+
+        // A vine hung beside it after the spot was kept leaves rubble there instead.
+        let mut chunk = chunk_with(&[(0, STONE)]);
+        chunk.set_block(4, 3, 4, VINES[3]);
+        light_fire(&mut chunk, spot);
+        assert_eq!(col.get(&chunk, 1), Some(rubble(0)));
+        assert_eq!(col.get(&chunk, 2), None);
+    }
+
+    #[test]
+    fn snow_rests_only_on_full_slabs_and_upper_stairs() {
+        let overrides = Default::default();
+        let terrain = terrain_without_ground(&overrides);
+        let col = Column {
+            lx: 3,
+            lz: 4,
+            x: 3,
+            z: 4,
+        };
+        let state = |key: &str, value: &str| {
+            let mut map = std::collections::HashMap::new();
+            map.insert(key.to_string(), Value::String(value.to_string()));
+            Some(Value::Compound(map))
+        };
+        let covered =
+            |chunk: &ChunkToModify| col.get(chunk, 6).is_some_and(|b| kind(b) == Kind::Snowy);
+
+        for (block, props) in [
+            (STONE_BRICK_SLAB, state("type", "top")),
+            (STONE_BRICK_SLAB, state("type", "double")),
+            (STONE_BRICK_STAIRS, state("half", "top")),
+        ] {
+            let mut chunk = chunk_with(&[(0, STONE)]);
+            chunk.set_block_with_properties(3, 5, 4, BlockWithProperties::new(block, props));
+            snow_over(&mut chunk, col, 0, &terrain);
+            assert!(covered(&chunk));
+        }
+
+        // A bottom stair holds no snow; it turns white, or stays bare, keeping its facing.
+        let stair = state("half", "bottom");
+        let mut chunk = chunk_with(&[(0, STONE)]);
+        chunk.set_block_with_properties(
+            3,
+            5,
+            4,
+            BlockWithProperties::new(STONE_BRICK_STAIRS, stair.clone()),
+        );
+        snow_over(&mut chunk, col, 0, &terrain);
+        assert!(!covered(&chunk));
+        assert!(matches!(
+            col.get(&chunk, 5),
+            Some(STONE_BRICK_STAIRS | SMOOTH_QUARTZ_STAIRS)
+        ));
+        assert_eq!(
+            col.properties(&chunk, 5, STONE_BRICK_STAIRS).as_deref(),
+            stair.as_ref()
+        );
+
+        // A slab without a state is a bottom one.
+        let mut chunk = chunk_with(&[(0, STONE), (5, STONE_BRICK_SLAB)]);
+        snow_over(&mut chunk, col, 0, &terrain);
+        assert!(!covered(&chunk));
+    }
+
+    #[test]
+    fn snow_on_a_field_turns_its_farmland_to_dirt() {
+        let overrides = Default::default();
+        let terrain = terrain_without_ground(&overrides);
+        let col = Column {
+            lx: 3,
+            lz: 4,
+            x: 3,
+            z: 4,
+        };
+        let mut chunk = chunk_with(&[(0, FARMLAND), (1, crate::block_definitions::WHEAT)]);
+        snow_over(&mut chunk, col, 0, &terrain);
+        assert_eq!(col.get(&chunk, 0), Some(DIRT));
+        assert!(col.get(&chunk, 1).is_some_and(|b| kind(b) == Kind::Snowy));
     }
 
     #[test]

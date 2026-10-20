@@ -72,11 +72,14 @@ fn is_blueprint_feature(element: &ProcessedElement) -> bool {
         return tag(tags, "natural") == Some("tree");
     }
     // A part only repeats a piece of its building's outline.
+    if tags
+        .get("building:part")
+        .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+    {
+        return false;
+    }
     if tags.contains_key("building") || tag(tags, "type") == Some("building") {
         return true;
-    }
-    if tags.contains_key("building:part") {
-        return false;
     }
     if let Some(waterway) = tags.get("waterway") {
         return !is_waterway_structure(waterway);
@@ -169,6 +172,14 @@ mod tests {
         assert!(is_blueprint_feature(&way(&[("amenity", "parking")])));
         assert!(is_blueprint_feature(&node(&[("natural", "tree")])));
         assert!(!is_blueprint_feature(&way(&[("building:part", "yes")])));
+        assert!(!is_blueprint_feature(&way(&[
+            ("building", "yes"),
+            ("building:part", "yes")
+        ])));
+        assert!(is_blueprint_feature(&way(&[
+            ("building", "yes"),
+            ("building:part", "no")
+        ])));
         assert!(!is_blueprint_feature(&way(&[("amenity", "school")])));
         assert!(!is_blueprint_feature(&way(&[("leisure", "playground")])));
         assert!(!is_blueprint_feature(&way(&[("power", "line")])));

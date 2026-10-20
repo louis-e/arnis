@@ -1295,6 +1295,8 @@ pub fn generate_world_with_options(
             });
         }
         let model_regions: HashSet<(i32, i32)> = deferred.regions().copied().collect();
+        // The styles read every region's roads, which then go when it is written.
+        let keep_roads = world_style(args, None).is_active();
 
         if eviction_active {
             let (flush_threads, flush_queue) = crate::world_editor::flush_pool_params(
@@ -1610,7 +1612,8 @@ pub fn generate_world_with_options(
                             tiles[tile_idx].max_z - 1,
                         );
                         // Under eviction only the deferred placements' regions keep theirs; the
-                        // rest are evicted, and this caps the extra resident RAM.
+                        // rest are evicted, and this caps the extra resident RAM. A styled run
+                        // keeps them all and drops each region's once it is flushed.
                         editor.merge_road_surface_overrides(
                             tile_road_overrides,
                             (
@@ -1619,7 +1622,7 @@ pub fn generate_world_with_options(
                                 tiles[tile_idx].max_x - 1,
                                 tiles[tile_idx].max_z - 1,
                             ),
-                            eviction_active.then_some(&model_regions),
+                            (eviction_active && !keep_roads).then_some(&model_regions),
                         );
 
                         if eviction_active {
@@ -1659,6 +1662,9 @@ pub fn generate_world_with_options(
                                         d.1,
                                         &world_style(args, Some(&building_footprints)),
                                     );
+                                    if keep_roads && !model_regions.contains(&d) {
+                                        editor.release_road_surface_overrides(d.0, d.1);
+                                    }
                                     if hash_check {
                                         hash_acc = hash_acc
                                             .wrapping_add(editor.region_content_hash(d.0, d.1));

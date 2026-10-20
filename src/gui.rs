@@ -1897,7 +1897,7 @@ fn gui_start_generation(
                     &crate::elevation::PeakSource::none(),
                 );
                 // Matches run_cli.
-                ground.mark_beaches();
+                ground.finish_land_cover(args.mode);
 
                 // Empty parsed_elements and xzbbox, as no OSM is loaded
                 let mut parsed_elements = Vec::new();
@@ -2038,7 +2038,7 @@ fn gui_start_generation(
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
                     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
-                    ground.mark_beaches();
+                    ground.finish_land_cover(args.mode);
 
                     // Matches run_cli: the overrides read roads as land, then the mode drops them.
                     crate::mode_filter::retain_for_mode(&mut parsed_elements, args.mode);
