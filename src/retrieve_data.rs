@@ -242,6 +242,7 @@ pub fn fetch_data_from_file(
 
 /// Coarse bucket for an archive miss, plus how the request failed when the error says. Only
 /// these are reported: the error text can name a tile, which locates the user to a few kilometres.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 fn fallback_reason(e: &str) -> String {
     const BUCKETS: [(&str, &str); 12] = [
         ("has no data for this area", "no_data_for_area"),
@@ -270,6 +271,7 @@ fn fallback_reason(e: &str) -> String {
 
 /// The `[kind]` tag of a failed request (see `net::failure_kind`), else the status of an
 /// `HTTP <code>` error.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 fn failure_kind(e: &str) -> Option<String> {
     let tagged = e
         .split('[')

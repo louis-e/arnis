@@ -406,10 +406,21 @@ pub fn blocks_km2(args: &crate::args::Args, bbox: &LLBBox) -> f64 {
 #[derive(Debug)]
 pub struct RunSizeError {
     /// Refused for its area rather than for the disk.
+    #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
     pub area: bool,
-    /// Fits the GUI's status line.
-    pub short: &'static str,
     pub detail: String,
+}
+
+impl RunSizeError {
+    /// Fits the GUI's status line.
+    #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+    pub fn short(&self) -> &'static str {
+        if self.area {
+            retrieve_data::AREA_TOO_LARGE
+        } else {
+            "Not enough disk space available."
+        }
+    }
 }
 
 /// Refuses a run the tile archive or the disk cannot take. Wants the run's final `args` and
@@ -431,7 +442,6 @@ pub fn check_run_size(
         if let Err(e) = crate::osm_tiles::check_size(bbox, args.scale) {
             return Err(RunSizeError {
                 area: true,
-                short: retrieve_data::AREA_TOO_LARGE,
                 detail: format!("The area is too large: {e}. Select a smaller area."),
             });
         }
@@ -439,7 +449,6 @@ pub fn check_run_size(
     let needed = estimated_world_bytes(blocks_km2(args, bbox), format, WorldSizeOptions::of(args));
     check_disk_space(dir, needed).map_err(|detail| RunSizeError {
         area: false,
-        short: "Not enough disk space available.",
         detail,
     })
 }

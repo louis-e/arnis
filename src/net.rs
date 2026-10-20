@@ -56,14 +56,16 @@ pub fn failure_kind(e: &reqwest::Error) -> String {
         .map(|s| s.to_string().to_ascii_lowercase())
         .collect::<Vec<_>>()
         .join(" | ");
+    // A dropped connection first: rustls words it with "tls" too.
+    let dropped = ["reset", "forcibly closed", "close_notify", "unexpected eof"];
     let kind = if e.is_timeout() {
         "timeout"
     } else if causes.contains("dns error") {
         "dns"
+    } else if dropped.iter().any(|d| causes.contains(d)) {
+        "reset"
     } else if causes.contains("certificate") || causes.contains("tls") {
         "tls"
-    } else if causes.contains("reset") || causes.contains("forcibly closed") {
-        "reset"
     } else if e.is_connect() {
         "connect"
     } else if e.is_body() || e.is_decode() {
@@ -75,6 +77,7 @@ pub fn failure_kind(e: &reqwest::Error) -> String {
 }
 
 /// Whether `tag` is something [`failure_kind`] returns.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
 pub fn is_failure_kind(tag: &str) -> bool {
     const KINDS: [&str; 7] = ["timeout", "dns", "tls", "reset", "connect", "body", "other"];
     KINDS.contains(&tag)
