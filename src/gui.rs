@@ -1963,6 +1963,7 @@ fn gui_start_generation(
                 let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox, &peaks));
                 let fetch_result = retrieve_data::fetch_osm_data(
                     bbox,
+                    args.scale,
                     args.debug,
                     "requests",
                     None,

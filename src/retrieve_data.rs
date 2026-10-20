@@ -292,6 +292,7 @@ fn failure_kind(e: &str) -> Option<String> {
 /// after the CLI had moved to the archive.
 pub fn fetch_osm_data(
     bbox: LLBBox,
+    scale: f64,
     debug: bool,
     download_method: &str,
     save_file: Option<&str>,
@@ -300,7 +301,7 @@ pub fn fetch_osm_data(
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     if use_tile_archive && !tiles_url.is_empty() {
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
-        match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url) {
+        match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url, scale) {
             Ok(data) => return Ok(data),
             Err(e) => {
                 eprintln!(
@@ -841,6 +842,10 @@ mod tests {
             ),
             (
                 "that area needs 9001 tiles, past the 4096 cap",
+                "area_too_large",
+            ),
+            (
+                "that area needs 31000 km², past the 25000 km² the archive serves at this world scale",
                 "area_too_large",
             ),
             (

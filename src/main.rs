@@ -536,6 +536,7 @@ fn run_cli() {
         } else {
             retrieve_data::fetch_osm_data(
                 effective_bbox,
+                args.scale,
                 args.debug,
                 args.downloader.as_str(),
                 args.save_json_file.as_deref(),

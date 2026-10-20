@@ -70,8 +70,21 @@ impl NodeIds {
 /// Refuse a tile that decompresses to more than this.
 const MAX_TILE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Guards against a bbox that would ask for the whole planet tile by tile.
-const MAX_TILES: usize = 4096;
+/// Ground the archive serves at world scale 1. A smaller scale builds the same blocks from more
+/// ground, so the limit grows with 1/scale², up to [`MAX_AREA_KM2`].
+const AREA_KM2_AT_SCALE_1: f64 = 25_000.0;
+
+/// Ground served at any scale: past this the OSM data alone outgrows memory.
+const MAX_AREA_KM2: f64 = 100_000.0;
+
+/// Guards against a bbox that would ask for the whole planet tile by tile. Tiles shrink toward
+/// the poles; this still holds the area limit up to about 75 degrees of latitude.
+const MAX_TILES: usize = 65_536;
+
+/// Ground the archive serves for a world at `scale`, in km².
+fn max_area_km2(scale: f64) -> f64 {
+    (AREA_KM2_AT_SCALE_1 / (scale * scale)).min(MAX_AREA_KM2)
+}
 
 /// Zoom of the index's coverage cells. Continent bboxes overlap enormously - north-america,
 /// russia and antarctica all span every longitude - so a bbox test alone opens up to six
@@ -249,10 +262,10 @@ struct Collected {
     relations: HashMap<u64, RelationBody>,
 }
 
-pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
+pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str, scale: f64) -> Result<OsmData> {
     println!("{} Fetching data from the tile archive...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
-    let (data, tiles_read, bytes) = read_tiles(bbox, base_url)?;
+    let (data, tiles_read, bytes) = read_tiles(bbox, base_url, max_area_km2(scale))?;
     println!(
         "Read {tiles_read} tiles ({:.1} MB) from the archive",
         bytes as f64 / 1e6
@@ -261,12 +274,37 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
     Ok(data)
 }
 
-/// [`fetch_data_from_tiles`] without progress output.
+/// [`fetch_data_from_tiles`] without progress output, for ground no world scale applies to.
 pub fn fetch_data_from_tiles_quietly(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
-    read_tiles(bbox, base_url).map(|(data, _, _)| data)
+    read_tiles(bbox, base_url, MAX_AREA_KM2).map(|(data, _, _)| data)
 }
 
-fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
+/// Tiles covering `bbox`, as `(min_x, max_x, min_y, max_y)` inclusive.
+fn tile_range(bbox: &LLBBox) -> (u32, u32, u32, u32) {
+    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), ZOOM);
+    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), ZOOM);
+    (
+        min_x.min(max_x),
+        min_x.max(max_x),
+        min_y.min(max_y),
+        min_y.max(max_y),
+    )
+}
+
+/// Counted, not collected: a planet-sized bbox is 67M tiles.
+fn tiles_needed(bbox: &LLBBox) -> usize {
+    let (xs, xe, ys, ye) = tile_range(bbox);
+    ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1)
+}
+
+fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmData, usize, u64)> {
+    // Before any request, so a box that is too big fails at once.
+    let area = bbox.area_km2();
+    if area > max_area_km2 {
+        return Err(format!(
+            "that area needs {area:.0} km², past the {max_area_km2:.0} km² the archive serves at this world scale"
+        ));
+    }
     let client = client()?;
     let manifest = manifest(&client, base_url)?;
     if manifest.zoom != ZOOM {
@@ -276,18 +314,13 @@ fn read_tiles(bbox: LLBBox, base_url: &str) -> Result<(OsmData, usize, u64)> {
         ));
     }
 
-    let (min_x, min_y) = pmtiles::lonlat_to_tile(bbox.min().lng(), bbox.max().lat(), ZOOM);
-    let (max_x, max_y) = pmtiles::lonlat_to_tile(bbox.max().lng(), bbox.min().lat(), ZOOM);
-    let (xs, xe) = (min_x.min(max_x), min_x.max(max_x));
-    let (ys, ye) = (min_y.min(max_y), min_y.max(max_y));
-    // Counted before collecting: a planet-sized bbox is 67M tiles, and the vector would be
-    // hundreds of megabytes before the cap ever ran.
-    let needed = ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1);
+    let needed = tiles_needed(&bbox);
     if needed > MAX_TILES {
         return Err(format!(
             "that area needs {needed} tiles, past the {MAX_TILES} cap"
         ));
     }
+    let (xs, xe, ys, ye) = tile_range(&bbox);
     let wanted: Vec<(u32, u32)> = (xs..=xe)
         .flat_map(|x| (ys..=ye).map(move |y| (x, y)))
         .collect();
@@ -954,6 +987,43 @@ mod tests {
             max_lat: 1.0,
             max_lon: 1.0,
         }
+    }
+
+    /// A square of `area` km² with its south edge at `lat`, as `area_km2` measures it.
+    fn square(lat: f64, area: f64) -> LLBBox {
+        let side = area.sqrt();
+        let dlat = side / 111.32;
+        let dlon = side / (111.32 * (lat + dlat / 2.0).to_radians().cos());
+        LLBBox::new(lat, 10.0, lat + dlat, 10.0 + dlon).unwrap()
+    }
+
+    #[test]
+    fn the_area_limit_grows_with_a_smaller_scale_up_to_the_cap() {
+        assert_eq!(max_area_km2(1.0), 25_000.0);
+        assert_eq!(max_area_km2(2.0), 6_250.0);
+        assert_eq!(max_area_km2(0.5), 100_000.0);
+        assert_eq!(max_area_km2(0.05), 100_000.0);
+    }
+
+    #[test]
+    fn the_tile_guard_never_cuts_below_the_area_limit() {
+        for lat in [0.0, 45.0, 60.0, 70.0] {
+            let b = square(lat, 24_900.0);
+            assert!(b.area_km2() <= max_area_km2(1.0), "{lat}: {}", b.area_km2());
+            assert!(tiles_needed(&b) <= MAX_TILES, "{lat}: {}", tiles_needed(&b));
+        }
+        for lat in [0.0, 50.0, 70.0] {
+            let b = square(lat, 99_500.0);
+            assert!(tiles_needed(&b) <= MAX_TILES, "{lat}: {}", tiles_needed(&b));
+        }
+    }
+
+    #[test]
+    fn a_box_past_the_area_limit_is_refused_before_any_request() {
+        let Err(e) = read_tiles(square(50.0, 26_000.0), "http://127.0.0.1:9/v1", 25_000.0) else {
+            panic!("a 26,000 km² box was read at scale 1");
+        };
+        assert!(e.starts_with("that area needs 2"), "{e}");
     }
 
     #[test]
