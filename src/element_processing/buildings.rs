@@ -12375,8 +12375,10 @@ fn generate_residential_antenna(
     }
 
     let footprint: FnvHashSet<(i32, i32)> = roof_area.iter().copied().collect();
-    let cx = roof_area.iter().map(|p| p.0).sum::<i32>() / roof_area.len() as i32;
-    let cz = roof_area.iter().map(|p| p.1).sum::<i32>() / roof_area.len() as i32;
+    // In i64: One World areas sit millions of blocks out, where an i32 sum overflows.
+    let n = roof_area.len() as i64;
+    let cx = (roof_area.iter().map(|p| i64::from(p.0)).sum::<i64>() / n) as i32;
+    let cz = (roof_area.iter().map(|p| i64::from(p.1)).sum::<i64>() / n) as i32;
 
     let interior: Vec<(i32, i32)> = roof_area
         .iter()
