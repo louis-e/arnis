@@ -12,6 +12,7 @@
 pub(crate) mod common;
 pub(crate) mod java;
 mod luanti;
+mod style;
 
 pub mod bedrock;
 
@@ -29,6 +30,7 @@ pub(crate) use common::{
 };
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
+pub(crate) use style::WorldStyle;
 
 use crate::block_definitions::*;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};

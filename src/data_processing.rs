@@ -1,4 +1,4 @@
-use crate::args::Args;
+use crate::args::{Args, GenerationMode};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::building_facade::BuildingContext;
@@ -20,7 +20,7 @@ use crate::progress::{
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
-use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat};
+use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat, WorldStyle};
 use colored::Colorize;
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -321,6 +321,10 @@ fn process_element(
             // A pier also tagged as a building or a path is still a deck on piles.
             if way.tags.get("man_made").map(String::as_str) == Some("pier") {
                 waterfront::generate_pier(editor, element, flood_fill_cache, args);
+            } else if args.mode == GenerationMode::Blueprint
+                && (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+            {
+                blueprint::generate_outline(editor, way);
             } else if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                 // parts of one building share a style seed so untagged parts match
                 let group_seed = part_groups.get(&way.id).copied().unwrap_or(way.id);
@@ -518,7 +522,9 @@ fn process_element(
             let is_building_relation = rel.tags.contains_key("building")
                 || rel.tags.contains_key("building:part")
                 || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
-            if is_building_relation {
+            if is_building_relation && args.mode == GenerationMode::Blueprint {
+                blueprint::generate_relation_outline(editor, rel);
+            } else if is_building_relation {
                 let ctx = BuildingContext {
                     flood_fill_cache,
                     building_passages,
@@ -583,6 +589,15 @@ fn process_element(
                 );
             }
         }
+    }
+}
+
+/// The run's world styles, with the building footprints the ruins need.
+fn world_style<'a>(args: &Args, footprints: Option<&'a CoordinateBitmap>) -> WorldStyle<'a> {
+    WorldStyle {
+        winter: args.winter,
+        ruins: args.post_apocalyptic,
+        footprints,
     }
 }
 
@@ -1639,6 +1654,11 @@ pub fn generate_world_with_options(
                                     && !deferred.holds(d)
                                     && Some(d) != spawn_region
                                 {
+                                    editor.style_region(
+                                        d.0,
+                                        d.1,
+                                        &world_style(args, Some(&building_footprints)),
+                                    );
                                     if hash_check {
                                         hash_acc = hash_acc
                                             .wrapping_add(editor.region_content_hash(d.0, d.1));
@@ -1871,7 +1891,11 @@ pub fn generate_world_with_options(
     // The editor holds its own handle on the sealed-surface mask, and that mask is the
     // road mask itself when nothing else was sealed, so releasing it here is what
     // actually frees the bitmap.
-    editor.release_sealed_surface();
+    // The styles still read the roads off it, at the end.
+    let styled = world_style(args, None).is_active();
+    if !styled {
+        editor.release_sealed_surface();
+    }
     drop(sealed_surface);
     // The barrier clearance shares the road mask, so it goes first.
     drop(barrier_clearance);
@@ -1891,7 +1915,8 @@ pub fn generate_world_with_options(
     drop(tunnel_footprint);
     drop(rail_mask);
     drop(big_water_field);
-    drop(building_footprints);
+    // The ruins break buildings open where these say they stand.
+    let building_footprints = args.post_apocalyptic.then_some(building_footprints);
     drop(building_passages);
     drop(bridge_structures);
     drop(bridge_surface);
@@ -1930,6 +1955,18 @@ pub fn generate_world_with_options(
         }
     }
     bench.mark("post_passes");
+
+    // Every region still in memory is styled here, streaming or not: the ones already
+    // flushed were styled on the way out.
+    if styled {
+        let style = world_style(args, building_footprints.as_ref());
+        for (rx, rz) in editor.resident_region_keys() {
+            editor.style_region(rx, rz, &style);
+        }
+        editor.release_sealed_surface();
+        bench.mark("world_style");
+    }
+    drop(building_footprints);
 
     if eviction_active {
         // Flush deferred (rail-tunnel-touched) regions now the global carve has run on them.

@@ -836,6 +836,21 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         496 => "mcl_noteblock:noteblock",
         497 => "mcl_colorblocks:hardened_clay_pink",
         498 => "mcl_colorblocks:hardened_clay_lime",
+        // Wallmounted toward the wall: north is -z, east +x, south +z, west -x.
+        499..=502 => {
+            return LuantiNode {
+                name: "mcl_core:vine",
+                param2: [5, 2, 4, 3][usize::from(block.id() - 499)],
+            }
+        }
+        503 => "mcl_nether:netherrack",
+        // On netherrack the game's own fire never goes out either.
+        504 => "mcl_fire:eternal_fire",
+        505 => "mcl_deepslate:deepslate_bricks_cracked",
+        506 => "mcl_deepslate:deepslate_tiles_cracked",
+        507 => "mcl_blackstone:blackstone_brick_polished_cracked",
+        508 => "mcl_nether:cracked_nether_brick",
+        509 => "mcl_walls:mossycobble",
         _ => "mcl_core:stone",
     };
     LuantiNode {

@@ -623,6 +623,11 @@ label[for].setting-label {
   background: none;
 }
 
+/* Four modes read better as two rows of two than as three and one. */
+.settings-page #generation-mode-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .settings-page .choice-cards .segment {
   position: relative;
   display: flex;

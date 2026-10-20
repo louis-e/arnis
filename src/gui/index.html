@@ -57,6 +57,8 @@
     <symbol id="i-landmark" viewBox="0 0 24 24"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4z"/></symbol>
     <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
     <symbol id="i-signpost" viewBox="0 0 24 24"><path d="M12 13v8"/><path d="M12 3v3"/><path d="M4 6a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h13a2 2 0 0 0 1.152-.365l3.424-2.317a1 1 0 0 0 0-1.635l-3.424-2.318A2 2 0 0 0 17 6z"/></symbol>
+    <symbol id="i-snowflake" viewBox="0 0 24 24"><path d="m10 20-1.25-2.5L6 18"/><path d="M10 4 8.75 6.5 6 6"/><path d="m14 20 1.25-2.5L18 18"/><path d="m14 4 1.25 2.5L18 6"/><path d="m17 21-3-6h-4"/><path d="m17 3-3 6 1.5 3"/><path d="M2 12h6.5L10 9"/><path d="m20 10-1.5 2 1.5 2"/><path d="M22 12h-6.5L14 15"/><path d="m4 10 1.5 2L4 14"/><path d="m7 21 3-6-1.5-3"/><path d="m7 3 3 6h4"/></symbol>
+    <symbol id="i-radiation" viewBox="0 0 24 24"><path d="M12 12h.01"/><path d="M7.5 4.2c-.3-.5-.9-.7-1.3-.4C3.9 5.5 2.3 8.1 2 11c-.1.5.4 1 1 1h5c0-1.5.8-2.8 2-3.4-1.1-1.9-2-3.5-2.5-4.4z"/><path d="M21 12c.6 0 1-.4 1-1-.3-2.9-1.8-5.5-4.1-7.1-.4-.3-1.1-.2-1.3.3-.6.9-1.5 2.5-2.6 4.3 1.2.7 2 2 2 3.5h5z"/><path d="M7.5 19.8c-.3.5-.1 1.1.4 1.3 2.6 1.2 5.6 1.2 8.2 0 .5-.2.7-.8.4-1.3-.5-.9-1.4-2.5-2.5-4.3-1.2.7-2.8.7-4 0-1.1 1.8-2 3.4-2.5 4.3z"/></symbol>
     <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></symbol>
     <symbol id="i-off" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
@@ -419,6 +421,7 @@
                   <option value="geo-terrain" data-localize="mode_geo_terrain">Objects + Terrain</option>
                   <option value="geo-only" data-localize="mode_geo_only">Objects only</option>
                   <option value="terrain-only" data-localize="mode_terrain_only">Terrain only</option>
+                  <option value="blueprint" data-localize="mode_blueprint">Blueprint</option>
                 </select>
                 <div class="segmented-control choice-cards" id="generation-mode-cards" data-select="generation-mode-select">
                   <button type="button" class="segment" data-value="geo-terrain">
@@ -434,7 +437,12 @@
                   <button type="button" class="segment" data-value="terrain-only">
                     <svg class="icon" aria-hidden="true"><use href="#i-mountain"></use></svg>
                     <span class="choice-title" data-localize="mode_terrain_only">Terrain only</span>
-                    <span class="choice-desc" data-localize="mode_terrain_only_desc">Real elevation and land cover without buildings or roads.</span>
+                    <span class="choice-desc" data-localize="mode_terrain_only_desc">Real elevation, water and nature without buildings or roads.</span>
+                  </button>
+                  <button type="button" class="segment" data-value="blueprint">
+                    <svg class="icon" aria-hidden="true"><use href="#i-ruler"></use></svg>
+                    <span class="choice-title" data-localize="mode_blueprint">Blueprint</span>
+                    <span class="choice-desc" data-localize="mode_blueprint_desc">Roads, water and nature, with buildings as outlines to build on.</span>
                   </button>
                 </div>
               </div>
@@ -504,6 +512,38 @@
                       <button type="button" class="segment active" data-default data-signage="basic" data-localize="signage_basic">Basic</button>
                       <button type="button" class="segment" data-signage="full" data-localize="signage_full">Full</button>
                     </div>
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="winter-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-snowflake"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="winter">Winter</span>
+                        <span class="tooltip-icon" data-tooltip="Lays snow over the ground, roofs and trees, freezes rivers and lakes from their shores and turns every biome snowy, so it keeps snowing in game. Roads stay ploughed. Works in every mode.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="winter_desc">Snow on the ground, roofs and trees, frozen rivers and lakes.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="winter-toggle" name="winter-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="post-apocalyptic-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-radiation"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="post_apocalyptic">Post-Apocalyptic</span>
+                        <span class="tooltip-icon" data-tooltip="Brings buildings partly down and breaks their walls and windows open, cracks the roads with grass growing through, piles rubble in the streets with the odd fire still burning in it, lets moss and vines climb the walls and puts every light out. Pairs well with Zombie Outbreak under Gameplay.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="post_apocalyptic_desc">Collapsed, overgrown buildings, cracked roads and no lights.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="post-apocalyptic-toggle" name="post-apocalyptic-toggle">
                   </div>
                 </div>
               </div>

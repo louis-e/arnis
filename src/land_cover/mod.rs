@@ -10,6 +10,7 @@
 //! downloading the full ~500MB tiles.
 
 pub mod bridge_repair;
+pub mod naturalize;
 pub mod osm_land_override;
 pub mod osm_water_override;
 mod shoreline;

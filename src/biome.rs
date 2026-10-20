@@ -224,15 +224,49 @@ pub fn chunk_biome_names(
                             mountain_biome(lc, climate, wd, above_m, g.slope(coord))
                         })
                         .flatten();
-                    names[(zi * 4 + xi) as usize] = mountain
+                    let name = mountain
                         .or_else(|| ecoregion_biome(lc, climate, g.ecoregion(coord)))
                         .unwrap_or_else(|| biome_for_class(lc, climate, center_lat_deg, wd));
+                    names[(zi * 4 + xi) as usize] =
+                        if g.winter() { winter_biome(name) } else { name };
                 }
             }
         }
     }
 
     names
+}
+
+/// The snowy counterpart of a biome, so a winter world keeps snowing in game. The sea
+/// stays cold but unfrozen: the game would otherwise ice it over from shore to shore.
+pub fn winter_biome(name: &'static str) -> &'static str {
+    match name {
+        "minecraft:river" => "minecraft:frozen_river",
+        "minecraft:beach" | "minecraft:stony_shore" => "minecraft:snowy_beach",
+        "minecraft:ocean" | "minecraft:lukewarm_ocean" | "minecraft:warm_ocean" => {
+            "minecraft:cold_ocean"
+        }
+        "minecraft:deep_ocean" | "minecraft:deep_lukewarm_ocean" => "minecraft:deep_cold_ocean",
+        "minecraft:forest"
+        | "minecraft:taiga"
+        | "minecraft:birch_forest"
+        | "minecraft:dark_forest"
+        | "minecraft:jungle"
+        | "minecraft:sparse_jungle"
+        | "minecraft:mangrove_swamp"
+        | "minecraft:swamp" => "minecraft:snowy_taiga",
+        "minecraft:meadow" | "minecraft:stony_peaks" => "minecraft:snowy_slopes",
+        _ if name.contains("snowy")
+            || name.contains("frozen")
+            || name.contains("cold")
+            || name.ends_with("_peaks")
+            || name == "minecraft:grove"
+            || name == "minecraft:ice_spikes" =>
+        {
+            name
+        }
+        _ => "minecraft:snowy_plains",
+    }
 }
 
 /// Packs an already-classified 4x4 biome grid into the Anvil container.
