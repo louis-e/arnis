@@ -280,7 +280,6 @@ pub struct WorldEditor<'a> {
     tree_slots: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
-    climate_anchor: Option<(f64, f64)>,
     metadata_extent: Option<(XZBBox, LLBBox)>,
 }
 
@@ -332,7 +331,6 @@ impl<'a> WorldEditor<'a> {
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
-            climate_anchor: None,
             metadata_extent: None,
         }
     }
@@ -390,7 +388,6 @@ impl<'a> WorldEditor<'a> {
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
-            climate_anchor: None,
             metadata_extent: None,
         }
     }
@@ -448,7 +445,6 @@ impl<'a> WorldEditor<'a> {
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
-            climate_anchor: None,
             metadata_extent: None,
         }
     }
@@ -457,16 +453,8 @@ impl<'a> WorldEditor<'a> {
         self.merge_into_existing = Some(layout);
     }
 
-    pub fn set_climate_anchor(&mut self, lat: f64, lon: f64) {
-        self.climate_anchor = Some((lat, lon));
-    }
-
     pub fn set_metadata_extent(&mut self, xzbbox: XZBBox, llbbox: LLBBox) {
         self.metadata_extent = Some((xzbbox, llbbox));
-    }
-
-    pub(crate) fn climate_lat(&self) -> Option<f64> {
-        self.climate_anchor.map(|(lat, _)| lat)
     }
 
     pub(crate) fn region_write_mode(&self) -> java::RegionWriteMode {
@@ -1179,7 +1167,6 @@ impl<'a> WorldEditor<'a> {
             self.preview.clone(),
             self.voxy.clone(),
             self.region_write_mode(),
-            self.climate_lat(),
             (self.ground_origin_x, self.ground_origin_z),
         )
     }
@@ -1234,23 +1221,17 @@ impl<'a> WorldEditor<'a> {
         self.get_ground_level(x, z) + y_offset
     }
 
-    /// Latitude/longitude the area's regional styles are taken at: the climate
-    /// anchor when one was set, else the bbox centre.
+    /// Latitude/longitude the area's regional styles are taken at: the bbox centre.
     pub fn geo_anchor(&self) -> (f64, f64) {
-        self.climate_anchor.unwrap_or_else(|| {
-            (
-                (self.llbbox.min().lat() + self.llbbox.max().lat()) / 2.0,
-                (self.llbbox.min().lng() + self.llbbox.max().lng()) / 2.0,
-            )
-        })
+        (
+            (self.llbbox.min().lat() + self.llbbox.max().lat()) / 2.0,
+            (self.llbbox.min().lng() + self.llbbox.max().lng()) / 2.0,
+        )
     }
 
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
-        match self.climate_anchor {
-            Some((lat, lon)) => crate::climate::Climate::classify_at(lat, lon),
-            None => crate::climate::Climate::classify(&self.llbbox),
-        }
+        crate::climate::Climate::classify(&self.llbbox)
     }
 
     /// Get the effective ground level at a world coordinate.
@@ -2924,7 +2905,6 @@ mod eviction_guard_tests {
             None,
             None,
             java::RegionWriteMode::Fresh,
-            None,
             (0, 0),
         )
     }
@@ -2962,7 +2942,6 @@ mod eviction_guard_tests {
                 None,
                 None,
                 java::RegionWriteMode::Fresh,
-                None,
                 (0, 0),
             )
             .write(0, 0, &flush_test_region())

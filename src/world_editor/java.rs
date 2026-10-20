@@ -183,7 +183,6 @@ impl<'a> WorldEditor<'a> {
             region_z,
             region_to_modify,
             &self.region_write_mode(),
-            self.climate_lat(),
             (self.ground_origin_x, self.ground_origin_z),
         )
     }
@@ -382,7 +381,6 @@ fn write_region_to_disk(
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
     mode: &RegionWriteMode,
-    climate_lat: Option<f64>,
     ground_origin: (i32, i32),
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(preview) = preview {
@@ -403,7 +401,7 @@ fn write_region_to_disk(
 
     // World-center latitude drives temperature-based biome variants (taiga
     // vs forest vs jungle) at chunk-build time. Cheap to recompute.
-    let center_lat = climate_lat.unwrap_or((llbbox.min().lat() + llbbox.max().lat()) * 0.5);
+    let center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
 
     // Filler chunks all share one set of sections, so they share their light too. A void
     // world has none: what the area does not touch is left to the void generator.
@@ -614,7 +612,6 @@ pub(crate) struct RegionWriteCtx {
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
     voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
     mode: RegionWriteMode,
-    climate_lat: Option<f64>,
     ground_origin: (i32, i32),
 }
 
@@ -629,7 +626,6 @@ impl RegionWriteCtx {
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
         voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
         mode: RegionWriteMode,
-        climate_lat: Option<f64>,
         ground_origin: (i32, i32),
     ) -> Self {
         Self {
@@ -641,7 +637,6 @@ impl RegionWriteCtx {
             preview,
             voxy,
             mode,
-            climate_lat,
             ground_origin,
         }
     }
@@ -664,7 +659,6 @@ impl RegionWriteCtx {
             region_z,
             region_to_modify,
             &self.mode,
-            self.climate_lat,
             self.ground_origin,
         )
     }
@@ -2096,7 +2090,6 @@ mod merge_tests {
             0,
             region,
             &mode,
-            None,
             (0, 0),
         )
         .unwrap();
