@@ -1379,8 +1379,9 @@ fn gui_start_generation(
     world_scale: f64,
     height_multiplier: f64,
     ground_level: i32,
-    terrain_enabled: bool,
-    skip_osm_objects: bool,
+    generation_mode: String,
+    winter_enabled: bool,
+    post_apocalyptic_enabled: bool,
     interior_enabled: bool,
     fillground_enabled: bool,
     caves_enabled: bool,
@@ -1708,13 +1709,9 @@ fn gui_start_generation(
                 world_name: None,
                 one_world_run: None,
                 ground_level,
-                mode: if skip_osm_objects {
-                    crate::args::GenerationMode::TerrainOnly
-                } else if terrain_enabled {
-                    crate::args::GenerationMode::GeoTerrain
-                } else {
-                    crate::args::GenerationMode::GeoOnly
-                },
+                mode: crate::args::GenerationMode::from_name(&generation_mode),
+                post_apocalyptic: post_apocalyptic_enabled,
+                winter: winter_enabled,
                 legacy_terrain: false,
                 interior: interior_enabled,
                 fillground: fillground_enabled,
@@ -1890,19 +1887,19 @@ fn gui_start_generation(
                 ground::world_top_y_for(&args),
             );
 
-            // Ask Args, not the frontend flag: below OBJECT_SKIP_SCALE objects are skipped
-            // regardless of the selected generation mode.
-            if args.skip_objects() {
-                // Generate ground data (terrain) for terrain-only mode
+            // Ask Args, not the frontend mode: below OBJECT_SKIP_SCALE, or off Earth, no OSM
+            // is loaded whatever mode was picked.
+            if args.skip_osm() {
+                // Ground data (terrain) only
                 let mut ground = ground::generate_ground_data(
                     &args,
                     bbox,
                     &crate::elevation::PeakSource::none(),
                 );
                 // Matches run_cli.
-                ground.mark_beaches();
+                ground.finish_land_cover(args.mode);
 
-                // Create empty parsed_elements and xzbbox for terrain-only mode
+                // Empty parsed_elements and xzbbox, as no OSM is loaded
                 let mut parsed_elements = Vec::new();
                 let (_coord_transformer, mut xzbbox) =
                     crate::projection::ProjectionSpec::from_args(&args)
@@ -1952,7 +1949,7 @@ fn gui_start_generation(
             let (peak_tx, peaks) = crate::elevation::PeakSource::channel();
             let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
                 let overture_handle = s.spawn(|| {
-                    if args.overture {
+                    if args.overture && !args.skip_objects() {
                         overture::fetch_overture_buildings(
                             &bbox,
                             &crate::projection::ProjectionSpec::from_args(&args),
@@ -2041,7 +2038,14 @@ fn gui_start_generation(
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
                     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
-                    ground.mark_beaches();
+                    ground.finish_land_cover(args.mode);
+
+                    // Matches run_cli: the overrides read roads as land, then the mode drops them.
+                    crate::mode_filter::retain_for_mode(&mut parsed_elements, args.mode);
+                    let outline_suppression = crate::mode_filter::outline_suppression_for_mode(
+                        outline_suppression,
+                        args.mode,
+                    );
 
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(

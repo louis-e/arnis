@@ -81,9 +81,21 @@ pub struct Args {
     /// What to generate, mirroring the GUI's generation mode dropdown:
     /// geo-terrain: OSM objects on real elevation terrain (default)
     /// geo-only: OSM objects on flat ground
-    /// terrain-only: real elevation terrain, no OSM or Overture objects (--overture has no effect)
+    /// terrain-only: real elevation terrain with OSM water and nature, but no buildings, roads
+    /// or Overture objects (--overture has no effect); towns and fields turn back into nature
+    /// blueprint: real elevation terrain with roads, rails, water and nature, and buildings
+    /// drawn only as outlines on the ground
     #[arg(long, value_enum, default_value_t = GenerationMode::GeoTerrain)]
     pub mode: GenerationMode,
+
+    /// Turn the world into a ruin: buildings partly collapsed and broken open, roads cracked
+    /// and overgrown, lights out
+    #[arg(long, default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub post_apocalyptic: bool,
+
+    /// Deep winter: snow on the ground, roofs and trees, frozen rivers and lakes, snowy biomes
+    #[arg(long, default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub winter: bool,
 
     /// Deprecated: terrain is on by default, use --mode geo-only for flat ground.
     /// Accepted as a no-op so existing scripts keep working.
@@ -457,8 +469,10 @@ pub enum GenerationMode {
     GeoTerrain,
     /// OSM objects on flat ground
     GeoOnly,
-    /// Real elevation terrain without any OSM or Overture objects
+    /// Real elevation terrain with OSM water and nature, but no buildings or roads
     TerrainOnly,
+    /// Roads, water and nature on real elevation, with buildings as outlines only
+    Blueprint,
 }
 
 impl GenerationMode {
@@ -467,9 +481,23 @@ impl GenerationMode {
         !matches!(self, GenerationMode::GeoOnly)
     }
 
-    /// Whether OSM and Overture objects are skipped entirely.
+    /// Whether every man-made object is left out: buildings, roads, Overture, landmarks.
     pub fn skip_objects(self) -> bool {
         matches!(self, GenerationMode::TerrainOnly)
+    }
+
+    /// Mode named by the GUI, as `--mode` spells it. Unknown names fall back to the default.
+    pub fn from_name(name: &str) -> Self {
+        <Self as clap::ValueEnum>::from_str(name, true).unwrap_or_default()
+    }
+
+    /// Whether built-up land and fields in the land cover turn back into natural cover. A
+    /// blueprint draws its plan on that clean ground, not on paving where buildings would be.
+    pub fn natural_land_cover(self) -> bool {
+        matches!(
+            self,
+            GenerationMode::TerrainOnly | GenerationMode::Blueprint
+        )
     }
 }
 
@@ -541,6 +569,12 @@ impl Args {
     /// Whether objects are being skipped only because the scale is below `OBJECT_SKIP_SCALE`.
     pub fn skip_objects_due_to_scale(&self) -> bool {
         !self.mode.skip_objects() && self.scale < OBJECT_SKIP_SCALE
+    }
+
+    /// Whether no OpenStreetMap data is loaded at all: too small a scale, or another body.
+    /// Terrain-only still loads it, for the water and nature it keeps.
+    pub fn skip_osm(&self) -> bool {
+        self.scale < OBJECT_SKIP_SCALE || !self.body.is_earth()
     }
 
     /// The Mapillary token, if one was given and is not blank.
@@ -679,11 +713,16 @@ impl GameMode {
 /// For Java Edition: `--path` is required. If the directory doesn't exist, it will be created.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
 /// Non-Earth bodies drive their own scale and force terrain-only. Shared by the
-/// CLI and the GUI so the two cannot disagree about what Moon/Mars means.
+/// CLI and the GUI so the two cannot disagree about what Moon/Mars means, or
+/// what a blueprint leaves out.
 pub fn apply_body_defaults(args: &mut Args) {
+    apply_mode_defaults(args);
     if args.body.is_earth() {
         return;
     }
+    // Snow and ruins dress Earth weather and Earth towns.
+    args.winter = false;
+    args.post_apocalyptic = false;
     args.scale = args.body.world_scale();
     args.mode = GenerationMode::TerrainOnly;
     args.overture = false;
@@ -710,6 +749,18 @@ pub fn apply_body_defaults(args: &mut Args) {
     if args.world_time == DEFAULT_WORLD_TIME {
         args.world_time = MIDNIGHT_TICKS;
     }
+}
+
+/// A blueprint shows where buildings stand, not what they look like, so whatever
+/// dresses a building or stands in for one is off.
+fn apply_mode_defaults(args: &mut Args) {
+    if args.mode != GenerationMode::Blueprint {
+        return;
+    }
+    args.use_3d = false;
+    args.interior = false;
+    args.building_facades = false;
+    args.mapillary_facades = Some(false);
 }
 
 /// Clap's `--world-time` default, so `apply_body_defaults` can tell left-alone
@@ -910,11 +961,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     }
 
     // A bounding box is required unless a local --file supplies one to derive it from.
-    // Terrain-only mode ignores --file (it never loads OSM objects), so it always needs --bbox.
+    // A run that loads no OSM data ignores --file, so it always needs --bbox.
     if args.bbox.is_none() {
-        if args.skip_objects() {
+        if args.skip_osm() {
             return Err(
-                "--mode terrain-only requires --bbox (a local --file is ignored in terrain-only mode)."
+                "--bbox is required: below scale 0.3, or off Earth, no OpenStreetMap data is loaded and --file is ignored."
                     .to_string(),
             );
         }
@@ -1419,11 +1470,11 @@ mod tests {
     }
 
     #[test]
-    fn test_terrain_only_requires_bbox_even_with_file() {
+    fn test_terrain_only_reads_a_file_but_small_scale_needs_a_bbox() {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
-        // terrain-only ignores --file, so a bbox is still required.
+        // Terrain-only loads OSM for its water, so a file can supply the bbox.
         let cmd = [
             "arnis",
             "--output-dir",
@@ -1434,20 +1485,71 @@ mod tests {
             "terrain-only",
         ];
         let args = Args::try_parse_from(cmd.iter()).unwrap();
-        assert!(validate_args(&args).is_err());
+        assert!(!args.skip_osm());
+        assert!(validate_args(&args).is_ok());
 
-        // With --bbox it validates.
+        // Below the object scale nothing is loaded, so --file is ignored.
         let cmd = [
             "arnis",
             "--output-dir",
             tmp_path,
-            "--bbox",
-            "1,2,3,4",
-            "--mode",
-            "terrain-only",
+            "--file",
+            "area.osm",
+            "--scale",
+            "0.1",
         ];
         let args = Args::try_parse_from(cmd.iter()).unwrap();
-        assert!(validate_args(&args).is_ok());
+        assert!(validate_args(&args).is_err());
+    }
+
+    #[test]
+    fn blueprint_turns_off_whatever_dresses_a_building() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", "out", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        let mut args = parse(&["--mode", "blueprint", "--interior", "--building-facades"]);
+        assert!(args.terrain());
+        assert!(!args.skip_objects());
+        apply_body_defaults(&mut args);
+        assert!(!args.use_3d && !args.interior && !args.building_facades);
+        assert_eq!(args.mapillary_facades, Some(false));
+    }
+
+    #[test]
+    fn gui_mode_names_match_the_cli() {
+        assert_eq!(
+            GenerationMode::from_name("blueprint"),
+            GenerationMode::Blueprint
+        );
+        assert_eq!(
+            GenerationMode::from_name("terrain-only"),
+            GenerationMode::TerrainOnly
+        );
+        assert_eq!(
+            GenerationMode::from_name("geo-only"),
+            GenerationMode::GeoOnly
+        );
+        assert_eq!(
+            GenerationMode::from_name("nonsense"),
+            GenerationMode::GeoTerrain
+        );
+    }
+
+    #[test]
+    fn winter_and_ruins_stay_on_earth() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", "out", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        let mut args = parse(&["--winter", "--post-apocalyptic"]);
+        apply_body_defaults(&mut args);
+        assert!(args.winter && args.post_apocalyptic);
+        let mut args = parse(&["--winter", "--post-apocalyptic", "--body", "moon"]);
+        apply_body_defaults(&mut args);
+        assert!(!args.winter && !args.post_apocalyptic);
     }
 
     /// `--help` must not print the Mapillary token.

@@ -1,4 +1,4 @@
-use crate::args::Args;
+use crate::args::{Args, GenerationMode};
 use crate::canopy::{self, CanopyData};
 use crate::celestial::CelestialBody;
 use crate::coordinate_system::{
@@ -60,6 +60,8 @@ pub struct Ground {
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
     ecoregions: Option<Arc<EcoMap>>,
+    /// A winter run: every biome becomes its snowy counterpart.
+    winter: bool,
 }
 
 /// Layout of a run's ground grids. A projected run takes its size from the
@@ -280,6 +282,7 @@ impl Ground {
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
+            winter: false,
         }
     }
 
@@ -335,6 +338,7 @@ impl Ground {
             climate: frame.climate(bbox),
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
+            winter: false,
         }
     }
 
@@ -358,6 +362,7 @@ impl Ground {
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
+            winter: false,
         }
     }
 
@@ -381,6 +386,7 @@ impl Ground {
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
+            winter: false,
         }
     }
 
@@ -429,6 +435,7 @@ impl Ground {
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
+            winter: false,
         }
     }
 
@@ -563,6 +570,7 @@ impl Ground {
                             .is_earth()
                             .then(|| frame.ecoregions(&requested_bbox, (final_w, final_h)))
                             .flatten(),
+                        winter: false,
                     }
                 }
                 Err(e) => {
@@ -597,6 +605,7 @@ impl Ground {
                             .is_earth()
                             .then(|| frame.ecoregions(&requested_bbox, plan.final_dims))
                             .flatten(),
+                        winter: false,
                     }
                 }
             }
@@ -635,6 +644,16 @@ impl Ground {
     /// Replaces the ecoregion map after the ground was rotated.
     pub fn set_ecoregion_map(&mut self, map: EcoMap) {
         self.ecoregions = Some(Arc::new(map));
+    }
+
+    /// Whether this is a winter run, whose biomes are all snowy.
+    #[inline(always)]
+    pub fn winter(&self) -> bool {
+        self.winter
+    }
+
+    pub fn set_winter(&mut self, winter: bool) {
+        self.winter = winter;
     }
 
     /// Returns whether land cover data is available
@@ -735,6 +754,30 @@ impl Ground {
             xzbbox,
             scale,
         );
+    }
+
+    /// Last land cover pass, once the OSM and bridge repairs have moved the water: returns
+    /// built-up land and fields to nature where the mode asks, then marks the beaches.
+    pub fn finish_land_cover(&mut self, mode: GenerationMode) {
+        if mode.natural_land_cover() {
+            self.naturalize_land_cover();
+        }
+        self.mark_beaches();
+    }
+
+    /// Returns built-up land and fields to natural cover, for terrain-only worlds.
+    fn naturalize_land_cover(&mut self) {
+        let climate = self.climate;
+        let Ground {
+            land_cover,
+            elevation_data,
+            ..
+        } = self;
+        let Some(lc) = land_cover.as_mut() else {
+            return;
+        };
+        let heights = elevation_data.as_mut().map(|d| d.heights.as_mut_slice());
+        crate::land_cover::naturalize::naturalize(lc, heights, climate);
     }
 
     /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
@@ -1353,7 +1396,7 @@ pub fn generate_ground_data(
     let frame = GroundFrame::from_args(args, &bbox);
     if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
-        let ground = Ground::new_enabled(
+        let mut ground = Ground::new_enabled(
             &bbox,
             args.scale,
             args.height_multiplier,
@@ -1368,6 +1411,7 @@ pub fn generate_ground_data(
             &frame,
             peaks,
         );
+        ground.set_winter(args.winter);
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
         let floor = area_floor_for(&ground, args);
@@ -1383,13 +1427,14 @@ pub fn generate_ground_data(
         return ground;
     }
     println!("{} Fetching land cover...", "[3/7]".bold());
-    let ground = Ground::new_flat_with_land_cover(
+    let mut ground = Ground::new_flat_with_land_cover(
         &bbox,
         args.scale,
         args.ground_level,
         args.canopy_height,
         &frame,
     );
+    ground.set_winter(args.winter);
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
@@ -1505,6 +1550,7 @@ mod tests {
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
+            winter: false,
         }
     }
 
@@ -1803,6 +1849,7 @@ pub(crate) mod test_support {
             climate: crate::climate::Climate::Temperate,
             body: CelestialBody::Earth,
             ecoregions: None,
+            winter: false,
         }
     }
 }

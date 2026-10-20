@@ -298,6 +298,8 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             ],
         ),
 
+        "fire" => BedrockBlock::with_states("fire", vec![("age", BedrockBlockStateValue::Int(0))]),
+
         // Cobblestone wall
         "cobblestone_wall" => BedrockBlock::with_states(
             "cobblestone_wall",
@@ -978,6 +980,23 @@ pub fn to_bedrock_block_with_properties(
     // Handle stairs with facing/shape properties
     if java_name.ends_with("_stairs") {
         return convert_stairs(java_name, props_map);
+    }
+
+    // Java names the faces a vine clings to; Bedrock packs them into bits.
+    if java_name == "vine" {
+        let bits = [("south", 1), ("west", 2), ("north", 4), ("east", 8)]
+            .iter()
+            .filter(|(face, _)| {
+                props_map
+                    .and_then(|m| m.get(*face))
+                    .is_some_and(|v| matches!(v, fastnbt::Value::String(s) if s == "true"))
+            })
+            .map(|(_, bit)| *bit)
+            .sum();
+        return BedrockBlock::with_states(
+            "vine",
+            vec![("vine_direction_bits", BedrockBlockStateValue::Int(bits))],
+        );
     }
 
     // Handle barrel facing direction

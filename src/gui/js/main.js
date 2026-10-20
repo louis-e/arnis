@@ -492,6 +492,8 @@ var selectedCelestialBody = 'earth';
 const EARTH_ONLY_SETTINGS = [
   'generation-mode-select',
   'overture-toggle',
+  'winter-toggle',
+  'post-apocalyptic-toggle',
   'use-3d-toggle',
   'interior-toggle',
   'canopy-height-toggle',
@@ -3346,10 +3348,10 @@ async function startGeneration() {
       }
     }
 
-    // Get generation mode from dropdown
+    // Get generation mode from dropdown, named as the CLI's --mode
     var generationMode = document.getElementById("generation-mode-select").value;
-    var terrain = (generationMode === "geo-terrain" || generationMode === "terrain-only");
-    var skipOsmObjects = (generationMode === "terrain-only");
+    var winter = document.getElementById("winter-toggle").checked;
+    var postApocalyptic = document.getElementById("post-apocalyptic-toggle").checked;
 
     var interior = document.getElementById("interior-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
@@ -3408,8 +3410,9 @@ async function startGeneration() {
         worldScale: scale,
         heightMultiplier: heightMultiplier,
         groundLevel: ground_level,
-        terrainEnabled: terrain,
-        skipOsmObjects: skipOsmObjects,
+        generationMode: generationMode,
+        winterEnabled: winter,
+        postApocalypticEnabled: postApocalyptic,
         interiorEnabled: interior,
         fillgroundEnabled: fill_ground,
         cavesEnabled: caves,

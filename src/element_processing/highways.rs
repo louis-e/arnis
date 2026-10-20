@@ -1,4 +1,4 @@
-use crate::args::Args;
+use crate::args::{Args, GenerationMode};
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -1479,8 +1479,9 @@ fn generate_highways_internal(
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
 
-            // At-grade lit ways get periodic street lamps alongside.
+            // At-grade lit ways get periodic street lamps alongside, but a blueprint has no furniture.
             if way.tags.get("lit").map(String::as_str) == Some("yes")
+                && args.mode != GenerationMode::Blueprint
                 && !is_bridge_member
                 && !is_bridge_ramp
                 && !is_indoor

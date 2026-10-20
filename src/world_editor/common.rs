@@ -1397,6 +1397,13 @@ impl ChunkGrid {
             .filter_map(|(i, c)| Some((Self::key(i), c.as_ref()?)))
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = ((i32, i32), &mut ChunkToModify)> + '_ {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, c)| Some((Self::key(i), c.as_mut()?)))
+    }
+
     pub fn values(&self) -> impl Iterator<Item = &ChunkToModify> + '_ {
         self.slots.iter().flatten()
     }

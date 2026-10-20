@@ -40,6 +40,7 @@ mod map_preview;
 mod map_renderer;
 mod map_transformation;
 mod mapillary;
+mod mode_filter;
 mod models_3d;
 mod net;
 mod one_world;
@@ -251,10 +252,10 @@ fn run_cli() {
             "Note:".yellow().bold()
         );
     }
-    // Terrain-only never touches Overpass, so the OSM in/out file args have nothing to act on.
-    if args.skip_objects() && (args.file.is_some() || args.save_json_file.is_some()) {
+    // A run that loads no OSM data has nothing for the OSM in/out file args to act on.
+    if args.skip_osm() && (args.file.is_some() || args.save_json_file.is_some()) {
         eprintln!(
-            "{} --mode terrain-only skips OpenStreetMap objects; --file/--save-json-file are ignored.",
+            "{} No OpenStreetMap data is loaded below scale 0.3 or off Earth; --file/--save-json-file are ignored.",
             "Note:".yellow().bold()
         );
     }
@@ -266,9 +267,10 @@ fn run_cli() {
     // A local .osm/.xml file is the only bbox source when --bbox is omitted, so it must be loaded
     // BEFORE the parallel fetch scope (Overture + land cover need the bbox) and before the bedrock
     // world-name / area-size steps below. The parsed data is kept in `preloaded_osm` so the file
-    // isn't read twice. The Overpass and terrain-only paths already know the bbox from --bbox.
+    // isn't read twice. The Overpass and no-OSM paths already know the bbox from --bbox.
     let skip_objects = args.skip_objects();
-    let (mut preloaded_osm, mut effective_bbox) = match (skip_objects, args.file.as_deref()) {
+    let skip_osm = args.skip_osm();
+    let (mut preloaded_osm, mut effective_bbox) = match (skip_osm, args.file.as_deref()) {
         (false, Some(file)) => {
             let (data, file_bounds) = match retrieve_data::fetch_data_from_file(file) {
                 Ok(loaded) => loaded,
@@ -305,7 +307,7 @@ fn run_cli() {
             (Some(data), bbox)
         }
         _ => {
-            // Overpass or terrain-only: --bbox is required (enforced by validate_args above).
+            // Overpass or no OSM at all: --bbox is required (enforced by validate_args above).
             let bbox = args.bbox.unwrap_or_else(|| {
                 eprintln!(
                     "{} A bounding box is required. Provide --bbox, or --file with a local .osm/.xml file.",
@@ -464,8 +466,8 @@ fn run_cli() {
     // its own internal Bench for the block-placement phases.
     let mut bench = bench::Bench::new(args.benchmark);
 
-    // Terrain-only (or a scale too small to render objects) skips every object source:
-    // no Overpass query, no Overture footprints. Land cover is still fetched.
+    // A scale too small to render objects skips every object source: no Overpass query, no
+    // Overture footprints. Terrain-only still loads OSM, for its water and nature.
     if args.skip_objects_due_to_scale() {
         println!(
             "{} Scale {:.2} is below {:.2}: skipping OpenStreetMap and Overture objects (terrain and land cover only)",
@@ -473,9 +475,14 @@ fn run_cli() {
             args.scale,
             args::OBJECT_SKIP_SCALE
         );
+    } else if skip_osm {
+        println!(
+            "{} No OpenStreetMap data off Earth: terrain only",
+            "[1/7]".bold()
+        );
     } else if skip_objects {
         println!(
-            "{} Terrain-only mode: skipping OpenStreetMap and Overture objects",
+            "{} Terrain-only mode: keeping OpenStreetMap water and nature, no buildings or roads",
             "[1/7]".bold()
         );
     }
@@ -520,9 +527,9 @@ fn run_cli() {
 
         let t = std::time::Instant::now();
         // A local file was already parsed up front (to derive the bbox), so reuse that data.
-        // Terrain-only carries no objects. Otherwise fetch from Overpass, in parallel with the
-        // Overture and land-cover fetches spawned above.
-        let raw_data = if skip_objects {
+        // A run without OSM carries no objects. Otherwise fetch from Overpass, in parallel with
+        // the Overture and land-cover fetches spawned above.
+        let raw_data = if skip_osm {
             osm_parser::OsmData::empty()
         } else if let Some(data) = preloaded_osm.take() {
             data
@@ -625,11 +632,16 @@ fn run_cli() {
     }
     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
     // Last, once the water has stopped moving.
-    ground.mark_beaches();
+    ground.finish_land_cover(args.mode);
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_bridge_repair");
     }
     bench.mark("landcover_osm_repair");
+
+    // The overrides above still read roads and buildings as land; now the mode drops them.
+    mode_filter::retain_for_mode(&mut parsed_elements, args.mode);
+    let outline_suppression =
+        mode_filter::outline_suppression_for_mode(outline_suppression, args.mode);
 
     // Write the parsed OSM data to a file for inspection
     if args.debug {
