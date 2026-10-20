@@ -81,17 +81,12 @@ pub(super) fn covers_area(bbox: &LLBBox) -> bool {
     tile_count(bbox) <= MAX_TILES as u64
 }
 
-/// Inclusive `(min_x, max_x, min_y, max_y)` tile range covering the bbox.
-///
-/// Tile y grows southward while latitude grows northward, so the corners come
-/// from opposite edges.
 fn tile_range(bbox: &LLBBox) -> (u32, u32, u32, u32) {
     pmtiles::tile_range(bbox, QUERY_ZOOM)
 }
 
 fn tile_count(bbox: &LLBBox) -> u64 {
-    let (min_x, max_x, min_y, max_y) = tile_range(bbox);
-    u64::from(max_x - min_x + 1) * u64::from(max_y - min_y + 1)
+    pmtiles::tile_count(bbox, QUERY_ZOOM)
 }
 
 /// Ceiling on concurrent range requests: enough to keep the link busy, few

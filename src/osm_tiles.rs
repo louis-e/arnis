@@ -283,10 +283,8 @@ pub fn fetch_data_from_tiles_quietly(bbox: LLBBox, base_url: &str) -> Result<Osm
     read_tiles(bbox, base_url, AREA_KM2_AT_SCALE_1).map(|(data, _, _)| data)
 }
 
-/// Counted, not collected: a planet-sized bbox is 67M tiles.
 fn tiles_needed(bbox: &LLBBox) -> usize {
-    let (xs, xe, ys, ye) = pmtiles::tile_range(bbox, ZOOM);
-    ((xe - xs) as usize + 1).saturating_mul((ye - ys) as usize + 1)
+    usize::try_from(pmtiles::tile_count(bbox, ZOOM)).unwrap_or(usize::MAX)
 }
 
 /// Whether the archive serves `bbox` for a world at `scale`. Needs no network, so a run can
@@ -370,23 +368,27 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
         let mut is_aot2 = false;
         // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
         // that is dominated by round trips (72 tiles took 94s, most of it waiting). In batches,
-        // so a large area holds one batch of decompressed tiles rather than all of them.
+        // so a large area holds one batch of tiles rather than all of them.
         for batch in located.chunks(TILE_BATCH) {
-            let fetched: Vec<Result<(u64, Vec<u8>)>> = batch
+            // Decoded here too, so only the merge below runs on one thread.
+            let fetched: Vec<Result<Option<(u64, bool, DecodedTile)>>> = batch
                 .par_iter()
                 .map(|(x, y, loc)| {
                     let raw = archive.tile(&client, ZOOM, *x, *y, *loc)?;
-                    unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))
+                    let (on_wire, plain) = unpack(raw, &format!("tile {ZOOM}/{x}/{y}"))?;
+                    if plain.is_empty() {
+                        return Ok(None);
+                    }
+                    let tile = decode(&plain)?;
+                    Ok(Some((on_wire, plain.starts_with(b"AOT2"), tile)))
                 })
                 .collect();
             for entry in fetched {
-                let (on_wire, plain) = entry?;
-                if plain.is_empty() {
+                let Some((on_wire, aot2_tile, tile)) = entry? else {
                     continue;
-                }
+                };
                 bytes += on_wire;
-                is_aot2 |= plain.starts_with(b"AOT2");
-                let tile = decode(&plain)?;
+                is_aot2 |= aot2_tile;
                 for r in &tile.relations {
                     let list = seen_in.entry(r.0).or_default();
                     if list.last() != Some(&k) {
