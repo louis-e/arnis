@@ -249,15 +249,15 @@ impl BedrockWriter {
         world_time: i64,
         start_with_map: bool,
     ) -> Self {
-        // If the path ends with .mcworld, use it as the final archive path
-        // and create a temp directory without that extension for working files
-        let (output_dir, mcworld_path) =
-            if output_path.extension().is_some_and(|ext| ext == "mcworld") {
-                (output_path.with_extension(""), output_path)
-            } else {
-                let mcworld_path = append_mcworld_extension(&output_path);
-                (output_path, mcworld_path)
-            };
+        let mcworld_path = if output_path.extension().is_some_and(|ext| ext == "mcworld") {
+            output_path
+        } else {
+            append_mcworld_extension(&output_path)
+        };
+        // Not the bare name: unpacking the archive in place creates that folder.
+        let mut staging = mcworld_path.clone().into_os_string();
+        staging.push(".staging");
+        let output_dir = PathBuf::from(staging);
 
         Self {
             output_dir,
@@ -1401,17 +1401,33 @@ mod tests {
         let output = PathBuf::from("Arnis St. Louis.mcworld");
         let writer = test_writer(output.clone());
         assert_eq!(writer.mcworld_path, output);
-        assert_eq!(writer.output_dir, PathBuf::from("Arnis St. Louis"));
+        assert_eq!(
+            writer.output_dir,
+            PathBuf::from("Arnis St. Louis.mcworld.staging")
+        );
+    }
+
+    #[test]
+    fn a_world_unpacked_beside_the_archive_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unpacked = tmp.path().join("Arnis Test");
+        fs::create_dir_all(unpacked.join("db")).unwrap();
+        fs::write(unpacked.join("levelname.txt"), b"Arnis World: Test").unwrap();
+
+        let writer = test_writer(unpacked.with_extension("mcworld"));
+        writer.prepare_output_dir().unwrap();
+        assert!(writer.output_dir.join(STAGING_MARKER).is_file());
+        assert!(unpacked.join("levelname.txt").is_file());
     }
 
     #[test]
     fn prepare_output_dir_keeps_foreign_directory() {
         let tmp = tempfile::tempdir().unwrap();
-        let staging = tmp.path().join("Arnis Test");
-        fs::create_dir_all(&staging).unwrap();
+        let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        let staging = &writer.output_dir;
+        fs::create_dir_all(staging).unwrap();
         fs::write(staging.join("notes.txt"), b"not ours").unwrap();
 
-        let writer = test_writer(staging.with_extension("mcworld"));
         assert!(writer.prepare_output_dir().is_err());
         assert!(staging.join("notes.txt").is_file());
     }
@@ -1419,12 +1435,12 @@ mod tests {
     #[test]
     fn prepare_output_dir_keeps_existing_bedrock_world() {
         let tmp = tempfile::tempdir().unwrap();
-        let staging = tmp.path().join("Arnis Test");
+        let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        let staging = &writer.output_dir;
         fs::create_dir_all(staging.join("db")).unwrap();
         fs::write(staging.join("levelname.txt"), b"Someone's World").unwrap();
         fs::write(staging.join("db").join("CURRENT"), b"leveldb").unwrap();
 
-        let writer = test_writer(staging.with_extension("mcworld"));
         assert!(writer.prepare_output_dir().is_err());
         assert!(staging.join("db").join("CURRENT").is_file());
     }
@@ -1432,12 +1448,12 @@ mod tests {
     #[test]
     fn prepare_output_dir_wipes_previous_staging_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let staging = tmp.path().join("Arnis Test");
+        let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        let staging = &writer.output_dir;
         fs::create_dir_all(staging.join("db")).unwrap();
         fs::write(staging.join(STAGING_MARKER), b"").unwrap();
         fs::write(staging.join("levelname.txt"), b"Arnis World: Old").unwrap();
 
-        let writer = test_writer(staging.with_extension("mcworld"));
         writer.prepare_output_dir().unwrap();
         assert!(staging.join(STAGING_MARKER).is_file());
         assert!(!staging.join("levelname.txt").exists());
@@ -1446,12 +1462,11 @@ mod tests {
     #[test]
     fn prepare_output_dir_accepts_empty_directory() {
         let tmp = tempfile::tempdir().unwrap();
-        let staging = tmp.path().join("Arnis Test");
-        fs::create_dir_all(&staging).unwrap();
+        let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        fs::create_dir_all(&writer.output_dir).unwrap();
 
-        let writer = test_writer(staging.with_extension("mcworld"));
         writer.prepare_output_dir().unwrap();
-        assert!(staging.join(STAGING_MARKER).is_file());
+        assert!(writer.output_dir.join(STAGING_MARKER).is_file());
     }
 
     #[test]
