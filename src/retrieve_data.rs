@@ -239,10 +239,10 @@ pub fn fetch_data_from_file(
     }
 }
 
-/// Coarse bucket for an archive miss. Only the category is reported: the error text can name a
-/// tile, which locates the user to a few kilometres.
+/// Coarse bucket for an archive miss, plus how the request failed when the error says. Only
+/// these are reported: the error text can name a tile, which locates the user to a few kilometres.
 #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
-fn fallback_reason(e: &str) -> &'static str {
+fn fallback_reason(e: &str) -> String {
     const BUCKETS: [(&str, &str); 12] = [
         ("has no data for this area", "no_data_for_area"),
         ("that area needs", "area_too_large"),
@@ -257,11 +257,33 @@ fn fallback_reason(e: &str) -> &'static str {
         ("truncated tile", "tile_decode"),
         ("implausible", "tile_decode"),
     ];
-    BUCKETS
+    let bucket = BUCKETS
         .iter()
         .find(|(needle, _)| e.contains(needle))
         .map(|(_, bucket)| *bucket)
-        .unwrap_or("other")
+        .unwrap_or("other");
+    match failure_kind(e) {
+        Some(kind) => format!("{bucket}/{kind}"),
+        None => bucket.to_string(),
+    }
+}
+
+/// The `[kind]` tag of a failed request (see `net::failure_kind`), else the status of an
+/// `HTTP <code>` error.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+fn failure_kind(e: &str) -> Option<String> {
+    let tagged = e
+        .split('[')
+        .skip(1)
+        .filter_map(|rest| rest.split_once(']').map(|(tag, _)| tag))
+        .find(|tag| crate::net::is_failure_kind(tag));
+    if let Some(tag) = tagged {
+        return Some(tag.to_string());
+    }
+    let after = &e[e.find("HTTP ")? + 5..];
+    let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+    let code = &after[..digits];
+    (digits == 3 && (b'1'..=b'5').contains(&code.as_bytes()[0])).then(|| format!("http_{code}"))
 }
 
 /// The OSM source for a run: the tile archive, falling back to Overpass.
@@ -831,8 +853,24 @@ mod tests {
                 "zoom_mismatch",
             ),
             (
-                "HTTP 403 fetching range from https://x/y (expected 206)",
-                "range_http",
+                "HTTP 403 Forbidden fetching range from https://x/y (expected 206)",
+                "range_http/http_403",
+            ),
+            (
+                "tile archive index unreachable [http_403]: HTTP status client error (403 Forbidden) for url (https://x/archives.json)",
+                "index_unreachable/http_403",
+            ),
+            (
+                "tile archive index unreachable [timeout]: error sending request for url (https://x/archives.json)",
+                "index_unreachable/timeout",
+            ),
+            (
+                "range request to https://x/europe.pmtiles failed [reset]: error sending request",
+                "network/reset",
+            ),
+            (
+                "range body from https://x/europe.pmtiles could not be read [body]: error decoding response body",
+                "network/body",
             ),
             ("tile 13/1/2 is not readable: truncated tile", "tile_decode"),
             ("something nobody predicted", "other"),
@@ -846,5 +884,7 @@ mod tests {
     fn fallback_reasons_are_coordinate_free() {
         let e = "tile 13/4359/2842 expands past the size cap";
         assert!(!fallback_reason(e).contains("4359"));
+        let bracketed = "tile [13/4359/2842] could not be read: HTTP 4359 or so";
+        assert_eq!(fallback_reason(bracketed), "network");
     }
 }

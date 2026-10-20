@@ -170,6 +170,8 @@ fn cache_root_for(base_url: &str) -> Option<PathBuf> {
 
 fn client() -> Result<Client> {
     Client::builder()
+        // A host that never answers would otherwise hold off the Overpass fallback for 2 min.
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(120))
         .user_agent(crate::retrieve_data::OSM_USER_AGENT)
         .build()
@@ -201,7 +203,10 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
         .send()
         .and_then(|r| r.error_for_status())
         .and_then(|r| r.bytes())
-        .map_err(|e| format!("tile archive index unreachable: {e}"))?;
+        .map_err(|e| {
+            let kind = crate::net::failure_kind(&e);
+            format!("tile archive index unreachable [{kind}]: {e}")
+        })?;
     let parsed: Manifest =
         serde_json::from_slice(&body).map_err(|e| format!("bad archive index: {e}"))?;
     if let Some(p) = &cached {

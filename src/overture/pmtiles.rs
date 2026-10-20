@@ -637,7 +637,8 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
         {
             Ok(response) => response,
             Err(e) => {
-                last_error = format!("range request to {url} failed: {e}");
+                let kind = crate::net::failure_kind(&e);
+                last_error = format!("range request to {url} failed [{kind}]: {e}");
                 continue;
             }
         };
@@ -661,7 +662,10 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
                 stats::record_network(body.len() as u64);
                 return Ok(body.to_vec());
             }
-            Err(e) => last_error = format!("range body from {url} could not be read: {e}"),
+            Err(e) => {
+                let kind = crate::net::failure_kind(&e);
+                last_error = format!("range body from {url} could not be read [{kind}]: {e}");
+            }
         }
     }
     Err(last_error)
