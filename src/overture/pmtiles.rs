@@ -350,6 +350,13 @@ pub fn tile_range(bbox: &LLBBox, z: u8) -> (u32, u32, u32, u32) {
     )
 }
 
+/// Tiles [`tile_range`] covers, counted rather than listed: a planet-sized bbox is 67M at
+/// zoom 13.
+pub fn tile_count(bbox: &LLBBox, z: u8) -> u64 {
+    let (min_x, max_x, min_y, max_y) = tile_range(bbox, z);
+    u64::from(max_x - min_x + 1) * u64::from(max_y - min_y + 1)
+}
+
 /// Web-Mercator tile containing a coordinate at the given zoom.
 pub fn lonlat_to_tile(lon: f64, lat: f64, z: u8) -> (u32, u32) {
     let n = f64::from(1u32 << z);
