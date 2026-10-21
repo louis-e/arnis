@@ -283,6 +283,7 @@ fn generate_at_grade_rail(editor: &mut WorldEditor, element: &ProcessedWay) {
             );
 
             editor.set_block(rail_block, bx, 1, bz, None, None);
+            editor.register_rail(element.id, bx, bz, current_ground + 1);
 
             if tds.is_multiple_of(4) {
                 editor.set_block(OAK_LOG, bx, 0, bz, None, None);
@@ -823,6 +824,7 @@ fn generate_rail_bridge(
                 );
                 editor.set_block_absolute(GRAVEL, bx, y, bz, None, None);
                 editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
+                editor.register_rail(way.id, bx, bz, y + 1);
             }
             return;
         }
@@ -854,6 +856,7 @@ fn generate_rail_bridge(
             next.map_or(y, |n| n.1),
         );
         editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
+        editor.register_rail(way.id, bx, bz, y + 1);
         let bed = if i % 4 == 0 { OAK_LOG } else { GRAVEL };
         lay_rail_deck_column(editor, bridge_surface, (bx, bz), y, slab, bed);
         deck_cells.push(((bx, bz), i));
@@ -1384,6 +1387,7 @@ fn generate_rail_tunnel_shell(
                 Some(&[STONE_BRICKS, CRACKED_STONE_BRICKS, MOSSY_STONE_BRICKS]),
                 None,
             );
+            editor.register_rail(element.id, bx, bz, floor_y + 1);
         }
     }
 }

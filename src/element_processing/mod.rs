@@ -35,6 +35,8 @@ pub mod subprocessor;
 mod surfaces;
 pub mod tourisms;
 pub mod traffic_lights;
+pub mod train_bodies;
+pub mod trains;
 pub mod tree;
 pub mod water_areas;
 pub mod waterfront;

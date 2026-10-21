@@ -1414,7 +1414,7 @@ fn gui_start_generation(
     discoveries: bool,
     traffic_lights: bool,
     zombie_outbreak: bool,
-    moving_cars: bool,
+    moving_vehicles: bool,
     body_gravity: bool,
     one_world: bool,
     one_world_name: String,
@@ -1705,7 +1705,7 @@ fn gui_start_generation(
                 discoveries,
                 pause_menu,
                 zombie_outbreak,
-                moving_cars,
+                moving_vehicles,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.

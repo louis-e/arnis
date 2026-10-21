@@ -981,7 +981,7 @@ pub fn generate_world_with_options(
         (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
     );
     let road_markings = road_markings::RoadMarkingIndex::build(&elements, args.scale, sign_region);
-    let extras = crate::datapack::Extras::from_args(args);
+    let mut extras = crate::datapack::Extras::from_args(args);
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
     let mut rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
@@ -1135,6 +1135,25 @@ pub fn generate_world_with_options(
     });
     if let Some(cars) = &car_network {
         editor.set_car_network(Arc::clone(cars));
+    }
+    // Trains ride the rails as they were laid, so the editors note where each one went.
+    let train_network = (extras.cars && world_format == WorldFormat::JavaAnvil)
+        .then(|| {
+            crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
+        })
+        .filter(|net| !net.is_empty());
+    let rail_heights: Option<crate::world_editor::RailHeights> = train_network
+        .as_ref()
+        .map(|_| Arc::new(std::sync::Mutex::new(fnv::FnvHashMap::default())));
+    if let Some(net) = &train_network {
+        println!(
+            "  Moving vehicles: {} trains on the rail network",
+            net.train_count()
+        );
+    }
+    extras.trains = train_network.is_some();
+    if let Some(heights) = &rail_heights {
+        editor.set_rail_heights(Arc::clone(heights));
     }
 
     // The elements are gone by the time the pack is written.
@@ -1396,6 +1415,9 @@ pub fn generate_world_with_options(
             }
             if let Some(cars) = &car_network {
                 tile_editor.set_car_network(Arc::clone(cars));
+            }
+            if let Some(heights) = &rail_heights {
+                tile_editor.set_rail_heights(Arc::clone(heights));
             }
             tile_editor.set_strict_bounds(
                 tile_bounds.min_x,
@@ -2236,6 +2258,14 @@ pub fn generate_world_with_options(
                         net.storage_function(),
                     ));
                     functions
+                })
+                .unwrap_or_default(),
+            train_functions: train_network
+                .as_ref()
+                .zip(rail_heights.as_ref())
+                .map(|(net, heights)| {
+                    let laid = heights.lock().map(|m| m.clone()).unwrap_or_default();
+                    net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
                 })
                 .unwrap_or_default(),
         };

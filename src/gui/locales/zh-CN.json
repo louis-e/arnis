@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "在你的街道上抵御五个夜晚的僵尸潮，最后还有首领。",
   "body_gravity": "月球与火星重力",
   "body_gravity_desc": "月球和火星世界中的真实低重力。",
-  "moving_cars": "行驶的汽车",
-  "moving_cars_desc": "按限速在你的街道上行驶的车流。"
+  "moving_vehicles": "行驶的交通工具",
+  "moving_vehicles_desc": "在你的街道和轨道上行驶的汽车、有轨电车、地铁和火车。"
 }

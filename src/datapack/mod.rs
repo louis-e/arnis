@@ -107,6 +107,26 @@ const CARS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/cars/respawn_settle.mcfunction",
 ];
 
+const TRAINS: &[(&str, &[u8])] = static_files![
+    "data/arnis/function/trains/load.mcfunction",
+    "data/arnis/function/trains/tick.mcfunction",
+    "data/arnis/function/trains/drive.mcfunction",
+    "data/arnis/function/trains/when.mcfunction",
+    "data/arnis/function/trains/near.mcfunction",
+    "data/arnis/function/trains/near_at.mcfunction",
+    "data/arnis/function/trains/near_test.mcfunction",
+    "data/arnis/function/trains/wrap.mcfunction",
+    "data/arnis/function/trains/car.mcfunction",
+    "data/arnis/function/trains/at.mcfunction",
+    "data/arnis/function/trains/put.mcfunction",
+    "data/arnis/function/trains/part.mcfunction",
+    "data/arnis/function/trains/gone_low.mcfunction",
+    "data/arnis/function/trains/gone_high.mcfunction",
+    "data/arnis/function/trains/gone.mcfunction",
+    "data/arnis/function/trains/gone_at.mcfunction",
+    "data/arnis/function/trains/sweep.mcfunction",
+];
+
 const OUTBREAK: &[(&str, &[u8])] = static_files![
     "data/arnis/function/outbreak/load.mcfunction",
     "data/arnis/function/outbreak/tick.mcfunction",
@@ -178,6 +198,8 @@ pub struct Extras {
     pub pause_menu: bool,
     pub outbreak: bool,
     pub cars: bool,
+    /// Set once the rail network turns out to have trains on it.
+    pub trains: bool,
 }
 
 impl Extras {
@@ -192,7 +214,8 @@ impl Extras {
             discoveries: args.discoveries,
             pause_menu: args.pause_menu,
             outbreak: args.zombie_outbreak,
-            cars: args.moving_cars,
+            cars: args.moving_vehicles,
+            trains: false,
         }
     }
 
@@ -203,6 +226,7 @@ impl Extras {
             || self.pause_menu
             || self.outbreak
             || self.cars
+            || self.trains
     }
 
     /// Whether the area's name and places are needed at all.
@@ -263,6 +287,9 @@ pub struct PackContext {
     /// The functions that load the car lanes and set what drivers check ahead, as
     /// (path in the pack, text).
     pub car_functions: Vec<(String, String)>,
+    /// The functions that hold the routes and timetables, run each train and summon its
+    /// carriages.
+    pub train_functions: Vec<(String, String)>,
 }
 
 impl PackContext {
@@ -362,6 +389,9 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     if ex.cars {
         add_static(CARS);
     }
+    if ex.trains {
+        add_static(TRAINS);
+    }
 
     out.push(("pack.mcmeta".to_string(), pretty(&pack_mcmeta(ex))));
     out.push((
@@ -376,6 +406,7 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
         (ex.pause_menu, "menu"),
         (ex.outbreak, "outbreak"),
         (ex.cars, "cars"),
+        (ex.trains, "trains"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))
@@ -408,6 +439,13 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     if ex.cars {
         out.extend(
             ctx.car_functions
+                .iter()
+                .map(|(path, text)| (path.clone(), text.clone().into_bytes())),
+        );
+    }
+    if ex.trains {
+        out.extend(
+            ctx.train_functions
                 .iter()
                 .map(|(path, text)| (path.clone(), text.clone().into_bytes())),
         );
@@ -519,6 +557,7 @@ fn pack_mcmeta(ex: Extras) -> Value {
         (ex.pause_menu, "pause menu"),
         (ex.outbreak, "zombie outbreak"),
         (ex.cars, "moving cars"),
+        (ex.trains, "trains"),
     ] {
         if on {
             features.push(name);
@@ -640,6 +679,7 @@ mod tests {
             },
             red_amber: true,
             car_functions: Vec::new(),
+            train_functions: Vec::new(),
         }
     }
 
@@ -651,6 +691,7 @@ mod tests {
             pause_menu: true,
             outbreak: true,
             cars: true,
+            trains: true,
         }
     }
 
@@ -687,7 +728,7 @@ mod tests {
     fn every_bundled_file_is_shipped_by_some_feature() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/minecraft/datapack_extras");
         let listed: std::collections::HashSet<&str> =
-            [CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, CARS]
+            [CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, CARS, TRAINS]
                 .iter()
                 .flat_map(|set| set.iter().map(|(p, _)| *p))
                 .collect();

@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Pięć nocy fal zombie na twoich ulicach, z bossem.",
   "body_gravity": "Grawitacja Księżyca i Marsa",
   "body_gravity_desc": "Prawdziwa niska grawitacja w światach Księżyca i Marsa.",
-  "moving_cars": "Jeżdżące samochody",
-  "moving_cars_desc": "Ruch uliczny jeżdżący po twoich ulicach z dozwoloną prędkością."
+  "moving_vehicles": "Jeżdżące pojazdy",
+  "moving_vehicles_desc": "Samochody, tramwaje, metro i pociągi na twoich ulicach i torach."
 }
