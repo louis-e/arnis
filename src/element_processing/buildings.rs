@@ -716,7 +716,13 @@ fn european_default_roof(
     }
     let scale_sq = ctx.scale * ctx.scale;
     let footprint_m2 = footprint_size as f64 / scale_sq;
-    if f64::from(building_height) > 26.0 * ctx.scale || footprint_m2 > 3000.0 {
+    // A block of eight storeys and more is roofed flat unless one is mapped.
+    let tall_block = element
+        .tags
+        .get("building:levels")
+        .and_then(|l| l.trim().parse::<f64>().ok())
+        .is_some_and(|l| l > 7.0);
+    if f64::from(building_height) > 26.0 * ctx.scale || footprint_m2 > 3000.0 || tall_block {
         return None;
     }
     // Ragged outlines (L-blocks around a car park, arcades) keep their flat lids.
@@ -1979,6 +1985,7 @@ impl BuildingCategory {
         building_height: i32,
         group_seed: u64,
         scale_factor: f64,
+        region: BuildingRegion,
     ) -> Self {
         // Check for man_made=tower before anything else
         if element.tags.get("man_made").map(|s| s.as_str()) == Some("tower") {
@@ -1994,12 +2001,27 @@ impl BuildingCategory {
                 hint = crate::osm_parser::building_style_hint(&element.tags);
             }
             let clean_seed = crate::osm_parser::seed_without_hint(group_seed);
-            match hint {
+            if hint == StyleHint::Glass {
                 // Tagged glass towers stay glass, but vary the treatment for a livelier skyline.
-                StyleHint::Glass => return Self::glass_family_variant(clean_seed),
+                return Self::glass_family_variant(clean_seed);
+            }
+            // A European office, store or housing block of eight to fourteen
+            // storeys is street fabric, not a tower: it keeps the facade of
+            // its type, whatever its era. The parts of a modelled building
+            // keep the tower's facade, which their siblings share.
+            if region == BuildingRegion::Europe
+                && !element.tags.contains_key("building:part")
+                && !Self::has_tower_proportions(element, building_height, scale_factor)
+            {
+                let typed = Self::from_building_type(Self::building_type(element));
+                if typed.keeps_its_facade_when_tall() {
+                    return typed;
+                }
+            }
+            match hint {
                 StyleHint::Masonry => return BuildingCategory::MasonrySkyscraper,
                 StyleHint::Contemporary => return BuildingCategory::ContemporarySkyscraper,
-                StyleHint::None => {}
+                StyleHint::Glass | StyleHint::None => {}
             }
 
             // Check if this qualifies as a true skyscraper:
@@ -2025,12 +2047,7 @@ impl BuildingCategory {
         }
 
         // Religious buildings keep their style even when also tagged historic.
-        let building_type = element
-            .tags
-            .get("building")
-            .or_else(|| element.tags.get("building:part"))
-            .map(|s| s.as_str())
-            .unwrap_or("yes");
+        let building_type = Self::building_type(element);
 
         let is_religious_building = matches!(
             building_type,
@@ -2048,6 +2065,21 @@ impl BuildingCategory {
             return BuildingCategory::Historic;
         }
 
+        Self::from_building_type(building_type)
+    }
+
+    /// The `building` value, else the `building:part` one.
+    fn building_type(element: &ProcessedWay) -> &str {
+        element
+            .tags
+            .get("building")
+            .or_else(|| element.tags.get("building:part"))
+            .map(|s| s.as_str())
+            .unwrap_or("yes")
+    }
+
+    /// Category of a building type value.
+    fn from_building_type(building_type: &str) -> Self {
         match building_type {
             // Single-family homes
             "house" | "detached" | "semidetached_house" | "terrace" | "bungalow" | "villa"
@@ -2110,6 +2142,46 @@ impl BuildingCategory {
             // Default for unknown types
             _ => BuildingCategory::Default,
         }
+    }
+
+    /// Categories whose facade still fits at eight to fourteen storeys.
+    fn keeps_its_facade_when_tall(self) -> bool {
+        matches!(
+            self,
+            BuildingCategory::Residential
+                | BuildingCategory::Commercial
+                | BuildingCategory::Office
+                | BuildingCategory::Hotel
+                | BuildingCategory::School
+                | BuildingCategory::Hospital
+                | BuildingCategory::Default
+        )
+    }
+
+    /// Whether a tall building is a tower rather than a mid-rise block or
+    /// slab: more than fourteen storeys or 50 m, or 40 m and more and half
+    /// again as tall as its footprint is long.
+    fn has_tower_proportions(element: &ProcessedWay, building_height: i32, scale: f64) -> bool {
+        let levels = element
+            .tags
+            .get("building:levels")
+            .and_then(|l| l.trim().parse::<f64>().ok())
+            .map_or(
+                (f64::from(building_height - GROUND_FLOOR_BONUS) / (4.0 * scale)) as i32,
+                |l| l.round() as i32,
+            );
+        if levels > 14 || f64::from(building_height) > 50.0 * scale {
+            return true;
+        }
+        if f64::from(building_height) < 40.0 * scale || element.nodes.len() < 3 {
+            return false;
+        }
+        let (min_x, max_x, min_z, max_z) = element.nodes.iter().fold(
+            (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
+            |(a, b, c, d), n| (a.min(n.x), b.max(n.x), c.min(n.z), d.max(n.z)),
+        );
+        let longest_side = (max_x - min_x).max(max_z - min_z).max(1);
+        f64::from(building_height) >= 1.5 * f64::from(longest_side)
     }
 
     /// Checks if a tall building has skyscraper proportions:
@@ -3052,6 +3124,10 @@ struct BuildingConfig {
     window_archetype: WindowArchetype,
     /// Window and pier widths the wall runs are laid out with.
     bays: BayRhythm,
+    /// Panel between storeys in a shaft whose spandrels recede with the glass.
+    spandrel_block: Block,
+    /// Stone base and capital of a masonry tower, if it has them.
+    zoning: Option<TowerZoning>,
     /// Balcony layout on street facades.
     balcony_band: BalconyBand,
     /// Banded stone ground floor on masonry-era urban buildings.
@@ -3088,6 +3164,88 @@ struct BuildingConfig {
     /// already owns, and a column flattened for a photograph that never comes
     /// loses its window, its plinth and its accent line for nothing.
     preset_shell: Arc<FnvHashSet<(i32, i32)>>,
+}
+
+/// Base, shaft and capital of a masonry tower: a stone base of one to four
+/// storeys under a belt course, the shaft in the wall's own colour, and a
+/// stone attic of one to three storeys under the main cornice. An art-deco
+/// shaft runs on to its setbacks without one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TowerZoning {
+    /// Last wall row of the base.
+    base_top: i32,
+    /// First wall row of the capital, its band row.
+    capital_from: Option<i32>,
+    /// Stone of the base and the capital.
+    stone: Block,
+    /// Rusticated courses on every other row of the base, if any.
+    groove: Option<Block>,
+}
+
+impl TowerZoning {
+    /// Zones of a pre-war tower shaft of six storeys or more standing on
+    /// the ground. The base and capital grow with the tower.
+    fn plan(config: &BuildingConfig) -> Option<Self> {
+        if !config.is_ground_level
+            || config.condition != BuildingCondition::Normal
+            || !config.punched_windows()
+            || !matches!(
+                config.window_archetype,
+                WindowArchetype::PairedPunched | WindowArchetype::DecoPiers
+            )
+        {
+            return None;
+        }
+        let cycle = config.floor_cycle;
+        let floors = (config.building_height - config.grammar_anchor()) / cycle;
+        if floors < 6 {
+            return None;
+        }
+        let base_floors = match floors {
+            ..=9 => 1,
+            10..=15 => 2,
+            16..=24 => 3,
+            _ => 4,
+        };
+        let capital_floors = match floors {
+            ..=11 => 1,
+            12..=24 => 2,
+            _ => 3,
+        };
+        let top = config.start_y_offset + config.building_height;
+        let capital = top - capital_floors * cycle;
+        // A brick or coloured shaft stands on its light trim stone. A shaft
+        // of light stone keeps it, its base rusticated in courses of the trim.
+        let (stone, groove) = if is_light_stone(config.wall_block) {
+            let groove = (config.trim_block != config.wall_block).then_some(config.trim_block);
+            (config.wall_block, groove)
+        } else {
+            (config.trim_block, None)
+        };
+        let capital_from = (config.window_archetype == WindowArchetype::PairedPunched)
+            .then(|| capital - config.floor_row(capital));
+        Some(Self {
+            base_top: config.ground_floor_top() + (base_floors - 1) * cycle,
+            capital_from,
+            stone,
+            groove,
+        })
+    }
+
+    /// Stone of a wall block at row `h`, or None where the shaft's wall stays.
+    #[inline]
+    fn stone_at(&self, h: i32, start_y: i32) -> Option<Block> {
+        if h <= self.base_top {
+            Some(match self.groove {
+                Some(groove) if (h - start_y) % 2 == 0 => groove,
+                _ => self.stone,
+            })
+        } else if self.capital_from.is_some_and(|c| h >= c) {
+            Some(self.stone)
+        } else {
+            None
+        }
+    }
 }
 
 /// Window frame styles distilled from the reference schematics, one per building.
@@ -3364,6 +3522,7 @@ impl BuildingConfig {
                     | WindowArchetype::Wide
                     | WindowArchetype::Piers
                     | WindowArchetype::Strips
+                    | WindowArchetype::DecoPiers
             );
         capped.then(|| if self.nobile_storey(h) { 3 } else { 2 })
     }
@@ -3378,10 +3537,21 @@ impl BuildingConfig {
         glazed
             || (self.window_archetype.recessed_spandrels()
                 && self.punched_windows()
-                && block == self.accent_block
+                && (block == self.accent_block || block == self.spandrel_block)
                 && h > self.ground_floor_top()
                 && h < self.start_y_offset + self.building_height
                 && self.slot_of(col).is_window())
+    }
+
+    /// Whether the lobby is the ground floor of a masonry tower: stone piers
+    /// on the bays of the floors above, rather than a dark glass front.
+    #[inline]
+    fn masonry_lobby(&self) -> bool {
+        self.ground == GroundFloor::Lobby
+            && matches!(
+                self.window_archetype,
+                WindowArchetype::PairedPunched | WindowArchetype::DecoPiers
+            )
     }
 
     /// Whether this column carries the street-level shopfront or lobby.
@@ -3393,6 +3563,10 @@ impl BuildingConfig {
     /// Bays of a straight wall run `len` columns long, upper floors and ground.
     fn run_layouts(&self, len: i32) -> (BayLayout, BayLayout) {
         let upper = BayLayout::plan(len, self.bays);
+        // A masonry tower's piers run down to the pavement as they are.
+        if self.masonry_lobby() {
+            return (upper, upper);
+        }
         // The shopfront ends on the same corner piers as the floors above,
         // so the piers run straight down to the pavement.
         let shop = BayLayout::plan(
@@ -3814,6 +3988,12 @@ enum WindowArchetype {
     Piers,
     /// Tower shaft of 1-wide glass strips between 1-wide piers, spandrels set back.
     Strips,
+    /// Masonry tower shaft of the early skyscraper: pairs of 1-wide windows
+    /// split by a stone mullion, a wide pier between pairs, in a flush wall.
+    PairedPunched,
+    /// Art-deco tower shaft: paired windows between continuous 1-wide piers,
+    /// over a two-row dark spandrel panel set back with the glass.
+    DecoPiers,
 }
 
 impl WindowArchetype {
@@ -3825,8 +4005,9 @@ impl WindowArchetype {
             Self::Spaced => (1, 2, 2),
             Self::Wide => (3, 2, 2),
             Self::Ribbon => (4, 1, 1),
-            Self::Piers => (2, 1, 2),
+            Self::Piers | Self::DecoPiers => (2, 1, 2),
             Self::Strips => (1, 1, 1),
+            Self::PairedPunched => (3, 2, 2),
         };
         BayRhythm {
             window,
@@ -3838,7 +4019,16 @@ impl WindowArchetype {
     /// Whether the rows between storeys are set back with the glass, so the
     /// piers run unbroken up the shaft.
     fn recessed_spandrels(self) -> bool {
-        matches!(self, Self::Piers | Self::Strips)
+        matches!(self, Self::Piers | Self::Strips | Self::DecoPiers)
+    }
+
+    /// Whether the column of `slot` is the stone mullion between a pair of
+    /// windows.
+    fn mullion_at(self, slot: BaySlot) -> bool {
+        match (self, slot) {
+            (Self::PairedPunched, BaySlot::Window { k, width, .. }) => k > 0 && k < width - 1,
+            _ => false,
+        }
     }
 }
 
@@ -3949,6 +4139,8 @@ fn archetype_allows_window(archetype: WindowArchetype, floor_row: i32, floor_cyc
     match archetype {
         // A ribbon keeps a two-row spandrel where the storey is tall enough.
         WindowArchetype::Ribbon if floor_cycle >= 4 => floor_row >= 2,
+        // So does an art-deco shaft, under its windows rather than over them.
+        WindowArchetype::DecoPiers if floor_cycle >= 4 => (1..floor_cycle - 1).contains(&floor_row),
         // Single sashes stay two rows tall, portrait rather than slit.
         WindowArchetype::Spaced | WindowArchetype::Sash => (1..=2).contains(&floor_row),
         _ => floor_row >= 1,
@@ -3981,17 +4173,92 @@ fn is_masonry_wall(block: Block) -> bool {
     )
 }
 
+/// What the tags and setting of a building say about when it went up, beyond
+/// its era.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PeriodCues {
+    /// Year from start_date and its kin, the building's own or its outline's.
+    start_year: Option<i32>,
+    /// Mapped as art deco.
+    art_deco: bool,
+    /// Mapped as homes or a hotel.
+    dwelling: bool,
+    /// Attached, low and on a small lot: the undated row fabric of an old
+    /// city centre, which is masonry far more often than not.
+    old_row_fabric: bool,
+}
+
+impl PeriodCues {
+    fn of(element: &ProcessedWay, start_year: Option<i32>, old_row_fabric: bool) -> Self {
+        let tags = &element.tags;
+        Self {
+            start_year,
+            art_deco: crate::osm_parser::is_art_deco(tags),
+            dwelling: matches!(
+                BuildingCategory::building_type(element),
+                "apartments" | "residential" | "dormitory" | "hotel" | "house"
+            ),
+            old_row_fabric,
+        }
+    }
+}
+
+/// Whether a tall building is a masonry tower of the pre-war kind: dated or
+/// styled before the war, or, in the old downtowns of North America and
+/// Europe, walled in brick or stone with no later date.
+fn is_prewar_masonry_tower(
+    category: BuildingCategory,
+    era: ArchEra,
+    region: BuildingRegion,
+    wall_block: Block,
+) -> bool {
+    match era {
+        ArchEra::TraditionalPreWar | ArchEra::HistoricOrnate => matches!(
+            category,
+            BuildingCategory::TallBuilding | BuildingCategory::MasonrySkyscraper
+        ),
+        ArchEra::Unknown => {
+            category == BuildingCategory::MasonrySkyscraper
+                || (category == BuildingCategory::TallBuilding
+                    && region != BuildingRegion::Other
+                    && is_masonry_wall(wall_block))
+        }
+        ArchEra::PostWarPanel | ArchEra::Contemporary => false,
+    }
+}
+
 /// Weighted per-category archetype choice, seeded on the shared group seed.
 fn pick_window_archetype(
     category: BuildingCategory,
     era: ArchEra,
     region: BuildingRegion,
     wall_block: Block,
+    cues: PeriodCues,
     group_seed: u64,
 ) -> WindowArchetype {
     use WindowArchetype::*;
     let europe = region == BuildingRegion::Europe;
     let america = region == BuildingRegion::NorthAmerica;
+    // A pre-war tower is a masonry wall with windows in it: paired windows
+    // in a flush wall until the First World War, continuous piers over dark
+    // spandrels in the art-deco years after it.
+    if is_prewar_masonry_tower(category, era, region, wall_block) {
+        let interwar = cues.art_deco || cues.start_year.is_some_and(|y| (1919..1945).contains(&y));
+        return if interwar {
+            DecoPiers
+        } else if cues.start_year.is_some()
+            || era == ArchEra::HistoricOrnate
+            || element_rng(group_seed ^ 0x57A2_C0DE_A5C1_0009).random_bool(0.75)
+        {
+            PairedPunched
+        } else {
+            DecoPiers
+        };
+    }
+    // Office towers of the sixties to the early nineties band their windows
+    // in the cladding, the postmodern ones as much as the plain.
+    let banded_office_years =
+        !cues.dwelling && cues.start_year.is_some_and(|y| (1960..=1995).contains(&y));
     // (archetype, weight), summing to 100 per row
     let table: &[(WindowArchetype, u32)] = match category {
         BuildingCategory::House => &[(Portrait, 45), (Spaced, 30), (Sash, 10), (Wide, 15)],
@@ -4036,16 +4303,20 @@ fn pick_window_archetype(
             &[(Wide, 40), (Ribbon, 50), (Portrait, 10)]
         }
         BuildingCategory::Historic => &[(Portrait, 50), (Spaced, 30), (Hooded, 20)],
-        // Masonry towers stack paired windows between continuous piers;
-        // anything else reads as a postwar or modern slab.
-        BuildingCategory::TallBuilding
-            if is_masonry_wall(wall_block)
-                || matches!(era, ArchEra::TraditionalPreWar | ArchEra::HistoricOrnate) =>
-        {
+        // Postwar towers band their windows or set them in a wide frame;
+        // anything undated or later may also run piers up the shaft.
+        BuildingCategory::TallBuilding if era == ArchEra::PostWarPanel => {
+            &[(Ribbon, 60), (Wide, 25), (Strips, 15)]
+        }
+        // A later brick or stone tower runs piers up its shaft.
+        BuildingCategory::TallBuilding if is_masonry_wall(wall_block) => {
             &[(Piers, 65), (Strips, 35)]
         }
         BuildingCategory::TallBuilding => &[(Ribbon, 50), (Piers, 25), (Strips, 25)],
         BuildingCategory::MasonrySkyscraper => return Piers,
+        BuildingCategory::ContemporarySkyscraper if banded_office_years => {
+            &[(Ribbon, 70), (Wide, 30)]
+        }
         BuildingCategory::ContemporarySkyscraper => return Wide,
         BuildingCategory::Religious | BuildingCategory::Farm => return Spaced,
         _ => return Portrait,
@@ -4061,15 +4332,28 @@ fn pick_window_archetype(
         }
         roll -= weight;
     }
-    if category == BuildingCategory::TallBuilding {
+    if matches!(
+        category,
+        BuildingCategory::TallBuilding | BuildingCategory::ContemporarySkyscraper
+    ) {
         return picked;
     }
     // Era adjustment on top of the category weights: masonry eras punch
-    // windows, panel and glass eras band them.
+    // windows, panel and glass eras band them. Undated brick and stone, and
+    // the undated row fabric of an old centre, are masonry too.
     let mut era_rng = element_rng(group_seed ^ 0x57A2_C0DE_A5C1_0008);
+    let undated_masonry =
+        era == ArchEra::Unknown && (cues.old_row_fabric || is_masonry_wall(wall_block));
     match (era, picked) {
         (ArchEra::HistoricOrnate, Portrait) if era_rng.random_bool(0.6) => Hooded,
         (ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar, Ribbon | Wide) => Portrait,
+        (ArchEra::Unknown, Ribbon | Wide) if undated_masonry => {
+            if europe {
+                Spaced
+            } else {
+                Portrait
+            }
+        }
         (ArchEra::PostWarPanel | ArchEra::Contemporary, Sash | Spaced | Hooded) => {
             if era_rng.random_bool(0.5) {
                 Ribbon
@@ -4079,6 +4363,91 @@ fn pick_window_archetype(
         }
         _ => picked,
     }
+}
+
+/// Glass of a masonry tower: grey, or black on a light wall, never the pale
+/// tints that wash a stone shaft out.
+fn masonry_window_glass(wall: Block, seed: u64) -> Block {
+    if is_dark_wall(wall) || element_rng(seed ^ 0x6A55_0F7E_0000_0001).random_bool(0.7) {
+        GRAY_STAINED_GLASS
+    } else {
+        BLACK_STAINED_GLASS
+    }
+}
+
+/// Dark panel between the storeys of an art-deco shaft, set back between
+/// its piers: grey or brown terracotta and slate under light stone, near
+/// black on brick.
+fn deco_spandrel_for_wall(wall: Block, seed: u64) -> Block {
+    let options: &[Block] =
+        if is_dark_wall(wall) || (is_masonry_wall(wall) && !is_light_stone(wall)) {
+            &[POLISHED_BLACKSTONE, BLACK_TERRACOTTA, POLISHED_DEEPSLATE]
+        } else if is_warm_stone(wall) {
+            &[BROWN_TERRACOTTA, GRAY_TERRACOTTA]
+        } else {
+            &[GRAY_TERRACOTTA, POLISHED_DEEPSLATE]
+        };
+    options[element_rng(seed ^ 0x6A55_0F7E_0000_0002).random_range(0..options.len())]
+}
+
+/// Walls dark enough that black glass in them reads as a hole.
+fn is_dark_wall(wall: Block) -> bool {
+    matches!(
+        wall,
+        BRICK
+            | NETHER_BRICK
+            | RED_NETHER_BRICKS
+            | MUD_BRICKS
+            | BROWN_TERRACOTTA
+            | BLACK_TERRACOTTA
+            | GRAY_TERRACOTTA
+            | GRAY_CONCRETE
+            | BLACK_CONCRETE
+            | BROWN_CONCRETE
+            | BLACKSTONE
+            | POLISHED_BLACKSTONE
+            | DEEPSLATE_BRICKS
+            | POLISHED_DEEPSLATE
+            | GRANITE
+            | POLISHED_GRANITE
+            | DARK_OAK_PLANKS
+    )
+}
+
+/// Pale limestone, sandstone and render walls.
+fn is_light_stone(wall: Block) -> bool {
+    matches!(
+        wall,
+        SANDSTONE
+            | SMOOTH_SANDSTONE
+            | END_STONE_BRICKS
+            | QUARTZ_BRICKS
+            | QUARTZ_BLOCK
+            | SMOOTH_QUARTZ
+            | POLISHED_DIORITE
+            | DIORITE
+            | CALCITE
+            | MUSHROOM_STEM
+            | SMOOTH_STONE
+            | STONE_BRICKS
+            | WHITE_CONCRETE
+            | LIGHT_GRAY_CONCRETE
+            | LIGHT_GRAY_CONCRETE_POWDER
+    )
+}
+
+/// Buff and warm stone, which takes a bronze panel rather than a slate one.
+fn is_warm_stone(wall: Block) -> bool {
+    matches!(
+        wall,
+        SANDSTONE
+            | SMOOTH_SANDSTONE
+            | END_STONE_BRICKS
+            | MUSHROOM_STEM
+            | BIRCH_PLANKS
+            | WHITE_TERRACOTTA
+            | YELLOW_TERRACOTTA
+    )
 }
 
 /// Darkens the glass against a dark wall or dark accent bands: grey glass, or
@@ -7942,6 +8311,14 @@ fn corner_pier(config: &BuildingConfig) -> Block {
 /// between dark piers, under a sign band in the same frame. The end piers carry
 /// the wall down to the ground.
 fn shopfront_block(h: i32, config: &BuildingConfig, col: ColumnFacade) -> Block {
+    if config.masonry_lobby() {
+        // Tall openings between the stone piers of the shaft, under a
+        // stone band.
+        return match config.shop_slot_of(col) {
+            BaySlot::Window { .. } if h < config.ground_floor_top() => config.window_block,
+            _ => config.wall_block,
+        };
+    }
     match config.shop_slot_of(col) {
         BaySlot::End | BaySlot::Lattice => match config.base_course_block {
             Some(base) if h <= config.start_y_offset + config.base_course_rows() => base,
@@ -7958,16 +8335,17 @@ fn shopfront_block(h: i32, config: &BuildingConfig, col: ColumnFacade) -> Block 
 fn band_block(config: &BuildingConfig, slot: BaySlot) -> Block {
     let window = slot.is_window();
     if config.window_archetype == WindowArchetype::Ribbon {
-        // The spandrel runs unbroken past the mullions.
-        return if slot == BaySlot::End {
-            config.wall_block
-        } else {
-            config.accent_block
-        };
+        // The spandrel is the cladding itself, running unbroken past the
+        // mullions; the sill ledge on it carries the trim.
+        return config.wall_block;
     }
-    if !window {
+    // A punched masonry wall runs on between the storeys; the sill ledge
+    // under each window carries the trim.
+    if !window || config.window_archetype == WindowArchetype::PairedPunched {
         config.wall_block
-    } else if config.window_archetype.recessed_spandrels() || config.use_vertical_accent {
+    } else if config.window_archetype.recessed_spandrels() {
+        config.spandrel_block
+    } else if config.use_vertical_accent {
         config.accent_block
     } else {
         config.trim_block
@@ -7979,6 +8357,17 @@ fn determine_wall_block_at_position_pristine(
     config: &BuildingConfig,
     col: ColumnFacade,
 ) -> Block {
+    let block = unzoned_wall_block(h, config, col);
+    // A masonry tower's base and capital are stone where the shaft is wall.
+    match config.zoning {
+        Some(zoning) if block == config.wall_block && !col.party => {
+            zoning.stone_at(h, config.start_y_offset).unwrap_or(block)
+        }
+        _ => block,
+    }
+}
+
+fn unzoned_wall_block(h: i32, config: &BuildingConfig, col: ColumnFacade) -> Block {
     // Shops and lobbies reach the pavement, ahead of the plinth.
     if h <= config.ground_floor_top() && config.shopfront_column(col) {
         return shopfront_block(h, config, col);
@@ -8110,10 +8499,19 @@ fn determine_wall_block_at_position_pristine(
             archetype_allows_window(config.window_archetype, floor_row, config.floor_cycle)
                 && config.window_row_cap(h).is_none_or(|cap| floor_row <= cap)
         };
-        if slot.is_window() && rows {
+        // The mullion of a window pair stays wall up the shaft; the base
+        // opens it into one wider window.
+        let mullion = config.window_archetype.mullion_at(slot)
+            && config.zoning.is_none_or(|z| h > z.base_top);
+        if slot.is_window() && rows && !mullion {
             config.window_block
-        } else if config.window_archetype == WindowArchetype::Ribbon && !rows {
-            // The spandrel band under a ribbon is two rows deep.
+        } else if matches!(
+            config.window_archetype,
+            WindowArchetype::Ribbon | WindowArchetype::DecoPiers
+        ) && !rows
+        {
+            // The spandrel band under a ribbon or an art-deco window is two
+            // rows deep.
             band_block(config, slot)
         } else {
             config.wall_block
@@ -9043,7 +9441,11 @@ fn generate_window_frames(
         return;
     }
     let ribbon = config.window_archetype == WindowArchetype::Ribbon;
-    if config.is_tall_building && !ribbon {
+    // A masonry tower keeps a stone sill under each of its windows.
+    if config.is_tall_building
+        && !ribbon
+        && config.window_archetype != WindowArchetype::PairedPunched
+    {
         return;
     }
     let top_h = config.start_y_offset + config.building_height;
@@ -9550,20 +9952,33 @@ fn generate_facade_cornices(
         return;
     }
     let top_h = config.start_y_offset + config.building_height;
-    let course_h = config.ground_floor_top() + 1;
+    // A zoned tower carries its belt course over the stone base, not the
+    // ground floor.
+    let course_h = config
+        .zoning
+        .map_or(config.ground_floor_top(), |z| z.base_top)
+        + 1;
     let stair = trim_stair(config.trim_block);
     let slab = trim_slab(config.trim_block);
     let ledge = make_top_slab(slab);
     let cap = rooftops::bottom_slab(slab);
+    // A tower of ten storeys and more is crowned by a cornice deep enough to
+    // read from the street: a frieze, a corbel and a two-block overhang.
+    let deep_cornice = config.zoning.is_some_and(|z| z.capital_from.is_some())
+        && !has_sloped_roof
+        && config.building_height >= 10 * config.floor_cycle;
 
     for &wc in facade_columns(&element.nodes, config).iter() {
         if front_blocked(&wc, config, building_passages, facade, part_probe) {
             continue;
         }
         let (lx, lz) = (wc.x + wc.normal.0, wc.z + wc.normal.1);
+        let (fx, fz) = (lx + wc.normal.0, lz + wc.normal.1);
         let facing = facing_for_normal(wc.normal.0, wc.normal.1);
+        let col = wc.facade(facade);
         // Dentils need solid wall behind them, not a window head.
-        let dentil = ornate && wc.pos % 2 == 0 && !glazed_at(top_h - 1, config, wc.facade(facade));
+        let dentil =
+            (ornate || deep_cornice) && wc.pos % 2 == 0 && !glazed_at(top_h - 1, config, col);
         let mut place = |block: BlockWithProperties, h: i32| {
             editor.set_block_with_properties_absolute(
                 block,
@@ -9574,7 +9989,13 @@ fn generate_facade_cornices(
                 None,
             );
         };
-        if masonry {
+        if deep_cornice {
+            place(BlockWithProperties::simple(config.trim_block), top_h);
+            place(cap.clone(), top_h + 1);
+            if dentil {
+                place(BlockWithProperties::simple(config.trim_block), top_h - 1);
+            }
+        } else if masonry {
             // A pitched roof's eave overhang sits on the row above.
             place(upside_down_stair(stair, facing), top_h);
             if !has_sloped_roof {
@@ -9584,8 +10005,38 @@ fn generate_facade_cornices(
                 place(ledge.clone(), top_h - 1);
             }
         }
-        if string_course && course_h < top_h - 1 {
+        if let Some(zoning) = config.zoning {
+            // The belt over the base stands out a block further on a corbel,
+            // and a plain ledge marks where the capital begins.
+            if course_h < zoning.capital_from.unwrap_or(top_h - 1) {
+                place(upside_down_stair(stair, facing), course_h);
+            }
+            if let Some(capital) = zoning.capital_from.filter(|&c| c < top_h - 1) {
+                place(ledge.clone(), capital);
+            }
+        } else if string_course && course_h < top_h - 1 {
             place(ledge.clone(), course_h);
+        }
+        // The outer row of the belt and of the crowning cornice.
+        let outer = |editor: &mut WorldEditor, block: BlockWithProperties, h: i32| {
+            editor.set_block_with_properties_absolute(
+                block,
+                fx,
+                h + config.abs_terrain_offset,
+                fz,
+                Some(&[AIR]),
+                None,
+            );
+        };
+        if config
+            .zoning
+            .is_some_and(|z| course_h < z.capital_from.unwrap_or(top_h - 1))
+        {
+            outer(editor, ledge.clone(), course_h);
+        }
+        if deep_cornice {
+            outer(editor, upside_down_stair(stair, facing), top_h);
+            outer(editor, cap.clone(), top_h + 1);
         }
     }
 }
@@ -10220,6 +10671,17 @@ pub fn generate_buildings(
     ctx: &BuildingContext<'_>,
     group_seed: u64,
 ) -> Option<FacadeAnchor> {
+    // A part's shared seed carries the year of the building it belongs to.
+    // The year dates the part; the rolls keep the seed without it. Any other
+    // building's seed is its own id, whatever bits that has set.
+    let (outline_year, group_seed) = if group_seed != element.id {
+        (
+            crate::osm_parser::year_from_seed(group_seed),
+            crate::osm_parser::seed_without_year(group_seed),
+        )
+    } else {
+        (None, group_seed)
+    };
     let flood_fill_cache = ctx.flood_fill_cache;
     let building_passages = ctx.building_passages;
     // Early return for underground buildings
@@ -10274,8 +10736,10 @@ pub fn generate_buildings(
     let floor_cycle = floor_cycle_for(building_type, &element.tags);
 
     // Architectural era, consumed by palettes, frames, depth styles and
-    // weathering. Untagged parts inherit the hint packed into the group seed.
-    let mut era = crate::osm_parser::building_arch_era(&element.tags);
+    // weathering. A part without a date of its own takes its building's;
+    // untagged parts inherit the hint packed into the group seed.
+    let start_year = crate::osm_parser::building_start_year(&element.tags).or(outline_year);
+    let mut era = crate::osm_parser::building_arch_era_dated(&element.tags, start_year);
     if era == ArchEra::Unknown && element.tags.contains_key("building:part") {
         era = crate::osm_parser::arch_era_from_hint(crate::osm_parser::style_hint_from_seed(
             group_seed,
@@ -10507,12 +10971,17 @@ pub fn generate_buildings(
         };
 
     // Determine building category and get appropriate style preset
+    let region = {
+        let (lat, lon) = editor.geo_anchor();
+        BuildingRegion::at(lat, lon)
+    };
     let category = BuildingCategory::from_element(
         element,
         is_tall_building,
         building_height,
         group_seed,
         scale_factor,
+        region,
     );
     let preset = BuildingStylePreset::for_category(category);
 
@@ -10522,7 +10991,7 @@ pub fn generate_buildings(
     let mut group_other_cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     if let Some(members) = ctx
         .group_members
-        .get(&crate::osm_parser::seed_without_hint(group_seed))
+        .get(&crate::osm_parser::group_key(group_seed))
     {
         if members.binary_search(&element.id).is_ok() {
             for id in members {
@@ -10593,7 +11062,7 @@ pub fn generate_buildings(
         }
         RoofContext {
             enclosed: ring > 0 && walled * 10 >= ring * 9,
-            region: BuildingRegion::at(lat, lon),
+            region,
             attached: party >= 4 && party * 100 >= total * 15,
             scale: scale_factor,
             materials: MaterialRegion::at(lat, lon),
@@ -10700,8 +11169,29 @@ pub fn generate_buildings(
 
     // Window layout is picked before the config literal so the frame gate
     // below can see it (frames dress punched windows only).
-    let window_archetype =
-        pick_window_archetype(category, era, roof_ctx.region, wall_block, group_seed);
+    let old_row_fabric = !is_tall_building
+        && roof_ctx.attached
+        && cached_footprint_size as f64 <= 800.0 * scale_factor * scale_factor
+        && effective_building_height <= 8 * floor_cycle + GROUND_FLOOR_BONUS;
+    let window_archetype = pick_window_archetype(
+        category,
+        era,
+        roof_ctx.region,
+        wall_block,
+        PeriodCues::of(element, start_year, old_row_fabric),
+        group_seed,
+    );
+    // A masonry tower's windows read as dark openings in the stone, and its
+    // piers run unbroken past the storeys.
+    let masonry_tower = matches!(
+        window_archetype,
+        WindowArchetype::PairedPunched | WindowArchetype::DecoPiers
+    );
+    let window_block = if masonry_tower {
+        masonry_window_glass(wall_block, group_seed)
+    } else {
+        style.window_block
+    };
 
     // Vertical composition: top-floor and first-floor treatments, seeded on
     // the group seed so building:part groups agree.
@@ -10796,12 +11286,12 @@ pub fn generate_buildings(
         abs_terrain_offset,
         wall_block,
         floor_block: style.floor_block,
-        window_block: style.window_block,
+        window_block,
         accent_block: style.accent_block,
         roof_block: style.roof_block,
         use_horizontal_windows: style.use_horizontal_windows,
         use_accent_roof_line: style.use_accent_roof_line,
-        use_accent_lines: style.use_accent_lines,
+        use_accent_lines: style.use_accent_lines && !masonry_tower,
         use_vertical_accent: style.use_vertical_accent,
         is_abandoned_building,
         has_windows,
@@ -10838,6 +11328,13 @@ pub fn generate_buildings(
             bays.pier += i32::from(surrounds);
             bays
         },
+        spandrel_block: if window_archetype == WindowArchetype::DecoPiers {
+            deco_spandrel_for_wall(wall_block, group_seed)
+        } else {
+            style.accent_block
+        },
+        // Planned below, once the podium massing has settled the wall height.
+        zoning: None,
         balcony_band: pick_balcony_band(
             category,
             era,
@@ -10948,6 +11445,10 @@ pub fn generate_buildings(
             ..config.clone()
         },
         None => config,
+    };
+    let config = BuildingConfig {
+        zoning: TowerZoning::plan(&config),
+        ..config
     };
     // The preset facades are recorded before the wall is built, not after it:
     // the columns they return are the columns built as a plain shell, so the
@@ -11377,6 +11878,11 @@ pub fn generate_buildings(
             let tower_config = BuildingConfig {
                 building_height: plan.full_height,
                 ..config.clone()
+            };
+            // The shaft's capital sits under its own top, not the podium's.
+            let tower_config = BuildingConfig {
+                zoning: TowerZoning::plan(&tower_config),
+                ..tower_config
             };
             generate_inset_tiers(
                 editor,
@@ -16446,6 +16952,7 @@ mod style_tests {
                     ArchEra::Unknown,
                     BuildingRegion::Europe,
                     BRICK,
+                    PeriodCues::default(),
                     seed,
                 )
             };
@@ -16458,6 +16965,7 @@ mod style_tests {
                 ArchEra::Unknown,
                 BuildingRegion::Other,
                 STONE_BRICKS,
+                PeriodCues::default(),
                 7
             ),
             WindowArchetype::Spaced
@@ -16468,6 +16976,7 @@ mod style_tests {
                 ArchEra::Unknown,
                 BuildingRegion::Other,
                 GLASS,
+                PeriodCues::default(),
                 7
             ),
             WindowArchetype::Portrait
@@ -16485,6 +16994,7 @@ mod style_tests {
                     ArchEra::Unknown,
                     BuildingRegion::NorthAmerica,
                     BRICK,
+                    PeriodCues::default(),
                     seed
                 )
             ));
@@ -16496,7 +17006,7 @@ mod style_tests {
     fn era_and_region_shift_archetypes() {
         use WindowArchetype::*;
         let pick = |category, era, region, wall, seed| {
-            pick_window_archetype(category, era, region, wall, seed)
+            pick_window_archetype(category, era, region, wall, PeriodCues::default(), seed)
         };
         let (mut hooded, mut sashes, mut spaced) = (0, 0, 0);
         for seed in 0..60u64 {
@@ -16532,7 +17042,8 @@ mod style_tests {
                     seed,
                 ) == Spaced,
             );
-            // A brick tower stacks windows between piers, never bands them.
+            // A brick tower punches its windows or runs piers up the
+            // shaft, never bands them.
             let tower = pick(
                 BuildingCategory::TallBuilding,
                 ArchEra::Unknown,
@@ -16541,7 +17052,7 @@ mod style_tests {
                 seed,
             );
             assert!(
-                matches!(tower, Piers | Strips),
+                matches!(tower, PairedPunched | DecoPiers),
                 "brick tower picked {tower:?}"
             );
             // Panel-era blocks band theirs.
@@ -16568,6 +17079,312 @@ mod style_tests {
         assert!(
             spaced >= 20,
             "stucco should favour spaced sashes, got {spaced}/60"
+        );
+    }
+
+    // A pre-war tower punches paired windows up to the First World War and
+    // runs art-deco piers after it; a postwar one bands its windows or sets
+    // them in a frame, and never runs masonry piers up the shaft.
+    #[test]
+    fn tower_windows_follow_the_period() {
+        use BuildingCategory::{ContemporarySkyscraper, MasonrySkyscraper, TallBuilding};
+        use WindowArchetype::*;
+        let dated = |year| PeriodCues {
+            start_year: Some(year),
+            ..PeriodCues::default()
+        };
+        let deco = PeriodCues {
+            art_deco: true,
+            ..PeriodCues::default()
+        };
+        let mut ribbons = 0;
+        for seed in 0..60u64 {
+            let pick = |category, era, cues| {
+                pick_window_archetype(
+                    category,
+                    era,
+                    BuildingRegion::NorthAmerica,
+                    SMOOTH_STONE,
+                    cues,
+                    seed,
+                )
+            };
+            assert_eq!(
+                pick(MasonrySkyscraper, ArchEra::TraditionalPreWar, dated(1907)),
+                PairedPunched
+            );
+            assert_eq!(
+                pick(TallBuilding, ArchEra::TraditionalPreWar, dated(1931)),
+                DecoPiers
+            );
+            assert_eq!(
+                pick(MasonrySkyscraper, ArchEra::HistoricOrnate, deco),
+                DecoPiers
+            );
+            let postwar = pick(TallBuilding, ArchEra::PostWarPanel, dated(1962));
+            assert!(
+                matches!(postwar, Ribbon | Wide | Strips),
+                "postwar tower picked {postwar:?}"
+            );
+            // Office towers of the banded decades, postmodern or plain.
+            let banded = pick(ContemporarySkyscraper, ArchEra::Contemporary, dated(1983));
+            assert!(matches!(banded, Ribbon | Wide), "{banded:?}");
+            ribbons += i32::from(banded == Ribbon);
+            // A later tower, or a block of flats, keeps its wide windows.
+            assert_eq!(
+                pick(ContemporarySkyscraper, ArchEra::Contemporary, dated(2005)),
+                Wide
+            );
+            let flats = PeriodCues {
+                dwelling: true,
+                ..dated(1983)
+            };
+            assert_eq!(
+                pick(ContemporarySkyscraper, ArchEra::Contemporary, flats),
+                Wide
+            );
+        }
+        assert!(ribbons >= 30, "banded offices got {ribbons}/60 ribbons");
+    }
+
+    // Undated brick, and the undated row fabric of an old centre, keep
+    // punched windows instead of glass bands.
+    #[test]
+    fn undated_masonry_fabric_is_never_banded() {
+        let row = PeriodCues {
+            old_row_fabric: true,
+            ..PeriodCues::default()
+        };
+        for seed in 0..60u64 {
+            for (region, wall, cues) in [
+                (BuildingRegion::NorthAmerica, BRICK, PeriodCues::default()),
+                (BuildingRegion::NorthAmerica, WHITE_CONCRETE, row),
+                (BuildingRegion::Europe, WHITE_CONCRETE, row),
+            ] {
+                let picked = pick_window_archetype(
+                    BuildingCategory::Default,
+                    ArchEra::Unknown,
+                    region,
+                    wall,
+                    cues,
+                    seed,
+                );
+                assert!(
+                    !matches!(picked, WindowArchetype::Ribbon | WindowArchetype::Wide),
+                    "{region:?} {wall:?} picked {picked:?}"
+                );
+            }
+        }
+    }
+
+    /// A twenty-storey pre-war tower shaft of paired windows over a 27
+    /// column wall.
+    fn paired_window_tower(floors: i32) -> BuildingConfig {
+        let mut c = test_config(GROUND_FLOOR_BONUS + floors * 4, false, false);
+        c.category = BuildingCategory::MasonrySkyscraper;
+        c.is_tall_building = true;
+        c.era = ArchEra::TraditionalPreWar;
+        c.window_archetype = WindowArchetype::PairedPunched;
+        c.bays = WindowArchetype::PairedPunched.rhythm();
+        c.window_block = GRAY_STAINED_GLASS;
+        c
+    }
+
+    // A paired-window shaft is mostly wall: two windows in five columns, the
+    // mullion between them solid, and a flush band between the storeys.
+    #[test]
+    fn a_paired_window_shaft_is_mostly_wall() {
+        use crate::element_processing::building_facade::ColumnFacade;
+        let c = paired_window_tower(20);
+        let layout = BayLayout::plan(27, c.bays);
+        let (mut glass, mut total) = (0, 0);
+        for h in (c.ground_floor_top() + 1)..(c.start_y_offset + c.building_height) {
+            for i in 0..27 {
+                let slot = layout.slot(i);
+                let col = ColumnFacade {
+                    wall_u: i,
+                    slot,
+                    ..Default::default()
+                };
+                let glazed = glazed_at(h, &c, col);
+                assert!(!(glazed && WindowArchetype::PairedPunched.mullion_at(slot)));
+                if c.floor_row(h) == 0 {
+                    assert_eq!(band_block(&c, slot), c.wall_block);
+                }
+                total += 1;
+                glass += i32::from(glazed);
+            }
+        }
+        let share = f64::from(glass) / f64::from(total);
+        assert!((0.2..0.35).contains(&share), "glass share {share}");
+    }
+
+    // A masonry tower stands on a stone base of more storeys the taller it
+    // is, under a stone capital; the brick shaft between keeps its wall, and
+    // a party wall keeps it all the way up.
+    #[test]
+    fn a_masonry_tower_is_zoned_by_its_height() {
+        use crate::element_processing::building_facade::ColumnFacade;
+        assert!(TowerZoning::plan(&paired_window_tower(5)).is_none());
+        let c = paired_window_tower(12);
+        let zoning = TowerZoning::plan(&c).expect("a twelve-storey tower is zoned");
+        let top = c.start_y_offset + c.building_height;
+        assert_eq!(zoning.base_top, c.ground_floor_top() + 4);
+        assert_eq!(zoning.capital_from, Some(top - 2 * 4));
+        // Brick stands on its light trim stone.
+        assert_eq!(zoning.stone, c.trim_block);
+        let tall = TowerZoning::plan(&paired_window_tower(30)).unwrap();
+        assert_eq!(tall.base_top, c.ground_floor_top() + 3 * 4);
+        // An art-deco shaft runs on to its setbacks without a capital.
+        let mut deco = paired_window_tower(30);
+        deco.window_archetype = WindowArchetype::DecoPiers;
+        deco.bays = WindowArchetype::DecoPiers.rhythm();
+        assert_eq!(TowerZoning::plan(&deco).unwrap().capital_from, None);
+
+        let zoned = BuildingConfig {
+            zoning: Some(zoning),
+            ..c.clone()
+        };
+        let pier = ColumnFacade {
+            slot: BaySlot::Pier,
+            ..Default::default()
+        };
+        let at = |h: i32, col| determine_wall_block_at_position_pristine(h, &zoned, col);
+        assert_eq!(at(zoning.base_top - 1, pier), c.trim_block);
+        assert_eq!(at(zoning.base_top + 6, pier), BRICK);
+        assert_eq!(at(top - 1, pier), c.trim_block);
+        let party = ColumnFacade {
+            party: true,
+            ..pier
+        };
+        assert_eq!(at(zoning.base_top - 1, party), BRICK);
+    }
+
+    // The lobby of a masonry tower is its stone piers carried down to the
+    // pavement on the bays above, not a dark glass front.
+    #[test]
+    fn a_masonry_tower_lobby_keeps_the_piers_of_its_shaft() {
+        use crate::element_processing::building_facade::ColumnFacade;
+        let mut c = paired_window_tower(20);
+        c.ground = GroundFloor::Lobby;
+        let (upper, shop) = c.run_layouts(31);
+        assert_eq!(upper, shop);
+        for i in 0..31 {
+            let col = ColumnFacade {
+                slot: upper.slot(i),
+                shop: shop.slot(i),
+                ..Default::default()
+            };
+            for h in (c.start_y_offset + 1)..=c.ground_floor_top() {
+                let block = shopfront_block(h, &c, col);
+                assert!(!SHOP_FRAME_OPTIONS.contains(&block), "{block:?} at {i}");
+            }
+        }
+        // A glass tower's lobby keeps its own wider rhythm.
+        c.window_archetype = WindowArchetype::Piers;
+        c.bays = WindowArchetype::Piers.rhythm();
+        let (upper, shop) = c.run_layouts(31);
+        assert_ne!(upper, shop);
+    }
+
+    // A ribbon's spandrel is the cladding itself.
+    #[test]
+    fn ribbon_spandrels_are_the_cladding() {
+        let mut c = test_config(30, false, false);
+        c.window_archetype = WindowArchetype::Ribbon;
+        c.bays = WindowArchetype::Ribbon.rhythm();
+        let window = BaySlot::Window {
+            k: 1,
+            width: 4,
+            bay: 0,
+        };
+        assert_eq!(band_block(&c, window), c.wall_block);
+        assert_eq!(band_block(&c, BaySlot::Pier), c.wall_block);
+    }
+
+    // A European block of eight to fourteen storeys keeps the facade of its
+    // type; a slender or higher one is still a tower, and so is any tall
+    // block in North America.
+    #[test]
+    fn european_mid_rise_blocks_keep_their_type() {
+        use crate::element_processing::building_test_support::rect_way;
+        let category = |way: &ProcessedWay, region| {
+            let btype = BuildingCategory::building_type(way);
+            let (h, tall) = calculate_building_height(way, btype, 0, 1.0, None, 4, 800, way.id);
+            assert!(tall);
+            BuildingCategory::from_element(way, tall, h, way.id, 1.0, region)
+        };
+        let office = rect_way(
+            7,
+            0,
+            0,
+            40,
+            20,
+            &[("building", "office"), ("building:levels", "10")],
+        );
+        assert_eq!(
+            category(&office, BuildingRegion::Europe),
+            BuildingCategory::Office
+        );
+        assert_eq!(
+            category(&office, BuildingRegion::NorthAmerica),
+            BuildingCategory::TallBuilding
+        );
+        // A listed stone block of 1932 is still a block, not a stone tower.
+        let listed = rect_way(
+            8,
+            0,
+            0,
+            40,
+            20,
+            &[
+                ("building", "office"),
+                ("building:levels", "8"),
+                ("building:material", "stone"),
+                ("heritage", "4"),
+                ("start_date", "1932"),
+            ],
+        );
+        assert_eq!(
+            category(&listed, BuildingRegion::Europe),
+            BuildingCategory::Office
+        );
+        let slender = rect_way(
+            9,
+            0,
+            0,
+            12,
+            12,
+            &[("building", "office"), ("building:levels", "12")],
+        );
+        assert_eq!(
+            category(&slender, BuildingRegion::Europe),
+            BuildingCategory::TallBuilding
+        );
+        let high = rect_way(
+            10,
+            0,
+            0,
+            60,
+            30,
+            &[("building", "apartments"), ("building:levels", "20")],
+        );
+        assert_eq!(
+            category(&high, BuildingRegion::Europe),
+            BuildingCategory::TallBuilding
+        );
+        // A part of a modelled tower stays with its siblings.
+        let part = rect_way(
+            11,
+            0,
+            0,
+            60,
+            30,
+            &[("building:part", "yes"), ("building:levels", "9")],
+        );
+        assert_eq!(
+            category(&part, BuildingRegion::Europe),
+            BuildingCategory::TallBuilding
         );
     }
 
@@ -16818,6 +17635,8 @@ mod style_tests {
             window_phase: 0,
             window_archetype: WindowArchetype::Portrait,
             bays: WindowArchetype::Portrait.rhythm(),
+            spandrel_block: SMOOTH_STONE,
+            zoning: None,
             balcony_band: BalconyBand::Scattered,
             rustication: false,
             base_course_block: None,
@@ -17509,7 +18328,14 @@ mod style_tests {
 
         let style_for = |way: &ProcessedWay| {
             let (h, tall) = calculate_building_height(way, "yes", 0, 1.0, None, 4, 100, group_seed);
-            let category = BuildingCategory::from_element(way, tall, h, group_seed, 1.0);
+            let category = BuildingCategory::from_element(
+                way,
+                tall,
+                h,
+                group_seed,
+                1.0,
+                BuildingRegion::NorthAmerica,
+            );
             let preset = BuildingStylePreset::for_category(category);
             let era = crate::osm_parser::building_arch_era(&way.tags);
             let detail = compute_detail_tier(way, category, 100, h, false);
@@ -17543,9 +18369,24 @@ mod style_tests {
         assert_eq!(a.wall_depth_style, b.wall_depth_style);
         assert_eq!(a.roof_type, b.roof_type);
         let region = BuildingRegion::Europe;
+        let cues = PeriodCues::default();
         assert_eq!(
-            pick_window_archetype(cat_a, ArchEra::Unknown, region, a.wall_block, group_seed),
-            pick_window_archetype(cat_b, ArchEra::Unknown, region, b.wall_block, group_seed)
+            pick_window_archetype(
+                cat_a,
+                ArchEra::Unknown,
+                region,
+                a.wall_block,
+                cues,
+                group_seed
+            ),
+            pick_window_archetype(
+                cat_b,
+                ArchEra::Unknown,
+                region,
+                b.wall_block,
+                cues,
+                group_seed
+            )
         );
     }
 
@@ -17578,7 +18419,14 @@ mod style_tests {
             let tags: &[(&str, &str)] = &[("building:part", "yes"), ("height", "12")];
             let way = rect_way(seed * 7 + 1, 20, 20, 32, 32, tags);
             let (h, tall) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 144, seed);
-            let category = BuildingCategory::from_element(&way, tall, h, seed, 1.0);
+            let category = BuildingCategory::from_element(
+                &way,
+                tall,
+                h,
+                seed,
+                1.0,
+                BuildingRegion::NorthAmerica,
+            );
             let preset = BuildingStylePreset::for_category(category);
             let era = crate::osm_parser::building_arch_era(&way.tags);
             let detail = compute_detail_tier(&way, category, 144, h, false);
@@ -17623,7 +18471,14 @@ mod style_tests {
             let tags: &[(&str, &str)] = &[("building", btype), ("building:levels", "8")];
             let way = rect_way(seed * 11, 20, 20, 40, 34, tags);
             let (h, tall) = calculate_building_height(&way, btype, 0, 1.0, None, 3, 300, seed);
-            let category = BuildingCategory::from_element(&way, tall, h, seed, 1.0);
+            let category = BuildingCategory::from_element(
+                &way,
+                tall,
+                h,
+                seed,
+                1.0,
+                BuildingRegion::NorthAmerica,
+            );
             let preset = BuildingStylePreset::for_category(category);
             let mut rng = element_rng(seed);
             let style = BuildingStyle::resolve(

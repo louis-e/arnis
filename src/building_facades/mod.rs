@@ -503,7 +503,7 @@ fn group_of(group_seed: u64) -> u64 {
     // Without the hint bits, because two parts of one building can carry
     // different packed style hints and must still find each other. Same key
     // the sibling index in `data_processing` is built on.
-    crate::osm_parser::seed_without_hint(group_seed)
+    crate::osm_parser::group_key(group_seed)
 }
 
 /// Records the runs of `nodes`' wall ring that a preset facade may cover, and

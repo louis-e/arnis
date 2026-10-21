@@ -553,8 +553,38 @@ pub fn seed_without_hint(seed: u64) -> u64 {
     seed & !STYLE_HINT_MASK
 }
 
+/// The key the parts of one building are grouped under: the seed without its
+/// packed style hint and year, which two parts of one building may not share.
+pub fn group_key(seed: u64) -> u64 {
+    seed & !(STYLE_HINT_MASK | YEAR_MASK)
+}
+
 fn seed_with_hint(seed: u64, hint: StyleHint) -> u64 {
     (seed & !STYLE_HINT_MASK) | ((hint as u64) << STYLE_HINT_SHIFT)
+}
+
+// Construction year of the building a part belongs to, packed into the part's
+// shared seed (bits 53-60) as years after 1800, so a start_date mapped only on
+// the outline still dates its parts. 0 is no year.
+const YEAR_SHIFT: u64 = 53;
+const YEAR_MASK: u64 = 0xFF << YEAR_SHIFT;
+const YEAR_BASE: i32 = 1800;
+
+/// Reads the packed construction year of the part's building back out of a shared seed.
+pub fn year_from_seed(seed: u64) -> Option<i32> {
+    let packed = ((seed & YEAR_MASK) >> YEAR_SHIFT) as i32;
+    (packed > 0).then_some(YEAR_BASE + packed)
+}
+
+/// The seed with its year bits cleared, which is the seed the building's own
+/// rolls are made with: dating a building must not reroll its style.
+pub fn seed_without_year(seed: u64) -> u64 {
+    seed & !YEAR_MASK
+}
+
+fn seed_with_year(seed: u64, year: Option<i32>) -> u64 {
+    let packed = year.map_or(0, |y| (y - YEAR_BASE).clamp(1, 255) as u64);
+    (seed & !YEAR_MASK) | (packed << YEAR_SHIFT)
 }
 
 // lowercase, strip whitespace/_/- so art_deco, neo-gothic, "concrete masonry unit" all collapse
@@ -563,6 +593,21 @@ fn norm_tag(v: &str) -> String {
         .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
         .flat_map(|c| c.to_lowercase())
         .collect()
+}
+
+/// Whether the building is mapped as art deco.
+pub fn is_art_deco(tags: &HashMap<String, String>) -> bool {
+    tags.get("building:architecture")
+        .or_else(|| tags.get("architecture"))
+        .is_some_and(|a| norm_tag(a) == "artdeco")
+}
+
+/// Year the building went up, from the first of start_date, construction_date
+/// and year_of_construction that holds one.
+pub fn building_start_year(tags: &HashMap<String, String>) -> Option<i32> {
+    ["start_date", "construction_date", "year_of_construction"]
+        .iter()
+        .find_map(|key| tags.get(*key).and_then(|v| first_year(v)))
 }
 
 // First 4-digit year in a date-ish value, e.g. "1911-1913" -> 1911, "1955-12-31" -> 1955.
@@ -669,14 +714,16 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
         return StyleHint::Glass;
     }
 
-    // Masonry / historic. `no` on these keys is an explicit negation, not a signal.
-    let present_and_not_no =
-        |key: &str| tags.get(key).is_some_and(|v| !v.eq_ignore_ascii_case("no"));
-    if present_and_not_no("historic")
-        || present_and_not_no("heritage")
-        || tags.contains_key("ref:nrhp")
-        || present_and_not_no("listed_status")
-    {
+    // Masonry / historic, unless the listing is for a building of the modern
+    // movement or one built after the war.
+    let arch = tags
+        .get("building:architecture")
+        .or_else(|| tags.get("architecture"))
+        .map(|a| norm_tag(a));
+    let year = building_start_year(tags);
+    let listed_modern = arch.as_deref().is_some_and(|a| MODERN_STYLES.contains(&a))
+        || year.is_some_and(|y| y >= 1945);
+    if is_listed(tags) && !listed_modern {
         return StyleHint::Masonry;
     }
     if material
@@ -690,10 +737,6 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
             return StyleHint::Masonry;
         }
     }
-    let arch = tags
-        .get("building:architecture")
-        .or_else(|| tags.get("architecture"))
-        .map(|a| norm_tag(a));
     if let Some(a) = arch.as_deref() {
         if ORNATE_STYLES.contains(&a) || BRUTALIST_STYLES.contains(&a) {
             return StyleHint::Masonry;
@@ -703,13 +746,8 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
         }
     }
     // Pre-curtain-wall era: load-bearing masonry. start_date is the best-populated source.
-    for key in ["start_date", "construction_date", "year_of_construction"] {
-        if let Some(y) = tags.get(key).and_then(|v| first_year(v)) {
-            if y < 1945 {
-                return StyleHint::Masonry;
-            }
-            break; // known modern year; fall through to the concrete check
-        }
+    if year.is_some_and(|y| y < 1945) {
+        return StyleHint::Masonry;
     }
 
     // Concrete frame reads as a solid facade with windows: the contemporary middle style.
@@ -737,19 +775,39 @@ pub enum ArchEra {
     Contemporary,
 }
 
-/// Classifies a building's era from its tags; `Unknown` when nothing signals.
-pub fn building_arch_era(tags: &HashMap<String, String>) -> ArchEra {
-    // Explicit heritage signals → ornate. `no` is a negation, not a signal.
+/// Whether the building is listed or marked historic. `no` on these keys is
+/// an explicit negation, not a signal.
+fn is_listed(tags: &HashMap<String, String>) -> bool {
     let present_and_not_no =
         |key: &str| tags.get(key).is_some_and(|v| !v.eq_ignore_ascii_case("no"));
-    if present_and_not_no("historic")
+    present_and_not_no("historic")
         || present_and_not_no("heritage")
         || tags.contains_key("ref:nrhp")
         || present_and_not_no("listed_status")
-    {
-        return ArchEra::HistoricOrnate;
-    }
+}
 
+/// Era of a building put up in `year`.
+pub fn era_for_year(year: i32) -> ArchEra {
+    if year < 1945 {
+        ArchEra::TraditionalPreWar
+    } else if year < 1980 {
+        ArchEra::PostWarPanel
+    } else {
+        ArchEra::Contemporary
+    }
+}
+
+/// Classifies a building's era from its tags; `Unknown` when nothing signals.
+#[cfg(test)]
+pub fn building_arch_era(tags: &HashMap<String, String>) -> ArchEra {
+    building_arch_era_dated(tags, building_start_year(tags))
+}
+
+/// Era of a building from its tags, with `year` standing in for the date
+/// tags: a part takes the year of the building it belongs to.
+pub fn building_arch_era_dated(tags: &HashMap<String, String>, year: Option<i32>) -> ArchEra {
+    // A named style says the most. A modern one keeps to its date: interwar
+    // modernism is still a punched masonry wall, postwar modernism a panel.
     let arch = tags
         .get("building:architecture")
         .or_else(|| tags.get("architecture"))
@@ -762,20 +820,20 @@ pub fn building_arch_era(tags: &HashMap<String, String>) -> ArchEra {
             return ArchEra::PostWarPanel;
         }
         if MODERN_STYLES.contains(&a) {
-            return ArchEra::Contemporary;
+            return year.map_or(ArchEra::Contemporary, era_for_year);
         }
     }
 
-    for key in ["start_date", "construction_date", "year_of_construction"] {
-        if let Some(y) = tags.get(key).and_then(|v| first_year(v)) {
-            return if y < 1945 {
-                ArchEra::TraditionalPreWar
-            } else if y < 1980 {
-                ArchEra::PostWarPanel
-            } else {
-                ArchEra::Contemporary
-            };
-        }
+    // A listing makes the building ornate unless it dates from after the war.
+    if is_listed(tags) {
+        return match year {
+            Some(y) if y >= 1945 => era_for_year(y),
+            _ => ArchEra::HistoricOrnate,
+        };
+    }
+
+    if let Some(y) = year {
+        return era_for_year(y);
     }
 
     let material = tags
@@ -1220,6 +1278,7 @@ fn compute_outline_suppression(
     // so the group seed carries the building's decision).
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
+    let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
     for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
@@ -1227,6 +1286,9 @@ fn compute_outline_suppression(
         }
         if let Some(t) = w.tags.as_ref() {
             way_hint.insert(w.id, building_style_hint(t));
+            if let Some(y) = building_start_year(t) {
+                way_year.insert(w.id, y);
+            }
             way_ground.insert(w.id, part_covers_ground(t));
         }
     }
@@ -1277,6 +1339,13 @@ fn compute_outline_suppression(
                 .find(|h| *h != StyleHint::None)
                 .unwrap_or(StyleHint::None);
         }
+        // So does its date, which the outline usually carries alone.
+        let rel_year = building_start_year(tags).or_else(|| {
+            rel.members
+                .iter()
+                .filter(|m| is_outline(m.role.trim()))
+                .find_map(|m| way_year.get(&m.r#ref).copied())
+        });
 
         // Sub-relation parts carry no way geometry here, so they skip the coverage gate.
         let mut has_part = false;
@@ -1295,7 +1364,10 @@ fn compute_outline_suppression(
                     }
                     part_group.insert(
                         m.r#ref,
-                        seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                        seed_with_year(
+                            seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                            rel_year,
+                        ),
                     );
                 }
                 _ => {}
@@ -1446,6 +1518,7 @@ fn compute_spatial_part_suppression(
     let mut part_ids: Vec<u64> = Vec::new();
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
+    let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for w in ways {
@@ -1468,6 +1541,9 @@ fn compute_spatial_part_suppression(
         }
         way_nodes.insert(w.id, ns);
         way_hint.insert(w.id, building_style_hint(tags));
+        if let Some(y) = building_start_year(tags) {
+            way_year.insert(w.id, y);
+        }
         way_ground.insert(w.id, part_covers_ground(tags));
         needed_nodes.extend(ns.iter().copied());
     }
@@ -1575,7 +1651,11 @@ fn compute_spatial_part_suppression(
             if hint == StyleHint::None {
                 hint = way_hint.get(&pid).copied().unwrap_or(StyleHint::None);
             }
-            part_group.insert(pid, seed_with_hint(geoms[gi].id, hint));
+            let year = way_year.get(&geoms[gi].id).copied();
+            part_group.insert(
+                pid,
+                seed_with_year(seed_with_hint(geoms[gi].id, hint), year),
+            );
         }
     }
 
@@ -2225,6 +2305,26 @@ mod outline_suppression_tests {
         assert_eq!(groups.get(&200), Some(&100));
     }
 
+    // The outline's start_date reaches its parts through the shared seed,
+    // which still keys the same group.
+    #[test]
+    fn spatial_part_carries_the_outline_year() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let mut outline = tagged(o, "building", "yes");
+        if let Some(t) = outline.tags.as_mut() {
+            t.insert("start_date".to_string(), "1962".to_string());
+        }
+        let ways = [outline, tagged(p, "building:part", "yes")];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        let seed = groups[&200];
+        assert_eq!(year_from_seed(seed), Some(1962));
+        assert_eq!(group_key(seed), 100);
+        assert_eq!(style_hint_from_seed(seed), StyleHint::None);
+    }
+
     fn tagmap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
             .iter()
@@ -2269,6 +2369,23 @@ mod outline_suppression_tests {
         assert_eq!(
             m(&[("building:architecture", "modern")]),
             StyleHint::Contemporary
+        );
+    }
+
+    #[test]
+    fn a_listed_modern_building_is_not_masonry() {
+        let m = |p: &[(&str, &str)]| building_style_hint(&tagmap(p));
+        assert_eq!(
+            m(&[("heritage", "yes"), ("start_date", "1969")]),
+            StyleHint::None
+        );
+        assert_eq!(
+            m(&[("heritage", "yes"), ("building:architecture", "modernism")]),
+            StyleHint::Contemporary
+        );
+        assert_eq!(
+            m(&[("heritage", "yes"), ("start_date", "1911")]),
+            StyleHint::Masonry
         );
     }
 
@@ -2736,12 +2853,58 @@ mod arch_era_tests {
             (&[("building:material", "concrete")], Contemporary),
             (&[("building:cladding", "plaster")], TraditionalPreWar),
             (&[("building", "house")], Unknown),
-            // heritage beats a modern start_date
-            (&[("heritage", "1"), ("start_date", "1995")], HistoricOrnate),
+            // a listing makes an old or undated building ornate
+            (&[("heritage", "1"), ("start_date", "1902")], HistoricOrnate),
+            // but not one put up after the war, nor one of the modern movement
+            (&[("heritage", "1"), ("start_date", "1995")], Contemporary),
+            (
+                &[
+                    ("heritage", "yes"),
+                    ("building:architecture", "modernism"),
+                    ("start_date", "1969"),
+                ],
+                PostWarPanel,
+            ),
+            (
+                &[
+                    ("heritage", "4"),
+                    ("building:architecture", "modern"),
+                    ("start_date", "1932"),
+                ],
+                TraditionalPreWar,
+            ),
+            // an ornate style wins over a later date
+            (
+                &[("building:architecture", "baroque"), ("start_date", "1995")],
+                HistoricOrnate,
+            ),
         ];
         for (pairs, expected) in cases {
             assert_eq!(building_arch_era(&tags(pairs)), *expected, "tags {pairs:?}");
         }
+    }
+
+    #[test]
+    fn a_part_takes_the_year_of_its_building() {
+        // An undated part of a 1962 tower is postwar, its own date still wins.
+        assert_eq!(
+            building_arch_era_dated(&tags(&[("building:part", "yes")]), Some(1962)),
+            ArchEra::PostWarPanel
+        );
+        assert_eq!(
+            building_arch_era_dated(&tags(&[("building:part", "yes")]), None),
+            ArchEra::Unknown
+        );
+        let seed = seed_with_year(seed_with_hint(4242, StyleHint::Glass), Some(1962));
+        assert_eq!(year_from_seed(seed), Some(1962));
+        assert_eq!(style_hint_from_seed(seed), StyleHint::Glass);
+        assert_eq!(group_key(seed), 4242);
+        assert_eq!(
+            seed_without_year(seed),
+            seed_with_hint(4242, StyleHint::Glass)
+        );
+        assert_eq!(year_from_seed(seed_with_year(4242, None)), None);
+        assert_eq!(year_from_seed(4242), None);
     }
 
     #[test]
