@@ -222,6 +222,8 @@ pub struct WorldEditor<'a> {
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
     hedge_columns: FnvHashSet<(i32, i32)>,
+    /// Street lamp columns, checked for water once the fill is done.
+    lamp_columns: Vec<(i32, i32)>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -303,6 +305,7 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            lamp_columns: Vec::new(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -360,6 +363,7 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            lamp_columns: Vec::new(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -417,6 +421,7 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            lamp_columns: Vec::new(),
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -1305,6 +1310,16 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_hedge(&mut self, x: i32, z: i32) {
         self.hedge_columns.insert((x, z));
+    }
+
+    /// Record a street lamp standing at (x, z).
+    pub fn register_lamp(&mut self, x: i32, z: i32) {
+        self.lamp_columns.push((x, z));
+    }
+
+    /// Every street lamp recorded so far, clearing the record.
+    pub fn take_lamps(&mut self) -> Vec<(i32, i32)> {
+        std::mem::take(&mut self.lamp_columns)
     }
 
     /// Whether a hedge stands at (x, z).

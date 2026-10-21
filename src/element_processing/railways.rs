@@ -11,6 +11,7 @@ use crate::element_processing::bridges::{
 use crate::element_processing::connected_blocks::{
     cross_cells, four_connected_line, place_connected, stair_steps,
 };
+use crate::element_processing::highways::TunnelLight;
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -1398,7 +1399,7 @@ fn generate_rail_tunnel_shell(
 pub fn carve_rail_tunnel_interior(
     editor: &mut WorldEditor,
     rail_tunnel_points: &[RailTunnelPoint],
-) {
+) -> Vec<TunnelLight> {
     // Whitelist: allow overwriting shell blocks and ground-fill STONE
     // so the tunnel is actually hollow.
     let carve_whitelist: &[Block] = &[
@@ -1408,6 +1409,7 @@ pub fn carve_rail_tunnel_interior(
         STONE,
     ];
     let mut carved: HashSet<(i32, i32)> = HashSet::with_capacity(rail_tunnel_points.len());
+    let mut lights = Vec::new();
     for &(bx, bz, lantern) in rail_tunnel_points {
         let first = carved.insert((bx, bz));
         if !first && !lantern {
@@ -1442,17 +1444,25 @@ pub fn carve_rail_tunnel_interior(
             }
         }
 
-        // Periodic ceiling lighting.
+        // Periodic ceiling lighting, hung once every bore is carved: a neighbour under
+        // higher ground carves a higher roof, and a road tunnel may cross this one.
         if lantern {
-            editor.set_block_absolute(SEA_LANTERN, bx, ceil_y - 1, bz, None, None);
+            lights.push(TunnelLight {
+                x: bx,
+                z: bz,
+                lo: floor_y + 3,
+                hi: ceil_y + 1,
+            });
         }
     }
+    lights
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::coordinate_system::geographic::LLBBox;
+    use crate::element_processing::highways::hang_tunnel_lights;
     use crate::osm_parser::ProcessedNode;
     use std::path::PathBuf;
 
@@ -1461,7 +1471,7 @@ mod tests {
         WorldEditor::new(PathBuf::from("/dev/null/unused"), xzbbox, llbbox)
     }
 
-    // The same carve as before deduplication: every listed point, in order.
+    // The same carve as before deduplication: every listed point, in order, then its lights.
     fn carve_every_point(editor: &mut WorldEditor, points: &[RailTunnelPoint]) {
         let wl: &[Block] = &[
             STONE_BRICKS,
@@ -1469,6 +1479,7 @@ mod tests {
             MOSSY_STONE_BRICKS,
             STONE,
         ];
+        let mut lights = Vec::new();
         for &(bx, bz, lantern) in points {
             let ceil_y = editor.get_ground_level(bx, bz) - RAIL_TUNNEL_DEPTH;
             let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
@@ -1482,9 +1493,21 @@ mod tests {
                 }
             }
             if lantern {
-                editor.set_block_absolute(SEA_LANTERN, bx, ceil_y - 1, bz, None, None);
+                lights.push((bx, bz, floor_y, ceil_y));
             }
         }
+        let lights: Vec<TunnelLight> = lights
+            .into_iter()
+            .map(
+                |(x, z, floor_y, ceil_y): (i32, i32, i32, i32)| TunnelLight {
+                    x,
+                    z,
+                    lo: floor_y + 3,
+                    hi: ceil_y + 1,
+                },
+            )
+            .collect();
+        hang_tunnel_lights(editor, &lights);
     }
 
     // Tiles list a tunnel once each; carving each point once must build the same bore,
@@ -1527,10 +1550,44 @@ mod tests {
             }
             cells
         };
-        let want = build(&|e| carve_every_point(e, &points));
-        let got = build(&|e| carve_rail_tunnel_interior(e, &points));
+        let want = build(&|e| carve_every_point(e, &line));
+        let got = build(&|e| {
+            let lights = carve_rail_tunnel_interior(e, &points);
+            hang_tunnel_lights(e, &lights);
+        });
         assert_eq!(got, want);
         assert!(got.contains(&Some(SEA_LANTERN.id())));
+    }
+
+    // Under rising ground the next point carves its roof a block higher, through this
+    // point's roof row; the light goes up to the roof that is left.
+    #[test]
+    fn tunnel_lanterns_hang_from_the_roof_left_after_carving() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 60, 60).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        for x in 25..=40 {
+            for z in 30..=50 {
+                editor.register_road_surface_y(x, z, 1);
+            }
+        }
+        for x in 10..=40 {
+            for z in 30..=50 {
+                let ground = editor.get_ground_level(x, z);
+                for y in ground - 12..ground {
+                    editor.set_block_absolute(STONE, x, y, z, None, None);
+                }
+            }
+        }
+        let points: Vec<RailTunnelPoint> = (15..=35).map(|x| (x, 40, x == 24)).collect();
+        let lights = carve_rail_tunnel_interior(&mut editor, &points);
+        hang_tunnel_lights(&mut editor, &lights);
+        let light = (-12..0)
+            .find(|&y| editor.check_for_block_absolute(24, y, 40, Some(&[SEA_LANTERN]), None))
+            .expect("the bore keeps its light");
+        assert!(
+            editor.block_exists_absolute(24, light + 1, 40),
+            "the light at y={light} hangs in the air"
+        );
     }
 
     // A straight east-west rail from x=20 to x=60 at z=50 (so cell index == x - 20).

@@ -227,7 +227,12 @@ fn is_pedestrian_way_tags(tags: &HashMap<String, String>) -> bool {
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
-// Absolute base Y for a node feature; deck Y on a bridge, else terrain + layer_boost.
+/// How far off a deck a lamp tagged with a `layer` moves onto it, as one mapped on a sidewalk
+/// the deck leaves out.
+const LAYERED_LAMP_DECK_REACH: i32 = 3;
+
+// Absolute base Y for a node feature; deck Y on a bridge, else terrain. A `layer` alone lifts
+// nothing: it marks a plaza over an underpass as often as a bridge.
 // `bridge_radius`: 0 = exact (lamps, bus stops, on-road signal head), 1 = the deck edge too
 // (a signal pole on the rail cell).
 #[inline]
@@ -236,12 +241,18 @@ fn node_feature_base_y(
     bridge_surface: &BridgeSurfaceMap,
     x: i32,
     z: i32,
-    layer_boost: i32,
+    layered: bool,
     bridge_radius: i32,
 ) -> i32 {
-    bridge_surface
-        .nearby_deck_y(x, z, bridge_radius)
-        .unwrap_or_else(|| editor.get_absolute_y(x, layer_boost, z))
+    // A layered one beside the deck stands against its edge, at the nearest deck's level.
+    let deck = if layered {
+        bridge_surface
+            .nearest_deck_cell(x, z, bridge_radius.max(1))
+            .map(|(_, y)| y)
+    } else {
+        bridge_surface.nearby_deck_y(x, z, bridge_radius)
+    };
+    deck.unwrap_or_else(|| editor.get_absolute_y(x, 0, z))
 }
 
 /// Generates highways with elevation support based on layer tags and connectivity analysis
@@ -985,8 +996,40 @@ fn tunnel_portal_faces(
     ]
 }
 
-// Phase 2: carve the interior, then lay the road last so no carve can eat it.
-pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[HighwayTunnelCell]) {
+/// A tunnel light to hang under whatever roof stands over (x, z) between `lo` and `hi`.
+pub struct TunnelLight {
+    pub x: i32,
+    pub z: i32,
+    pub lo: i32,
+    pub hi: i32,
+}
+
+/// Hangs tunnel lights once every bore is carved, since one carved later, such as a road
+/// tunnel across a rail one, can open the roof a light was hung from. A tile hangs only its
+/// own, so no copy from its halo hangs beside or under one.
+pub fn hang_tunnel_lights(editor: &mut WorldEditor, lights: &[TunnelLight]) {
+    for light in lights {
+        if !editor.owns(light.x, light.z) {
+            continue;
+        }
+        let roof =
+            (light.lo..=light.hi).find(|&y| editor.block_exists_absolute(light.x, y, light.z));
+        // A repeat finds the light already hung, not the roof.
+        let lit = |y: i32| {
+            editor.check_for_block_absolute(light.x, y, light.z, Some(&[SEA_LANTERN]), None)
+        };
+        if let Some(y) = roof.filter(|&y| !lit(y)) {
+            editor.set_block_absolute(SEA_LANTERN, light.x, y - 1, light.z, None, None);
+        }
+    }
+}
+
+// Phase 2: carve the interior, then lay the road last so no carve can eat it. Returns the
+// lights to hang once every tunnel is carved.
+pub fn carve_highway_tunnel_interior(
+    editor: &mut WorldEditor,
+    tunnel_cells: &[HighwayTunnelCell],
+) -> Vec<TunnelLight> {
     // What the bore may swallow: its placeholder, ground fill, approach paving, cut surfaces.
     const CARVE_WL: &[Block] = &[
         STONE_BRICKS,
@@ -1038,7 +1081,6 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
     ];
 
     for cell in tunnel_cells {
-        let ceil_y = cell.road_y + TUNNEL_CEIL_OFFSET;
         let hw = cell.half_width;
         // Stop at the portal; past it carving leaves a gap the bore cannot repave.
         for dx in -hw..=hw {
@@ -1059,9 +1101,6 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
                 }
             }
         }
-        if cell.light {
-            editor.set_block_absolute(SEA_LANTERN, cell.x, ceil_y - 1, cell.z, None, None);
-        }
     }
 
     for cell in tunnel_cells {
@@ -1077,6 +1116,17 @@ pub fn carve_highway_tunnel_interior(editor: &mut WorldEditor, tunnel_cells: &[H
             }
         }
     }
+
+    tunnel_cells
+        .iter()
+        .filter(|c| c.light)
+        .map(|c| TunnelLight {
+            x: c.x,
+            z: c.z,
+            lo: c.road_y + 3,
+            hi: c.road_y + TUNNEL_CEIL_OFFSET + 2,
+        })
+        .collect()
 }
 
 // Tunnel-bore footprint, to keep the water depth-carve and vegetation off it.
@@ -1127,6 +1177,7 @@ pub fn collect_tunnel_footprint(
 }
 
 fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
+    editor.register_lamp(x, z);
     editor.set_block_absolute(SMOOTH_STONE, x, base + 1, z, None, None);
     for dy in 2..=4 {
         editor.set_block_absolute(STONE_BRICK_WALL, x, base + dy, z, None, None);
@@ -1140,6 +1191,34 @@ fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
         None,
     );
     editor.set_block_absolute(IRON_TRAPDOOR, x, base + 6, z, None, None);
+}
+
+/// Takes down lamps the water fill reached, as on a quay edge a river polygon overclaims.
+/// Lamps go up before the water, so only afterwards does it show. Halo lamps go too, or
+/// the merge would put a neighbour's copy back where the owner took its own down.
+pub fn drop_lamps_in_water(editor: &mut WorldEditor) {
+    const PARTS: &[Block] = &[SMOOTH_STONE, STONE_BRICK_WALL, REDSTONE_LAMP, IRON_TRAPDOOR];
+    for (x, z) in editor.take_lamps() {
+        let is = |ed: &WorldEditor, y: i32, blocks: &[Block]| {
+            ed.check_for_block_absolute(x, y, z, Some(blocks), None)
+        };
+        let ground = editor.get_ground_level(x, z);
+        let Some(head) = (ground + 2..=ground + 12)
+            .find(|&y| is(editor, y, &[REDSTONE_LAMP]) && is(editor, y - 1, &[STONE_BRICK_WALL]))
+        else {
+            continue;
+        };
+        // A still surface over the ground swallows the plinth, so walk down the post.
+        let mut foot = head - 1;
+        while foot > head - 4 && is(editor, foot - 1, &[STONE_BRICK_WALL, SMOOTH_STONE]) {
+            foot -= 1;
+        }
+        if is(editor, foot - 1, &[WATER]) {
+            for y in foot..=head + 1 {
+                editor.set_block_absolute(AIR, x, y, z, Some(PARTS), None);
+            }
+        }
+    }
 }
 
 const WAY_LAMP_INTERVAL: usize = 25;
@@ -1240,7 +1319,7 @@ fn generate_highways_internal(
     // Shared `indoor=yes` / layer parsing for the whole function. Indoor
     // highways must never produce elevated geometry (they sit inside
     // buildings), and features like street lamps on an explicit
-    // `layer=*` should ride up with the bridge/overpass they belong to.
+    // `layer=*` stand on the bridge deck they belong to.
     let is_indoor = element.tags().get("indoor").is_some_and(|v| v == "yes");
     let layer_value_raw = element
         .tags()
@@ -1256,16 +1335,24 @@ fn generate_highways_internal(
     };
     const LAYER_HEIGHT_STEP: i32 = 6;
     let layer_boost = layer_value_effective * LAYER_HEIGHT_STEP;
+    let layered = layer_value_effective > 0;
     let signal_base = |ed: &WorldEditor, x: i32, z: i32, radius: i32| {
-        node_feature_base_y(ed, bridge_surface, x, z, layer_boost, radius)
+        node_feature_base_y(ed, bridge_surface, x, z, layered, radius)
     };
 
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             if let ProcessedElement::Node(first_node) = element {
-                let x: i32 = first_node.x;
-                let z: i32 = first_node.z;
-                let base = node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
+                let mut x: i32 = first_node.x;
+                let mut z: i32 = first_node.z;
+                if layered {
+                    if let Some((cell, _)) =
+                        bridge_surface.nearest_deck_cell(x, z, LAYERED_LAMP_DECK_REACH)
+                    {
+                        (x, z) = cell;
+                    }
+                }
+                let base = node_feature_base_y(editor, bridge_surface, x, z, layered, 0);
                 place_street_lamp(editor, x, z, base);
             }
         } else if highway_type == "crossing" || highway_type == "traffic_signals" {
@@ -1284,8 +1371,7 @@ fn generate_highways_internal(
                 if let ProcessedElement::Node(node) = element {
                     let x = node.x;
                     let z = node.z;
-                    let head_base =
-                        node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
+                    let head_base = node_feature_base_y(editor, bridge_surface, x, z, layered, 0);
 
                     // Try to build a hanging signal if it's on a road
                     let anchor = road_mask
@@ -1298,7 +1384,7 @@ fn generate_highways_internal(
                             // The deck edge (rail cell) still holds the pole; further out it
                             // stands on the terrain.
                             let pole_base =
-                                node_feature_base_y(editor, bridge_surface, ax, az, layer_boost, 1);
+                                node_feature_base_y(editor, bridge_surface, ax, az, layered, 1);
                             editor.set_block_absolute(
                                 COBBLESTONE_WALL,
                                 ax,
@@ -1389,14 +1475,14 @@ fn generate_highways_internal(
             if let ProcessedElement::Node(node) = element {
                 let x = node.x;
                 let z = node.z;
-                let base = node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
+                let base = node_feature_base_y(editor, bridge_surface, x, z, layered, 0);
                 for dy in 1..=3 {
                     editor.set_block_absolute(COBBLESTONE_WALL, x, base + dy, z, None, None);
                 }
 
                 editor.set_block_absolute(WHITE_WOOL, x, base + 4, z, None, None);
                 let neighbor_base =
-                    node_feature_base_y(editor, bridge_surface, x + 1, z, layer_boost, 1);
+                    node_feature_base_y(editor, bridge_surface, x + 1, z, layered, 1);
                 editor.set_block_absolute(WHITE_WOOL, x + 1, neighbor_base + 4, z, None, None);
 
                 // Bus sign on both broad faces of the overhanging wool, stop name on the pole block.
@@ -3533,6 +3619,157 @@ mod tests {
         }
     }
 
+    /// Street lamp nodes at (id, x, z), tagged with `layer`.
+    fn place_lamps(
+        editor: &mut WorldEditor,
+        surface: &BridgeSurfaceMap,
+        lamps: &[(u64, i32, i32)],
+        layer: &str,
+    ) {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        for &(id, x, z) in lamps {
+            let element = ProcessedElement::Node(ProcessedNode {
+                id,
+                tags: [("highway", "street_lamp"), ("layer", layer)]
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                x,
+                z,
+            });
+            generate_highways(
+                editor,
+                &element,
+                &args,
+                &HighwayConnectivityMap::new(),
+                &FloodFillCache::new(),
+                &empty,
+                &structures,
+                surface,
+                &TunnelInternalEndpoints::default(),
+                &TunnelPortalMap::default(),
+                &empty,
+                &mut Vec::new(),
+                &RoadMarkingIndex::default(),
+            );
+        }
+    }
+
+    /// Land cover calls a quay sidewalk water as often as the river; only the fill decides.
+    #[test]
+    fn a_lamp_on_land_cover_water_left_dry_stands() {
+        use crate::land_cover::{LandCoverData, LC_GRASSLAND, LC_WATER};
+        let side = 60usize;
+        let grid: Vec<Vec<u8>> = (0..side)
+            .map(|_| {
+                (0..side)
+                    .map(|x| if x < 20 { LC_WATER } else { LC_GRASSLAND })
+                    .collect()
+            })
+            .collect();
+        let lc = LandCoverData {
+            grid,
+            water_distance: vec![vec![0u8; side]; side],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width: side,
+            height: side,
+            cells_per_meter: 1.0,
+        };
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, side as i32 - 1, side as i32 - 1).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        editor.set_ground(std::sync::Arc::new(
+            crate::ground::test_support::ground_with_land_cover_and_elevation(lc, side, side),
+        ));
+        place_lamps(
+            &mut editor,
+            &BridgeSurfaceMap::empty(),
+            &[(1, 10, 30), (2, 40, 30)],
+            "0",
+        );
+        drop_lamps_in_water(&mut editor);
+        for x in [10, 40] {
+            let ground = editor.get_absolute_y(x, 0, 30);
+            assert!(editor.check_for_block_absolute(
+                x,
+                ground + 1,
+                30,
+                Some(&[SMOOTH_STONE]),
+                None
+            ));
+        }
+    }
+
+    /// A river polygon reaching over a quay edge fills under a lamp mapped there only after
+    /// the lamp went up, so it comes down; one on a deck over the water stays.
+    #[test]
+    fn lamps_the_water_fill_reached_are_taken_down() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let mut surface = BridgeSurfaceMap::empty();
+        for x in 30..40 {
+            for z in 10..20 {
+                surface.insert_deck(x, z, 4);
+                editor.set_block_absolute(STONE_BRICKS, x, 4, z, None, None);
+            }
+        }
+        place_lamps(&mut editor, &surface, &[(1, 10, 40), (2, 20, 40)], "0");
+        place_lamps(&mut editor, &surface, &[(3, 35, 15)], "1");
+        // A pier paved in the plinth's own stone, over the water.
+        editor.set_block_absolute(SMOOTH_STONE, 45, 0, 40, None, None);
+        editor.set_block_absolute(WATER, 45, -1, 40, None, None);
+        place_lamps(&mut editor, &surface, &[(4, 45, 40)], "0");
+        for x in 0..60 {
+            for z in 0..60 {
+                if x < 15 || (30..40).contains(&x) {
+                    editor.set_block_absolute(WATER, x, 0, z, None, Some(&[]));
+                }
+            }
+        }
+        // Water up a block over its ground drowns the plinth, and the post still goes.
+        editor.set_block_absolute(WATER, 20, 1, 40, None, Some(&[]));
+        editor.set_block_absolute(WATER, 20, 0, 40, None, Some(&[]));
+        // The first lamp is in the halo, a copy the merge would put back if left.
+        editor.set_strict_bounds(15, 0, 59, 59);
+        drop_lamps_in_water(&mut editor);
+
+        assert!(editor.highest_block_between(10, 40, 1, 20).is_none());
+        assert!(editor.highest_block_between(20, 40, 2, 20).is_none());
+        assert!(editor.check_for_block_absolute(35, 9, 15, Some(&[REDSTONE_LAMP]), None));
+        assert!(editor.check_for_block_absolute(45, 5, 40, Some(&[REDSTONE_LAMP]), None));
+        assert!(editor.check_for_block_absolute(45, 0, 40, Some(&[SMOOTH_STONE]), None));
+    }
+
+    /// A `layer` on a lamp marks a plaza over an underpass as often as a bridge: away from
+    /// a deck it stands on the ground, a couple of blocks off one it moves onto the deck.
+    #[test]
+    fn layered_lamps_stand_on_a_deck_or_on_the_ground() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let mut surface = BridgeSurfaceMap::empty();
+        for x in 30..40 {
+            for z in 10..20 {
+                surface.insert_deck(x, z, 20);
+            }
+        }
+        place_lamps(&mut editor, &surface, &[(1, 10, 40), (2, 41, 15)], "1");
+        let ground = editor.get_absolute_y(10, 0, 40);
+        assert!(
+            editor.check_for_block_absolute(10, ground + 1, 40, Some(&[SMOOTH_STONE]), None),
+            "the plaza lamp stands on the ground"
+        );
+        assert!(
+            editor.check_for_block_absolute(39, 21, 15, Some(&[SMOOTH_STONE]), None),
+            "the parapet lamp stands on the deck edge"
+        );
+        assert!(
+            editor.highest_block_between(41, 15, -64, 40).is_none(),
+            "nothing is left where it was mapped, off the deck"
+        );
+    }
+
     #[test]
     fn a_road_does_not_pave_over_the_red_cycleway_beside_it_in_either_order() {
         let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 100.0).unwrap();
@@ -4250,6 +4487,90 @@ mod tests {
             (TUNNEL_COVER_DROP, TUNNEL_COVER_DROP),
             "a road joining two portals descends into both and stays down between"
         );
+    }
+
+    /// A neighbour a block up the ramp carves through this cell's ceiling row, so the
+    /// light goes under the roof that is left rather than into the air below it.
+    #[test]
+    fn tunnel_lights_hang_from_the_roof_left_after_carving() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let cell = |x: i32, road_y: i32, light: bool| HighwayTunnelCell {
+            x,
+            z: 20,
+            road_y,
+            half_width: 2,
+            covered: true,
+            carve_top: road_y + TUNNEL_CEIL_OFFSET - 1,
+            palette: &[GRAY_CONCRETE],
+            light,
+            faces: [None, None],
+        };
+        let cells = vec![cell(20, 0, true), cell(21, 1, false)];
+        for c in &cells {
+            for dx in -3..=3 {
+                for dz in -3..=3 {
+                    for y in -1..=c.road_y + TUNNEL_CEIL_OFFSET {
+                        editor.set_block_absolute(STONE_BRICKS, c.x + dx, y, c.z + dz, None, None);
+                    }
+                }
+            }
+        }
+        let lights = carve_highway_tunnel_interior(&mut editor, &cells);
+        hang_tunnel_lights(&mut editor, &lights);
+
+        let light = (1..=8)
+            .find(|&y| editor.check_for_block_absolute(20, y, 20, Some(&[SEA_LANTERN]), None))
+            .expect("the bore keeps its light");
+        assert!(
+            editor.block_exists_absolute(20, light + 1, 20),
+            "the light at y={light} hangs in the air"
+        );
+    }
+
+    /// A road bore crossing a rail tunnel opens the rail roof, so no lantern hangs before both are carved.
+    #[test]
+    fn a_road_bore_crossing_a_rail_tunnel_leaves_no_light_in_the_air() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        for x in 5..35 {
+            for z in 5..35 {
+                for y in -10..0 {
+                    editor.set_block_absolute(STONE, x, y, z, None, None);
+                }
+            }
+        }
+        let rail: Vec<_> = (10..=30).map(|x| (x, 20, x == 20)).collect();
+        let road: Vec<_> = (10..=30)
+            .map(|z| HighwayTunnelCell {
+                x: 20,
+                z,
+                road_y: -5,
+                half_width: 2,
+                covered: true,
+                carve_top: -5 + TUNNEL_CEIL_OFFSET - 1,
+                palette: &[GRAY_CONCRETE],
+                light: false,
+                faces: [None, None],
+            })
+            .collect();
+        let mut lights =
+            crate::element_processing::railways::carve_rail_tunnel_interior(&mut editor, &rail);
+        lights.extend(carve_highway_tunnel_interior(&mut editor, &road));
+        hang_tunnel_lights(&mut editor, &lights);
+
+        for x in 5..35 {
+            for z in 5..35 {
+                for y in -10..4 {
+                    if editor.check_for_block_absolute(x, y, z, Some(&[SEA_LANTERN]), None) {
+                        assert!(
+                            editor.block_exists_absolute(x, y + 1, z),
+                            "the light at ({x}, {y}, {z}) hangs in the air"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// The shell stamps a square per cell, which used to seal a roofed portal.

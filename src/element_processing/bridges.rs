@@ -1304,6 +1304,11 @@ impl BridgeSurfaceMap {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn insert_deck(&mut self, x: i32, z: i32, y: i32) {
+        self.cells.insert((x, z), DeckSpan { low: y, high: y });
+    }
+
     /// Deck Y of a rail viaduct track running through (x, z), with its way id.
     pub fn rail_track_at(&self, x: i32, z: i32) -> Option<(u64, i32)> {
         self.rail_tracks.get(&(x, z)).copied()
@@ -1342,6 +1347,23 @@ impl BridgeSurfaceMap {
     }
 
     // Highest deck Y within `radius`; lets side features mapped just off the deck ride the bridge.
+    /// The deck cell nearest (x, z) within `radius`, (x, z) itself first, and its deck Y.
+    pub fn nearest_deck_cell(&self, x: i32, z: i32, radius: i32) -> Option<((i32, i32), i32)> {
+        let mut best: Option<(i32, (i32, i32), i32)> = None;
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                let cell = (x + dx, z + dz);
+                let d = dx * dx + dz * dz;
+                if let Some(s) = self.cells.get(&cell) {
+                    if best.is_none_or(|(b, _, _)| d < b) {
+                        best = Some((d, cell, s.high));
+                    }
+                }
+            }
+        }
+        best.map(|(_, cell, y)| (cell, y))
+    }
+
     pub fn nearby_deck_y(&self, x: i32, z: i32, radius: i32) -> Option<i32> {
         if let Some(s) = self.cells.get(&(x, z)) {
             return Some(s.high);

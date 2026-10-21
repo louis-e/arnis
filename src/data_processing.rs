@@ -1505,12 +1505,20 @@ pub fn generate_world_with_options(
                 g_min_z,
                 g_max_z,
             );
+            highways::drop_lamps_in_water(&mut tile_editor);
 
             // Under eviction the post-merge rail-tunnel carve can't run (regions get freed),
             // so carve in-tile now, after ground/fill so the interior isn't refilled.
             if eviction_active {
-                railways::carve_rail_tunnel_interior(&mut tile_editor, &tile_rail_tunnel_points);
-                highways::carve_highway_tunnel_interior(&mut tile_editor, &tile_tunnel_cells);
+                let mut lights = railways::carve_rail_tunnel_interior(
+                    &mut tile_editor,
+                    &tile_rail_tunnel_points,
+                );
+                lights.extend(highways::carve_highway_tunnel_interior(
+                    &mut tile_editor,
+                    &tile_tunnel_cells,
+                ));
+                highways::hang_tunnel_lights(&mut tile_editor, &lights);
             }
             // Seal floating water/lava last: the water-depth carve and the tunnel carves
             // above can each undercut a water body over a cave. Under eviction this tile
@@ -1890,6 +1898,7 @@ pub fn generate_world_with_options(
             &tunnel_footprint,
             &bridge_surface,
         );
+        highways::drop_lamps_in_water(&mut editor);
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
@@ -1929,11 +1938,18 @@ pub fn generate_world_with_options(
 
     // Carve railway tunnel interiors now that underground is filled with stone.
     // Under eviction this already ran in-tile (regions get freed before here).
-    if !eviction_active && !rail_tunnel_points.is_empty() {
-        railways::carve_rail_tunnel_interior(&mut editor, &rail_tunnel_points);
-    }
-    if !eviction_active && !tunnel_cells.is_empty() {
-        highways::carve_highway_tunnel_interior(&mut editor, &tunnel_cells);
+    if !eviction_active {
+        let mut lights = Vec::new();
+        if !rail_tunnel_points.is_empty() {
+            lights = railways::carve_rail_tunnel_interior(&mut editor, &rail_tunnel_points);
+        }
+        if !tunnel_cells.is_empty() {
+            lights.extend(highways::carve_highway_tunnel_interior(
+                &mut editor,
+                &tunnel_cells,
+            ));
+        }
+        highways::hang_tunnel_lights(&mut editor, &lights);
     }
     // Seal floating water/lava as the final underground pass; eviction tiles did it in-tile.
     if args.caves && !eviction_active {
