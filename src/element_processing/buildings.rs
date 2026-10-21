@@ -3887,6 +3887,37 @@ struct BayRhythm {
     corner: i32,
 }
 
+/// Upper-floor bays of a department store or shopping centre: narrow slits
+/// far apart in a mostly closed, clad wall rather than an office grid, as the
+/// sales floors behind it are lit from inside. Only for big stores of three
+/// storeys or more; a glass facade keeps its glass.
+fn closed_retail_bays(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    footprint_cells: usize,
+    scale: f64,
+) -> Option<BayRhythm> {
+    let store = matches!(
+        element.tags.get("shop").map(String::as_str),
+        Some("department_store" | "mall")
+    ) || matches!(
+        element.tags.get("building").map(String::as_str),
+        Some("retail" | "department_store" | "mall")
+    );
+    let footprint_m2 = footprint_cells as f64 / (scale * scale);
+    let storeys = (config.building_height - GROUND_FLOOR_BONUS) / config.floor_cycle.max(1);
+    (store
+        && footprint_m2 >= 1500.0
+        && storeys >= 3
+        && config.has_windows
+        && !is_glass_wall(config.wall_block))
+    .then_some(BayRhythm {
+        window: 1,
+        pier: 5,
+        corner: 3,
+    })
+}
+
 /// Bays of a shopfront or tower lobby: wide display windows between 1-wide piers.
 const SHOP_RHYTHM: BayRhythm = BayRhythm {
     window: 3,
@@ -11191,6 +11222,11 @@ pub fn generate_buildings(
         // Filled in below, once the podium massing has settled the wall height
         // `building_facades::collect` will be given.
         preset_shell: Arc::default(),
+    };
+    // A department store's sales floors want wall, not daylight.
+    let config = match closed_retail_bays(element, &config, cached_footprint_size, scale_factor) {
+        Some(bays) => BuildingConfig { bays, ..config },
+        None => config,
     };
 
     // Passages only apply to ground-level buildings. Elevated building:part
@@ -19037,6 +19073,34 @@ mod style_tests {
             low.building_height = 2 + 10 * 4;
             assert_eq!(plan(&low, &europe), None);
         }
+    }
+
+    // A big store's upper floors are clad with a few slits; offices, small
+    // shops and glass stores keep their windows.
+    #[test]
+    fn department_stores_close_their_upper_floors() {
+        use crate::element_processing::building_test_support::rect_way;
+        let config = test_config(2 + 5 * 4, false, false);
+        let store = rect_way(
+            1,
+            0,
+            0,
+            60,
+            40,
+            &[("building", "retail"), ("shop", "department_store")],
+        );
+        let bays = closed_retail_bays(&store, &config, 2400, 1.0).expect("closed bays");
+        assert!(bays.pier >= 4 * bays.window);
+        let office = rect_way(2, 0, 0, 60, 40, &[("building", "office")]);
+        assert_eq!(closed_retail_bays(&office, &config, 2400, 1.0), None);
+        assert_eq!(closed_retail_bays(&store, &config, 600, 1.0), None);
+        let glass = BuildingConfig {
+            wall_block: GRAY_STAINED_GLASS,
+            ..config.clone()
+        };
+        assert_eq!(closed_retail_bays(&store, &glass, 2400, 1.0), None);
+        let low = test_config(2 + 2 * 4, false, false);
+        assert_eq!(closed_retail_bays(&store, &low, 2400, 1.0), None);
     }
 
     #[test]
