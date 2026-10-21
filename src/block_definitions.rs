@@ -2257,6 +2257,12 @@ mod material_tests {
             COBBLED_DEEPSLATE_SLAB,
             SMOOTH_QUARTZ_SLAB,
             CHERRY_PLANKS,
+            // Shades of tagged brick and stone, and crown louvres.
+            TUFF,
+            LIGHT_GRAY_TERRACOTTA,
+            QUARTZ_BRICKS,
+            POLISHED_DEEPSLATE,
+            IRON_TRAPDOOR,
         ] {
             assert!(block.id() < 256, "{} has id {}", block.name(), block.id());
         }
