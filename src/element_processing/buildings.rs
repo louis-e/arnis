@@ -4327,9 +4327,9 @@ fn facade_tone_for_material(
     facade_tone_for_colour(rgb, family, rng)
 }
 
-/// Tone family of a tower with a colour but no material: pre-war and undated
-/// towers are stone or brick, post-war ones stone or concrete. None for
-/// every other building, whose colour may be any render.
+/// Tone family of a tower with a colour but no material: a masonry or
+/// pre-war tower is stone or brick, any other a concrete or render frame.
+/// None for every other building, whose colour may be any render.
 fn tower_facade_tones(category: BuildingCategory, tags: &HashMap<String, String>) -> Option<u8> {
     if !matches!(
         category,
@@ -4342,14 +4342,15 @@ fn tower_facade_tones(category: BuildingCategory, tags: &HashMap<String, String>
     ) {
         return None;
     }
-    let post_war = matches!(
-        crate::osm_parser::building_arch_era(tags),
-        ArchEra::PostWarPanel | ArchEra::Contemporary
-    );
-    Some(if post_war {
-        STONEWORK | CONCRETE_WORK
-    } else {
+    let masonry = category == BuildingCategory::MasonrySkyscraper
+        || matches!(
+            crate::osm_parser::building_arch_era(tags),
+            ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar
+        );
+    Some(if masonry {
         STONEWORK | BRICKWORK
+    } else {
+        CONCRETE_WORK
     })
 }
 
@@ -18757,6 +18758,16 @@ mod style_tests {
             assert!(
                 matches!(tower, Some(SANDSTONE | SMOOTH_SANDSTONE | MUSHROOM_STEM)),
                 "{tower:?}"
+            );
+            // A grey modern tower is concrete, not stone brick.
+            let grey = wall(
+                &[("building:colour", "gray")],
+                BuildingCategory::GridSkyscraper,
+                seed,
+            );
+            assert!(
+                matches!(grey, Some(LIGHT_GRAY_CONCRETE | POLISHED_ANDESITE)),
+                "{grey:?}"
             );
             // A mauve brick finds its nearest brick even with no shade of its hue.
             let mauve = wall(
