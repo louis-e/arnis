@@ -10,6 +10,7 @@
 
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::datapack::macro_coord;
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::road_markings::oneway_sign;
 use crate::element_processing::traffic_lights::{
@@ -700,7 +701,13 @@ impl CarNetwork {
                 if k > 0 {
                     out.push(',');
                 }
-                let _ = write!(out, "{{x:{:.1}d,y:{:.1}d,z:{:.1}d", p.x, p.y, p.z);
+                let _ = write!(
+                    out,
+                    "{{x:{:.2}d,y:{:.1}d,z:{:.2}d",
+                    macro_coord(p.x),
+                    p.y,
+                    macro_coord(p.z)
+                );
                 if let Some(g) = p.stop {
                     let _ = write!(out, ",g:{g}b");
                 }
@@ -871,9 +878,9 @@ impl CarNetwork {
             let mut data = HashMap::from([
                 ("s".to_string(), Value::Int(car.segment as i32)),
                 ("i".to_string(), Value::Int(car.target as i32)),
-                ("x".to_string(), Value::Double(t.x)),
+                ("x".to_string(), Value::Double(macro_coord(t.x))),
                 ("y".to_string(), Value::Double(t.y)),
-                ("z".to_string(), Value::Double(t.z)),
+                ("z".to_string(), Value::Double(macro_coord(t.z))),
                 ("v".to_string(), Value::Int(speed)),
                 (
                     "c".to_string(),
@@ -1982,6 +1989,29 @@ mod tests {
         assert_eq!(text.lines().count(), 3 + net.segments.len());
         assert!(text.contains(",g:1b"));
         assert!(text.contains(&format!(",v:{}}}", net.segments[0].speed)));
+    }
+
+    #[test]
+    fn no_waypoint_lies_on_a_whole_x_or_z_for_the_pack_to_shift() {
+        // A crossroads on whole blocks puts many lane points on whole coordinates.
+        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat);
+        let text = net.storage_function();
+        let mut seen = 0;
+        for key in ["x:", "z:"] {
+            for part in text.split(key).skip(1) {
+                let v: f64 = part.split('d').next().unwrap().parse().unwrap();
+                assert!(v.fract() != 0.0, "{key}{v} is whole");
+                seen += 1;
+            }
+        }
+        assert!(seen > 20);
+        for car in &net.cars {
+            let t = net.segments[car.segment].points[car.target];
+            assert!(macro_coord(t.x).fract() != 0.0 && macro_coord(t.z).fract() != 0.0);
+        }
+        assert_eq!(macro_coord(48.0), 48.01);
+        assert_eq!(macro_coord(-12.0), -11.99);
+        assert_eq!(macro_coord(48.104), 48.1);
     }
 
     #[test]

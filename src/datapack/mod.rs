@@ -298,6 +298,17 @@ impl PackContext {
 }
 
 /// Writes the pack into the world and enables it in `level.dat`.
+/// A coordinate for a macro to pass on, to the centimetre and never whole: a macro writes
+/// 48.0 as 48, and Minecraft puts a whole x or z in the middle of its block, half a block off.
+pub(crate) fn macro_coord(v: f64) -> f64 {
+    let r = (v * 100.0).round() / 100.0;
+    if r.fract() == 0.0 {
+        r + 0.01
+    } else {
+        r
+    }
+}
+
 pub fn install(world: &Path, ctx: &PackContext) -> Result<(), String> {
     let root = world.join("datapacks").join(PACK_NAME);
     for (path, bytes) in files(ctx) {
