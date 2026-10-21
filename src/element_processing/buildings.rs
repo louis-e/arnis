@@ -5177,7 +5177,12 @@ fn get_wall_block_for_category(
 /// Gross block height of one upper floor: 3 for residential-scale types
 /// (~3 m storeys), 4 for commercial/institutional. Tags only, because the
 /// category is resolved after the height and cannot be used here.
-fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
+/// `housing_group`: the part belongs to a building of flats or houses.
+fn floor_cycle_for(
+    building_type: &str,
+    tags: &HashMap<String, String>,
+    housing_group: bool,
+) -> i32 {
     const RESIDENTIAL_SCALE: &[&str] = &[
         "house",
         "detached",
@@ -5196,7 +5201,12 @@ fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
     ];
     if tags.contains_key("building:part") {
         // One cycle for all parts keeps stacked volumes flush at the seams.
-        return 4;
+        // Storeys counted on the parts of a housing block are housing
+        // storeys, a third lower than the commercial default; a mapped
+        // height keeps its own scale.
+        let counted = tags.contains_key("building:levels") && !tags.contains_key("height");
+        let housing = housing_group || RESIDENTIAL_SCALE.contains(&building_type);
+        return if counted && housing { 3 } else { 4 };
     }
     // Both mapped: the storeys are as tall as the building says. Under the
     // usual 3 a 25 m five-storey office would show seven rows of windows.
@@ -5623,6 +5633,7 @@ fn generate_roof_only_structure(
             .map(|s| s.as_str())
             .unwrap_or("roof"),
         &element.tags,
+        false,
     );
 
     // Determine where the roof structure starts vertically.
@@ -10483,7 +10494,16 @@ pub fn generate_buildings(
         .or_else(|| element.tags.get("building:part"))
         .map(|s| s.as_str())
         .unwrap_or("yes");
-    let floor_cycle = floor_cycle_for(building_type, &element.tags);
+    // A part of a housing block carries that in its group seed; the mark is
+    // taken off again so every roll below stays as it was.
+    let housing_group = element.tags.contains_key("building:part")
+        && crate::osm_parser::residential_group_from_seed(group_seed);
+    let group_seed = if housing_group {
+        crate::osm_parser::seed_without_residential_mark(group_seed)
+    } else {
+        group_seed
+    };
+    let floor_cycle = floor_cycle_for(building_type, &element.tags, housing_group);
 
     // Architectural era, consumed by palettes, frames, depth styles and
     // weathering. Untagged parts inherit the hint packed into the group seed.
@@ -10688,9 +10708,14 @@ pub fn generate_buildings(
         cached_footprint_size,
         group_seed,
     );
-    // Untagged towers read better on the taller commercial rhythm.
+    // Untagged towers read better on the taller commercial rhythm; a part
+    // keeps the cycle its group shares.
+    let takes_commercial_rhythm = is_tall_building
+        && building_type == "yes"
+        && floor_cycle == 3
+        && !element.tags.contains_key("building:part");
     let (floor_cycle, building_height, is_tall_building, min_level_offset) =
-        if is_tall_building && building_type == "yes" && floor_cycle == 3 {
+        if takes_commercial_rhythm {
             let (h, tall) = calculate_building_height(
                 element,
                 building_type,
@@ -16444,6 +16469,26 @@ mod height_tests {
         ]);
         let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, Some(19), 4, 100, 1);
         assert_eq!(h, 29);
+    }
+
+    // A ten-storey slab of flats mapped as levels-only parts is about 32 m,
+    // not the 42 m of a commercial storey; a part with a mapped height, or
+    // of a building that is not housing, keeps the shared commercial cycle.
+    #[test]
+    fn levels_only_parts_of_housing_take_housing_storeys() {
+        let part = way_with_tags(&[("building:part", "yes"), ("building:levels", "10")]);
+        let cycle = floor_cycle_for("yes", &part.tags, true);
+        assert_eq!(cycle, 3);
+        let (h, _) = calculate_building_height(&part, "yes", 0, 1.0, None, cycle, 400, 1);
+        assert_eq!(h, 32);
+        assert_eq!(floor_cycle_for("yes", &part.tags, false), 4);
+        assert_eq!(floor_cycle_for("apartments", &part.tags, false), 3);
+        let measured = way_with_tags(&[
+            ("building:part", "yes"),
+            ("building:levels", "10"),
+            ("height", "38"),
+        ]);
+        assert_eq!(floor_cycle_for("yes", &measured.tags, true), 4);
     }
 
     #[test]

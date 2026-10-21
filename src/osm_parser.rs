@@ -550,7 +550,49 @@ pub fn style_hint_from_seed(seed: u64) -> StyleHint {
 
 /// The seed with its style-hint bits cleared (used for the random variant roll).
 pub fn seed_without_hint(seed: u64) -> u64 {
-    seed & !STYLE_HINT_MASK
+    seed & !(STYLE_HINT_MASK | RESIDENTIAL_GROUP_BIT)
+}
+
+// Set on the shared seed of parts whose building is housing (bit 60)
+const RESIDENTIAL_GROUP_BIT: u64 = 1 << 60;
+
+/// Whether a part's shared seed marks its building as housing, whose
+/// levels-only parts take the residential storey height.
+pub fn residential_group_from_seed(seed: u64) -> bool {
+    seed & RESIDENTIAL_GROUP_BIT != 0
+}
+
+/// The seed without the housing mark, so every roll a part makes stays the
+/// one it made before the mark existed.
+pub fn seed_without_residential_mark(seed: u64) -> u64 {
+    seed & !RESIDENTIAL_GROUP_BIT
+}
+
+fn seed_with_residential_mark(seed: u64, residential: bool) -> u64 {
+    if residential {
+        seed | RESIDENTIAL_GROUP_BIT
+    } else {
+        seed
+    }
+}
+
+/// Building types built on the residential storey height: flats, houses and
+/// their outbuildings.
+fn is_housing_type(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("building").map(String::as_str),
+        Some(
+            "residential"
+                | "apartments"
+                | "house"
+                | "detached"
+                | "semidetached_house"
+                | "terrace"
+                | "dormitory"
+                | "bungalow"
+                | "villa"
+        )
+    )
 }
 
 fn seed_with_hint(seed: u64, hint: StyleHint) -> u64 {
@@ -1323,6 +1365,7 @@ fn compute_outline_suppression(
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
+    let mut housing_ways: HashSet<u64> = HashSet::new();
     for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
@@ -1330,6 +1373,9 @@ fn compute_outline_suppression(
         if let Some(t) = w.tags.as_ref() {
             way_hint.insert(w.id, building_style_hint(t));
             way_ground.insert(w.id, part_covers_ground(t));
+            if is_housing_type(t) {
+                housing_ways.insert(w.id);
+            }
         }
     }
     let mut needed_nodes: HashSet<u64> = HashSet::new();
@@ -1380,6 +1426,12 @@ fn compute_outline_suppression(
                 .unwrap_or(StyleHint::None);
         }
 
+        // Housing when the relation or its outline says so.
+        let housing = is_housing_type(tags)
+            || rel.members.iter().any(|m| {
+                is_outline(m.role.trim()) && m.r#type == "way" && housing_ways.contains(&m.r#ref)
+            });
+
         // Sub-relation parts carry no way geometry here, so they skip the coverage gate.
         let mut has_part = false;
         let mut has_relation_part = false;
@@ -1397,7 +1449,10 @@ fn compute_outline_suppression(
                     }
                     part_group.insert(
                         m.r#ref,
-                        seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                        seed_with_residential_mark(
+                            seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                            housing,
+                        ),
                     );
                 }
                 _ => {}
@@ -1549,6 +1604,7 @@ fn compute_spatial_part_suppression(
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
+    let mut housing_outlines: HashSet<u64> = HashSet::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for w in ways {
         if relation_ways.contains(&w.id) {
@@ -1565,6 +1621,9 @@ fn compute_spatial_part_suppression(
             part_ids.push(w.id);
         } else if tags.contains_key("building") {
             outline_ids.push(w.id);
+            if is_housing_type(tags) {
+                housing_outlines.insert(w.id);
+            }
         } else {
             continue;
         }
@@ -1677,7 +1736,13 @@ fn compute_spatial_part_suppression(
             if hint == StyleHint::None {
                 hint = way_hint.get(&pid).copied().unwrap_or(StyleHint::None);
             }
-            part_group.insert(pid, seed_with_hint(geoms[gi].id, hint));
+            part_group.insert(
+                pid,
+                seed_with_residential_mark(
+                    seed_with_hint(geoms[gi].id, hint),
+                    housing_outlines.contains(&geoms[gi].id),
+                ),
+            );
         }
     }
 
@@ -2378,6 +2443,26 @@ mod outline_suppression_tests {
             .as_ref()
             .unwrap()
             .contains_key("building:colour"));
+    }
+
+    // The parts of a block of flats carry the housing mark; it leaves the
+    // group key and every roll made from the seed as they were.
+    #[test]
+    fn spatial_parts_of_flats_carry_the_housing_mark() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let ways = [
+            tagged(o, "building", "apartments"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        let seed = groups[&200];
+        assert!(residential_group_from_seed(seed));
+        assert_eq!(seed_without_hint(seed), 100);
+        assert_eq!(seed_without_residential_mark(seed), 100);
+        assert!(!residential_group_from_seed(100));
     }
 
     fn tagmap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
