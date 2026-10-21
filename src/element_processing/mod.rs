@@ -6,6 +6,7 @@ pub mod bridge_modules;
 pub mod bridge_styles;
 pub mod bridge_towers;
 pub mod bridges;
+pub(crate) mod building_construction;
 pub mod building_facade;
 #[cfg(test)]
 pub mod building_test_support;

@@ -10506,6 +10506,31 @@ pub fn generate_buildings(
             )
         };
 
+    // A building going up is a frame of slabs and columns, not a finished shell.
+    if BuildingCondition::from_tags(&element.tags) == BuildingCondition::Construction
+        && min_level_offset == 0
+        && cached_footprint_size > THIN_RING_MAX_CELLS
+    {
+        let storey = multiply_scale(floor_cycle, scale_factor);
+        crate::element_processing::building_construction::generate(
+            editor,
+            element,
+            &cached_floor_area,
+            start_y_offset + abs_terrain_offset,
+            crate::element_processing::building_construction::Progress::of(
+                element.id,
+                building_height,
+                storey,
+            ),
+            args.terrain(),
+            scale_factor,
+            ctx.building_footprints,
+            building_passages,
+            BUILDING_PASSAGE_HEIGHT,
+        );
+        return None;
+    }
+
     // Determine building category and get appropriate style preset
     let category = BuildingCategory::from_element(
         element,
