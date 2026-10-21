@@ -11221,6 +11221,27 @@ pub fn generate_buildings(
         },
         None => config,
     };
+    // A tower crown is carved out of the mapped height: the shaft stops short
+    // and the crown rises to the top the data gives.
+    let tower_crown = if podium_tower.is_none() {
+        plan_tower_crown(
+            element,
+            &config,
+            style.roof_type,
+            style.generate_roof && invented_massing,
+            &cached_floor_area,
+            &roof_ctx,
+        )
+    } else {
+        None
+    };
+    let config = match tower_crown {
+        Some(crown) => BuildingConfig {
+            building_height: config.building_height - crown.rows(config.floor_cycle),
+            ..config
+        },
+        None => config,
+    };
     // The preset facades are recorded before the wall is built, not after it:
     // the columns they return are the columns built as a plain shell, so the
     // shell is exactly what the photographs cover and a wall they hang nothing
@@ -11586,6 +11607,7 @@ pub fn generate_buildings(
                 BuildingCategory::House | BuildingCategory::Residential
             ) || is_residential_type(building_type),
             explicit_pass: invented_massing,
+            crown: tower_crown,
         };
         // Cells within an overhang's reach that belong to another building
         // or part: a pitched roof's eaves stop short of them.
@@ -11742,6 +11764,8 @@ struct FlatRoofKit<'a> {
     /// for those before every flat roof got one. A setback crown, which the
     /// data does not show, and the hospital's wall crosses stay with them.
     explicit_pass: bool,
+    /// The crown planned inside the mapped height, see `plan_tower_crown`.
+    crown: Option<TowerCrown>,
 }
 
 /// Building types that are homes.
@@ -12124,17 +12148,28 @@ fn generate_building_roof(
         } else {
             ParapetCap::Coping(coping)
         };
-        if config.has_parapet {
+        // A crown screen stands where the parapet would.
+        let screen = match kit.crown {
+            Some(TowerCrown::Screen { rows }) => Some(rows),
+            _ => None,
+        };
+        if let Some(rows) = screen {
+            generate_crown_screen(editor, element, config, rows, kit.facade);
+        } else if config.has_parapet {
             generate_parapet(editor, element, config, roof_area, kit.facade, cap);
         } else if !modeled_part_roof {
             generate_flat_roof_edge_variation(editor, config, roof_area, kit.facade, coping);
         }
 
         // A stepped setback crown, unless a planned tower rises from this roof.
+        // Plant stands on the deck inside a screen, but not on a setback.
         let has_crown = suppress_flat_extras
-            || (!is_part
-                && kit.explicit_pass
-                && generate_setback_crown(editor, config, roof_area, &kit.cover));
+            || match kit.crown {
+                Some(TowerCrown::Setback { tiers }) if !is_part => {
+                    generate_setback_crown(editor, config, roof_area, &kit.cover, tiers)
+                }
+                _ => false,
+            };
         if !has_crown
             && !modeled_part_roof
             && should_generate_rooftop_equipment(config, style.roof_type, category)
@@ -12450,31 +12485,169 @@ fn generate_inset_tiers(
     placed.then_some(current_base)
 }
 
+/// How a flat-roofed tower ends, inside its mapped height.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TowerCrown {
+    /// Setback tiers, a storey each, stepping back three blocks at a time:
+    /// the zoning-era wedding cake of a pre-war masonry tower.
+    Setback { tiers: i32 },
+    /// The facade carried on past a lowered roof deck as an open screen,
+    /// louvred where the windows were, with the plant behind it.
+    Screen { rows: i32 },
+}
+
+impl TowerCrown {
+    /// Rows of the mapped height the crown takes from the shaft.
+    fn rows(self, floor_cycle: i32) -> i32 {
+        match self {
+            TowerCrown::Setback { tiers } => tiers * floor_cycle,
+            TowerCrown::Screen { rows } => rows,
+        }
+    }
+}
+
+/// The crown a tall, flat-roofed tower ends in, or None for a plain parapet.
+/// Pre-war masonry towers in North America step back in tiers; other towers
+/// hide their plant behind a screen. Either is carved out of the mapped
+/// height, never stacked on it.
+fn plan_tower_crown(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    roof_type: RoofType,
+    generate_roof_flag: bool,
+    floor_area: &[(i32, i32)],
+    roof_ctx: &RoofContext,
+) -> Option<TowerCrown> {
+    let cycle = config.floor_cycle.max(1);
+    let storeys = config.building_height / cycle;
+    // The roof pass must draw the crown: an enclosed roof gets none.
+    if !config.is_tall_building
+        || storeys < 12
+        || roof_type != RoofType::Flat
+        || !generate_roof_flag
+        || roof_ctx.enclosed
+        || config.condition != BuildingCondition::Normal
+        || element.tags.contains_key("building:part")
+        || floor_area.len() < 200
+    {
+        return None;
+    }
+    let roll = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001).random_range(0u32..100);
+    let pre_war_masonry = config.category == BuildingCategory::MasonrySkyscraper
+        || (config.category == BuildingCategory::TallBuilding
+            && matches!(
+                config.era,
+                ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar
+            ));
+    if pre_war_masonry && roof_ctx.region == BuildingRegion::NorthAmerica {
+        if roll >= 45 {
+            return None;
+        }
+        // Each tier steps three blocks in and needs a floor of its own.
+        let wanted = if config.category == BuildingCategory::MasonrySkyscraper {
+            3
+        } else {
+            2
+        };
+        let dist = roof_edge_distances(floor_area);
+        let tiers = (1..=wanted)
+            .take_while(|t| {
+                floor_area
+                    .iter()
+                    .filter(|&&(x, z)| dist.get(x, z) >= 3 * t)
+                    .count()
+                    >= 30
+            })
+            .count() as i32;
+        return (tiers > 0).then_some(TowerCrown::Setback { tiers });
+    }
+    if roll >= 50 {
+        return None;
+    }
+    // Two storeys of plant room on a big tower, a storey and a half below.
+    let rows = if storeys >= 20 { 2 * cycle } else { cycle + 2 };
+    Some(TowerCrown::Screen { rows })
+}
+
+/// The screen of a `TowerCrown::Screen`: the facade's own piers, bands and
+/// mullions carried from the lowered roof deck to the mapped height, with
+/// louvres where its windows were and no floor behind them. A curtain wall
+/// runs on as glass. A coping caps it where a parapet would be.
+fn generate_crown_screen(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    rows: i32,
+    facade: &FacadePlan,
+) {
+    let full = BuildingConfig {
+        building_height: config.building_height + rows,
+        ..config.clone()
+    };
+    let columns = facade_columns(&element.nodes, config);
+    let mut variety = WallVariety::new(config);
+    let deck = config.start_y_offset + config.building_height + 1;
+    let top = full.start_y_offset + full.building_height;
+    let abs = config.abs_terrain_offset;
+    let curtain = is_glass_wall(config.wall_block);
+    let coping = rooftops::bottom_slab(rooftops::coping_for(
+        config.wall_block,
+        config.accent_block,
+        config.style_seed,
+    ));
+    for wc in columns.iter() {
+        let col = wc.facade(facade);
+        let flat = config.is_flat_column(wc.x, wc.z);
+        // An open trapdoor facing out hangs on the inner face of its cell,
+        // so the louvres sit a block behind the piers.
+        let louvre = make_open_trapdoor(IRON_TRAPDOOR, facing_for_normal(wc.normal.0, wc.normal.1));
+        for h in deck + 1..=top {
+            let block =
+                determine_wall_block_at_position(wc.x, h, wc.z, &full, col, flat, &mut variety);
+            let glazed = !flat && (block == config.window_block || block == GLASS);
+            if glazed && !curtain && wc.normal != (0, 0) {
+                editor.set_block_with_properties_absolute(
+                    louvre.clone(),
+                    wc.x,
+                    h + abs,
+                    wc.z,
+                    None,
+                    None,
+                );
+            } else {
+                editor.set_block_absolute(block, wc.x, h + abs, wc.z, None, None);
+            }
+        }
+        let line = if config.use_accent_roof_line && !flat {
+            config.accent_block
+        } else {
+            config.wall_block
+        };
+        editor.set_block_absolute(line, wc.x, top + 1 + abs, wc.z, None, None);
+        if !col.party {
+            editor.set_block_with_properties_absolute(
+                coping.clone(),
+                wc.x,
+                top + 2 + abs,
+                wc.z,
+                Some(&[AIR]),
+                None,
+            );
+        }
+    }
+}
+
+/// Stepped setback tiers on a tower's lowered roof, one storey each, up to
+/// the mapped height that `plan_tower_crown` took them from.
 fn generate_setback_crown(
     editor: &mut WorldEditor,
     config: &BuildingConfig,
     roof_area: &[(i32, i32)],
     cover: &RoofMembrane,
+    tier_count: i32,
 ) -> bool {
-    if !config.is_tall_building
-        || config.condition != BuildingCondition::Normal
-        || roof_area.len() < 200
-    {
-        return false;
-    }
-    let mut rng = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001);
-    if !rng.random_bool(0.45) {
-        return false;
-    }
-
     let dist = roof_edge_distances(roof_area);
     let roof_rel = config.start_y_offset + config.building_height + 1;
-    // Masonry towers get the full art-deco wedding cake.
-    let tier_count = if config.category == BuildingCategory::MasonrySkyscraper {
-        3
-    } else {
-        2
-    };
     let tiers: Vec<InsetTier> = (0..tier_count)
         .map(|t| InsetTier {
             inset: 3 + t * 3,
@@ -12482,7 +12655,12 @@ fn generate_setback_crown(
             with_ceilings: false,
         })
         .collect();
-    let Some(top) = generate_inset_tiers(editor, config, roof_area, &dist, roof_rel, &tiers, cover)
+    // The tiers' top storey is the tower's top storey.
+    let full = BuildingConfig {
+        building_height: config.building_height + tier_count * config.floor_cycle,
+        ..config.clone()
+    };
+    let Some(top) = generate_inset_tiers(editor, &full, roof_area, &dist, roof_rel, &tiers, cover)
     else {
         return false;
     };
@@ -18800,6 +18978,68 @@ mod style_tests {
     }
 
     #[test]
+    fn tower_crowns_come_out_of_the_mapped_height() {
+        use crate::element_processing::building_test_support::rect_way;
+        let way = rect_way(1, 0, 0, 30, 30, &[("building", "office")]);
+        let floor: Vec<(i32, i32)> = (1..30).flat_map(|x| (1..30).map(move |z| (x, z))).collect();
+        let new_york = RoofContext {
+            region: BuildingRegion::NorthAmerica,
+            ..RoofContext::default()
+        };
+        let europe = RoofContext {
+            region: BuildingRegion::Europe,
+            ..RoofContext::default()
+        };
+        let mut tower = test_config(2 + 30 * 4, false, false);
+        tower.is_tall_building = true;
+        tower.category = BuildingCategory::MasonrySkyscraper;
+        let plan = |tower: &BuildingConfig, ctx: &RoofContext| {
+            plan_tower_crown(&way, tower, RoofType::Flat, true, &floor, ctx)
+        };
+        let (mut setbacks, mut screens) = (0, 0);
+        for id in 0..60 {
+            tower.element_id = id;
+            match plan(&tower, &new_york) {
+                Some(TowerCrown::Setback { tiers }) => {
+                    assert_eq!(tiers, 3);
+                    setbacks += 1;
+                }
+                Some(TowerCrown::Screen { .. }) => panic!("a pre-war New York tower steps back"),
+                None => {}
+            }
+            // The same tower in Europe hides its plant instead.
+            match plan(&tower, &europe) {
+                Some(TowerCrown::Screen { rows }) => {
+                    assert_eq!(rows, 8);
+                    screens += 1;
+                }
+                Some(TowerCrown::Setback { .. }) => panic!("European towers do not step back"),
+                None => {}
+            }
+        }
+        assert!((10..50).contains(&setbacks), "{setbacks}");
+        assert!((10..50).contains(&screens), "{screens}");
+        // A crown takes its rows from the shaft, never adds them.
+        assert_eq!(TowerCrown::Setback { tiers: 3 }.rows(4), 12);
+        // Low towers, enclosed roofs and roofs the pass does not draw keep a parapet.
+        let enclosed = RoofContext {
+            enclosed: true,
+            ..europe
+        };
+        for id in 0..60 {
+            tower.element_id = id;
+            assert_eq!(plan(&tower, &enclosed), None);
+            assert_eq!(
+                plan_tower_crown(&way, &tower, RoofType::Flat, false, &floor, &europe),
+                None
+            );
+            let mut low = tower.clone();
+            low.building_height = 2 + 10 * 4;
+            assert_eq!(plan(&low, &europe), None);
+        }
+    }
+
+    #[test]
     fn wall_variety_stays_within_the_tone() {
         assert_eq!(substitute_pool_only(GRAY_CONCRETE), &[GRAY_CONCRETE_POWDER]);
         for b in substitute_pool_only(BRICK) {
@@ -19235,6 +19475,62 @@ mod facade_integration_tests {
             .flat_map(|x| (0..80).map(move |z| (x, z)))
             .map(|(x, z)| editor.highest_block_between(x, z, -64, 300))
             .collect()
+    }
+
+    // A tower's crown ends at its mapped height: a screen carries the wall
+    // up round a plant deck sunk below it, and nothing is stacked above.
+    #[test]
+    fn a_crown_screen_stays_inside_the_mapped_height() {
+        use crate::coordinate_system::geographic::LLBBox;
+        use crate::element_processing::building_test_support::test_editor_at;
+        let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let road = CoordinateBitmap::new(&xz);
+        let footprints = CoordinateBitmap::new(&xz);
+        let berlin = LLBBox::new(52.52, 13.40, 52.53, 13.41).unwrap();
+        let (x0, z0, x1, z1) = (20, 20, 50, 44);
+        let mut screens = 0;
+        for id in 1..24u64 {
+            let way = rect_way(
+                id,
+                x0,
+                z0,
+                x1,
+                z1,
+                &[
+                    ("building", "office"),
+                    ("height", "100"),
+                    ("roof:shape", "flat"),
+                ],
+            );
+            let mut editor = test_editor_at(&xz, berlin);
+            run_building(&mut editor, &way, &road, &footprints);
+            // A screen leaves the top storey open: no roof over the inside at
+            // the mapped height, only what plant stands that tall.
+            let lidded = (x0 + 2..=x1 - 2)
+                .flat_map(|x| (z0 + 2..=z1 - 2).map(move |z| (x, z)))
+                .filter(|&(x, z)| editor.get_block_absolute(x, 101, z).is_some())
+                .count();
+            if lidded * 2 > ((x1 - x0 - 3) * (z1 - z0 - 3)) as usize {
+                continue;
+            }
+            screens += 1;
+            // Walls end at 100, under a roof line and a coping.
+            for x in x0 + 1..x1 {
+                let top = editor.highest_block_between(x, z0, -64, 300);
+                assert_eq!(top, Some(102), "way {id}: screen top at x {x}");
+            }
+            // The plant stands on a deck sunk inside the screen, not above it.
+            let mut above = 0;
+            for x in x0..=x1 {
+                for z in z0..=z1 {
+                    if editor.highest_block_between(x, z, -64, 300) > Some(103) {
+                        above += 1;
+                    }
+                }
+            }
+            assert!(above <= 8, "way {id}: {above} columns above the screen");
+        }
+        assert!(screens > 0, "no tower drew a screen");
     }
 
     // A New York mid-rise without roof tags gets a membrane, a parapet and
