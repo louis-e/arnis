@@ -1309,6 +1309,15 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.insert((x, z), y);
     }
 
+    /// The ground Y a road, track or cut has set for this cell, if any.
+    #[inline]
+    pub fn surface_override(&self, x: i32, z: i32) -> Option<i32> {
+        if self.road_surface_overrides.is_empty() {
+            return None;
+        }
+        self.road_surface_overrides.get(&(x, z)).copied()
+    }
+
     /// Record a bridge pier or pylon column standing on the terrain at (x, z).
     #[inline]
     pub fn register_support_column(&mut self, x: i32, z: i32, block: Block) {

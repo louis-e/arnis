@@ -4540,7 +4540,7 @@ mod tests {
                 }
             }
         }
-        let rail: Vec<_> = (10..=30).map(|x| (x, 20, x == 20)).collect();
+        let rail: Vec<_> = (10..=30).map(|x| (x, 20, -8, x == 20)).collect();
         let road: Vec<_> = (10..=30)
             .map(|z| HighwayTunnelCell {
                 x: 20,

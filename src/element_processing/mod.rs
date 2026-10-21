@@ -25,6 +25,7 @@ pub mod man_made;
 pub mod natural;
 pub mod parking_garage;
 pub mod power;
+pub mod rail_track;
 pub mod railways;
 pub mod road_markings;
 pub mod rooftops;

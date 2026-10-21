@@ -1181,7 +1181,8 @@ impl BridgeStructureMap {
             let level = deck.max(floor);
             for &i in group {
                 let way = rail_bridge_ways[i];
-                let terrain: Vec<i32> = railways::build_smoothed_centerline(way)
+                let cells = railways::build_smoothed_centerline(way);
+                let terrain: Vec<i32> = cells
                     .iter()
                     .map(|&(x, z)| editor.get_ground_level(x, z))
                     .collect();
@@ -1194,11 +1195,16 @@ impl BridgeStructureMap {
                 rail_decks.insert(
                     way.id,
                     RailDeck::Own(OwnRailDeck {
-                        ys: railways::rail_bridge_profile(
+                        ys: railways::fit_rail_deck(
+                            &cells,
                             &terrain,
-                            level,
-                            start_internal,
-                            end_internal,
+                            railways::rail_bridge_profile(
+                                &terrain,
+                                level,
+                                start_internal,
+                                end_internal,
+                            ),
+                            [start_internal, end_internal],
                         ),
                         start_is_boundary: !start_internal,
                         end_is_boundary: !end_internal,

@@ -285,6 +285,7 @@ fn process_element(
     building_passages: &CoordinateBitmap,
     road_mask: &CoordinateBitmap,
     rail_mask: &CoordinateBitmap,
+    rail_joins: &railways::RailJoins,
     tunnel_footprint: &CoordinateBitmap,
     xzbbox: &XZBBox,
     big_water_field: &crate::water_depth::BigWaterField,
@@ -433,6 +434,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     rail_mask,
+                    rail_joins,
                 );
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
@@ -1085,6 +1087,8 @@ pub fn generate_world_with_options(
 
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
+    // What each track way joins at its ends, so every tile lays the joints alike.
+    let rail_joins = railways::RailJoins::build(&elements, railways::track_level);
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
 
@@ -1449,6 +1453,7 @@ pub fn generate_world_with_options(
                     &building_passages,
                     &road_mask,
                     &rail_mask,
+                    &rail_joins,
                     &tunnel_footprint,
                     // World bbox (not tile) for relation/area ring clipping: clipping to
                     // the tile can drop a relation whose ring fails to close. The tile
@@ -1851,6 +1856,7 @@ pub fn generate_world_with_options(
                 &building_passages,
                 &road_mask,
                 &rail_mask,
+                &rail_joins,
                 &tunnel_footprint,
                 &clip_bbox,
                 &big_water_field,
@@ -1950,6 +1956,7 @@ pub fn generate_world_with_options(
     }
     drop(tunnel_footprint);
     drop(rail_mask);
+    drop(rail_joins);
     drop(big_water_field);
     // The ruins break buildings open where these say they stand.
     let building_footprints = args.post_apocalyptic.then_some(building_footprints);
