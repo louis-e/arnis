@@ -4236,7 +4236,7 @@ const FACADE_TONES: [(Block, (u8, u8, u8), u8); 32] = [
     ),
     (TERRACOTTA, (152, 94, 68), BRICKWORK | STONEWORK | RENDERED),
     (POLISHED_GRANITE, (154, 107, 89), BRICKWORK | STONEWORK),
-    (MUD_BRICKS, (137, 104, 79), BRICKWORK | STONEWORK),
+    (MUD_BRICKS, (137, 104, 79), BRICKWORK),
     (LIGHT_GRAY_TERRACOTTA, (135, 107, 98), BRICKWORK | RENDERED),
     (BROWN_TERRACOTTA, (77, 51, 36), BRICKWORK | RENDERED),
     (NETHER_BRICK, (44, 22, 26), BRICKWORK),
@@ -4400,18 +4400,16 @@ fn facade_tone_for_colour(rgb: (u8, u8, u8), family: u8, rng: &mut impl Rng) -> 
 
 /// Whether a block's Oklab colour keeps the hue of a tagged one: anything
 /// does for a near-neutral tag; for a tinted tag a grey does not, and a
-/// tinted block only within about 20 degrees of hue.
+/// tinted block only within about 20 degrees of hue. Brownstone, which has
+/// no stone of its hue, falls back to the nearest overall (granite).
 fn keeps_hue(target: (f32, f32, f32), block: (f32, f32, f32)) -> bool {
     let target_chroma = target.1.hypot(target.2);
     if target_chroma < 0.03 {
         return true;
     }
     let chroma = block.1.hypot(block.2);
-    if chroma < 0.01 {
-        return false;
-    }
     if chroma < 0.015 {
-        return true;
+        return false;
     }
     let cos = (target.1 * block.1 + target.2 * block.2) / (target_chroma * chroma);
     cos >= 0.927 // cos 22 degrees
@@ -18713,6 +18711,19 @@ mod style_tests {
             assert!(
                 matches!(brown, Some(MUD_BRICKS | POLISHED_GRANITE | BRICK)),
                 "{brown:?}"
+            );
+            // Brownstone is a granite, not a brick or a grey.
+            let brownstone = wall(
+                &[
+                    ("building:material", "stone"),
+                    ("building:colour", "#987c5d"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(brownstone, Some(POLISHED_GRANITE | TERRACOTTA)),
+                "{brownstone:?}"
             );
             // Sooted sandstone stays dark.
             let sooted = wall(
