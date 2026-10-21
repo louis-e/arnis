@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Öt éjszakányi zombihullám az utcáidon, a végén főellenséggel.",
   "body_gravity": "Hold- és Mars-gravitáció",
   "body_gravity_desc": "Valódi alacsony gravitáció a Hold- és Mars-világokban.",
-  "moving_cars": "Mozgó autók",
-  "moving_cars_desc": "Forgalom, amely a sebességhatárral közlekedik az utcáidon."
+  "moving_vehicles": "Mozgó járművek",
+  "moving_vehicles_desc": "Autók, villamosok, metrók és vonatok az utcáidon és síneiden."
 }

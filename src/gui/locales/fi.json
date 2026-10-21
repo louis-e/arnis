@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Viisi yötä zombiaaltoja kaduillasi, lopussa pomo.",
   "body_gravity": "Kuun ja Marsin painovoima",
   "body_gravity_desc": "Aito matala painovoima Kuu- ja Mars-maailmoissa.",
-  "moving_cars": "Liikkuvat autot",
-  "moving_cars_desc": "Liikennettä, joka ajaa kaduillasi nopeusrajoitusta noudattaen."
+  "moving_vehicles": "Liikkuvat ajoneuvot",
+  "moving_vehicles_desc": "Autoja, raitiovaunuja, metroja ja junia kaduillasi ja raiteillasi."
 }

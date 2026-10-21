@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Cinq nuits de vagues de zombies dans vos rues, avec un boss.",
   "body_gravity": "Gravité Lune et Mars",
   "body_gravity_desc": "Une vraie faible gravité dans les mondes Lune et Mars.",
-  "moving_cars": "Voitures en mouvement",
-  "moving_cars_desc": "Une circulation qui roule dans vos rues à la vitesse limite."
+  "moving_vehicles": "Véhicules en mouvement",
+  "moving_vehicles_desc": "Voitures, tramways, métros et trains qui parcourent vos rues et vos voies."
 }

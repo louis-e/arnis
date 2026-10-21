@@ -285,6 +285,7 @@ fn process_element(
     building_passages: &CoordinateBitmap,
     road_mask: &CoordinateBitmap,
     rail_mask: &CoordinateBitmap,
+    rail_joins: &railways::RailJoins,
     tunnel_footprint: &CoordinateBitmap,
     xzbbox: &XZBBox,
     big_water_field: &crate::water_depth::BigWaterField,
@@ -433,6 +434,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     rail_mask,
+                    rail_joins,
                 );
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
@@ -981,7 +983,7 @@ pub fn generate_world_with_options(
         (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
     );
     let road_markings = road_markings::RoadMarkingIndex::build(&elements, args.scale, sign_region);
-    let extras = crate::datapack::Extras::from_args(args);
+    let mut extras = crate::datapack::Extras::from_args(args);
 
     // Collect underground railway centerline points for post-ground-fill air carving (phase 2).
     let mut rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
@@ -1085,6 +1087,8 @@ pub fn generate_world_with_options(
 
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
+    // What each track way joins at its ends, so every tile lays the joints alike.
+    let rail_joins = railways::RailJoins::build(&elements, railways::track_level);
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
 
@@ -1135,6 +1139,25 @@ pub fn generate_world_with_options(
     });
     if let Some(cars) = &car_network {
         editor.set_car_network(Arc::clone(cars));
+    }
+    // Trains ride the rails as they were laid, so the editors note where each one went.
+    let train_network = (extras.cars && world_format == WorldFormat::JavaAnvil)
+        .then(|| {
+            crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
+        })
+        .filter(|net| !net.is_empty());
+    let rail_heights: Option<crate::world_editor::RailHeights> = train_network
+        .as_ref()
+        .map(|_| Arc::new(std::sync::Mutex::new(fnv::FnvHashMap::default())));
+    if let Some(net) = &train_network {
+        println!(
+            "  Moving vehicles: {} trains on the rail network",
+            net.train_count()
+        );
+    }
+    extras.trains = train_network.is_some();
+    if let Some(heights) = &rail_heights {
+        editor.set_rail_heights(Arc::clone(heights));
     }
 
     // The elements are gone by the time the pack is written.
@@ -1397,6 +1420,9 @@ pub fn generate_world_with_options(
             if let Some(cars) = &car_network {
                 tile_editor.set_car_network(Arc::clone(cars));
             }
+            if let Some(heights) = &rail_heights {
+                tile_editor.set_rail_heights(Arc::clone(heights));
+            }
             tile_editor.set_strict_bounds(
                 tile_bounds.min_x,
                 tile_bounds.min_z,
@@ -1427,6 +1453,7 @@ pub fn generate_world_with_options(
                     &building_passages,
                     &road_mask,
                     &rail_mask,
+                    &rail_joins,
                     &tunnel_footprint,
                     // World bbox (not tile) for relation/area ring clipping: clipping to
                     // the tile can drop a relation whose ring fails to close. The tile
@@ -1505,12 +1532,20 @@ pub fn generate_world_with_options(
                 g_min_z,
                 g_max_z,
             );
+            highways::drop_lamps_in_water(&mut tile_editor);
 
             // Under eviction the post-merge rail-tunnel carve can't run (regions get freed),
             // so carve in-tile now, after ground/fill so the interior isn't refilled.
             if eviction_active {
-                railways::carve_rail_tunnel_interior(&mut tile_editor, &tile_rail_tunnel_points);
-                highways::carve_highway_tunnel_interior(&mut tile_editor, &tile_tunnel_cells);
+                let mut lights = railways::carve_rail_tunnel_interior(
+                    &mut tile_editor,
+                    &tile_rail_tunnel_points,
+                );
+                lights.extend(highways::carve_highway_tunnel_interior(
+                    &mut tile_editor,
+                    &tile_tunnel_cells,
+                ));
+                highways::hang_tunnel_lights(&mut tile_editor, &lights);
             }
             // Seal floating water/lava last: the water-depth carve and the tunnel carves
             // above can each undercut a water body over a cave. Under eviction this tile
@@ -1821,6 +1856,7 @@ pub fn generate_world_with_options(
                 &building_passages,
                 &road_mask,
                 &rail_mask,
+                &rail_joins,
                 &tunnel_footprint,
                 &clip_bbox,
                 &big_water_field,
@@ -1890,6 +1926,7 @@ pub fn generate_world_with_options(
             &tunnel_footprint,
             &bridge_surface,
         );
+        highways::drop_lamps_in_water(&mut editor);
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
@@ -1919,6 +1956,7 @@ pub fn generate_world_with_options(
     }
     drop(tunnel_footprint);
     drop(rail_mask);
+    drop(rail_joins);
     drop(big_water_field);
     // The ruins break buildings open where these say they stand.
     let building_footprints = args.post_apocalyptic.then_some(building_footprints);
@@ -1929,11 +1967,18 @@ pub fn generate_world_with_options(
 
     // Carve railway tunnel interiors now that underground is filled with stone.
     // Under eviction this already ran in-tile (regions get freed before here).
-    if !eviction_active && !rail_tunnel_points.is_empty() {
-        railways::carve_rail_tunnel_interior(&mut editor, &rail_tunnel_points);
-    }
-    if !eviction_active && !tunnel_cells.is_empty() {
-        highways::carve_highway_tunnel_interior(&mut editor, &tunnel_cells);
+    if !eviction_active {
+        let mut lights = Vec::new();
+        if !rail_tunnel_points.is_empty() {
+            lights = railways::carve_rail_tunnel_interior(&mut editor, &rail_tunnel_points);
+        }
+        if !tunnel_cells.is_empty() {
+            lights.extend(highways::carve_highway_tunnel_interior(
+                &mut editor,
+                &tunnel_cells,
+            ));
+        }
+        highways::hang_tunnel_lights(&mut editor, &lights);
     }
     // Seal floating water/lava as the final underground pass; eviction tiles did it in-tile.
     if args.caves && !eviction_active {
@@ -2220,6 +2265,14 @@ pub fn generate_world_with_options(
                         net.storage_function(),
                     ));
                     functions
+                })
+                .unwrap_or_default(),
+            train_functions: train_network
+                .as_ref()
+                .zip(rail_heights.as_ref())
+                .map(|(net, heights)| {
+                    let laid = heights.lock().map(|m| m.clone()).unwrap_or_default();
+                    net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
                 })
                 .unwrap_or_default(),
         };

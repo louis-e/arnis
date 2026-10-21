@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Cinci nopți de valuri de zombi pe străzile tale, cu un boss.",
   "body_gravity": "Gravitație pe Lună și Marte",
   "body_gravity_desc": "Gravitație redusă reală în lumile Lună și Marte.",
-  "moving_cars": "Mașini în mișcare",
-  "moving_cars_desc": "Trafic care circulă pe străzile tale cu limita de viteză."
+  "moving_vehicles": "Vehicule în mișcare",
+  "moving_vehicles_desc": "Mașini, tramvaie, metrouri și trenuri pe străzile și șinele tale."
 }

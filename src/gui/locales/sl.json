@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Pet noči valov zombijev po tvojih ulicah, z glavnim nasprotnikom.",
   "body_gravity": "Gravitacija Lune in Marsa",
   "body_gravity_desc": "Prava nizka gravitacija v svetovih Lune in Marsa.",
-  "moving_cars": "Vozeči avtomobili",
-  "moving_cars_desc": "Promet, ki vozi po tvojih ulicah z omejeno hitrostjo."
+  "moving_vehicles": "Vozeča vozila",
+  "moving_vehicles_desc": "Avtomobili, tramvaji, podzemna in vlaki na tvojih ulicah in tirih."
 }

@@ -42,5 +42,6 @@ execute if score #c arnis.car matches ..0 run return 0
 execute store result entity @s data.d double 0.001 run scoreboard players get #c arnis.car
 execute as @e[type=block_display,tag=arnis.car.part,distance=..0.1] if score @s arnis.car = #id arnis.car run tag @s add arnis.car.go
 function arnis:cars/move with entity @s data
-execute at @s rotated as @s run tp @e[type=block_display,tag=arnis.car.go] ~ ~ ~ ~ ~
-tag @e[type=block_display,tag=arnis.car.go] remove arnis.car.go
+# Still where the move began, so only this car's parts are searched, not every one.
+tp @e[type=block_display,tag=arnis.car.go,distance=..0.1] @s
+execute at @s run tag @e[type=block_display,tag=arnis.car.go,distance=..0.1] remove arnis.car.go

@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "街中を襲うゾンビの波を5夜生き延びよう。ボスも登場。",
   "body_gravity": "月と火星の重力",
   "body_gravity_desc": "月と火星のワールドで本物の低重力。",
-  "moving_cars": "走る車",
-  "moving_cars_desc": "制限速度で街の道路を走る車。"
+  "moving_vehicles": "走る乗り物",
+  "moving_vehicles_desc": "道路や線路を走る車、路面電車、地下鉄、列車。"
 }

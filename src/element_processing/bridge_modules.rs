@@ -241,8 +241,8 @@ pub fn sweep_module(
         let slice = &module.slices[i % module.length];
         for (w, dy, block) in slice {
             let open = if *w > 0 { open_left } else { open_right };
-            // No railing against another deck.
-            if !open && *dy > 0 && w.abs() * 2 >= module.half_width {
+            // No railing against another deck, nor a lamp head left without its post.
+            if !open && *dy > 0 {
                 continue;
             }
             if !open && *dy == 0 && is_railing_part(block.block) {
@@ -314,5 +314,36 @@ mod tests {
         assert!(mods[0].has_pillars && mods[1].has_pillars);
         assert!(!mods[2].has_pillars && !mods[3].has_pillars);
         assert!(!mods[0].feet.iter().all(|f| f.is_empty()));
+    }
+
+    // The narrow deck's lamps hang in over the road from posts on its edges. Between
+    // two other decks the posts go, and their heads must go with them.
+    #[test]
+    fn a_deck_between_two_others_keeps_no_lamp_heads() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        let deck_y = 10;
+        let mut surface = BridgeSurfaceMap::empty();
+        for x in 0..60 {
+            for z in 5..55 {
+                surface.insert_deck(x, z, deck_y);
+            }
+        }
+        let path: Vec<BridgePathSample> = (5..55).map(|x| (x, deck_y, 30, (0.0, 1.0))).collect();
+        sweep_module(&mut editor, &surface, &path, module_at(3).unwrap());
+        for x in 0..60 {
+            for z in 0..60 {
+                assert!(
+                    editor
+                        .highest_block_between(x, z, deck_y + 1, deck_y + 12)
+                        .is_none(),
+                    "a block above the deck at ({x}, {z})"
+                );
+            }
+        }
     }
 }

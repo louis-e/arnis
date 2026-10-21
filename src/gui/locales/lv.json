@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Piecas naktis zombiju viļņu tavās ielās, ar bosu.",
   "body_gravity": "Mēness un Marsa gravitācija",
   "body_gravity_desc": "Īsta zema gravitācija Mēness un Marsa pasaulēs.",
-  "moving_cars": "Braucošas automašīnas",
-  "moving_cars_desc": "Satiksme, kas brauc pa tavām ielām ar atļauto ātrumu."
+  "moving_vehicles": "Braucoši transportlīdzekļi",
+  "moving_vehicles_desc": "Automašīnas, tramvaji, metro un vilcieni uz tavām ielām un sliedēm."
 }

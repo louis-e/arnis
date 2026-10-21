@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "거리를 휩쓰는 좀비 웨이브 속에서 다섯 밤을 버티세요. 보스도 등장합니다.",
   "body_gravity": "달과 화성 중력",
   "body_gravity_desc": "달과 화성 월드에서 실제 낮은 중력.",
-  "moving_cars": "움직이는 자동차",
-  "moving_cars_desc": "제한 속도로 거리를 달리는 차량."
+  "moving_vehicles": "움직이는 탈것",
+  "moving_vehicles_desc": "거리와 선로를 달리는 자동차, 트램, 지하철, 기차."
 }
