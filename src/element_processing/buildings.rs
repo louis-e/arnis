@@ -4153,6 +4153,11 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("facade:material"))
         .filter(|m| !painted_metal(m, &element.tags))
     {
+        // Brick, stone, render and concrete: the material is the texture and
+        // a tagged colour picks its shade.
+        if let Some(block) = facade_tone_for_material(material, &element.tags, rng) {
+            return Some(block);
+        }
         if let Some(block) = get_wall_block_for_material(material, rng) {
             return Some(block);
         }
@@ -4163,10 +4168,217 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("colour"));
     if let Some(building_colour) = colour {
         if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
+            // A tower's colour is its stone or concrete, never timber.
+            if let Some(block) = tower_facade_tones(category, &element.tags)
+                .and_then(|family| facade_tone_for_colour(rgb, family, rng))
+            {
+                return Some(block);
+            }
             return Some(wall_block_for_colour_tag(rgb, rng));
         }
     }
     None
+}
+
+/// Facade materials a tagged colour is matched within.
+const BRICKWORK: u8 = 1;
+const STONEWORK: u8 = 2;
+const RENDERED: u8 = 4;
+const CONCRETE_WORK: u8 = 8;
+
+/// Wall blocks by mean texture colour, with the facade materials each can
+/// stand for. Brick runs from red through brown and buff to grey and white
+/// glazed brick; stone from limestone cream and grey granite to sooted dark
+/// sandstone; render and concrete take the flat textures. Planks are left
+/// out on purpose: a coloured stone or render wall is not timber.
+const FACADE_TONES: [(Block, (u8, u8, u8), u8); 32] = [
+    (BRICK, (151, 98, 83), BRICKWORK),
+    (
+        RED_TERRACOTTA,
+        (143, 61, 47),
+        BRICKWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (TERRACOTTA, (152, 94, 68), BRICKWORK | STONEWORK | RENDERED),
+    (POLISHED_GRANITE, (154, 107, 89), BRICKWORK | STONEWORK),
+    (MUD_BRICKS, (137, 104, 79), BRICKWORK | STONEWORK),
+    (LIGHT_GRAY_TERRACOTTA, (135, 107, 98), BRICKWORK | RENDERED),
+    (BROWN_TERRACOTTA, (77, 51, 36), BRICKWORK | RENDERED),
+    (NETHER_BRICK, (44, 22, 26), BRICKWORK),
+    (DEEPSLATE_BRICKS, (71, 71, 71), BRICKWORK | STONEWORK),
+    (STONE_BRICKS, (122, 122, 122), BRICKWORK | STONEWORK),
+    (QUARTZ_BRICKS, (235, 229, 222), BRICKWORK),
+    (SANDSTONE, (216, 203, 156), BRICKWORK | STONEWORK),
+    (
+        SMOOTH_SANDSTONE,
+        (224, 214, 170),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        WHITE_TERRACOTTA,
+        (210, 178, 161),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        MUSHROOM_STEM,
+        (203, 196, 185),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        SMOOTH_STONE,
+        (159, 159, 159),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        POLISHED_ANDESITE,
+        (132, 135, 134),
+        STONEWORK | CONCRETE_WORK,
+    ),
+    (TUFF, (108, 109, 102), STONEWORK),
+    (POLISHED_DEEPSLATE, (72, 73, 73), STONEWORK),
+    (
+        CALCITE,
+        (223, 224, 220),
+        STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (POLISHED_DIORITE, (193, 193, 195), STONEWORK),
+    (QUARTZ_BLOCK, (236, 230, 223), STONEWORK | RENDERED),
+    (END_STONE_BRICKS, (218, 224, 162), STONEWORK | RENDERED),
+    (WHITE_CONCRETE, (207, 213, 214), RENDERED | CONCRETE_WORK),
+    (
+        LIGHT_GRAY_CONCRETE_POWDER,
+        (154, 154, 148),
+        RENDERED | CONCRETE_WORK,
+    ),
+    (
+        LIGHT_GRAY_CONCRETE,
+        (125, 125, 115),
+        RENDERED | CONCRETE_WORK,
+    ),
+    (GRAY_CONCRETE, (55, 58, 62), RENDERED | CONCRETE_WORK),
+    (YELLOW_TERRACOTTA, (186, 133, 35), RENDERED),
+    (ORANGE_TERRACOTTA, (162, 84, 38), RENDERED),
+    (CYAN_TERRACOTTA, (87, 91, 91), RENDERED | CONCRETE_WORK),
+    (LIGHT_BLUE_TERRACOTTA, (113, 109, 138), RENDERED),
+    (BLACKSTONE, (42, 36, 41), STONEWORK),
+];
+
+/// Wall block for a brick, stone, render or concrete facade that also has a
+/// colour tag: that material's shade nearest the colour. None without a
+/// colour, for other materials (glass, metal, timber keep their own rules),
+/// or when the material has no shade near the colour.
+fn facade_tone_for_material(
+    material: &str,
+    tags: &HashMap<String, String>,
+    rng: &mut impl Rng,
+) -> Option<Block> {
+    let rgb = tags
+        .get("building:colour")
+        .or_else(|| tags.get("colour"))
+        .and_then(|c| color_text_to_rgb_tuple(c))?;
+    let normalized: String = material
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    let family = match normalized.as_str() {
+        "brick" | "bricks" | "redbrick" | "clinker" => BRICKWORK,
+        "stone" | "naturalstone" | "limestone" | "sandstone" | "marble" | "granite" => STONEWORK,
+        "plaster" | "stucco" | "render" | "rendering" | "limerender" | "plastered" => RENDERED,
+        "concrete" | "reinforcedconcrete" | "cement" | "concreteblock" | "concreteblocks"
+        | "panel" | "panels" | "prefab" | "prefabricated" => CONCRETE_WORK,
+        _ => return None,
+    };
+    facade_tone_for_colour(rgb, family, rng)
+}
+
+/// Tone family of a tower with a colour but no material: pre-war and undated
+/// towers are stone or brick, post-war ones stone or concrete. None for
+/// every other building, whose colour may be any render.
+fn tower_facade_tones(category: BuildingCategory, tags: &HashMap<String, String>) -> Option<u8> {
+    if !matches!(
+        category,
+        BuildingCategory::TallBuilding
+            | BuildingCategory::MasonrySkyscraper
+            | BuildingCategory::ContemporarySkyscraper
+            | BuildingCategory::ModernSkyscraper
+            | BuildingCategory::GridSkyscraper
+            | BuildingCategory::GlassCornerSkyscraper
+    ) {
+        return None;
+    }
+    let post_war = matches!(
+        crate::osm_parser::building_arch_era(tags),
+        ArchEra::PostWarPanel | ArchEra::Contemporary
+    );
+    Some(if post_war {
+        STONEWORK | CONCRETE_WORK
+    } else {
+        STONEWORK | BRICKWORK
+    })
+}
+
+/// Nearest `FACADE_TONES` member of `family` to a tagged colour, picking
+/// among near-equal matches so a street of one tag is not all one block.
+/// A coloured tag keeps its hue: a buff tag takes sandstone rather than the
+/// pinker white terracotta that is nearer in lightness, and no tinted tag
+/// takes a grey, unless nothing of that hue is anywhere near. None when even
+/// the nearest is far off, as for blue-painted brick, which the general
+/// colour palette then matches instead.
+fn facade_tone_for_colour(rgb: (u8, u8, u8), family: u8, rng: &mut impl Rng) -> Option<Block> {
+    // Squared distance with lightness at half weight, as for every colour
+    // tag: a tagged pure red still finds brick, a blue does not.
+    const MAX_DISTANCE: f32 = 0.03;
+    let target = crate::colors::oklab_components(&rgb);
+    let insert = |best: &mut [(f32, Block); 3], d: f32, block: Block| {
+        if let Some(slot) = best.iter().position(|&(bd, _)| d < bd) {
+            best.copy_within(slot..2, slot + 1);
+            best[slot] = (d, block);
+        }
+    };
+    let mut any = [(f32::MAX, AIR); 3];
+    let mut same_hue = [(f32::MAX, AIR); 3];
+    for &(block, colour, flags) in &FACADE_TONES {
+        if flags & family == 0 {
+            continue;
+        }
+        let lab = crate::colors::oklab_components(&colour);
+        let (dl, da, db) = (0.5 * (target.0 - lab.0), target.1 - lab.1, target.2 - lab.2);
+        let d = dl * dl + da * da + db * db;
+        insert(&mut any, d, block);
+        if keeps_hue(target, lab) {
+            insert(&mut same_hue, d, block);
+        }
+    }
+    if any[0].0 > MAX_DISTANCE {
+        return None;
+    }
+    let best = if same_hue[0].0 <= 4.0 * any[0].0 {
+        same_hue
+    } else {
+        any
+    };
+    let cutoff = best[0].0.max(1e-6) * 1.25;
+    let near = best.iter().take_while(|&&(d, _)| d <= cutoff).count();
+    Some(best[rng.random_range(0..near)].1)
+}
+
+/// Whether a block's Oklab colour keeps the hue of a tagged one: anything
+/// does for a near-neutral tag; for a tinted tag a grey does not, and a
+/// tinted block only within about 20 degrees of hue.
+fn keeps_hue(target: (f32, f32, f32), block: (f32, f32, f32)) -> bool {
+    let target_chroma = target.1.hypot(target.2);
+    if target_chroma < 0.03 {
+        return true;
+    }
+    let chroma = block.1.hypot(block.2);
+    if chroma < 0.01 {
+        return false;
+    }
+    if chroma < 0.015 {
+        return true;
+    }
+    let cos = (target.1 * block.1 + target.2 * block.2) / (target_chroma * chroma);
+    cos >= 0.927 // cos 22 degrees
 }
 
 /// Render and stone tones with their mean texture colour. Pale and earthy
@@ -17442,6 +17654,13 @@ mod style_tests {
             }
         }
         blocks.extend(RENDER_TONES.iter().map(|&(b, _)| b));
+        for &(b, _, _) in FACADE_TONES.iter() {
+            blocks.extend([
+                b,
+                get_stair_block_for_material(b),
+                get_slab_block_for_material(b),
+            ]);
+        }
         blocks.extend(ROOF_SHADES.iter().map(|&(b, _)| b));
         // Window life: curtains, air conditioners, window boxes.
         blocks.extend_from_slice(&[
@@ -18317,6 +18536,125 @@ mod style_tests {
             let b = wall_block_for_colour_tag(tag, &mut element_rng(1));
             assert!(want.contains(&b), "{tag:?}: {}", b.name());
         }
+    }
+
+    #[test]
+    fn a_tagged_colour_shades_the_tagged_material() {
+        use crate::element_processing::building_test_support::{rect_way, tag_map};
+        let wall = |tags: &[(&str, &str)], category, seed| {
+            let way = rect_way(3, 0, 0, 12, 12, tags);
+            determine_wall_block_from_tags(&way, category, &mut element_rng(seed))
+        };
+        let office = BuildingCategory::Office;
+        for seed in 0..12 {
+            // Beige stone is not grey stone, and grey render is not beige.
+            let beige = wall(
+                &[
+                    ("building:material", "stone"),
+                    ("building:colour", "#bbab94"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(beige, Some(WHITE_TERRACOTTA | MUSHROOM_STEM)),
+                "{beige:?}"
+            );
+            let grey = wall(
+                &[
+                    ("building:material", "plaster"),
+                    ("building:colour", "grey"),
+                ],
+                office,
+                seed,
+            );
+            assert_eq!(grey, Some(LIGHT_GRAY_CONCRETE));
+            // Buff and brown brick are not red brick.
+            let buff = wall(
+                &[
+                    ("building:material", "brick"),
+                    ("building:colour", "#dacdaa"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(buff, Some(SANDSTONE | SMOOTH_SANDSTONE)),
+                "{buff:?}"
+            );
+            let brown = wall(
+                &[
+                    ("building:material", "brick"),
+                    ("building:colour", "#90664D"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(brown, Some(MUD_BRICKS | POLISHED_GRANITE | BRICK)),
+                "{brown:?}"
+            );
+            // Sooted sandstone stays dark.
+            let sooted = wall(
+                &[
+                    ("building:material", "sandstone"),
+                    ("building:colour", "#49493f"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(sooted, Some(POLISHED_DEEPSLATE | DEEPSLATE_BRICKS)),
+                "{sooted:?}"
+            );
+            // A red brick tag is still brick.
+            let red = wall(
+                &[("building:material", "brick"), ("building:colour", "red")],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(red, Some(RED_TERRACOTTA | TERRACOTTA | BRICK)),
+                "{red:?}"
+            );
+            // A tan tower is sandstone, not birch planks or pink terracotta.
+            let tower = wall(
+                &[("building:colour", "#CDAA7D"), ("start_date", "1907")],
+                BuildingCategory::MasonrySkyscraper,
+                seed,
+            );
+            assert!(
+                matches!(tower, Some(SANDSTONE | SMOOTH_SANDSTONE | MUSHROOM_STEM)),
+                "{tower:?}"
+            );
+            // A mauve brick finds its nearest brick even with no shade of its hue.
+            let mauve = wall(
+                &[
+                    ("building:material", "brick"),
+                    ("building:colour", "#9c717c"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(mauve, Some(LIGHT_GRAY_TERRACOTTA | POLISHED_GRANITE)),
+                "{mauve:?}"
+            );
+        }
+        let mut rng = element_rng(1);
+        // Painted brick far from any brick shade keeps the paint.
+        assert_eq!(
+            facade_tone_for_colour((30, 40, 200), BRICKWORK, &mut rng),
+            None
+        );
+        // Without a colour the material keeps its own palette, and glass
+        // keeps its own rules.
+        assert_eq!(
+            facade_tone_for_material("brick", &HashMap::new(), &mut rng),
+            None
+        );
+        let beige = tag_map(&[("building:colour", "#bbab94")]);
+        assert_eq!(facade_tone_for_material("glass", &beige, &mut rng), None);
     }
 
     #[test]

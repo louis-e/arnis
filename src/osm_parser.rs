@@ -844,7 +844,7 @@ pub fn parse_osm_data(
     println!("Bounding box: {bbox:?}");
 
     // Deserialize the JSON data into the OSMData structure
-    let data = SplitOsmData::from_raw_osm_data(osm_data);
+    let mut data = SplitOsmData::from_raw_osm_data(osm_data);
 
     let (coord_transformer, xzbbox) = projection
         .transformer(&bbox)
@@ -894,6 +894,7 @@ pub fn parse_osm_data(
         &relation_ways,
         &mut part_groups,
     ));
+    inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
     // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
     // separate building:part relations) are invisible to both passes above: the membership
     // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
@@ -1189,6 +1190,107 @@ fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
     let min_h = tags.get("min_height").and_then(|s| leading_f64(s));
     let min_lvl = tags.get("building:min_level").and_then(|s| leading_f64(s));
     min_h.unwrap_or(0.0) <= 0.0 && min_lvl.unwrap_or(0.0) <= 0.0
+}
+
+/// Facade tags a part that names no material or colour of its own takes from
+/// its building: the mapper described the brick, stone or render of the whole
+/// building once, on its outline or relation, and the parts are that
+/// building. Glass, metal and the like stay with the outline, where the
+/// group's style hint already carries them.
+fn inherit_masonry_facade_tags(
+    ways: &mut [OsmElement],
+    relations: &[OsmElement],
+    part_groups: &PartGroups,
+) {
+    const FACADE_KEYS: [&str; 4] = [
+        "building:material",
+        "building:facade:material",
+        "building:colour",
+        "colour",
+    ];
+    let masonry = |tags: &HashMap<String, String>| {
+        tags.get("building:material")
+            .or_else(|| tags.get("building:facade:material"))
+            .is_some_and(|m| {
+                matches!(
+                    norm_tag(m).as_str(),
+                    "brick"
+                        | "bricks"
+                        | "stone"
+                        | "naturalstone"
+                        | "limestone"
+                        | "sandstone"
+                        | "marble"
+                        | "granite"
+                        | "plaster"
+                        | "stucco"
+                        | "render"
+                        | "concrete"
+                )
+            })
+    };
+    let facade_of = |tags: &HashMap<String, String>| -> Vec<(String, String)> {
+        FACADE_KEYS
+            .iter()
+            .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+            .collect()
+    };
+    if part_groups.is_empty() {
+        return;
+    }
+    let groups: HashSet<u64> = part_groups
+        .values()
+        .map(|&s| seed_without_hint(s))
+        .collect();
+    // Facade of each group's building, keyed like the groups: an outline way
+    // by its id, a building relation by its salted id.
+    let mut facade: HashMap<u64, Vec<(String, String)>> = HashMap::new();
+    let mut relation_outlines: HashMap<u64, u64> = HashMap::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        let key = RELATION_SEED_BIT | rel.id;
+        if !groups.contains(&key) {
+            continue;
+        }
+        if masonry(tags) {
+            facade.insert(key, facade_of(tags));
+            continue;
+        }
+        for m in &rel.members {
+            let role = m.role.trim();
+            if m.r#type == "way"
+                && (role.eq_ignore_ascii_case("outline") || role.eq_ignore_ascii_case("outer"))
+            {
+                relation_outlines.insert(m.r#ref, key);
+            }
+        }
+    }
+    for w in ways.iter() {
+        let Some(tags) = w.tags.as_ref().filter(|t| masonry(t)) else {
+            continue;
+        };
+        if groups.contains(&w.id) {
+            facade.insert(w.id, facade_of(tags));
+        } else if let Some(&key) = relation_outlines.get(&w.id) {
+            facade.entry(key).or_insert_with(|| facade_of(tags));
+        }
+    }
+    if facade.is_empty() {
+        return;
+    }
+    for w in ways.iter_mut() {
+        let Some(inherited) = part_groups
+            .get(&w.id)
+            .and_then(|&seed| facade.get(&seed_without_hint(seed)))
+        else {
+            continue;
+        };
+        let tags = w.tags.get_or_insert_with(HashMap::new);
+        if FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
+            continue;
+        }
+        tags.extend(inherited.iter().cloned());
+    }
 }
 
 fn compute_outline_suppression(
@@ -2223,6 +2325,59 @@ mod outline_suppression_tests {
         let mut groups = PartGroups::new();
         compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
         assert_eq!(groups.get(&200), Some(&100));
+    }
+
+    // An untagged part takes the stone of its outline; a tagged part and a
+    // glass outline keep their own.
+    #[test]
+    fn untagged_parts_take_the_masonry_of_their_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let (q, qn) = square_way(300, 3000, 0.3);
+        let outline = with_tag(
+            tagged(o, "building", "retail"),
+            "building:material",
+            "stone",
+        );
+        let outline = with_tag(outline, "building:colour", "#cfc6b5");
+        let own = with_tag(
+            tagged(q, "building:part", "yes"),
+            "building:colour",
+            "black",
+        );
+        let mut ways = vec![outline, tagged(p, "building:part", "yes"), own];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        let part = ways[1].tags.as_ref().unwrap();
+        assert_eq!(
+            part.get("building:material").map(String::as_str),
+            Some("stone")
+        );
+        assert_eq!(
+            part.get("building:colour").map(String::as_str),
+            Some("#cfc6b5")
+        );
+        let own = ways[2].tags.as_ref().unwrap();
+        assert!(!own.contains_key("building:material"));
+
+        let glass = with_tag(
+            tagged(square_way(100, 1000, 1.0).0, "building", "office"),
+            "building:material",
+            "glass",
+        );
+        let glass = with_tag(glass, "building:colour", "#8085a2");
+        let mut ways = vec![
+            glass,
+            tagged(square_way(200, 2000, 0.5).0, "building:part", "yes"),
+        ];
+        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        assert!(!ways[1]
+            .tags
+            .as_ref()
+            .unwrap()
+            .contains_key("building:colour"));
     }
 
     fn tagmap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
