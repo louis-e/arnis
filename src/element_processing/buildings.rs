@@ -669,6 +669,40 @@ impl Default for RoofContext {
     }
 }
 
+/// Roof of a building that counts storeys in its roof (`roof:levels`) but
+/// names no shape: a flat lid has none, so the roof is pitched. A pre-war
+/// North American row house carries its attic storeys in a mansard, as does
+/// an ornate European building with two or more; otherwise a terraced row is
+/// gabled and a free-standing building hipped. None without the tag, for
+/// `roof:levels=0`, and for parts, whose volumes are modelled.
+fn roof_levels_roof(
+    element: &ProcessedWay,
+    era: ArchEra,
+    ctx: RoofContext,
+) -> Option<(RoofType, bool)> {
+    let levels = element
+        .tags
+        .get("roof:levels")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|l| *l >= 1.0)?;
+    if element.tags.contains_key("building:part") {
+        return None;
+    }
+    let pre_war = matches!(
+        era,
+        ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar | ArchEra::Unknown
+    );
+    let roof = match ctx.region {
+        BuildingRegion::NorthAmerica if ctx.attached && pre_war => RoofType::Mansard,
+        BuildingRegion::Europe if era == ArchEra::HistoricOrnate && levels >= 2.0 => {
+            RoofType::Mansard
+        }
+        _ if ctx.attached => RoofType::Gabled,
+        _ => RoofType::Hipped,
+    };
+    Some((roof, true))
+}
+
 /// Roof of an untagged European building that is not a detached house: old-town
 /// fabric up to about seven storeys is pitched, whatever it houses, while
 /// postwar and contemporary blocks mostly are not. None leaves the decision to
@@ -2708,6 +2742,8 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         } else if roof_ctx.enclosed {
             (RoofType::Flat, false)
+        } else if let Some(choice) = roof_levels_roof(element, era, roof_ctx) {
+            choice
         } else if let Some(choice) = european_default_roof(
             element,
             building_type,
@@ -16214,6 +16250,45 @@ mod height_tests {
     }
 
     // Attached old-town blocks of unknown age are mostly pitched in Europe.
+    // Storeys in the roof mean a roof to hold them, never a flat lid.
+    #[test]
+    fn roof_levels_without_a_shape_give_a_pitched_roof() {
+        let ctx = |region, attached| RoofContext {
+            region,
+            attached,
+            ..RoofContext::default()
+        };
+        let way = way_with_tags(&[("building", "yes"), ("roof:levels", "2")]);
+        assert_eq!(
+            roof_levels_roof(&way, ArchEra::Unknown, ctx(BuildingRegion::Europe, true)),
+            Some((RoofType::Gabled, true))
+        );
+        assert_eq!(
+            roof_levels_roof(&way, ArchEra::Unknown, ctx(BuildingRegion::Europe, false)),
+            Some((RoofType::Hipped, true))
+        );
+        let row_house = way_with_tags(&[("building", "apartments"), ("roof:levels", "1")]);
+        assert_eq!(
+            roof_levels_roof(
+                &row_house,
+                ArchEra::TraditionalPreWar,
+                ctx(BuildingRegion::NorthAmerica, true)
+            ),
+            Some((RoofType::Mansard, true))
+        );
+        for tags in [
+            &[("building", "yes"), ("roof:levels", "0")][..],
+            &[("building", "yes")][..],
+            &[("building:part", "yes"), ("roof:levels", "2")][..],
+        ] {
+            let way = way_with_tags(tags);
+            assert_eq!(
+                roof_levels_roof(&way, ArchEra::Unknown, ctx(BuildingRegion::Europe, true)),
+                None
+            );
+        }
+    }
+
     #[test]
     fn european_old_town_fabric_is_mostly_pitched() {
         let pitched = (0..200u64)
