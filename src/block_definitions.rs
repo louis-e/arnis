@@ -2091,10 +2091,11 @@ pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
             WAXED_EXPOSED_COPPER,
             WAXED_COPPER_BLOCK,
         ],
+        // Curtain glass is tinted, often grey or teal; clear glass reads as no wall.
         "glass" => &[
             GRAY_STAINED_GLASS,
             LIGHT_GRAY_STAINED_GLASS,
-            GLASS,
+            CYAN_STAINED_GLASS,
             BLACK_STAINED_GLASS,
         ],
         "mirror" | "solarpanels" => &[GRAY_STAINED_GLASS, CYAN_STAINED_GLASS, BLACK_STAINED_GLASS],
@@ -2257,6 +2258,18 @@ mod material_tests {
             COBBLED_DEEPSLATE_SLAB,
             SMOOTH_QUARTZ_SLAB,
             CHERRY_PLANKS,
+            // Glass skins: tints, backpans, mullions and transoms.
+            GRAY_STAINED_GLASS,
+            BLACK_STAINED_GLASS,
+            CYAN_STAINED_GLASS,
+            LIGHT_GRAY_STAINED_GLASS,
+            CYAN_TERRACOTTA,
+            GRAY_TERRACOTTA,
+            BROWN_TERRACOTTA,
+            POLISHED_DEEPSLATE,
+            ANDESITE_WALL,
+            POLISHED_DEEPSLATE_WALL,
+            POLISHED_ANDESITE_SLAB,
         ] {
             assert!(block.id() < 256, "{} has id {}", block.name(), block.id());
         }
