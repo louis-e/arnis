@@ -2270,6 +2270,9 @@ mod material_tests {
             ANDESITE_WALL,
             POLISHED_DEEPSLATE_WALL,
             POLISHED_ANDESITE_SLAB,
+            // Masonry tower shafts: dark glass and spandrel panels.
+            BLACK_TERRACOTTA,
+            POLISHED_BLACKSTONE,
         ] {
             assert!(block.id() < 256, "{} has id {}", block.name(), block.id());
         }
