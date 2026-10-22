@@ -851,6 +851,12 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         507 => "mcl_blackstone:blackstone_brick_polished_cracked",
         508 => "mcl_nether:cracked_nether_brick",
         509 => "mcl_walls:mossycobble",
+        510 => "mcl_lanterns:chain",
+        511 => "mcl_colorblocks:concrete_pink",
+        512 => "mcl_core:glass_orange",
+        513 => "mcl_core:glass_yellow",
+        514 => "mcl_core:glass_red",
+        515 => "mcl_core:glass_lime",
         _ => "mcl_core:stone",
     };
     LuantiNode {

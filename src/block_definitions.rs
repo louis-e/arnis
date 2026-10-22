@@ -595,6 +595,12 @@ impl Block {
             507 => "cracked_polished_blackstone_bricks",
             508 => "cracked_nether_bricks",
             509 => "mossy_cobblestone_wall",
+            510 => "chain",
+            511 => "pink_concrete",
+            512 => "orange_stained_glass",
+            513 => "yellow_stained_glass",
+            514 => "red_stained_glass",
+            515 => "lime_stained_glass",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -796,6 +802,11 @@ impl Block {
             210 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("axis".to_string(), Value::String("x".to_string()));
+                map
+            })),
+            510 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("axis".to_string(), Value::String("y".to_string()));
                 map
             })),
             // Smooth stone slab (bottom by default)
@@ -1700,6 +1711,12 @@ pub const CRACKED_DEEPSLATE_TILES: Block = Block::new(506);
 pub const CRACKED_POLISHED_BLACKSTONE_BRICKS: Block = Block::new(507);
 pub const CRACKED_NETHER_BRICKS: Block = Block::new(508);
 pub const MOSSY_COBBLESTONE_WALL: Block = Block::new(509);
+pub const CHAIN_Y: Block = Block::new(510);
+pub const PINK_CONCRETE: Block = Block::new(511);
+pub const ORANGE_STAINED_GLASS: Block = Block::new(512);
+pub const YELLOW_STAINED_GLASS: Block = Block::new(513);
+pub const RED_STAINED_GLASS: Block = Block::new(514);
+pub const LIME_STAINED_GLASS: Block = Block::new(515);
 /// A vine clinging to the wall on its north, east, south or west side.
 pub const VINES: [Block; 4] = [
     Block::new(499),

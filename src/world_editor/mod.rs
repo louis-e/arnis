@@ -210,6 +210,9 @@ pub struct WorldEditor<'a> {
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
     mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
+    /// Lift lines and terminals, kept free of trees.
+    clear_corridors: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    fuel_index: Option<Arc<crate::element_processing::fuel_stations::FuelIndex>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -307,6 +310,8 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             mapped_trunks: None,
             mapped_cranes: None,
+            clear_corridors: None,
+            fuel_index: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
@@ -366,6 +371,8 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             mapped_trunks: None,
             mapped_cranes: None,
+            clear_corridors: None,
+            fuel_index: None,
             format,
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
@@ -425,6 +432,8 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             mapped_trunks: None,
             mapped_cranes: None,
+            clear_corridors: None,
+            fuel_index: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
@@ -540,6 +549,30 @@ impl<'a> WorldEditor<'a> {
     /// Where mapped cranes stand, whatever order the elements render in.
     pub fn mapped_cranes(&self) -> &[(i32, i32)] {
         self.mapped_cranes.as_deref().map_or(&[], Vec::as_slice)
+    }
+
+    /// Sets the petrol station index (shared across the main and tile editors).
+    pub fn set_fuel_index(
+        &mut self,
+        index: Arc<crate::element_processing::fuel_stations::FuelIndex>,
+    ) {
+        self.fuel_index = Some(index);
+    }
+
+    pub fn fuel_index(&self) -> Option<Arc<crate::element_processing::fuel_stations::FuelIndex>> {
+        self.fuel_index.clone()
+    }
+
+    /// Sets the lift corridors (shared across the main and tile editors).
+    pub fn set_clear_corridors(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.clear_corridors = Some(map);
+    }
+
+    /// True where a lift line or terminal keeps trees off.
+    pub fn in_clear_corridor(&self, x: i32, z: i32) -> bool {
+        self.clear_corridors
+            .as_ref()
+            .is_some_and(|m| !m.is_empty() && m.contains(x, z))
     }
 
     /// Sets the mapped tree trunks (shared across the main and tile editors).

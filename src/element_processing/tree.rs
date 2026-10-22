@@ -670,6 +670,11 @@ impl Tree {
             return;
         }
 
+        // Lift lines run through cleared lanes.
+        if editor.in_clear_corridor(x, z) {
+            return;
+        }
+
         // Roads, pitches and other paved areas own their columns. The block check
         // below cannot see this: a surface=dirt track is dirt like any field, and a
         // pitch drawn after the park around it has not been painted yet.
@@ -793,6 +798,7 @@ impl Tree {
                 // Without the footprint one a tree asked for beside a building
                 // gets snapped onto its roof.
                 if editor.is_lc_water(sx, sz)
+                    || editor.in_clear_corridor(sx, sz)
                     || building_footprints.is_some_and(|f| f.contains(sx, sz))
                     || editor.check_for_block(sx, 0, sz, Some(road_water))
                     || bridge_surface.is_some_and(|b| b.contains(sx, sz))
