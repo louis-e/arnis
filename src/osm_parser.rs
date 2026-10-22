@@ -595,11 +595,16 @@ fn norm_tag(v: &str) -> String {
         .collect()
 }
 
-/// Whether the building is mapped as art deco.
-pub fn is_art_deco(tags: &HashMap<String, String>) -> bool {
+/// The mapped architectural style, normalised; the first of a `;` list.
+fn architecture(tags: &HashMap<String, String>) -> Option<String> {
     tags.get("building:architecture")
         .or_else(|| tags.get("architecture"))
-        .is_some_and(|a| norm_tag(a) == "artdeco")
+        .map(|a| norm_tag(a.split(';').next().unwrap_or(a)))
+}
+
+/// Whether the building is mapped as art deco.
+pub fn is_art_deco(tags: &HashMap<String, String>) -> bool {
+    architecture(tags).as_deref() == Some("artdeco")
 }
 
 /// Year the building went up, from the first of start_date, construction_date
@@ -716,14 +721,9 @@ pub fn building_style_hint(tags: &HashMap<String, String>) -> StyleHint {
 
     // Masonry / historic, unless the listing is for a building of the modern
     // movement or one built after the war.
-    let arch = tags
-        .get("building:architecture")
-        .or_else(|| tags.get("architecture"))
-        .map(|a| norm_tag(a));
+    let arch = architecture(tags);
     let year = building_start_year(tags);
-    let listed_modern = arch.as_deref().is_some_and(|a| MODERN_STYLES.contains(&a))
-        || year.is_some_and(|y| y >= 1945);
-    if is_listed(tags) && !listed_modern {
+    if is_listed(tags) && !listed_for_modern_design(tags, arch.as_deref(), year) {
         return StyleHint::Masonry;
     }
     if material
@@ -786,6 +786,49 @@ fn is_listed(tags: &HashMap<String, String>) -> bool {
         || present_and_not_no("listed_status")
 }
 
+/// Whether a listed building is listed for a modern design: mapped in a
+/// modern style, or dated after the war. A listed church dated after the
+/// war was far more often rebuilt in its old form, so its date does not
+/// count.
+fn listed_for_modern_design(
+    tags: &HashMap<String, String>,
+    arch: Option<&str>,
+    year: Option<i32>,
+) -> bool {
+    arch.is_some_and(|a| MODERN_STYLES.contains(&a))
+        || (year.is_some_and(|y| y >= 1945) && !is_place_of_worship(tags))
+}
+
+fn is_place_of_worship(tags: &HashMap<String, String>) -> bool {
+    tags.get("amenity").is_some_and(|a| a == "place_of_worship")
+        || tags.get("building").is_some_and(|b| {
+            matches!(
+                b.as_str(),
+                "church"
+                    | "cathedral"
+                    | "chapel"
+                    | "basilica"
+                    | "mosque"
+                    | "synagogue"
+                    | "temple"
+                    | "shrine"
+                    | "monastery"
+            )
+        })
+}
+
+/// The year a building passes on to its parts: its own date, unless the
+/// date is later than its style, as on a church rebuilt in its old form.
+fn year_for_parts(tags: &HashMap<String, String>) -> Option<i32> {
+    let year = building_start_year(tags)?;
+    (year < 1945
+        || matches!(
+            building_arch_era_dated(tags, Some(year)),
+            ArchEra::PostWarPanel | ArchEra::Contemporary
+        ))
+    .then_some(year)
+}
+
 /// Era of a building put up in `year`.
 pub fn era_for_year(year: i32) -> ArchEra {
     if year < 1945 {
@@ -808,10 +851,7 @@ pub fn building_arch_era(tags: &HashMap<String, String>) -> ArchEra {
 pub fn building_arch_era_dated(tags: &HashMap<String, String>, year: Option<i32>) -> ArchEra {
     // A named style says the most. A modern one keeps to its date: interwar
     // modernism is still a punched masonry wall, postwar modernism a panel.
-    let arch = tags
-        .get("building:architecture")
-        .or_else(|| tags.get("architecture"))
-        .map(|a| norm_tag(a));
+    let arch = architecture(tags);
     if let Some(a) = arch.as_deref() {
         if ORNATE_STYLES.contains(&a) {
             return ArchEra::HistoricOrnate;
@@ -827,7 +867,7 @@ pub fn building_arch_era_dated(tags: &HashMap<String, String>, year: Option<i32>
     // A listing makes the building ornate unless it dates from after the war.
     if is_listed(tags) {
         return match year {
-            Some(y) if y >= 1945 => era_for_year(y),
+            Some(y) if listed_for_modern_design(tags, None, Some(y)) => era_for_year(y),
             _ => ArchEra::HistoricOrnate,
         };
     }
@@ -1286,7 +1326,7 @@ fn compute_outline_suppression(
         }
         if let Some(t) = w.tags.as_ref() {
             way_hint.insert(w.id, building_style_hint(t));
-            if let Some(y) = building_start_year(t) {
+            if let Some(y) = year_for_parts(t) {
                 way_year.insert(w.id, y);
             }
             way_ground.insert(w.id, part_covers_ground(t));
@@ -1340,7 +1380,7 @@ fn compute_outline_suppression(
                 .unwrap_or(StyleHint::None);
         }
         // So does its date, which the outline usually carries alone.
-        let rel_year = building_start_year(tags).or_else(|| {
+        let rel_year = year_for_parts(tags).or_else(|| {
             rel.members
                 .iter()
                 .filter(|m| is_outline(m.role.trim()))
@@ -1541,7 +1581,7 @@ fn compute_spatial_part_suppression(
         }
         way_nodes.insert(w.id, ns);
         way_hint.insert(w.id, building_style_hint(tags));
-        if let Some(y) = building_start_year(tags) {
+        if let Some(y) = year_for_parts(tags) {
             way_year.insert(w.id, y);
         }
         way_ground.insert(w.id, part_covers_ground(tags));
@@ -2325,6 +2365,26 @@ mod outline_suppression_tests {
         assert_eq!(style_hint_from_seed(seed), StyleHint::None);
     }
 
+    // A church rebuilt after the war in its old form keeps the date of its
+    // rebuilding to itself; its parts stay with its style.
+    #[test]
+    fn a_rebuilt_church_does_not_date_its_parts() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let mut outline = tagged(o, "building", "church");
+        if let Some(t) = outline.tags.as_mut() {
+            t.insert("building:architecture".to_string(), "gothic".to_string());
+            t.insert("start_date".to_string(), "1954".to_string());
+        }
+        let ways = [outline, tagged(p, "building:part", "tower")];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        let seed = groups[&200];
+        assert_eq!(year_from_seed(seed), None);
+        assert_eq!(style_hint_from_seed(seed), StyleHint::Masonry);
+    }
+
     fn tagmap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
             .iter()
@@ -2385,6 +2445,14 @@ mod outline_suppression_tests {
         );
         assert_eq!(
             m(&[("heritage", "yes"), ("start_date", "1911")]),
+            StyleHint::Masonry
+        );
+        assert_eq!(
+            m(&[
+                ("building", "church"),
+                ("heritage", "4"),
+                ("start_date", "1954")
+            ]),
             StyleHint::Masonry
         );
     }
@@ -2873,9 +2941,25 @@ mod arch_era_tests {
                 ],
                 TraditionalPreWar,
             ),
-            // an ornate style wins over a later date
+            // an ornate style wins over a later date, the first of a list too
             (
                 &[("building:architecture", "baroque"), ("start_date", "1995")],
+                HistoricOrnate,
+            ),
+            (
+                &[
+                    ("building:architecture", "gothic;baroque"),
+                    ("start_date", "1954"),
+                ],
+                HistoricOrnate,
+            ),
+            // a listed church dated after the war was rebuilt in its old form
+            (
+                &[
+                    ("building", "church"),
+                    ("heritage", "4"),
+                    ("start_date", "1954-06-27"),
+                ],
                 HistoricOrnate,
             ),
         ];
