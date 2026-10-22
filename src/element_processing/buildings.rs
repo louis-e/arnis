@@ -4339,9 +4339,9 @@ const FACADE_TONES: [(Block, (u8, u8, u8), u8); 32] = [
 ];
 
 /// Wall block for a brick, stone, render or concrete facade that also has a
-/// colour tag: that material's shade nearest the colour. None without a
-/// colour, for other materials (glass, metal, timber keep their own rules),
-/// or when the material has no shade near the colour.
+/// colour tag: that material's shade nearest the colour, or the colour itself
+/// where the material has no shade near it (painted brick). None without a
+/// colour, and for other materials (glass, metal, timber keep their own rules).
 fn facade_tone_for_material(
     material: &str,
     tags: &HashMap<String, String>,
@@ -4364,7 +4364,7 @@ fn facade_tone_for_material(
         | "panel" | "panels" | "prefab" | "prefabricated" => CONCRETE_WORK,
         _ => return None,
     };
-    facade_tone_for_colour(rgb, family, rng)
+    facade_tone_for_colour(rgb, family, rng).or_else(|| Some(wall_block_for_colour_tag(rgb, rng)))
 }
 
 /// Tone family of a tower with a colour but no material: a masonry or
@@ -19011,6 +19011,14 @@ mod style_tests {
         assert_eq!(
             facade_tone_for_colour((30, 40, 200), BRICKWORK, &mut rng),
             None
+        );
+        let blue = tag_map(&[("building:colour", "#1e28c8")]);
+        let painted = facade_tone_for_material("brick", &blue, &mut rng).expect("painted brick");
+        assert!(
+            !FACADE_TONES
+                .iter()
+                .any(|&(b, _, f)| f & BRICKWORK != 0 && b == painted),
+            "{painted:?}"
         );
         // Without a colour the material keeps its own palette, and glass
         // keeps its own rules.
