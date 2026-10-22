@@ -390,7 +390,13 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         98 => "mcl_walls:sandstone",
         99 => "mcl_stairs:slab_sandstonesmooth",
         100 => "mcl_colorblocks:concrete_red",
-        101 => "mcl_doors:iron_trapdoor", // IRON_TRAPDOOR
+        101 => {
+            return conv_trapdoor(
+                props,
+                "mcl_doors:iron_trapdoor",
+                "mcl_doors:iron_trapdoor_open",
+            )
+        } // IRON_TRAPDOOR
         102 => return conv_stair(props, "mcl_stairs:stair_copper_oxidized_cut"), // WAXED_OXIDIZED_CUT_COPPER_STAIRS
         103 => "mcl_copper:block_oxidized", // WAXED_OXIDIZED_COPPER (waxed variant approximated as oxidized)
         104 => "mcl_colorblocks:hardened_clay_yellow",
@@ -874,6 +880,23 @@ mod tests {
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
     /// a block without a Mineclonia node fails here instead of in someone's map.
+    #[test]
+    fn open_iron_trapdoors_stay_open() {
+        use crate::block_definitions::IRON_TRAPDOOR;
+        let open = Value::Compound(HashMap::from([
+            ("open".to_string(), Value::String("true".to_string())),
+            ("facing".to_string(), Value::String("east".to_string())),
+        ]));
+        assert_eq!(
+            to_mineclonia_node(IRON_TRAPDOOR, Some(&open)).name,
+            "mcl_doors:iron_trapdoor_open"
+        );
+        assert_eq!(
+            to_mineclonia_node(IRON_TRAPDOOR, None).name,
+            "mcl_doors:iron_trapdoor"
+        );
+    }
+
     #[test]
     fn slabs_export_their_half() {
         use crate::block_definitions::{POLISHED_GRANITE_SLAB, QUARTZ_SLAB_TOP, STONE_BRICK_SLAB};

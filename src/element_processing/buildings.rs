@@ -689,6 +689,14 @@ fn roof_levels_roof(
     if element.tags.contains_key("building:part") {
         return None;
     }
+    // A mapped height with a roof:height or roof:angle is measured to the
+    // eaves only when a roof:shape says so; without one the walls keep the
+    // whole height, so a pitched roof here would rise above it.
+    if element.tags.contains_key("height")
+        && (element.tags.contains_key("roof:height") || element.tags.contains_key("roof:angle"))
+    {
+        return None;
+    }
     let pre_war = matches!(
         era,
         ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar | ArchEra::Unknown
@@ -3280,6 +3288,29 @@ impl TowerZoning {
         })
     }
 
+    /// The zones of a tower whose colour or material is mapped keep the
+    /// mapped wall: the belt course and cornice still mark them.
+    fn keeping_mapped_wall(self, config: &BuildingConfig, tags: &HashMap<String, String>) -> Self {
+        let mapped = [
+            "building:colour",
+            "colour",
+            "building:material",
+            "building:facade:material",
+            "facade:material",
+        ]
+        .iter()
+        .any(|k| tags.contains_key(*k));
+        if mapped {
+            Self {
+                stone: config.wall_block,
+                groove: None,
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+
     /// Stone of a wall block at row `h`, or None where the shaft's wall stays.
     #[inline]
     fn stone_at(&self, h: i32, start_y: i32) -> Option<Block> {
@@ -5805,13 +5836,11 @@ fn floor_cycle_for(
         "static_caravan",
     ];
     if tags.contains_key("building:part") {
-        // One cycle for all parts keeps stacked volumes flush at the seams.
-        // Storeys counted on the parts of a housing block are housing
-        // storeys, a third lower than the commercial default; a mapped
-        // height keeps its own scale.
-        let counted = tags.contains_key("building:levels") && !tags.contains_key("height");
-        let housing = housing_group || RESIDENTIAL_SCALE.contains(&building_type);
-        return if counted && housing { 3 } else { 4 };
+        // One cycle for all parts of a building keeps stacked volumes flush
+        // at the seams, as building:min_level counts in it too. The parts of
+        // a housing block count housing storeys, a third lower than the
+        // commercial default.
+        return if housing_group { 3 } else { 4 };
     }
     // Both mapped: the storeys are as tall as the building says. Under the
     // usual 3 a 25 m five-storey office would show seven rows of windows.
@@ -6223,6 +6252,7 @@ fn generate_roof_only_structure(
     cached_floor_area: &[(i32, i32)],
     args: &Args,
     group_seed: u64,
+    housing_group: bool,
 ) {
     let scale_factor = args.scale;
     let abs_terrain_offset = if !args.terrain() {
@@ -6238,7 +6268,7 @@ fn generate_roof_only_structure(
             .map(|s| s.as_str())
             .unwrap_or("roof"),
         &element.tags,
-        false,
+        housing_group,
     );
 
     // Determine where the roof structure starts vertically.
@@ -7483,7 +7513,11 @@ fn build_wall_ring(
                     );
                 }
             }
-            if let Some((cx, cz)) = backdrop.filter(|_| block == config.display_glass()) {
+            // Only behind the shop or lobby glass: the floors above can glaze
+            // with the same tint.
+            if let Some((cx, cz)) =
+                backdrop.filter(|_| h <= config.lobby_top() && block == config.display_glass())
+            {
                 editor.set_block_absolute(
                     SHOP_BACKDROP,
                     cx,
@@ -9018,20 +9052,30 @@ fn glass_palette(
     // A mapped metal or stone part of a glass tower, such as a crown ring,
     // keeps the wall its tags gave it.
     let other_material = first_material.is_some() && !glass_tagged;
-    let colour_glass = element
+    let colour = element
         .tags
         .get("building:colour")
         .or_else(|| element.tags.get("colour"))
-        .and_then(|c| color_text_to_rgb_tuple(c))
-        .map(glass_for_colour);
+        .and_then(|c| color_text_to_rgb_tuple(c));
+    let colour_glass = colour.map(glass_for_colour);
     let tint = colour_glass.filter(|_| glass_tagged);
+    // With no glass mapped, a warm colour (tan, buff, red) describes stone
+    // or brick rather than a tint, so a glass tower keeps its own glass.
+    let stone_colour = colour.is_some_and(|rgb| {
+        let (_, a, b) = crate::colors::oklab_components(&rgb);
+        let hue = b.atan2(a).to_degrees().rem_euclid(360.0);
+        !(100.0..300.0).contains(&hue) && a.hypot(b) >= 0.03
+    });
     match category {
         _ if other_material => (wall_block, window_block),
         // The walls of a glass tower are its glass: a coloured one is
         // tinted, not concrete.
         BuildingCategory::GlassySkyscraper | BuildingCategory::GlassCornerSkyscraper => {
             let own_glass = is_glass_wall(wall_block).then_some(wall_block);
-            let wall = colour_glass.or(own_glass).unwrap_or(GRAY_STAINED_GLASS);
+            let wall = colour_glass
+                .filter(|_| glass_tagged || !stone_colour)
+                .or(own_glass)
+                .unwrap_or(GRAY_STAINED_GLASS);
             (wall, window_block)
         }
         // A glass grid is glass throughout, its frame hung in front of it
@@ -11567,14 +11611,10 @@ pub fn generate_buildings(
         .map(|s| s.as_str())
         .unwrap_or("yes");
     // A part of a housing block carries that in its group seed; the mark is
-    // taken off again so every roll below stays as it was.
+    // taken off every seed again, so all members of a building roll alike.
     let housing_group = element.tags.contains_key("building:part")
         && crate::osm_parser::residential_group_from_seed(group_seed);
-    let group_seed = if housing_group {
-        crate::osm_parser::seed_without_residential_mark(group_seed)
-    } else {
-        group_seed
-    };
+    let group_seed = crate::osm_parser::seed_without_residential_mark(group_seed);
     let floor_cycle = floor_cycle_for(building_type, &element.tags, housing_group);
 
     // Architectural era, consumed by palettes, frames, depth styles and
@@ -11675,7 +11715,14 @@ pub fn generate_buildings(
     // with building:part="roof" (but no "building" tag) would otherwise fall
     // through to the full building pipeline and render as small boxy buildings.
     if element.tags.get("building:part").map(|v| v.as_str()) == Some("roof") {
-        generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
+        generate_roof_only_structure(
+            editor,
+            element,
+            &cached_floor_area,
+            args,
+            group_seed,
+            housing_group,
+        );
         return None;
     }
 
@@ -11729,7 +11776,14 @@ pub fn generate_buildings(
                 return None;
             }
             "roof" => {
-                generate_roof_only_structure(editor, element, &cached_floor_area, args, group_seed);
+                generate_roof_only_structure(
+                    editor,
+                    element,
+                    &cached_floor_area,
+                    args,
+                    group_seed,
+                    housing_group,
+                );
                 return None;
             }
             // Skybridges with elevation data render as normal elevated buildings,
@@ -12333,7 +12387,7 @@ pub fn generate_buildings(
         None => config,
     };
     let config = BuildingConfig {
-        zoning: TowerZoning::plan(&config),
+        zoning: TowerZoning::plan(&config).map(|z| z.keeping_mapped_wall(&config, &element.tags)),
         ..config
     };
     // The preset facades are recorded before the wall is built, not after it:
@@ -12372,9 +12426,11 @@ pub fn generate_buildings(
         ..config
     };
     // Interiors must stop at the podium roof or rooms would float.
-    let effective_building_height = match &podium_tower {
-        Some(plan) => plan.podium_height,
-        None => effective_building_height,
+    let effective_building_height = match (&podium_tower, tower_crown) {
+        (Some(plan), _) => plan.podium_height,
+        // Nor do they reach into a crown carved out of the top.
+        (None, Some(crown)) => (effective_building_height - crown.rows(config.floor_cycle)).max(3),
+        (None, None) => effective_building_height,
     };
 
     // Interior uses per storey, planned before doors and floors: shared shop floors
@@ -12768,7 +12824,8 @@ pub fn generate_buildings(
             };
             // The shaft's capital sits under its own top, not the podium's.
             let tower_config = BuildingConfig {
-                zoning: TowerZoning::plan(&tower_config),
+                zoning: TowerZoning::plan(&tower_config)
+                    .map(|z| z.keeping_mapped_wall(&tower_config, &element.tags)),
                 ..tower_config
             };
             generate_inset_tiers(
@@ -17617,6 +17674,13 @@ mod height_tests {
             &[("building", "yes"), ("roof:levels", "0")][..],
             &[("building", "yes")][..],
             &[("building:part", "yes"), ("roof:levels", "2")][..],
+            // A measured roof under a mapped height would rise above it.
+            &[
+                ("building", "yes"),
+                ("roof:levels", "1"),
+                ("height", "15"),
+                ("roof:height", "4"),
+            ][..],
         ] {
             let way = way_with_tags(tags);
             assert_eq!(
@@ -17885,8 +17949,9 @@ mod height_tests {
     }
 
     // A ten-storey slab of flats mapped as levels-only parts is about 32 m,
-    // not the 42 m of a commercial storey; a part with a mapped height, or
-    // of a building that is not housing, keeps the shared commercial cycle.
+    // not the 42 m of a commercial storey. Every part of a housing block takes
+    // the housing cycle, so min_level offsets stay flush; a part of a building
+    // that is not housing keeps the shared commercial cycle.
     #[test]
     fn levels_only_parts_of_housing_take_housing_storeys() {
         let part = way_with_tags(&[("building:part", "yes"), ("building:levels", "10")]);
@@ -17895,13 +17960,13 @@ mod height_tests {
         let (h, _) = calculate_building_height(&part, "yes", 0, 1.0, None, cycle, 400, 1);
         assert_eq!(h, 32);
         assert_eq!(floor_cycle_for("yes", &part.tags, false), 4);
-        assert_eq!(floor_cycle_for("apartments", &part.tags, false), 3);
+        assert_eq!(floor_cycle_for("apartments", &part.tags, false), 4);
         let measured = way_with_tags(&[
             ("building:part", "yes"),
-            ("building:levels", "10"),
+            ("building:min_level", "10"),
             ("height", "38"),
         ]);
-        assert_eq!(floor_cycle_for("yes", &measured.tags, true), 4);
+        assert_eq!(floor_cycle_for("yes", &measured.tags, true), 3);
     }
 
     #[test]
@@ -18970,6 +19035,33 @@ mod style_tests {
             LIGHT_GRAY_STAINED_GLASS,
             "pale frame colour"
         );
+    }
+
+    /// A tower that rolled a glass family with no glass mapped takes a cool
+    /// colour as its tint, but a warm one describes stone, not glass.
+    #[test]
+    fn a_stone_coloured_tower_keeps_its_own_glass() {
+        use crate::element_processing::building_test_support::rect_way;
+        let tower = |colour| {
+            let way = rect_way(
+                3,
+                0,
+                0,
+                20,
+                20,
+                &[("building", "yes"), ("building:colour", colour)],
+            );
+            glass_palette(
+                &way,
+                BuildingCategory::GlassySkyscraper,
+                CYAN_STAINED_GLASS,
+                GRAY_STAINED_GLASS,
+            )
+            .0
+        };
+        assert_eq!(tower("#CDAA7D"), CYAN_STAINED_GLASS);
+        assert_eq!(tower("red"), CYAN_STAINED_GLASS);
+        assert_eq!(tower("black"), BLACK_STAINED_GLASS);
     }
 
     /// The glass of a glass-tagged building follows its colour; a glass grid

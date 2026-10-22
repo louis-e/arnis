@@ -1343,9 +1343,10 @@ fn inherit_masonry_facade_tags(
     relations: &[OsmElement],
     part_groups: &PartGroups,
 ) {
-    const FACADE_KEYS: [&str; 4] = [
+    const FACADE_KEYS: [&str; 5] = [
         "building:material",
         "building:facade:material",
+        "facade:material",
         "building:colour",
         "colour",
     ];
