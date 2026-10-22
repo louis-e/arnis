@@ -1227,7 +1227,7 @@ const SUPPRESSION_GRID_CELL_DEG: f64 = 0.0005;
 // A part covers the outline's ground footprint only if it starts at ground level.
 // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
 // that float above the ground (e.g. S3DB churches), so they can't stand in for the outline.
-fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
+pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
     // Leading number only: sign at position 0, one decimal point. So "54-60" → 54, not a parse fail.
     let leading_f64 = |s: &str| {
         let t = s.trim();

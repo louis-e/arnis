@@ -2007,10 +2007,10 @@ impl BuildingCategory {
             }
             // A European office, store or housing block of eight to fourteen
             // storeys is street fabric, not a tower: it keeps the facade of
-            // its type, whatever its era. The parts of a modelled building
-            // keep the tower's facade, which their siblings share.
+            // its type, whatever its era. So does the body of a block modelled
+            // in parts; a part raised off the ground is a tower's upper shaft.
             if region == BuildingRegion::Europe
-                && !element.tags.contains_key("building:part")
+                && crate::osm_parser::part_covers_ground(&element.tags)
                 && !Self::has_tower_proportions(element, building_height, scale_factor)
             {
                 let typed = Self::from_building_type(Self::building_type(element));
@@ -4303,9 +4303,12 @@ fn pick_window_archetype(
             &[(Wide, 40), (Ribbon, 50), (Portrait, 10)]
         }
         BuildingCategory::Historic => &[(Portrait, 50), (Spaced, 30), (Hooded, 20)],
-        // Postwar towers band their windows or set them in a wide frame;
-        // anything undated or later may also run piers up the shaft.
-        BuildingCategory::TallBuilding if era == ArchEra::PostWarPanel => {
+        // Postwar towers band their windows or set them in a wide frame,
+        // stone-clad ones too; anything undated or later may also run piers
+        // up the shaft.
+        BuildingCategory::TallBuilding | BuildingCategory::MasonrySkyscraper
+            if era == ArchEra::PostWarPanel =>
+        {
             &[(Ribbon, 60), (Wide, 25), (Strips, 15)]
         }
         // A later brick or stone tower runs piers up its shaft.
@@ -4334,16 +4337,20 @@ fn pick_window_archetype(
     }
     if matches!(
         category,
-        BuildingCategory::TallBuilding | BuildingCategory::ContemporarySkyscraper
+        BuildingCategory::TallBuilding
+            | BuildingCategory::MasonrySkyscraper
+            | BuildingCategory::ContemporarySkyscraper
     ) {
         return picked;
     }
     // Era adjustment on top of the category weights: masonry eras punch
-    // windows, panel and glass eras band them. Undated brick and stone, and
-    // the undated row fabric of an old centre, are masonry too.
+    // windows, panel and glass eras band them. In the old centres of North
+    // America and Europe, undated brick and stone and undated row fabric are
+    // masonry too.
     let mut era_rng = element_rng(group_seed ^ 0x57A2_C0DE_A5C1_0008);
-    let undated_masonry =
-        era == ArchEra::Unknown && (cues.old_row_fabric || is_masonry_wall(wall_block));
+    let undated_masonry = era == ArchEra::Unknown
+        && region != BuildingRegion::Other
+        && (cues.old_row_fabric || is_masonry_wall(wall_block));
     match (era, picked) {
         (ArchEra::HistoricOrnate, Portrait) if era_rng.random_bool(0.6) => Hooded,
         (ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar, Ribbon | Wide) => Portrait,
@@ -12546,6 +12553,9 @@ fn plan_podium_tower(
         || !generate_roof_flag
         || config.condition != BuildingCondition::Normal
         || element.tags.contains_key("building:part")
+        // An early masonry tower rises sheer from its lot to its cornice;
+        // the stepped setback belongs to the towers of the interwar years.
+        || config.window_archetype == WindowArchetype::PairedPunched
     {
         return None;
     }
@@ -17121,11 +17131,13 @@ mod style_tests {
                 pick(MasonrySkyscraper, ArchEra::HistoricOrnate, deco),
                 DecoPiers
             );
-            let postwar = pick(TallBuilding, ArchEra::PostWarPanel, dated(1962));
-            assert!(
-                matches!(postwar, Ribbon | Wide | Strips),
-                "postwar tower picked {postwar:?}"
-            );
+            for category in [TallBuilding, MasonrySkyscraper] {
+                let postwar = pick(category, ArchEra::PostWarPanel, dated(1962));
+                assert!(
+                    matches!(postwar, Ribbon | Wide | Strips),
+                    "postwar {category:?} picked {postwar:?}"
+                );
+            }
             // Office towers of the banded decades, postmodern or plain.
             let banded = pick(ContemporarySkyscraper, ArchEra::Contemporary, dated(1983));
             assert!(matches!(banded, Ribbon | Wide), "{banded:?}");
@@ -17148,13 +17160,28 @@ mod style_tests {
     }
 
     // Undated brick, and the undated row fabric of an old centre, keep
-    // punched windows instead of glass bands.
+    // punched windows instead of glass bands. Elsewhere the dense fabric is
+    // as often a postwar concrete frame, and keeps its bands.
     #[test]
     fn undated_masonry_fabric_is_never_banded() {
         let row = PeriodCues {
             old_row_fabric: true,
             ..PeriodCues::default()
         };
+        let banded_elsewhere = (0..60u64).any(|seed| {
+            matches!(
+                pick_window_archetype(
+                    BuildingCategory::Default,
+                    ArchEra::Unknown,
+                    BuildingRegion::Other,
+                    WHITE_CONCRETE,
+                    row,
+                    seed,
+                ),
+                WindowArchetype::Ribbon | WindowArchetype::Wide
+            )
+        });
+        assert!(banded_elsewhere);
         for seed in 0..60u64 {
             for (region, wall, cues) in [
                 (BuildingRegion::NorthAmerica, BRICK, PeriodCues::default()),
@@ -17373,7 +17400,8 @@ mod style_tests {
             category(&high, BuildingRegion::Europe),
             BuildingCategory::TallBuilding
         );
-        // A part of a modelled tower stays with its siblings.
+        // The body of a block modelled in parts is a block too; a part
+        // raised off the ground is the upper shaft of a tower.
         let part = rect_way(
             11,
             0,
@@ -17384,6 +17412,22 @@ mod style_tests {
         );
         assert_eq!(
             category(&part, BuildingRegion::Europe),
+            BuildingCategory::Default
+        );
+        let shaft = rect_way(
+            12,
+            0,
+            0,
+            60,
+            30,
+            &[
+                ("building:part", "yes"),
+                ("height", "70"),
+                ("min_height", "30"),
+            ],
+        );
+        assert_eq!(
+            category(&shaft, BuildingRegion::Europe),
             BuildingCategory::TallBuilding
         );
     }
@@ -18214,6 +18258,23 @@ mod style_tests {
                 &way,
                 &config,
                 RoofType::Gabled,
+                true,
+                footprint,
+                &floor_area,
+                seed
+            )
+            .is_none());
+        }
+        // Nor does an early masonry tower, which rises sheer from its lot.
+        let early = BuildingConfig {
+            window_archetype: WindowArchetype::PairedPunched,
+            ..config.clone()
+        };
+        for seed in 0..30u64 {
+            assert!(plan_podium_tower(
+                &way,
+                &early,
+                RoofType::Flat,
                 true,
                 footprint,
                 &floor_area,
