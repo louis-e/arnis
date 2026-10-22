@@ -2273,6 +2273,11 @@ mod material_tests {
             // Masonry tower shafts: dark glass and spandrel panels.
             BLACK_TERRACOTTA,
             POLISHED_BLACKSTONE,
+            // Shades of tagged brick and stone, and crown louvres.
+            TUFF,
+            LIGHT_GRAY_TERRACOTTA,
+            QUARTZ_BRICKS,
+            IRON_TRAPDOOR,
         ] {
             assert!(block.id() < 256, "{} has id {}", block.name(), block.id());
         }

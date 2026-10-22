@@ -669,6 +669,41 @@ impl Default for RoofContext {
     }
 }
 
+/// Roof of a building that counts storeys in its roof (`roof:levels`) but
+/// names no shape, used where the default rules would leave a flat lid,
+/// which has no room for them. A pre-war
+/// North American row house carries its attic storeys in a mansard, as does
+/// an ornate European building with two or more; otherwise a terraced row is
+/// gabled and a free-standing building hipped. None without the tag, for
+/// `roof:levels=0`, and for parts, whose volumes are modelled.
+fn roof_levels_roof(
+    element: &ProcessedWay,
+    era: ArchEra,
+    ctx: RoofContext,
+) -> Option<(RoofType, bool)> {
+    let levels = element
+        .tags
+        .get("roof:levels")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|l| *l >= 1.0)?;
+    if element.tags.contains_key("building:part") {
+        return None;
+    }
+    let pre_war = matches!(
+        era,
+        ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar | ArchEra::Unknown
+    );
+    let roof = match ctx.region {
+        BuildingRegion::NorthAmerica if ctx.attached && pre_war => RoofType::Mansard,
+        BuildingRegion::Europe if era == ArchEra::HistoricOrnate && levels >= 2.0 => {
+            RoofType::Mansard
+        }
+        _ if ctx.attached => RoofType::Gabled,
+        _ => RoofType::Hipped,
+    };
+    Some((roof, true))
+}
+
 /// Roof of an untagged European building that is not a detached house: old-town
 /// fabric up to about seven storeys is pitched, whatever it houses, while
 /// postwar and contemporary blocks mostly are not. None leaves the decision to
@@ -2870,6 +2905,16 @@ impl BuildingStyle {
         } else {
             (RoofType::Flat, false)
         };
+        // Storeys in the roof need a roof to hold them: a flat lid from the
+        // default rules gives way to a pitched one, and a pitched default
+        // stays as it was.
+        let defaulted = !element.tags.contains_key("roof:shape")
+            && preset.roof_type.is_none()
+            && !roof_ctx.enclosed;
+        let (roof_type, generate_roof) = match roof_levels_roof(element, era, roof_ctx) {
+            Some(choice) if defaulted && roof_type == RoofType::Flat => choice,
+            _ => (roof_type, generate_roof),
+        };
 
         // downgrade only truly rotated shapes, not concave axis-aligned ones
         let has_explicit_roof_shape = element.tags.contains_key("roof:shape");
@@ -4185,6 +4230,37 @@ fn curtain_rhythm(style_seed: u64, era: ArchEra) -> BayRhythm {
     }
 }
 
+/// Upper-floor bays of a department store or shopping centre: narrow slits
+/// far apart in a mostly closed, clad wall rather than an office grid, as the
+/// sales floors behind it are lit from inside. Only for big stores of three
+/// storeys or more; a glass facade keeps its glass.
+fn closed_retail_bays(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    footprint_cells: usize,
+    scale: f64,
+) -> Option<BayRhythm> {
+    let store = matches!(
+        element.tags.get("shop").map(String::as_str),
+        Some("department_store" | "mall")
+    ) || matches!(
+        element.tags.get("building").map(String::as_str),
+        Some("retail" | "department_store" | "mall")
+    );
+    let footprint_m2 = footprint_cells as f64 / (scale * scale);
+    let storeys = (config.building_height - GROUND_FLOOR_BONUS) / config.floor_cycle.max(1);
+    (store
+        && footprint_m2 >= 1500.0
+        && storeys >= 3
+        && config.has_windows
+        && !is_glass_wall(config.wall_block))
+    .then_some(BayRhythm {
+        window: 1,
+        pier: 5,
+        corner: 3,
+    })
+}
+
 /// Bays of a shopfront or tower lobby: wide display windows between 1-wide piers.
 const SHOP_RHYTHM: BayRhythm = BayRhythm {
     window: 3,
@@ -4680,6 +4756,11 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("facade:material"))
         .filter(|m| !painted_metal(m, &element.tags))
     {
+        // Brick, stone, render and concrete: the material is the texture and
+        // a tagged colour picks its shade.
+        if let Some(block) = facade_tone_for_material(material, &element.tags, rng) {
+            return Some(block);
+        }
         if let Some(block) = get_wall_block_for_material(material, rng) {
             return Some(block);
         }
@@ -4690,10 +4771,219 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("colour"));
     if let Some(building_colour) = colour {
         if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
+            // A tower's colour is its stone or concrete, never timber.
+            if let Some(block) = tower_facade_tones(category, &element.tags)
+                .and_then(|family| facade_tone_for_colour(rgb, family, rng))
+            {
+                return Some(block);
+            }
             return Some(wall_block_for_colour_tag(rgb, rng));
         }
     }
     None
+}
+
+/// Facade materials a tagged colour is matched within.
+const BRICKWORK: u8 = 1;
+const STONEWORK: u8 = 2;
+const RENDERED: u8 = 4;
+const CONCRETE_WORK: u8 = 8;
+
+/// Wall blocks by mean texture colour, with the facade materials each can
+/// stand for. Brick runs from red through brown and buff to grey and white
+/// glazed brick; stone from limestone cream and grey granite to sooted dark
+/// sandstone; render and concrete take the flat textures. Planks are left
+/// out on purpose: a coloured stone or render wall is not timber.
+const FACADE_TONES: [(Block, (u8, u8, u8), u8); 32] = [
+    (BRICK, (151, 98, 83), BRICKWORK),
+    (
+        RED_TERRACOTTA,
+        (143, 61, 47),
+        BRICKWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (TERRACOTTA, (152, 94, 68), BRICKWORK | STONEWORK | RENDERED),
+    (POLISHED_GRANITE, (154, 107, 89), BRICKWORK | STONEWORK),
+    (MUD_BRICKS, (137, 104, 79), BRICKWORK),
+    (LIGHT_GRAY_TERRACOTTA, (135, 107, 98), BRICKWORK | RENDERED),
+    (BROWN_TERRACOTTA, (77, 51, 36), BRICKWORK | RENDERED),
+    (NETHER_BRICK, (44, 22, 26), BRICKWORK),
+    (DEEPSLATE_BRICKS, (71, 71, 71), BRICKWORK | STONEWORK),
+    (STONE_BRICKS, (122, 122, 122), BRICKWORK | STONEWORK),
+    (QUARTZ_BRICKS, (235, 229, 222), BRICKWORK),
+    (SANDSTONE, (216, 203, 156), BRICKWORK | STONEWORK),
+    (
+        SMOOTH_SANDSTONE,
+        (224, 214, 170),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        WHITE_TERRACOTTA,
+        (210, 178, 161),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        MUSHROOM_STEM,
+        (203, 196, 185),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        SMOOTH_STONE,
+        (159, 159, 159),
+        BRICKWORK | STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (
+        POLISHED_ANDESITE,
+        (132, 135, 134),
+        STONEWORK | CONCRETE_WORK,
+    ),
+    (TUFF, (108, 109, 102), STONEWORK),
+    (POLISHED_DEEPSLATE, (72, 73, 73), STONEWORK),
+    (
+        CALCITE,
+        (223, 224, 220),
+        STONEWORK | RENDERED | CONCRETE_WORK,
+    ),
+    (POLISHED_DIORITE, (193, 193, 195), STONEWORK),
+    (QUARTZ_BLOCK, (236, 230, 223), STONEWORK | RENDERED),
+    (END_STONE_BRICKS, (218, 224, 162), STONEWORK | RENDERED),
+    (WHITE_CONCRETE, (207, 213, 214), RENDERED | CONCRETE_WORK),
+    (
+        LIGHT_GRAY_CONCRETE_POWDER,
+        (154, 154, 148),
+        RENDERED | CONCRETE_WORK,
+    ),
+    (
+        LIGHT_GRAY_CONCRETE,
+        (125, 125, 115),
+        RENDERED | CONCRETE_WORK,
+    ),
+    (GRAY_CONCRETE, (55, 58, 62), RENDERED | CONCRETE_WORK),
+    (YELLOW_TERRACOTTA, (186, 133, 35), RENDERED),
+    (ORANGE_TERRACOTTA, (162, 84, 38), RENDERED),
+    (CYAN_TERRACOTTA, (87, 91, 91), RENDERED | CONCRETE_WORK),
+    (LIGHT_BLUE_TERRACOTTA, (113, 109, 138), RENDERED),
+    (BLACKSTONE, (42, 36, 41), STONEWORK),
+];
+
+/// Wall block for a brick, stone, render or concrete facade that also has a
+/// colour tag: that material's shade nearest the colour, or the colour itself
+/// where the material has no shade near it (painted brick). None without a
+/// colour, and for other materials (glass, metal, timber keep their own rules).
+fn facade_tone_for_material(
+    material: &str,
+    tags: &HashMap<String, String>,
+    rng: &mut impl Rng,
+) -> Option<Block> {
+    let rgb = tags
+        .get("building:colour")
+        .or_else(|| tags.get("colour"))
+        .and_then(|c| color_text_to_rgb_tuple(c))?;
+    let normalized: String = material
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    let family = match normalized.as_str() {
+        "brick" | "bricks" | "redbrick" | "clinker" => BRICKWORK,
+        "stone" | "naturalstone" | "limestone" | "sandstone" | "marble" | "granite" => STONEWORK,
+        "plaster" | "stucco" | "render" | "rendering" | "limerender" | "plastered" => RENDERED,
+        "concrete" | "reinforcedconcrete" | "cement" | "concreteblock" | "concreteblocks"
+        | "panel" | "panels" | "prefab" | "prefabricated" => CONCRETE_WORK,
+        _ => return None,
+    };
+    facade_tone_for_colour(rgb, family, rng).or_else(|| Some(wall_block_for_colour_tag(rgb, rng)))
+}
+
+/// Tone family of a tower with a colour but no material: a masonry or
+/// pre-war tower is stone or brick, any other a concrete or render frame.
+/// None for every other building, whose colour may be any render.
+fn tower_facade_tones(category: BuildingCategory, tags: &HashMap<String, String>) -> Option<u8> {
+    if !matches!(
+        category,
+        BuildingCategory::TallBuilding
+            | BuildingCategory::MasonrySkyscraper
+            | BuildingCategory::ContemporarySkyscraper
+            | BuildingCategory::ModernSkyscraper
+            | BuildingCategory::GridSkyscraper
+            | BuildingCategory::GlassCornerSkyscraper
+    ) {
+        return None;
+    }
+    let masonry = category == BuildingCategory::MasonrySkyscraper
+        || matches!(
+            crate::osm_parser::building_arch_era_dated(
+                tags,
+                crate::osm_parser::building_start_year(tags)
+            ),
+            ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar
+        );
+    Some(if masonry {
+        STONEWORK | BRICKWORK
+    } else {
+        CONCRETE_WORK
+    })
+}
+
+/// Nearest `FACADE_TONES` member of `family` to a tagged colour, picking
+/// among near-equal matches so a street of one tag is not all one block.
+/// A coloured tag keeps its hue: a buff tag takes sandstone rather than the
+/// pinker white terracotta that is nearer in lightness, and no tinted tag
+/// takes a grey, unless nothing of that hue is anywhere near. None when even
+/// the nearest is far off, as for blue-painted brick, which the general
+/// colour palette then matches instead.
+fn facade_tone_for_colour(rgb: (u8, u8, u8), family: u8, rng: &mut impl Rng) -> Option<Block> {
+    // Squared distance with lightness at half weight, as for every colour
+    // tag: a tagged pure red still finds brick, a blue does not.
+    const MAX_DISTANCE: f32 = 0.03;
+    let target = crate::colors::oklab_components(&rgb);
+    let insert = |best: &mut [(f32, Block); 3], d: f32, block: Block| {
+        if let Some(slot) = best.iter().position(|&(bd, _)| d < bd) {
+            best.copy_within(slot..2, slot + 1);
+            best[slot] = (d, block);
+        }
+    };
+    let mut any = [(f32::MAX, AIR); 3];
+    let mut same_hue = [(f32::MAX, AIR); 3];
+    for &(block, colour, flags) in &FACADE_TONES {
+        if flags & family == 0 {
+            continue;
+        }
+        let lab = crate::colors::oklab_components(&colour);
+        let (dl, da, db) = (0.5 * (target.0 - lab.0), target.1 - lab.1, target.2 - lab.2);
+        let d = dl * dl + da * da + db * db;
+        insert(&mut any, d, block);
+        if keeps_hue(target, lab) {
+            insert(&mut same_hue, d, block);
+        }
+    }
+    if any[0].0 > MAX_DISTANCE {
+        return None;
+    }
+    let best = if same_hue[0].0 <= 4.0 * any[0].0 {
+        same_hue
+    } else {
+        any
+    };
+    let cutoff = best[0].0.max(1e-6) * 1.25;
+    let near = best.iter().take_while(|&&(d, _)| d <= cutoff).count();
+    Some(best[rng.random_range(0..near)].1)
+}
+
+/// Whether a block's Oklab colour keeps the hue of a tagged one: anything
+/// does for a near-neutral tag; for a tinted tag a grey does not, and a
+/// tinted block only within about 20 degrees of hue. Brownstone, which has
+/// no stone of its hue, falls back to the nearest overall (granite).
+fn keeps_hue(target: (f32, f32, f32), block: (f32, f32, f32)) -> bool {
+    let target_chroma = target.1.hypot(target.2);
+    if target_chroma < 0.03 {
+        return true;
+    }
+    let chroma = block.1.hypot(block.2);
+    if chroma < 0.015 {
+        return false;
+    }
+    let cos = (target.1 * block.1 + target.2 * block.2) / (target_chroma * chroma);
+    cos >= 0.927 // cos 22 degrees
 }
 
 /// Render and stone tones with their mean texture colour. Pale and earthy
@@ -5492,7 +5782,12 @@ fn get_wall_block_for_category(
 /// Gross block height of one upper floor: 3 for residential-scale types
 /// (~3 m storeys), 4 for commercial/institutional. Tags only, because the
 /// category is resolved after the height and cannot be used here.
-fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
+/// `housing_group`: the part belongs to a building of flats or houses.
+fn floor_cycle_for(
+    building_type: &str,
+    tags: &HashMap<String, String>,
+    housing_group: bool,
+) -> i32 {
     const RESIDENTIAL_SCALE: &[&str] = &[
         "house",
         "detached",
@@ -5511,7 +5806,12 @@ fn floor_cycle_for(building_type: &str, tags: &HashMap<String, String>) -> i32 {
     ];
     if tags.contains_key("building:part") {
         // One cycle for all parts keeps stacked volumes flush at the seams.
-        return 4;
+        // Storeys counted on the parts of a housing block are housing
+        // storeys, a third lower than the commercial default; a mapped
+        // height keeps its own scale.
+        let counted = tags.contains_key("building:levels") && !tags.contains_key("height");
+        let housing = housing_group || RESIDENTIAL_SCALE.contains(&building_type);
+        return if counted && housing { 3 } else { 4 };
     }
     // Both mapped: the storeys are as tall as the building says. Under the
     // usual 3 a 25 m five-storey office would show seven rows of windows.
@@ -5938,6 +6238,7 @@ fn generate_roof_only_structure(
             .map(|s| s.as_str())
             .unwrap_or("roof"),
         &element.tags,
+        false,
     );
 
     // Determine where the roof structure starts vertically.
@@ -6905,14 +7206,17 @@ const RUN_HEADING_COS: f64 = 0.97;
 /// the same ring in turn, so the last ring is kept per thread and handed out
 /// again rather than laid out once per pass.
 fn facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Rc<[WallColumn]> {
-    type Memo = Option<(Vec<(i32, i32)>, BayRhythm, Rc<[WallColumn]>)>;
+    // Keyed on everything the layout reads: the ring, the bays and whether
+    // the shopfront takes the bays of the floors above.
+    type Memo = Option<(Vec<(i32, i32)>, (BayRhythm, bool), Rc<[WallColumn]>)>;
     thread_local! {
         static LAST: RefCell<Memo> = const { RefCell::new(None) };
     }
+    let key = (config.bays, config.masonry_lobby());
     LAST.with(|last| {
         let mut last = last.borrow_mut();
-        if let Some((ring, bays, columns)) = last.as_ref() {
-            if *bays == config.bays
+        if let Some((ring, last_key, columns)) = last.as_ref() {
+            if *last_key == key
                 && ring.len() == nodes.len()
                 && ring
                     .iter()
@@ -6924,7 +7228,7 @@ fn facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Rc<[WallC
         }
         let columns: Rc<[WallColumn]> = lay_out_facade_columns(nodes, config).into();
         let ring = nodes.iter().map(|n| (n.x, n.z)).collect();
-        *last = Some((ring, config.bays, columns.clone()));
+        *last = Some((ring, key, columns.clone()));
         columns
     })
 }
@@ -11262,7 +11566,16 @@ pub fn generate_buildings(
         .or_else(|| element.tags.get("building:part"))
         .map(|s| s.as_str())
         .unwrap_or("yes");
-    let floor_cycle = floor_cycle_for(building_type, &element.tags);
+    // A part of a housing block carries that in its group seed; the mark is
+    // taken off again so every roll below stays as it was.
+    let housing_group = element.tags.contains_key("building:part")
+        && crate::osm_parser::residential_group_from_seed(group_seed);
+    let group_seed = if housing_group {
+        crate::osm_parser::seed_without_residential_mark(group_seed)
+    } else {
+        group_seed
+    };
+    let floor_cycle = floor_cycle_for(building_type, &element.tags, housing_group);
 
     // Architectural era, consumed by palettes, frames, depth styles and
     // weathering. A part without a date of its own takes its building's;
@@ -11469,9 +11782,14 @@ pub fn generate_buildings(
         cached_footprint_size,
         group_seed,
     );
-    // Untagged towers read better on the taller commercial rhythm.
+    // Untagged towers read better on the taller commercial rhythm; a part
+    // keeps the cycle its group shares.
+    let takes_commercial_rhythm = is_tall_building
+        && building_type == "yes"
+        && floor_cycle == 3
+        && !element.tags.contains_key("building:part");
     let (floor_cycle, building_height, is_tall_building, min_level_offset) =
-        if is_tall_building && building_type == "yes" && floor_cycle == 3 {
+        if takes_commercial_rhythm {
             let (h, tall) = calculate_building_height(
                 element,
                 building_type,
@@ -11959,6 +12277,11 @@ pub fn generate_buildings(
         // `building_facades::collect` will be given.
         preset_shell: Arc::default(),
     };
+    // A department store's sales floors want wall, not daylight.
+    let config = match closed_retail_bays(element, &config, cached_footprint_size, scale_factor) {
+        Some(bays) => BuildingConfig { bays, ..config },
+        None => config,
+    };
 
     // Passages only apply to ground-level buildings. Elevated building:part
     // elements (min_level > 0) sit above the passage and must keep their
@@ -11985,6 +12308,27 @@ pub fn generate_buildings(
         Some(plan) => BuildingConfig {
             building_height: plan.podium_height,
             ..config.clone()
+        },
+        None => config,
+    };
+    // A tower crown is carved out of the mapped height: the shaft stops short
+    // and the crown rises to the top the data gives.
+    let tower_crown = if podium_tower.is_none() {
+        plan_tower_crown(
+            element,
+            &config,
+            style.roof_type,
+            style.generate_roof && invented_massing,
+            &cached_floor_area,
+            &roof_ctx,
+        )
+    } else {
+        None
+    };
+    let config = match tower_crown {
+        Some(crown) => BuildingConfig {
+            building_height: config.building_height - crown.rows(config.floor_cycle),
+            ..config
         },
         None => config,
     };
@@ -12357,6 +12701,7 @@ pub fn generate_buildings(
                 BuildingCategory::House | BuildingCategory::Residential
             ) || is_residential_type(building_type),
             explicit_pass: invented_massing,
+            crown: tower_crown,
         };
         // Cells within an overhang's reach that belong to another building
         // or part: a pitched roof's eaves stop short of them.
@@ -12518,6 +12863,8 @@ struct FlatRoofKit<'a> {
     /// for those before every flat roof got one. A setback crown, which the
     /// data does not show, and the hospital's wall crosses stay with them.
     explicit_pass: bool,
+    /// The crown planned inside the mapped height, see `plan_tower_crown`.
+    crown: Option<TowerCrown>,
 }
 
 /// Building types that are homes.
@@ -12900,17 +13247,28 @@ fn generate_building_roof(
         } else {
             ParapetCap::Coping(coping)
         };
-        if config.has_parapet {
+        // A crown screen stands where the parapet would.
+        let screen = match kit.crown {
+            Some(TowerCrown::Screen { rows }) => Some(rows),
+            _ => None,
+        };
+        if let Some(rows) = screen {
+            generate_crown_screen(editor, element, config, rows, kit.facade);
+        } else if config.has_parapet {
             generate_parapet(editor, element, config, roof_area, kit.facade, cap);
         } else if !modeled_part_roof {
             generate_flat_roof_edge_variation(editor, config, roof_area, kit.facade, coping);
         }
 
         // A stepped setback crown, unless a planned tower rises from this roof.
+        // Plant stands on the deck inside a screen, but not on a setback.
         let has_crown = suppress_flat_extras
-            || (!is_part
-                && kit.explicit_pass
-                && generate_setback_crown(editor, config, roof_area, &kit.cover));
+            || match kit.crown {
+                Some(TowerCrown::Setback { tiers }) if !is_part => {
+                    generate_setback_crown(editor, config, roof_area, &kit.cover, tiers)
+                }
+                _ => false,
+            };
         if !has_crown
             && !modeled_part_roof
             && should_generate_rooftop_equipment(config, style.roof_type, category)
@@ -13285,31 +13643,172 @@ fn generate_inset_tiers(
     placed.then_some(current_base)
 }
 
+/// How a flat-roofed tower ends, inside its mapped height.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TowerCrown {
+    /// Setback tiers, a storey each, stepping back three blocks at a time:
+    /// the zoning-era wedding cake of a pre-war masonry tower.
+    Setback { tiers: i32 },
+    /// The facade carried on past a lowered roof deck as an open screen,
+    /// louvred where the windows were, with the plant behind it.
+    Screen { rows: i32 },
+}
+
+impl TowerCrown {
+    /// Rows of the mapped height the crown takes from the shaft.
+    fn rows(self, floor_cycle: i32) -> i32 {
+        match self {
+            TowerCrown::Setback { tiers } => tiers * floor_cycle,
+            TowerCrown::Screen { rows } => rows,
+        }
+    }
+}
+
+/// The crown a tall, flat-roofed tower ends in, or None for a plain parapet.
+/// Pre-war masonry towers in North America step back in tiers; other towers
+/// hide their plant behind a screen. Either is carved out of the mapped
+/// height, never stacked on it.
+fn plan_tower_crown(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    roof_type: RoofType,
+    generate_roof_flag: bool,
+    floor_area: &[(i32, i32)],
+    roof_ctx: &RoofContext,
+) -> Option<TowerCrown> {
+    let cycle = config.floor_cycle.max(1);
+    let storeys = config.building_height / cycle;
+    // The roof pass must draw the crown: an enclosed roof gets none.
+    if !config.is_tall_building
+        || storeys < 12
+        || roof_type != RoofType::Flat
+        || !generate_roof_flag
+        || roof_ctx.enclosed
+        || config.condition != BuildingCondition::Normal
+        || element.tags.contains_key("building:part")
+        || floor_area.len() < 200
+        // An early masonry tower rises sheer from its lot to its cornice.
+        || config.window_archetype == WindowArchetype::PairedPunched
+    {
+        return None;
+    }
+    let roll = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001).random_range(0u32..100);
+    let pre_war_masonry = config.category == BuildingCategory::MasonrySkyscraper
+        || (config.category == BuildingCategory::TallBuilding
+            && matches!(
+                config.era,
+                ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar
+            ));
+    if pre_war_masonry && roof_ctx.region == BuildingRegion::NorthAmerica {
+        if roll >= 45 {
+            return None;
+        }
+        // Each tier steps three blocks in and needs a floor of its own.
+        let wanted = if config.category == BuildingCategory::MasonrySkyscraper {
+            3
+        } else {
+            2
+        };
+        let dist = roof_edge_distances(floor_area);
+        let tiers = (1..=wanted)
+            .take_while(|t| {
+                floor_area
+                    .iter()
+                    .filter(|&&(x, z)| dist.get(x, z) >= 3 * t)
+                    .count()
+                    >= 30
+            })
+            .count() as i32;
+        return (tiers > 0).then_some(TowerCrown::Setback { tiers });
+    }
+    // A masonry shaft ends on its capital and cornice, not on a plant screen.
+    if roll >= 50 || config.window_archetype == WindowArchetype::DecoPiers {
+        return None;
+    }
+    // Two storeys of plant room on a big tower, a storey and a half below.
+    let rows = if storeys >= 20 { 2 * cycle } else { cycle + 2 };
+    Some(TowerCrown::Screen { rows })
+}
+
+/// The screen of a `TowerCrown::Screen`: the facade's own piers, bands and
+/// mullions carried from the lowered roof deck to the mapped height, with
+/// louvres where its windows were and no floor behind them. A curtain wall
+/// runs on as glass. A coping caps it where a parapet would be.
+fn generate_crown_screen(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    rows: i32,
+    facade: &FacadePlan,
+) {
+    let full = BuildingConfig {
+        building_height: config.building_height + rows,
+        ..config.clone()
+    };
+    let columns = facade_columns(&element.nodes, config);
+    let mut variety = WallVariety::new(config);
+    let deck = config.start_y_offset + config.building_height + 1;
+    let top = full.start_y_offset + full.building_height;
+    let abs = config.abs_terrain_offset;
+    let curtain = is_glass_wall(config.wall_block);
+    let coping = rooftops::bottom_slab(rooftops::coping_for(
+        config.wall_block,
+        config.accent_block,
+        config.style_seed,
+    ));
+    for wc in columns.iter() {
+        let col = wc.facade(facade);
+        let flat = config.is_flat_column(wc.x, wc.z);
+        // An open trapdoor facing out hangs on the inner face of its cell,
+        // so the louvres sit a block behind the piers.
+        let louvre = make_open_trapdoor(IRON_TRAPDOOR, facing_for_normal(wc.normal.0, wc.normal.1));
+        for h in deck + 1..=top {
+            let block =
+                determine_wall_block_at_position(wc.x, h, wc.z, &full, col, flat, &mut variety);
+            let glazed = !flat && (block == config.window_block || block == GLASS);
+            if glazed && !curtain && wc.normal != (0, 0) {
+                editor.set_block_with_properties_absolute(
+                    louvre.clone(),
+                    wc.x,
+                    h + abs,
+                    wc.z,
+                    None,
+                    None,
+                );
+            } else {
+                editor.set_block_absolute(block, wc.x, h + abs, wc.z, None, None);
+            }
+        }
+        let line = if config.use_accent_roof_line && !flat {
+            config.accent_block
+        } else {
+            config.wall_block
+        };
+        editor.set_block_absolute(line, wc.x, top + 1 + abs, wc.z, None, None);
+        if !col.party {
+            editor.set_block_with_properties_absolute(
+                coping.clone(),
+                wc.x,
+                top + 2 + abs,
+                wc.z,
+                Some(&[AIR]),
+                None,
+            );
+        }
+    }
+}
+
+/// Stepped setback tiers on a tower's lowered roof, one storey each, up to
+/// the mapped height that `plan_tower_crown` took them from.
 fn generate_setback_crown(
     editor: &mut WorldEditor,
     config: &BuildingConfig,
     roof_area: &[(i32, i32)],
     cover: &RoofMembrane,
+    tier_count: i32,
 ) -> bool {
-    if !config.is_tall_building
-        || config.condition != BuildingCondition::Normal
-        || roof_area.len() < 200
-    {
-        return false;
-    }
-    let mut rng = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001);
-    if !rng.random_bool(0.45) {
-        return false;
-    }
-
     let dist = roof_edge_distances(roof_area);
     let roof_rel = config.start_y_offset + config.building_height + 1;
-    // Masonry towers get the full art-deco wedding cake.
-    let tier_count = if config.category == BuildingCategory::MasonrySkyscraper {
-        3
-    } else {
-        2
-    };
     let tiers: Vec<InsetTier> = (0..tier_count)
         .map(|t| InsetTier {
             inset: 3 + t * 3,
@@ -13317,7 +13816,12 @@ fn generate_setback_crown(
             with_ceilings: false,
         })
         .collect();
-    let Some(top) = generate_inset_tiers(editor, config, roof_area, &dist, roof_rel, &tiers, cover)
+    // The tiers' top storey is the tower's top storey.
+    let full = BuildingConfig {
+        building_height: config.building_height + tier_count * config.floor_cycle,
+        ..config.clone()
+    };
+    let Some(top) = generate_inset_tiers(editor, &full, roof_area, &dist, roof_rel, &tiers, cover)
     else {
         return false;
     };
@@ -17083,6 +17587,45 @@ mod height_tests {
         european_default_roof(&way, "apartments", era, 18, 300, seed, ctx)
     }
 
+    // Storeys in the roof mean a roof to hold them, never a flat lid.
+    #[test]
+    fn roof_levels_without_a_shape_give_a_pitched_roof() {
+        let ctx = |region, attached| RoofContext {
+            region,
+            attached,
+            ..RoofContext::default()
+        };
+        let way = way_with_tags(&[("building", "yes"), ("roof:levels", "2")]);
+        assert_eq!(
+            roof_levels_roof(&way, ArchEra::Unknown, ctx(BuildingRegion::Europe, true)),
+            Some((RoofType::Gabled, true))
+        );
+        assert_eq!(
+            roof_levels_roof(&way, ArchEra::Unknown, ctx(BuildingRegion::Europe, false)),
+            Some((RoofType::Hipped, true))
+        );
+        let row_house = way_with_tags(&[("building", "apartments"), ("roof:levels", "1")]);
+        assert_eq!(
+            roof_levels_roof(
+                &row_house,
+                ArchEra::TraditionalPreWar,
+                ctx(BuildingRegion::NorthAmerica, true)
+            ),
+            Some((RoofType::Mansard, true))
+        );
+        for tags in [
+            &[("building", "yes"), ("roof:levels", "0")][..],
+            &[("building", "yes")][..],
+            &[("building:part", "yes"), ("roof:levels", "2")][..],
+        ] {
+            let way = way_with_tags(tags);
+            assert_eq!(
+                roof_levels_roof(&way, ArchEra::Unknown, ctx(BuildingRegion::Europe, true)),
+                None
+            );
+        }
+    }
+
     // Attached old-town blocks of unknown age are mostly pitched in Europe.
     #[test]
     fn european_old_town_fabric_is_mostly_pitched() {
@@ -17339,6 +17882,26 @@ mod height_tests {
         ]);
         let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, Some(19), 4, 100, 1);
         assert_eq!(h, 29);
+    }
+
+    // A ten-storey slab of flats mapped as levels-only parts is about 32 m,
+    // not the 42 m of a commercial storey; a part with a mapped height, or
+    // of a building that is not housing, keeps the shared commercial cycle.
+    #[test]
+    fn levels_only_parts_of_housing_take_housing_storeys() {
+        let part = way_with_tags(&[("building:part", "yes"), ("building:levels", "10")]);
+        let cycle = floor_cycle_for("yes", &part.tags, true);
+        assert_eq!(cycle, 3);
+        let (h, _) = calculate_building_height(&part, "yes", 0, 1.0, None, cycle, 400, 1);
+        assert_eq!(h, 32);
+        assert_eq!(floor_cycle_for("yes", &part.tags, false), 4);
+        assert_eq!(floor_cycle_for("apartments", &part.tags, false), 3);
+        let measured = way_with_tags(&[
+            ("building:part", "yes"),
+            ("building:levels", "10"),
+            ("height", "38"),
+        ]);
+        assert_eq!(floor_cycle_for("yes", &measured.tags, true), 4);
     }
 
     #[test]
@@ -19209,6 +19772,13 @@ mod style_tests {
             }
         }
         blocks.extend(RENDER_TONES.iter().map(|&(b, _)| b));
+        for &(b, _, _) in FACADE_TONES.iter() {
+            blocks.extend([
+                b,
+                get_stair_block_for_material(b),
+                get_slab_block_for_material(b),
+            ]);
+        }
         blocks.extend(ROOF_SHADES.iter().map(|&(b, _)| b));
         // Window life: curtains, air conditioners, window boxes.
         blocks.extend_from_slice(&[
@@ -20154,6 +20724,246 @@ mod style_tests {
     }
 
     #[test]
+    fn a_tagged_colour_shades_the_tagged_material() {
+        use crate::element_processing::building_test_support::{rect_way, tag_map};
+        let wall = |tags: &[(&str, &str)], category, seed| {
+            let way = rect_way(3, 0, 0, 12, 12, tags);
+            determine_wall_block_from_tags(&way, category, &mut element_rng(seed))
+        };
+        let office = BuildingCategory::Office;
+        for seed in 0..12 {
+            // Beige stone is not grey stone, and grey render is not beige.
+            let beige = wall(
+                &[
+                    ("building:material", "stone"),
+                    ("building:colour", "#bbab94"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(beige, Some(WHITE_TERRACOTTA | MUSHROOM_STEM)),
+                "{beige:?}"
+            );
+            let grey = wall(
+                &[
+                    ("building:material", "plaster"),
+                    ("building:colour", "grey"),
+                ],
+                office,
+                seed,
+            );
+            assert_eq!(grey, Some(LIGHT_GRAY_CONCRETE));
+            // Buff and brown brick are not red brick.
+            let buff = wall(
+                &[
+                    ("building:material", "brick"),
+                    ("building:colour", "#dacdaa"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(buff, Some(SANDSTONE | SMOOTH_SANDSTONE)),
+                "{buff:?}"
+            );
+            let brown = wall(
+                &[
+                    ("building:material", "brick"),
+                    ("building:colour", "#90664D"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(brown, Some(MUD_BRICKS | POLISHED_GRANITE | BRICK)),
+                "{brown:?}"
+            );
+            // Brownstone is a granite, not a brick or a grey.
+            let brownstone = wall(
+                &[
+                    ("building:material", "stone"),
+                    ("building:colour", "#987c5d"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(brownstone, Some(POLISHED_GRANITE | TERRACOTTA)),
+                "{brownstone:?}"
+            );
+            // Sooted sandstone stays dark.
+            let sooted = wall(
+                &[
+                    ("building:material", "sandstone"),
+                    ("building:colour", "#49493f"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(sooted, Some(POLISHED_DEEPSLATE | DEEPSLATE_BRICKS)),
+                "{sooted:?}"
+            );
+            // A red brick tag is still brick.
+            let red = wall(
+                &[("building:material", "brick"), ("building:colour", "red")],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(red, Some(RED_TERRACOTTA | TERRACOTTA | BRICK)),
+                "{red:?}"
+            );
+            // A tan tower is sandstone, not birch planks or pink terracotta.
+            let tower = wall(
+                &[("building:colour", "#CDAA7D"), ("start_date", "1907")],
+                BuildingCategory::MasonrySkyscraper,
+                seed,
+            );
+            assert!(
+                matches!(tower, Some(SANDSTONE | SMOOTH_SANDSTONE | MUSHROOM_STEM)),
+                "{tower:?}"
+            );
+            // A grey modern tower is concrete, not stone brick.
+            let grey = wall(
+                &[("building:colour", "gray")],
+                BuildingCategory::GridSkyscraper,
+                seed,
+            );
+            assert!(
+                matches!(grey, Some(LIGHT_GRAY_CONCRETE | POLISHED_ANDESITE)),
+                "{grey:?}"
+            );
+            // A mauve brick finds its nearest brick even with no shade of its hue.
+            let mauve = wall(
+                &[
+                    ("building:material", "brick"),
+                    ("building:colour", "#9c717c"),
+                ],
+                office,
+                seed,
+            );
+            assert!(
+                matches!(mauve, Some(LIGHT_GRAY_TERRACOTTA | POLISHED_GRANITE)),
+                "{mauve:?}"
+            );
+        }
+        let mut rng = element_rng(1);
+        // Painted brick far from any brick shade keeps the paint.
+        assert_eq!(
+            facade_tone_for_colour((30, 40, 200), BRICKWORK, &mut rng),
+            None
+        );
+        let blue = tag_map(&[("building:colour", "#1e28c8")]);
+        let painted = facade_tone_for_material("brick", &blue, &mut rng).expect("painted brick");
+        assert!(
+            !FACADE_TONES
+                .iter()
+                .any(|&(b, _, f)| f & BRICKWORK != 0 && b == painted),
+            "{painted:?}"
+        );
+        // Without a colour the material keeps its own palette, and glass
+        // keeps its own rules.
+        assert_eq!(
+            facade_tone_for_material("brick", &HashMap::new(), &mut rng),
+            None
+        );
+        let beige = tag_map(&[("building:colour", "#bbab94")]);
+        assert_eq!(facade_tone_for_material("glass", &beige, &mut rng), None);
+    }
+
+    #[test]
+    fn tower_crowns_come_out_of_the_mapped_height() {
+        use crate::element_processing::building_test_support::rect_way;
+        let way = rect_way(1, 0, 0, 30, 30, &[("building", "office")]);
+        let floor: Vec<(i32, i32)> = (1..30).flat_map(|x| (1..30).map(move |z| (x, z))).collect();
+        let new_york = RoofContext {
+            region: BuildingRegion::NorthAmerica,
+            ..RoofContext::default()
+        };
+        let europe = RoofContext {
+            region: BuildingRegion::Europe,
+            ..RoofContext::default()
+        };
+        let mut tower = test_config(2 + 30 * 4, false, false);
+        tower.is_tall_building = true;
+        tower.category = BuildingCategory::MasonrySkyscraper;
+        let plan = |tower: &BuildingConfig, ctx: &RoofContext| {
+            plan_tower_crown(&way, tower, RoofType::Flat, true, &floor, ctx)
+        };
+        let (mut setbacks, mut screens) = (0, 0);
+        for id in 0..60 {
+            tower.element_id = id;
+            match plan(&tower, &new_york) {
+                Some(TowerCrown::Setback { tiers }) => {
+                    assert_eq!(tiers, 3);
+                    setbacks += 1;
+                }
+                Some(TowerCrown::Screen { .. }) => panic!("a pre-war New York tower steps back"),
+                None => {}
+            }
+            // The same tower in Europe hides its plant instead.
+            match plan(&tower, &europe) {
+                Some(TowerCrown::Screen { rows }) => {
+                    assert_eq!(rows, 8);
+                    screens += 1;
+                }
+                Some(TowerCrown::Setback { .. }) => panic!("European towers do not step back"),
+                None => {}
+            }
+        }
+        assert!((10..50).contains(&setbacks), "{setbacks}");
+        assert!((10..50).contains(&screens), "{screens}");
+        // A crown takes its rows from the shaft, never adds them.
+        assert_eq!(TowerCrown::Setback { tiers: 3 }.rows(4), 12);
+        // Low towers, enclosed roofs and roofs the pass does not draw keep a parapet.
+        let enclosed = RoofContext {
+            enclosed: true,
+            ..europe
+        };
+        for id in 0..60 {
+            tower.element_id = id;
+            assert_eq!(plan(&tower, &enclosed), None);
+            assert_eq!(
+                plan_tower_crown(&way, &tower, RoofType::Flat, false, &floor, &europe),
+                None
+            );
+            let mut low = tower.clone();
+            low.building_height = 2 + 10 * 4;
+            assert_eq!(plan(&low, &europe), None);
+        }
+    }
+
+    // A big store's upper floors are clad with a few slits; offices, small
+    // shops and glass stores keep their windows.
+    #[test]
+    fn department_stores_close_their_upper_floors() {
+        use crate::element_processing::building_test_support::rect_way;
+        let config = test_config(2 + 5 * 4, false, false);
+        let store = rect_way(
+            1,
+            0,
+            0,
+            60,
+            40,
+            &[("building", "retail"), ("shop", "department_store")],
+        );
+        let bays = closed_retail_bays(&store, &config, 2400, 1.0).expect("closed bays");
+        assert!(bays.pier >= 4 * bays.window);
+        let office = rect_way(2, 0, 0, 60, 40, &[("building", "office")]);
+        assert_eq!(closed_retail_bays(&office, &config, 2400, 1.0), None);
+        assert_eq!(closed_retail_bays(&store, &config, 600, 1.0), None);
+        let glass = BuildingConfig {
+            wall_block: GRAY_STAINED_GLASS,
+            ..config.clone()
+        };
+        assert_eq!(closed_retail_bays(&store, &glass, 2400, 1.0), None);
+        let low = test_config(2 + 2 * 4, false, false);
+        assert_eq!(closed_retail_bays(&store, &low, 2400, 1.0), None);
+    }
+
+    #[test]
     fn wall_variety_stays_within_the_tone() {
         assert_eq!(substitute_pool_only(GRAY_CONCRETE), &[GRAY_CONCRETE_POWDER]);
         for b in substitute_pool_only(BRICK) {
@@ -20593,6 +21403,62 @@ mod facade_integration_tests {
             .collect()
     }
 
+    // A tower's crown ends at its mapped height: a screen carries the wall
+    // up round a plant deck sunk below it, and nothing is stacked above.
+    #[test]
+    fn a_crown_screen_stays_inside_the_mapped_height() {
+        use crate::coordinate_system::geographic::LLBBox;
+        use crate::element_processing::building_test_support::test_editor_at;
+        let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let road = CoordinateBitmap::new(&xz);
+        let footprints = CoordinateBitmap::new(&xz);
+        let berlin = LLBBox::new(52.52, 13.40, 52.53, 13.41).unwrap();
+        let (x0, z0, x1, z1) = (20, 20, 50, 44);
+        let mut screens = 0;
+        for id in 1..24u64 {
+            let way = rect_way(
+                id,
+                x0,
+                z0,
+                x1,
+                z1,
+                &[
+                    ("building", "office"),
+                    ("height", "100"),
+                    ("roof:shape", "flat"),
+                ],
+            );
+            let mut editor = test_editor_at(&xz, berlin);
+            run_building(&mut editor, &way, &road, &footprints);
+            // A screen leaves the top storey open: no roof over the inside at
+            // the mapped height, only what plant stands that tall.
+            let lidded = (x0 + 2..=x1 - 2)
+                .flat_map(|x| (z0 + 2..=z1 - 2).map(move |z| (x, z)))
+                .filter(|&(x, z)| editor.get_block_absolute(x, 101, z).is_some())
+                .count();
+            if lidded * 2 > ((x1 - x0 - 3) * (z1 - z0 - 3)) as usize {
+                continue;
+            }
+            screens += 1;
+            // Walls end at 100, under a roof line and a coping.
+            for x in x0 + 1..x1 {
+                let top = editor.highest_block_between(x, z0, -64, 300);
+                assert_eq!(top, Some(102), "way {id}: screen top at x {x}");
+            }
+            // The plant stands on a deck sunk inside the screen, not above it.
+            let mut above = 0;
+            for x in x0..=x1 {
+                for z in z0..=z1 {
+                    if editor.highest_block_between(x, z, -64, 300) > Some(103) {
+                        above += 1;
+                    }
+                }
+            }
+            assert!(above <= 8, "way {id}: {above} columns above the screen");
+        }
+        assert!(screens > 0, "no tower drew a screen");
+    }
+
     // A New York mid-rise without roof tags gets a membrane, a parapet and
     // plant: the plant stands on its own roof, clear of the parapet, and is
     // the same on every run.
@@ -20606,8 +21472,10 @@ mod facade_integration_tests {
         let nyc = LLBBox::new(40.70, -74.02, 40.71, -74.01).unwrap();
         let (x0, z0, x1, z1) = (20, 20, 51, 43);
         let run = || {
+            // Not 4711: the photographed-wall test installs a facade under
+            // that id for the whole process while it runs.
             let way = rect_way(
-                4711,
+                4731,
                 x0,
                 z0,
                 x1,
@@ -20619,9 +21487,10 @@ mod facade_integration_tests {
             editor
         };
         let editor = run();
+        let again = run();
         assert_eq!(
             column_tops(&editor),
-            column_tops(&run()),
+            column_tops(&again),
             "the fit-out is deterministic"
         );
 

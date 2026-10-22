@@ -550,13 +550,56 @@ pub fn style_hint_from_seed(seed: u64) -> StyleHint {
 
 /// The seed with its style-hint bits cleared (used for the random variant roll).
 pub fn seed_without_hint(seed: u64) -> u64 {
-    seed & !STYLE_HINT_MASK
+    seed & !(STYLE_HINT_MASK | RESIDENTIAL_GROUP_BIT | YEAR_MASK)
+}
+
+// Set on the shared seed of parts whose building is housing (bit 60)
+const RESIDENTIAL_GROUP_BIT: u64 = 1 << 60;
+
+/// Whether a part's shared seed marks its building as housing, whose
+/// levels-only parts take the residential storey height.
+pub fn residential_group_from_seed(seed: u64) -> bool {
+    seed & RESIDENTIAL_GROUP_BIT != 0
+}
+
+/// The seed without the housing mark, so every roll a part makes stays the
+/// one it made before the mark existed.
+pub fn seed_without_residential_mark(seed: u64) -> u64 {
+    seed & !RESIDENTIAL_GROUP_BIT
+}
+
+fn seed_with_residential_mark(seed: u64, residential: bool) -> u64 {
+    if residential {
+        seed | RESIDENTIAL_GROUP_BIT
+    } else {
+        seed
+    }
+}
+
+/// Building types built on the residential storey height: flats, houses and
+/// their outbuildings.
+fn is_housing_type(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("building").map(String::as_str),
+        Some(
+            "residential"
+                | "apartments"
+                | "house"
+                | "detached"
+                | "semidetached_house"
+                | "terrace"
+                | "dormitory"
+                | "bungalow"
+                | "villa"
+        )
+    )
 }
 
 /// The key the parts of one building are grouped under: the seed without its
-/// packed style hint and year, which two parts of one building may not share.
+/// packed style hint, year and housing mark, which two parts of one building
+/// may not share.
 pub fn group_key(seed: u64) -> u64 {
-    seed & !(STYLE_HINT_MASK | YEAR_MASK)
+    seed & !(STYLE_HINT_MASK | YEAR_MASK | RESIDENTIAL_GROUP_BIT)
 }
 
 fn seed_with_hint(seed: u64, hint: StyleHint) -> u64 {
@@ -564,9 +607,9 @@ fn seed_with_hint(seed: u64, hint: StyleHint) -> u64 {
 }
 
 // Construction year of the building a part belongs to, packed into the part's
-// shared seed (bits 53-60) as years after 1800, so a start_date mapped only on
+// shared seed (bits 52-59) as years after 1800, so a start_date mapped only on
 // the outline still dates its parts. 0 is no year.
-const YEAR_SHIFT: u64 = 53;
+const YEAR_SHIFT: u64 = 52;
 const YEAR_MASK: u64 = 0xFF << YEAR_SHIFT;
 const YEAR_BASE: i32 = 1800;
 
@@ -942,7 +985,7 @@ pub fn parse_osm_data(
     println!("Bounding box: {bbox:?}");
 
     // Deserialize the JSON data into the OSMData structure
-    let data = SplitOsmData::from_raw_osm_data(osm_data);
+    let mut data = SplitOsmData::from_raw_osm_data(osm_data);
 
     let (coord_transformer, xzbbox) = projection
         .transformer(&bbox)
@@ -992,6 +1035,7 @@ pub fn parse_osm_data(
         &relation_ways,
         &mut part_groups,
     ));
+    inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
     // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
     // separate building:part relations) are invisible to both passes above: the membership
     // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
@@ -1289,6 +1333,107 @@ pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
     min_h.unwrap_or(0.0) <= 0.0 && min_lvl.unwrap_or(0.0) <= 0.0
 }
 
+/// Facade tags a part that names no material or colour of its own takes from
+/// its building: the mapper described the brick, stone or render of the whole
+/// building once, on its outline or relation, and the parts are that
+/// building. Glass, metal and the like stay with the outline, where the
+/// group's style hint already carries them.
+fn inherit_masonry_facade_tags(
+    ways: &mut [OsmElement],
+    relations: &[OsmElement],
+    part_groups: &PartGroups,
+) {
+    const FACADE_KEYS: [&str; 4] = [
+        "building:material",
+        "building:facade:material",
+        "building:colour",
+        "colour",
+    ];
+    let masonry = |tags: &HashMap<String, String>| {
+        tags.get("building:material")
+            .or_else(|| tags.get("building:facade:material"))
+            .is_some_and(|m| {
+                matches!(
+                    norm_tag(m).as_str(),
+                    "brick"
+                        | "bricks"
+                        | "stone"
+                        | "naturalstone"
+                        | "limestone"
+                        | "sandstone"
+                        | "marble"
+                        | "granite"
+                        | "plaster"
+                        | "stucco"
+                        | "render"
+                        | "concrete"
+                )
+            })
+    };
+    let facade_of = |tags: &HashMap<String, String>| -> Vec<(String, String)> {
+        FACADE_KEYS
+            .iter()
+            .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+            .collect()
+    };
+    if part_groups.is_empty() {
+        return;
+    }
+    let groups: HashSet<u64> = part_groups
+        .values()
+        .map(|&s| seed_without_hint(s))
+        .collect();
+    // Facade of each group's building, keyed like the groups: an outline way
+    // by its id, a building relation by its salted id.
+    let mut facade: HashMap<u64, Vec<(String, String)>> = HashMap::new();
+    let mut relation_outlines: HashMap<u64, u64> = HashMap::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        let key = RELATION_SEED_BIT | rel.id;
+        if !groups.contains(&key) {
+            continue;
+        }
+        if masonry(tags) {
+            facade.insert(key, facade_of(tags));
+            continue;
+        }
+        for m in &rel.members {
+            let role = m.role.trim();
+            if m.r#type == "way"
+                && (role.eq_ignore_ascii_case("outline") || role.eq_ignore_ascii_case("outer"))
+            {
+                relation_outlines.insert(m.r#ref, key);
+            }
+        }
+    }
+    for w in ways.iter() {
+        let Some(tags) = w.tags.as_ref().filter(|t| masonry(t)) else {
+            continue;
+        };
+        if groups.contains(&w.id) {
+            facade.insert(w.id, facade_of(tags));
+        } else if let Some(&key) = relation_outlines.get(&w.id) {
+            facade.entry(key).or_insert_with(|| facade_of(tags));
+        }
+    }
+    if facade.is_empty() {
+        return;
+    }
+    for w in ways.iter_mut() {
+        let Some(inherited) = part_groups
+            .get(&w.id)
+            .and_then(|&seed| facade.get(&seed_without_hint(seed)))
+        else {
+            continue;
+        };
+        let tags = w.tags.get_or_insert_with(HashMap::new);
+        if FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
+            continue;
+        }
+        tags.extend(inherited.iter().cloned());
+    }
+}
+
 fn compute_outline_suppression(
     relations: &[OsmElement],
     ways: &[OsmElement],
@@ -1320,6 +1465,7 @@ fn compute_outline_suppression(
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
     let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
+    let mut housing_ways: HashSet<u64> = HashSet::new();
     for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
@@ -1330,6 +1476,9 @@ fn compute_outline_suppression(
                 way_year.insert(w.id, y);
             }
             way_ground.insert(w.id, part_covers_ground(t));
+            if is_housing_type(t) {
+                housing_ways.insert(w.id);
+            }
         }
     }
     let mut needed_nodes: HashSet<u64> = HashSet::new();
@@ -1387,6 +1536,12 @@ fn compute_outline_suppression(
                 .find_map(|m| way_year.get(&m.r#ref).copied())
         });
 
+        // Housing when the relation or its outline says so.
+        let housing = is_housing_type(tags)
+            || rel.members.iter().any(|m| {
+                is_outline(m.role.trim()) && m.r#type == "way" && housing_ways.contains(&m.r#ref)
+            });
+
         // Sub-relation parts carry no way geometry here, so they skip the coverage gate.
         let mut has_part = false;
         let mut has_relation_part = false;
@@ -1404,9 +1559,12 @@ fn compute_outline_suppression(
                     }
                     part_group.insert(
                         m.r#ref,
-                        seed_with_year(
-                            seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
-                            rel_year,
+                        seed_with_residential_mark(
+                            seed_with_year(
+                                seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                                rel_year,
+                            ),
+                            housing,
                         ),
                     );
                 }
@@ -1560,6 +1718,7 @@ fn compute_spatial_part_suppression(
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
     let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
+    let mut housing_outlines: HashSet<u64> = HashSet::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for w in ways {
         if relation_ways.contains(&w.id) {
@@ -1576,6 +1735,9 @@ fn compute_spatial_part_suppression(
             part_ids.push(w.id);
         } else if tags.contains_key("building") {
             outline_ids.push(w.id);
+            if is_housing_type(tags) {
+                housing_outlines.insert(w.id);
+            }
         } else {
             continue;
         }
@@ -1694,7 +1856,10 @@ fn compute_spatial_part_suppression(
             let year = way_year.get(&geoms[gi].id).copied();
             part_group.insert(
                 pid,
-                seed_with_year(seed_with_hint(geoms[gi].id, hint), year),
+                seed_with_residential_mark(
+                    seed_with_year(seed_with_hint(geoms[gi].id, hint), year),
+                    housing_outlines.contains(&geoms[gi].id),
+                ),
             );
         }
     }
@@ -2383,6 +2548,79 @@ mod outline_suppression_tests {
         let seed = groups[&200];
         assert_eq!(year_from_seed(seed), None);
         assert_eq!(style_hint_from_seed(seed), StyleHint::Masonry);
+    }
+
+    // An untagged part takes the stone of its outline; a tagged part and a
+    // glass outline keep their own.
+    #[test]
+    fn untagged_parts_take_the_masonry_of_their_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let (q, qn) = square_way(300, 3000, 0.3);
+        let outline = with_tag(
+            tagged(o, "building", "retail"),
+            "building:material",
+            "stone",
+        );
+        let outline = with_tag(outline, "building:colour", "#cfc6b5");
+        let own = with_tag(
+            tagged(q, "building:part", "yes"),
+            "building:colour",
+            "black",
+        );
+        let mut ways = vec![outline, tagged(p, "building:part", "yes"), own];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        let part = ways[1].tags.as_ref().unwrap();
+        assert_eq!(
+            part.get("building:material").map(String::as_str),
+            Some("stone")
+        );
+        assert_eq!(
+            part.get("building:colour").map(String::as_str),
+            Some("#cfc6b5")
+        );
+        let own = ways[2].tags.as_ref().unwrap();
+        assert!(!own.contains_key("building:material"));
+
+        let glass = with_tag(
+            tagged(square_way(100, 1000, 1.0).0, "building", "office"),
+            "building:material",
+            "glass",
+        );
+        let glass = with_tag(glass, "building:colour", "#8085a2");
+        let mut ways = vec![
+            glass,
+            tagged(square_way(200, 2000, 0.5).0, "building:part", "yes"),
+        ];
+        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        assert!(!ways[1]
+            .tags
+            .as_ref()
+            .unwrap()
+            .contains_key("building:colour"));
+    }
+
+    // The parts of a block of flats carry the housing mark; it leaves the
+    // group key and every roll made from the seed as they were.
+    #[test]
+    fn spatial_parts_of_flats_carry_the_housing_mark() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let ways = [
+            tagged(o, "building", "apartments"),
+            tagged(p, "building:part", "yes"),
+        ];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        let seed = groups[&200];
+        assert!(residential_group_from_seed(seed));
+        assert_eq!(seed_without_hint(seed), 100);
+        assert_eq!(seed_without_residential_mark(seed), 100);
+        assert!(!residential_group_from_seed(100));
     }
 
     fn tagmap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
