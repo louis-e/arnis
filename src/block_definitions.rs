@@ -2257,6 +2257,14 @@ mod material_tests {
             COBBLED_DEEPSLATE_SLAB,
             SMOOTH_QUARTZ_SLAB,
             CHERRY_PLANKS,
+            // The glass and spandrel panels of masonry tower shafts.
+            GRAY_STAINED_GLASS,
+            BLACK_STAINED_GLASS,
+            GRAY_TERRACOTTA,
+            BROWN_TERRACOTTA,
+            BLACK_TERRACOTTA,
+            POLISHED_DEEPSLATE,
+            POLISHED_BLACKSTONE,
         ] {
             assert!(block.id() < 256, "{} has id {}", block.name(), block.id());
         }

@@ -4304,8 +4304,13 @@ fn pick_window_archetype(
         }
         BuildingCategory::Historic => &[(Portrait, 50), (Spaced, 30), (Hooded, 20)],
         // Postwar towers band their windows or set them in a wide frame,
-        // stone-clad ones too; anything undated or later may also run piers
-        // up the shaft.
+        // stone-clad ones too, and never run piers up the shaft. A postwar
+        // block of flats punches its windows in the wall instead.
+        BuildingCategory::TallBuilding | BuildingCategory::MasonrySkyscraper
+            if era == ArchEra::PostWarPanel && cues.dwelling =>
+        {
+            &[(Portrait, 45), (Wide, 35), (Strips, 20)]
+        }
         BuildingCategory::TallBuilding | BuildingCategory::MasonrySkyscraper
             if era == ArchEra::PostWarPanel =>
         {
@@ -17136,6 +17141,16 @@ mod style_tests {
                 assert!(
                     matches!(postwar, Ribbon | Wide | Strips),
                     "postwar {category:?} picked {postwar:?}"
+                );
+                // A postwar block of flats punches its windows.
+                let homes = PeriodCues {
+                    dwelling: true,
+                    ..dated(1962)
+                };
+                let flats = pick(category, ArchEra::PostWarPanel, homes);
+                assert!(
+                    matches!(flats, Portrait | Wide | Strips),
+                    "postwar flats {category:?} picked {flats:?}"
                 );
             }
             // Office towers of the banded decades, postmodern or plain.
