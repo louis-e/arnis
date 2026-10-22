@@ -670,7 +670,8 @@ impl Default for RoofContext {
 }
 
 /// Roof of a building that counts storeys in its roof (`roof:levels`) but
-/// names no shape: a flat lid has none, so the roof is pitched. A pre-war
+/// names no shape, used where the default rules would leave a flat lid,
+/// which has no room for them. A pre-war
 /// North American row house carries its attic storeys in a mansard, as does
 /// an ornate European building with two or more; otherwise a terraced row is
 /// gabled and a free-standing building hipped. None without the tag, for
@@ -2742,8 +2743,6 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         } else if roof_ctx.enclosed {
             (RoofType::Flat, false)
-        } else if let Some(choice) = roof_levels_roof(element, era, roof_ctx) {
-            choice
         } else if let Some(choice) = european_default_roof(
             element,
             building_type,
@@ -2832,6 +2831,16 @@ impl BuildingStyle {
             }
         } else {
             (RoofType::Flat, false)
+        };
+        // Storeys in the roof need a roof to hold them: a flat lid from the
+        // default rules gives way to a pitched one, and a pitched default
+        // stays as it was.
+        let defaulted = !element.tags.contains_key("roof:shape")
+            && preset.roof_type.is_none()
+            && !roof_ctx.enclosed;
+        let (roof_type, generate_roof) = match roof_levels_roof(element, era, roof_ctx) {
+            Some(choice) if defaulted && roof_type == RoofType::Flat => choice,
+            _ => (roof_type, generate_roof),
         };
 
         // downgrade only truly rotated shapes, not concave axis-aligned ones
@@ -16462,7 +16471,6 @@ mod height_tests {
         european_default_roof(&way, "apartments", era, 18, 300, seed, ctx)
     }
 
-    // Attached old-town blocks of unknown age are mostly pitched in Europe.
     // Storeys in the roof mean a roof to hold them, never a flat lid.
     #[test]
     fn roof_levels_without_a_shape_give_a_pitched_roof() {
@@ -16502,6 +16510,7 @@ mod height_tests {
         }
     }
 
+    // Attached old-town blocks of unknown age are mostly pitched in Europe.
     #[test]
     fn european_old_town_fabric_is_mostly_pitched() {
         let pitched = (0..200u64)
