@@ -1029,22 +1029,32 @@ pub fn parse_osm_data(
         })
         .collect();
     // also catch S3DB outlines mapped without a relation
-    outline_suppression.extend(compute_spatial_part_suppression(
+    let mut fillers = OutlineFillers::new();
+    outline_suppression.extend(spatial_part_outlines(
         &data.ways,
         &data.nodes,
         &relation_ways,
         &mut part_groups,
+        &mut fillers,
     ));
     inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
     // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
     // separate building:part relations) are invisible to both passes above: the membership
     // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
     // Judge them spatially so a relation outline covered by part relations is dropped.
-    outline_suppression.extend(compute_spatial_relation_part_suppression(
+    outline_suppression.extend(spatial_relation_part_outlines(
         &data.relations,
         &data.ways,
         &data.nodes,
+        &mut fillers,
     ));
+    for (kind, list) in [("way", &mut data.ways), ("relation", &mut data.relations)] {
+        for e in list.iter_mut() {
+            if let (Some(&base), Some(tags)) = (fillers.get(&(kind, e.id)), e.tags.as_mut()) {
+                lower_outline_to_parts(tags, base);
+            }
+        }
+    }
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
         FnvHashMap::with_capacity_and_hasher(data.nodes.len(), Default::default());
@@ -1312,25 +1322,107 @@ const SUPPRESSION_GRID_CELL_DEG: f64 = 0.0005;
 // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
 // that float above the ground (e.g. S3DB churches), so they can't stand in for the outline.
 pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
-    // Leading number only: sign at position 0, one decimal point. So "54-60" → 54, not a parse fail.
-    let leading_f64 = |s: &str| {
-        let t = s.trim();
-        let mut end = 0;
-        let mut seen_dot = false;
-        for (i, c) in t.char_indices() {
-            let ok =
-                c.is_ascii_digit() || (c == '.' && !seen_dot) || ((c == '-' || c == '+') && i == 0);
-            if !ok {
-                break;
-            }
-            seen_dot |= c == '.';
-            end = i + c.len_utf8();
-        }
-        t[..end].parse::<f64>().ok()
-    };
-    let min_h = tags.get("min_height").and_then(|s| leading_f64(s));
-    let min_lvl = tags.get("building:min_level").and_then(|s| leading_f64(s));
+    let min_h = tags.get("min_height").and_then(|s| leading_number(s));
+    let min_lvl = tags
+        .get("building:min_level")
+        .and_then(|s| leading_number(s));
     min_h.unwrap_or(0.0) <= 0.0 && min_lvl.unwrap_or(0.0) <= 0.0
+}
+
+// Leading number only: sign at position 0, one decimal point. So "54-60" → 54, not a parse fail.
+fn leading_number(s: &str) -> Option<f64> {
+    let t = s.trim();
+    let mut end = 0;
+    let mut seen_dot = false;
+    for (i, c) in t.char_indices() {
+        let ok =
+            c.is_ascii_digit() || (c == '.' && !seen_dot) || ((c == '-' || c == '+') && i == 0);
+        if !ok {
+            break;
+        }
+        seen_dot |= c == '.';
+        end = i + c.len_utf8();
+    }
+    t[..end].parse::<f64>().ok()
+}
+
+/// Where a raised building:part starts: its min_height in metres, or else its
+/// building:min_level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PartBase {
+    Metres(f64),
+    Levels(f64),
+}
+
+impl PartBase {
+    /// None for a part standing on the ground.
+    fn of(tags: &HashMap<String, String>) -> Option<Self> {
+        if let Some(m) = tags
+            .get("min_height")
+            .and_then(|s| leading_number(s))
+            .filter(|m| *m > 0.0)
+        {
+            return Some(Self::Metres(m));
+        }
+        tags.get("building:min_level")
+            .and_then(|s| leading_number(s))
+            .filter(|l| *l > 0.0)
+            .map(Self::Levels)
+    }
+
+    /// Rough height in metres, only to find the lowest of several bases.
+    fn approx_metres(self) -> f64 {
+        match self {
+            Self::Metres(m) => m,
+            Self::Levels(l) => l * 3.0,
+        }
+    }
+
+    fn lower(a: Option<Self>, b: Self) -> Self {
+        match a {
+            Some(a) if a.approx_metres() <= b.approx_metres() => a,
+            _ => b,
+        }
+    }
+}
+
+/// Outlines kept only for the ground under raised parts, with the base of the
+/// lowest of those parts.
+type OutlineFillers = HashMap<(&'static str, u64), PartBase>;
+
+/// An outline whose parts are mostly raised (arcades, a ground floor mapped
+/// only on the outline) is kept for the ground beneath them, but only as tall
+/// as the lowest of them starts and with a flat top: at its own, often
+/// estimated, height it would cap the parts that describe the building.
+fn lower_outline_to_parts(tags: &mut HashMap<String, String>, base: PartBase) {
+    match base {
+        PartBase::Metres(m) => {
+            if tags
+                .get("height")
+                .and_then(|h| leading_number(h))
+                .is_some_and(|h| h <= m)
+            {
+                return;
+            }
+            tags.insert("height".to_string(), format!("{m}"));
+            tags.remove("building:levels");
+        }
+        PartBase::Levels(l) => {
+            if tags
+                .get("building:levels")
+                .and_then(|h| leading_number(h))
+                .is_some_and(|h| h <= l)
+            {
+                return;
+            }
+            tags.insert("building:levels".to_string(), format!("{l}"));
+            tags.remove("height");
+        }
+    }
+    for key in ["roof:height", "roof:levels", "roof:angle"] {
+        tags.remove(key);
+    }
+    tags.insert("roof:shape".to_string(), "flat".to_string());
 }
 
 /// Facade tags a part that names no material or colour of its own takes from
@@ -1701,11 +1793,30 @@ fn stitch_rings(
 
 /// Suppresses relation-less S3DB outlines: a building polygon that spatially contains building:part polygons.
 /// Ways in `relation_ways` belong to a type=building relation and are judged by the relation pass instead.
+#[cfg(test)]
 fn compute_spatial_part_suppression(
     ways: &[OsmElement],
     nodes: &[OsmElement],
     relation_ways: &HashSet<u64>,
     part_group: &mut PartGroups,
+) -> OutlineSuppression {
+    spatial_part_outlines(
+        ways,
+        nodes,
+        relation_ways,
+        part_group,
+        &mut OutlineFillers::new(),
+    )
+}
+
+/// `compute_spatial_part_suppression`, also recording in `fillers` the
+/// outlines kept only for the ground under their raised parts.
+fn spatial_part_outlines(
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+    relation_ways: &HashSet<u64>,
+    part_group: &mut PartGroups,
+    fillers: &mut OutlineFillers,
 ) -> OutlineSuppression {
     let is_part = |tags: &HashMap<String, String>| {
         tags.get("building:part")
@@ -1719,6 +1830,7 @@ fn compute_spatial_part_suppression(
     let mut way_hint: HashMap<u64, StyleHint> = HashMap::new();
     let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
+    let mut way_base: HashMap<u64, PartBase> = HashMap::new();
     let mut housing_outlines: HashSet<u64> = HashSet::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for w in ways {
@@ -1734,6 +1846,9 @@ fn compute_spatial_part_suppression(
         }
         if is_part(tags) {
             part_ids.push(w.id);
+            if let Some(base) = PartBase::of(tags) {
+                way_base.insert(w.id, base);
+            }
         } else if tags.contains_key("building") {
             outline_ids.push(w.id);
             if is_housing_type(tags) {
@@ -1816,6 +1931,7 @@ fn compute_spatial_part_suppression(
 
     // add each part area to every outline containing its centroid
     let mut covered: HashMap<usize, f64> = HashMap::new();
+    let mut covered_raised: HashMap<usize, (f64, PartBase)> = HashMap::new();
     for pid in part_ids {
         let r = ring(pid);
         let pa = ring_area(&r);
@@ -1838,6 +1954,9 @@ fn compute_spatial_part_suppression(
             if point_in_ring(cla, clo, &geoms[gi].ring) {
                 if ground {
                     *covered.entry(gi).or_insert(0.0) += pa;
+                } else if let Some(&base) = way_base.get(&pid) {
+                    let e = covered_raised.entry(gi).or_insert((0.0, base));
+                    *e = (e.0 + pa, PartBase::lower(Some(e.1), base));
                 }
                 best = Some(match best {
                     Some(b) if (geoms[b].area, geoms[b].id) <= (geoms[gi].area, geoms[gi].id) => b,
@@ -1866,10 +1985,17 @@ fn compute_spatial_part_suppression(
     }
 
     let mut suppressed: OutlineSuppression = HashSet::new();
-    for (gi, cov) in covered {
+    for (&gi, &cov) in &covered {
         let g = &geoms[gi];
         if cov / g.area >= MIN_PART_COVERAGE {
             suppressed.insert(("way", g.id));
+        }
+    }
+    for (gi, (raised, base)) in covered_raised {
+        let g = &geoms[gi];
+        let ground = covered.get(&gi).copied().unwrap_or(0.0);
+        if !suppressed.contains(&("way", g.id)) && (ground + raised) / g.area >= MIN_PART_COVERAGE {
+            fillers.insert(("way", g.id), base);
         }
     }
     suppressed
@@ -1888,12 +2014,24 @@ fn compute_spatial_part_suppression(
 ///     area biases safely toward suppressing a genuinely covered outline, matching the
 ///     way-based pass.
 ///   * Association is SPATIAL (part centroid inside the outline footprint), never membership:
-///     the parts are separate relations, not members of the outline relation, so the
-///     membership pass (`compute_outline_suppression`) never links them.
+///     the parts are separate relations or closed ways, not members of the outline relation,
+///     so the membership pass (`compute_outline_suppression`) never links them.
+#[cfg(test)]
 fn compute_spatial_relation_part_suppression(
     relations: &[OsmElement],
     ways: &[OsmElement],
     nodes: &[OsmElement],
+) -> OutlineSuppression {
+    spatial_relation_part_outlines(relations, ways, nodes, &mut OutlineFillers::new())
+}
+
+/// `compute_spatial_relation_part_suppression`, also recording in `fillers` the
+/// outlines kept only for the ground under their raised parts.
+fn spatial_relation_part_outlines(
+    relations: &[OsmElement],
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+    fillers: &mut OutlineFillers,
 ) -> OutlineSuppression {
     let is_part = |tags: &HashMap<String, String>| {
         tags.get("building:part")
@@ -1931,12 +2069,28 @@ fn compute_spatial_relation_part_suppression(
     if needed_ways.is_empty() {
         return HashSet::new();
     }
+    // Closed building:part ways stand in a relation outline as often as part
+    // relations do: a courtyard block mapped as a multipolygon, its wings as ways.
+    let part_ways: Vec<&OsmElement> = ways
+        .iter()
+        .filter(|w| {
+            w.tags.as_ref().is_some_and(&is_part)
+                && w.nodes
+                    .as_ref()
+                    .is_some_and(|ns| ns.len() >= 4 && ns.first() == ns.last())
+        })
+        .collect();
 
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
     for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
+            needed_nodes.extend(ns.iter().copied());
+        }
+    }
+    for w in &part_ways {
+        if let Some(ns) = w.nodes.as_ref() {
             needed_nodes.extend(ns.iter().copied());
         }
     }
@@ -1965,8 +2119,25 @@ fn compute_spatial_relation_part_suppression(
     struct RelPart {
         area: f64,
         centroid: (f64, f64),
-        ground: bool,
+        base: Option<PartBase>,
     }
+    // Gross outer area; centroid = vertex average over all rings. The closing node is
+    // counted (first == last), matching the way-based pass exactly.
+    let part_of = |rings: &[Vec<(f64, f64)>], area: f64, tags: &HashMap<String, String>| {
+        let (mut sla, mut slo, mut cnt) = (0.0, 0.0, 0usize);
+        for ring in rings {
+            for &(la, lo) in ring {
+                sla += la;
+                slo += lo;
+                cnt += 1;
+            }
+        }
+        (cnt > 0).then(|| RelPart {
+            area,
+            centroid: (sla / cnt as f64, slo / cnt as f64),
+            base: PartBase::of(tags),
+        })
+    };
 
     // Classify each relation and assemble its footprint. building:part=no marks the OUTLINE
     // (not a part, e.g. the Colosseum outline); an outline candidate carries `building` and is
@@ -1994,25 +2165,21 @@ fn compute_spatial_relation_part_suppression(
                 rings,
                 area,
             });
-        } else {
-            // Gross outer area; centroid = vertex average over all assembled rings. The
-            // closing node is counted (first == last), matching the way-based pass exactly.
-            let (mut sla, mut slo, mut cnt) = (0.0, 0.0, 0usize);
-            for ring in &rings {
-                for &(la, lo) in ring {
-                    sla += la;
-                    slo += lo;
-                    cnt += 1;
-                }
-            }
-            if cnt == 0 {
-                continue;
-            }
-            parts.push(RelPart {
-                area,
-                centroid: (sla / cnt as f64, slo / cnt as f64),
-                ground: part_covers_ground(tags),
-            });
+        } else if let Some(p) = part_of(&rings, area, tags) {
+            parts.push(p);
+        }
+    }
+    for w in &part_ways {
+        let (Some(tags), Some(ns)) = (&w.tags, &w.nodes) else {
+            continue;
+        };
+        let ring: Vec<(f64, f64)> = ns.iter().filter_map(|i| node_ll.get(i).copied()).collect();
+        let area = ring_area(&ring);
+        if area <= 0.0 {
+            continue;
+        }
+        if let Some(p) = part_of(std::slice::from_ref(&ring), area, tags) {
+            parts.push(p);
         }
     }
     if outlines.is_empty() || parts.is_empty() {
@@ -2051,12 +2218,8 @@ fn compute_spatial_relation_part_suppression(
     // Add each ground-level part's gross area to every outline whose footprint contains the
     // part centroid (matches the way-based pass, which credits every containing outline).
     let mut covered: HashMap<usize, f64> = HashMap::new();
+    let mut covered_raised: HashMap<usize, (f64, PartBase)> = HashMap::new();
     for p in &parts {
-        // Elevated parts (min_height / building:min_level > 0) model raised roof/dome volumes
-        // that float above the ground, so they can't stand in for the ground footprint.
-        if !p.ground {
-            continue;
-        }
         let (cla, clo) = p.centroid;
         let Some(cands) = grid.get(&cell(cla, clo)) else {
             continue;
@@ -2067,7 +2230,15 @@ fn compute_spatial_relation_part_suppression(
                 .iter()
                 .any(|r| point_in_ring(cla, clo, r))
             {
-                *covered.entry(gi).or_insert(0.0) += p.area;
+                // Elevated parts (min_height / building:min_level > 0) model raised volumes
+                // that float above the ground, so they can't stand in for the ground footprint.
+                match p.base {
+                    None => *covered.entry(gi).or_insert(0.0) += p.area,
+                    Some(base) => {
+                        let e = covered_raised.entry(gi).or_insert((0.0, base));
+                        *e = (e.0 + p.area, PartBase::lower(Some(e.1), base));
+                    }
+                }
             }
         }
     }
@@ -2076,10 +2247,19 @@ fn compute_spatial_relation_part_suppression(
     // it is consumed only in the Way render arm, whereas a building:part RELATION renders via
     // the relation arm and carries its own tags, so a relation-keyed seed would have no consumer.
     let mut suppressed: OutlineSuppression = HashSet::new();
-    for (gi, cov) in covered {
+    for (&gi, &cov) in &covered {
         let g = &outlines[gi];
         if cov / g.area >= MIN_PART_COVERAGE {
             suppressed.insert(("relation", g.id));
+        }
+    }
+    for (gi, (raised, base)) in covered_raised {
+        let g = &outlines[gi];
+        let ground = covered.get(&gi).copied().unwrap_or(0.0);
+        if !suppressed.contains(&("relation", g.id))
+            && (ground + raised) / g.area >= MIN_PART_COVERAGE
+        {
+            fillers.insert(("relation", g.id), base);
         }
     }
     suppressed
@@ -2807,6 +2987,82 @@ mod outline_suppression_tests {
         let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
         assert!(s.contains(&("relation", 1)));
         assert!(!s.contains(&("relation", 2)));
+    }
+
+    // A courtyard block mapped as a multipolygon with its wings as building:part
+    // ways: ground parts covering it suppress the outline as part relations do.
+    #[test]
+    fn suppresses_relation_outline_covered_by_part_ways() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0016);
+        let outline = relation_el(
+            1,
+            &[("building", "government"), ("height", "30")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        let mut ways = outline_ways;
+        ways.push(tagged(part_way, "building:part", "yes"));
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let mut fillers = OutlineFillers::new();
+        let s = spatial_relation_part_outlines(&[outline], &ways, &nodes, &mut fillers);
+        assert!(s.contains(&("relation", 1)));
+        assert!(fillers.is_empty());
+    }
+
+    // Parts raised over an arcade cannot stand in for the ground, so the outline
+    // stays, but only up to where the lowest of them starts, and flat: at its own
+    // height it would cap the parts.
+    #[test]
+    fn an_outline_under_raised_parts_fills_only_the_ground_floor() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (low, low_nodes) = square_way(200, 2000, 0.0012);
+        let (high, high_nodes) = square_way(300, 3000, 0.001);
+        let outline = relation_el(
+            1,
+            &[
+                ("building", "government"),
+                ("height", "30"),
+                ("roof:height", "8"),
+            ],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        let raised = |w, min| {
+            let mut w = tagged(w, "building:part", "yes");
+            if let Some(t) = w.tags.as_mut() {
+                t.insert("min_height".to_string(), min);
+            }
+            w
+        };
+        let mut ways = outline_ways;
+        ways.push(raised(low, "6".to_string()));
+        ways.push(raised(high, "9".to_string()));
+        let nodes: Vec<OsmElement> = outline_nodes
+            .into_iter()
+            .chain(low_nodes)
+            .chain(high_nodes)
+            .collect();
+        let mut fillers = OutlineFillers::new();
+        let s = spatial_relation_part_outlines(&[outline], &ways, &nodes, &mut fillers);
+        assert!(s.is_empty());
+        let base = fillers[&("relation", 1)];
+        assert_eq!(base, PartBase::Metres(6.0));
+
+        let mut tags = tagmap(&[
+            ("building", "government"),
+            ("height", "30"),
+            ("building:levels", "7"),
+            ("roof:height", "8"),
+        ]);
+        lower_outline_to_parts(&mut tags, base);
+        assert_eq!(tags.get("height").map(String::as_str), Some("6"));
+        assert_eq!(tags.get("roof:shape").map(String::as_str), Some("flat"));
+        assert!(!tags.contains_key("building:levels") && !tags.contains_key("roof:height"));
+        // An outline already lower than the parts' base keeps its height.
+        let mut low_tags = tagmap(&[("building", "yes"), ("height", "4")]);
+        lower_outline_to_parts(&mut low_tags, base);
+        assert_eq!(low_tags.get("height").map(String::as_str), Some("4"));
     }
 
     // parse_osm_data only turns type=multipolygon / type=building relations into renderable
