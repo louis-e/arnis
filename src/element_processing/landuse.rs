@@ -7,7 +7,8 @@ use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{
-    without_holes, BuildingFootprintBitmap, CoordinateBitmap, FloodFillCache, RoadMaskBitmap,
+    in_hole, without_holes, BuildingFootprintBitmap, FloodFillCache, Holes, InnerRings,
+    RoadMaskBitmap,
 };
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -45,7 +46,7 @@ fn landuse_area(
     building_footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
     bridge_surface: &BridgeSurfaceMap,
-    holes: Option<&CoordinateBitmap>,
+    holes: Option<&Holes>,
 ) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
@@ -86,11 +87,9 @@ fn landuse_area(
         _ => GRASS_BLOCK,
     };
 
-    // Get the area of the landuse element using cache
-    let floor_area = without_holes(
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref()),
-        holes,
-    );
+    // Get the area of the landuse element using cache; hole cells are skipped where read,
+    // so the shared fill is not copied.
+    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
     let leaf_type_tagged = matches!(
         element.tags.get("leaf_type").map(String::as_str),
@@ -148,6 +147,9 @@ fn landuse_area(
 
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     for &(x, z) in floor_area.iter() {
+        if in_hole(holes, x, z) {
+            continue;
+        }
         // A tile reads the whole area, but nothing lands outside its editor; only the
         // per-cell draw has to happen there, so the cells it owns see the same sequence.
         // The main editor owns One World's clip margin, and every draw there still counts.
@@ -440,6 +442,7 @@ fn landuse_area(
 
     // Large construction sites get a centre crane plus scattered excavators, and
     // every site its fence and props, which keep clear of both.
+    let floor_area = without_holes(&floor_area, holes);
     if landuse_tag == "construction" {
         crate::structures::crane::maybe_place_crane(
             editor,
@@ -542,17 +545,12 @@ pub fn generate_landuse_from_relation(
     road_mask: &RoadMaskBitmap,
     bridge_surface: &BridgeSurfaceMap,
 ) {
-    if rel.tags.contains_key("landuse") {
+    if rel.tags.contains_key("landuse") && super::landuse_paints_ground(&rel.tags) {
         // Process each outer member way individually using cached flood fill.
         // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation
         // extent, misses the flood fill cache, and can cause multi-GB allocations.
-        let inners: Vec<&ProcessedWay> = rel
-            .members
-            .iter()
-            .filter(|m| m.role == ProcessedMemberRole::Inner)
-            .map(|m| m.way.as_ref())
-            .collect();
+        let inners = InnerRings::of(rel);
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
                 let holes = flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());

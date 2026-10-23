@@ -3,6 +3,7 @@
 use super::uses::{parse_level, use_from_area, use_from_tags, Tenant, Use};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::buildings::relation_outer_rings;
+use crate::floodfill_cache::hole_groups;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode};
 use fnv::FnvHashMap;
 use std::collections::HashMap;
@@ -340,18 +341,23 @@ impl InteriorUseIndex {
         };
         // Best area so far per building: (rank, area size, use).
         let mut best_area: FnvHashMap<u64, (u8, i64, Use)> = FnvHashMap::default();
-        // Even-odd over outer and inner rings, so a building in a hole (and not on an
-        // island in it) is left out.
+        // Each outer ring less the holes that cut it, so a building in a hole is left out
+        // while one on an island in it, or where two outer rings overlap, is not.
         let mut add_area = |rings: &[Outline], holes: &[Outline], use_: Use| {
-            for ring in rings {
+            let ring_points = |r: &[Outline]| -> Vec<Vec<(i32, i32)>> {
+                r.iter().map(|o| o.ring.clone()).collect()
+            };
+            let groups = hole_groups(&ring_points(rings), &ring_points(holes), |&p| p);
+            let cut = |r: usize, cx: i32, cz: i32| {
+                groups
+                    .iter()
+                    .find(|(members, _)| members.contains(&r))
+                    .is_some_and(|(_, cutting)| cutting.iter().any(|&h| holes[h].contains(cx, cz)))
+            };
+            for (r, ring) in rings.iter().enumerate() {
                 for o in grid.within(ring.min, ring.max) {
                     let (cx, cz) = o.center();
-                    let depth = rings
-                        .iter()
-                        .chain(holes)
-                        .filter(|r| r.contains(cx, cz))
-                        .count();
-                    if depth % 2 == 0 {
+                    if !ring.contains(cx, cz) || cut(r, cx, cz) {
                         continue;
                     }
                     let candidate = (area_rank(use_), -ring.area, use_);
@@ -515,6 +521,26 @@ mod tests {
             Some(Use::Factory),
             "on an island in the hole"
         );
+    }
+
+    #[test]
+    fn a_building_where_two_outer_rings_overlap_takes_their_use() {
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        let xz = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let member = |id, x0, z0, x1, z1| ProcessedMember {
+            role: ProcessedMemberRole::Outer,
+            way: std::sync::Arc::new(rect_way(id, x0, z0, x1, z1, &[])),
+        };
+        let elements = vec![
+            ProcessedElement::Way(rect_way(1, 60, 60, 70, 70, &[("building", "yes")])),
+            ProcessedElement::Relation(ProcessedRelation {
+                id: 9,
+                tags: tag_map(&[("landuse", "industrial"), ("type", "multipolygon")]),
+                members: vec![member(50, 0, 0, 100, 100), member(51, 50, 50, 150, 150)],
+            }),
+        ];
+        let index = InteriorUseIndex::build(&elements, &xz);
+        assert_eq!(index.area(1), Some(Use::Factory));
     }
 
     #[test]

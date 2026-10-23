@@ -876,8 +876,6 @@ mod tests {
         }
     }
 
-    /// A still surface sits up to `MAX_STILL_FILL_DROP` over the terrain, so laying
-    /// only the top block over a bore leaves the body hanging on air.
     #[test]
     fn a_pond_on_an_island_keeps_its_water() {
         let square = |x0: i32, x1: i32| {
@@ -898,6 +896,8 @@ mod tests {
         assert!(water(30), "the pond on the island");
     }
 
+    /// A still surface sits up to `MAX_STILL_FILL_DROP` over the terrain, so laying
+    /// only the top block over a bore leaves the body hanging on air.
     #[test]
     fn water_over_a_bore_fills_down_to_the_terrain() {
         let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();

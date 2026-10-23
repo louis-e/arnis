@@ -1059,7 +1059,8 @@ pub fn parse_osm_data(
         .collect();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
     let mut seen_ways: FnvHashSet<u64> = FnvHashSet::default();
-    let holed_outers = holed_relation_outers(&data.relations);
+    // Outer ways tagged like the relation that draws them less its holes.
+    let mut repeated_outers: FnvHashSet<u64> = FnvHashSet::default();
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -1127,7 +1128,7 @@ pub fn parse_osm_data(
         let tags = filter_tags(element.tags.unwrap_or_default());
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
-        let (mut tags, clipped_nodes) = if relation_way_ids.contains(&element.id) {
+        let (tags, clipped_nodes) = if relation_way_ids.contains(&element.id) {
             let way = Arc::new(ProcessedWay {
                 id: element.id,
                 tags,
@@ -1142,11 +1143,6 @@ pub fn parse_osm_data(
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() || !touches_world(&clipped_nodes) {
             continue;
-        }
-        for &rel in holed_outers.get(&element.id).into_iter().flatten() {
-            if let Some(rel_tags) = &data.relations[rel].tags {
-                drop_repeated_area_tags(&mut tags, rel_tags);
-            }
         }
 
         let processed: ProcessedWay = ProcessedWay {
@@ -1231,6 +1227,13 @@ pub fn parse_osm_data(
                 touches_world,
             );
             if !members.is_empty() {
+                repeated_outers.extend(repeating_outers(
+                    tags,
+                    &element.members,
+                    &roles,
+                    &members,
+                    &ways_map,
+                ));
                 processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                     id: element.id,
                     members,
@@ -1243,7 +1246,7 @@ pub fn parse_osm_data(
         let members: Vec<ProcessedMember> = element
             .members
             .iter()
-            .zip(roles)
+            .zip(&roles)
             .filter_map(|(mem, role)| {
                 if mem.r#type != "way" {
                     if mem.r#type != "relation" && mem.r#type != "node" {
@@ -1251,7 +1254,7 @@ pub fn parse_osm_data(
                     }
                     return None;
                 }
-                let role = role?;
+                let role = role.clone()?;
 
                 // Check if the way exists in ways_map
                 let way = match ways_map.get(&mem.r#ref) {
@@ -1286,12 +1289,24 @@ pub fn parse_osm_data(
             .collect();
 
         if !members.is_empty() {
+            repeated_outers.extend(repeating_outers(
+                tags,
+                &element.members,
+                &roles,
+                &members,
+                &ways_map,
+            ));
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
                 tags: filter_tags(tags.clone()),
             }));
         }
+    }
+    if !repeated_outers.is_empty() {
+        processed_elements.retain(
+            |e| !matches!(e, ProcessedElement::Way(way) if repeated_outers.contains(&way.id)),
+        );
     }
 
     emit_gui_progress_update(18.5, "");
@@ -2208,9 +2223,13 @@ fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
 }
 
 /// Each member's role, None for members that are not rings of the relation. "part" only
-/// counts in type=building relations, and any other role of a building is outer. A blank
-/// role in a multipolygon is inner when the way is a ring inside an odd number of the
-/// relation's other rings, and outer otherwise, as for a piece of a split outer ring.
+/// counts in type=building relations, and any other role of a building is outer.
+///
+/// A blank role in a multipolygon is read from the geometry. A closed way is inner when it
+/// lies inside an odd number of the relation's other rings, and outer otherwise. An open
+/// way is a piece of a ring only where it joins the other pieces end to end, each of its
+/// end nodes shared with exactly one other piece; it takes the role of the pieces it joins.
+/// Anything else, like a stray line, stays out, as it did before blank roles were read.
 fn member_roles(
     members: &[OsmMember],
     ways_map: &HashMap<u64, Arc<ProcessedWay>>,
@@ -2233,30 +2252,96 @@ fn member_roles(
     if building || !members.iter().any(blank) {
         return roles;
     }
-    let ring = |m: &OsmMember| ways_map.get(&m.r#ref).filter(|w| is_closed_way(w));
-    let rings: Vec<(usize, &Arc<ProcessedWay>)> = members
-        .iter()
-        .enumerate()
-        .filter(|&(i, m)| roles[i].is_some() || blank(m))
-        .filter_map(|(i, m)| Some((i, ring(m)?)))
+    let way = |i: usize| {
+        ways_map
+            .get(&members[i].r#ref)
+            .filter(|w| w.nodes.len() >= 2)
+    };
+    let ends = |w: &ProcessedWay| [w.nodes[0].id, w.nodes[w.nodes.len() - 1].id];
+    let candidates: Vec<usize> = (0..members.len())
+        .filter(|&i| roles[i].is_some() || blank(&members[i]))
+        .filter(|&i| way(i).is_some())
         .collect();
-    for (i, member) in members.iter().enumerate() {
-        if !blank(member) {
+
+    // Open pieces: end node degrees, and which explicit roles end at each node.
+    let mut degree: FnvHashMap<u64, usize> = FnvHashMap::default();
+    let mut role_at: FnvHashMap<u64, Vec<ProcessedMemberRole>> = FnvHashMap::default();
+    for &i in &candidates {
+        let w = way(i).unwrap();
+        if is_closed_way(w) {
             continue;
         }
-        let around = ring(member).map_or(0, |way| {
-            rings
+        for node in ends(w) {
+            *degree.entry(node).or_default() += 1;
+            if let Some(role) = &roles[i] {
+                role_at.entry(node).or_default().push(role.clone());
+            }
+        }
+    }
+    for &i in &candidates {
+        let w = way(i).unwrap();
+        if !blank(&members[i]) || is_closed_way(w) {
+            continue;
+        }
+        if ends(w).iter().all(|node| degree.get(node) == Some(&2)) {
+            let joined: Vec<&ProcessedMemberRole> = ends(w)
                 .iter()
-                .filter(|&&(j, other)| {
-                    j != i
-                        && crate::floodfill_cache::mostly_inside(
-                            &way.nodes,
-                            &other.nodes,
-                            crate::floodfill_cache::node_xz,
-                        )
-                })
-                .count()
-        });
+                .flat_map(|n| role_at.get(n))
+                .flatten()
+                .collect();
+            let inner =
+                !joined.is_empty() && joined.iter().all(|r| **r == ProcessedMemberRole::Inner);
+            roles[i] = Some(if inner {
+                ProcessedMemberRole::Inner
+            } else {
+                ProcessedMemberRole::Outer
+            });
+        }
+    }
+
+    // Closed blank rings by depth, among closed members and the rings the pieces make.
+    let closed_blanks: Vec<usize> = candidates
+        .iter()
+        .copied()
+        .filter(|&i| blank(&members[i]) && is_closed_way(way(i).unwrap()))
+        .collect();
+    if closed_blanks.is_empty() {
+        return roles;
+    }
+    let mut containers: Vec<(Option<usize>, Vec<ProcessedNode>)> = Vec::new();
+    for role in [ProcessedMemberRole::Outer, ProcessedMemberRole::Inner] {
+        let mut pieces: Vec<Vec<ProcessedNode>> = candidates
+            .iter()
+            .filter(|&&i| roles[i].as_ref() == Some(&role) && !is_closed_way(way(i).unwrap()))
+            .map(|&i| way(i).unwrap().nodes.clone())
+            .collect();
+        crate::element_processing::merge_way_segments(&mut pieces);
+        containers.extend(
+            pieces
+                .into_iter()
+                .filter(|r| r.len() >= 4 && r[0].id == r[r.len() - 1].id)
+                .map(|r| (None, r)),
+        );
+    }
+    for &i in &candidates {
+        let w = way(i).unwrap();
+        if is_closed_way(w) {
+            containers.push((Some(i), w.nodes.clone()));
+        }
+    }
+    for i in closed_blanks {
+        let nodes = &way(i).unwrap().nodes;
+        let around = containers
+            .iter()
+            .filter(|(j, ring)| {
+                *j != Some(i)
+                    && crate::floodfill_cache::mostly_inside(
+                        nodes,
+                        ring,
+                        crate::floodfill_cache::node_xz,
+                    )
+            })
+            .count();
         roles[i] = Some(if around % 2 == 1 {
             ProcessedMemberRole::Inner
         } else {
@@ -2266,61 +2351,35 @@ fn member_roles(
     roles
 }
 
-/// Multipolygons with holes that may share their area tags with an outer way, by way id.
-fn holed_relation_outers(relations: &[OsmElement]) -> FnvHashMap<u64, Vec<usize>> {
-    let mut outers: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
-    for (index, rel) in relations.iter().enumerate() {
-        let Some(tags) = &rel.tags else {
-            continue;
-        };
-        let role = |wanted: ProcessedMemberRole| {
-            move |m: &&OsmMember| {
-                m.r#type == "way" && area_member_role(&m.role) == Some(wanted.clone())
-            }
-        };
-        if tags.get("type").map(String::as_str) != Some("multipolygon")
-            || tags.contains_key("building")
-            || tags.contains_key("building:part")
-            || !rel
-                .members
-                .iter()
-                .any(|m| role(ProcessedMemberRole::Inner)(&m))
-        {
-            continue;
-        }
-        for member in rel.members.iter().filter(role(ProcessedMemberRole::Outer)) {
-            outers.entry(member.r#ref).or_default().push(index);
-        }
-    }
-    outers
-}
-
-/// Drops the area tag an outer way repeats from its relation: the relation draws that area
-/// less its holes, and the way would fill them in again. Matches the relation branches of
-/// data_processing, so only a tag the relation is drawn by goes.
-fn drop_repeated_area_tags(way: &mut HashMap<String, String>, rel: &HashMap<String, String>) {
-    let water_natural = |t: &HashMap<String, String>| {
-        matches!(t.get("natural").map(String::as_str), Some("water" | "bay"))
+/// Closed outer ways of a relation that draws its area less its holes, whose own tags say
+/// nothing the relation does not. Drawn as ways too, they would fill the holes in again.
+/// A way with a tag of its own, a fence or another use, is left to draw as before.
+fn repeating_outers<'a>(
+    tags: &'a HashMap<String, String>,
+    raw: &'a [OsmMember],
+    roles: &'a [Option<ProcessedMemberRole>],
+    members: &[ProcessedMember],
+    ways_map: &'a HashMap<u64, Arc<ProcessedWay>>,
+) -> impl Iterator<Item = u64> + 'a {
+    let holed = members.iter().any(|m| m.role == ProcessedMemberRole::Inner)
+        && crate::element_processing::RelationArea::of(tags)
+            .is_some_and(|area| area.draws_area(tags));
+    let said = |key: &str| {
+        key == "name" || key.ends_with("_name") || matches!(key, "wikidata" | "area" | "type")
     };
-    if rel.contains_key("water") || water_natural(rel) {
-        if way.contains_key("water") || water_natural(way) {
-            if water_natural(way) {
-                way.remove("natural");
-            }
-            way.remove("water");
-        }
-        return;
-    }
-    let key = ["natural", "landuse"]
-        .into_iter()
-        .find(|key| rel.contains_key(*key))
-        .or_else(|| (rel.get("leisure").map(String::as_str) == Some("park")).then_some("leisure"))
-        .or_else(|| rel.contains_key("man_made").then_some("man_made"));
-    if let Some(key) = key {
-        if way.get(key) == rel.get(key) {
-            way.remove(key);
-        }
-    }
+    raw.iter()
+        .zip(roles)
+        .filter(move |(_, role)| holed && **role == Some(ProcessedMemberRole::Outer))
+        .filter_map(move |(m, _)| ways_map.get(&m.r#ref))
+        .filter(move |way| {
+            is_closed_way(way)
+                && way.tags.keys().any(|k| !said(k))
+                && way
+                    .tags
+                    .iter()
+                    .all(|(k, v)| said(k) || tags.get(k) == Some(v))
+        })
+        .map(|way| way.id)
 }
 
 /// Outer or inner, the two roles a multipolygon ring can have.
@@ -3309,8 +3368,17 @@ mod osm_xml_tests {
             .expect("the relation is kept")
     }
 
-    // A wood with a clearing and a pond, rings closed, roles as given.
+    // A wood with a clearing, rings closed, roles as given.
     fn wood(outer: &str, clearing: &str, way_tags: &str) -> String {
+        wood_tagged(
+            outer,
+            clearing,
+            way_tags,
+            r#"<tag k="landuse" v="forest"/>"#,
+        )
+    }
+
+    fn wood_tagged(outer: &str, clearing: &str, way_tags: &str, rel_tags: &str) -> String {
         format!(
             r#"<osm version="0.6">
   <bounds minlat="54.800" minlon="18.370" maxlat="54.810" maxlon="18.390"/>
@@ -3328,10 +3396,67 @@ mod osm_xml_tests {
     <member type="way" ref="20" role="{outer}"/>
     <member type="way" ref="21" role="{clearing}"/>
     <tag k="type" v="multipolygon"/>
+    {rel_tags}
+  </relation>
+</osm>"#
+        )
+    }
+
+    // The same wood with its outer ring split over two ways, and more members as given.
+    fn split_wood(members: &str, ways: &str) -> String {
+        format!(
+            r#"<osm version="0.6">
+  <bounds minlat="54.800" minlon="18.370" maxlat="54.810" maxlon="18.390"/>
+  <node id="1" lat="54.801" lon="18.371"/>
+  <node id="2" lat="54.801" lon="18.389"/>
+  <node id="3" lat="54.809" lon="18.389"/>
+  <node id="4" lat="54.809" lon="18.371"/>
+  <node id="5" lat="54.803" lon="18.375"/>
+  <node id="6" lat="54.803" lon="18.385"/>
+  <node id="7" lat="54.807" lon="18.385"/>
+  <node id="8" lat="54.807" lon="18.375"/>
+  <node id="9" lat="54.805" lon="18.380"/>
+  <way id="21"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/></way>
+  <way id="22"><nd ref="1"/><nd ref="2"/><nd ref="3"/></way>
+  <way id="23"><nd ref="3"/><nd ref="4"/><nd ref="1"/></way>
+  {ways}
+  <relation id="31">
+    <member type="way" ref="22" role="outer"/>
+    <member type="way" ref="23" role="outer"/>
+    {members}
+    <tag k="type" v="multipolygon"/>
     <tag k="landuse" v="forest"/>
   </relation>
 </osm>"#
         )
+    }
+
+    fn roles_of(rel: &ProcessedRelation) -> Vec<ProcessedMemberRole> {
+        rel.members.iter().map(|m| m.role.clone()).collect()
+    }
+
+    #[test]
+    fn a_blank_ring_in_a_split_outer_is_its_hole() {
+        let elements = parse_local(&split_wood(r#"<member type="way" ref="21" role=""/>"#, ""));
+        assert_eq!(
+            roles_of(relation(&elements, 31)),
+            vec![ProcessedMemberRole::Outer, ProcessedMemberRole::Inner]
+        );
+    }
+
+    #[test]
+    fn a_stray_blank_way_does_not_break_the_ring() {
+        let elements = parse_local(&split_wood(
+            r#"<member type="way" ref="24" role=""/>"#,
+            r#"<way id="24"><nd ref="1"/><nd ref="9"/></way>"#,
+        ));
+        let rel = relation(&elements, 31);
+        assert_eq!(roles_of(rel), vec![ProcessedMemberRole::Outer]);
+        let ring = &rel.members[0].way.nodes;
+        assert_eq!(
+            (ring[0].x, ring[0].z),
+            (ring[ring.len() - 1].x, ring[ring.len() - 1].z)
+        );
     }
 
     fn parse_local(xml: &str) -> Vec<ProcessedElement> {
@@ -3365,31 +3490,35 @@ mod osm_xml_tests {
 
     #[test]
     fn an_outer_way_repeating_its_relation_leaves_the_hole_to_it() {
-        let tagged = |tags: &str| {
-            let elements = parse_local(&wood("outer", "inner", tags));
-            elements
+        let way_kept = |xml: String| {
+            parse_local(&xml)
                 .iter()
-                .find_map(|e| match e {
-                    ProcessedElement::Way(w) if w.id == 20 => Some(w.tags.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default()
+                .any(|e| matches!(e, ProcessedElement::Way(w) if w.id == 20))
         };
-        let same = tagged(r#"<tag k="landuse" v="forest"/><tag k="barrier" v="fence"/>"#);
+        let forest = r#"<tag k="landuse" v="forest"/><tag k="name" v="Hart"/>"#;
         assert!(
-            !same.contains_key("landuse"),
-            "the relation draws the forest"
+            !way_kept(wood("outer", "inner", forest)),
+            "the relation draws it"
         );
-        assert_eq!(same.get("barrier").map(String::as_str), Some("fence"));
-        let other = tagged(r#"<tag k="landuse" v="meadow"/>"#);
-        assert_eq!(other.get("landuse").map(String::as_str), Some("meadow"));
-        // Its member copy keeps the tag.
-        let elements = parse_local(&wood("outer", "inner", r#"<tag k="landuse" v="forest"/>"#));
-        let member = &relation(&elements, 30).members[0].way;
-        assert_eq!(
-            member.tags.get("landuse").map(String::as_str),
-            Some("forest")
+        assert!(
+            !way_kept(wood("outer", "", forest)),
+            "a blank-role clearing is a hole too"
         );
+        assert!(way_kept(wood(
+            "outer",
+            "",
+            r#"<tag k="landuse" v="meadow"/>"#
+        )));
+        let fenced = r#"<tag k="landuse" v="forest"/><tag k="barrier" v="fence"/>"#;
+        assert!(
+            way_kept(wood("outer", "inner", fenced)),
+            "the fence is its own"
+        );
+        // A relation that draws no area leaves its ways alone.
+        let tank = r#"<tag k="man_made" v="storage_tank"/>"#;
+        assert!(way_kept(wood_tagged("outer", "inner", tank, tank)));
+        let elements = parse_local(&wood("outer", "inner", forest));
+        assert_eq!(relation(&elements, 30).members[0].way.id, 20);
     }
 
     #[test]

@@ -45,6 +45,73 @@ pub mod waterways;
 
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedNode;
+use std::collections::HashMap;
+
+/// What `process_element` draws a relation as. Its relation arms, the ground-fill sort, the
+/// fill cache and the parser all read this, so they cannot drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationArea {
+    Building,
+    Water,
+    Natural,
+    Landuse,
+    Park,
+    ManMade,
+}
+
+impl RelationArea {
+    pub fn of(tags: &HashMap<String, String>) -> Option<Self> {
+        let natural = tags.get("natural").map(String::as_str);
+        if tags.contains_key("building")
+            || tags.contains_key("building:part")
+            || tags.get("type").map(String::as_str) == Some("building")
+        {
+            Some(Self::Building)
+        } else if tags.contains_key("water") || matches!(natural, Some("water" | "bay")) {
+            Some(Self::Water)
+        } else if natural.is_some() {
+            Some(Self::Natural)
+        } else if tags.contains_key("landuse") {
+            Some(Self::Landuse)
+        } else if tags.get("leisure").map(String::as_str) == Some("park") {
+            Some(Self::Park)
+        } else if tags.contains_key("man_made") {
+            Some(Self::ManMade)
+        } else {
+            None
+        }
+    }
+
+    /// Whether the relation is drawn by filling each outer ring less its holes. Landuse
+    /// that paints no ground draws nothing, and of man_made only piers, breakwaters and
+    /// groynes are areas.
+    pub fn fills_members(self, tags: &HashMap<String, String>) -> bool {
+        match self {
+            Self::Natural | Self::Park => true,
+            Self::Landuse => landuse_paints_ground(tags),
+            Self::ManMade => matches!(
+                tags.get("man_made").map(String::as_str),
+                Some("pier" | "breakwater" | "groyne")
+            ),
+            Self::Building | Self::Water => false,
+        }
+    }
+
+    /// Whether the relation draws its whole area, holes left out.
+    pub fn draws_area(self, tags: &HashMap<String, String>) -> bool {
+        self == Self::Water || self.fills_members(tags)
+    }
+}
+
+/// Whether a `landuse` value paints ground at all.
+/// `generate_landuse` bails on these before placing anything, and they are typically the largest
+/// polygons around, so including them would push every real area behind unrelated elements.
+pub fn landuse_paints_ground(tags: &HashMap<String, String>) -> bool {
+    !matches!(
+        tags.get("landuse").map(String::as_str),
+        Some("residential") | Some("commercial")
+    )
+}
 
 /// Merges way segments that share endpoints into closed rings.
 /// Used by water_areas.rs and boundaries.rs for assembling relation members.
