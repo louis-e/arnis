@@ -1059,6 +1059,7 @@ pub fn parse_osm_data(
         .collect();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
     let mut seen_ways: FnvHashSet<u64> = FnvHashSet::default();
+    let holed_outers = holed_relation_outers(&data.relations);
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -1126,7 +1127,7 @@ pub fn parse_osm_data(
         let tags = filter_tags(element.tags.unwrap_or_default());
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
-        let (tags, clipped_nodes) = if relation_way_ids.contains(&element.id) {
+        let (mut tags, clipped_nodes) = if relation_way_ids.contains(&element.id) {
             let way = Arc::new(ProcessedWay {
                 id: element.id,
                 tags,
@@ -1141,6 +1142,11 @@ pub fn parse_osm_data(
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() || !touches_world(&clipped_nodes) {
             continue;
+        }
+        for &rel in holed_outers.get(&element.id).into_iter().flatten() {
+            if let Some(rel_tags) = &data.relations[rel].tags {
+                drop_repeated_area_tags(&mut tags, rel_tags);
+            }
         }
 
         let processed: ProcessedWay = ProcessedWay {
@@ -1197,6 +1203,13 @@ pub fn parse_osm_data(
             && relation_type == Some("multipolygon");
         let keep_unclipped = is_water_relation || is_building_multipolygon;
 
+        let roles = member_roles(
+            &element.members,
+            &ways_map,
+            relation_type == Some("building"),
+            is_building_relation,
+        );
+
         // Natural, landuse and leisure areas are filled one outer member at a time. A ring
         // split over several ways closes only once they are joined, and clipping each way
         // on its own cuts them apart at the bbox edge, so such a relation arrived as open
@@ -1205,13 +1218,18 @@ pub fn parse_osm_data(
         if !keep_unclipped
             && relation_type == Some("multipolygon")
             && is_filled_area_relation(tags)
-            && element.members.iter().any(|m| {
-                m.r#type == "way"
-                    && area_member_role(&m.role).is_some()
-                    && ways_map.get(&m.r#ref).is_some_and(|w| !is_closed_way(w))
+            && element.members.iter().zip(&roles).any(|(m, role)| {
+                role.is_some() && ways_map.get(&m.r#ref).is_some_and(|w| !is_closed_way(w))
             })
         {
-            let members = assemble_area_rings(element.id, &element.members, &ways_map, &xzbbox);
+            let members = assemble_area_rings(
+                element.id,
+                &element.members,
+                &roles,
+                &ways_map,
+                &clip_bbox,
+                touches_world,
+            );
             if !members.is_empty() {
                 processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                     id: element.id,
@@ -1225,34 +1243,15 @@ pub fn parse_osm_data(
         let members: Vec<ProcessedMember> = element
             .members
             .iter()
-            .filter_map(|mem: &OsmMember| {
+            .zip(roles)
+            .filter_map(|(mem, role)| {
                 if mem.r#type != "way" {
                     if mem.r#type != "relation" && mem.r#type != "node" {
                         eprintln!("WARN: Unknown relation member type \"{}\"", mem.r#type);
                     }
                     return None;
                 }
-
-                let trimmed_role = mem.role.trim();
-                let role = if trimmed_role.eq_ignore_ascii_case("outer")
-                    || trimmed_role.eq_ignore_ascii_case("outline")
-                {
-                    ProcessedMemberRole::Outer
-                } else if trimmed_role.eq_ignore_ascii_case("inner") {
-                    ProcessedMemberRole::Inner
-                } else if trimmed_role.eq_ignore_ascii_case("part") {
-                    if relation_type == Some("building") {
-                        // "part" role only applies to type=building relations.
-                        ProcessedMemberRole::Part
-                    } else {
-                        // For multipolygon relations, "part" is not a valid role, skip.
-                        return None;
-                    }
-                } else if is_building_relation {
-                    ProcessedMemberRole::Outer
-                } else {
-                    return None;
-                };
+                let role = role?;
 
                 // Check if the way exists in ways_map
                 let way = match ways_map.get(&mem.r#ref) {
@@ -2208,6 +2207,122 @@ fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
         )
 }
 
+/// Each member's role, None for members that are not rings of the relation. "part" only
+/// counts in type=building relations, and any other role of a building is outer. A blank
+/// role in a multipolygon is inner when the way is a ring inside an odd number of the
+/// relation's other rings, and outer otherwise, as for a piece of a split outer ring.
+fn member_roles(
+    members: &[OsmMember],
+    ways_map: &HashMap<u64, Arc<ProcessedWay>>,
+    building_type: bool,
+    building: bool,
+) -> Vec<Option<ProcessedMemberRole>> {
+    let blank = |m: &OsmMember| m.r#type == "way" && m.role.trim().is_empty();
+    let mut roles: Vec<Option<ProcessedMemberRole>> = members
+        .iter()
+        .map(|m| {
+            if m.r#type != "way" {
+                None
+            } else if m.role.trim().eq_ignore_ascii_case("part") {
+                building_type.then_some(ProcessedMemberRole::Part)
+            } else {
+                area_member_role(&m.role).or_else(|| building.then_some(ProcessedMemberRole::Outer))
+            }
+        })
+        .collect();
+    if building || !members.iter().any(blank) {
+        return roles;
+    }
+    let ring = |m: &OsmMember| ways_map.get(&m.r#ref).filter(|w| is_closed_way(w));
+    let rings: Vec<(usize, &Arc<ProcessedWay>)> = members
+        .iter()
+        .enumerate()
+        .filter(|&(i, m)| roles[i].is_some() || blank(m))
+        .filter_map(|(i, m)| Some((i, ring(m)?)))
+        .collect();
+    for (i, member) in members.iter().enumerate() {
+        if !blank(member) {
+            continue;
+        }
+        let around = ring(member).map_or(0, |way| {
+            rings
+                .iter()
+                .filter(|&&(j, other)| {
+                    j != i
+                        && crate::floodfill_cache::mostly_inside(
+                            &way.nodes,
+                            &other.nodes,
+                            crate::floodfill_cache::node_xz,
+                        )
+                })
+                .count()
+        });
+        roles[i] = Some(if around % 2 == 1 {
+            ProcessedMemberRole::Inner
+        } else {
+            ProcessedMemberRole::Outer
+        });
+    }
+    roles
+}
+
+/// Multipolygons with holes that may share their area tags with an outer way, by way id.
+fn holed_relation_outers(relations: &[OsmElement]) -> FnvHashMap<u64, Vec<usize>> {
+    let mut outers: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
+    for (index, rel) in relations.iter().enumerate() {
+        let Some(tags) = &rel.tags else {
+            continue;
+        };
+        let role = |wanted: ProcessedMemberRole| {
+            move |m: &&OsmMember| {
+                m.r#type == "way" && area_member_role(&m.role) == Some(wanted.clone())
+            }
+        };
+        if tags.get("type").map(String::as_str) != Some("multipolygon")
+            || tags.contains_key("building")
+            || tags.contains_key("building:part")
+            || !rel
+                .members
+                .iter()
+                .any(|m| role(ProcessedMemberRole::Inner)(&m))
+        {
+            continue;
+        }
+        for member in rel.members.iter().filter(role(ProcessedMemberRole::Outer)) {
+            outers.entry(member.r#ref).or_default().push(index);
+        }
+    }
+    outers
+}
+
+/// Drops the area tag an outer way repeats from its relation: the relation draws that area
+/// less its holes, and the way would fill them in again. Matches the relation branches of
+/// data_processing, so only a tag the relation is drawn by goes.
+fn drop_repeated_area_tags(way: &mut HashMap<String, String>, rel: &HashMap<String, String>) {
+    let water_natural = |t: &HashMap<String, String>| {
+        matches!(t.get("natural").map(String::as_str), Some("water" | "bay"))
+    };
+    if rel.contains_key("water") || water_natural(rel) {
+        if way.contains_key("water") || water_natural(way) {
+            if water_natural(way) {
+                way.remove("natural");
+            }
+            way.remove("water");
+        }
+        return;
+    }
+    let key = ["natural", "landuse"]
+        .into_iter()
+        .find(|key| rel.contains_key(*key))
+        .or_else(|| (rel.get("leisure").map(String::as_str) == Some("park")).then_some("leisure"))
+        .or_else(|| rel.contains_key("man_made").then_some("man_made"));
+    if let Some(key) = key {
+        if way.get(key) == rel.get(key) {
+            way.remove(key);
+        }
+    }
+}
+
 /// Outer or inner, the two roles a multipolygon ring can have.
 fn area_member_role(role: &str) -> Option<ProcessedMemberRole> {
     let role = role.trim();
@@ -2239,25 +2354,25 @@ fn assembled_ring_id(relation_id: u64, inner: bool, index: usize) -> u64 {
         | (index as u64 & 0x7FFF)
 }
 
-/// Joins a multipolygon's member ways into closed rings, clips every ring to the bbox and
-/// returns them as synthetic member ways. Pieces that still do not close are dropped: filled
-/// they would make a wedge, and drawn they would be a stray outline around nothing.
+/// Joins a multipolygon's member ways into closed rings, clips every ring to the clip bbox
+/// and returns those reaching the world as synthetic member ways. Pieces that still do not
+/// close are dropped: filled they would make a wedge, and drawn they would be a stray
+/// outline around nothing.
 fn assemble_area_rings(
     relation_id: u64,
     members: &[OsmMember],
+    roles: &[Option<ProcessedMemberRole>],
     ways_map: &HashMap<u64, Arc<ProcessedWay>>,
-    xzbbox: &XZBBox,
+    clip_bbox: &XZBBox,
+    touches_world: impl Fn(&[ProcessedNode]) -> bool,
 ) -> Vec<ProcessedMember> {
     let mut outers: Vec<Vec<ProcessedNode>> = Vec::new();
     let mut inners: Vec<Vec<ProcessedNode>> = Vec::new();
-    for member in members {
-        if member.r#type != "way" {
-            continue;
-        }
-        let rings = match area_member_role(&member.role) {
+    for (member, role) in members.iter().zip(roles) {
+        let rings = match role {
             Some(ProcessedMemberRole::Outer) => &mut outers,
-            Some(_) => &mut inners,
-            None => continue,
+            Some(ProcessedMemberRole::Inner) => &mut inners,
+            _ => continue,
         };
         if let Some(way) = ways_map.get(&member.r#ref) {
             if way.nodes.len() >= 2 {
@@ -2285,8 +2400,8 @@ fn assemble_area_rings(
                 let first = first.clone();
                 ring.push(first);
             }
-            let nodes = clip_way_to_bbox(&ring, xzbbox);
-            if nodes.len() < 4 {
+            let nodes = clip_way_to_bbox(&ring, clip_bbox);
+            if nodes.len() < 4 || !touches_world(&nodes) {
                 continue;
             }
             let inner = role == ProcessedMemberRole::Inner;
@@ -3182,6 +3297,116 @@ mod osm_xml_tests {
         let ring = &rel.members[0].way.nodes;
         let (first, last) = (&ring[0], ring.last().unwrap());
         assert_eq!((first.x, first.z), (last.x, last.z), "the ring is closed");
+    }
+
+    fn relation(elements: &[ProcessedElement], id: u64) -> &ProcessedRelation {
+        elements
+            .iter()
+            .find_map(|e| match e {
+                ProcessedElement::Relation(r) if r.id == id => Some(r),
+                _ => None,
+            })
+            .expect("the relation is kept")
+    }
+
+    // A wood with a clearing and a pond, rings closed, roles as given.
+    fn wood(outer: &str, clearing: &str, way_tags: &str) -> String {
+        format!(
+            r#"<osm version="0.6">
+  <bounds minlat="54.800" minlon="18.370" maxlat="54.810" maxlon="18.390"/>
+  <node id="1" lat="54.801" lon="18.371"/>
+  <node id="2" lat="54.801" lon="18.389"/>
+  <node id="3" lat="54.809" lon="18.389"/>
+  <node id="4" lat="54.809" lon="18.371"/>
+  <node id="5" lat="54.803" lon="18.375"/>
+  <node id="6" lat="54.803" lon="18.385"/>
+  <node id="7" lat="54.807" lon="18.385"/>
+  <node id="8" lat="54.807" lon="18.375"/>
+  <way id="20"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>{way_tags}</way>
+  <way id="21"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/></way>
+  <relation id="30">
+    <member type="way" ref="20" role="{outer}"/>
+    <member type="way" ref="21" role="{clearing}"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="landuse" v="forest"/>
+  </relation>
+</osm>"#
+        )
+    }
+
+    fn parse_local(xml: &str) -> Vec<ProcessedElement> {
+        let (data, bounds) = parse(xml);
+        let spec = crate::projection::ProjectionSpec::local(1.0);
+        parse_osm_data(data, bounds.unwrap(), false, &spec).0
+    }
+
+    #[test]
+    fn blank_roles_are_read_from_the_rings() {
+        let elements = parse_local(&wood("", "", ""));
+        let roles: Vec<_> = relation(&elements, 30)
+            .members
+            .iter()
+            .map(|m| (m.way.id, m.role.clone()))
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                (20, ProcessedMemberRole::Outer),
+                (21, ProcessedMemberRole::Inner)
+            ],
+            "the ring inside the other is its hole"
+        );
+        let elements = parse_local(&wood("outer", "", ""));
+        assert_eq!(
+            relation(&elements, 30).members[1].role,
+            ProcessedMemberRole::Inner
+        );
+    }
+
+    #[test]
+    fn an_outer_way_repeating_its_relation_leaves_the_hole_to_it() {
+        let tagged = |tags: &str| {
+            let elements = parse_local(&wood("outer", "inner", tags));
+            elements
+                .iter()
+                .find_map(|e| match e {
+                    ProcessedElement::Way(w) if w.id == 20 => Some(w.tags.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+        let same = tagged(r#"<tag k="landuse" v="forest"/><tag k="barrier" v="fence"/>"#);
+        assert!(
+            !same.contains_key("landuse"),
+            "the relation draws the forest"
+        );
+        assert_eq!(same.get("barrier").map(String::as_str), Some("fence"));
+        let other = tagged(r#"<tag k="landuse" v="meadow"/>"#);
+        assert_eq!(other.get("landuse").map(String::as_str), Some("meadow"));
+        // Its member copy keeps the tag.
+        let elements = parse_local(&wood("outer", "inner", r#"<tag k="landuse" v="forest"/>"#));
+        let member = &relation(&elements, 30).members[0].way;
+        assert_eq!(
+            member.tags.get("landuse").map(String::as_str),
+            Some("forest")
+        );
+    }
+
+    #[test]
+    fn split_rings_keep_the_clip_margin() {
+        let (data, bounds) = parse(SPLIT_BEACH);
+        let spec = crate::projection::ProjectionSpec {
+            clip_pad: 64,
+            ..crate::projection::ProjectionSpec::local(1.0)
+        };
+        let (elements, xzbbox, _, _) = parse_osm_data(data, bounds.unwrap(), false, &spec);
+        let ring = &relation(&elements, 30).members[0].way.nodes;
+        let max_x = ring.iter().map(|n| n.x).max().unwrap();
+        assert_eq!(
+            max_x,
+            xzbbox.max_x() + 64,
+            "the beach runs on into the margin"
+        );
     }
 
     #[test]

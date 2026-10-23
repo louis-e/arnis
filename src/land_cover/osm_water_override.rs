@@ -6,6 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use crate::bresenham::bresenham_line;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::floodfill_cache::hole_groups;
 use crate::land_cover::{compute_water_distance, LandCoverData, LC_WATER};
 use crate::osm_parser::{
     ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
@@ -154,23 +155,28 @@ pub fn apply_osm_water_override(
                     .iter()
                     .map(|ring| ring.iter().map(|n| (n.x, n.z)).collect())
                     .collect();
-                let outers_refs: Vec<&[(i32, i32)]> = outers.iter().map(|v| v.as_slice()).collect();
-                let inners_refs: Vec<&[(i32, i32)]> = inners.iter().map(|v| v.as_slice()).collect();
-                changed += fill_polygon_scanline(
-                    &mut land_cover.grid,
-                    &outers_refs,
-                    &inners_refs,
-                    heights,
-                    context.as_ref(),
-                    min_x,
-                    min_z,
-                    max_x,
-                    max_z,
-                    width,
-                    height,
-                    scale_to_grid_x,
-                    scale_to_grid_z,
-                );
+                // Each group on its own, so a pond on an island in a hole stays water.
+                for (members, cutting) in hole_groups(&outers, &inners, |&p| p) {
+                    let outers_refs: Vec<&[(i32, i32)]> =
+                        members.iter().map(|&o| outers[o].as_slice()).collect();
+                    let inners_refs: Vec<&[(i32, i32)]> =
+                        cutting.iter().map(|&i| inners[i].as_slice()).collect();
+                    changed += fill_polygon_scanline(
+                        &mut land_cover.grid,
+                        &outers_refs,
+                        &inners_refs,
+                        heights,
+                        context.as_ref(),
+                        min_x,
+                        min_z,
+                        max_x,
+                        max_z,
+                        width,
+                        height,
+                        scale_to_grid_x,
+                        scale_to_grid_z,
+                    );
+                }
             }
             _ => {}
         }

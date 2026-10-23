@@ -593,14 +593,14 @@ impl FloodFillCache {
         inners: &[&ProcessedWay],
         timeout: Option<&Duration>,
     ) -> Option<CoordinateBitmap> {
-        let (ox0, oz0, ox1, oz1) = ring_bounds(&outer.nodes)?;
+        let (ox0, oz0, ox1, oz1) = ring_bounds(&outer.nodes, node_xz)?;
         let cutting: Vec<&ProcessedWay> = inners
             .iter()
             .copied()
             .filter(|inner| {
-                ring_bounds(&inner.nodes).is_some_and(|(x0, z0, x1, z1)| {
+                ring_bounds(&inner.nodes, node_xz).is_some_and(|(x0, z0, x1, z1)| {
                     x0 <= ox1 && x1 >= ox0 && z0 <= oz1 && z1 >= oz0
-                }) && !mostly_inside(&outer.nodes, &inner.nodes)
+                }) && !mostly_inside(&outer.nodes, &inner.nodes, node_xz)
             })
             .collect();
         if cutting.is_empty() {
@@ -608,7 +608,7 @@ impl FloodFillCache {
         }
         let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
         for inner in &cutting {
-            let (a, b, c, d) = ring_bounds(&inner.nodes)?;
+            let (a, b, c, d) = ring_bounds(&inner.nodes, node_xz)?;
             (x0, z0, x1, z1) = (x0.min(a), z0.min(b), x1.max(c), z1.max(d));
         }
         let bounds =
@@ -927,7 +927,6 @@ impl Default for FloodFillCache {
     }
 }
 
-/// Applies a callback to the flood-filled cells of a relation's merged, clipped, closed rings.
 /// A fill less the cells of a hole mask.
 pub fn without_holes(fill: FloodFillResult, holes: Option<&CoordinateBitmap>) -> FloodFillResult {
     match holes {
@@ -941,25 +940,54 @@ pub fn without_holes(fill: FloodFillResult, holes: Option<&CoordinateBitmap>) ->
     }
 }
 
-fn ring_bounds(nodes: &[crate::osm_parser::ProcessedNode]) -> Option<(i32, i32, i32, i32)> {
-    let first = nodes.first()?;
-    Some(nodes.iter().fold(
-        (first.x, first.z, first.x, first.z),
-        |(x0, z0, x1, z1), n| (x0.min(n.x), z0.min(n.z), x1.max(n.x), z1.max(n.z)),
-    ))
+pub fn node_xz(node: &crate::osm_parser::ProcessedNode) -> (i32, i32) {
+    (node.x, node.z)
+}
+
+type Bounds = (i32, i32, i32, i32);
+
+fn ring_bounds<T>(ring: &[T], xz: impl Fn(&T) -> (i32, i32)) -> Option<Bounds> {
+    let (x, z) = xz(ring.first()?);
+    Some(
+        ring.iter()
+            .map(xz)
+            .fold((x, z, x, z), |(x0, z0, x1, z1), (x, z)| {
+                (x0.min(x), z0.min(z), x1.max(x), z1.max(z))
+            }),
+    )
 }
 
 /// Whether most vertices of `ring` lie inside `around`, as an island's lie inside its lake.
-fn mostly_inside(
-    ring: &[crate::osm_parser::ProcessedNode],
-    around: &[crate::osm_parser::ProcessedNode],
+pub fn mostly_inside<T>(ring: &[T], around: &[T], xz: impl Fn(&T) -> (i32, i32) + Copy) -> bool {
+    match (ring_bounds(ring, xz), ring_bounds(around, xz)) {
+        (Some(r), Some(a)) => vertices_inside(ring, r, around, a, xz),
+        _ => false,
+    }
+}
+
+fn vertices_inside<T>(
+    ring: &[T],
+    (rx0, rz0, rx1, rz1): Bounds,
+    around: &[T],
+    (ax0, az0, ax1, az1): Bounds,
+    xz: impl Fn(&T) -> (i32, i32),
 ) -> bool {
+    // A ring inside another fits in its bounds, which spares the big rings a vertex test.
+    if around.len() < 3 || rx0 < ax0 - 1 || rz0 < az0 - 1 || rx1 > ax1 + 1 || rz1 > az1 + 1 {
+        return false;
+    }
+    let around: Vec<(f64, f64)> = around
+        .iter()
+        .map(|p| {
+            let (x, z) = xz(p);
+            (x as f64, z as f64)
+        })
+        .collect();
     let inside = |x: f64, z: f64| {
         let mut hit = false;
-        let mut j = around.len().wrapping_sub(1);
-        for (i, a) in around.iter().enumerate() {
-            let b = &around[j];
-            let (ax, az, bx, bz) = (a.x as f64, a.z as f64, b.x as f64, b.z as f64);
+        let mut j = around.len() - 1;
+        for (i, &(ax, az)) in around.iter().enumerate() {
+            let (bx, bz) = around[j];
             if (az > z) != (bz > z) && x < (bx - ax) * (z - az) / (bz - az) + ax {
                 hit = !hit;
             }
@@ -970,11 +998,43 @@ fn mostly_inside(
     // Off the grid by a quarter, so a vertex shared with the other ring counts as neither.
     let count = ring
         .iter()
-        .filter(|n| inside(n.x as f64 + 0.25, n.z as f64 + 0.25))
+        .filter(|p| {
+            let (x, z) = xz(p);
+            inside(x as f64 + 0.25, z as f64 + 0.25)
+        })
         .count();
-    around.len() >= 3 && count * 2 > ring.len()
+    count * 2 > ring.len()
 }
 
+/// Outer rings grouped by the inner rings that cut them, as (outers, cutting inners) index
+/// lists. An outer ring inside an inner one, an island in a lake's hole, is not cut by it,
+/// so it fills again. Usually there is one group with every inner ring.
+pub fn hole_groups<T, R: AsRef<[T]>>(
+    outers: &[R],
+    inners: &[R],
+    xz: impl Fn(&T) -> (i32, i32) + Copy,
+) -> Vec<(Vec<usize>, Vec<usize>)> {
+    let inner_bounds: Vec<Option<Bounds>> =
+        inners.iter().map(|r| ring_bounds(r.as_ref(), xz)).collect();
+    let mut groups: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
+    for (o, outer) in outers.iter().enumerate() {
+        let outer = outer.as_ref();
+        let bounds = ring_bounds(outer, xz);
+        let cutting: Vec<usize> = (0..inners.len())
+            .filter(|&i| match (bounds, inner_bounds[i]) {
+                (Some(ob), Some(ib)) => !vertices_inside(outer, ob, inners[i].as_ref(), ib, xz),
+                _ => true,
+            })
+            .collect();
+        match groups.iter_mut().find(|(_, c)| *c == cutting) {
+            Some((members, _)) => members.push(o),
+            None => groups.push((vec![o], cutting)),
+        }
+    }
+    groups
+}
+
+/// Applies a callback to the flood-filled cells of a relation's merged, clipped, closed rings.
 fn for_relation_ring_cells(
     rel: &crate::osm_parser::ProcessedRelation,
     role: ProcessedMemberRole,
@@ -1323,5 +1383,14 @@ mod tests {
             "an island in the lake is wood again"
         );
         assert!(cache.holes_in(&outer, &[], None).is_none());
+    }
+
+    #[test]
+    fn a_pond_on_an_island_is_not_cut_by_the_island() {
+        let square = |x0: i32, x1: i32| vec![(x0, x0), (x1, x0), (x1, x1), (x0, x1), (x0, x0)];
+        let (lake, pond) = (square(0, 60), square(25, 35));
+        let (island, islet) = (square(15, 45), square(28, 32));
+        let groups = hole_groups(&[lake, pond], &[island, islet], |&p| p);
+        assert_eq!(groups, vec![(vec![0], vec![0, 1]), (vec![1], vec![1])]);
     }
 }

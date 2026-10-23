@@ -5,7 +5,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::connected_blocks::place_connected;
 use crate::floodfill::flood_fill_area;
-use crate::floodfill_cache::{FloodFillCache, FloodFillResult};
+use crate::floodfill_cache::{hole_groups, node_xz, FloodFillCache, FloodFillResult};
 use crate::mapillary::geometry::parse_length_m;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::{min_y, WorldEditor};
@@ -145,22 +145,34 @@ fn area_cells(
     match element {
         ProcessedElement::Way(way) => add_ring(&mut inside, way, &fill(way)),
         ProcessedElement::Relation(rel) => {
-            for member in rel
-                .members
-                .iter()
-                .filter(|m| m.role == ProcessedMemberRole::Outer)
-            {
-                add_ring(&mut inside, &member.way, &fill(&member.way));
-            }
-            // The hole's own outline stays deck, as the edge around it.
-            for member in rel
-                .members
-                .iter()
-                .filter(|m| m.role == ProcessedMemberRole::Inner)
-            {
-                for cell in fill(&member.way).iter() {
-                    inside.remove(cell);
+            let rings = |role: ProcessedMemberRole| -> Vec<&ProcessedWay> {
+                rel.members
+                    .iter()
+                    .filter(|m| m.role == role)
+                    .map(|m| m.way.as_ref())
+                    .collect()
+            };
+            let (outers, inners) = (
+                rings(ProcessedMemberRole::Outer),
+                rings(ProcessedMemberRole::Inner),
+            );
+            let nodes = |ways: &[&ProcessedWay]| -> Vec<Vec<(i32, i32)>> {
+                ways.iter()
+                    .map(|w| w.nodes.iter().map(node_xz).collect())
+                    .collect()
+            };
+            for (members, cutting) in hole_groups(&nodes(&outers), &nodes(&inners), |&p| p) {
+                let mut cells = HashSet::new();
+                for o in members {
+                    add_ring(&mut cells, outers[o], &fill(outers[o]));
                 }
+                // The hole's own outline stays deck, as the edge around it.
+                for i in cutting {
+                    for cell in fill(inners[i]).iter() {
+                        cells.remove(cell);
+                    }
+                }
+                inside.extend(cells);
             }
         }
         ProcessedElement::Node(_) => {}
@@ -905,6 +917,34 @@ mod tests {
         assert_eq!(width_blocks(&tags("6m"), 3.0, 1.0), 6.0);
         assert_eq!(width_blocks(&tags("6 m"), 3.0, 1.0), 6.0);
         assert_eq!(width_blocks(&tags("wide"), 3.0, 1.0), 3.0);
+    }
+
+    #[test]
+    fn a_deck_in_a_pier_hole_is_kept() {
+        let ring = |id: u64, x0: i32, x1: i32| crate::osm_parser::ProcessedMember {
+            role: if id == 2 {
+                ProcessedMemberRole::Inner
+            } else {
+                ProcessedMemberRole::Outer
+            },
+            way: Arc::new(way(
+                id,
+                &[],
+                &[(x0, x0), (x1, x0), (x1, x1), (x0, x1), (x0, x0)],
+            )),
+        };
+        let pier = ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+            id: 9,
+            tags: HashMap::new(),
+            members: vec![ring(1, 10, 60), ring(2, 20, 50), ring(3, 30, 40)],
+        });
+        let fill = |w: &ProcessedWay| -> FloodFillResult {
+            let pts: Vec<(i32, i32)> = w.nodes.iter().map(|n| (n.x, n.z)).collect();
+            Arc::new(flood_fill_area(&pts, None))
+        };
+        let cells = area_cells(&pier, fill);
+        assert!(cells.contains(&(15, 15)) && !cells.contains(&(25, 25)));
+        assert!(cells.contains(&(35, 35)), "the deck in the hole");
     }
 
     #[test]
