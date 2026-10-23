@@ -510,24 +510,52 @@ impl FuelIndex {
             return index;
         }
         let reach = NODE_REACH * scale;
+        // Box round each site, so most buildings in a city are passed over at once.
+        let boxes: Vec<(f64, f64, f64, f64)> = index
+            .sites
+            .iter()
+            .map(|s| {
+                if s.ring.is_empty() {
+                    (s.x - reach, s.z - reach, s.x + reach, s.z + reach)
+                } else {
+                    s.ring.iter().fold(
+                        (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
+                        |(x0, z0, x1, z1), &(x, z)| (x0.min(x), z0.min(z), x1.max(x), z1.max(z)),
+                    )
+                }
+            })
+            .collect();
+        let (bx0, bz0, bx1, bz1) = boxes.iter().fold(
+            (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
+            |(x0, z0, x1, z1), b| (x0.min(b.0), z0.min(b.1), x1.max(b.2), z1.max(b.3)),
+        );
         for e in elements {
             let ProcessedElement::Way(w) = e else {
                 continue;
             };
-            if !w.tags.contains_key("building") && !w.tags.contains_key("building:part") {
+            if w.nodes.is_empty()
+                || !w.tags.contains_key("building") && !w.tags.contains_key("building:part")
+            {
+                continue;
+            }
+            let n = w.nodes.len() as f64;
+            let cx = w.nodes.iter().map(|p| p.x as f64 + 0.5).sum::<f64>() / n;
+            let cz = w.nodes.iter().map(|p| p.z as f64 + 0.5).sum::<f64>() / n;
+            if cx < bx0 || cx > bx1 || cz < bz0 || cz > bz1 {
                 continue;
             }
             let roof = is_roof(&w.tags);
             if roof && other_use(&w.tags) {
                 continue;
             }
-            let ring = ring_of(w);
-            let (cx, cz) = centre(&ring);
             let best = index
                 .sites
                 .iter()
                 .enumerate()
-                .filter(|(_, s)| s.id != w.id)
+                .filter(|&(i, s)| {
+                    let b = boxes[i];
+                    s.id != w.id && cx >= b.0 && cx <= b.2 && cz >= b.1 && cz <= b.3
+                })
                 .filter_map(|(i, s)| {
                     let d = ((s.x - cx).powi(2) + (s.z - cz).powi(2)).sqrt();
                     let near = if s.ring.is_empty() {

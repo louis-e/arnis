@@ -1638,8 +1638,27 @@ fn suppress_ride_parts(
     for w in &rides {
         suppressed.remove(&("way", w.id));
     }
-    let coords: HashMap<u64, (f64, f64)> = nodes
+    let is_part = |tags: &HashMap<String, String>| {
+        tags.get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+            && !attractions::claims(tags)
+    };
+    let parts: Vec<&OsmElement> = ways
         .iter()
+        .filter(|w| w.tags.as_ref().is_some_and(is_part))
+        .collect();
+    if parts.is_empty() {
+        return;
+    }
+    // Only the rides' and parts' own nodes, not every node in the area.
+    let wanted: FnvHashSet<u64> = rides
+        .iter()
+        .chain(&parts)
+        .flat_map(|w| w.nodes.iter().flatten().copied())
+        .collect();
+    let coords: FnvHashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| wanted.contains(&n.id))
         .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
         .collect();
     let ring = |w: &OsmElement| -> Vec<(f64, f64)> {
@@ -1654,15 +1673,7 @@ fn suppress_ride_parts(
         .map(|w| ring(w))
         .filter(|r| r.len() >= 4)
         .collect();
-    for w in ways {
-        let Some(tags) = &w.tags else { continue };
-        if !tags
-            .get("building:part")
-            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
-            || attractions::claims(tags)
-        {
-            continue;
-        }
+    for w in parts {
         let pts = ring(w);
         if pts.is_empty() {
             continue;

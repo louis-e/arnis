@@ -1803,17 +1803,22 @@ fn generate_magic_carpet(editor: &mut WorldEditor, way: &ProcessedWay) {
 
 /// Cells kept free of trees along lift lines and round their terminals.
 pub fn clear_corridors(elements: &[ProcessedElement], xzbbox: &XZBBox) -> CoordinateBitmap {
+    let lifts: Vec<(&ProcessedWay, Kind)> = elements
+        .iter()
+        .filter_map(|e| match e {
+            ProcessedElement::Way(way) if way.nodes.len() >= 2 => tag(&way.tags, "aerialway")
+                .and_then(Kind::from_tag)
+                .filter(|k| !matches!(k, Kind::MagicCarpet | Kind::RopeTow))
+                .map(|k| (way, k)),
+            _ => None,
+        })
+        .collect();
+    // Most areas have no lift, and a world-sized bitmap is megabytes.
+    if lifts.is_empty() {
+        return CoordinateBitmap::new_empty();
+    }
     let mut map = CoordinateBitmap::new(xzbbox);
-    for element in elements {
-        let ProcessedElement::Way(way) = element else {
-            continue;
-        };
-        let Some(kind) = tag(&way.tags, "aerialway").and_then(Kind::from_tag) else {
-            continue;
-        };
-        if matches!(kind, Kind::MagicCarpet | Kind::RopeTow) {
-            continue;
-        }
+    for (way, kind) in lifts {
         let spec = Spec::new(kind, &way.tags);
         // Room for the carriers plus a tree crown either side.
         let half = spec.gauge / 2.0 + 6.0;
@@ -2005,5 +2010,6 @@ mod tests {
         let map = clear_corridors(&[ProcessedElement::Way(way)], &bbox);
         assert!(map.contains(125, 8) && !map.contains(125, 20));
         assert!(map.contains(-12, 0));
+        assert!(clear_corridors(&[], &bbox).is_empty());
     }
 }
