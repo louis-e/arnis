@@ -1319,6 +1319,30 @@
       </div>
     </div>
 
+    <!-- Discord invite: shown once ever, after the second world of a session -->
+    <div id="discord-modal" class="modal" style="display: none;">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="discord-modal-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="discord-modal-title" data-localize="discord_modal_title">Join the Arnis Discord</h2>
+          </div>
+          <button type="button" class="dialog-close" onclick="closeDiscordModal()" aria-label="Close" title="Close (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="dialog-body">
+          <p data-localize="discord_modal_text">Enjoying Arnis? Join our Discord to show off your worlds, get help and see what's coming next.</p>
+        </div>
+        <footer class="dialog-footer">
+          <button type="button" class="dialog-button" onclick="closeDiscordModal()" data-localize="discord_modal_dismiss">No thanks</button>
+          <button type="button" class="dialog-button is-primary" onclick="joinDiscord()">
+            <svg class="icon" aria-hidden="true"><use href="#i-external"></use></svg>
+            <span data-localize="discord_modal_join">Join Discord</span>
+          </button>
+        </footer>
+      </div>
+    </div>
+
     <!-- One World: asks before chunks already in the world are generated again -->
     <div id="one-world-confirm-modal" class="modal" style="display: none;">
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="one-world-confirm-title" tabindex="-1">

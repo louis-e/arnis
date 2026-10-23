@@ -240,5 +240,9 @@
   "body_gravity": "Gravedad de la Luna y Marte",
   "body_gravity_desc": "Gravedad baja real en mundos de la Luna y Marte.",
   "moving_vehicles": "Vehículos en movimiento",
-  "moving_vehicles_desc": "Coches, tranvías, metros y trenes que recorren tus calles y vías."
+  "moving_vehicles_desc": "Coches, tranvías, metros y trenes que recorren tus calles y vías.",
+  "discord_modal_title": "Únete al Discord de Arnis",
+  "discord_modal_text": "¿Te gusta Arnis? Únete a nuestro Discord para presumir tus mundos, recibir ayuda y ver lo que viene.",
+  "discord_modal_dismiss": "No, gracias",
+  "discord_modal_join": "Unirse a Discord"
 }

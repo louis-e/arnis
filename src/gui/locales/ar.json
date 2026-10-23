@@ -240,5 +240,9 @@
   "body_gravity": "جاذبية القمر والمريخ",
   "body_gravity_desc": "جاذبية منخفضة حقيقية في عوالم القمر والمريخ.",
   "moving_vehicles": "مركبات متحركة",
-  "moving_vehicles_desc": "سيارات وترام ومترو وقطارات تسير في شوارعك وعلى سككك."
+  "moving_vehicles_desc": "سيارات وترام ومترو وقطارات تسير في شوارعك وعلى سككك.",
+  "discord_modal_title": "انضم إلى Discord الخاص بـ Arnis",
+  "discord_modal_text": "هل تستمتع بـ Arnis؟ انضم إلى Discord الخاص بنا لعرض عوالمك والحصول على المساعدة ومعرفة ما هو قادم.",
+  "discord_modal_dismiss": "لا، شكرًا",
+  "discord_modal_join": "انضم إلى Discord"
 }

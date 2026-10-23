@@ -240,5 +240,9 @@
   "body_gravity": "Grawitacja Księżyca i Marsa",
   "body_gravity_desc": "Prawdziwa niska grawitacja w światach Księżyca i Marsa.",
   "moving_vehicles": "Jeżdżące pojazdy",
-  "moving_vehicles_desc": "Samochody, tramwaje, metro i pociągi na twoich ulicach i torach."
+  "moving_vehicles_desc": "Samochody, tramwaje, metro i pociągi na twoich ulicach i torach.",
+  "discord_modal_title": "Dołącz do Discorda Arnis",
+  "discord_modal_text": "Podoba Ci się Arnis? Dołącz do naszego Discorda, aby pochwalić się swoimi światami, uzyskać pomoc i zobaczyć, co nadchodzi.",
+  "discord_modal_dismiss": "Nie, dziękuję",
+  "discord_modal_join": "Dołącz do Discorda"
 }

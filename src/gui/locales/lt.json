@@ -240,5 +240,9 @@
   "body_gravity": "Mėnulio ir Marso gravitacija",
   "body_gravity_desc": "Tikra maža gravitacija Mėnulio ir Marso pasauliuose.",
   "moving_vehicles": "Važiuojančios transporto priemonės",
-  "moving_vehicles_desc": "Automobiliai, tramvajai, metro ir traukiniai jūsų gatvėse ir bėgiuose."
+  "moving_vehicles_desc": "Automobiliai, tramvajai, metro ir traukiniai jūsų gatvėse ir bėgiuose.",
+  "discord_modal_title": "Prisijunkite prie „Arnis“ Discord",
+  "discord_modal_text": "Patinka „Arnis“? Prisijunkite prie mūsų Discord, kad parodytumėte savo pasaulius, gautumėte pagalbos ir pamatytumėte, kas laukia toliau.",
+  "discord_modal_dismiss": "Ne, ačiū",
+  "discord_modal_join": "Prisijungti prie Discord"
 }

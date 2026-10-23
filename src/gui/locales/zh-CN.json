@@ -240,5 +240,9 @@
   "body_gravity": "月球与火星重力",
   "body_gravity_desc": "月球和火星世界中的真实低重力。",
   "moving_vehicles": "行驶的交通工具",
-  "moving_vehicles_desc": "在你的街道和轨道上行驶的汽车、有轨电车、地铁和火车。"
+  "moving_vehicles_desc": "在你的街道和轨道上行驶的汽车、有轨电车、地铁和火车。",
+  "discord_modal_title": "加入 Arnis Discord",
+  "discord_modal_text": "喜欢 Arnis 吗？加入我们的 Discord，展示你的世界、获取帮助，并抢先了解接下来的新功能。",
+  "discord_modal_dismiss": "不了，谢谢",
+  "discord_modal_join": "加入 Discord"
 }
