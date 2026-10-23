@@ -168,10 +168,13 @@ fn relation_rings(
     }
 
     super::merge_way_segments(&mut inners);
-    if !verify_closed_rings(&inners) {
-        println!("Skipping relation {} due to invalid polygon", element.id);
-        return None;
-    }
+    // A broken inner ring loses its island, not the whole lake.
+    inners.retain(|ring| {
+        ring.len() >= 3 && {
+            let (first, last) = (&ring[0], &ring[ring.len() - 1]);
+            first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
+        }
+    });
 
     Some((outers, inners))
 }

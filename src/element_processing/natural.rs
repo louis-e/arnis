@@ -6,7 +6,9 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{self, place_bush, BushKind};
 use crate::element_processing::tree::{Tree, TreeType};
-use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
+use crate::floodfill_cache::{
+    is_oversized_ring, without_holes, BuildingFootprintBitmap, CoordinateBitmap, FloodFillCache,
+};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::trees::mapped::{tree_row_positions, MappedTree};
 use crate::world_editor::WorldEditor;
@@ -19,6 +21,27 @@ pub fn generate_natural(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+) {
+    natural_area(
+        editor,
+        element,
+        args,
+        flood_fill_cache,
+        building_footprints,
+        bridge_surface,
+        None,
+    );
+}
+
+/// A natural feature less the cells of `holes`.
+fn natural_area(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
+    holes: Option<&CoordinateBitmap>,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
@@ -87,7 +110,10 @@ pub fn generate_natural(
             // Resolve the fill before painting the edge. It is cached, so this costs nothing
             // extra. A closed ring that comes back empty is one the fill refused for size, and
             // drawing its edge anyway leaves a border around ground nothing ever filled.
-            let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+            let filled_area = without_holes(
+                flood_fill_cache.get_or_compute(way, args.timeout.as_ref()),
+                holes,
+            );
             if filled_area.is_empty() && is_oversized_ring(way) {
                 return;
             }
@@ -771,21 +797,29 @@ pub fn generate_natural_from_relation(
         // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation
         // extent, misses the flood fill cache, and can cause multi-GB allocations.
+        let inners: Vec<&ProcessedWay> = rel
+            .members
+            .iter()
+            .filter(|m| m.role == ProcessedMemberRole::Inner)
+            .map(|m| m.way.as_ref())
+            .collect();
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
+                let holes = flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
                 // Use relation tags so the member inherits the relation's natural=* type
                 let way_with_rel_tags = ProcessedWay {
                     id: member.way.id,
                     nodes: member.way.nodes.clone(),
                     tags: rel.tags.clone(),
                 };
-                generate_natural(
+                natural_area(
                     editor,
                     &ProcessedElement::Way(way_with_rel_tags),
                     args,
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    holes.as_ref(),
                 );
             }
         }
@@ -947,6 +981,58 @@ mod tests {
             &surface,
         );
         editor
+    }
+
+    #[test]
+    fn a_natural_relation_leaves_its_hole_alone() {
+        use crate::element_processing::bridge_styles::BridgeOutlineIndex;
+        use crate::element_processing::bridges::BridgeStructureMap;
+        use crate::element_processing::building_test_support::rect_way;
+        use crate::osm_parser::ProcessedMember;
+        use clap::Parser as _;
+
+        let xzbbox = Box::leak(Box::new(XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap()));
+        let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, place);
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        let member = |role, way| ProcessedMember {
+            role,
+            way: std::sync::Arc::new(way),
+        };
+        let rel = ProcessedRelation {
+            id: 8,
+            tags: [("natural".to_string(), "beach".to_string())].into(),
+            members: vec![
+                member(ProcessedMemberRole::Outer, rect_way(1, 5, 5, 54, 54, &[])),
+                member(ProcessedMemberRole::Inner, rect_way(2, 20, 20, 40, 40, &[])),
+            ],
+        };
+        let cache = FloodFillCache::precompute(&[ProcessedElement::Relation(rel.clone())], None);
+        generate_natural_from_relation(
+            &mut editor,
+            &rel,
+            &args,
+            &cache,
+            &BuildingFootprintBitmap::new_empty(),
+            &surface,
+        );
+        assert!(editor.check_for_block(10, 0, 10, Some(&[SAND])));
+        let in_hole = (22..39)
+            .flat_map(|x| (22..39).map(move |z| (x, z)))
+            .filter(|&(x, z)| editor.check_for_block(x, 0, z, Some(&[SAND])))
+            .count();
+        assert_eq!(in_hole, 0, "sand in the hole");
     }
 
     fn count(editor: &WorldEditor, y: i32, blocks: &[Block]) -> usize {

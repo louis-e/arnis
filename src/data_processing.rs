@@ -121,14 +121,17 @@ fn relation_ground_fill_area(rel: &ProcessedRelation) -> Option<f64> {
     if !fills_ground {
         return None;
     }
-    // Outer members are each rendered individually, so the footprint is their sum.
-    Some(
+    // Outer members are each rendered individually, less the holes their inner rings cut.
+    let sum = |role: ProcessedMemberRole| -> f64 {
         rel.members
             .iter()
-            .filter(|m| m.role == ProcessedMemberRole::Outer)
+            .filter(|m| m.role == role)
             .map(|m| ring_area(&m.way.nodes))
-            .sum(),
-    )
+            .sum()
+    };
+    let outer = sum(ProcessedMemberRole::Outer);
+    let net = outer - sum(ProcessedMemberRole::Inner);
+    Some(if net > 0.0 { net } else { outer })
 }
 
 /// Footprint of a ground-filling element, or `None` if it is not one.
@@ -2646,6 +2649,21 @@ mod tests {
             way(1, 100, &[("landuse", "forest")]),
             relation(2, 10, &[("landuse", "meadow")]),
         ];
+        sort_ground_fill_areas(&mut elements);
+        assert_eq!(ids(&elements), vec![2, 1]);
+    }
+
+    #[test]
+    fn a_ring_relation_sorts_by_the_land_between_its_rings() {
+        // A railway corridor round a park covers a thin ring, not the whole park.
+        let mut ring = relation(2, 100, &[("landuse", "railway")]);
+        if let ProcessedElement::Relation(rel) = &mut ring {
+            rel.members.push(ProcessedMember {
+                role: ProcessedMemberRole::Inner,
+                way: Arc::new(square(3000, 95, &[])),
+            });
+        }
+        let mut elements = vec![way(1, 40, &[("landuse", "grass")]), ring];
         sort_ground_fill_areas(&mut elements);
         assert_eq!(ids(&elements), vec![2, 1]);
     }

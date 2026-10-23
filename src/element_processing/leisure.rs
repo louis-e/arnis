@@ -5,7 +5,9 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
-use crate::floodfill_cache::{is_oversized_ring, BuildingFootprintBitmap, FloodFillCache};
+use crate::floodfill_cache::{
+    is_oversized_ring, without_holes, BuildingFootprintBitmap, CoordinateBitmap, FloodFillCache,
+};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -17,6 +19,27 @@ pub fn generate_leisure(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+) {
+    leisure_area(
+        editor,
+        element,
+        args,
+        flood_fill_cache,
+        building_footprints,
+        bridge_surface,
+        None,
+    );
+}
+
+/// A leisure area less the cells of `holes`.
+fn leisure_area(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+    bridge_surface: &BridgeSurfaceMap,
+    holes: Option<&CoordinateBitmap>,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -51,7 +74,10 @@ pub fn generate_leisure(
 
         // Resolve the fill before painting the edge, for the same reason as in natural.rs:
         // a closed ring the fill refused must not leave a border around unfilled ground.
-        let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+        let filled_area = without_holes(
+            flood_fill_cache.get_or_compute(element, args.timeout.as_ref()),
+            holes,
+        );
         if filled_area.is_empty() && is_oversized_ring(element) {
             return;
         }
@@ -203,21 +229,29 @@ pub fn generate_leisure_from_relation(
         // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation
         // extent, misses the flood fill cache, and can cause multi-GB allocations.
+        let inners: Vec<&ProcessedWay> = rel
+            .members
+            .iter()
+            .filter(|m| m.role == ProcessedMemberRole::Inner)
+            .map(|m| m.way.as_ref())
+            .collect();
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
+                let holes = flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
                 // Use relation tags so the member inherits the relation's leisure=* type
                 let way_with_rel_tags = ProcessedWay {
                     id: member.way.id,
                     nodes: member.way.nodes.clone(),
                     tags: rel.tags.clone(),
                 };
-                generate_leisure(
+                leisure_area(
                     editor,
                     &way_with_rel_tags,
                     args,
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    holes.as_ref(),
                 );
             }
         }

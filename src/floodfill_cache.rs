@@ -489,11 +489,12 @@ impl FloodFillCache {
             if !Self::relation_fills_members(rel) {
                 continue;
             }
-            // Piers and breakwaters also cut their holes out of the fill.
-            let holes = Self::is_waterfront(&rel.tags);
+            // Inner rings too: their fills cut the holes out of the outer ones.
             for member in &rel.members {
-                let wanted = member.role == ProcessedMemberRole::Outer
-                    || (holes && member.role == ProcessedMemberRole::Inner);
+                let wanted = matches!(
+                    member.role,
+                    ProcessedMemberRole::Outer | ProcessedMemberRole::Inner
+                );
                 if wanted && seen.insert(member.way.id) {
                     ways_needing_fill.push(&member.way);
                 }
@@ -580,6 +581,45 @@ impl FloodFillCache {
                 Arc::new(filled)
             }
         }
+    }
+
+    /// Cells of the inner rings that cut holes in `outer`, or None when none of them do.
+    ///
+    /// An inner ring around the outer one (an island in a lake) leaves it whole. The mask
+    /// covers the holes whole, not one tile, so every tile drops the same cells.
+    pub fn holes_in(
+        &self,
+        outer: &ProcessedWay,
+        inners: &[&ProcessedWay],
+        timeout: Option<&Duration>,
+    ) -> Option<CoordinateBitmap> {
+        let (ox0, oz0, ox1, oz1) = ring_bounds(&outer.nodes)?;
+        let cutting: Vec<&ProcessedWay> = inners
+            .iter()
+            .copied()
+            .filter(|inner| {
+                ring_bounds(&inner.nodes).is_some_and(|(x0, z0, x1, z1)| {
+                    x0 <= ox1 && x1 >= ox0 && z0 <= oz1 && z1 >= oz0
+                }) && !mostly_inside(&outer.nodes, &inner.nodes)
+            })
+            .collect();
+        if cutting.is_empty() {
+            return None;
+        }
+        let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for inner in &cutting {
+            let (a, b, c, d) = ring_bounds(&inner.nodes)?;
+            (x0, z0, x1, z1) = (x0.min(a), z0.min(b), x1.max(c), z1.max(d));
+        }
+        let bounds =
+            XZBBox::rect_from_min_max(x0.max(ox0), z0.max(oz0), x1.min(ox1), z1.min(oz1)).ok()?;
+        let mut mask = CoordinateBitmap::new(&bounds);
+        for inner in cutting {
+            for &(x, z) in self.get_or_compute(inner, timeout).iter() {
+                mask.set(x, z);
+            }
+        }
+        (!mask.is_empty()).then_some(mask)
     }
 
     /// Gets cached flood fill result for a ProcessedElement (Way only).
@@ -716,11 +756,15 @@ impl FloodFillCache {
                 if !is_building {
                     continue;
                 }
-                for_relation_ring_cells(rel, ProcessedMemberRole::Outer, xzbbox, |x, z| {
-                    footprints.set(x, z)
-                });
+                // Its own courtyards only, so a building standing in one keeps its footprint.
+                let mut courtyard: fnv::FnvHashSet<(i32, i32)> = fnv::FnvHashSet::default();
                 for_relation_ring_cells(rel, ProcessedMemberRole::Inner, xzbbox, |x, z| {
-                    footprints.clear(x, z)
+                    courtyard.insert((x, z));
+                });
+                for_relation_ring_cells(rel, ProcessedMemberRole::Outer, xzbbox, |x, z| {
+                    if !courtyard.contains(&(x, z)) {
+                        footprints.set(x, z)
+                    }
                 });
             }
         }
@@ -884,6 +928,53 @@ impl Default for FloodFillCache {
 }
 
 /// Applies a callback to the flood-filled cells of a relation's merged, clipped, closed rings.
+/// A fill less the cells of a hole mask.
+pub fn without_holes(fill: FloodFillResult, holes: Option<&CoordinateBitmap>) -> FloodFillResult {
+    match holes {
+        Some(mask) => Arc::new(
+            fill.iter()
+                .copied()
+                .filter(|&(x, z)| !mask.contains(x, z))
+                .collect(),
+        ),
+        None => fill,
+    }
+}
+
+fn ring_bounds(nodes: &[crate::osm_parser::ProcessedNode]) -> Option<(i32, i32, i32, i32)> {
+    let first = nodes.first()?;
+    Some(nodes.iter().fold(
+        (first.x, first.z, first.x, first.z),
+        |(x0, z0, x1, z1), n| (x0.min(n.x), z0.min(n.z), x1.max(n.x), z1.max(n.z)),
+    ))
+}
+
+/// Whether most vertices of `ring` lie inside `around`, as an island's lie inside its lake.
+fn mostly_inside(
+    ring: &[crate::osm_parser::ProcessedNode],
+    around: &[crate::osm_parser::ProcessedNode],
+) -> bool {
+    let inside = |x: f64, z: f64| {
+        let mut hit = false;
+        let mut j = around.len().wrapping_sub(1);
+        for (i, a) in around.iter().enumerate() {
+            let b = &around[j];
+            let (ax, az, bx, bz) = (a.x as f64, a.z as f64, b.x as f64, b.z as f64);
+            if (az > z) != (bz > z) && x < (bx - ax) * (z - az) / (bz - az) + ax {
+                hit = !hit;
+            }
+            j = i;
+        }
+        hit
+    };
+    // Off the grid by a quarter, so a vertex shared with the other ring counts as neither.
+    let count = ring
+        .iter()
+        .filter(|n| inside(n.x as f64 + 0.25, n.z as f64 + 0.25))
+        .count();
+    around.len() >= 3 && count * 2 > ring.len()
+}
+
 fn for_relation_ring_cells(
     rel: &crate::osm_parser::ProcessedRelation,
     role: ProcessedMemberRole,
@@ -1185,5 +1276,52 @@ mod tests {
         for skipped in [103, 104, 105] {
             assert!(cache.get_cached(skipped).is_none(), "member {skipped}");
         }
+    }
+
+    fn ring(id: u64, x0: i32, z0: i32, x1: i32, z1: i32) -> ProcessedWay {
+        let mut way = tagged_way(id, &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)], &[]);
+        way.tags.clear();
+        way
+    }
+
+    #[test]
+    fn inner_rings_cut_holes_but_islands_stay_whole() {
+        let outer = ring(1, 0, 0, 60, 60);
+        let lake = ring(2, 15, 15, 45, 45);
+        let island = ring(3, 25, 25, 35, 35);
+        let elements = vec![ProcessedElement::Relation(
+            crate::osm_parser::ProcessedRelation {
+                id: 9,
+                tags: [("natural".to_string(), "wood".to_string())].into(),
+                members: [
+                    (ProcessedMemberRole::Outer, &outer),
+                    (ProcessedMemberRole::Inner, &lake),
+                    (ProcessedMemberRole::Outer, &island),
+                ]
+                .into_iter()
+                .map(|(role, way)| crate::osm_parser::ProcessedMember {
+                    role,
+                    way: Arc::new(way.clone()),
+                })
+                .collect(),
+            },
+        )];
+        let cache = FloodFillCache::precompute(&elements, None);
+        assert!(
+            cache.contains(2),
+            "the inner fill is shared like the outer ones"
+        );
+
+        let holes = cache
+            .holes_in(&outer, &[&lake], None)
+            .expect("the lake cuts the wood");
+        assert!(holes.contains(20, 20) && holes.contains(30, 30) && !holes.contains(5, 5));
+        let kept = without_holes(cache.get_or_compute(&outer, None), Some(&holes));
+        assert!(kept.contains(&(5, 5)) && !kept.contains(&(20, 20)));
+        assert!(
+            cache.holes_in(&island, &[&lake], None).is_none(),
+            "an island in the lake is wood again"
+        );
+        assert!(cache.holes_in(&outer, &[], None).is_none());
     }
 }

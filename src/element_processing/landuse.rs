@@ -6,7 +6,9 @@ use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
 use crate::element_processing::tree::{Tree, TreeType};
-use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache, RoadMaskBitmap};
+use crate::floodfill_cache::{
+    without_holes, BuildingFootprintBitmap, CoordinateBitmap, FloodFillCache, RoadMaskBitmap,
+};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
@@ -20,6 +22,30 @@ pub fn generate_landuse(
     building_footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
     bridge_surface: &BridgeSurfaceMap,
+) {
+    landuse_area(
+        editor,
+        element,
+        args,
+        flood_fill_cache,
+        building_footprints,
+        road_mask,
+        bridge_surface,
+        None,
+    );
+}
+
+/// A landuse area less the cells of `holes`.
+#[allow(clippy::too_many_arguments)]
+fn landuse_area(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
+    holes: Option<&CoordinateBitmap>,
 ) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
@@ -61,7 +87,10 @@ pub fn generate_landuse(
     };
 
     // Get the area of the landuse element using cache
-    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let floor_area = without_holes(
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref()),
+        holes,
+    );
 
     let leaf_type_tagged = matches!(
         element.tags.get("leaf_type").map(String::as_str),
@@ -191,7 +220,10 @@ pub fn generate_landuse(
                 editor.set_block(ground, x, 0, z, None, Some(&[SPONGE]));
             }
         } else if landuse_tag == "railway" {
-            editor.set_block(actual_block, x, 0, z, None, Some(&[SPONGE]));
+            // Ballast over whatever ground is there, but not over roads or water.
+            if !is_protected {
+                editor.set_block(actual_block, x, 0, z, None, Some(&[SPONGE]));
+            }
         } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
         }
@@ -515,15 +547,22 @@ pub fn generate_landuse_from_relation(
         // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation
         // extent, misses the flood fill cache, and can cause multi-GB allocations.
+        let inners: Vec<&ProcessedWay> = rel
+            .members
+            .iter()
+            .filter(|m| m.role == ProcessedMemberRole::Inner)
+            .map(|m| m.way.as_ref())
+            .collect();
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
+                let holes = flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
                 // Use relation tags so the member inherits the relation's landuse=* type
                 let way_with_rel_tags = ProcessedWay {
                     id: member.way.id,
                     nodes: member.way.nodes.clone(),
                     tags: rel.tags.clone(),
                 };
-                generate_landuse(
+                landuse_area(
                     editor,
                     &way_with_rel_tags,
                     args,
@@ -531,6 +570,7 @@ pub fn generate_landuse_from_relation(
                     building_footprints,
                     road_mask,
                     bridge_surface,
+                    holes.as_ref(),
                 );
             }
         }
@@ -575,6 +615,67 @@ mod sealed_surface_tests {
     use crate::floodfill_cache::SealedSurfaceBitmap;
     use clap::Parser as _;
     use std::sync::Arc;
+
+    #[test]
+    fn a_landuse_relation_leaves_its_holes_alone() {
+        use crate::osm_parser::{ProcessedElement, ProcessedMember};
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        // A railway corridor round a park, like the one round Disneyland Paris, with an
+        // island of railway land in the middle of the park.
+        let member = |role, way| ProcessedMember {
+            role,
+            way: Arc::new(way),
+        };
+        let rel = ProcessedRelation {
+            id: 7,
+            tags: [("landuse".to_string(), "railway".to_string())].into(),
+            members: vec![
+                member(ProcessedMemberRole::Outer, rect_way(1, 5, 5, 54, 54, &[])),
+                member(ProcessedMemberRole::Inner, rect_way(2, 15, 15, 44, 44, &[])),
+                member(ProcessedMemberRole::Outer, rect_way(3, 27, 27, 33, 33, &[])),
+            ],
+        };
+        let cache = FloodFillCache::precompute(&[ProcessedElement::Relation(rel.clone())], None);
+        editor.set_block(WATER, 8, 0, 8, None, None);
+        generate_landuse_from_relation(
+            &mut editor,
+            &rel,
+            &args,
+            &cache,
+            &BuildingFootprintBitmap::new_empty(),
+            &RoadMaskBitmap::new_empty(),
+            &surface,
+        );
+        assert!(
+            editor.check_for_block(10, 0, 10, Some(&[GRAVEL])),
+            "the corridor"
+        );
+        assert!(
+            !editor.check_for_block(20, 0, 20, Some(&[GRAVEL])),
+            "the park"
+        );
+        assert!(
+            editor.check_for_block(30, 0, 30, Some(&[GRAVEL])),
+            "the island"
+        );
+        assert!(
+            editor.check_for_block(8, 0, 8, Some(&[WATER])),
+            "a stream under the line"
+        );
+    }
 
     #[test]
     fn a_forest_leaves_a_dirt_track_alone() {
