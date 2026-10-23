@@ -53,6 +53,9 @@ use crate::progress::emit_gui_error;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 
+/// The block each way's rails lie in, by (way, x, z).
+pub type RailHeights = Arc<Mutex<FnvHashMap<(u64, i32, i32), i32>>>;
+
 /// Walks the error chain to determine whether a save failure was caused by
 /// insufficient disk space.
 ///
@@ -222,6 +225,11 @@ pub struct WorldEditor<'a> {
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
     hedge_columns: FnvHashSet<(i32, i32)>,
+    /// Street lamp columns, checked for water once the fill is done.
+    lamp_columns: Vec<(i32, i32)>,
+    /// The block each way's rails lie in, by way and column, shared with the tile editors
+    /// so the trains can ride them; None when there are no trains.
+    rail_heights: Option<RailHeights>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -303,6 +311,8 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            lamp_columns: Vec::new(),
+            rail_heights: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -360,6 +370,8 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            lamp_columns: Vec::new(),
+            rail_heights: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -417,6 +429,8 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            lamp_columns: Vec::new(),
+            rail_heights: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -1295,6 +1309,15 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.insert((x, z), y);
     }
 
+    /// The ground Y a road, track or cut has set for this cell, if any.
+    #[inline]
+    pub fn surface_override(&self, x: i32, z: i32) -> Option<i32> {
+        if self.road_surface_overrides.is_empty() {
+            return None;
+        }
+        self.road_surface_overrides.get(&(x, z)).copied()
+    }
+
     /// Record a bridge pier or pylon column standing on the terrain at (x, z).
     #[inline]
     pub fn register_support_column(&mut self, x: i32, z: i32, block: Block) {
@@ -1305,6 +1328,30 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_hedge(&mut self, x: i32, z: i32) {
         self.hedge_columns.insert((x, z));
+    }
+
+    /// Shares the record of where rails were laid (across the main and tile editors).
+    pub fn set_rail_heights(&mut self, heights: RailHeights) {
+        self.rail_heights = Some(heights);
+    }
+
+    /// Records that `way` laid a rail in the block at `y` of column (x, z).
+    pub fn register_rail(&self, way: u64, x: i32, z: i32, y: i32) {
+        if let Some(heights) = &self.rail_heights {
+            if let Ok(mut map) = heights.lock() {
+                map.insert((way, x, z), y);
+            }
+        }
+    }
+
+    /// Record a street lamp standing at (x, z).
+    pub fn register_lamp(&mut self, x: i32, z: i32) {
+        self.lamp_columns.push((x, z));
+    }
+
+    /// Every street lamp recorded so far, clearing the record.
+    pub fn take_lamps(&mut self) -> Vec<(i32, i32)> {
+        std::mem::take(&mut self.lamp_columns)
     }
 
     /// Whether a hedge stands at (x, z).

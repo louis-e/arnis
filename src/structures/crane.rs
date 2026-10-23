@@ -36,7 +36,11 @@ fn crane() -> Option<&'static StructureSchematic> {
 }
 
 /// Place one crane at the centroid of a large-enough site; mast on-site, jib overhangs (clipped at edge).
-pub fn maybe_place_crane(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
+pub fn maybe_place_crane(
+    editor: &mut WorldEditor,
+    cells: &[(i32, i32)],
+    building_footprints: &CoordinateBitmap,
+) {
     if !editor.place_schematics() {
         return;
     }
@@ -62,10 +66,11 @@ pub fn maybe_place_crane(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
             dx * dx + dz * dz
         })
         .unwrap_or((cx, cz));
-    if editor.is_lc_water(ax, az) {
+    // Nor through a building, which if going up has a crane of its own.
+    if editor.is_lc_water(ax, az) || building_footprints.contains(ax, az) {
         return;
     }
-    if site_has_mapped_crane(editor.mapped_cranes(), cells) {
+    if mapped_crane_on(editor.mapped_cranes(), cells).is_some() {
         return;
     }
     // Not every site gets one; random facing, seeded by anchor for tile-seam determinism.
@@ -78,20 +83,32 @@ pub fn maybe_place_crane(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
     place_structure(editor, schem, ax, az, base_y, rot, None);
 }
 
-/// Whether a mapped crane stands on the site, which then gets no crane of its own.
-fn site_has_mapped_crane(cranes: &[(i32, i32)], cells: &[(i32, i32)]) -> bool {
+/// Stamp the crane with its mast at (x, z) on a building going up, turned by `roll`.
+pub fn place_on_site(editor: &mut WorldEditor, x: i32, z: i32, base_y: i32, roll: u64) {
+    if !editor.place_schematics() || editor.is_lc_water(x, z) {
+        return;
+    }
+    let Some(schem) = crane() else {
+        return;
+    };
+    place_structure(editor, schem, x, z, base_y, (roll & 3) as u8, None);
+}
+
+/// A mapped crane standing on the site, which then gets no crane of its own.
+pub fn mapped_crane_on(cranes: &[(i32, i32)], cells: &[(i32, i32)]) -> Option<(i32, i32)> {
     let (Some(min_x), Some(max_x), Some(min_z), Some(max_z)) = (
         cells.iter().map(|c| c.0).min(),
         cells.iter().map(|c| c.0).max(),
         cells.iter().map(|c| c.1).min(),
         cells.iter().map(|c| c.1).max(),
     ) else {
-        return false;
+        return None;
     };
     cranes
         .iter()
         .filter(|&&(x, z)| (min_x..=max_x).contains(&x) && (min_z..=max_z).contains(&z))
-        .any(|crane| cells.contains(crane))
+        .find(|crane| cells.contains(crane))
+        .copied()
 }
 
 /// Unit step from the mast toward the jib tip once the model is turned `rot` quarters.
@@ -203,9 +220,12 @@ mod tests {
     #[test]
     fn a_site_with_a_mapped_crane_on_it_gets_none_of_its_own() {
         let site: Vec<(i32, i32)> = (0..40).flat_map(|x| (0..40).map(move |z| (x, z))).collect();
-        assert!(site_has_mapped_crane(&[(100, 100), (20, 20)], &site));
-        assert!(!site_has_mapped_crane(&[(100, 100), (45, 20)], &site));
-        assert!(!site_has_mapped_crane(&[], &site));
+        assert_eq!(
+            mapped_crane_on(&[(100, 100), (20, 20)], &site),
+            Some((20, 20))
+        );
+        assert_eq!(mapped_crane_on(&[(100, 100), (45, 20)], &site), None);
+        assert_eq!(mapped_crane_on(&[], &site), None);
     }
 
     #[test]

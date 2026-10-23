@@ -370,9 +370,10 @@ pub struct Args {
     pub zombie_outbreak: bool,
 
     /// Cars that drive the streets at the speed limit, queue behind each other, turn at
-    /// junctions and, with --traffic-lights, stop at red. Java 1.21.4+.
-    #[arg(long, default_value_t = false)]
-    pub moving_cars: bool,
+    /// junctions and, with --traffic-lights, stop at red; and trains, S-Bahns, metros and
+    /// trams that run the mapped tracks and stop at their stations. Java 1.21.4+.
+    #[arg(long, alias = "moving-cars", default_value_t = false)]
+    pub moving_vehicles: bool,
 }
 
 /// Accepts the panel resolutions the atlas budget logic can halve cleanly.
@@ -743,7 +744,7 @@ pub fn apply_body_defaults(args: &mut Args) {
     // No roads or places off Earth.
     args.traffic_lights = false;
     args.discoveries = false;
-    args.moving_cars = false;
+    args.moving_vehicles = false;
     // Airless bodies look right at night. Only a default: comparing against the
     // flag's own default lets an explicit --world-time win.
     if args.world_time == DEFAULT_WORLD_TIME {
@@ -794,7 +795,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.traffic_lights, "--traffic-lights"),
         (args.zombie_outbreak, "--zombie-outbreak"),
         (args.body_gravity, "--body-gravity"),
-        (args.moving_cars, "--moving-cars"),
+        (args.moving_vehicles, "--moving-vehicles"),
     ];
     if args.bedrock || args.luanti {
         if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {

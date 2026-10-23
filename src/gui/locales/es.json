@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Cinco noches de oleadas de zombis por tus calles, con un jefe final.",
   "body_gravity": "Gravedad de la Luna y Marte",
   "body_gravity_desc": "Gravedad baja real en mundos de la Luna y Marte.",
-  "moving_cars": "Coches en movimiento",
-  "moving_cars_desc": "Tráfico que circula por tus calles al límite de velocidad."
+  "moving_vehicles": "Vehículos en movimiento",
+  "moving_vehicles_desc": "Coches, tranvías, metros y trenes que recorren tus calles y vías."
 }

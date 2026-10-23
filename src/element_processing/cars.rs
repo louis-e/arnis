@@ -10,6 +10,7 @@
 
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::datapack::macro_coord;
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::road_markings::oneway_sign;
 use crate::element_processing::traffic_lights::{
@@ -18,7 +19,7 @@ use crate::element_processing::traffic_lights::{
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -35,6 +36,16 @@ const LANE_END_KMH: f64 = 32.0;
 const LANE_END_REACH: f64 = 10.0;
 /// Turning round at a dead end.
 const U_TURN_KMH: f64 = 12.0;
+/// Tightest circle a car turns round on at a dead end, in metres. Where the lanes lie
+/// closer than that it swings out first, so it never spins on the spot.
+const U_TURN_RADIUS_M: f64 = 3.0;
+/// Dead ends shorter than this, in metres, are stubs past a junction or the mouth of a
+/// driveway: no one turns into one only to turn round while there is anywhere else to go.
+const STUB_M: f64 = 25.0;
+/// Roads cut off from the rest that add up to less than this, in metres, carry no cars.
+const SCRAP_M: f64 = 100.0;
+/// A lane ending this close to the edge of the area runs off it, onto roads outside.
+const EDGE_REACH: f64 = 3.0;
 /// Most a car turns in all onto a lane's entry point and on along the lane, beyond which
 /// it would be turning round on the spot.
 const ENTRY_TURN_DEG: f64 = 135.0;
@@ -45,8 +56,6 @@ const SHORT_LANE: f64 = 3.0;
 /// Furthest a lane's entry point lies across a junction, in blocks, as for a left turn
 /// over a boulevard: beyond it the car is back in a queue.
 const CROSSING_REACH: f64 = 40.0;
-/// How far the curve round a hairpin is pulled out to each side, in blocks.
-const HAIRPIN_SWING: f64 = 3.0;
 /// Drivers keep a little under the limit.
 const LIMIT_SHARE: f64 = 0.92;
 /// 2.5 m/s², a calm start from the lights.
@@ -193,6 +202,9 @@ impl Path {
     }
 }
 
+/// Shortest step between nodes that gives a lane its heading, in blocks.
+const MIN_LEG: f64 = 2.0;
+
 /// The lane's centre line: the node path pushed `offset` to the driving side.
 fn lane_line(nodes: &[&ProcessedNode], offset: f64, drives_on_left: bool) -> Vec<(f64, f64)> {
     let centre: Vec<(f64, f64)> = nodes
@@ -207,17 +219,33 @@ fn lane_line(nodes: &[&ProcessedNode], offset: f64, drives_on_left: bool) -> Vec
         }
     };
     let dir = |a: (f64, f64), b: (f64, f64)| unit(b.0 - a.0, b.1 - a.1);
+    // Nodes a block or so apart only give the heading rounding to whole blocks made up, so
+    // each node takes its headings from the nearest node at least that far either way.
+    let far = |a: (f64, f64), b: (f64, f64)| (b.0 - a.0).hypot(b.1 - a.1) >= MIN_LEG;
     (0..centre.len())
         .map(|k| {
-            let into = (k > 0).then(|| dir(centre[k - 1], centre[k])).flatten();
-            let out = (k + 1 < centre.len())
-                .then(|| dir(centre[k], centre[k + 1]))
-                .flatten();
+            let into = (0..k)
+                .rev()
+                .find(|&j| far(centre[j], centre[k]))
+                .and_then(|j| dir(centre[j], centre[k]));
+            let out = (k + 1..centre.len())
+                .find(|&j| far(centre[k], centre[j]))
+                .and_then(|j| dir(centre[k], centre[j]));
+            let near = || {
+                (k > 0)
+                    .then(|| dir(centre[k - 1], centre[k]))
+                    .flatten()
+                    .or_else(|| {
+                        (k + 1 < centre.len())
+                            .then(|| dir(centre[k], centre[k + 1]))
+                            .flatten()
+                    })
+            };
             let d = match (into, out) {
                 (Some(a), Some(b)) => unit(a.0 + b.0, a.1 + b.1).unwrap_or(b),
                 (Some(a), None) => a,
                 (None, Some(b)) => b,
-                (None, None) => (1.0, 0.0),
+                (None, None) => near().unwrap_or((1.0, 0.0)),
             };
             let (sx, sz) = side(d);
             (centre[k].0 + sx * offset, centre[k].1 + sz * offset)
@@ -256,9 +284,18 @@ struct Segment {
     into_junction: bool,
     /// A dead end, where the lane bends round into the way back.
     turns_back: bool,
+    /// A dead end too short to drive into, which no car starts on either.
+    stub: bool,
     /// Cruising speed at the limit.
     speed: i32,
     density: f64,
+}
+
+impl Segment {
+    /// Whether cars start on the lane, placed or respawned: one they can drive on from.
+    fn carries_cars(&self) -> bool {
+        self.points.len() >= 2 && !self.next.is_empty() && !self.stub
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -593,14 +630,28 @@ impl CarNetwork {
                     next: Vec::new(),
                     into_junction: junction(last),
                     turns_back,
+                    stub: false,
                     speed,
                     density: density(highway),
                 }
             })
             .collect();
 
-        segments.iter_mut().for_each(tidy);
-        link(&mut segments, &lanes, world, |kmh| step_speed(kmh, scale));
+        let size = scale.clamp(0.4, 3.0);
+        segments
+            .iter_mut()
+            .for_each(|s| tidy(s, U_TURN_RADIUS_M * size));
+        link(
+            &mut segments,
+            &lanes,
+            world,
+            Reach {
+                stub: STUB_M * scale,
+                scrap: SCRAP_M * scale,
+                turn_round: U_TURN_RADIUS_M * size,
+            },
+            |kmh| step_speed(kmh, scale),
+        );
         segments.iter_mut().for_each(pace);
         let cars = place_cars(&segments, scale);
         let mut by_way: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
@@ -611,7 +662,7 @@ impl CarNetwork {
             segments,
             cars,
             by_way,
-            size: scale.clamp(0.4, 3.0),
+            size,
             scale,
         }
     }
@@ -650,7 +701,13 @@ impl CarNetwork {
                 if k > 0 {
                     out.push(',');
                 }
-                let _ = write!(out, "{{x:{:.1}d,y:{:.1}d,z:{:.1}d", p.x, p.y, p.z);
+                let _ = write!(
+                    out,
+                    "{{x:{:.2}d,y:{:.1}d,z:{:.2}d",
+                    macro_coord(p.x),
+                    p.y,
+                    macro_coord(p.z)
+                );
                 if let Some(g) = p.stop {
                     let _ = write!(out, ",g:{g}b");
                 }
@@ -667,7 +724,9 @@ impl CarNetwork {
                     format!("{{s:{},i:{}{crossing}}}", t.lane, t.entry)
                 })
                 .collect();
-            let _ = writeln!(out, "],n:[{}],v:{}}}", next.join(","), seg.speed);
+            // A lane no car starts on is skipped by the respawn too.
+            let off = if seg.carries_cars() { "" } else { ",o:1b" };
+            let _ = writeln!(out, "],n:[{}],v:{}{off}}}", next.join(","), seg.speed);
         }
         out
     }
@@ -819,9 +878,9 @@ impl CarNetwork {
             let mut data = HashMap::from([
                 ("s".to_string(), Value::Int(car.segment as i32)),
                 ("i".to_string(), Value::Int(car.target as i32)),
-                ("x".to_string(), Value::Double(t.x)),
+                ("x".to_string(), Value::Double(macro_coord(t.x))),
                 ("y".to_string(), Value::Double(t.y)),
-                ("z".to_string(), Value::Double(t.z)),
+                ("z".to_string(), Value::Double(macro_coord(t.z))),
                 ("v".to_string(), Value::Int(speed)),
                 (
                     "c".to_string(),
@@ -907,8 +966,9 @@ fn lower(a: Option<i32>, b: Option<i32>) -> Option<i32> {
 }
 
 /// Takes the kinks out of a lane: drops a point the offset line folded back over, and
-/// rounds sharp corners so cars swing round them rather than turn on the spot.
-fn tidy(seg: &mut Segment) {
+/// rounds sharp corners so cars swing round them rather than turn on the spot, a hairpin
+/// on a circle of at least `radius`.
+fn tidy(seg: &mut Segment, radius: f64) {
     let dir = |p: &Waypoint, q: &Waypoint| unit(q.x - p.x, q.z - p.z);
     let gap = |p: &Waypoint, q: &Waypoint| (q.x - p.x).hypot(q.z - p.z);
     let turn =
@@ -945,30 +1005,40 @@ fn tidy(seg: &mut Segment) {
             seg.arcs.push(s);
             continue;
         };
-        // From `d` before the corner to `d` after it. Short of a hairpin that cuts the
-        // corner; a hairpin swings out to the side, since its legs leave no room between.
+        let hairpin = turn(&old, k) > 150.0;
+        // A hairpin's legs leave no room to turn between, so it turns round on its own
+        // circle from as far back as that reaches, rather than past the tip.
+        let d = if hairpin {
+            let legs = gap(&old[k - 1], &p).min(gap(&p, &old[k + 1]));
+            (0.45 * legs)
+                .min(turn_round_reach(0.0, radius) - 1.0)
+                .max(d)
+        } else {
+            d
+        };
+        // From `d` before the corner to `d` after it.
         let (from, to) = (
             (p.x - a.0 * d, p.z - a.1 * d),
             (p.x + b.0 * d, p.z + b.1 * d),
         );
-        let (c1, c2) = if turn(&old, k) <= 150.0 {
+        let mut points = vec![(from.0, from.1, 0.0)];
+        if !hairpin {
             let r = d * 2.0 / 3.0;
-            (
+            points.extend(curve(
+                from,
                 (from.0 + a.0 * r, from.1 + a.1 * r),
                 (to.0 - b.0 * r, to.1 - b.1 * r),
-            )
+                to,
+            ));
         } else {
-            // Out past the corner on one side and back on the other, round its tip.
-            let ab = a.0 * b.0 + a.1 * b.1;
-            let n = unit(a.0 * ab - b.0, a.1 * ab - b.1).unwrap_or((-a.1, a.0));
-            let tip = (p.x + a.0 * d, p.z + a.1 * d);
-            (
-                (tip.0 + n.0 * HAIRPIN_SWING, tip.1 + n.1 * HAIRPIN_SWING),
-                (tip.0 - n.0 * HAIRPIN_SWING, tip.1 - n.1 * HAIRPIN_SWING),
-            )
-        };
-        let mut points = vec![(from.0, from.1, 0.0)];
-        points.extend(curve(from, c1, c2, to));
+            // Short legs leave room only for a tighter circle, one that still ends by the tip.
+            let across = ((to.0 - from.0) * -a.1 + (to.1 - from.1) * a.0).abs();
+            let mut r = radius;
+            while r > 0.5 && turn_round_reach(across, r) > d + 1.0 {
+                r -= 0.25;
+            }
+            points.extend(turn_round(from, a, to, r));
+        }
         points.push((to.0, to.1, 1.0));
         for (x, z, t) in points {
             seg.points.push(Waypoint {
@@ -1037,10 +1107,27 @@ fn pace(seg: &mut Segment) {
     }
 }
 
+/// Lengths in blocks that decide how cars use dead ends.
+#[derive(Clone, Copy)]
+struct Reach {
+    /// A dead end shorter than this is no way on.
+    stub: f64,
+    /// A network of roads shorter than this in all carries no cars.
+    scrap: f64,
+    /// Smallest radius a car turns round on.
+    turn_round: f64,
+}
+
 /// Where each lane may go on from its end: any lane leaving that junction but the way
 /// back, or the way back at a dead end. With nowhere to go, as off the edge of the area,
 /// the car leaves.
-fn link(segments: &mut [Segment], lanes: &[Lane], world: &XZBBox, speed_at: impl Fn(f64) -> i32) {
+fn link(
+    segments: &mut [Segment],
+    lanes: &[Lane],
+    world: &XZBBox,
+    reach: Reach,
+    speed_at: impl Fn(f64) -> i32,
+) {
     let usable = |s: &Segment| s.points.len() >= 2;
     let mut starting: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
     for (i, lane) in lanes.iter().enumerate() {
@@ -1066,10 +1153,13 @@ fn link(segments: &mut [Segment], lanes: &[Lane], world: &XZBBox, speed_at: impl
             next
         })
         .collect();
-    let short: Vec<bool> = segments
-        .iter()
-        .map(|s| s.arcs.last().unwrap_or(&0.0) - s.arcs.first().unwrap_or(&0.0) < SHORT_LANE)
-        .collect();
+    let length = |s: &Segment| s.arcs.last().unwrap_or(&0.0) - s.arcs.first().unwrap_or(&0.0);
+    let short: Vec<bool> = segments.iter().map(|s| length(s) < SHORT_LANE).collect();
+    // Measured before any lane is bent round into its way back, which lengthens it.
+    for s in segments.iter_mut() {
+        s.stub = s.turns_back && length(s) < reach.stub;
+    }
+    let stub: Vec<bool> = segments.iter().map(|s| s.stub).collect();
     for (i, lane) in lanes.iter().enumerate() {
         // A lane too short to drive is part of its junction: cars cross it onto the ones after.
         let mut next = Vec::new();
@@ -1088,6 +1178,10 @@ fn link(segments: &mut [Segment], lanes: &[Lane], world: &XZBBox, speed_at: impl
                 next.push(j);
             }
         }
+        // In and straight back out of a stub would spin the car round at the junction.
+        if next.iter().any(|&j| !stub[j]) {
+            next.retain(|&j| !stub[j]);
+        }
         let entries: Vec<(usize, Option<(usize, f64)>)> = next
             .iter()
             .map(|&j| (j, entry(&segments[i].points, &segments[j].points)))
@@ -1099,15 +1193,27 @@ fn link(segments: &mut [Segment], lanes: &[Lane], world: &XZBBox, speed_at: impl
         let turns = match entries.as_slice() {
             // The only way on, and a sharp one: the lane itself bends round into it.
             &[(j, e)] if e.is_none_or(|(_, turn)| turn > SHARP_DEG) => {
-                if bend_into(segments, i, j, world, &speed_at) {
+                if bend_into(segments, i, j, world, reach.turn_round, &speed_at) {
                     let e = entry(&segments[i].points, &segments[j].points);
                     vec![(j, e.map_or(0, |(e, _)| e))]
                 } else {
                     forward
                 }
             }
-            // Any turn the car can take beats one that would make it double back.
-            _ if forward.is_empty() => entries.iter().map(|&(j, _)| (j, 0)).collect(),
+            // Every way on is too sharp to drive onto: bend round into the gentlest of them
+            // rather than turn on the spot.
+            _ if forward.is_empty() => {
+                let gentlest = next.iter().copied().min_by(|&p, &q| {
+                    sharpness(segments, i, p).total_cmp(&sharpness(segments, i, q))
+                });
+                match gentlest {
+                    Some(j) if bend_into(segments, i, j, world, reach.turn_round, &speed_at) => {
+                        let e = entry(&segments[i].points, &segments[j].points);
+                        vec![(j, e.map_or(0, |(e, _)| e))]
+                    }
+                    _ => entries.iter().map(|&(j, _)| (j, 0)).collect(),
+                }
+            }
             _ => forward,
         };
         let seg = &segments[i];
@@ -1127,11 +1233,51 @@ fn link(segments: &mut [Segment], lanes: &[Lane], world: &XZBBox, speed_at: impl
             .collect();
         segments[i].next = turns;
     }
+
+    // A piece of road cut off from the rest, in a car park or behind a gate, leaves a car
+    // nothing to do but go round and round: there is no way on anywhere in it.
+    let mut root: Vec<usize> = (0..segments.len()).collect();
+    fn find(root: &mut [usize], mut k: usize) -> usize {
+        while root[k] != k {
+            root[k] = root[root[k]];
+            k = root[k];
+        }
+        k
+    }
+    for (i, seg) in segments.iter().enumerate() {
+        for t in &seg.next {
+            let (a, b) = (find(&mut root, i), find(&mut root, t.lane));
+            root[a] = b;
+        }
+    }
+    let mut driven: FnvHashMap<usize, f64> = FnvHashMap::default();
+    for (i, seg) in segments.iter().enumerate() {
+        *driven.entry(find(&mut root, i)).or_default() += length(seg);
+    }
+    // Unless it runs off the area, where it goes on into roads left out.
+    let near =
+        |v: f64, lo: i32, hi: i32| v < lo as f64 + EDGE_REACH || v > (hi + 1) as f64 - EDGE_REACH;
+    let at_edge = |p: &Waypoint| {
+        near(p.x, world.min_x(), world.max_x()) || near(p.z, world.min_z(), world.max_z())
+    };
+    let mut open: FnvHashSet<usize> = FnvHashSet::default();
+    for (i, seg) in segments.iter().enumerate() {
+        if seg.points.first().is_some_and(at_edge) || seg.points.last().is_some_and(at_edge) {
+            open.insert(find(&mut root, i));
+        }
+    }
+    for (i, seg) in segments.iter_mut().enumerate() {
+        let network = find(&mut root, i);
+        // Both ways along each road.
+        if !open.contains(&network) && driven[&network] < 2.0 * reach.scrap {
+            seg.next.clear();
+        }
+    }
 }
 
 /// The first point of lane `to` a car at the end of `from` can drive to without turning
-/// round: ahead of it, and not so far round that the lane then leads back. Also how far
-/// the car turns in all, in degrees.
+/// round: ahead of it, within `CROSSING_REACH`, and not so far round that the lane then
+/// leads back. Also how far the car turns in all, in degrees.
 fn entry(from: &[Waypoint], to: &[Waypoint]) -> Option<(usize, f64)> {
     let (&end, rest) = from.split_last()?;
     let heading = rest
@@ -1142,7 +1288,8 @@ fn entry(from: &[Waypoint], to: &[Waypoint]) -> Option<(usize, f64)> {
         |a: (f64, f64), b: (f64, f64)| (a.0 * b.0 + a.1 * b.1).clamp(-1.0, 1.0).acos().to_degrees();
     let fits = |e: usize, room: f64| {
         let (dx, dz) = (to[e].x - end.x, to[e].z - end.z);
-        let leg = unit(dx, dz).filter(|_| dx.hypot(dz) >= room)?;
+        let far = dx.hypot(dz);
+        let leg = unit(dx, dz).filter(|_| far >= room && far <= CROSSING_REACH)?;
         let onto = turn(heading, leg);
         let on = to
             .get(e + 1)
@@ -1156,6 +1303,23 @@ fn entry(from: &[Waypoint], to: &[Waypoint]) -> Option<(usize, f64)> {
         .or_else(|| (0..to.len()).find_map(|e| fits(e, 0.0)))
 }
 
+/// How far round, in degrees, lane `j` starts off from the way lane `i` ends.
+fn sharpness(segments: &[Segment], i: usize, j: usize) -> f64 {
+    let heading = |p: &[Waypoint]| {
+        p.windows(2)
+            .find_map(|w| unit(w[1].x - w[0].x, w[1].z - w[0].z))
+    };
+    let mut end = segments[i].points.clone();
+    end.reverse();
+    match (heading(&end), heading(&segments[j].points)) {
+        (Some(a), Some(b)) => (-a.0 * b.0 - a.1 * b.1)
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees(),
+        _ => 180.0,
+    }
+}
+
 /// Extends lane `i` along a curve that leaves it straight on and meets lane `j` going its
 /// way, for a turn too sharp to take on the spot. False, with the lane as it was, where
 /// the curve would leave the area.
@@ -1164,6 +1328,7 @@ fn bend_into(
     i: usize,
     j: usize,
     world: &XZBBox,
+    radius: f64,
     speed_at: impl Fn(f64) -> i32,
 ) -> bool {
     let seg = &segments[i];
@@ -1189,10 +1354,46 @@ fn bend_into(
         .clamp(-1.0, 1.0)
         .acos()
         .to_degrees();
+    // Turning round starts early enough that its loop ends about where the lane does.
+    let (a, h, keep, held) = if turn > 150.0 {
+        let b = to[0];
+        let gap = ((b.x - a.x) * -h.1 + (b.z - a.z) * h.0).abs();
+        let first = seg.arcs.first().copied().unwrap_or(0.0);
+        let last = seg.arcs.last().copied().unwrap_or(0.0);
+        let shift = (turn_round_reach(gap, radius) - 1.0).clamp(0.0, (last - first - 0.5).max(0.0));
+        let at = last - shift;
+        let k = seg
+            .arcs
+            .partition_point(|&s| s < at)
+            .clamp(1, seg.points.len() - 1);
+        let (p, q) = (seg.points[k - 1], seg.points[k]);
+        let span = seg.arcs[k] - seg.arcs[k - 1];
+        let t = if span > 0.0 {
+            ((at - seg.arcs[k - 1]) / span).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let start = Waypoint {
+            x: p.x + (q.x - p.x) * t,
+            y: p.y + (q.y - p.y) * t,
+            z: p.z + (q.z - p.z) * t,
+            stop: None,
+            cap: q.cap,
+        };
+        (
+            start,
+            unit(q.x - p.x, q.z - p.z).unwrap_or(h),
+            Some((k, at)),
+            // A stop line on the part cut off moves to where the turn starts.
+            seg.points[k..].iter().find_map(|p| p.stop),
+        )
+    } else {
+        (a, h, None, None)
+    };
     let (meet, out, onto_meet) = if turn > 150.0 {
         // Turning round: alongside, then up the far side to where the lane starts.
         let b = to[0];
-        let back = ((b.x - a.x) * out.0 + (b.z - a.z) * out.1).clamp(0.0, 12.0);
+        let back = ((b.x - a.x) * out.0 + (b.z - a.z) * out.1).clamp(0.0, 30.0);
         let meet = (b.x - out.0 * back, b.y, b.z - out.1 * back);
         (meet, out, back > 0.5)
     } else {
@@ -1208,20 +1409,28 @@ fn bend_into(
         };
         ((to[k].x, to[k].y, to[k].z), out, false)
     };
-    // Control points two thirds of the gap out, which draws a half circle at a dead end.
-    let reach = ((meet.0 - a.x).hypot(meet.2 - a.z) * 2.0 / 3.0).clamp(1.0, 5.0);
     let cap = speed_at((70.0 - 0.6 * turn).max(U_TURN_KMH));
     let cap = (cap < seg.speed).then_some(cap);
-    let mut points = curve(
-        (a.x, a.z),
-        (a.x + h.0 * reach, a.z + h.1 * reach),
-        (meet.0 - out.0 * reach, meet.2 - out.1 * reach),
-        (meet.0, meet.2),
-    );
+    let mut points = if turn > 150.0 {
+        turn_round((a.x, a.z), h, (meet.0, meet.2), radius)
+    } else {
+        // Control points two thirds of the gap out.
+        let reach = ((meet.0 - a.x).hypot(meet.2 - a.z) * 2.0 / 3.0).clamp(1.0, 5.0);
+        curve(
+            (a.x, a.z),
+            (a.x + h.0 * reach, a.z + h.1 * reach),
+            (meet.0 - out.0 * reach, meet.2 - out.1 * reach),
+            (meet.0, meet.2),
+        )
+    };
     if onto_meet {
         points.push((meet.0, meet.2, 1.0));
     }
-    let mut along = seg.arcs.last().copied().unwrap_or(0.0);
+    // Where the lane is cut short, the turn round starts on a point of its own.
+    if keep.is_some() {
+        points.insert(0, (a.x, a.z, 0.0));
+    }
+    let mut along = keep.map_or(seg.arcs.last().copied().unwrap_or(0.0), |(_, at)| at);
     let mut was = (a.x, a.z);
     let mut added = Vec::new();
     for (x, z, t) in points {
@@ -1239,12 +1448,94 @@ fn bend_into(
         };
         added.push((p, along));
     }
+    if let Some((first, _)) = added.first_mut() {
+        first.stop = first.stop.or(held);
+    }
     let seg = &mut segments[i];
+    if let Some((k, _)) = keep {
+        seg.points.truncate(k);
+        seg.arcs.truncate(k);
+    }
     for (p, s) in added {
         seg.points.push(p);
         seg.arcs.push(s);
     }
     true
+}
+
+/// Radius, swing out and the run while swinging out of a turn round between lanes `gap`
+/// apart, on a circle of at least `radius`.
+fn turn_round_shape(gap: f64, radius: f64) -> (f64, f64, f64) {
+    let r = radius.max(gap / 2.0);
+    let swing = r - gap / 2.0;
+    // Long enough that swinging out barely turns the car the wrong way first.
+    let run = if swing > 0.25 {
+        (3.0 * swing).max(1.5)
+    } else {
+        0.0
+    };
+    (r, swing, run)
+}
+
+/// How far ahead of its start a turn round between lanes `gap` apart reaches.
+fn turn_round_reach(gap: f64, radius: f64) -> f64 {
+    let (r, _, run) = turn_round_shape(gap, radius);
+    run + r
+}
+
+/// Points round a dead end from `a`, heading `h`, onto the way back at `meet`, neither end
+/// included, each with how far along it lies, 0 to 1: a half circle of at least `radius`
+/// round the middle of the road. Where the lanes lie closer than that, the car first
+/// swings out to its own side to make room.
+fn turn_round(a: (f64, f64), h: (f64, f64), meet: (f64, f64), radius: f64) -> Vec<(f64, f64, f64)> {
+    let across = (meet.0 - a.0) * -h.1 + (meet.1 - a.1) * h.0;
+    let n = if across >= 0.0 {
+        (-h.1, h.0)
+    } else {
+        (h.1, -h.0)
+    };
+    let gap = across.abs();
+    let (r, swing, run) = turn_round_shape(gap, radius);
+    let at = |along: f64, side: f64| {
+        (
+            a.0 + h.0 * along + n.0 * side,
+            a.1 + h.1 * along + n.1 * side,
+        )
+    };
+    let bend = |from, c1, c2, to| curve(from, c1, c2, to).into_iter().map(|(x, z, _)| (x, z));
+    let mut path = vec![a];
+    if run > 0.0 {
+        path.extend(bend(
+            a,
+            at(run / 2.0, 0.0),
+            at(run / 2.0, -swing),
+            at(run, -swing),
+        ));
+    }
+    const ARC_STEPS: usize = 8;
+    for k in 0..=ARC_STEPS {
+        let t = std::f64::consts::PI * k as f64 / ARC_STEPS as f64;
+        path.push(at(run + r * t.sin(), gap / 2.0 - r * t.cos()));
+    }
+    if run > 0.0 {
+        path.extend(bend(
+            at(run, gap + swing),
+            at(run / 2.0, gap + swing),
+            at(run / 2.0, gap),
+            at(0.0, gap),
+        ));
+    }
+    path.push(meet);
+    path.dedup_by(|p, q| (p.0 - q.0).hypot(p.1 - q.1) < 0.5);
+    let gap_to = |p: (f64, f64), q: (f64, f64)| (q.0 - p.0).hypot(q.1 - p.1);
+    let total: f64 = path.windows(2).map(|w| gap_to(w[0], w[1])).sum();
+    let mut along = 0.0;
+    let mut out = Vec::new();
+    for k in 1..path.len().saturating_sub(1) {
+        along += gap_to(path[k - 1], path[k]);
+        out.push((path[k].0, path[k].1, along / total.max(1e-9)));
+    }
+    out
 }
 
 /// Spreads cars over every lane by how busy its road is, thinning them all evenly when
@@ -1255,7 +1546,7 @@ fn place_cars(segments: &[Segment], scale: f64) -> Vec<Car> {
     };
     let wanted: f64 = segments
         .iter()
-        .filter(|s| s.points.len() >= 2)
+        .filter(|s| s.carries_cars())
         .map(|s| length(s) / scale * s.density)
         .sum();
     let thin = if wanted > MAX_CARS as f64 {
@@ -1266,7 +1557,7 @@ fn place_cars(segments: &[Segment], scale: f64) -> Vec<Car> {
     let mut cars = Vec::new();
     let mut owed = 0.5;
     for (i, seg) in segments.iter().enumerate() {
-        if seg.points.len() < 2 || seg.next.is_empty() {
+        if !seg.carries_cars() {
             continue;
         }
         let len = length(seg);
@@ -1640,11 +1931,12 @@ mod tests {
             flat,
         );
         // Leaving out the turn at the dead end.
+        let turning = Some(step_speed(U_TURN_KMH, 1.0));
         let on_road = |net: &CarNetwork| {
             net.segments[0]
                 .points
                 .iter()
-                .filter(|p| p.x <= 200.5)
+                .filter(|p| p.cap != turning)
                 .count()
         };
         let flat_points = on_road(&net);
@@ -1697,6 +1989,29 @@ mod tests {
         assert_eq!(text.lines().count(), 3 + net.segments.len());
         assert!(text.contains(",g:1b"));
         assert!(text.contains(&format!(",v:{}}}", net.segments[0].speed)));
+    }
+
+    #[test]
+    fn no_waypoint_lies_on_a_whole_x_or_z_for_the_pack_to_shift() {
+        // A crossroads on whole blocks puts many lane points on whole coordinates.
+        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat);
+        let text = net.storage_function();
+        let mut seen = 0;
+        for key in ["x:", "z:"] {
+            for part in text.split(key).skip(1) {
+                let v: f64 = part.split('d').next().unwrap().parse().unwrap();
+                assert!(v.fract() != 0.0, "{key}{v} is whole");
+                seen += 1;
+            }
+        }
+        assert!(seen > 20);
+        for car in &net.cars {
+            let t = net.segments[car.segment].points[car.target];
+            assert!(macro_coord(t.x).fract() != 0.0 && macro_coord(t.z).fract() != 0.0);
+        }
+        assert_eq!(macro_coord(48.0), 48.01);
+        assert_eq!(macro_coord(-12.0), -11.99);
+        assert_eq!(macro_coord(48.104), 48.1);
     }
 
     #[test]
@@ -1868,6 +2183,256 @@ mod tests {
         }
     }
 
+    /// Drives every chain of three lanes as the pack does, 0.3 blocks a move, and returns
+    /// the most the car turns, in degrees, within any `window` blocks of driving.
+    fn tightest_turn(net: &CarNetwork, window: f64) -> f64 {
+        let mut chains: Vec<Vec<(usize, usize)>> = Vec::new();
+        for s in 0..net.segments.len() {
+            for t in &net.segments[s].next {
+                let tail = &net.segments[t.lane].next;
+                if tail.is_empty() {
+                    chains.push(vec![(s, 1), (t.lane, t.entry)]);
+                }
+                for u in tail {
+                    chains.push(vec![(s, 1), (t.lane, t.entry), (u.lane, u.entry)]);
+                }
+            }
+        }
+        let mut worst: f64 = 0.0;
+        for chain in chains {
+            let first = &net.segments[chain[0].0].points[0];
+            let mut pos = (first.x, first.z);
+            // (heading change, distance) per move
+            let mut moves: Vec<(f64, f64)> = Vec::new();
+            let mut heading: Option<f64> = None;
+            for (lane, from) in chain {
+                for p in net.segments[lane].points.iter().skip(from) {
+                    loop {
+                        let (dx, dz) = (p.x - pos.0, p.z - pos.1);
+                        let dist = dx.hypot(dz);
+                        if dist <= 0.3 {
+                            pos = (p.x, p.z);
+                            break;
+                        }
+                        let yaw = (-dx).atan2(dz).to_degrees();
+                        let swing =
+                            heading.map_or(0.0, |h| (yaw - h + 540.0).rem_euclid(360.0) - 180.0);
+                        heading = Some(yaw);
+                        moves.push((swing, 0.3));
+                        pos = (pos.0 + dx / dist * 0.3, pos.1 + dz / dist * 0.3);
+                    }
+                }
+            }
+            for start in 0..moves.len() {
+                let (mut net_turn, mut driven) = (0.0f64, 0.0);
+                for &(swing, d) in &moves[start..] {
+                    net_turn += swing;
+                    driven += d;
+                    if driven > window {
+                        break;
+                    }
+                    worst = worst.max(net_turn.abs());
+                }
+            }
+        }
+        worst
+    }
+
+    /// A road with a short stub off one side of it and a long dead end off the other.
+    fn stub_roads() -> Vec<ProcessedElement> {
+        vec![
+            road(
+                20,
+                vec![
+                    node(1, -150, 0, &[]),
+                    node(2, 0, 0, &[]),
+                    node(3, 150, 0, &[]),
+                ],
+                &[],
+            ),
+            road(21, vec![node(2, 0, 0, &[]), node(4, 0, 12, &[])], &[]),
+            road(22, vec![node(2, 0, 0, &[]), node(5, 0, -120, &[])], &[]),
+        ]
+    }
+
+    #[test]
+    fn no_one_turns_into_a_short_stub_while_there_is_anywhere_else_to_go() {
+        let net = CarNetwork::build(&stub_roads(), 1.0, false, false, &world(), flat);
+        let into_stub = |j: usize| {
+            let p = &net.segments[j].points;
+            p[0].z > 0.5 && p.last().unwrap().z > p[0].z
+        };
+        let stub = (0..net.segments.len()).find(|&j| into_stub(j)).unwrap();
+        assert!(net.segments[stub].turns_back);
+        for seg in &net.segments {
+            assert!(seg.next.iter().all(|t| t.lane != stub));
+        }
+        // The long dead end is still driven into, and the cars come back out of it.
+        assert!(net
+            .segments
+            .iter()
+            .any(|s| s.next.iter().any(|t| net.segments[t.lane].turns_back)));
+    }
+
+    // Two ways meeting where their last nodes lie a fraction of a block apart, as on the
+    // Champs-Elysees, which rounds them onto one block or onto a step across the road.
+    #[test]
+    fn nodes_rounded_onto_neighbouring_blocks_do_not_fold_the_lane() {
+        for (p, x) in [
+            ((785, 600), (784, 600)),
+            ((784, 599), (784, 599)),
+            ((784, 600), (784, 599)),
+        ] {
+            let roads = vec![
+                road(
+                    1,
+                    vec![
+                        node(1, 900, 656, &[]),
+                        node(2, 834, 624, &[]),
+                        node(3, 786, 600, &[]),
+                        node(4, p.0, p.1, &[]),
+                        node(5, x.0, x.1, &[]),
+                    ],
+                    &[("highway", "primary")],
+                ),
+                road(
+                    2,
+                    vec![
+                        node(5, x.0, x.1, &[]),
+                        node(6, 770, 593, &[]),
+                        node(7, 693, 556, &[]),
+                        node(8, 600, 511, &[]),
+                    ],
+                    &[("highway", "primary")],
+                ),
+            ];
+            let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat);
+            for seg in &net.segments {
+                let pts: Vec<&Waypoint> = seg
+                    .points
+                    .iter()
+                    .filter(|q| q.x > 760.0 && q.x < 810.0)
+                    .collect();
+                let west = seg.points[0].x > seg.points.last().unwrap().x;
+                for w in pts.windows(2) {
+                    let dx = w[1].x - w[0].x;
+                    assert!(
+                        if west { dx <= 0.05 } else { dx >= -0.05 },
+                        "a fold at {:?}",
+                        w
+                    );
+                }
+            }
+        }
+    }
+
+    // A switchback mapped with one node at its tip and a short leg after it: the turn
+    // round has to fit before the road ends there. The outer lane rounds the tip on its
+    // own side of the road, a couple of blocks out.
+    #[test]
+    fn a_hairpin_with_a_short_leg_turns_round_before_the_tip() {
+        let roads = vec![road(
+            1,
+            vec![
+                node(1, 0, 0, &[]),
+                node(2, 40, 0, &[]),
+                node(3, 34, 2, &[]),
+                node(4, -10, 10, &[]),
+            ],
+            &[],
+        )];
+        for left in [false, true] {
+            let net = CarNetwork::build(&roads, 1.0, left, false, &world(), flat);
+            let far = net
+                .segments
+                .iter()
+                .flat_map(|s| &s.points)
+                .map(|p| p.x)
+                .fold(f64::MIN, f64::max);
+            assert!(
+                far <= 43.5,
+                "a car runs on to x={far}, past the tip at 40, left {left}"
+            );
+        }
+    }
+
+    // A cul-de-sac whose junction lies just outside the area is a road going on, not a
+    // scrap: cars still drive in, turn round and leave. Clipped to the edge, as parsed.
+    #[test]
+    fn a_dead_end_running_off_the_area_is_no_scrap() {
+        let roads = vec![road(
+            1,
+            vec![node(1, 2000, 0, &[]), node(2, 1930, 0, &[])],
+            &[("highway", "primary")],
+        )];
+        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat);
+        assert!(net.segments.iter().any(|s| !s.next.is_empty()));
+        assert!(net.car_count() > 0);
+    }
+
+    // A signalised junction whose every exit doubles back: the lane turns round from short
+    // of its end, and its stop line goes with it rather than with the part cut off.
+    #[test]
+    fn a_lane_turning_round_early_keeps_its_stop_line() {
+        let main: &[(&str, &str)] = &[("highway", "primary"), ("oneway", "yes")];
+        let roads = vec![
+            road(
+                1,
+                vec![
+                    node(1, 0, 0, &[]),
+                    node(2, 100, 0, &[("highway", "traffic_signals")]),
+                ],
+                main,
+            ),
+            road(2, vec![node(2, 100, 0, &[]), node(3, 0, 8, &[])], main),
+            road(3, vec![node(2, 100, 0, &[]), node(4, 0, -8, &[])], main),
+        ];
+        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat);
+        let lane = net
+            .segments
+            .iter()
+            .find(|s| s.way == 1)
+            .expect("the approach has a lane");
+        assert!(!lane.next.is_empty(), "the approach leads on");
+        assert!(
+            lane.points.iter().any(|p| p.stop.is_some()),
+            "the stop line is gone"
+        );
+    }
+
+    // Respawned cars draw any lane, so the ones no car starts on are marked for them.
+    #[test]
+    fn lanes_no_car_starts_on_are_marked_off_for_the_respawn() {
+        let net = CarNetwork::build(&stub_roads(), 1.0, false, false, &world(), flat);
+        let text = net.storage_function();
+        let lines: Vec<&str> = text.lines().filter(|l| l.contains("seg append")).collect();
+        assert_eq!(lines.len(), net.segments.len());
+        for (seg, line) in net.segments.iter().zip(&lines) {
+            assert_eq!(line.contains(",o:1b"), !seg.carries_cars(), "{line}");
+        }
+        assert!(net.segments.iter().any(|s| s.stub));
+    }
+
+    #[test]
+    fn a_scrap_of_road_with_a_dead_end_at_each_end_sends_no_one_round_it() {
+        let scrap = road(30, vec![node(1, 0, 0, &[]), node(2, 8, 0, &[])], &[]);
+        let net = CarNetwork::build(&[scrap], 1.0, false, false, &world(), flat);
+        assert!(net.segments.iter().all(|s| s.next.is_empty()));
+        assert_eq!(net.car_count(), 0);
+    }
+
+    #[test]
+    fn a_car_turning_round_never_spins_on_the_spot() {
+        for left in [false, true] {
+            for roads in [stub_roads(), awkward_roads()] {
+                let net = CarNetwork::build(&roads, 1.0, left, false, &world(), flat);
+                // Half a turn inside a car length and a bit is spinning on the spot.
+                let turn = tightest_turn(&net, 5.0);
+                assert!(turn <= 170.0, "{turn} degrees in 5 blocks, left {left}");
+            }
+        }
+    }
+
     #[test]
     fn a_dead_end_is_turned_round_in_a_curve_onto_the_way_back() {
         let way = road(5, vec![node(1, 0, 0, &[]), node(2, 100, 0, &[])], &[]);
@@ -1881,8 +2446,9 @@ mod tests {
         assert!(seg.turns_back);
         assert_eq!(seg.next.len(), 1);
         assert_ne!(seg.next[0].lane, east);
-        // The curve swings out past the end of the road and comes back slowly.
-        assert!(seg.points.iter().any(|p| p.x > 101.5));
+        // The curve turns round at the end of the road, not past it, and slowly.
+        let reach = seg.points.iter().map(|p| p.x).fold(f64::MIN, f64::max);
+        assert!(reach > 100.0 && reach < 102.5, "{reach}");
         assert!(seg.points.last().unwrap().cap.is_some());
     }
 

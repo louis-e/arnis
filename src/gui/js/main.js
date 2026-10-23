@@ -3444,7 +3444,7 @@ async function startGeneration() {
         pauseMenu: gameplayToggle('pause-menu-toggle'),
         discoveries: gameplayToggle('discoveries-toggle'),
         trafficLights: gameplayToggle('traffic-lights-toggle'),
-        movingCars: gameplayToggle('moving-cars-toggle'),
+        movingVehicles: gameplayToggle('moving-cars-toggle'),
         zombieOutbreak: gameplayToggle('zombie-outbreak-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,

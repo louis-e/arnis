@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Fem nätter av zombievågor genom dina gator, med en boss.",
   "body_gravity": "Månens och Mars gravitation",
   "body_gravity_desc": "Verklig låg gravitation i mån- och Marsvärldar.",
-  "moving_cars": "Rörliga bilar",
-  "moving_cars_desc": "Trafik som kör på dina gator i hastighetsgränsen."
+  "moving_vehicles": "Rörliga fordon",
+  "moving_vehicles_desc": "Bilar, spårvagnar, tunnelbanor och tåg på dina gator och spår."
 }

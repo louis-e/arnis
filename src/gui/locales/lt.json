@@ -239,6 +239,6 @@
   "zombie_outbreak_desc": "Penkios naktys zombių bangų jūsų gatvėse, su bosu.",
   "body_gravity": "Mėnulio ir Marso gravitacija",
   "body_gravity_desc": "Tikra maža gravitacija Mėnulio ir Marso pasauliuose.",
-  "moving_cars": "Važiuojantys automobiliai",
-  "moving_cars_desc": "Eismas, važiuojantis jūsų gatvėmis leistinu greičiu."
+  "moving_vehicles": "Važiuojančios transporto priemonės",
+  "moving_vehicles_desc": "Automobiliai, tramvajai, metro ir traukiniai jūsų gatvėse ir bėgiuose."
 }

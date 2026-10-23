@@ -409,7 +409,11 @@ pub fn generate_landuse(
     // Large construction sites get a centre crane plus scattered excavators, and
     // every site its fence and props, which keep clear of both.
     if landuse_tag == "construction" {
-        crate::structures::crane::maybe_place_crane(editor, floor_area.as_slice());
+        crate::structures::crane::maybe_place_crane(
+            editor,
+            floor_area.as_slice(),
+            building_footprints,
+        );
         crate::structures::excavator::scatter_excavators(editor, floor_area.as_slice());
         construction_site::furnish(editor, element, floor_area.as_slice(), building_footprints);
     }

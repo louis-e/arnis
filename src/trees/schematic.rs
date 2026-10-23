@@ -201,6 +201,7 @@ pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
             voxels.push((x as i16, y as i16, z as i16, block));
         }
     }
+    drop_stray_leaves(&mut voxels, width, height, length);
 
     // Normalise so the lowest log/leaf sits at y=0 (schems pad air below the trunk).
     if let Some(min_y) = voxels.iter().map(|v| v.1).min() {
@@ -240,6 +241,56 @@ pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
         min_log_vy,
         leaf_columns: crown.len() as u32,
     })
+}
+
+/// Furthest apart, per axis, two voxels of one tree may be: one air block between still
+/// reads as the crown.
+const CROWN_REACH: i32 = 2;
+
+/// Drops leaves no chain of voxels within `CROWN_REACH` of each other links to the wood,
+/// so a stray bit left in a model doesn't float beside the tree.
+fn drop_stray_leaves(
+    voxels: &mut Vec<(i16, i16, i16, Block)>,
+    width: i32,
+    height: i32,
+    length: i32,
+) {
+    let mut todo: Vec<usize> = (0..voxels.len()).filter(|&k| is_log(voxels[k].3)).collect();
+    if todo.is_empty() {
+        return;
+    }
+    let cell = |x: i32, y: i32, z: i32| ((y * length + z) * width + x) as usize;
+    let mut grid = vec![u32::MAX; (width * height * length) as usize];
+    for (k, v) in voxels.iter().enumerate() {
+        grid[cell(v.0.into(), v.1.into(), v.2.into())] = k as u32;
+    }
+    let mut linked = vec![false; voxels.len()];
+    for &k in &todo {
+        linked[k] = true;
+    }
+    while let Some(k) = todo.pop() {
+        let (x, y, z) = (
+            i32::from(voxels[k].0),
+            i32::from(voxels[k].1),
+            i32::from(voxels[k].2),
+        );
+        for ny in (y - CROWN_REACH).max(0)..=(y + CROWN_REACH).min(height - 1) {
+            for nz in (z - CROWN_REACH).max(0)..=(z + CROWN_REACH).min(length - 1) {
+                for nx in (x - CROWN_REACH).max(0)..=(x + CROWN_REACH).min(width - 1) {
+                    let j = grid[cell(nx, ny, nz)];
+                    if j != u32::MAX && !linked[j as usize] {
+                        linked[j as usize] = true;
+                        todo.push(j as usize);
+                    }
+                }
+            }
+        }
+    }
+    let mut k = 0;
+    voxels.retain(|_| {
+        k += 1;
+        linked[k - 1]
+    });
 }
 
 /// Rotate a schematic cell offset `(x, z)` by `k` quarter-turns clockwise (k in 0..=3).
@@ -554,6 +605,24 @@ mod tests {
             crate::trees::tree_library::size_for_height(schem.height),
             crate::trees::tree_library::TreeSize::Small
         );
+    }
+
+    // A leaf one air block off the crown is crown; a bit left floating further off
+    // in the model file is not part of the tree.
+    #[test]
+    fn stray_leaves_far_from_the_tree_are_dropped() {
+        // 1 x 8 x 1: log, log, leaves, air, leaves, air, air, leaves.
+        let bytes = schem_bytes(
+            1,
+            8,
+            1,
+            &["minecraft:air", "minecraft:oak_log", "minecraft:oak_leaves"],
+            &[1, 1, 2, 0, 2, 0, 0, 2],
+        );
+        let schem = load_schem(&bytes).unwrap();
+        let ys: Vec<i16> = schem.voxels.iter().map(|v| v.1).collect();
+        assert_eq!(ys, vec![0, 1, 2, 4]);
+        assert_eq!(schem.height, 5);
     }
 
     #[test]
