@@ -28,6 +28,14 @@ fn is_roof(tags: &HashMap<String, String>) -> bool {
     tag(tags, "building") == Some("roof") || tag(tags, "building:part") == Some("roof")
 }
 
+/// A roof that says it covers something else, like a car wash or a trolley shelter.
+fn other_use(tags: &HashMap<String, String>) -> bool {
+    tag(tags, "amenity").is_some_and(|a| a != "fuel")
+        || ["shop", "parking", "shelter", "leisure", "public_transport"]
+            .iter()
+            .any(|k| tags.contains_key(*k))
+}
+
 /// Colours a station is dressed in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Livery {
@@ -95,6 +103,15 @@ const BRANDS: &[(&str, Livery)] = &[
     ),
     (
         "total",
+        livery(
+            WHITE_CONCRETE,
+            RED_CONCRETE,
+            Some(ORANGE_CONCRETE),
+            WHITE_CONCRETE,
+        ),
+    ),
+    (
+        "totalenergies",
         livery(
             WHITE_CONCRETE,
             RED_CONCRETE,
@@ -361,17 +378,20 @@ pub fn livery_for(tags: &HashMap<String, String>, seed: u64) -> Livery {
         let Some(value) = tag(tags, key) else {
             continue;
         };
-        let v = value.to_lowercase();
+        let v = value.to_lowercase().replace('\u{2019}', "'");
         // Whole-word match, so "Stará" is not Star and "Esso" is not in "Pessoa".
         let words: Vec<&str> = v
             .split(|c: char| !c.is_alphanumeric() && c != '\'')
             .filter(|w| !w.is_empty())
             .collect();
+        // "Casey's" is Casey.
+        let same =
+            |word: &str, brand: &str| word == brand || word.strip_suffix("'s") == Some(brand);
         for (brand, look) in BRANDS {
             let parts: Vec<&str> = brand.split(' ').collect();
             let hit = words
                 .windows(parts.len())
-                .any(|w| w.iter().zip(&parts).all(|(a, b)| a == b));
+                .any(|w| w.iter().zip(&parts).all(|(a, b)| same(a, b)));
             if hit {
                 return *look;
             }
@@ -497,9 +517,12 @@ impl FuelIndex {
             if !w.tags.contains_key("building") && !w.tags.contains_key("building:part") {
                 continue;
             }
+            let roof = is_roof(&w.tags);
+            if roof && other_use(&w.tags) {
+                continue;
+            }
             let ring = ring_of(w);
             let (cx, cz) = centre(&ring);
-            let roof = is_roof(&w.tags);
             let best = index
                 .sites
                 .iter()
@@ -573,8 +596,8 @@ fn long_axis(cells: &[(i32, i32)]) -> (f64, f64, f64, f64) {
     (mx, mz, angle.cos(), angle.sin())
 }
 
-/// Draws a mapped canopy in its station's livery, with the pumps under it.
-#[allow(clippy::too_many_arguments)]
+/// Draws a mapped canopy in its station's livery, with the pumps under it; false when
+/// it is too small, and is then drawn as a plain roof.
 pub fn generate_canopy(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
@@ -582,12 +605,12 @@ pub fn generate_canopy(
     road_mask: &RoadMaskBitmap,
     scale: f64,
     timeout: Option<&Duration>,
-) {
+) -> bool {
     let Some(index) = editor.fuel_index() else {
-        return;
+        return false;
     };
     let Some(site) = index.site_for_canopy(way.id).cloned() else {
-        return;
+        return false;
     };
     let cells: Vec<(i32, i32)> = flood_fill_cache
         .get_or_compute(way, timeout)
@@ -595,7 +618,7 @@ pub fn generate_canopy(
         .copied()
         .collect();
     if cells.len() < 12 {
-        return;
+        return false;
     }
     let metres = |key: &str| {
         tag(&way.tags, key)
@@ -611,6 +634,7 @@ pub fn generate_canopy(
         .unwrap_or(soffit + 2)
         .clamp(soffit + 1, soffit + 3);
     draw_canopy(editor, &cells, &site, soffit, top, road_mask, way.id);
+    true
 }
 
 fn draw_canopy(
@@ -820,9 +844,13 @@ pub fn generate_station(
     if site.has_canopy {
         return;
     }
+    let shop_building = element.tags().contains_key("building");
+    if shop_building && road.is_none() {
+        return;
+    }
     // Area stations keep their canopy inside the area.
     let area: HashSet<(i32, i32)> = match element {
-        ProcessedElement::Way(w) if !site.ring.is_empty() => flood_fill_cache
+        ProcessedElement::Way(w) if !site.ring.is_empty() && !shop_building => flood_fill_cache
             .get_or_compute(w, timeout)
             .iter()
             .copied()
@@ -838,10 +866,16 @@ pub fn generate_station(
         (-rx / d, -rz / d)
     };
     let (half_l, half_w) = ((7.0 * scale).max(5.0), (4.5 * scale).max(3.5));
+    // A shop building stands where the station is mapped, so its canopy steps in from the road.
+    let (ox, oz, first) = match road {
+        Some((x, z)) if shop_building => (x as f64 + 0.5, z as f64 + 0.5, half_w + 2.0),
+        _ => (site.x, site.z, 0.0),
+    };
     // Clear ground first; then over lanes mapped through the forecourt, never over buildings.
     for road_share in [0.0, 0.5] {
         for shift in [0.0, 3.0, 6.0, 9.0] {
-            let (cx, cz) = (site.x + away.0 * shift, site.z + away.1 * shift);
+            let step = first + shift;
+            let (cx, cz) = (ox + away.0 * step, oz + away.1 * step);
             let f = Frame::new(cx, cz, -away.1, away.0);
             let cells: Vec<(i32, i32)> = f
                 .cells(-half_l, half_l, -half_w, half_w)
@@ -860,14 +894,22 @@ pub fn generate_station(
             }
             draw_canopy(editor, &cells, &site, 5, 7, road_mask, site.id);
             if !site.has_shop {
-                kiosk(editor, &site, &f, half_w, footprints, road_mask, &area);
+                kiosk(
+                    editor,
+                    &site,
+                    &f.flipped(),
+                    half_w,
+                    footprints,
+                    road_mask,
+                    &area,
+                );
             }
             return;
         }
     }
 }
 
-/// A small shop behind a generated canopy.
+/// A small shop on the +b side of a generated canopy's frame.
 fn kiosk(
     editor: &mut WorldEditor,
     site: &Site,
@@ -968,6 +1010,16 @@ mod tests {
             livery_for(&tags(&[("name", "Stará Pessoa")]), 0).fascia,
             WHITE_CONCRETE
         );
+        for brand in ["Casey's", "Casey\u{2019}s"] {
+            assert_eq!(
+                livery_for(&tags(&[("brand", brand)]), 0).fascia,
+                RED_CONCRETE
+            );
+        }
+        assert_eq!(
+            livery_for(&tags(&[("brand", "TotalEnergies")]), 0).stripe2,
+            Some(ORANGE_CONCRETE)
+        );
     }
 
     #[test]
@@ -997,10 +1049,19 @@ mod tests {
             rect(2, 0, 0, 16, 10, &[("building", "roof")]),
             rect(3, 20, 0, 30, 8, &[("building", "retail")]),
             rect(4, 300, 300, 316, 310, &[("building", "roof")]),
+            rect(
+                7,
+                0,
+                14,
+                10,
+                20,
+                &[("building", "roof"), ("amenity", "car_wash")],
+            ),
         ];
         let index = FuelIndex::build(&elements, 1.0);
         assert!(index.canopies.contains_key(&2));
         assert!(!index.canopies.contains_key(&4));
+        assert!(!index.canopies.contains_key(&7));
         let site = index.site(1).unwrap();
         assert!(site.has_canopy && site.has_shop);
 

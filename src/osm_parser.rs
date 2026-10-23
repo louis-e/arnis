@@ -903,8 +903,8 @@ pub fn parse_osm_data(
         &data.ways,
         &data.nodes,
     ));
-    // A ride drawn whole replaces any 3D parts mapped inside it.
-    outline_suppression.extend(compute_ride_part_suppression(&data.ways, &data.nodes));
+    // A ride drawn whole replaces any 3D parts mapped inside it, and is never replaced by them.
+    suppress_ride_parts(&data.ways, &data.nodes, &mut outline_suppression);
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
         FnvHashMap::with_capacity_and_hasher(data.nodes.len(), Default::default());
@@ -1348,16 +1348,23 @@ fn ring_area(r: &[(f64, f64)]) -> f64 {
     (a / 2.0).abs()
 }
 
-/// building:part ways whose centre lies inside the outline of a ride `attractions` draws.
-fn compute_ride_part_suppression(ways: &[OsmElement], nodes: &[OsmElement]) -> OutlineSuppression {
+/// Suppresses building:part ways whose centre lies inside a ride `attractions` draws
+/// whole, and keeps the ride's own outline.
+fn suppress_ride_parts(
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+    suppressed: &mut OutlineSuppression,
+) {
     use crate::element_processing::attractions;
     let rides: Vec<&OsmElement> = ways
         .iter()
-        .filter(|w| w.tags.as_ref().is_some_and(attractions::claims))
+        .filter(|w| w.tags.as_ref().is_some_and(attractions::replaces_parts))
         .collect();
-    let mut suppressed: OutlineSuppression = HashSet::new();
     if rides.is_empty() {
-        return suppressed;
+        return;
+    }
+    for w in &rides {
+        suppressed.remove(&("way", w.id));
     }
     let coords: HashMap<u64, (f64, f64)> = nodes
         .iter()
@@ -1395,7 +1402,6 @@ fn compute_ride_part_suppression(ways: &[OsmElement], nodes: &[OsmElement]) -> O
             suppressed.insert(("way", w.id));
         }
     }
-    suppressed
 }
 
 // Ray-cast point-in-polygon test on a lat/lon ring.

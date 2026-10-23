@@ -45,19 +45,31 @@ fn height_m(tags: &HashMap<String, String>) -> Option<f64> {
 fn hinted(name: &str) -> Option<Ride> {
     let n = name.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    // Short words match whole, so "Meyer" has no eye in it.
+    let tokens: Vec<&str> = n.split(|c: char| !c.is_alphanumeric()).collect();
+    let word = |words: &[&str]| words.iter().any(|w| tokens.contains(w));
     if has(&[
-        "riesenrad",
-        "ferris",
-        "big wheel",
-        "eye",
-        "grande roue",
-        "ruota",
-        "noria",
-        "reuzenrad",
-        "pariserhjul",
-        "diabelski",
-        "wheel",
+        "schiffschaukel",
+        "pirat",
+        "viking",
+        "galeone",
+        "swinging ship",
     ]) {
+        Some(Ride::PirateShip)
+    } else if word(&["eye"])
+        || has(&[
+            "riesenrad",
+            "ferris",
+            "big wheel",
+            "grande roue",
+            "ruota",
+            "noria",
+            "reuzenrad",
+            "pariserhjul",
+            "diabelski",
+            "wheel",
+        ])
+    {
         Some(Ride::BigWheel)
     } else if has(&[
         "kettenkarussell",
@@ -69,23 +81,16 @@ fn hinted(name: &str) -> Option<Ride> {
         "kettenflieger",
     ]) {
         Some(Ride::ChainSwings)
-    } else if has(&[
-        "freifall",
-        "free fall",
-        "freefall",
-        "drop",
-        "fallturm",
-        "power tower",
-    ]) {
+    } else if word(&["drop"])
+        || has(&[
+            "freifall",
+            "free fall",
+            "freefall",
+            "fallturm",
+            "power tower",
+        ])
+    {
         Some(Ride::DropTower)
-    } else if has(&[
-        "schiffschaukel",
-        "pirat",
-        "viking",
-        "galeone",
-        "swinging ship",
-    ]) {
-        Some(Ride::PirateShip)
     } else if has(&[
         "autodrom",
         "autoscooter",
@@ -144,7 +149,17 @@ fn ride_kind(tags: &HashMap<String, String>) -> Option<Ride> {
     // A generic ride drawn as some other area keeps that look.
     if ride == Ride::Spinner
         && [
-            "leisure", "landuse", "natural", "amenity", "highway", "waterway",
+            "leisure",
+            "landuse",
+            "natural",
+            "amenity",
+            "highway",
+            "waterway",
+            "railway",
+            "barrier",
+            "tourism",
+            "man_made",
+            "roller_coaster",
         ]
         .iter()
         .any(|k| tags.contains_key(*k))
@@ -160,6 +175,11 @@ fn ride_kind(tags: &HashMap<String, String>) -> Option<Ride> {
 /// True for rides drawn here, including those mapped as buildings.
 pub fn claims(tags: &HashMap<String, String>) -> bool {
     ride_kind(tags).is_some()
+}
+
+/// True for rides always drawn whole, so 3D parts mapped inside them can go.
+pub fn replaces_parts(tags: &HashMap<String, String>) -> bool {
+    ride_kind(tags).is_some_and(|r| r != Ride::Spinner)
 }
 
 /// Where a ride stands and how big its mapped outline is.
@@ -342,6 +362,11 @@ fn dist_to(cx: f64, cz: f64, x: i32, z: i32) -> f64 {
     ((x as f64 + 0.5 - cx).powi(2) + (z as f64 + 0.5 - cz).powi(2)).sqrt()
 }
 
+/// Half-block steps along a run of `len` blocks, at least one.
+fn steps(len: f64) -> usize {
+    (len * 2.0).ceil().max(1.0) as usize
+}
+
 /// Angle of a cell round a centre, 0..TAU.
 fn angle_of(cx: f64, cz: f64, x: i32, z: i32) -> f64 {
     (z as f64 + 0.5 - cz)
@@ -349,6 +374,7 @@ fn angle_of(cx: f64, cz: f64, x: i32, z: i32) -> f64 {
         .rem_euclid(TAU)
 }
 
+/// Draws a ride; false when it declines the element, which is then drawn as usual.
 pub fn generate_ride(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -357,20 +383,20 @@ pub fn generate_ride(
     road_mask: &RoadMaskBitmap,
     scale: f64,
     timeout: Option<&Duration>,
-) {
+) -> bool {
     let tags = element.tags();
     let Some(ride) = ride_kind(tags) else {
-        return;
+        return false;
     };
     let Some(site) = site_of(element, flood_fill_cache, timeout) else {
-        return;
+        return false;
     };
     // Only a compact outline reads as one spinning ride; a big or long one is a track.
     if ride == Ride::Spinner
         && site.long > 0.0
         && (site.long > 30.0 * scale || site.short < site.long * 0.55)
     {
-        return;
+        return false;
     }
     let seed = mix(element.id(), 0x52_49_44_45);
     let colours = ride_colours(tags, seed);
@@ -399,6 +425,7 @@ pub fn generate_ride(
         Ride::Teacups => teacups(editor, &place),
         Ride::Spinner => spinner(editor, &place),
     }
+    true
 }
 
 struct Placement<'a> {
@@ -534,7 +561,8 @@ fn carousel(editor: &mut WorldEditor, p: &Placement) {
                 continue;
             }
             let rise = ((h + ri) % 2) as i32;
-            for y in deck + 1..eave - 1 {
+            let roof = (eave + ((r - dist_to(cx, cz, x, z)) * slope).round() as i32).min(apex);
+            for y in deck + 1..roof {
                 if y != deck + 2 + rise {
                     editor.set_block_absolute(LIGHTNING_ROD, x, y, z, None, None);
                 }
@@ -620,7 +648,8 @@ fn swing_ride(editor: &mut WorldEditor, p: &Placement) {
         if !used.insert((x, z)) {
             continue;
         }
-        for y in floor + 3..rim - 1 {
+        let crown = rim + ((crown_r - dist_to(cx, cz, x, z)) * 0.45).round() as i32;
+        for y in floor + 3..crown {
             editor.set_block_absolute(CHAIN_Y, x, y, z, None, None);
         }
         let out = axis_of(ang.cos(), ang.sin());
@@ -991,7 +1020,7 @@ fn pirate_ship(editor: &mut WorldEditor, p: &Placement) {
     let foot = len * 0.45;
     for side in [-frame_b, frame_b] {
         for dir in [-1.0, 1.0] {
-            let n = (pivot * 2.0) as usize;
+            let n = steps((pivot - floor as f64).max(foot));
             for k in 0..=n {
                 let t = k as f64 / n as f64;
                 let (x, z) = f.cell(dir * foot * t, side);
@@ -999,7 +1028,7 @@ fn pirate_ship(editor: &mut WorldEditor, p: &Placement) {
                 editor.set_block_absolute(WHITE_CONCRETE, x, y, z, None, None);
             }
             let arm_b = side - side.signum();
-            let n = (pivot * 2.0) as usize;
+            let n = steps((pivot - (keel + 3) as f64).max(half_l * 0.55));
             for k in 0..=n {
                 let t = k as f64 / n as f64;
                 let (x, z) = f.cell(dir * half_l * 0.55 * t, arm_b);
@@ -1271,5 +1300,24 @@ mod tests {
         assert_eq!(ride_kind(&t), Some(Ride::DropTower));
         let t = tags(&[("attraction", "amusement_ride"), ("name", "Tagada")]);
         assert_eq!(ride_kind(&t), Some(Ride::Spinner));
+        assert_eq!(hinted("Swinging Ship"), Some(Ride::PirateShip));
+        assert_eq!(hinted("Viking Swing"), Some(Ride::PirateShip));
+        assert_eq!(hinted("London Eye"), Some(Ride::BigWheel));
+        assert_eq!(hinted("Breakdance Meyer"), None);
+    }
+
+    #[test]
+    fn generic_rides_leave_other_features_alone() {
+        for other in [
+            ("barrier", "fence"),
+            ("railway", "rail"),
+            ("tourism", "attraction"),
+        ] {
+            let t = tags(&[("attraction", "amusement_ride"), other]);
+            assert!(!claims(&t), "{other:?}");
+        }
+        let t = tags(&[("attraction", "big_wheel")]);
+        assert!(replaces_parts(&t));
+        assert!(!replaces_parts(&tags(&[("attraction", "amusement_ride")])));
     }
 }

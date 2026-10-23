@@ -275,6 +275,20 @@ fn conv_pointed_dripstone(props: Option<&Value>) -> LuantiNode {
     LuantiNode { name, param2: 0 }
 }
 
+/// Mineclonia chains are facedir nodes: 0 stands upright, 4 lies along z and 12 along x.
+fn conv_chain(block: Block, props: Option<&Value>) -> LuantiNode {
+    let defaults = block.properties();
+    let param2 = match prop_str(props.or(defaults.as_ref()), "axis") {
+        Some("x") => 12,
+        Some("z") => 4,
+        _ => 0,
+    };
+    LuantiNode {
+        name: "mcl_lanterns:chain",
+        param2,
+    }
+}
+
 /// Maps an Arnis Block to a Luanti node for the given game pack.
 ///
 /// Directional blocks (stairs, trapdoors, etc.) use the optional `props`
@@ -490,7 +504,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         207 => "mcl_colorblocks:concrete_green",
         208 => "mcl_walls:brick",
         209 => "mcl_redstone_torch:redstoneblock",
-        210 | 362 => "mcl_lanterns:chain",
+        210 | 362 => return conv_chain(block, props),
         211 => {
             return conv_trapdoor(
                 props,
@@ -851,7 +865,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         507 => "mcl_blackstone:blackstone_brick_polished_cracked",
         508 => "mcl_nether:cracked_nether_brick",
         509 => "mcl_walls:mossycobble",
-        510 => "mcl_lanterns:chain",
+        510 => return conv_chain(block, props),
         511 => "mcl_colorblocks:concrete_pink",
         512 => "mcl_core:glass_orange",
         513 => "mcl_core:glass_yellow",
@@ -869,7 +883,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
 mod tests {
     use super::*;
     use crate::block_definitions::{
-        OAK_FENCE_GATE, RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE, WHITE_BED,
+        CHAIN_X, CHAIN_Y, CHAIN_Z, OAK_FENCE_GATE, RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE,
+        WHITE_BED,
     };
     use std::collections::HashMap;
 
@@ -930,6 +945,15 @@ mod tests {
         ]));
         let white = to_mineclonia_node(WHITE_BED, Some(&props));
         assert_eq!((white.name, white.param2), ("mcl_beds:bed_white_top", 2));
+    }
+
+    #[test]
+    fn chains_lie_along_their_axis() {
+        let param2 = |b| to_mineclonia_node(b, None).param2;
+        assert_eq!(
+            (param2(CHAIN_X), param2(CHAIN_Z), param2(CHAIN_Y)),
+            (12, 4, 0)
+        );
     }
 
     #[test]

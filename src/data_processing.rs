@@ -322,8 +322,9 @@ fn process_element(
             // A pier also tagged as a building or a path is still a deck on piles.
             if way.tags.get("man_made").map(String::as_str) == Some("pier") {
                 waterfront::generate_pier(editor, element, flood_fill_cache, args);
-            } else if attractions::claims(&way.tags) && args.mode != GenerationMode::Blueprint {
-                attractions::generate_ride(
+            } else if attractions::claims(&way.tags)
+                && args.mode != GenerationMode::Blueprint
+                && attractions::generate_ride(
                     editor,
                     element,
                     flood_fill_cache,
@@ -331,18 +332,20 @@ fn process_element(
                     road_mask,
                     args.scale,
                     args.timeout.as_ref(),
-                );
+                )
+            {
+                // Drawn; an outline the ride declines falls through to the branches below.
             } else if args.mode != GenerationMode::Blueprint
                 && fuel_stations::is_station_canopy(editor, way)
-            {
-                fuel_stations::generate_canopy(
+                && fuel_stations::generate_canopy(
                     editor,
                     way,
                     flood_fill_cache,
                     road_mask,
                     args.scale,
                     args.timeout.as_ref(),
-                );
+                )
+            {
                 if way.tags.get("amenity").map(String::as_str) == Some("fuel") {
                     fuel_stations::generate_station(
                         editor,

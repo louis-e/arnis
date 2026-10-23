@@ -618,6 +618,8 @@ pub fn is_lift(tags: &HashMap<String, String>) -> bool {
 
 struct Line<'a> {
     way: &'a ProcessedWay,
+    /// Seeds the rope displays; each section of a lift has its own.
+    id: u64,
     spec: Spec,
     sup: Vec<Support>,
     /// Travel direction at each support.
@@ -727,8 +729,60 @@ pub fn generate_aerialway(
             points.reverse();
         }
     }
+    for (section, range) in sections(&points).into_iter().enumerate() {
+        let id = if section == 0 {
+            way.id
+        } else {
+            mix(way.id, section as u64)
+        };
+        build_section(
+            editor,
+            way,
+            id,
+            spec.clone(),
+            &points[range],
+            building_footprints,
+            road_mask,
+        );
+    }
+}
+
+/// Shortest run of rope between a mid-station and the next station.
+const MIN_SECTION: f64 = 40.0;
+
+/// Point ranges between the ends and any mapped mid-stations, sharing the station points.
+fn sections(points: &[(f64, f64, Hint)]) -> Vec<std::ops::RangeInclusive<usize>> {
+    let last = points.len() - 1;
+    let mut along = vec![0.0];
+    for w in points.windows(2) {
+        along.push(along.last().unwrap() + dist(w[0].0, w[0].1, w[1].0, w[1].1));
+    }
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, p) in points.iter().enumerate().skip(1) {
+        let mid = p.2 == Hint::Station
+            && along[i] - along[start] >= MIN_SECTION
+            && along[last] - along[i] >= MIN_SECTION;
+        if i == last || mid {
+            out.push(start..=i);
+            start = i;
+        }
+    }
+    out
+}
+
+fn build_section(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    id: u64,
+    spec: Spec,
+    points: &[(f64, f64, Hint)],
+    building_footprints: &CoordinateBitmap,
+    road_mask: &RoadMaskBitmap,
+) {
+    let kind = spec.kind;
     let ground = |x: f64, z: f64| ground_at(editor, x, z);
-    let mut sup = plan_supports(&points, &spec, &ground);
+    let mut sup = plan_supports(points, &spec, &ground);
     if sup.len() < 2 {
         return;
     }
@@ -746,6 +800,7 @@ pub fn generate_aerialway(
         .collect();
     let line = Line {
         way,
+        id,
         spec,
         sup,
         dirs,
@@ -780,7 +835,7 @@ fn draw_ropes(editor: &mut WorldEditor, line: &Line, footprints: &CoordinateBitm
     } else {
         &[0.0]
     };
-    let mut seed = (line.way.id as i64).wrapping_mul(1_000_003);
+    let mut seed = (line.id as i64).wrapping_mul(1_000_003);
     for &side in sides {
         for i in 0..line.sup.len() - 1 {
             let (a, b) = (line.anchor(i, side), line.anchor(i + 1, side));
@@ -1017,7 +1072,9 @@ fn draw_terminal(
     match line.spec.terminal {
         Terminal::Housing => {
             let f = terminal_frame(line, i);
-            housing(editor, line, &f, floor, rope_cell, road_mask, footprints);
+            housing(
+                editor, line, &f, floor, rope_cell, bottom, road_mask, footprints,
+            );
         }
         Terminal::Hall => {
             let f = terminal_frame(line, i);
@@ -1025,7 +1082,9 @@ fn draw_terminal(
         }
         Terminal::Open => {
             let f = terminal_frame(line, i);
-            open_terminal(editor, line, &f, floor, rope_cell, bottom);
+            open_terminal(
+                editor, line, &f, floor, rope_cell, bottom, road_mask, footprints,
+            );
         }
         Terminal::Post => {
             let (x, z) = (s.x.floor() as i32, s.z.floor() as i32);
@@ -1087,6 +1146,7 @@ fn housing(
     f: &Frame,
     floor: i32,
     rope: i32,
+    bottom: bool,
     road_mask: &RoadMaskBitmap,
     footprints: &CoordinateBitmap,
 ) {
@@ -1184,7 +1244,24 @@ fn housing(
     }
     // Operator booth beside the loading area.
     let booth_b = -(half_b + 3.5);
-    for (x, z, a, b) in f.cells(half_a - 4.0, half_a - 1.0, booth_b - 1.5, booth_b + 1.5) {
+    let (booth_a0, booth_a1) = (half_a - 4.0, half_a - 1.0);
+    let booth = Frame::new(
+        f.world((booth_a0 + booth_a1) / 2.0, booth_b).0,
+        f.world((booth_a0 + booth_a1) / 2.0, booth_b).1,
+        f.ux,
+        f.uz,
+    );
+    platform(
+        editor,
+        &booth,
+        1.5,
+        1.5,
+        floor,
+        POLISHED_ANDESITE,
+        road_mask,
+        footprints,
+    );
+    for (x, z, a, b) in f.cells(booth_a0, booth_a1, booth_b - 1.5, booth_b + 1.5) {
         if road_mask.contains(x, z) || footprints.contains(x, z) {
             continue;
         }
@@ -1207,7 +1284,9 @@ fn housing(
                 let (ox, oz) = f.world(0.0, 0.0);
                 (ax - ox, az - oz)
             };
-            let travel = if side > 0.0 { (fx, fz) } else { (-fx, -fz) };
+            // The up rope leaves the bottom station and comes into the top one.
+            let sign = if bottom { side } else { -side };
+            let travel = (fx * sign, fz * sign);
             draw_carrier(
                 editor,
                 carrier,
@@ -1278,7 +1357,7 @@ fn hall(
         let p = f.world(half_a, side * spec.gauge / 2.0);
         let q = f.world(-half_a + 1.5, side * spec.gauge / 2.0);
         let y = rope as f64 + 0.5;
-        rope_beam(editor, [p.0, y, p.1], [q.0, y, q.1], line.way.id, side);
+        rope_beam(editor, [p.0, y, p.1], [q.0, y, q.1], line.id, side);
     }
     name_sign(editor, line, f, half_a - 0.5, half_b - 0.5, rope + 2);
 }
@@ -1288,6 +1367,7 @@ fn rope_beam(editor: &mut WorldEditor, p: [f64; 3], q: [f64; 3], id: u64, side: 
     rope(editor, p, q, seed);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_terminal(
     editor: &mut WorldEditor,
     line: &Line,
@@ -1295,6 +1375,8 @@ fn open_terminal(
     floor: i32,
     rope: i32,
     bottom: bool,
+    road_mask: &RoadMaskBitmap,
+    footprints: &CoordinateBitmap,
 ) {
     let spec = &line.spec;
     let r = spec.gauge / 2.0;
@@ -1322,9 +1404,19 @@ fn open_terminal(
     }
     // Drive hut behind the wheel and a boarding deck under the up rope.
     let hut_a = -(r + 4.0);
+    let hut = Frame::new(f.world(hut_a, 0.0).0, f.world(hut_a, 0.0).1, f.ux, f.uz);
+    platform(
+        editor,
+        &hut,
+        1.5,
+        2.5,
+        floor,
+        POLISHED_ANDESITE,
+        road_mask,
+        footprints,
+    );
     for (x, z, a, b) in f.cells(hut_a - 1.5, hut_a + 1.5, -2.5, 2.5) {
         let wall = (a - hut_a).abs() > 0.8 || b.abs() > 1.8;
-        editor.set_block_absolute(POLISHED_ANDESITE, x, floor, z, None, None);
         if wall {
             editor.set_block_absolute(WHITE_CONCRETE, x, floor + 1, z, None, None);
             let window = if b.abs() < 0.8 || (a - hut_a).abs() < 0.8 {
@@ -1337,9 +1429,18 @@ fn open_terminal(
         editor.set_block_absolute(line.colour, x, floor + 3, z, None, None);
     }
     if matches!(spec.carrier, Some(Carrier::Chair { .. })) {
-        for (x, z, _, _) in f.cells(0.0, r + 5.0, r - 1.5, r + 1.5) {
-            editor.set_block_absolute(SPRUCE_PLANKS, x, floor, z, None, None);
-        }
+        let (dx, dz) = f.world((r + 5.0) / 2.0, r);
+        let deck = Frame::new(dx, dz, f.ux, f.uz);
+        platform(
+            editor,
+            &deck,
+            (r + 5.0) / 2.0,
+            1.5,
+            floor,
+            SPRUCE_PLANKS,
+            road_mask,
+            footprints,
+        );
     }
     name_sign(editor, line, f, hut_a + 1.5, 0.0, floor + 2);
 }
@@ -1347,7 +1448,6 @@ fn open_terminal(
 fn launch_tower(editor: &mut WorldEditor, line: &Line, i: usize) {
     let s = &line.sup[i];
     let (cx, cz) = (s.x.floor() as i32, s.z.floor() as i32);
-    let floor = s.ground as i32;
     let deck = s.rope_y.floor() as i32 - 2;
     for (dx, dz) in [(-1, -1), (-1, 1), (1, -1), (1, 1)] {
         let g = ground_at(editor, (cx + dx) as f64, (cz + dz) as f64) as i32;
@@ -1365,11 +1465,19 @@ fn launch_tower(editor: &mut WorldEditor, line: &Line, i: usize) {
     }
     let (tx, tz) = line.dirs[i];
     let (ax, az) = axis_of(tx, tz);
-    // Gap in the railing where riders launch, and a ladder up the back.
+    // Gaps in the railing where riders launch and climb up, and a ladder up a post at the back.
     editor.set_block_absolute(AIR, cx + ax, deck + 1, cz + az, Some(&[SPRUCE_FENCE]), None);
+    let (px, pz) = (cx - ax, cz - az);
+    editor.set_block_absolute(AIR, px, deck + 1, pz, Some(&[SPRUCE_FENCE]), None);
+    let post_ground = ground_at(editor, px as f64, pz as f64) as i32;
+    for y in post_ground + 1..deck {
+        editor.set_block_absolute(SPRUCE_LOG, px, y, pz, None, None);
+    }
     let ladder = with_prop(LADDER, "facing", facing_name((-ax, -az)));
-    for y in floor + 1..deck {
-        place(editor, ladder.clone(), cx - ax * 2, y, cz - az * 2);
+    let (lx, lz) = (cx - ax * 2, cz - az * 2);
+    let ladder_ground = ground_at(editor, lx as f64, lz as f64) as i32;
+    for y in ladder_ground + 1..=deck {
+        place(editor, ladder.clone(), lx, y, lz);
     }
     for y in deck + 1..=deck + 2 {
         editor.set_block_absolute(SPRUCE_LOG, cx, y, cz, None, None);
@@ -1841,6 +1949,26 @@ mod tests {
         let pts = vec![(0.5, 0.5, Hint::Station), (200.5, 0.5, Hint::Edge)];
         let sup = plan_supports(&pts, &s, &flat);
         assert_eq!(sup.last().unwrap().role, Role::Edge);
+    }
+
+    #[test]
+    fn a_mid_station_splits_the_line() {
+        let pts = vec![
+            (0.5, 0.5, Hint::Station),
+            (100.5, 0.5, Hint::Pylon),
+            (200.5, 0.5, Hint::Station),
+            (300.5, 0.5, Hint::Pylon),
+            (400.5, 0.5, Hint::Station),
+        ];
+        assert_eq!(sections(&pts), vec![0..=2, 2..=4]);
+        assert_eq!(sections(&pts[..2]), vec![0..=1]);
+        // A station vertex beside the end is part of the end station.
+        let pts = vec![
+            (0.5, 0.5, Hint::Station),
+            (6.5, 0.5, Hint::Station),
+            (200.5, 0.5, Hint::Station),
+        ];
+        assert_eq!(sections(&pts), vec![0..=2]);
     }
 
     #[test]
