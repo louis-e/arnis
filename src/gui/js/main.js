@@ -444,16 +444,54 @@ function closeOnBackdrop(modal, close) {
   });
 }
 
-// License, version info and the 3D preview are read-only, so a click beside
-// them may close them. The consent dialog is left alone: it wants an answer.
+// License, version info, the 3D preview and the Discord invite ask nothing, so
+// a click beside them may close them. The consent dialog is left alone: it
+// wants an answer.
 function initDialogs() {
   const license = document.getElementById("license-modal");
   const update = document.getElementById("update-modal");
   const preview3d = document.getElementById("preview3d-modal");
+  const discord = document.getElementById("discord-modal");
   if (license) closeOnBackdrop(license, () => window.closeLicense());
   if (update) closeOnBackdrop(update, closeUpdateModal);
   if (preview3d) closeOnBackdrop(preview3d, () => window.closePreview3D && window.closePreview3D());
+  if (discord) closeOnBackdrop(discord, closeDiscordModal);
 }
+
+const DISCORD_INVITE_URL = "https://discord.gg/Tba5NKzKjT";
+const DISCORD_PROMPT_KEY = "discord-prompt-shown";
+let sessionGenerations = 0;
+
+// Invites once ever, after the second finished world of a session. If another
+// dialog is up at that moment, it waits for the next one.
+function noteGenerationDone() {
+  sessionGenerations++;
+  if (sessionGenerations < 2) return;
+  // A beat later, so the green "Done!" registers before the dialog covers it.
+  setTimeout(() => {
+    if (localStorage.getItem(DISCORD_PROMPT_KEY)) return;
+    const modal = document.getElementById("discord-modal");
+    const busy = [...document.querySelectorAll(".modal, #settings-modal")]
+      .some((m) => m.style.display === "flex");
+    if (!modal || busy) return;
+    // Marked on show, so closing Arnis without answering also counts.
+    localStorage.setItem(DISCORD_PROMPT_KEY, "true");
+    showModal(modal);
+  }, 1000);
+}
+
+function closeDiscordModal() {
+  const modal = document.getElementById("discord-modal");
+  if (modal) hideModal(modal);
+}
+
+function joinDiscord() {
+  openExternal(DISCORD_INVITE_URL);
+  closeDiscordModal();
+}
+
+window.closeDiscordModal = closeDiscordModal;
+window.joinDiscord = joinDiscord;
 
 function openUpdateInBrowser() {
   const url =
@@ -1048,6 +1086,7 @@ function setupProgressListener() {
         // A generation just built facades into the same cache, so the preview
         // has something new to say.
         window.arnisPreview3D?.refreshFacades();
+        noteGenerationDone();
       } else {
         progressInfo.style.color = "#ececec";
       }
@@ -1180,12 +1219,15 @@ function initSettings() {
 
     const licenseModal = document.getElementById("license-modal");
     const updateModal = document.getElementById("update-modal");
+    const discordModal = document.getElementById("discord-modal");
     const licenseOpen = licenseModal && licenseModal.style.display === "flex";
     const updateOpen = updateModal && updateModal.style.display === "flex";
+    const discordOpen = discordModal && discordModal.style.display === "flex";
 
     if (licenseOpen) closeLicense();
     if (updateOpen) closeUpdateModal();
-    if (!licenseOpen && !updateOpen && settingsModal.style.display === "flex") {
+    if (discordOpen) closeDiscordModal();
+    if (!licenseOpen && !updateOpen && !discordOpen && settingsModal.style.display === "flex") {
       closeSettings();
     }
   });

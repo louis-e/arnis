@@ -240,5 +240,9 @@
   "body_gravity": "Moon & Mars Gravity",
   "body_gravity_desc": "Real low gravity on Moon and Mars worlds.",
   "moving_vehicles": "Moving Vehicles",
-  "moving_vehicles_desc": "Cars, trams, metros and trains that run your streets and tracks."
+  "moving_vehicles_desc": "Cars, trams, metros and trains that run your streets and tracks.",
+  "discord_modal_title": "Join the Arnis Discord",
+  "discord_modal_text": "Enjoying Arnis? Join our Discord to show off your worlds, get help and see what's coming next.",
+  "discord_modal_dismiss": "No thanks",
+  "discord_modal_join": "Join Discord"
 }

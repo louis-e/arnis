@@ -240,5 +240,9 @@
   "body_gravity": "Mond- & Mars-Schwerkraft",
   "body_gravity_desc": "Echte geringe Schwerkraft in Mond- und Marswelten.",
   "moving_vehicles": "Fahrende Fahrzeuge",
-  "moving_vehicles_desc": "Autos, Straßenbahnen, U-Bahnen und Züge auf deinen Straßen und Gleisen."
+  "moving_vehicles_desc": "Autos, Straßenbahnen, U-Bahnen und Züge auf deinen Straßen und Gleisen.",
+  "discord_modal_title": "Tritt dem Arnis-Discord bei",
+  "discord_modal_text": "Gefällt dir Arnis? Tritt unserem Discord bei, um deine Welten zu zeigen, Hilfe zu bekommen und zu sehen, was als Nächstes kommt.",
+  "discord_modal_dismiss": "Nein danke",
+  "discord_modal_join": "Discord beitreten"
 }

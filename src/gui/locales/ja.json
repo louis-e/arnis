@@ -240,5 +240,9 @@
   "body_gravity": "月と火星の重力",
   "body_gravity_desc": "月と火星のワールドで本物の低重力。",
   "moving_vehicles": "走る乗り物",
-  "moving_vehicles_desc": "道路や線路を走る車、路面電車、地下鉄、列車。"
+  "moving_vehicles_desc": "道路や線路を走る車、路面電車、地下鉄、列車。",
+  "discord_modal_title": "Arnis の Discord に参加しよう",
+  "discord_modal_text": "Arnis を楽しんでいますか？Discord に参加して、作ったワールドを見せたり、質問したり、今後の新機能をいち早くチェックしましょう。",
+  "discord_modal_dismiss": "いいえ、結構です",
+  "discord_modal_join": "Discord に参加"
 }

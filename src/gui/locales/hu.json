@@ -240,5 +240,9 @@
   "body_gravity": "Hold- és Mars-gravitáció",
   "body_gravity_desc": "Valódi alacsony gravitáció a Hold- és Mars-világokban.",
   "moving_vehicles": "Mozgó járművek",
-  "moving_vehicles_desc": "Autók, villamosok, metrók és vonatok az utcáidon és síneiden."
+  "moving_vehicles_desc": "Autók, villamosok, metrók és vonatok az utcáidon és síneiden.",
+  "discord_modal_title": "Csatlakozz az Arnis Discordhoz",
+  "discord_modal_text": "Tetszik az Arnis? Csatlakozz a Discordunkhoz, mutasd meg a világaidat, kérj segítséget, és nézd meg, mi jön legközelebb.",
+  "discord_modal_dismiss": "Nem, köszönöm",
+  "discord_modal_join": "Csatlakozás a Discordhoz"
 }
