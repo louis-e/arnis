@@ -219,7 +219,7 @@ fn tile_fill_readers(
             let mut add = |id: u64| {
                 ids.push(id);
                 for seed in [part_groups.get(&id).copied().unwrap_or(id), id] {
-                    let key = crate::osm_parser::seed_without_hint(seed);
+                    let key = crate::osm_parser::group_key(seed);
                     if let Some(members) = group_members.get(&key) {
                         ids.extend_from_slice(members);
                     }
@@ -1064,10 +1064,11 @@ pub fn generate_world_with_options(
 
     // Sibling index keyed on the hint-free seed: parts of one building can
     // carry different packed style-hint bits and must still find each other.
+    // The packed year is cleared too, so the outline finds its parts.
     let group_members: FnvHashMap<u64, Vec<u64>> = {
         let mut map: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
         for (&way_id, &seed) in part_groups.iter() {
-            map.entry(crate::osm_parser::seed_without_hint(seed))
+            map.entry(crate::osm_parser::group_key(seed))
                 .or_default()
                 .push(way_id);
         }
@@ -2492,7 +2493,7 @@ mod tests {
         let seed = 77u64;
         let part_groups: PartGroups = [(10, seed), (11, seed)].into_iter().collect();
         let mut group_members: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
-        group_members.insert(crate::osm_parser::seed_without_hint(seed), vec![10, 11]);
+        group_members.insert(crate::osm_parser::group_key(seed), vec![10, 11]);
         let elements = vec![building(10), building(11)];
         let states = release_in_order(
             &elements,
