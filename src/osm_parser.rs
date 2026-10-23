@@ -1045,6 +1045,8 @@ pub fn parse_osm_data(
         &data.nodes,
         &mut part_groups,
     ));
+    // A ride drawn whole replaces any 3D parts mapped inside it, and is never replaced by them.
+    suppress_ride_parts(&data.ways, &data.nodes, &mut outline_suppression);
     inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
@@ -1616,6 +1618,73 @@ fn ring_area(r: &[(f64, f64)]) -> f64 {
         a += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
     }
     (a / 2.0).abs()
+}
+
+/// Suppresses building:part ways whose centre lies inside a ride `attractions` draws
+/// whole, and keeps the ride's own outline.
+fn suppress_ride_parts(
+    ways: &[OsmElement],
+    nodes: &[OsmElement],
+    suppressed: &mut OutlineSuppression,
+) {
+    use crate::element_processing::attractions;
+    let rides: Vec<&OsmElement> = ways
+        .iter()
+        .filter(|w| w.tags.as_ref().is_some_and(attractions::replaces_parts))
+        .collect();
+    if rides.is_empty() {
+        return;
+    }
+    for w in &rides {
+        suppressed.remove(&("way", w.id));
+    }
+    let is_part = |tags: &HashMap<String, String>| {
+        tags.get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+            && !attractions::claims(tags)
+    };
+    let parts: Vec<&OsmElement> = ways
+        .iter()
+        .filter(|w| w.tags.as_ref().is_some_and(is_part))
+        .collect();
+    if parts.is_empty() {
+        return;
+    }
+    // Only the rides' and parts' own nodes, not every node in the area.
+    let wanted: FnvHashSet<u64> = rides
+        .iter()
+        .chain(&parts)
+        .flat_map(|w| w.nodes.iter().flatten().copied())
+        .collect();
+    let coords: FnvHashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| wanted.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+    let ring = |w: &OsmElement| -> Vec<(f64, f64)> {
+        w.nodes
+            .iter()
+            .flatten()
+            .filter_map(|id| coords.get(id).copied())
+            .collect()
+    };
+    let outlines: Vec<Vec<(f64, f64)>> = rides
+        .iter()
+        .map(|w| ring(w))
+        .filter(|r| r.len() >= 4)
+        .collect();
+    for w in parts {
+        let pts = ring(w);
+        if pts.is_empty() {
+            continue;
+        }
+        let n = pts.len() as f64;
+        let lat = pts.iter().map(|p| p.0).sum::<f64>() / n;
+        let lon = pts.iter().map(|p| p.1).sum::<f64>() / n;
+        if outlines.iter().any(|o| point_in_ring(lat, lon, o)) {
+            suppressed.insert(("way", w.id));
+        }
+    }
 }
 
 // Ray-cast point-in-polygon test on a lat/lon ring.

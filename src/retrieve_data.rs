@@ -369,6 +369,8 @@ pub fn fetch_data_from_overpass(
         nwr["bridge"];
         nwr["railway"];
         nwr["roller_coaster"];
+        nwr["aerialway"];
+        nwr["attraction"];
         nwr["barrier"];
         nwr["entrance"];
         nwr["door"];

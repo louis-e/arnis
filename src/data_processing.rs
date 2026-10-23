@@ -322,6 +322,41 @@ fn process_element(
             // A pier also tagged as a building or a path is still a deck on piles.
             if way.tags.get("man_made").map(String::as_str) == Some("pier") {
                 waterfront::generate_pier(editor, element, flood_fill_cache, args);
+            } else if attractions::claims(&way.tags)
+                && args.mode != GenerationMode::Blueprint
+                && attractions::generate_ride(
+                    editor,
+                    element,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    args.scale,
+                    args.timeout.as_ref(),
+                )
+            {
+                // Drawn; an outline the ride declines falls through to the branches below.
+            } else if args.mode != GenerationMode::Blueprint
+                && fuel_stations::is_station_canopy(editor, way)
+                && fuel_stations::generate_canopy(
+                    editor,
+                    way,
+                    flood_fill_cache,
+                    road_mask,
+                    args.scale,
+                    args.timeout.as_ref(),
+                )
+            {
+                if way.tags.get("amenity").map(String::as_str) == Some("fuel") {
+                    fuel_stations::generate_station(
+                        editor,
+                        element,
+                        flood_fill_cache,
+                        building_footprints,
+                        road_mask,
+                        args.scale,
+                        args.timeout.as_ref(),
+                    );
+                }
             } else if args.mode == GenerationMode::Blueprint
                 && (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
             {
@@ -342,6 +377,19 @@ fn process_element(
                 if signage {
                     signage::generate_building_signage(editor, way, anchor);
                 }
+                if way.tags.get("amenity").map(String::as_str) == Some("fuel") {
+                    fuel_stations::generate_station(
+                        editor,
+                        element,
+                        flood_fill_cache,
+                        building_footprints,
+                        road_mask,
+                        args.scale,
+                        args.timeout.as_ref(),
+                    );
+                }
+            } else if aerialways::is_lift(&way.tags) {
+                aerialways::generate_aerialway(editor, way, building_footprints, road_mask);
             } else if crate::structures::jetbridge::claims(way) {
                 // Ahead of the highway branch, or the corridor tag paints asphalt on the apron.
                 crate::structures::jetbridge::generate_jet_bridge(editor, way, building_footprints);
@@ -364,6 +412,16 @@ fn process_element(
                 if signage {
                     signage::generate_highway_way_signage(editor, way, building_footprints);
                 }
+            } else if way.tags.get("amenity").map(String::as_str) == Some("fuel") {
+                fuel_stations::generate_station(
+                    editor,
+                    element,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    args.scale,
+                    args.timeout.as_ref(),
+                );
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(
                     editor,
@@ -482,8 +540,28 @@ fn process_element(
                     building_footprints,
                     bridge_surface,
                 );
+            } else if attractions::claims(&node.tags) {
+                attractions::generate_ride(
+                    editor,
+                    element,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    args.scale,
+                    args.timeout.as_ref(),
+                );
             } else if man_made::is_summit_cross(&node.tags) {
                 man_made::generate_cross(editor, node, args, true);
+            } else if node.tags.get("amenity").map(String::as_str) == Some("fuel") {
+                fuel_stations::generate_station(
+                    editor,
+                    element,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    args.scale,
+                    args.timeout.as_ref(),
+                );
             } else if node.tags.contains_key("amenity") {
                 amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
             } else if node.tags.contains_key("barrier") {
@@ -1046,6 +1124,10 @@ pub fn generate_world_with_options(
     // Indexed up front, so a construction site skips its own crane whichever renders first.
     let mapped_cranes = Arc::new(man_made::mapped_crane_points(&elements));
     editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
+    let clear_corridors = Arc::new(aerialways::clear_corridors(&elements, &xzbbox));
+    editor.set_clear_corridors(Arc::clone(&clear_corridors));
+    let fuel_index = Arc::new(fuel_stations::FuelIndex::build(&elements, args.scale));
+    editor.set_fuel_index(Arc::clone(&fuel_index));
 
     let traffic_signals =
         (extras.traffic_lights && world_format == WorldFormat::JavaAnvil).then(|| {
@@ -1412,6 +1494,8 @@ pub fn generate_world_with_options(
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
+            tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
+            tile_editor.set_fuel_index(Arc::clone(&fuel_index));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
             }
