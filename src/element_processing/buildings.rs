@@ -765,7 +765,10 @@ fn european_default_roof(
         .get("building:levels")
         .and_then(|l| l.trim().parse::<f64>().ok())
         .is_some_and(|l| l > 7.0);
-    if f64::from(building_height) > 26.0 * ctx.scale || footprint_m2 > 3000.0 || tall_block {
+    if f64::from(building_height) > 26.0 * ctx.scale || tall_block {
+        return Some((RoofType::Flat, false));
+    }
+    if footprint_m2 > 3000.0 {
         return None;
     }
     // Ragged outlines (L-blocks around a car park, arcades) keep their flat lids.
@@ -17667,6 +17670,23 @@ mod height_tests {
             ..RoofContext::default()
         };
         european_default_roof(&way, "apartments", era, 18, 300, seed, ctx)
+    }
+
+    // A European block of eight storeys and more is roofed flat unless a roof is mapped,
+    // whatever category its facade keeps.
+    #[test]
+    fn tall_european_blocks_default_to_flat_roofs() {
+        let way = way_with_tags(&[("building", "apartments"), ("building:levels", "10")]);
+        let ctx = RoofContext {
+            region: BuildingRegion::Europe,
+            attached: true,
+            scale: 1.0,
+            ..RoofContext::default()
+        };
+        assert_eq!(
+            european_default_roof(&way, "apartments", ArchEra::Unknown, 32, 400, 1, ctx),
+            Some((RoofType::Flat, false))
+        );
     }
 
     // Storeys in the roof mean a roof to hold them, never a flat lid.
