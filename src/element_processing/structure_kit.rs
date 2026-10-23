@@ -337,8 +337,16 @@ pub fn line_cells(p: P3, q: P3) -> Vec<((i32, i32, i32), u8)> {
 
 fn block_beam(editor: &mut WorldEditor, p: P3, q: P3, block: Block, vertical: Block) {
     for ((x, y, z), axis) in line_cells(p, q) {
-        let b = if axis == 1 { vertical } else { block };
-        editor.set_block_absolute(b, x, y, z, None, None);
+        editor.set_block_absolute(beam_block(axis, block, vertical), x, y, z, None, None);
+    }
+}
+
+/// The block for a beam cell reached along `axis`; a chain turns to follow it.
+fn beam_block(axis: u8, block: Block, vertical: Block) -> Block {
+    match axis {
+        1 => vertical,
+        2 if block == CHAIN_X => CHAIN_Z,
+        _ => block,
     }
 }
 
@@ -373,6 +381,14 @@ mod tests {
         for i in 0..3 {
             assert!((r[i] - u[i]).abs() < 1e-9, "{r:?} vs {u:?}");
         }
+    }
+
+    #[test]
+    fn chain_beams_follow_their_axis() {
+        assert_eq!(beam_block(0, CHAIN_X, CHAIN_Y), CHAIN_X);
+        assert_eq!(beam_block(2, CHAIN_X, CHAIN_Y), CHAIN_Z);
+        assert_eq!(beam_block(1, CHAIN_X, CHAIN_Y), CHAIN_Y);
+        assert_eq!(beam_block(2, IRON_BARS, IRON_BARS), IRON_BARS);
     }
 
     #[test]
