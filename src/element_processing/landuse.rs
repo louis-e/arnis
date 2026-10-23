@@ -271,10 +271,7 @@ pub fn generate_landuse(
                 }
             }
             "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
-                // Irrigation dots, but only where boxed in so they can't flow downhill and wash out crops.
-                if x % 9 == 0 && z % 9 == 0 && editor.water_source_is_enclosed(x, z) {
-                    editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
-                } else if rng.random_range(0..76) == 0 {
+                if rng.random_range(0..76) == 0 {
                     let special_choice: i32 = rng.random_range(1..=10);
                     if special_choice <= 4 {
                         editor.set_block(HAY_BALE, x, 1, z, None, Some(&[SPONGE]));

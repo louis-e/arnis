@@ -1226,20 +1226,7 @@ pub fn generate_ground_region(
                                             None,
                                         ) =>
                                     {
-                                        // Irrigation dots, but only where boxed in so they can't flow downhill and wash out crops.
-                                        if x % 9 == 0
-                                            && z % 9 == 0
-                                            && editor.water_source_is_enclosed(x, z)
-                                        {
-                                            editor.set_block_absolute(
-                                                WATER,
-                                                x,
-                                                ground_y,
-                                                z,
-                                                Some(&[FARMLAND]),
-                                                None,
-                                            );
-                                        } else if rng.random_range(0..76) == 0 {
+                                        if rng.random_range(0..76) == 0 {
                                             if rng.random_range(1..=10) <= 4 {
                                                 editor.set_block_absolute(
                                                     HAY_BALE,
