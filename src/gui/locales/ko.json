@@ -240,5 +240,9 @@
   "body_gravity": "달과 화성 중력",
   "body_gravity_desc": "달과 화성 월드에서 실제 낮은 중력.",
   "moving_vehicles": "움직이는 탈것",
-  "moving_vehicles_desc": "거리와 선로를 달리는 자동차, 트램, 지하철, 기차."
+  "moving_vehicles_desc": "거리와 선로를 달리는 자동차, 트램, 지하철, 기차.",
+  "discord_modal_title": "Arnis Discord에 참여하세요",
+  "discord_modal_text": "Arnis가 마음에 드시나요? Discord에 참여해 만든 월드를 자랑하고, 도움을 받고, 앞으로 나올 기능을 먼저 확인하세요.",
+  "discord_modal_dismiss": "괜찮습니다",
+  "discord_modal_join": "Discord 참여"
 }

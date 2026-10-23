@@ -240,5 +240,9 @@
   "body_gravity": "Гравитация Луны и Марса",
   "body_gravity_desc": "Настоящая низкая гравитация в мирах Луны и Марса.",
   "moving_vehicles": "Движущийся транспорт",
-  "moving_vehicles_desc": "Машины, трамваи, метро и поезда на ваших улицах и путях."
+  "moving_vehicles_desc": "Машины, трамваи, метро и поезда на ваших улицах и путях.",
+  "discord_modal_title": "Присоединяйтесь к Discord Arnis",
+  "discord_modal_text": "Нравится Arnis? Присоединяйтесь к нашему Discord, чтобы делиться своими мирами, получать помощь и первыми узнавать о новинках.",
+  "discord_modal_dismiss": "Нет, спасибо",
+  "discord_modal_join": "Присоединиться к Discord"
 }

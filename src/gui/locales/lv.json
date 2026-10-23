@@ -240,5 +240,9 @@
   "body_gravity": "Mēness un Marsa gravitācija",
   "body_gravity_desc": "Īsta zema gravitācija Mēness un Marsa pasaulēs.",
   "moving_vehicles": "Braucoši transportlīdzekļi",
-  "moving_vehicles_desc": "Automašīnas, tramvaji, metro un vilcieni uz tavām ielām un sliedēm."
+  "moving_vehicles_desc": "Automašīnas, tramvaji, metro un vilcieni uz tavām ielām un sliedēm.",
+  "discord_modal_title": "Pievienojieties Arnis Discord",
+  "discord_modal_text": "Patīk Arnis? Pievienojieties mūsu Discord, lai parādītu savas pasaules, saņemtu palīdzību un uzzinātu, kas gaidāms tālāk.",
+  "discord_modal_dismiss": "Nē, paldies",
+  "discord_modal_join": "Pievienoties Discord"
 }

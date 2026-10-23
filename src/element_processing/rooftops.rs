@@ -350,7 +350,7 @@ pub(crate) fn bottom_slab(slab: Block) -> BlockWithProperties {
 }
 
 /// Integer hash of a seed and a cell (splitmix64 finaliser).
-fn hash2(seed: u64, a: i32, b: i32) -> u64 {
+pub(crate) fn hash2(seed: u64, a: i32, b: i32) -> u64 {
     let mut h = seed
         ^ u64::from(a as u32).wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ u64::from(b as u32).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);

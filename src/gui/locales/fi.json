@@ -240,5 +240,9 @@
   "body_gravity": "Kuun ja Marsin painovoima",
   "body_gravity_desc": "Aito matala painovoima Kuu- ja Mars-maailmoissa.",
   "moving_vehicles": "Liikkuvat ajoneuvot",
-  "moving_vehicles_desc": "Autoja, raitiovaunuja, metroja ja junia kaduillasi ja raiteillasi."
+  "moving_vehicles_desc": "Autoja, raitiovaunuja, metroja ja junia kaduillasi ja raiteillasi.",
+  "discord_modal_title": "Liity Arnisin Discordiin",
+  "discord_modal_text": "Pidätkö Arnisista? Liity Discordiimme esittelemään maailmojasi, saamaan apua ja näkemään, mitä on tulossa.",
+  "discord_modal_dismiss": "Ei kiitos",
+  "discord_modal_join": "Liity Discordiin"
 }
