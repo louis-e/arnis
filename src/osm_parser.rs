@@ -4,7 +4,7 @@ use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fnv::{FnvHashMap, FnvHashSet};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -74,35 +74,88 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
         }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
     });
+    // Proposed and razed roads don't exist, and neither do their bridges or tunnels.
+    if matches!(
+        tags.get("highway").map(String::as_str),
+        Some("proposed" | "razed")
+    ) {
+        tags.remove("highway");
+        if !tags.contains_key("railway") {
+            for key in ["bridge", "tunnel", "layer"] {
+                tags.remove(key);
+            }
+        }
+    }
+    if tags
+        .get("natural")
+        .is_some_and(|natural| is_landform(natural))
+    {
+        tags.remove("natural");
+    }
     tags
+}
+
+/// Natural values naming a region, like a peninsula, rather than what covers the ground.
+fn is_landform(natural: &str) -> bool {
+    matches!(
+        natural,
+        "peninsula"
+            | "isthmus"
+            | "cape"
+            | "valley"
+            | "plateau"
+            | "massif"
+            | "mountain_range"
+            | "gorge"
+            | "landform"
+            | "plain"
+            | "arete"
+            | "couloir"
+            | "coastline"
+    )
 }
 
 // Raw data from OSM
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OsmMember {
     pub r#type: String,
     pub r#ref: u64,
     pub r#role: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OsmElement {
     pub r#type: String,
     pub id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lat: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lon: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nodes: Option<Vec<u64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<HashMap<String, String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<OsmMember>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OsmData {
     elements: Vec<OsmElement>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
+    #[serde(default, rename = "bounds", skip_serializing_if = "Option::is_none")]
+    saved_bounds: Option<SavedBounds>,
+}
+
+/// The `bounds` layout of the OSM API's JSON.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+struct SavedBounds {
+    minlat: f64,
+    minlon: f64,
+    maxlat: f64,
+    maxlon: f64,
 }
 
 impl OsmData {
@@ -116,6 +169,7 @@ impl OsmData {
         OsmData {
             elements,
             remark: None,
+            saved_bounds: None,
         }
     }
 
@@ -128,7 +182,23 @@ impl OsmData {
         OsmData {
             elements: Vec::new(),
             remark: None,
+            saved_bounds: None,
         }
+    }
+
+    /// The requested area, which a saved copy regenerates instead of the wider node extent.
+    pub fn set_saved_bounds(&mut self, bbox: &LLBBox) {
+        self.saved_bounds = Some(SavedBounds {
+            minlat: bbox.min().lat(),
+            minlon: bbox.min().lng(),
+            maxlat: bbox.max().lat(),
+            maxlon: bbox.max().lng(),
+        });
+    }
+
+    pub fn saved_bounds(&self) -> Option<LLBBox> {
+        let b = self.saved_bounds?;
+        LLBBox::new(b.minlat, b.minlon, b.maxlat, b.maxlon).ok()
     }
 
     /// Bounding box spanning every node with coordinates, or None when the data has no
@@ -377,6 +447,7 @@ pub fn parse_osm_xml(
         OsmData {
             elements,
             remark: None,
+            saved_bounds: None,
         },
         bounds,
     ))
@@ -1178,9 +1249,10 @@ pub fn parse_osm_data(
         if !seen_relations.insert(element.id) {
             continue;
         }
-        let Some(tags) = &element.tags else {
+        let Some(raw_tags) = &element.tags else {
             continue;
         };
+        let tags = &filter_tags(raw_tags.clone());
 
         // Process multipolygons and building relations
         let relation_type = tags.get("type").map(|x: &String| x.as_str());
@@ -1239,7 +1311,7 @@ pub fn parse_osm_data(
                 processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                     id: element.id,
                     members,
-                    tags: filter_tags(tags.clone()),
+                    tags: tags.clone(),
                 }));
             }
             continue;
@@ -1301,7 +1373,7 @@ pub fn parse_osm_data(
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
-                tags: filter_tags(tags.clone()),
+                tags: tags.clone(),
             }));
         }
     }
@@ -2570,6 +2642,18 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     PRIORITY_ORDER.len()
 }
 
+/// Render order for the CLI, GUI and tests: by `get_priority`, with plain landuse last so it only
+/// fills ground around what is already there.
+pub fn sort_by_priority(elements: &mut [ProcessedElement]) {
+    elements.sort_by_cached_key(|element| {
+        let priority = get_priority(element);
+        (
+            priority >= PRIORITY_ORDER.len() && element.tags().contains_key("landuse"),
+            priority,
+        )
+    });
+}
+
 #[cfg(test)]
 mod outline_suppression_tests {
     use super::*;
@@ -3820,5 +3904,97 @@ mod arch_era_tests {
         );
         assert_eq!(arch_era_from_hint(StyleHint::Glass), ArchEra::Contemporary);
         assert_eq!(arch_era_from_hint(StyleHint::None), ArchEra::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod priority_sort_tests {
+    use super::*;
+
+    fn way(id: u64, pairs: &[(&str, &str)]) -> ProcessedElement {
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes: Vec::new(),
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn landuse_renders_after_everything_it_surrounds() {
+        let mut elements = vec![
+            way(1, &[("landuse", "meadow")]),
+            way(2, &[("man_made", "mast")]),
+            way(3, &[("amenity", "parking")]),
+            way(4, &[("building:part", "yes")]),
+            way(5, &[("highway", "service")]),
+            way(6, &[("building", "yes")]),
+        ];
+        sort_by_priority(&mut elements);
+        let order: Vec<u64> = elements.iter().map(ProcessedElement::id).collect();
+        assert_eq!(order, vec![6, 5, 3, 4, 2, 1]);
+    }
+
+    #[test]
+    fn a_building_or_reservoir_with_a_landuse_tag_keeps_its_place() {
+        let mut elements = vec![
+            way(1, &[("landuse", "meadow")]),
+            way(2, &[("building", "retail"), ("landuse", "retail")]),
+            way(3, &[("building:part", "yes")]),
+            way(4, &[("water", "reservoir"), ("landuse", "reservoir")]),
+            way(5, &[("man_made", "pier")]),
+        ];
+        sort_by_priority(&mut elements);
+        let order: Vec<u64> = elements.iter().map(ProcessedElement::id).collect();
+        assert_eq!(order, vec![2, 4, 3, 5, 1]);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn tags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn roads_that_are_not_built_lose_their_highway_tag() {
+        for value in ["proposed", "razed"] {
+            let kept = filter_tags(tags(&[
+                ("highway", value),
+                ("bridge", "yes"),
+                ("layer", "1"),
+            ]));
+            assert!(kept.is_empty(), "highway={value} kept {kept:?}");
+        }
+        // A railway on the same bridge keeps it.
+        let kept = filter_tags(tags(&[
+            ("highway", "proposed"),
+            ("railway", "rail"),
+            ("bridge", "yes"),
+        ]));
+        assert_eq!(kept.get("bridge").map(String::as_str), Some("yes"));
+        let kept = filter_tags(tags(&[("highway", "construction")]));
+        assert_eq!(
+            kept.get("highway").map(String::as_str),
+            Some("construction")
+        );
+    }
+
+    #[test]
+    fn a_landform_is_no_natural_area_but_its_other_tags_stay() {
+        for landform in ["peninsula", "mountain_range", "valley", "coastline"] {
+            let kept = filter_tags(tags(&[("natural", landform), ("barrier", "wall")]));
+            assert!(!kept.contains_key("natural"), "natural={landform} kept");
+            assert_eq!(kept.get("barrier").map(String::as_str), Some("wall"));
+        }
+        let kept = filter_tags(tags(&[("natural", "wood")]));
+        assert_eq!(kept.get("natural").map(String::as_str), Some("wood"));
     }
 }

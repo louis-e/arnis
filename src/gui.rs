@@ -2008,13 +2008,7 @@ fn gui_start_generation(
                         parsed_elements.extend(unique_overture);
                     }
 
-                    // Landuse last, then by priority; keyed once per element, not per comparison.
-                    parsed_elements.sort_by_cached_key(|el| {
-                        (
-                            el.tags().contains_key("landuse"),
-                            osm_parser::get_priority(el),
-                        )
-                    });
+                    osm_parser::sort_by_priority(&mut parsed_elements);
 
                     let mut ground = ground;
 

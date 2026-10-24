@@ -265,7 +265,7 @@ fn node_role(node: &ProcessedNode, scale: f64) -> Option<(NodeRole, usize)> {
         Some("entrance" | "stile" | "horse_stile" | "turnstile" | "full-height_turnstile") => {
             (NodeRole::Opening, 1)
         }
-        // Passable for people beside the gate arm or post; the node itself draws that.
+        // Open over a lane's width; only a bollard places something on its node.
         Some(
             "lift_gate" | "cycle_barrier" | "motorcycle_barrier" | "cattle_grid" | "border_control"
             | "toll_booth" | "sally_port" | "bollard" | "chain" | "rope" | "height_restrictor",

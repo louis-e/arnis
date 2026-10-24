@@ -34,8 +34,7 @@ pub fn generate_default_example() -> (XZBBox, Vec<ProcessedElement>) {
             false,
             &crate::projection::ProjectionSpec::local(1.0),
         );
-    parsed_elements
-        .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+    osm_parser::sort_by_priority(&mut parsed_elements);
 
     (xzbbox, parsed_elements)
 }

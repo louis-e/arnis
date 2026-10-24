@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "每栋建筑的真实街景照片（如有）。",
   "world_time_desc": "世界开始时的时间。",
   "world_type_desc": "区域边缘之外是什么。仅限 Java 版。",
-  "map_item_desc": "开局时背包里有整个区域的地图。仅限 Java 版。",
+  "map_item_desc": "开局时背包里有整个区域的地图。在 Bedrock 中为游戏自带的初始地图。",
   "custom_world_name_desc": "自行命名新世界，而不是“Arnis World N”。仅限 Java 版。",
   "overture_desc": "用卫星识别的建筑轮廓填补 OpenStreetMap 的空缺。",
   "three_dmr_desc": "著名地标，以及汽车、船只、起重机和风力涡轮机。",

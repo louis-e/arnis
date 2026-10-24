@@ -126,6 +126,8 @@ pub struct RoadMarkingIndex {
     pub yellow_centre: bool,
     /// Signalised crossings get broken edge lines instead of a zebra.
     signal_crossing_lines: bool,
+    /// Nodes where a crossing way meets a road.
+    crossing_road_nodes: FnvHashSet<u64>,
 }
 
 /// Vehicular carriageway attributes the junction rules need.
@@ -372,6 +374,18 @@ fn signal_crossings_have_lines(elements: &[ProcessedElement]) -> Option<bool> {
     (lines + zebras > 0).then_some(lines > zebras)
 }
 
+/// `highway=crossing`, or signals tagged with a crossing.
+fn is_crossing_way(tags: &HashMap<String, String>) -> bool {
+    tags.get("highway").map(String::as_str) == Some("footway")
+        && tags.get("footway").map(String::as_str) == Some("crossing")
+}
+
+fn describes_crossing(node: &ProcessedNode) -> bool {
+    let highway = node.tags.get("highway").map(String::as_str);
+    highway == Some("crossing")
+        || (highway == Some("traffic_signals") && node.tags.contains_key("crossing"))
+}
+
 /// A crossing controlled by signals, in either tagging.
 fn is_signalled(tags: &HashMap<String, String>) -> bool {
     tags.get("crossing").map(String::as_str) == Some("traffic_signals")
@@ -433,62 +447,75 @@ impl RoadMarkingIndex {
         self.crossings.get(&id).map(Vec::as_slice)
     }
 
-    /// Paint of a crossing from its tags; `untagged` is used when nothing says either way.
-    fn crossing_paint(
+    /// None when the tags say nothing, Some(None) when they say it is unpainted.
+    fn tagged_crossing_paint(
         &self,
         tags: &HashMap<String, String>,
-        untagged: Option<CrossingPaint>,
-    ) -> Option<CrossingPaint> {
+    ) -> Option<Option<CrossingPaint>> {
         let crossing = tags.get("crossing").map(String::as_str);
         if matches!(
             crossing,
             Some("no" | "unmarked" | "informal" | "impossible")
         ) {
-            return None;
+            return Some(None);
         }
         match tags.get("crossing:markings").map(String::as_str) {
-            Some("no" | "surface") => return None,
-            Some("lines" | "lines:paired") => return Some(CrossingPaint::Lines { broken: false }),
-            Some("dashes" | "dots" | "dashes:paired") => {
-                return Some(CrossingPaint::Lines { broken: true })
+            Some("no" | "surface") => return Some(None),
+            Some("lines" | "lines:paired") => {
+                return Some(Some(CrossingPaint::Lines { broken: false }))
             }
-            Some(_) => return Some(CrossingPaint::Zebra),
+            Some("dashes" | "dots" | "dashes:paired") => {
+                return Some(Some(CrossingPaint::Lines { broken: true }))
+            }
+            Some(_) => return Some(Some(CrossingPaint::Zebra)),
             None => {}
         }
         if tags.get("crossing_ref").map(String::as_str) == Some("zebra") {
-            return Some(CrossingPaint::Zebra);
+            return Some(Some(CrossingPaint::Zebra));
         }
         match crossing {
-            Some("zebra") => Some(CrossingPaint::Zebra),
-            _ if is_signalled(tags) => Some(if self.signal_crossing_lines {
+            Some("zebra") => Some(Some(CrossingPaint::Zebra)),
+            _ if is_signalled(tags) => Some(Some(if self.signal_crossing_lines {
                 CrossingPaint::Lines { broken: true }
             } else {
                 CrossingPaint::Zebra
-            }),
-            Some(_) => Some(CrossingPaint::Zebra),
-            None => untagged,
+            })),
+            Some(_) => Some(Some(CrossingPaint::Zebra)),
+            None => None,
         }
     }
 
-    /// Paint of a `footway=crossing` way, which renders as a zebra unless tagged otherwise.
-    pub fn crossing_way_paint(&self, tags: &HashMap<String, String>) -> Option<CrossingPaint> {
-        if tags.get("highway").map(String::as_str) != Some("footway")
-            || tags.get("footway").map(String::as_str) != Some("crossing")
-        {
+    /// Its tags, else its nodes on roads: one painted node wins, all unmarked is bare, else zebra.
+    pub fn crossing_way_paint(&self, way: &ProcessedWay) -> Option<CrossingPaint> {
+        if !is_crossing_way(&way.tags) {
             return None;
         }
-        self.crossing_paint(tags, Some(CrossingPaint::Zebra))
+        if let Some(paint) = self.tagged_crossing_paint(&way.tags) {
+            return paint;
+        }
+        let (mut unmarked, mut silent) = (false, false);
+        for node in way.nodes.iter() {
+            if !self.crossing_road_nodes.contains(&node.id) {
+                continue;
+            }
+            let tagged = describes_crossing(node)
+                .then(|| self.tagged_crossing_paint(&node.tags))
+                .flatten();
+            match tagged {
+                Some(Some(paint)) => return Some(paint),
+                Some(None) => unmarked = true,
+                None => silent = true,
+            }
+        }
+        (silent || !unmarked).then_some(CrossingPaint::Zebra)
     }
 
-    /// Paint of a crossing mapped only as a node on the road.
+    /// An untagged crossing node stays bare, as many are sidewalks crossing driveways.
     fn crossing_node_paint(&self, node: &ProcessedNode) -> Option<CrossingPaint> {
-        let highway = node.tags.get("highway").map(String::as_str);
-        let on_road = highway == Some("crossing")
-            || (highway == Some("traffic_signals") && node.tags.contains_key("crossing"));
-        if !on_road {
+        if !describes_crossing(node) {
             return None;
         }
-        self.crossing_paint(&node.tags, None)
+        self.tagged_crossing_paint(&node.tags).flatten()
     }
 
     pub fn build(elements: &[ProcessedElement], scale: f64, region: SignRegion) -> Self {
@@ -526,10 +553,20 @@ impl RoadMarkingIndex {
                     palette: surface_palette(highway, &way.tags),
                     node_t: node_path_index(way),
                 });
-            } else if index.crossing_way_paint(&way.tags).is_some() {
+            } else if is_crossing_way(&way.tags) {
                 crossing_ways.push(way);
             }
         }
+        let crossing_nodes: FnvHashSet<u64> = crossing_ways
+            .iter()
+            .flat_map(|w| w.nodes.iter().map(|n| n.id))
+            .collect();
+        index.crossing_road_nodes = roads
+            .iter()
+            .flat_map(|r| r.way.nodes.iter().map(|n| n.id))
+            .filter(|id| crossing_nodes.contains(id))
+            .collect();
+        crossing_ways.retain(|w| index.crossing_way_paint(w).is_some());
 
         // Most nodes belong to one way only; index just the shared ones.
         let mut uses: FnvHashMap<u64, u32> = FnvHashMap::default();
@@ -577,7 +614,7 @@ impl RoadMarkingIndex {
             .iter()
             .map(|w| {
                 let half = highway_block_range("footway", &w.tags, scale);
-                match index.crossing_way_paint(&w.tags) {
+                match index.crossing_way_paint(w) {
                     Some(CrossingPaint::Lines { .. }) => half + 1,
                     _ => half,
                 }
@@ -1876,14 +1913,18 @@ mod tests {
                 ],
             ))
         };
-        let untagged: HashMap<String, String> = [
-            ("highway", "footway"),
-            ("footway", "crossing"),
-            ("crossing", "traffic_signals"),
-        ]
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+        let untagged = ProcessedWay {
+            id: 9,
+            nodes: Vec::new(),
+            tags: [
+                ("highway", "footway"),
+                ("footway", "crossing"),
+                ("crossing", "traffic_signals"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        };
         let vienna = [
             crossing(1, "zebra"),
             crossing(2, "zebra"),
@@ -2158,6 +2199,121 @@ mod tests {
     }
 
     #[test]
+    fn a_crossing_way_without_tags_follows_its_crossing_node() {
+        let road_with = |node_tags: &[(&str, &str)]| {
+            vec![
+                way(
+                    1,
+                    vec![
+                        plain(10, 0, 50),
+                        node(2, 40, 50, node_tags),
+                        plain(11, 100, 50),
+                    ],
+                    &[("highway", "secondary")],
+                ),
+                way(
+                    3,
+                    vec![
+                        plain(12, 40, 30),
+                        node(2, 40, 50, node_tags),
+                        plain(13, 40, 70),
+                    ],
+                    &[("highway", "footway"), ("footway", "crossing")],
+                ),
+            ]
+        };
+        let crossing_of = |elements: &[ProcessedElement]| match &elements[1] {
+            ProcessedElement::Way(way) => way.clone(),
+            _ => unreachable!(),
+        };
+        // The node says unmarked.
+        let elements = road_with(&[("highway", "crossing"), ("crossing", "unmarked")]);
+        let index = build(&elements);
+        assert_eq!(index.crossing_way_paint(&crossing_of(&elements)), None);
+        assert!(index.crossing_clips(3).is_none());
+        assert!(no_gaps(&index, 1));
+        // The node says lines.
+        let elements = road_with(&[("highway", "crossing"), ("crossing:markings", "lines")]);
+        assert_eq!(
+            build(&elements).crossing_way_paint(&crossing_of(&elements)),
+            Some(CrossingPaint::Lines { broken: false })
+        );
+        // Neither says anything: a zebra.
+        let elements = road_with(&[("highway", "crossing")]);
+        let index = build(&elements);
+        assert_eq!(
+            index.crossing_way_paint(&crossing_of(&elements)),
+            Some(CrossingPaint::Zebra)
+        );
+        assert!(index.crossing_clips(3).is_some());
+    }
+
+    #[test]
+    fn a_crossing_way_follows_its_nodes_on_roads_and_one_painted_node_is_enough() {
+        let unmarked: &[(&str, &str)] = &[("highway", "crossing"), ("crossing", "unmarked")];
+        // Node 5 is on a cycle track or slip road, node 2 on the main road.
+        let elements = |first: &[(&str, &str)], at_5: &[(&str, &str)], at_2: &[(&str, &str)]| {
+            vec![
+                way(
+                    1,
+                    vec![plain(10, 0, 50), node(2, 40, 50, at_2), plain(11, 100, 50)],
+                    &[("highway", "secondary")],
+                ),
+                way(
+                    4,
+                    vec![plain(14, 0, 40), node(5, 40, 40, at_5), plain(15, 100, 40)],
+                    first,
+                ),
+                way(
+                    3,
+                    vec![
+                        plain(12, 40, 30),
+                        node(5, 40, 40, at_5),
+                        node(2, 40, 50, at_2),
+                        plain(13, 40, 70),
+                    ],
+                    &[("highway", "footway"), ("footway", "crossing")],
+                ),
+            ]
+        };
+        let paint = |elements: Vec<ProcessedElement>| {
+            let ProcessedElement::Way(crossing) = &elements[2] else {
+                unreachable!()
+            };
+            build(&elements).crossing_way_paint(crossing)
+        };
+        let cycleway: &[(&str, &str)] = &[("highway", "cycleway")];
+        let slip: &[(&str, &str)] = &[("highway", "secondary_link")];
+        let zebra: &[(&str, &str)] = &[("highway", "crossing"), ("crossing", "zebra")];
+        let silent: &[(&str, &str)] = &[("highway", "crossing")];
+        for at_2 in [zebra, silent] {
+            assert_eq!(
+                paint(elements(cycleway, unmarked, at_2)),
+                Some(CrossingPaint::Zebra)
+            );
+        }
+        assert_eq!(
+            paint(elements(slip, unmarked, zebra)),
+            Some(CrossingPaint::Zebra)
+        );
+        assert_eq!(paint(elements(slip, unmarked, unmarked)), None);
+    }
+
+    #[test]
+    fn an_untagged_crossing_node_alone_stays_bare() {
+        let elements = vec![way(
+            1,
+            vec![
+                plain(10, 0, 50),
+                node(2, 40, 50, &[("highway", "crossing")]),
+                plain(11, 100, 50),
+            ],
+            &[("highway", "secondary")],
+        )];
+        assert!(build(&elements).way(1).is_none());
+    }
+
+    #[test]
     fn a_crossing_way_is_clipped_to_the_carriageway() {
         let elements = vec![
             way(
@@ -2186,20 +2342,24 @@ mod tests {
 
     #[test]
     fn signalised_crossings_paint_lines_in_germany_and_zebras_elsewhere() {
-        let tags: HashMap<String, String> = [
-            ("highway", "footway"),
-            ("footway", "crossing"),
-            ("crossing", "traffic_signals"),
-        ]
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+        let crossing = ProcessedWay {
+            id: 9,
+            nodes: Vec::new(),
+            tags: [
+                ("highway", "footway"),
+                ("footway", "crossing"),
+                ("crossing", "traffic_signals"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        };
         let de = RoadMarkingIndex::build(&[], 1.0, SignRegion::Germanic);
         let fr = RoadMarkingIndex::build(&[], 1.0, SignRegion::Europe);
         assert_eq!(
-            de.crossing_way_paint(&tags),
+            de.crossing_way_paint(&crossing),
             Some(CrossingPaint::Lines { broken: true })
         );
-        assert_eq!(fr.crossing_way_paint(&tags), Some(CrossingPaint::Zebra));
+        assert_eq!(fr.crossing_way_paint(&crossing), Some(CrossingPaint::Zebra));
     }
 }

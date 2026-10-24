@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Todelliset katukuvat kustakin rakennuksesta, jos saatavilla.",
   "world_time_desc": "Vuorokaudenaika, josta maailma alkaa.",
   "world_type_desc": "Mitä alueen reunan takana on. Vain Java.",
-  "map_item_desc": "Aloita niin, että tavaraluettelossa on koko alueen kartta. Vain Java.",
+  "map_item_desc": "Aloita niin, että tavaraluettelossa on koko alueen kartta. Bedrockissa pelin oma aloituskartta.",
   "custom_world_name_desc": "Nimeä uudet maailmat itse nimen ”Arnis World N” sijaan. Vain Java.",
   "overture_desc": "Täyttää OpenStreetMapin aukkoja satelliitista tunnistetuilla pohjilla.",
   "three_dmr_desc": "Kuuluisat maamerkit sekä autot, veneet, nosturit ja tuulivoimalat.",

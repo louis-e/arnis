@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Resnične ulične fotografije vsake stavbe, kjer obstajajo.",
   "world_time_desc": "Čas dneva, ob katerem se svet začne.",
   "world_type_desc": "Kaj leži onkraj roba območja. Samo Java.",
-  "map_item_desc": "Začnite z zemljevidom celotnega območja v inventarju. Samo Java.",
+  "map_item_desc": "Začnite z zemljevidom celotnega območja v inventarju. V Bedrocku: začetni zemljevid same igre.",
   "custom_world_name_desc": "Nove svetove poimenujte sami namesto „Arnis World N“. Samo Java.",
   "overture_desc": "Zapolni vrzeli v OpenStreetMap z obrisi, zaznanimi s satelitskih posnetkov.",
   "three_dmr_desc": "Znane znamenitosti ter avtomobili, čolni, žerjavi in vetrne turbine.",

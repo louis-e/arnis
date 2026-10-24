@@ -5,6 +5,7 @@
 
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::element_processing::highways::{aeroway_area, aeroway_area_block};
 use crate::element_processing::RelationArea;
 use crate::floodfill::{flood_fill_area, MAX_FLOOD_FILL_AREA};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
@@ -365,7 +366,8 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
     }
     // Pedestrian plazas and other highway=* areas are flood-filled, not stamped
     // along a centerline, so the road mask does not cover them.
-    way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes")
+    (way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes"))
+        || aeroway_area_block(way).is_some()
 }
 
 /// Paving that yields to planted areas mapped inside it. Pitches, tracks and
@@ -377,6 +379,7 @@ fn paving_yields_to_nested_areas(way: &ProcessedWay) -> bool {
             .get("amenity")
             .is_some_and(|v| SEALED_AMENITY.contains(&v.as_str()))
         || way.tags.get("leisure").map(String::as_str) == Some("schoolyard")
+        || aeroway_area_block(way).is_some()
 }
 
 const PLANTED_LANDUSE: &[&str] = &[
@@ -665,6 +668,7 @@ impl FloodFillCache {
     /// - amenity -> amenities::generate_amenities
     /// - natural (except tree and tree_row) -> natural::generate_natural
     /// - highway with area=yes -> highways::generate_highways (area fill)
+    /// - aeroway areas (aprons, runway and taxiway areas) -> highways::generate_aeroway
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         (way.tags.contains_key("building")
             || way.tags.contains_key("building:part")
@@ -679,6 +683,8 @@ impl FloodFillCache {
             // Highway areas (like pedestrian plazas) use flood fill when area=yes
             || (way.tags.contains_key("highway")
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
+            // Aprons and other airport areas -> highways::generate_aeroway
+            || aeroway_area(way).is_some()
             // Historic tomb polygons (e.g. tomb=pyramid)
             || way.tags.get("tomb").map(|v| v == "pyramid").unwrap_or(false)
             // Pier and breakwater areas -> waterfront

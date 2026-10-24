@@ -80,11 +80,10 @@ fn natural_area(
                 "sand" | "dune" => SAND,
                 "beach" | "shoal" => beach_block(element.tags().get("surface")),
                 "water" | "reef" | "bay" => WATER,
-                "bare_rock" => STONE,
+                "bare_rock" | "rock" | "stone" => STONE,
                 "blockfield" => COBBLESTONE,
                 "glacier" => PACKED_ICE,
                 "mud" | "wetland" => MUD,
-                "mountain_range" => COBBLESTONE,
                 "saddle" | "ridge" => STONE,
                 "shrubbery" | "tundra" | "hill" => GRASS_BLOCK,
                 "cliff" => STONE,
@@ -101,7 +100,7 @@ fn natural_area(
             // first placement is wasted work.
             let rock_variation = matches!(
                 natural_type.as_str(),
-                "blockfield" | "cliff" | "saddle" | "ridge" | "mountain_range"
+                "blockfield" | "cliff" | "saddle" | "ridge"
             );
 
             let ProcessedElement::Way(way) = element else {
@@ -264,7 +263,7 @@ fn natural_area(
                             editor.set_block(PACKED_ICE, x, 0, z, None, None);
                             editor.set_block(STONE, x, -1, z, None, None);
                         }
-                        "bare_rock" => {
+                        "bare_rock" | "rock" | "stone" => {
                             // Varied rock surface: stone base with natural variation
                             let h = crate::land_cover::coord_hash(x, z) % 12;
                             let rock = match h {
@@ -480,84 +479,6 @@ fn natural_area(
                                     }
                                 }
                                 _ => place_grass_or_tall(editor, &mut rng, x, z),
-                            }
-                        }
-                        "mountain_range" => {
-                            // Create block clusters instead of random placement
-                            let cluster_chance = rng.random_range(0..1000);
-
-                            if cluster_chance < 50 {
-                                // 5% chance to start a new cluster
-                                let cluster_block = match rng.random_range(0..7) {
-                                    0 => DIRT,
-                                    1 => STONE,
-                                    2 => GRAVEL,
-                                    3 => GRANITE,
-                                    4 => DIORITE,
-                                    5 => ANDESITE,
-                                    _ => GRASS_BLOCK,
-                                };
-
-                                // Generate cluster size (5-10 blocks radius)
-                                let cluster_size = rng.random_range(5..=10);
-
-                                // Create cluster around current position
-                                for dx in -cluster_size..=cluster_size {
-                                    for dz in -cluster_size..=cluster_size {
-                                        let cluster_x = x + dx;
-                                        let cluster_z = z + dz;
-
-                                        // Use distance to create more natural cluster shape
-                                        let distance = ((dx * dx + dz * dz) as f32).sqrt();
-                                        if distance <= cluster_size as f32 {
-                                            // Probability decreases with distance from center
-                                            let place_prob = 1.0 - (distance / cluster_size as f32);
-                                            if rng.random::<f32>() < place_prob {
-                                                editor.set_block(
-                                                    cluster_block,
-                                                    cluster_x,
-                                                    0,
-                                                    cluster_z,
-                                                    None,
-                                                    None,
-                                                );
-
-                                                // Add vegetation on grass blocks
-                                                if cluster_block == GRASS_BLOCK {
-                                                    let vegetation_chance =
-                                                        rng.random_range(0..100);
-                                                    if vegetation_chance == 0
-                                                        && editor.land_cover_backs_trees(
-                                                            cluster_x, cluster_z,
-                                                        )
-                                                    {
-                                                        // 1% chance for rare trees
-                                                        Tree::create(
-                                                            editor,
-                                                            (cluster_x, 1, cluster_z),
-                                                            Some(building_footprints),
-                                                            Some(bridge_surface),
-                                                        );
-                                                    } else if vegetation_chance < 15 {
-                                                        // 15% chance for grass
-                                                        editor.set_block(
-                                                            GRASS, cluster_x, 1, cluster_z, None,
-                                                            None,
-                                                        );
-                                                    } else if vegetation_chance < 25 {
-                                                        // 10% chance for a low bush
-                                                        place_bush(
-                                                            editor,
-                                                            cluster_x,
-                                                            cluster_z,
-                                                            BushKind::Low,
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                         "saddle" => {
@@ -1072,6 +993,14 @@ mod tests {
         assert_eq!(count(&gravel, 0, &[GRAVEL]), 1600);
         let sand = render_natural(place, &[("natural", "beach")]);
         assert_eq!(count(&sand, 0, &[SAND]), 1600);
+    }
+
+    #[test]
+    fn a_rock_is_rock_not_grass() {
+        let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let editor = render_natural(place, &[("natural", "rock")]);
+        assert_eq!(count(&editor, 0, &[GRASS_BLOCK]), 0);
+        assert!(count(&editor, 0, &[STONE, ANDESITE, COBBLESTONE]) > 1000);
     }
 
     #[test]

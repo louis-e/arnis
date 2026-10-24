@@ -474,7 +474,13 @@ fn process_element(
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
             } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway") {
-                highways::generate_aeroway(editor, way, args, building_footprints);
+                highways::generate_aeroway(
+                    editor,
+                    way,
+                    args,
+                    building_footprints,
+                    flood_fill_cache,
+                );
             } else if way.tags.get("service").map(String::as_str) == Some("siding") {
                 highways::generate_siding(editor, way, bridge_surface);
             } else if way.tags.get("tomb").map(String::as_str) == Some("pyramid") {

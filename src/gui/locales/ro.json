@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Fotografii reale de stradă ale clădirilor, când sunt disponibile.",
   "world_time_desc": "Momentul zilei la care începe lumea.",
   "world_type_desc": "Ce se află dincolo de marginea zonei. Doar Java.",
-  "map_item_desc": "Începe cu o hartă a întregii zone în inventar. Doar Java.",
+  "map_item_desc": "Începe cu o hartă a întregii zone în inventar. Pe Bedrock, harta de start a jocului.",
   "custom_world_name_desc": "Alege numele lumilor noi în locul formatului „Arnis World N”. Doar Java.",
   "overture_desc": "Completează golurile din OpenStreetMap cu amprente detectate din satelit.",
   "three_dmr_desc": "Repere cunoscute, plus mașini, bărci, macarale și turbine eoliene.",

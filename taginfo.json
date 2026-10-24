@@ -1,10 +1,10 @@
 {
     "data_format": 1,
     "data_url": "https://raw.githubusercontent.com/louis-e/arnis/main/taginfo.json",
-    "data_updated": "20250824T120000Z",
+    "data_updated": "20261024T152102Z",
     "project": {
         "name": "Arnis",
-        "description": "Generate real life cities in Minecraft. Creates complex and accurate Minecraft Java Edition worlds that reflect real-world geography, topography, and architecture.",
+        "description": "Generate real life cities in Minecraft. Creates complex and accurate Minecraft Java Edition, Bedrock Edition and Luanti worlds that reflect real-world geography, topography, and architecture.",
         "project_url": "https://github.com/louis-e/arnis",
         "contact_name": "Louis Erbkamm",
         "contact_email": "info@louisdev.de"
@@ -12,81 +12,72 @@
     "tags": [
         {
             "key": "building",
-            "description": "Used to generate various building structures in Minecraft, including houses, apartments, garages, sheds, hospitals, and other building types."
+            "description": "Used to generate buildings, with the value choosing the style, typical height, roof and interior."
         },
         {
             "key": "building:part",
-            "description": "Used to generate building components and complex building structures."
+            "description": "Generates each part as its own volume with its own height, min_height and roof, styled like the rest of its building."
+        },
+        {
+            "key": "type",
+            "value": "building",
+            "description": "Groups a building outline with its building:part members, which share one style. The outline is left out when the parts cover at least half of it."
         },
         {
             "key": "building:levels",
-            "description": "Used to determine the height of buildings by specifying the number of floors."
+            "description": "Used to set a building's height from its number of storeys, more than seven storeys giving it a tall building style."
         },
         {
             "key": "building:min_level",
             "description": "Used to determine the starting elevation level for elevated buildings."
         },
         {
+            "key": "min_height",
+            "description": "Used to lift a building or building part off the ground by this many metres, its walls running from there up to height."
+        },
+        {
+            "key": "height",
+            "description": "Used to set the height of buildings and building parts, roof included, and of towers, masts, trees, barriers and other structures."
+        },
+        {
             "key": "building:colour",
             "description": "Used to determine the color of building walls and materials."
         },
         {
-            "key": "building",
-            "value": "garage",
-            "description": "Generates small garage structures with reduced height."
+            "key": "colour",
+            "description": "Used as the wall colour when building:colour is missing, and to colour rides and lift cabins."
         },
         {
-            "key": "building",
-            "value": "shed",
-            "description": "Generates small shed structures, may include bicycle parking."
+            "key": "building:material",
+            "description": "Used to choose a building's wall blocks from its material, such as brick, stone, concrete, render, wood, metal or glass, shaded by building:colour."
         },
         {
-            "key": "building",
-            "value": "parking",
-            "description": "Generates multi-level parking structures with parking spaces and ramps."
+            "key": "building:facade:material",
+            "description": "Used like building:material when that tag is missing."
         },
         {
-            "key": "building",
-            "value": "roof",
-            "description": "Generates roof-only structures with support pillars."
+            "key": "building:cladding",
+            "description": "Used to treat a building clad in brick, plaster, render, stone or tiles as pre-war masonry, which changes its wall palette and windows."
         },
         {
-            "key": "building",
-            "value": "apartments",
-            "description": "Generates apartment buildings with increased height."
+            "key": "building:architecture",
+            "description": "Used to give a building the facade of its architectural style, such as ornate stone fronts for gothic, baroque or art deco and post-war fronts for brutalist buildings."
         },
         {
-            "key": "building",
-            "value": "hospital",
-            "description": "Generates hospital buildings with increased height."
+            "key": "start_date",
+            "description": "Used to date a building, so that its era picks the wall palette, window style and ornament."
         },
         {
-            "key": "building",
-            "value": "bridge",
-            "description": "Generates bridge structures with elevation-aware placement."
+            "key": "construction_date",
+            "description": "Used like start_date when that tag is missing."
         },
         {
-            "key": "building",
-            "value": "house",
-            "description": "Generates residential houses with optional roof generation."
-        },
-        {
-            "key": "building",
-            "value": "residential",
-            "description": "Generates residential buildings with optional roof generation."
-        },
-        {
-            "key": "building",
-            "value": "yes",
-            "description": "Generates generic buildings with optional roof generation."
-        },
-        {
-            "key": "height",
-            "description": "Used to specify the exact height of buildings, towers, and other structures in meters."
+            "key": "heritage",
+            "description": "Marks a building as listed, giving it an ornate historic facade with more detail unless it is dated after 1945."
         },
         {
             "key": "roof:shape",
-            "description": "Used to determine the roof type for buildings when roof generation is enabled."
+            "description": "Used to choose the roof shape of a building or roof canopy, overriding the regional roof defaults. Unknown values give a flat roof."
         },
         {
             "key": "roof:shape",
@@ -101,22 +92,22 @@
         {
             "key": "roof:shape",
             "value": "half-hipped",
-            "description": "Generates half-hipped roof variations."
+            "description": "Generates a gabled roof whose gable ends are hipped in their upper half."
         },
         {
             "key": "roof:shape",
             "value": "gambrel",
-            "description": "Generates gambrel roof variations."
+            "description": "Generates a barn roof with a steep lower slope breaking to a shallower upper slope."
         },
         {
             "key": "roof:shape",
             "value": "mansard",
-            "description": "Generates mansard roof variations."
+            "description": "Generates a mansard roof with a steep lower band and a shallow or flat top, usually with dormers."
         },
         {
             "key": "roof:shape",
             "value": "round",
-            "description": "Generates rounded roof variations."
+            "description": "Generates a barrel-vaulted roof."
         },
         {
             "key": "roof:shape",
@@ -146,21 +137,404 @@
         {
             "key": "roof:shape",
             "value": "flat",
-            "description": "Generates flat roofs (default roof type)."
+            "description": "Generates a flat roof with a roof membrane and, depending on the building, a parapet and rooftop equipment."
+        },
+        {
+            "key": "roof:colour",
+            "description": "Used to choose the roof block from its colour, matching pitched roofs to slate, zinc, clay tile or copper shades and flat roofs to the nearest block colour."
+        },
+        {
+            "key": "roof:material",
+            "description": "Used to choose the roof covering from its material, such as tiles, slate, metal, copper, concrete, wood, thatch, glass or grass."
+        },
+        {
+            "key": "roof:height",
+            "description": "Used to set the rise of a pitched, domed or conical roof in metres."
+        },
+        {
+            "key": "roof:angle",
+            "description": "Used to set the pitch of a pitched roof in degrees when roof:height is not mapped."
+        },
+        {
+            "key": "roof:levels",
+            "description": "Gives a building with storeys in its roof and no mapped roof:shape a pitched or mansard roof, and sets the height of a mansard roof's steep band."
+        },
+        {
+            "key": "roof:direction",
+            "description": "Used to orient a roof: a skillion roof slopes down toward this direction and a gabled roof's ridge runs across it."
+        },
+        {
+            "key": "roof:orientation",
+            "description": "Used to run a gabled roof's ridge along or across the longer side of the building."
+        },
+        {
+            "key": "building",
+            "value": "yes",
+            "description": "Generates a generic building whose height is inferred from its footprint when untagged and whose roof follows regional habits."
+        },
+        {
+            "key": "building",
+            "value": "house",
+            "description": "Generates a house of one to three storeys when no height is mapped, usually with a pitched roof following regional roof habits and sometimes a chimney."
+        },
+        {
+            "key": "building",
+            "value": "detached",
+            "description": "Generates a house like building=house, with a typical height for the type."
+        },
+        {
+            "key": "building",
+            "value": "semidetached_house",
+            "description": "Generates a house like building=house, with a typical height for the type."
+        },
+        {
+            "key": "building",
+            "value": "terrace",
+            "description": "Generates a terraced house like building=house, its roof ridge running parallel to the street."
+        },
+        {
+            "key": "building",
+            "value": "bungalow",
+            "description": "Generates a house like building=house, with a typical height for the type."
+        },
+        {
+            "key": "building",
+            "value": "residential",
+            "description": "Generates a residential building of three to six storeys when no height is mapped, with a pitched or flat roof following regional and era habits."
+        },
+        {
+            "key": "building",
+            "value": "apartments",
+            "description": "Generates a residential block of three to six storeys when no height is mapped, with a flat, hipped, gabled or mansard roof depending on size, era and region."
+        },
+        {
+            "key": "building",
+            "value": "dormitory",
+            "description": "Generates a residential block like building=apartments."
+        },
+        {
+            "key": "building",
+            "value": "farm",
+            "description": "Generates a farmhouse in the plain farm building style, with a house's height and a home interior."
+        },
+        {
+            "key": "building",
+            "value": "farm_auxiliary",
+            "description": "Generates a plain farm building, usually with a gabled roof, furnished as a barn when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "barn",
+            "description": "Generates a farm building like building=farm_auxiliary, 5 to 9 m tall when no height is mapped."
+        },
+        {
+            "key": "building",
+            "value": "stable",
+            "description": "Generates a farm building like building=farm_auxiliary, 5 to 9 m tall when no height is mapped."
+        },
+        {
+            "key": "building",
+            "value": "cowshed",
+            "description": "Generates a farm building like building=farm_auxiliary."
+        },
+        {
+            "key": "building",
+            "value": "garage",
+            "description": "Generates a garage with a flat roof, no windows and a double door, 3 m tall when no height is mapped."
+        },
+        {
+            "key": "building",
+            "value": "garages",
+            "description": "Generates garages like building=garage."
+        },
+        {
+            "key": "building",
+            "value": "shed",
+            "description": "Generates a small shed with oak log walls, a plank roof and a door, or an open bicycle shelter when bicycle_parking is also tagged."
+        },
+        {
+            "key": "building",
+            "value": "greenhouse",
+            "description": "Generates a greenhouse with glass walls, a slab roof and a door."
+        },
+        {
+            "key": "building",
+            "value": "parking",
+            "description": "Generates multi-level parking structures with parking spaces and ramps."
+        },
+        {
+            "key": "building",
+            "value": "roof",
+            "description": "Generates roof-only structures with support pillars."
+        },
+        {
+            "key": "building",
+            "value": "commercial",
+            "description": "Generates a commercial building with pilasters, a parapet and often a street-level shopfront, furnished as offices when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "retail",
+            "description": "Generates a low shop building with pilasters, a parapet and usually a street-level shopfront, furnished as a shop when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "supermarket",
+            "description": "Generates a one or two storey store with a parapet and usually a shopfront, furnished as a supermarket when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "kiosk",
+            "description": "Generates a one-storey shop building like building=retail."
+        },
+        {
+            "key": "building",
+            "value": "office",
+            "description": "Generates an office building with pilasters and a parapet, two to eight storeys by footprint when no height is mapped, furnished as offices when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "hotel",
+            "description": "Generates a hotel with floor bands and a parapet, three to eight storeys when no height is mapped, furnished as a hotel when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "industrial",
+            "description": "Generates an industrial hall 5 to 9 m tall when no height is mapped, with corner beams and, on large footprints, a mono-pitch or flat roof."
+        },
+        {
+            "key": "building",
+            "value": "warehouse",
+            "description": "Generates a warehouse hall 5 to 9 m tall when no height is mapped, with corner beams and, on large footprints, a mono-pitch or flat roof."
+        },
+        {
+            "key": "building",
+            "value": "hangar",
+            "description": "Generates a hall like building=industrial."
+        },
+        {
+            "key": "building",
+            "value": "school",
+            "description": "Generates a school with bands at the floor lines and a parapet, two to four storeys when no height is mapped, furnished as a school when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "kindergarten",
+            "description": "Generates a school building like building=school."
+        },
+        {
+            "key": "building",
+            "value": "college",
+            "description": "Generates a school building like building=school."
+        },
+        {
+            "key": "building",
+            "value": "university",
+            "description": "Generates a school building like building=school."
+        },
+        {
+            "key": "building",
+            "value": "public",
+            "description": "Generates the building in the school style, furnished as offices when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "government",
+            "description": "Generates the building in the school style, furnished as offices when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "hospital",
+            "description": "Generates a hospital of four to seven storeys when no height is mapped, with banded facades, a flat roof and a rooftop helipad where it fits."
+        },
+        {
+            "key": "building",
+            "value": "church",
+            "description": "Generates a church with buttressed walls and a steep gabled roof as one tall hall, furnished for worship when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "chapel",
+            "description": "Generates a chapel like building=church."
+        },
+        {
+            "key": "building",
+            "value": "cathedral",
+            "description": "Generates a cathedral like building=church, 18 to 24 m tall when no height is mapped."
+        },
+        {
+            "key": "building",
+            "value": "mosque",
+            "description": "Generates a religious hall with buttressed walls, furnished with prayer carpets when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "synagogue",
+            "description": "Generates a religious hall with buttressed walls, furnished for worship when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "temple",
+            "description": "Generates a religious hall with buttressed walls, furnished for worship when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "religious",
+            "description": "Generates a religious hall with buttressed walls, furnished for worship when interiors are generated."
+        },
+        {
+            "key": "building",
+            "value": "tower",
+            "description": "Generates a tower with glass windows, accent bands and a flat roof."
+        },
+        {
+            "key": "building",
+            "value": "castle",
+            "description": "Generates the building in the historic style with castle stone walls."
+        },
+        {
+            "key": "building",
+            "value": "construction",
+            "description": "Generates a building under construction as a concrete frame around a stair core, partly clad, with scaffolding and a tower crane on large sites."
+        },
+        {
+            "key": "building",
+            "value": "ruins",
+            "description": "Generates a roofless stone ruin at about 60% of the building's height, without windows or doors."
+        },
+        {
+            "key": "building",
+            "value": "collapsed",
+            "description": "Generates a roofless ruin at about 60% of the building's height, without windows or doors."
+        },
+        {
+            "key": "building",
+            "value": "bridge",
+            "description": "Generates a flat stone deck with stone brick railings at the height given by level or layer, or a raised building when min_height or building:min_level is mapped."
+        },
+        {
+            "key": "building",
+            "value": "water_tower",
+            "description": "Generates a water tower with a tank on legs instead of a building."
+        },
+        {
+            "key": "building",
+            "value": "silo",
+            "description": "Generates a cylindrical silo instead of a building."
+        },
+        {
+            "key": "building",
+            "value": "storage_tank",
+            "description": "Generates a squat cylindrical storage tank instead of a building."
+        },
+        {
+            "key": "building:part",
+            "value": "roof",
+            "description": "Generates a roof canopy on pillars, or a shaped canopy for domed, hipped, pyramidal, conical, onion or round roofs, instead of a closed building part."
+        },
+        {
+            "key": "man_made",
+            "value": "tower",
+            "description": "On a building outline, generates a tower with glass windows, accent bands and a flat roof, 12 to 20 m tall when no height is mapped."
+        },
+        {
+            "key": "tower:type",
+            "description": "Used to build a man_made=tower outline as a solid bridge tower (bridge) and to give masts floodlights (lighting)."
+        },
+        {
+            "key": "tower:type",
+            "value": "lighting",
+            "description": "Gives a mast floodlights instead of antenna panels, 20 m tall on the ground when no height is mapped."
+        },
+        {
+            "key": "amenity",
+            "value": "place_of_worship",
+            "description": "On a building outline, builds it in the religious style with buttressed walls and steeper gables, furnished for worship when interiors are generated."
         },
         {
             "key": "historic",
             "value": "castle",
-            "description": "Used to identify historic castles and forts for appropriate material selection."
+            "description": "Builds the building in the historic style with castle stone walls, ignoring any mapped wall material or colour."
         },
         {
             "key": "parking",
             "value": "multi-storey",
-            "description": "Used to identify multi-level parking structures."
+            "description": "On a building outline, generates a multi-storey car park with open decks, bay markings, ramps, a stair tower, lights and parked cars."
         },
         {
             "key": "bicycle_parking",
-            "description": "Used to identify bicycle parking areas within buildings or structures."
+            "description": "Turns a building=shed into an open bicycle shelter, and roofs an amenity=bicycle_parking area when its value is shed or building."
+        },
+        {
+            "key": "abandoned",
+            "value": "yes",
+            "description": "Generates the building as abandoned, with half its windows boarded up, no doors, weathered walls and cobwebs instead of ceiling lights."
+        },
+        {
+            "key": "ruins",
+            "value": "yes",
+            "description": "Generates the building as a roofless ruin at about 60% of its height, without windows or doors and with heavily weathered walls."
+        },
+        {
+            "key": "abandoned:building",
+            "description": "Generates the building as abandoned like abandoned=yes."
+        },
+        {
+            "key": "ruins:building",
+            "description": "Generates the building as a ruin like ruins=yes."
+        },
+        {
+            "key": "disused:building",
+            "description": "Boards up about a third of the building's windows."
+        },
+        {
+            "key": "construction:building",
+            "description": "Generates the building as a construction frame like building=construction."
+        },
+        {
+            "key": "construction",
+            "description": "Names what a road or building under construction is going to be: a highway=construction road gets that road's width, and office, commercial, retail, hotel, hospital and university building frames get glass cladding, others masonry."
+        },
+        {
+            "key": "door",
+            "description": "Places a dark oak door at ground-level door nodes, turned and matched to the wall when the node is on a building outline."
+        },
+        {
+            "key": "entrance",
+            "description": "Places a door at ground-level entrance nodes, turned and matched to the wall when the node is on a building outline."
+        },
+        {
+            "key": "entrance",
+            "value": "main",
+            "description": "Places a double door on a commercial, office or hotel wall at least 8 blocks long."
+        },
+        {
+            "key": "layer",
+            "description": "Lifts roads with a positive layer onto decks and sets the height of bridge decks and roof canopies, while layer -2 and below sinks road tunnels deeper. Buildings and most small features with a negative layer are not generated."
+        },
+        {
+            "key": "level",
+            "description": "Used to place shops, offices and practices on their storey when interiors are generated and to raise building=bridge decks. Buildings and other features with a negative level are not generated."
+        },
+        {
+            "key": "shop",
+            "description": "Gives a street-facing building a shopfront at street level, and furnishes the storey or unit a shop occupies when interiors are generated, with shelving, counters and wares matching what it sells."
+        },
+        {
+            "key": "office",
+            "description": "Used to furnish offices with desks, a reception and meeting rooms when interiors are generated."
+        },
+        {
+            "key": "craft",
+            "description": "Used to furnish workshops with workbenches and tools when interiors are generated."
+        },
+        {
+            "key": "healthcare",
+            "description": "Used to furnish practices with reception, waiting area and treatment rooms when interiors are generated."
+        },
+        {
+            "key": "religion",
+            "description": "Used to choose between pews and prayer carpets when furnishing places of worship."
         },
         {
             "key": "highway",
@@ -169,17 +543,22 @@
         {
             "key": "highway",
             "value": "motorway",
-            "description": "Generates wide roads with lane markings and outlines."
+            "description": "Generates an 11-block-wide asphalt road by default, wider with more lanes, one-way unless tagged otherwise, with long dashed lines between its lanes."
+        },
+        {
+            "key": "highway",
+            "value": "trunk",
+            "description": "Generates an 11-block-wide asphalt road by default, wider with more lanes, with long dashed lane lines."
         },
         {
             "key": "highway",
             "value": "primary",
-            "description": "Generates wide roads with lane markings and outlines."
+            "description": "Generates an 11-block-wide asphalt road by default, wider with more lanes, with a dashed centre line (solid yellow in North America)."
         },
         {
             "key": "highway",
-            "value": "residential",
-            "description": "Generates standard residential roads."
+            "value": "secondary",
+            "description": "Generates a 9-block-wide asphalt road by default, wider with more lanes, with a centre line."
         },
         {
             "key": "highway",
@@ -188,33 +567,13 @@
         },
         {
             "key": "highway",
-            "value": "footway",
-            "description": "Generates narrow pedestrian paths using gray concrete."
-        },
-        {
-            "key": "highway",
-            "value": "path",
-            "description": "Generates dirt paths for walking."
-        },
-        {
-            "key": "highway",
-            "value": "steps",
-            "description": "Generates staircases and stepped paths."
-        },
-        {
-            "key": "highway",
-            "value": "pedestrian",
-            "description": "Generates pedestrian areas and plazas."
-        },
-        {
-            "key": "highway",
-            "value": "track",
-            "description": "Generates rural tracks and farm roads."
+            "value": "residential",
+            "description": "Generates a 5-block-wide asphalt street without lane lines."
         },
         {
             "key": "highway",
             "value": "service",
-            "description": "Generates service roads and driveways."
+            "description": "Generates a 5-block-wide gray concrete service road or driveway."
         },
         {
             "key": "highway",
@@ -228,18 +587,33 @@
         },
         {
             "key": "highway",
-            "value": "street_lamp",
-            "description": "Generates street lighting with glowstone."
+            "value": "track",
+            "description": "Generates a 3-block-wide track surfaced by its surface tag, in the asphalt mix when untagged."
         },
         {
             "key": "highway",
-            "value": "crossing",
-            "description": "Generates road crossings and intersections."
+            "value": "footway",
+            "description": "Generates narrow pedestrian paths using gray concrete."
         },
         {
             "key": "highway",
-            "value": "bus_stop",
-            "description": "Generates bus stop infrastructure."
+            "value": "cycleway",
+            "description": "Generates a 3-block-wide red bicycle path where its surface is paved or not tagged."
+        },
+        {
+            "key": "highway",
+            "value": "path",
+            "description": "Generates dirt paths for walking."
+        },
+        {
+            "key": "highway",
+            "value": "steps",
+            "description": "Generates a 3-block-wide gray concrete path. Steps are not built as stairs."
+        },
+        {
+            "key": "highway",
+            "value": "pedestrian",
+            "description": "Generates a gray concrete pedestrian street, or a filled plaza when tagged area=yes."
         },
         {
             "key": "highway",
@@ -247,9 +621,57 @@
             "description": "Generates sand trap areas for vehicles on mountainous roads."
         },
         {
+            "key": "highway",
+            "value": "construction",
+            "description": "Generates a bare earth road bed as wide as the road it is going to be, without lane lines or street lamps."
+        },
+        {
+            "key": "highway",
+            "value": "proposed",
+            "description": "Proposed roads are ignored during generation."
+        },
+        {
+            "key": "highway",
+            "value": "street_lamp",
+            "description": "Generates a street lamp of a stone brick wall post with a lit redstone lamp on top."
+        },
+        {
+            "key": "highway",
+            "value": "crossing",
+            "description": "Paints a zebra or edge-line crossing across the road at the node depending on crossing and crossing:markings, with a traffic signal when crossing=traffic_signals."
+        },
+        {
+            "key": "highway",
+            "value": "traffic_signals",
+            "description": "Places a traffic light on a pole, hung over the road on an arm when the node is on the road, and paints a stop line on the junction approach."
+        },
+        {
+            "key": "highway",
+            "value": "stop",
+            "description": "Paints a solid stop line across the junction approach and puts up a stop sign when signage is enabled."
+        },
+        {
+            "key": "highway",
+            "value": "give_way",
+            "description": "Paints a dashed give-way line across the junction approach and puts up a give-way sign when signage is enabled."
+        },
+        {
+            "key": "highway",
+            "value": "bus_stop",
+            "description": "Generates a bus stop pole with a sign, carrying a bus pictogram and the stop name when signage is enabled."
+        },
+        {
+            "key": "footway",
+            "description": "Any value other than no marks the way as a pedestrian path, so paved surfaces render as smooth stone."
+        },
+        {
             "key": "footway",
             "value": "crossing",
-            "description": "Generates zebra crossings with alternating white and black stripes."
+            "description": "Paints the crossing over the road as white zebra bars on the road's own surface, unless its tags, on the way or on its crossing node, say it is unmarked or lined."
+        },
+        {
+            "key": "crossing",
+            "description": "Chooses how a crossing is painted across the road: a zebra for most values, nothing for unmarked, no, informal or impossible."
         },
         {
             "key": "crossing",
@@ -257,22 +679,162 @@
             "description": "Generates traffic signal infrastructure at crossings."
         },
         {
+            "key": "crossing",
+            "value": "unmarked",
+            "description": "Leaves the crossing unpainted."
+        },
+        {
+            "key": "crossing:markings",
+            "description": "Sets the crossing paint: solid edge lines for lines, dashed edge lines for dashes or dots, none for no, and a zebra for other values."
+        },
+        {
+            "key": "crossing_ref",
+            "value": "zebra",
+            "description": "Paints the crossing as a zebra, also at signalised crossings."
+        },
+        {
+            "key": "lit",
+            "value": "yes",
+            "description": "Places street lamps every 25 blocks beside lit roads, alternating sides, and hangs lanterns on the posts of lit piers."
+        },
+        {
+            "key": "oneway",
+            "value": "yes",
+            "description": "Drops the centre line so the lanes are split by dashed lines only, and puts a no-entry sign at the exit end when signage is enabled."
+        },
+        {
+            "key": "junction",
+            "value": "roundabout",
+            "description": "Makes the road one-way with a single unmarked lane by default and paints give-way lines on roads entering it."
+        },
+        {
+            "key": "maxspeed",
+            "description": "Gives roads posted at 70 km/h or more long lane dashes, and shows the limit on speed limit signs when signage is enabled."
+        },
+        {
+            "key": "lane_markings",
+            "description": "lane_markings=no removes lane lines, and lane_markings=yes paints them on two-lane residential, service and track roads."
+        },
+        {
+            "key": "lanes",
+            "description": "Used to determine road width and lane markings."
+        },
+        {
+            "key": "lanes",
+            "value": "1",
+            "description": "Generates single-lane roads without center markings."
+        },
+        {
+            "key": "lanes",
+            "value": "2",
+            "description": "Generates a two-lane road with a centre line, except on residential, living street, service and track roads, which stay unpainted unless lane_markings=yes."
+        },
+        {
+            "key": "lanes:forward",
+            "description": "Places the centre line between the forward and backward lanes."
+        },
+        {
+            "key": "lanes:backward",
+            "description": "Places the centre line between the forward and backward lanes."
+        },
+        {
+            "key": "ref",
+            "description": "Shows the route number on route shields along major roads when signage is enabled."
+        },
+        {
+            "key": "width",
+            "description": "Sets the width of roads, runways, taxiways, waterways and piers, and of gate openings in barriers."
+        },
+        {
+            "key": "area",
+            "value": "yes",
+            "description": "Used to identify area features like pedestrian plazas."
+        },
+        {
+            "key": "tunnel",
+            "value": "yes",
+            "description": "Builds roads and railways as underground stone brick tunnels lit by sea lanterns, with roads ramping down to their portals where the terrain leaves room. Waterways in tunnels are skipped."
+        },
+        {
+            "key": "tunnel",
+            "value": "building_passage",
+            "description": "Cuts a ground-level opening as wide as the road through the buildings the way passes under."
+        },
+        {
+            "key": "bridge",
+            "description": "Raises roads and railways onto a bridge deck with railings, piers and approach ramps, styled by the bridge value and bridge:structure."
+        },
+        {
+            "key": "bridge:structure",
+            "description": "Chooses the bridge style: arch, truss, suspension, cable-stayed or beam."
+        },
+        {
+            "key": "bridge",
+            "value": "covered",
+            "description": "Generates a covered bridge with plank walls, windows and a roof over the deck."
+        },
+        {
+            "key": "bridge",
+            "value": "boardwalk",
+            "description": "Generates a wooden boardwalk of oak planks with fence rails."
+        },
+        {
+            "key": "embankment",
+            "value": "yes",
+            "description": "A road on an embankment that joins a bridge end becomes its approach ramp, carrying the deck down to the ground."
+        },
+        {
             "key": "surface",
             "description": "Used to determine the appropriate block type for surfaces (concrete, asphalt, gravel, etc.)."
         },
         {
             "key": "surface",
+            "value": "asphalt",
+            "description": "Generates a speckled gray asphalt surface of gray concrete powder and cyan terracotta."
+        },
+        {
+            "key": "surface",
+            "value": "paved",
+            "description": "Generates the gray asphalt mix on roads."
+        },
+        {
+            "key": "surface",
+            "value": "concrete",
+            "description": "Generates the gray asphalt mix on roads and smooth stone on footways, pedestrian streets and steps."
+        },
+        {
+            "key": "surface",
             "value": "paving_stones",
-            "description": "Generates stone brick surfaces."
+            "description": "Generates the gray asphalt mix on roads and smooth stone on footways, pedestrian streets and steps."
         },
         {
             "key": "surface",
             "value": "sett",
-            "description": "Generates stone brick surfaces."
+            "description": "Generates the gray asphalt mix on roads and smooth stone on footways, pedestrian streets and steps."
+        },
+        {
+            "key": "surface",
+            "value": "chipseal",
+            "description": "Generates the gray asphalt mix on roads."
+        },
+        {
+            "key": "surface",
+            "value": "concrete:plates",
+            "description": "Generates the gray asphalt mix on roads."
+        },
+        {
+            "key": "surface",
+            "value": "concrete:lanes",
+            "description": "Generates the gray asphalt mix on roads."
         },
         {
             "key": "surface",
             "value": "bricks",
+            "description": "Generates brick surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "brick",
             "description": "Generates brick surfaces."
         },
         {
@@ -282,8 +844,8 @@
         },
         {
             "key": "surface",
-            "value": "asphalt",
-            "description": "Generates black concrete surfaces."
+            "value": "metal",
+            "description": "Generates iron block surfaces."
         },
         {
             "key": "surface",
@@ -297,7 +859,17 @@
         },
         {
             "key": "surface",
+            "value": "compacted",
+            "description": "Generates gravel surfaces."
+        },
+        {
+            "key": "surface",
             "value": "grass",
+            "description": "Generates grass block surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "grass_paver",
             "description": "Generates grass block surfaces."
         },
         {
@@ -317,36 +889,375 @@
         },
         {
             "key": "surface",
+            "value": "unpaved",
+            "description": "Generates dirt surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "soil",
+            "description": "Generates dirt surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "mud",
+            "description": "Generates mud surfaces."
+        },
+        {
+            "key": "surface",
             "value": "sand",
             "description": "Generates sand surfaces."
         },
         {
             "key": "surface",
-            "value": "concrete",
-            "description": "Generates light gray concrete surfaces."
+            "value": "clay",
+            "description": "Generates terracotta surfaces."
         },
         {
-            "key": "lanes",
-            "description": "Used to determine road width and lane markings."
+            "key": "surface",
+            "value": "tartan",
+            "description": "Generates red terracotta surfaces."
         },
         {
-            "key": "lanes",
-            "value": "1",
-            "description": "Generates single-lane roads without center markings."
+            "key": "surface",
+            "value": "artificial_turf",
+            "description": "Generates green wool surfaces."
         },
         {
-            "key": "lanes",
-            "value": "2",
-            "description": "Generates two-lane roads with center stripe and outline."
+            "key": "surface",
+            "value": "woodchips",
+            "description": "Generates podzol surfaces."
         },
         {
-            "key": "area",
+            "key": "surface",
+            "value": "cobblestone",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "pebblestone",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "unhewn_cobblestone",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "stepping_stones",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "rock",
+            "description": "Generates stone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "stone",
+            "description": "Generates stone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "ice",
+            "description": "Generates packed ice surfaces."
+        },
+        {
+            "key": "railway",
+            "description": "Generates railway track as rails on a gravel bed, with bridges, tunnels and overhead catenary where tagged."
+        },
+        {
+            "key": "railway",
+            "value": "rail",
+            "description": "Generates railway track as rails on a gravel bed, with overhead catenary when electrified."
+        },
+        {
+            "key": "railway",
+            "value": "light_rail",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "tram",
+            "description": "Generates tram track, set into the road surface where it runs along a road."
+        },
+        {
+            "key": "railway",
+            "value": "narrow_gauge",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "funicular",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "monorail",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "miniature",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "preserved",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "disused",
+            "description": "Generates railway track as rails on a gravel bed."
+        },
+        {
+            "key": "railway",
+            "value": "subway",
+            "description": "Generates the track underground in a stone brick tunnel lit by sea lanterns, unless the way is a bridge or tagged tunnel=no."
+        },
+        {
+            "key": "subway",
             "value": "yes",
-            "description": "Used to identify area features like pedestrian plazas."
+            "description": "Puts the railway track underground in a stone brick tunnel lit by sea lanterns, unless the way is a bridge or tagged tunnel=no."
+        },
+        {
+            "key": "railway",
+            "value": "proposed",
+            "description": "Proposed railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "abandoned",
+            "description": "Abandoned railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "construction",
+            "description": "Railways under construction are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "razed",
+            "description": "Razed railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "turntable",
+            "description": "Railway turntables are ignored during generation."
+        },
+        {
+            "key": "electrified",
+            "value": "contact_line",
+            "description": "Adds an overhead contact wire with cantilever masts over railway=rail track."
+        },
+        {
+            "key": "railway",
+            "value": "level_crossing",
+            "description": "Puts up a level crossing warning sign when signage is enabled."
+        },
+        {
+            "key": "railway",
+            "value": "station",
+            "description": "Puts up a station name board when signage is enabled, or a metro logo post for subway stations."
+        },
+        {
+            "key": "railway",
+            "value": "halt",
+            "description": "Puts up a station name board when signage is enabled."
+        },
+        {
+            "key": "railway",
+            "value": "subway_entrance",
+            "description": "Puts up a post with a lit metro logo when signage is enabled."
+        },
+        {
+            "key": "railway",
+            "value": "tram_stop",
+            "description": "Puts up a tram stop post with a tram pictogram and the stop name when signage is enabled."
+        },
+        {
+            "key": "service",
+            "value": "siding",
+            "description": "Draws a line of stone brick slabs for a way tagged service=siding without a railway or highway tag."
+        },
+        {
+            "key": "roller_coaster",
+            "value": "track",
+            "description": "Generates a rail track on iron blocks 4 blocks up, with iron pillars."
+        },
+        {
+            "key": "aeroway",
+            "description": "Used to generate airport infrastructure including runways, taxiways, aprons and helipads (with occasional parked helicopters), plus aeroplanes along runways and taxiways and at aircraft stands."
+        },
+        {
+            "key": "aeroway",
+            "value": "runway",
+            "description": "Generates a gray concrete strip about 24 m wide, or as wide as width, with a dashed white centre line and edge lines, and clears buildings standing on it."
+        },
+        {
+            "key": "aeroway",
+            "value": "taxiway",
+            "description": "Generates a light gray concrete strip about 24 m wide, or as wide as width, with a yellow centre line."
+        },
+        {
+            "key": "aeroway",
+            "value": "helipad",
+            "description": "Generates a light gray pad with a white ring and H, sometimes with a parked helicopter."
+        },
+        {
+            "key": "aeroway",
+            "value": "parking_position",
+            "description": "Draws a narrow lead-in line with a yellow centre stripe and parks an aircraft at the stand."
+        },
+        {
+            "key": "aeroway",
+            "value": "jet_bridge",
+            "description": "Generates a jet bridge model running from the terminal building out to the aircraft stand."
+        },
+        {
+            "key": "aeroway",
+            "value": "apron",
+            "description": "Fills the apron with light gray concrete, keeping grass mapped inside it."
+        },
+        {
+            "key": "aeroway",
+            "value": "taxilane",
+            "description": "Draws a narrow lead-in line with a yellow centre stripe across the apron."
+        },
+        {
+            "key": "aeroway",
+            "value": "stopway",
+            "description": "Generates gray runway pavement without markings."
+        },
+        {
+            "key": "area:aeroway",
+            "description": "Fills runway, stopway and blast pad areas with gray and taxiway areas with light gray concrete, and removes buildings standing on runway areas."
+        },
+        {
+            "key": "aerialway",
+            "description": "Generates aerial lifts with pylons, terminals, ropes and carriers matching the lift type, and keeps trees out of the lift corridor."
+        },
+        {
+            "key": "aerialway",
+            "value": "chair_lift",
+            "description": "Generates a chair lift with chairs sized by aerialway:occupancy and a hooded terminal when detachable."
+        },
+        {
+            "key": "aerialway",
+            "value": "gondola",
+            "description": "Generates a gondola lift with enclosed cabins sized by aerialway:occupancy."
+        },
+        {
+            "key": "aerialway",
+            "value": "cable_car",
+            "description": "Generates an aerial tramway with large cabins, tall pylons and terminal halls."
+        },
+        {
+            "key": "aerialway",
+            "value": "drag_lift",
+            "description": "Generates a surface lift with T-bar hangers on low pylons."
+        },
+        {
+            "key": "aerialway",
+            "value": "t-bar",
+            "description": "Generates a surface lift with T-bar hangers on low pylons."
+        },
+        {
+            "key": "aerialway",
+            "value": "platter",
+            "description": "Generates a surface lift with platter hangers on low pylons."
+        },
+        {
+            "key": "aerialway",
+            "value": "rope_tow",
+            "description": "Generates a low rope tow on short posts."
+        },
+        {
+            "key": "aerialway",
+            "value": "magic_carpet",
+            "description": "Generates a conveyor belt under a glass tunnel, open when covered=no."
+        },
+        {
+            "key": "aerialway",
+            "value": "zip_line",
+            "description": "Generates a zip line running downhill from a launch platform."
+        },
+        {
+            "key": "aerialway",
+            "value": "goods",
+            "description": "Generates a material ropeway with hanging buckets."
+        },
+        {
+            "key": "aerialway",
+            "value": "station",
+            "description": "Places a lift terminal at that node of the lift line."
+        },
+        {
+            "key": "aerialway:occupancy",
+            "description": "Sets the size of a lift's chairs and cabins."
+        },
+        {
+            "key": "aerialway:bubble",
+            "value": "yes",
+            "description": "Gives a chair lift's chairs a coloured glass bubble."
+        },
+        {
+            "key": "power",
+            "description": "Generates power infrastructure: lines, pylons, poles and generators, skipping anything underground or in a tunnel."
+        },
+        {
+            "key": "power",
+            "value": "line",
+            "description": "Generates sagging wires between the nodes at a height set by voltage, as a three-wire bundle from 110 kV."
+        },
+        {
+            "key": "power",
+            "value": "minor_line",
+            "description": "Generates a sagging wire between the nodes at a height set by voltage."
+        },
+        {
+            "key": "power",
+            "value": "tower",
+            "description": "Generates a tapered iron lattice pylon with cross-arms, insulators and a lightning rod, 25 blocks tall unless height says otherwise."
+        },
+        {
+            "key": "power",
+            "value": "pole",
+            "description": "Generates a utility pole of oak log, concrete or iron by material, 10 blocks tall unless height says otherwise, with a cross-arm and insulators."
+        },
+        {
+            "key": "power",
+            "value": "generator",
+            "description": "Generates a wind turbine or a solar panel field depending on generator:source."
+        },
+        {
+            "key": "generator:source",
+            "value": "wind",
+            "description": "Places a wind turbine model, skipping roof-mounted, raised or small turbines."
+        },
+        {
+            "key": "generator:source",
+            "value": "solar",
+            "description": "Fills the area with rows of solar panels between gravel paths, skipping rooftop arrays and small areas."
+        },
+        {
+            "key": "power",
+            "value": "substation",
+            "description": "Puts up a high-voltage warning sign at the outline when signage is enabled."
+        },
+        {
+            "key": "power",
+            "value": "plant",
+            "description": "Puts up a high-voltage warning sign at the outline when signage is enabled."
+        },
+        {
+            "key": "voltage",
+            "description": "Sets the height of power line wires from 10 to 22 blocks and adds a three-wire bundle at 110 kV and above."
         },
         {
             "key": "landuse",
-            "description": "Used to generate different ground surfaces and land use patterns including residential areas, farmland, forests, commercial zones, and industrial areas."
+            "description": "Used to paint the ground and scatter plants, trees and props on land use areas such as farmland, forests, meadows, cemeteries, quarries and construction sites. Residential and commercial areas are skipped."
         },
         {
             "key": "landuse",
@@ -371,22 +1282,42 @@
         {
             "key": "landuse",
             "value": "forest",
-            "description": "Generates grass block surfaces with frequent trees and vegetation."
+            "description": "Generates grass with dense trees in patches, ferns and flowers. leaf_type picks broadleaf or conifer trees."
         },
         {
             "key": "landuse",
             "value": "farmland",
-            "description": "Generates agricultural areas with farmland blocks, crops, and irrigation."
+            "description": "Generates farmland planted with wheat, carrots and potatoes, with occasional hay bales and bushes."
+        },
+        {
+            "key": "landuse",
+            "value": "vineyard",
+            "description": "Generates coarse dirt with sparse grass and low bushes."
+        },
+        {
+            "key": "landuse",
+            "value": "flowerbed",
+            "description": "Generates dirt planted with flowers on almost every block."
         },
         {
             "key": "landuse",
             "value": "cemetery",
-            "description": "Generates cemetery areas with podzol, graves, and flowers."
+            "description": "Generates podzol ground with tombstones, flowers and ferns inside a stone brick wall."
         },
         {
             "key": "landuse",
             "value": "construction",
-            "description": "Generates construction sites with coarse dirt, scaffolding, and building materials."
+            "description": "Generates churned ground inside a mesh fence, with material heaps, site cabins, containers and scaffold towers, and a crane and excavators on large sites."
+        },
+        {
+            "key": "landuse",
+            "value": "brownfield",
+            "description": "Generates coarse dirt with sparse grass, low bushes and dead bushes."
+        },
+        {
+            "key": "landuse",
+            "value": "farmyard",
+            "description": "Generates bare coarse dirt."
         },
         {
             "key": "landuse",
@@ -396,12 +1327,12 @@
         {
             "key": "landuse",
             "value": "residential",
-            "description": "Generates residential area surfaces with stone bricks or grass depending on rural/urban setting."
+            "description": "Residential areas are skipped. The ground there comes from land cover data."
         },
         {
             "key": "landuse",
             "value": "commercial",
-            "description": "Generates commercial zones with smooth stone surfaces."
+            "description": "Commercial areas are skipped. The ground there comes from land cover data."
         },
         {
             "key": "landuse",
@@ -416,12 +1347,16 @@
         {
             "key": "landuse",
             "value": "industrial",
-            "description": "Generates industrial areas with cobblestone surfaces."
+            "description": "Generates stone ground mixed with stone bricks and smooth stone."
         },
         {
             "key": "landuse",
             "value": "military",
-            "description": "Generates military areas with gray concrete surfaces."
+            "description": "Generates grass with worn patches of coarse dirt, dirt and gravel, paved with andesite where the land cover shows built-up ground."
+        },
+        {
+            "key": "military",
+            "description": "On landuse=military, training areas, ranges, danger areas and trenches get more worn ground."
         },
         {
             "key": "landuse",
@@ -436,12 +1371,12 @@
         {
             "key": "landuse",
             "value": "quarry",
-            "description": "Generates quarry areas with stone surfaces and resource deposits."
+            "description": "Generates a mix of stone, gravel, cobblestone and andesite with ore blocks chosen by resource."
         },
         {
-            "key": "residential",
-            "value": "rural",
-            "description": "Used to distinguish rural residential areas (grass blocks) from urban ones (stone bricks)."
+            "key": "landuse",
+            "value": "reservoir",
+            "description": "Turns the area into water, carved deeper away from the shore like a lake."
         },
         {
             "key": "man_made",
@@ -469,11 +1404,6 @@
         },
         {
             "key": "resource",
-            "value": "copper",
-            "description": "Generates copper ore blocks in quarries."
-        },
-        {
-            "key": "resource",
             "value": "gold",
             "description": "Generates gold ore blocks in quarries."
         },
@@ -483,23 +1413,28 @@
             "description": "Generates clay blocks in quarries."
         },
         {
-            "key": "resource",
-            "value": "kaolinite",
-            "description": "Generates clay blocks in quarries."
+            "key": "place",
+            "value": "square",
+            "description": "Paves the square with stone bricks."
         },
         {
             "key": "natural",
-            "description": "Used to generate natural features including trees, water bodies, wetlands, beaches, and terrain features."
+            "description": "Used to generate natural features including trees, water bodies, wetlands, beaches, and terrain features. Names of landforms such as peninsulas, valleys and mountain ranges are ignored, since they take in towns and fields alike."
         },
         {
             "key": "natural",
             "value": "tree",
-            "description": "Generates individual trees with various wood types."
+            "description": "Places a tree whose kind follows its genus, species, taxon or leaf_type tag and whose size follows height."
         },
         {
             "key": "natural",
-            "value": "water",
-            "description": "Generates water bodies and aquatic areas."
+            "value": "tree_row",
+            "description": "Plants a tree every 8 metres along the row, its kind taken from genus, species, taxon or leaf_type."
+        },
+        {
+            "key": "natural",
+            "value": "wood",
+            "description": "Generates woodland areas with trees and forest vegetation."
         },
         {
             "key": "natural",
@@ -513,23 +1448,23 @@
         },
         {
             "key": "natural",
-            "value": "wood",
-            "description": "Generates woodland areas with trees and forest vegetation."
-        },
-        {
-            "key": "natural",
             "value": "heath",
             "description": "Generates heath areas with grass blocks and heath vegetation."
         },
         {
             "key": "natural",
-            "value": "tree_row",
-            "description": "Generates tree rows with frequent trees and vegetation."
+            "value": "shrubbery",
+            "description": "Generates a two-block-high bed of clipped shrubs, one leaf species per bed."
+        },
+        {
+            "key": "natural",
+            "value": "water",
+            "description": "Generates a lake or pond carved deeper away from the shore, with a sand, gravel or clay bed."
         },
         {
             "key": "natural",
             "value": "sand",
-            "description": "Generates sandy terrain with occasional dead bushes."
+            "description": "Generates sand, with occasional dead bushes in desert and steppe climates."
         },
         {
             "key": "natural",
@@ -539,12 +1474,12 @@
         {
             "key": "natural",
             "value": "beach",
-            "description": "Generates sandy beach areas."
+            "description": "Generates a sand beach, or gravel, stone or mud when surface says so."
         },
         {
             "key": "natural",
             "value": "shoal",
-            "description": "Generates shallow water areas with sand/gravel base."
+            "description": "Generates sand, or gravel, stone or mud from surface, with scattered single water blocks."
         },
         {
             "key": "natural",
@@ -554,7 +1489,12 @@
         {
             "key": "natural",
             "value": "bare_rock",
-            "description": "Generates exposed rock terrain with stone blocks."
+            "description": "Generates exposed rock as a mix of stone, andesite, cobblestone, gravel, tuff and coarse dirt."
+        },
+        {
+            "key": "natural",
+            "value": "rock",
+            "description": "Generates exposed rock like natural=bare_rock."
         },
         {
             "key": "natural",
@@ -578,11 +1518,6 @@
         },
         {
             "key": "natural",
-            "value": "mountain_range",
-            "description": "Generates mountainous terrain with rock clusters and varied materials."
-        },
-        {
-            "key": "natural",
             "value": "saddle",
             "description": "Generates saddle areas (low points between peaks) with mixed stone and grass."
         },
@@ -590,11 +1525,6 @@
             "key": "natural",
             "value": "ridge",
             "description": "Generates ridge areas (elevated crests) with predominantly rocky terrain."
-        },
-        {
-            "key": "natural",
-            "value": "shrubbery",
-            "description": "Generates decorative shrub areas with oak leaves."
         },
         {
             "key": "natural",
@@ -610,6 +1540,46 @@
             "key": "natural",
             "value": "cliff",
             "description": "Generates cliff areas with predominantly stone terrain."
+        },
+        {
+            "key": "natural",
+            "value": "peak",
+            "description": "Raises the terrain to the summit height given in ele where the elevation data falls short."
+        },
+        {
+            "key": "ele",
+            "description": "Used on natural=peak and volcano nodes to lift the terrain to the surveyed summit height in metres."
+        },
+        {
+            "key": "summit:cross",
+            "value": "yes",
+            "description": "Places a cross on a small cobblestone cairn at a peak, volcano or hill node."
+        },
+        {
+            "key": "leaf_type",
+            "description": "Used to choose broadleaf or conifer trees for forests, woods, tree rows and single trees."
+        },
+        {
+            "key": "leaf_type",
+            "value": "broadleaved",
+            "description": "Limits trees to broadleaf kinds such as oak and birch."
+        },
+        {
+            "key": "leaf_type",
+            "value": "needleleaved",
+            "description": "Limits trees to spruce and pine."
+        },
+        {
+            "key": "genus",
+            "description": "Picks the tree model of that genus for single trees and tree rows, such as birch for Betula."
+        },
+        {
+            "key": "species",
+            "description": "Used like genus, from its first word, when genus is missing."
+        },
+        {
+            "key": "taxon",
+            "description": "Used like genus, from its first word, when genus and species are missing."
         },
         {
             "key": "wetland",
@@ -651,6 +1621,59 @@
             "description": "Generates tidal flat areas without vegetation."
         },
         {
+            "key": "water",
+            "description": "Used to generate water areas and aquatic features."
+        },
+        {
+            "key": "waterway",
+            "description": "Used to cut water channels along rivers, streams, canals and ditches, sized by waterway type or width, and to fill docks and riverbank areas with water. Waterways in tunnels are skipped."
+        },
+        {
+            "key": "waterway",
+            "value": "river",
+            "description": "Generates a river channel 8 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "canal",
+            "description": "Generates a canal channel 6 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "stream",
+            "description": "Generates a stream channel 3 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "fairway",
+            "description": "Generates a fairway channel 12 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "flowline",
+            "description": "Generates a flowline channel 2 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "brook",
+            "description": "Generates a brook channel 2 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "ditch",
+            "description": "Generates a ditch 2 blocks wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "drain",
+            "description": "Generates a drainage channel 1 block wide unless width is set."
+        },
+        {
+            "key": "waterway",
+            "value": "dock",
+            "description": "Fills the dock basin with water like a lake."
+        },
+        {
             "key": "amenity",
             "description": "Used to generate various amenities and facilities including parking areas, fountains, waste disposal, shelters, and bicycle parking."
         },
@@ -666,6 +1689,11 @@
         },
         {
             "key": "amenity",
+            "value": "recycling",
+            "description": "Places a barrel filled with matching recyclables at recycling containers."
+        },
+        {
+            "key": "amenity",
             "value": "vending_machine",
             "description": "Generates vending machines using iron blocks."
         },
@@ -676,28 +1704,51 @@
         },
         {
             "key": "amenity",
-            "value": "bicycle_parking",
-            "description": "Generates bicycle parking areas with oak planks and roof coverage."
-        },
-        {
-            "key": "amenity",
             "value": "bench",
-            "description": "Generates benches using smooth stone and oak logs."
+            "description": "Places an oak bench of stairs and a slab, aligned with the nearest road."
         },
         {
             "key": "amenity",
-            "value": "shelter",
-            "description": "Generates shelter structures with roofs and fencing."
-        },
-        {
-            "key": "amenity",
-            "value": "parking",
-            "description": "Generates parking lots with marked spaces, driving lanes, and lighting."
+            "value": "drinking_water",
+            "description": "Places a small cobblestone drinking fountain with a spout and a water cauldron."
         },
         {
             "key": "amenity",
             "value": "fountain",
-            "description": "Generates decorative fountains with water and borders."
+            "description": "Places a bundled fountain model, with a larger model for big fountain areas."
+        },
+        {
+            "key": "amenity",
+            "value": "shelter",
+            "description": "Generates a glass bus shelter, a pavilion or a lean-to hut chosen by shelter_type when mapped as a point, or a slab roof on corner posts when mapped as an area."
+        },
+        {
+            "key": "shelter_type",
+            "description": "Picks the shelter built at an amenity=shelter node: a glass bus shelter for public_transport, a lean-to hut for lean_to, an open pavilion for gazebo and pavilion."
+        },
+        {
+            "key": "amenity",
+            "value": "bicycle_parking",
+            "description": "Keeps a bicycle parking area's paving, using surface when set, and roofs it on posts when it is covered."
+        },
+        {
+            "key": "covered",
+            "value": "yes",
+            "description": "Gives an amenity=bicycle_parking area a slab roof on fence posts."
+        },
+        {
+            "key": "amenity",
+            "value": "parking",
+            "description": "Generates a paved lot with marked spaces, lamp posts and some parked cars."
+        },
+        {
+            "key": "amenity",
+            "value": "fuel",
+            "description": "Generates a petrol station canopy over pump islands in the brand's colours, adding a kiosk when no shop is mapped."
+        },
+        {
+            "key": "brand",
+            "description": "Picks the canopy and pump colours of known fuel station brands."
         },
         {
             "key": "leisure",
@@ -706,7 +1757,7 @@
         {
             "key": "leisure",
             "value": "park",
-            "description": "Generates park areas with grass surfaces and recreational features."
+            "description": "Generates grass with flowers, ferns, bushes and, where the land cover shows woodland, trees."
         },
         {
             "key": "leisure",
@@ -741,17 +1792,22 @@
         {
             "key": "leisure",
             "value": "pitch",
-            "description": "Generates sports pitch areas with appropriate surface materials."
+            "description": "Generates a green terracotta pitch, or the block of its surface tag, with line markings and goals or a net for its sport."
+        },
+        {
+            "key": "leisure",
+            "value": "stadium",
+            "description": "Replaces large stadiums with a stadium model fitted to the outline."
         },
         {
             "key": "leisure",
             "value": "beach_resort",
-            "description": "Generates beach resort areas with appropriate surfaces."
+            "description": "Fills the area with green terracotta, or with the block of its surface tag."
         },
         {
             "key": "leisure",
             "value": "dog_park",
-            "description": "Generates dog park areas with appropriate surfaces."
+            "description": "Fills the area with green terracotta, or with the block of its surface tag."
         },
         {
             "key": "leisure",
@@ -767,6 +1823,11 @@
             "key": "leisure",
             "value": "bathing_place",
             "description": "Generates bathing areas with smooth sandstone surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "marina",
+            "description": "Fills the marina area with water."
         },
         {
             "key": "leisure",
@@ -794,96 +1855,194 @@
             "description": "Generates schoolyard areas with asphalt surfaces used for play at schools."
         },
         {
-            "key": "waterway",
-            "description": "Used to generate rivers, streams, and other waterways with appropriate depths and banks."
+            "key": "sport",
+            "description": "Used to draw line markings on leisure=pitch areas, with goals for soccer and a net for tennis."
         },
         {
-            "key": "waterway",
-            "value": "river",
-            "description": "Generates large rivers 8 blocks wide and 3 blocks deep."
+            "key": "sport",
+            "value": "soccer",
+            "description": "Draws a soccer pitch with halfway line, centre circle, penalty boxes and goals."
         },
         {
-            "key": "waterway",
-            "value": "canal",
-            "description": "Generates canals 6 blocks wide and 2 blocks deep."
+            "key": "sport",
+            "value": "basketball",
+            "description": "Draws basketball court lines with a centre circle and keys."
         },
         {
-            "key": "waterway",
-            "value": "stream",
-            "description": "Generates streams 3 blocks wide and 2 blocks deep."
+            "key": "sport",
+            "value": "tennis",
+            "description": "Draws tennis court lines and a net."
         },
         {
-            "key": "waterway",
-            "value": "fairway",
-            "description": "Generates shipping fairways 12 blocks wide and 3 blocks deep."
+            "key": "man_made",
+            "description": "Used to generate man-made structures including towers, chimneys, piers, and other constructed features."
         },
         {
-            "key": "waterway",
-            "value": "flowline",
-            "description": "Generates water flow lines 2 blocks wide and 1 block deep."
+            "key": "man_made",
+            "value": "pier",
+            "description": "Generates a pier deck on piles, in spruce or in stone when its surface or material is paved, with a railing where it stands high above the water."
         },
         {
-            "key": "waterway",
-            "value": "brook",
-            "description": "Generates small brooks 2 blocks wide and 1 block deep."
-        },
-        {
-            "key": "waterway",
-            "value": "ditch",
-            "description": "Generates ditches 2 blocks wide and 1 block deep."
-        },
-        {
-            "key": "waterway",
-            "value": "drain",
-            "description": "Generates drainage channels 1 block wide and 1 block deep."
-        },
-        {
-            "key": "width",
-            "description": "Used to determine the width of waterways and other linear features."
-        },
-        {
-            "key": "railway",
-            "description": "Used to generate railway infrastructure including tracks and railway facilities."
-        },
-        {
-            "key": "railway",
-            "value": "proposed",
-            "description": "Proposed railways are ignored during generation."
-        },
-        {
-            "key": "railway",
-            "value": "abandoned",
-            "description": "Abandoned railways are ignored during generation."
-        },
-        {
-            "key": "railway",
-            "value": "subway",
-            "description": "Subway railways are ignored during generation."
-        },
-        {
-            "key": "railway",
-            "value": "construction",
-            "description": "Railways under construction are ignored during generation."
-        },
-        {
-            "key": "railway",
-            "value": "razed",
-            "description": "Razed railways are ignored during generation."
-        },
-        {
-            "key": "railway",
-            "value": "turntable",
-            "description": "Railway turntables are ignored during generation."
-        },
-        {
-            "key": "subway",
+            "key": "floating",
             "value": "yes",
-            "description": "Railways marked as subway are ignored during generation."
+            "description": "Lays a pier deck on the water without piles or railing."
         },
         {
-            "key": "tunnel",
+            "key": "man_made",
+            "value": "breakwater",
+            "description": "Generates a rubble mound of stone, cobblestone and andesite standing out of the water."
+        },
+        {
+            "key": "man_made",
+            "value": "groyne",
+            "description": "Generates a low rubble groyne, or a row of wooden piles when material=wood."
+        },
+        {
+            "key": "submerged",
             "value": "yes",
-            "description": "Railways in tunnels are ignored during generation."
+            "description": "Keeps a breakwater or groyne at the waterline."
+        },
+        {
+            "key": "man_made",
+            "value": "dolphin",
+            "description": "Places a cluster of four spruce log mooring piles."
+        },
+        {
+            "key": "man_made",
+            "value": "mast",
+            "description": "Generates a mast to its height, an iron bar pole when short or on a roof and a lattice or tube tower when tall, banded red and white from 100 m."
+        },
+        {
+            "key": "man_made",
+            "value": "antenna",
+            "description": "Generates an antenna mast to its height, an iron bar pole when short or on a roof and a lattice or tube tower when tall."
+        },
+        {
+            "key": "tower:construction",
+            "description": "Builds tall masts as a solid tube instead of a lattice for monopole, tube, guyed_tube and concrete."
+        },
+        {
+            "key": "man_made",
+            "value": "chimney",
+            "description": "Generates a chimney to its height, a brick stack on a roof or a tapering hollow shaft on the ground, in concrete when tagged so or very tall."
+        },
+        {
+            "key": "man_made",
+            "value": "water_well",
+            "description": "Generates a stone well with water and a roofed winch frame, or a hand pump over a basin when pump is set."
+        },
+        {
+            "key": "pump",
+            "description": "Turns a man_made=water_well into a hand pump over a water basin."
+        },
+        {
+            "key": "man_made",
+            "value": "water_tower",
+            "description": "Generates water tower structures with support legs and tank."
+        },
+        {
+            "key": "man_made",
+            "value": "silo",
+            "description": "Generates a cylindrical silo to its height, in iron, concrete or smooth stone by material."
+        },
+        {
+            "key": "man_made",
+            "value": "storage_tank",
+            "description": "Generates a squat cylindrical tank coloured by content."
+        },
+        {
+            "key": "content",
+            "description": "Colours a storage tank: black for oil and fuel, white for gas, light gray for water."
+        },
+        {
+            "key": "man_made",
+            "value": "lighthouse",
+            "description": "Places a bundled lighthouse model."
+        },
+        {
+            "key": "man_made",
+            "value": "crane",
+            "description": "Places a tower crane model with its jib swung over nearby water or toward direction."
+        },
+        {
+            "key": "man_made",
+            "value": "cross",
+            "description": "Generates a cross to its height, from dark oak, iron or white concrete by material."
+        },
+        {
+            "key": "tourism",
+            "description": "Used to place information boards and sign posts at tourism=information nodes."
+        },
+        {
+            "key": "tourism",
+            "value": "information",
+            "description": "Places a map board or an information sign post at information nodes, except offices and visitor centres."
+        },
+        {
+            "key": "information",
+            "description": "Used to choose a map board for information=map, board and terminal and an information sign post for other values."
+        },
+        {
+            "key": "information",
+            "value": "office",
+            "description": "Information offices are not generated as simple boards."
+        },
+        {
+            "key": "information",
+            "value": "visitor_centre",
+            "description": "Visitor centres are not generated as simple boards."
+        },
+        {
+            "key": "historic",
+            "description": "Used to build memorials, monuments and wayside crosses, and on buildings to give them a historic style with ornate stone details."
+        },
+        {
+            "key": "historic",
+            "value": "memorial",
+            "description": "Generates a memorial shaped by memorial, a stone pillar by default."
+        },
+        {
+            "key": "memorial",
+            "description": "Picks the memorial's shape: plaque, statue on a pedestal, ground stone, stolperstein, cross, obelisk or stele."
+        },
+        {
+            "key": "memorial",
+            "value": "plaque",
+            "description": "Mounts a plaque with its inscription or name on a nearby wall, or on a small stand."
+        },
+        {
+            "key": "memorial",
+            "value": "stolperstein",
+            "description": "Sets a gold block into the ground."
+        },
+        {
+            "key": "historic",
+            "value": "monument",
+            "description": "Generates a polished andesite column on a stone brick platform, 5 to 20 blocks tall from height."
+        },
+        {
+            "key": "historic",
+            "value": "wayside_cross",
+            "description": "Generates a small stone brick cross."
+        },
+        {
+            "key": "attraction",
+            "description": "Builds funfair rides such as carousels, Ferris wheels and drop towers, sized from the outline and height and coloured from colour."
+        },
+        {
+            "key": "attraction",
+            "value": "carousel",
+            "description": "Builds a carousel."
+        },
+        {
+            "key": "attraction",
+            "value": "big_wheel",
+            "description": "Builds a Ferris wheel."
+        },
+        {
+            "key": "attraction",
+            "value": "amusement_ride",
+            "description": "Builds the ride its name suggests, or a generic spinning ride."
         },
         {
             "key": "barrier",
@@ -916,18 +2075,73 @@
         },
         {
             "key": "barrier",
+            "value": "city_wall",
+            "description": "Generates a stone brick wall three blocks high with a slab coping."
+        },
+        {
+            "key": "barrier",
+            "value": "retaining_wall",
+            "description": "Generates a stone brick wall one block high."
+        },
+        {
+            "key": "barrier",
+            "value": "guard_rail",
+            "description": "Generates a one-block-high stone brick wall rail."
+        },
+        {
+            "key": "barrier",
+            "value": "handrail",
+            "description": "Generates a one-block-high stone brick wall rail."
+        },
+        {
+            "key": "barrier",
+            "value": "cable_barrier",
+            "description": "Generates a one-block-high stone brick wall rail."
+        },
+        {
+            "key": "barrier",
+            "value": "jersey_barrier",
+            "description": "Generates a one-block-high light gray concrete barrier that stays in place on roads it crosses."
+        },
+        {
+            "key": "barrier",
+            "value": "block",
+            "description": "Generates block barriers using stone blocks."
+        },
+        {
+            "key": "barrier",
+            "value": "gate",
+            "description": "Places an oak fence gate where the node sits on a fence, wall or hedge line."
+        },
+        {
+            "key": "barrier",
+            "value": "swing_gate",
+            "description": "Places an oak fence gate where the node sits on a fence, wall or hedge line."
+        },
+        {
+            "key": "barrier",
+            "value": "sliding_gate",
+            "description": "Places an oak fence gate where the node sits on a fence, wall or hedge line."
+        },
+        {
+            "key": "barrier",
+            "value": "wicket_gate",
+            "description": "Places an oak fence gate where the node sits on a fence, wall or hedge line."
+        },
+        {
+            "key": "barrier",
+            "value": "kissing_gate",
+            "description": "Places an oak fence gate where the node sits on a fence, wall or hedge line."
+        },
+        {
+            "key": "barrier",
             "value": "stile",
             "description": "Generates stile barrier openings."
         },
         {
             "key": "barrier",
-            "value": "gate",
-            "description": "Generates gate barrier openings."
-        },
-        {
-            "key": "barrier",
-            "value": "swing_gate",
-            "description": "Generates swing gate barrier openings."
+            "value": "turnstile",
+            "description": "Leaves a one-block gap in the barrier line at the node."
         },
         {
             "key": "barrier",
@@ -936,8 +2150,28 @@
         },
         {
             "key": "barrier",
-            "value": "block",
-            "description": "Generates block barriers using stone blocks."
+            "value": "cycle_barrier",
+            "description": "Leaves a three-block gap in the barrier line at the node."
+        },
+        {
+            "key": "barrier",
+            "value": "cattle_grid",
+            "description": "Leaves a three-block gap in the barrier line at the node."
+        },
+        {
+            "key": "barrier",
+            "value": "chain",
+            "description": "Leaves a three-block gap in the barrier line at the node."
+        },
+        {
+            "key": "barrier",
+            "value": "toll_booth",
+            "description": "Leaves a three-block gap in the barrier line at the node."
+        },
+        {
+            "key": "barrier",
+            "value": "border_control",
+            "description": "Leaves a three-block gap in the barrier line at the node."
         },
         {
             "key": "barrier",
@@ -1039,11 +2273,6 @@
             "description": "Generates stone fences using stone brick walls."
         },
         {
-            "key": "fence_type",
-            "value": "glass",
-            "description": "Generates glass fences using glass blocks."
-        },
-        {
             "key": "material",
             "description": "Used to determine the material type for various structures."
         },
@@ -1063,132 +2292,46 @@
             "description": "Uses stone brick walls (representing metal) for barrier construction."
         },
         {
-            "key": "man_made",
-            "description": "Used to generate man-made structures including towers, chimneys, piers, and other constructed features."
+            "key": "material",
+            "value": "wood",
+            "description": "Uses oak fences for barrier construction."
         },
         {
-            "key": "man_made",
-            "value": "pier",
-            "description": "Generates pier structures with oak planks and support pillars."
+            "key": "emergency",
+            "value": "fire_hydrant",
+            "description": "Places a red hydrant with hydrant signs, or red banners where signs are unavailable."
         },
         {
-            "key": "man_made",
-            "value": "antenna",
-            "description": "Generates antenna/radio towers with iron blocks and bars."
+            "key": "fire_hydrant:type",
+            "description": "Underground, wall and pond hydrants are skipped."
         },
         {
-            "key": "man_made",
-            "value": "chimney",
-            "description": "Generates chimney structures with brick construction."
+            "key": "advertising",
+            "description": "Generates advertising structures: billboards, columns, flags and poster boxes."
         },
         {
-            "key": "man_made",
-            "value": "water_well",
-            "description": "Generates water well structures with stone and water."
+            "key": "advertising",
+            "value": "billboard",
+            "description": "Generates a poster billboard on two posts facing the nearest road when signage is enabled."
         },
         {
-            "key": "man_made",
-            "value": "water_tower",
-            "description": "Generates water tower structures with support legs and tank."
+            "key": "advertising",
+            "value": "column",
+            "description": "Generates an advertising column with posters on each face, or a plain green concrete column without signage."
         },
         {
-            "key": "tower:type",
-            "description": "Used to determine tower type for appropriate sizing."
+            "key": "advertising",
+            "value": "flag",
+            "description": "Generates a flagpole of iron bars with a coloured wool flag, 6 blocks tall unless height says otherwise."
         },
         {
-            "key": "tower:type",
-            "value": "communication",
-            "description": "Generates communication towers with standard height."
+            "key": "advertising",
+            "value": "poster_box",
+            "description": "Generates a lit poster box on iron bar legs with posters on both faces."
         },
         {
-            "key": "tower:type",
-            "value": "transmission",
-            "description": "Generates transmission towers with increased height."
-        },
-        {
-            "key": "aeroway",
-            "description": "Used to generate airport infrastructure including runways, taxiways and helipads (with occasional parked helicopters), plus aeroplanes along runways and taxiways."
-        },
-        {
-            "key": "aeroway",
-            "value": "jet_bridge",
-            "description": "Generates a jet bridge model running from the terminal building out to the aircraft stand."
-        },
-        {
-            "key": "area:aeroway",
-            "description": "Used to generate airport area infrastructure."
-        },
-        {
-            "key": "bridge",
-            "description": "Used to identify bridge structures (currently in development)."
-        },
-        {
-            "key": "tourism",
-            "description": "Used to generate tourism-related facilities and information points."
-        },
-        {
-            "key": "tourism",
-            "value": "information",
-            "description": "Generates tourism information points and boards."
-        },
-        {
-            "key": "information",
-            "description": "Used to determine the type of information facility."
-        },
-        {
-            "key": "information",
-            "value": "office",
-            "description": "Information offices are not generated as simple boards."
-        },
-        {
-            "key": "information",
-            "value": "visitor_centre",
-            "description": "Visitor centres are not generated as simple boards."
-        },
-        {
-            "key": "door",
-            "description": "Used to generate door openings in buildings."
-        },
-        {
-            "key": "entrance",
-            "description": "Used to generate building entrances and access points."
-        },
-        {
-            "key": "water",
-            "description": "Used to generate water areas and aquatic features."
-        },
-        {
-            "key": "service",
-            "value": "siding",
-            "description": "Generates railway sidings using stone brick slabs."
-        },
-        {
-            "key": "layer",
-            "description": "Used to handle multi-level features and underground/elevated structures. Negative values are ignored."
-        },
-        {
-            "key": "level",
-            "description": "Used to handle building levels and elevation, and to place shops, offices and practices on their storey when interiors are generated. Negative values are ignored."
-        },
-        {
-            "key": "shop",
-            "description": "Used to furnish the storey or unit a shop occupies when interiors are generated, with shelving, counters and wares matching what it sells."
-        },
-        {
-            "key": "office",
-            "description": "Used to furnish offices with desks, a reception and meeting rooms when interiors are generated."
-        },
-        {
-            "key": "craft",
-            "description": "Used to furnish workshops with workbenches and tools when interiors are generated."
-        },
-        {
-            "key": "healthcare",
-            "description": "Used to furnish practices with reception, waiting area and treatment rooms when interiors are generated."
-        },
-        {
-            "key": "religion",
-            "description": "Used to choose between pews and prayer carpets when furnishing places of worship."
+            "key": "wikidata",
+            "description": "Replaces known landmarks with bundled or Wikimedia Commons 3D models matched by Wikidata ID, and adds facade detail to buildings."
         }
     ]
 }
