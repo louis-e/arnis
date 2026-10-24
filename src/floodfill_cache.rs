@@ -365,8 +365,7 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
         }
     }
     // Pedestrian plazas and other highway=* areas are flood-filled, not stamped
-    // along a centerline, so the road mask does not cover them. Aprons and other
-    // paved airport areas are filled the same way.
+    // along a centerline, so the road mask does not cover them.
     (way.tags.contains_key("highway") && way.tags.get("area").is_some_and(|v| v == "yes"))
         || aeroway_area_block(way).is_some()
 }

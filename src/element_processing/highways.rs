@@ -127,8 +127,7 @@ fn precompute_row_medians(
 /// consistently across the file.
 const DEFAULT_ROAD_MIX: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
 
-/// A road closed for building work (`highway=construction`): bare earth, whatever surface the
-/// finished road is going to get.
+/// Bare earth for a road under construction, whatever its final surface.
 const CONSTRUCTION_BED: &[Block] = &[COARSE_DIRT, GRAVEL, DIRT];
 
 /// Blocks that a road write must NOT overwrite. Intentionally narrow:

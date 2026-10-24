@@ -265,9 +265,7 @@ fn node_role(node: &ProcessedNode, scale: f64) -> Option<(NodeRole, usize)> {
         Some("entrance" | "stile" | "horse_stile" | "turnstile" | "full-height_turnstile") => {
             (NodeRole::Opening, 1)
         }
-        // Barriers a vehicle gets through: the line stays open over a lane's width. Of these
-        // only a bollard places something on its node (`generate_barrier_nodes`); a lift
-        // gate, chain or cattle grid leaves the gap clear.
+        // Open over a lane's width; only a bollard places something on its node.
         Some(
             "lift_gate" | "cycle_barrier" | "motorcycle_barrier" | "cattle_grid" | "border_control"
             | "toll_booth" | "sally_port" | "bollard" | "chain" | "rope" | "height_restrictor",

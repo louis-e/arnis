@@ -367,14 +367,10 @@ pub fn fetch_data_from_overpass(
     let api_servers: Vec<&str> = vec![];
     let fallback_api_servers: Vec<&str> = vec![];
 
-    // Generate Overpass API query for bounding box. It selects what the tile archive carries
-    // (arnis-tiles `tags.rs`), so a fallback run gets the same data:
-    // - nodes and relations with one of the listed keys,
-    // - every tagged way, because ways render from keys the list does not name, such as
-    //   `area:aeroway`, and an untagged way that is no relation member draws nothing,
-    // - then ocean and coastal features are subtracted from all of them. ESA WorldCover
-    //   resolves the sea more reliably at 10m (LC_WATER), while inland water (lakes, rivers,
-    //   ponds) still comes from OSM.
+    // Generate Overpass API query for bounding box, selecting what the tile archive carries.
+    // Ocean/coastal elements are excluded because ESA WorldCover satellite data
+    // handles ocean detection more reliably at 10m resolution (LC_WATER class).
+    // Inland water (lakes, rivers, ponds) is still fetched from OSM.
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
