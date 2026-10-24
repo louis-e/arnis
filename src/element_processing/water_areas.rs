@@ -1,7 +1,7 @@
 use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::element_processing::bridges::BridgeSurfaceMap;
-use crate::floodfill_cache::RoadMaskBitmap;
+use crate::floodfill_cache::{hole_groups, RoadMaskBitmap};
 use crate::ground::Ground;
 use crate::water_depth::{carve_water_column, BigWaterField};
 use crate::{
@@ -168,10 +168,13 @@ fn relation_rings(
     }
 
     super::merge_way_segments(&mut inners);
-    if !verify_closed_rings(&inners) {
-        println!("Skipping relation {} due to invalid polygon", element.id);
-        return None;
-    }
+    // A broken inner ring loses its island, not the whole lake.
+    inners.retain(|ring| {
+        ring.len() >= 3 && {
+            let (first, last) = (&ring[0], &ring[ring.len() - 1]);
+            first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
+        }
+    });
 
     Some((outers, inners))
 }
@@ -324,17 +327,6 @@ fn collect_ring_edges(ring: &[XZPoint]) -> Vec<ScanlineEdge> {
     edges
 }
 
-/// Collects edges from multiple rings into a single list.
-/// Used for inner rings where even-odd on combined edges is correct
-/// (inner rings of a valid multipolygon do not overlap).
-fn collect_all_ring_edges(rings: &[Vec<XZPoint>]) -> Vec<ScanlineEdge> {
-    let mut edges = Vec::new();
-    for ring in rings {
-        edges.extend(collect_ring_edges(ring));
-    }
-    edges
-}
-
 /// Computes the integer x-spans that are "inside" the polygon rings at
 /// scanline `z`, using the even-odd (parity) rule.
 ///
@@ -458,25 +450,53 @@ fn subtract_spans(a: &[(i32, i32)], b: &[(i32, i32)]) -> Vec<(i32, i32)> {
 
 /// Polygon edges prepared for scanline filling: one edge list per outer ring
 /// (unioned per row, so overlapping outer rings still fill correctly) and the
-/// combined inner-ring edges (subtracted).
-struct PolygonEdges {
-    outer_groups: Vec<Vec<ScanlineEdge>>,
+/// combined edges of the inner rings that cut them (subtracted).
+struct HoleGroup {
+    outers: Vec<Vec<ScanlineEdge>>,
     inner: Vec<ScanlineEdge>,
+}
+
+/// Outer rings grouped by the holes that cut them, so a pond on an island in a hole
+/// keeps its water.
+struct PolygonEdges {
+    groups: Vec<HoleGroup>,
 }
 
 impl PolygonEdges {
     fn new(outers: &[Vec<XZPoint>], inners: &[Vec<XZPoint>]) -> Self {
-        Self {
-            outer_groups: outers.iter().map(|ring| collect_ring_edges(ring)).collect(),
-            inner: collect_all_ring_edges(inners),
-        }
+        let groups = hole_groups(outers, inners, |p: &XZPoint| (p.x, p.z))
+            .into_iter()
+            .map(|(outer, cutting)| HoleGroup {
+                outers: outer
+                    .iter()
+                    .map(|&o| collect_ring_edges(&outers[o]))
+                    .collect(),
+                inner: cutting
+                    .iter()
+                    .flat_map(|&i| collect_ring_edges(&inners[i]))
+                    .collect(),
+            })
+            .collect();
+        Self { groups }
     }
 
     /// Filled x-spans of row `z`, clamped to `[min_x, max_x]`.
     fn row_spans(&self, z: i32, min_x: i32, max_x: i32) -> Vec<(i32, i32)> {
-        let z_f = z as f64;
+        let mut spans: Vec<(i32, i32)> = Vec::new();
+        for group in &self.groups {
+            let group_spans = group.row_spans(z as f64, min_x, max_x);
+            if !group_spans.is_empty() {
+                spans = union_spans(&spans, &group_spans);
+            }
+        }
+        spans
+    }
+}
+
+impl HoleGroup {
+    fn row_spans(&self, z_f: f64, min_x: i32, max_x: i32) -> Vec<(i32, i32)> {
         let mut outer_spans: Vec<(i32, i32)> = Vec::new();
-        for ring_edges in &self.outer_groups {
+        for ring_edges in &self.outers {
             let ring_spans = compute_scanline_spans(ring_edges, z_f, min_x, max_x);
             if !ring_spans.is_empty() {
                 outer_spans = union_spans(&outer_spans, &ring_spans);
@@ -854,6 +874,26 @@ mod tests {
             ],
             tags,
         }
+    }
+
+    #[test]
+    fn a_pond_on_an_island_keeps_its_water() {
+        let square = |x0: i32, x1: i32| {
+            [(x0, x0), (x1, x0), (x1, x1), (x0, x1), (x0, x0)]
+                .iter()
+                .map(|&(x, z)| XZPoint::new(x, z))
+                .collect::<Vec<_>>()
+        };
+        let edges = PolygonEdges::new(&[square(0, 60), square(25, 35)], &[square(15, 45)]);
+        let water = |x: i32| {
+            edges
+                .row_spans(30, 0, 60)
+                .iter()
+                .any(|&(a, b)| (a..=b).contains(&x))
+        };
+        assert!(water(5), "the lake");
+        assert!(!water(20), "the island");
+        assert!(water(30), "the pond on the island");
     }
 
     /// A still surface sits up to `MAX_STILL_FILL_DROP` over the terrain, so laying

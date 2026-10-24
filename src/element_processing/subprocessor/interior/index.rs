@@ -3,6 +3,7 @@
 use super::uses::{parse_level, use_from_area, use_from_tags, Tenant, Use};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::buildings::relation_outer_rings;
+use crate::floodfill_cache::hole_groups;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode};
 use fnv::FnvHashMap;
 use std::collections::HashMap;
@@ -340,11 +341,23 @@ impl InteriorUseIndex {
         };
         // Best area so far per building: (rank, area size, use).
         let mut best_area: FnvHashMap<u64, (u8, i64, Use)> = FnvHashMap::default();
-        let mut add_area = |rings: &[Outline], use_: Use| {
-            for ring in rings {
+        // Each outer ring less the holes that cut it, so a building in a hole is left out
+        // while one on an island in it, or where two outer rings overlap, is not.
+        let mut add_area = |rings: &[Outline], holes: &[Outline], use_: Use| {
+            let ring_points = |r: &[Outline]| -> Vec<Vec<(i32, i32)>> {
+                r.iter().map(|o| o.ring.clone()).collect()
+            };
+            let groups = hole_groups(&ring_points(rings), &ring_points(holes), |&p| p);
+            let cut = |r: usize, cx: i32, cz: i32| {
+                groups
+                    .iter()
+                    .find(|(members, _)| members.contains(&r))
+                    .is_some_and(|(_, cutting)| cutting.iter().any(|&h| holes[h].contains(cx, cz)))
+            };
+            for (r, ring) in rings.iter().enumerate() {
                 for o in grid.within(ring.min, ring.max) {
                     let (cx, cz) = o.center();
-                    if !rings.iter().any(|r| r.contains(cx, cz)) {
+                    if !ring.contains(cx, cz) || cut(r, cx, cz) {
                         continue;
                     }
                     let candidate = (area_rank(use_), -ring.area, use_);
@@ -383,26 +396,30 @@ impl InteriorUseIndex {
                         }
                     }
                     if let Some(use_) = use_from_area(&way.tags) {
-                        add_area(std::slice::from_ref(&outline), use_);
+                        add_area(std::slice::from_ref(&outline), &[], use_);
                     }
                 }
                 ProcessedElement::Relation(rel) if !is_building(&rel.tags) => {
                     let Some(use_) = use_from_area(&rel.tags) else {
                         continue;
                     };
-                    let mut rings: Vec<Vec<ProcessedNode>> = rel
-                        .members
-                        .iter()
-                        .filter(|m| m.role == ProcessedMemberRole::Outer)
-                        .map(|m| m.way.nodes.clone())
-                        .collect();
-                    crate::element_processing::merge_way_segments(&mut rings);
-                    let outlines: Vec<Outline> = rings
-                        .iter()
-                        .filter(|r| r.len() >= 4)
-                        .filter_map(|r| Outline::new(rel.id, r, &rel.tags))
-                        .collect();
-                    add_area(&outlines, use_);
+                    let outlines_of = |role: ProcessedMemberRole| -> Vec<Outline> {
+                        let mut rings: Vec<Vec<ProcessedNode>> = rel
+                            .members
+                            .iter()
+                            .filter(|m| m.role == role)
+                            .map(|m| m.way.nodes.clone())
+                            .collect();
+                        crate::element_processing::merge_way_segments(&mut rings);
+                        rings
+                            .iter()
+                            .filter(|r| r.len() >= 4)
+                            .filter_map(|r| Outline::new(rel.id, r, &rel.tags))
+                            .collect()
+                    };
+                    let outlines = outlines_of(ProcessedMemberRole::Outer);
+                    let holes = outlines_of(ProcessedMemberRole::Inner);
+                    add_area(&outlines, &holes, use_);
                 }
                 _ => {}
             }
@@ -472,6 +489,58 @@ mod tests {
             "the school outranks the land use"
         );
         assert_eq!(index.area(2), Some(Use::Factory));
+    }
+
+    #[test]
+    fn a_building_in_a_hole_of_an_area_does_not_take_its_use() {
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        let xz = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let member = |role, id, x0, z0, x1, z1| ProcessedMember {
+            role,
+            way: std::sync::Arc::new(rect_way(id, x0, z0, x1, z1, &[])),
+        };
+        let elements = vec![
+            ProcessedElement::Way(rect_way(1, 10, 10, 20, 20, &[("building", "yes")])),
+            ProcessedElement::Way(rect_way(2, 60, 60, 70, 70, &[("building", "yes")])),
+            ProcessedElement::Way(rect_way(3, 95, 95, 105, 105, &[("building", "yes")])),
+            ProcessedElement::Relation(ProcessedRelation {
+                id: 9,
+                tags: tag_map(&[("landuse", "industrial"), ("type", "multipolygon")]),
+                members: vec![
+                    member(ProcessedMemberRole::Outer, 50, 0, 0, 150, 150),
+                    member(ProcessedMemberRole::Inner, 51, 40, 40, 120, 120),
+                    member(ProcessedMemberRole::Outer, 52, 90, 90, 110, 110),
+                ],
+            }),
+        ];
+        let index = InteriorUseIndex::build(&elements, &xz);
+        assert_eq!(index.area(1), Some(Use::Factory));
+        assert_eq!(index.area(2), None, "it stands in the hole");
+        assert_eq!(
+            index.area(3),
+            Some(Use::Factory),
+            "on an island in the hole"
+        );
+    }
+
+    #[test]
+    fn a_building_where_two_outer_rings_overlap_takes_their_use() {
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        let xz = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let member = |id, x0, z0, x1, z1| ProcessedMember {
+            role: ProcessedMemberRole::Outer,
+            way: std::sync::Arc::new(rect_way(id, x0, z0, x1, z1, &[])),
+        };
+        let elements = vec![
+            ProcessedElement::Way(rect_way(1, 60, 60, 70, 70, &[("building", "yes")])),
+            ProcessedElement::Relation(ProcessedRelation {
+                id: 9,
+                tags: tag_map(&[("landuse", "industrial"), ("type", "multipolygon")]),
+                members: vec![member(50, 0, 0, 100, 100), member(51, 50, 50, 150, 150)],
+            }),
+        ];
+        let index = InteriorUseIndex::build(&elements, &xz);
+        assert_eq!(index.area(1), Some(Use::Factory));
     }
 
     #[test]
