@@ -8,12 +8,14 @@ use std::time::Duration;
 #[command(author, version, about)]
 pub struct Args {
     /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng).
-    /// Required unless --file supplies a local .osm/.xml file to derive it from
-    /// (terrain-only mode ignores --file, so it always requires --bbox).
+    /// Required unless --file supplies a local OSM file to derive it from. Below scale 0.3
+    /// and on the Moon or Mars no OSM data is loaded and --file is ignored, so there it is
+    /// always required.
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
     pub bbox: Option<LLBBox>,
 
-    /// JSON file containing OSM data (optional)
+    /// Local OSM data to generate from instead of downloading it: an .osm/.xml file (OSM XML)
+    /// or Overpass JSON. Without --bbox, the area is taken from the file.
     #[arg(long, group = "location")]
     pub file: Option<String>,
 
@@ -21,8 +23,9 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub save_json_file: Option<String>,
 
-    /// Output directory for the generated world (required for Java, optional for Bedrock).
-    /// Use --output-dir (or the deprecated --path alias) to specify where the world is created.
+    /// Folder the new world is created in, e.g. your Minecraft saves folder. Required for
+    /// Java (and the saves folder with --one-world). Bedrock defaults to the Desktop and
+    /// Luanti to its worlds folder. --path is a deprecated alias.
     #[arg(long = "output-dir", alias = "path")]
     pub path: Option<PathBuf>,
 
@@ -34,7 +37,8 @@ pub struct Args {
     #[arg(long)]
     pub luanti: bool,
 
-    /// Downloader method (requests/curl/wget) (optional)
+    /// How Overpass is queried when the data comes from there: requests (built in), curl or
+    /// wget
     #[arg(long, default_value = "requests")]
     pub downloader: String,
 
@@ -207,7 +211,7 @@ pub struct Args {
     pub rotation: f64,
 
     /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
-    /// Bedrock 1.21.40+: Y=-512..512). Both are experimental.
+    /// Bedrock 1.21.40+: up to Y=511). Both are experimental.
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
 
@@ -235,7 +239,8 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub map_preview: bool,
 
-    /// Give the player a locked map item showing the whole world (Java only)
+    /// Give the player a map: on Java a locked map item showing the whole world, on Bedrock
+    /// the game's starting map
     #[arg(long = "map-item", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub map_item: bool,
 
