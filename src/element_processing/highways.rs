@@ -3169,10 +3169,12 @@ pub(crate) fn highway_block_range(
     tags: &HashMap<String, String>,
     scale: f64,
 ) -> i32 {
-    // A road under construction is as wide as the road it is going to be.
-    let highway_type = match (highway_type, tags.get("construction")) {
-        ("construction", Some(future)) => future.as_str(),
-        _ => highway_type,
+    // A road under construction is as wide as the finished road.
+    let highway_type = if highway_type == "construction" {
+        tags.get("construction")
+            .map_or(highway_type, String::as_str)
+    } else {
+        highway_type
     };
     let (mut block_range, scales_with_lanes): (i32, bool) = match highway_type {
         "footway" | "pedestrian" => (1, false),
