@@ -1,7 +1,7 @@
 {
     "data_format": 1,
     "data_url": "https://raw.githubusercontent.com/louis-e/arnis/main/taginfo.json",
-    "data_updated": "20261024T143028Z",
+    "data_updated": "20261024T152102Z",
     "project": {
         "name": "Arnis",
         "description": "Generate real life cities in Minecraft. Creates complex and accurate Minecraft Java Edition, Bedrock Edition and Luanti worlds that reflect real-world geography, topography, and architecture.",
@@ -493,7 +493,7 @@
         },
         {
             "key": "construction",
-            "description": "Names the future type of a building=construction: office, commercial, retail, hotel, hospital and university frames get glass cladding, others masonry."
+            "description": "Names what a road or building under construction is going to be: a highway=construction road gets that road's width, and office, commercial, retail, hotel, hospital and university building frames get glass cladding, others masonry."
         },
         {
             "key": "door",
@@ -622,6 +622,16 @@
         },
         {
             "key": "highway",
+            "value": "construction",
+            "description": "Generates a bare earth road bed as wide as the road it is going to be, without lane lines or street lamps."
+        },
+        {
+            "key": "highway",
+            "value": "proposed",
+            "description": "Proposed roads are ignored during generation."
+        },
+        {
+            "key": "highway",
             "value": "street_lamp",
             "description": "Generates a street lamp of a stone brick wall post with a lit redstone lamp on top."
         },
@@ -657,7 +667,7 @@
         {
             "key": "footway",
             "value": "crossing",
-            "description": "Paints the crossing over the road as white zebra bars on the road's own surface, unless crossing or crossing:markings say it is unmarked or lined."
+            "description": "Paints the crossing over the road as white zebra bars on the road's own surface, unless its tags, on the way or on its crossing node, say it is unmarked or lined."
         },
         {
             "key": "crossing",
@@ -1078,7 +1088,7 @@
         },
         {
             "key": "aeroway",
-            "description": "Used to generate airport infrastructure including runways, taxiways and helipads (with occasional parked helicopters), plus aeroplanes along runways and taxiways and at aircraft stands."
+            "description": "Used to generate airport infrastructure including runways, taxiways, aprons and helipads (with occasional parked helicopters), plus aeroplanes along runways and taxiways and at aircraft stands."
         },
         {
             "key": "aeroway",
@@ -1106,8 +1116,23 @@
             "description": "Generates a jet bridge model running from the terminal building out to the aircraft stand."
         },
         {
+            "key": "aeroway",
+            "value": "apron",
+            "description": "Fills the apron with light gray concrete, keeping grass mapped inside it."
+        },
+        {
+            "key": "aeroway",
+            "value": "taxilane",
+            "description": "Draws a narrow lead-in line with a yellow centre stripe across the apron."
+        },
+        {
+            "key": "aeroway",
+            "value": "stopway",
+            "description": "Generates gray runway pavement without markings."
+        },
+        {
             "key": "area:aeroway",
-            "description": "Removes buildings standing on runway areas and draws light gray concrete along the area's outline."
+            "description": "Fills runway, stopway and blast pad areas with gray and taxiway areas with light gray concrete, and removes buildings standing on runway areas."
         },
         {
             "key": "aerialway",
@@ -1394,7 +1419,7 @@
         },
         {
             "key": "natural",
-            "description": "Used to generate natural features including trees, water bodies, wetlands, beaches, and terrain features."
+            "description": "Used to generate natural features including trees, water bodies, wetlands, beaches, and terrain features. Names of landforms such as peninsulas, valleys and mountain ranges are ignored, since they take in towns and fields alike."
         },
         {
             "key": "natural",
@@ -1468,6 +1493,11 @@
         },
         {
             "key": "natural",
+            "value": "rock",
+            "description": "Generates exposed rock like natural=bare_rock."
+        },
+        {
+            "key": "natural",
             "value": "blockfield",
             "description": "Generates rocky terrain with cobblestone blocks."
         },
@@ -1485,11 +1515,6 @@
             "key": "natural",
             "value": "wetland",
             "description": "Generates wetland areas with appropriate vegetation and water features."
-        },
-        {
-            "key": "natural",
-            "value": "mountain_range",
-            "description": "Generates mountainous terrain with rock clusters and varied materials."
         },
         {
             "key": "natural",
