@@ -74,7 +74,9 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
         landuse_paints_ground(tags)
     } else if let Some(natural) = tags.get("natural") {
         // natural=* + amenity=fountain falls through to the fountain handler.
-        tags.get("amenity").map(String::as_str) != Some("fountain") && natural != "tree_row"
+        tags.get("amenity").map(String::as_str) != Some("fountain")
+            && natural != "tree_row"
+            && !crate::element_processing::natural::is_landform(natural)
     } else if tags.contains_key("amenity") {
         false
     } else if tags.contains_key("leisure") {
@@ -2628,6 +2630,9 @@ mod tests {
     #[test]
     fn water_relations_are_excluded() {
         assert!(ground_fill_area(&relation(1, 10, &[("natural", "water")])).is_none());
+        // A peninsula or mountain range names a region; it fills no ground.
+        assert!(ground_fill_area(&relation(3, 10, &[("natural", "peninsula")])).is_none());
+        assert!(ground_fill_area(&way(4, 10, &[("natural", "mountain_range")])).is_none());
         assert!(ground_fill_area(&relation(2, 10, &[("water", "lake")])).is_none());
         assert!(ground_fill_area(&relation(3, 10, &[("natural", "wood")])).is_some());
         // Only leisure=park relations reach a ground-fill handler.
