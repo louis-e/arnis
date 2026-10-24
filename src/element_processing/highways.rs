@@ -1694,7 +1694,7 @@ fn generate_highways_internal(
             let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize;
 
             // Painted pedestrian crossing, kept to the carriageways it runs over.
-            let crossing_paint = markings.crossing_way_paint(element.tags());
+            let crossing_paint = markings.crossing_way_paint(way);
             let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
             // Surface of the carriageway under a crossing cell; None off the road, and
             // everywhere for a crossing that shares no node with a road.
