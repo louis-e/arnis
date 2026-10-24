@@ -2,7 +2,7 @@
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases) [![Download here](https://img.shields.io/badge/Download-here-green)](https://github.com/louis-e/arnis/releases) [![Discord](https://img.shields.io/discord/1326192999738249267?label=Discord&color=%237289da)](https://discord.gg/mA2g69Fhxq)
 
-Arnis creates complex and accurate Minecraft Java Edition (1.17+), Bedrock Edition, and Luanti (Minetest) worlds that reflect real-world geography, topography, and architecture.
+Arnis creates complex and accurate Minecraft Java Edition (1.21.4+), Bedrock Edition, and Luanti (Minetest) worlds that reflect real-world geography, topography, and architecture.
 
 This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
 Generate your hometown, big cities, and natural landscapes with ease!
@@ -16,14 +16,14 @@ _**Want mobile generation or larger map sizes?** [MapSmith](https://arnismc.com/
 <img width="60%" src="assets/git/gui.png"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
 
-Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
+Choose your area on the map using the rectangle tool, then simply click on <i>Start Generation</i>!
 Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
 
 ## 📚 Documentation
 
 <img src="assets/git/documentation.png" width="100%" alt="Banner">
 
-Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering topics such as technical explanations, FAQs, contribution guidelines and roadmaps.
+Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering topics such as generation settings, command line usage, technical explanations, FAQs and contribution guidelines.
 
 [backgroundvid.webm](https://github.com/user-attachments/assets/420acc19-a850-418e-8397-1a45b05582ab)
 
@@ -38,31 +38,14 @@ Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/
 #### How to contribute
 This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above-mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
-Command line Build: ```cargo run --release --no-default-features -- --output-dir="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
+Command line Build: ```cargo run --release --no-default-features -- --output-dir="C:/YOUR_PATH/.minecraft/saves" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
 GUI Build: ```cargo run --release```<br>
 
-`--mode` selects what gets generated, mirroring the GUI's generation mode dropdown:
-
-| Mode | Result |
-| --- | --- |
-| `geo-terrain` (default) | Buildings, roads and other OSM objects on real elevation terrain |
-| `geo-only` | OSM objects on flat ground |
-| `terrain-only` | Real elevation terrain with OpenStreetMap water and nature, but no buildings, roads or other man-made objects (`--overture` has no effect). Built-up land and fields turn back into the natural cover around them, and bridges and piers into the water they cross |
-| `blueprint` | Roads, rails, water and nature on real elevation terrain, with every building drawn only as a light blue outline on the ground to build on. 3D models, props, interiors and facades are off |
-
-Two settings work with any mode and can be combined: `--winter` covers the ground, roofs and trees in snow, freezes rivers and lakes from their shores and makes every biome snowy, and `--post-apocalyptic` brings buildings partly down, breaks their walls and windows open, cracks the roads with grass growing through, piles rubble in the streets with the odd fire still burning in it, lets moss and vines climb the walls and puts every light out.
-
-`--one-world` generates into one persistent Java world that every later run extends; `--output-dir` is then the saves folder and `--world-name` picks the world in it:
-
-```
-cargo run --release --no-default-features -- --one-world --output-dir="C:/YOUR_PATH/.minecraft/saves" --world-name="My City" --bbox="min_lat,min_lng,max_lat,max_lng"
-```
-
-Every area is placed in the same Web Mercator frame, so neighbouring areas join seamlessly; the first run fixes scale, terrain mode and build height, and rotation is off. In the GUI the same mode is the *One World* toggle under Settings > World.
+All command line options, like the generation modes, winter and One World, are explained on the [Command Line Usage](https://github.com/louis-e/arnis/wiki/Command-Line-Usage) wiki page.
 
 After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
-If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`
+If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves --bbox="min_lat,min_lng,max_lat,max_lng"`
 
 ## :star: Star History
 
