@@ -74,6 +74,14 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
         }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
     });
+    // A proposed or razed road is not on the ground, so no part of Arnis should take it for
+    // one: no surface, no bridge deck, no road mask, no junction paint.
+    if matches!(
+        tags.get("highway").map(String::as_str),
+        Some("proposed" | "razed")
+    ) {
+        tags.remove("highway");
+    }
     tags
 }
 
@@ -3870,5 +3878,32 @@ mod priority_sort_tests {
         sort_by_priority(&mut elements);
         let order: Vec<u64> = elements.iter().map(ProcessedElement::id).collect();
         assert_eq!(order, vec![6, 5, 3, 4, 2, 1]);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn tags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn roads_that_are_not_built_lose_their_highway_tag() {
+        for value in ["proposed", "razed"] {
+            let kept = filter_tags(tags(&[("highway", value), ("bridge", "yes")]));
+            assert!(!kept.contains_key("highway"), "highway={value} kept");
+            assert_eq!(kept.get("bridge").map(String::as_str), Some("yes"));
+        }
+        // A road being built is on the ground, so it stays a road.
+        let kept = filter_tags(tags(&[("highway", "construction")]));
+        assert_eq!(
+            kept.get("highway").map(String::as_str),
+            Some("construction")
+        );
     }
 }

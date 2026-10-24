@@ -127,6 +127,10 @@ fn precompute_row_medians(
 /// consistently across the file.
 const DEFAULT_ROAD_MIX: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
 
+/// A road closed for building work (`highway=construction`): bare earth, whatever surface the
+/// finished road is going to get.
+const CONSTRUCTION_BED: &[Block] = &[COARSE_DIRT, GRAVEL, DIRT];
+
 /// Blocks that a road write must NOT overwrite. Intentionally narrow:
 /// - `GRAY_CONCRETE_POWDER`, `CYAN_TERRACOTTA`: the default asphalt mix,
 ///   preserved so two asphalt roads overlapping produce a consistent
@@ -188,6 +192,9 @@ pub(crate) fn surface_palette(
     highway_type: &str,
     tags: &HashMap<String, String>,
 ) -> &'static [Block] {
+    if highway_type == "construction" {
+        return CONSTRUCTION_BED;
+    }
     if highway_type == "cycleway" {
         if let Some(red) = cycleway_palette(tags) {
             return red;
@@ -1573,6 +1580,7 @@ fn generate_highways_internal(
                 && !is_indoor
                 && layer_value_effective == 0
                 && highway_type != "steps"
+                && highway_type != "construction"
             {
                 place_way_lamps(editor, way, block_range, road_mask);
             }
@@ -2920,6 +2928,10 @@ pub(crate) fn highway_default_lanes(highway_type: &str) -> i32 {
 
 /// Lanes the paint divides a way into; 1 means no lane lines.
 pub(crate) fn lane_marking_count(highway_type: &str, tags: &HashMap<String, String>) -> i32 {
+    // Nothing is painted on a road that is still being built.
+    if highway_type == "construction" {
+        return 1;
+    }
     let painted = tags.get("lane_markings").map(String::as_str);
     if painted == Some("no") {
         return 1;
@@ -3081,6 +3093,11 @@ pub(crate) fn highway_block_range(
     tags: &HashMap<String, String>,
     scale: f64,
 ) -> i32 {
+    // A road under construction is as wide as the road it is going to be.
+    let highway_type = match (highway_type, tags.get("construction")) {
+        ("construction", Some(future)) => future.as_str(),
+        _ => highway_type,
+    };
     let (mut block_range, scales_with_lanes): (i32, bool) = match highway_type {
         "footway" | "pedestrian" => (1, false),
         // Bicycle paths are 2-4 m across; at the road default they swallowed the verge
