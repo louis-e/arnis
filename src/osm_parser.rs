@@ -115,6 +115,17 @@ pub struct OsmData {
     elements: Vec<OsmElement>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
+    #[serde(default, rename = "bounds", skip_serializing_if = "Option::is_none")]
+    saved_bounds: Option<SavedBounds>,
+}
+
+/// The `bounds` layout of the OSM API's JSON.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+struct SavedBounds {
+    minlat: f64,
+    minlon: f64,
+    maxlat: f64,
+    maxlon: f64,
 }
 
 impl OsmData {
@@ -128,6 +139,7 @@ impl OsmData {
         OsmData {
             elements,
             remark: None,
+            saved_bounds: None,
         }
     }
 
@@ -140,7 +152,23 @@ impl OsmData {
         OsmData {
             elements: Vec::new(),
             remark: None,
+            saved_bounds: None,
         }
+    }
+
+    /// The requested area, which a saved copy regenerates instead of the wider node extent.
+    pub fn set_saved_bounds(&mut self, bbox: &LLBBox) {
+        self.saved_bounds = Some(SavedBounds {
+            minlat: bbox.min().lat(),
+            minlon: bbox.min().lng(),
+            maxlat: bbox.max().lat(),
+            maxlon: bbox.max().lng(),
+        });
+    }
+
+    pub fn saved_bounds(&self) -> Option<LLBBox> {
+        let b = self.saved_bounds?;
+        LLBBox::new(b.minlat, b.minlon, b.maxlat, b.maxlon).ok()
     }
 
     /// Bounding box spanning every node with coordinates, or None when the data has no
@@ -389,6 +417,7 @@ pub fn parse_osm_xml(
         OsmData {
             elements,
             remark: None,
+            saved_bounds: None,
         },
         bounds,
     ))

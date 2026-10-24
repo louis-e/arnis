@@ -292,7 +292,7 @@ fn run_cli() {
             // Report where a derived bbox came from (an explicit --bbox is echoed by the parse step).
             if args.bbox.is_none() {
                 let source = if file_bounds.is_some() {
-                    "file <bounds> element"
+                    "the bounds in the file"
                 } else {
                     "node coordinate extent"
                 };

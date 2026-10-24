@@ -209,9 +209,8 @@ const OSM_XML_EXTENSIONS: &[&str] = &["osm", "xml"];
 
 /// Loads OSM data from a local file. `.osm`/`.xml` files are parsed as raw OSM XML (offline,
 /// avoiding Overpass size limits) and their `<bounds>` element, if present, is returned so the
-/// caller can auto-derive the bounding box. Any other extension keeps the original behavior:
-/// deserializing Arnis's own JSON dump (`{"elements":[...],"remark":...}`), which carries no
-/// bounds (returned as None).
+/// caller can auto-derive the bounding box. Any other extension is read as Overpass JSON
+/// (`{"elements":[...]}`), whose `bounds` are returned when `--save-json-file` wrote them.
 pub fn fetch_data_from_file(
     file: &str,
 ) -> Result<(OsmData, Option<LLBBox>), Box<dyn std::error::Error>> {
@@ -236,7 +235,8 @@ pub fn fetch_data_from_file(
     } else {
         let mut deserializer = serde_json::Deserializer::from_reader(reader);
         let data: OsmData = OsmData::deserialize(&mut deserializer)?;
-        Ok((data, None))
+        let bounds = data.saved_bounds();
+        Ok((data, bounds))
     }
 }
 
@@ -311,9 +311,9 @@ pub fn fetch_osm_data(
         }
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
         match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url, scale) {
-            Ok(data) => {
+            Ok(mut data) => {
                 if let Some(path) = save_file {
-                    save_osm_json(&data, path)?;
+                    save_osm_json(&mut data, &bbox, path)?;
                 }
                 return Ok(data);
             }
@@ -335,9 +335,13 @@ pub fn fetch_osm_data(
     fetch_data_from_overpass(bbox, debug, download_method, save_file)
 }
 
-/// Writes the data the archive gave as Overpass JSON, the format `--file` reads back. The
-/// Overpass path saves the response itself.
-fn save_osm_json(data: &OsmData, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// Saves the data as Overpass JSON with the requested area, for `--file` to read back.
+fn save_osm_json(
+    data: &mut OsmData,
+    bbox: &LLBBox,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    data.set_saved_bounds(bbox);
     let mut writer = BufWriter::new(File::create(path)?);
     serde_json::to_writer(&mut writer, data)?;
     writer.flush()?;
@@ -483,7 +487,7 @@ pub fn fetch_data_from_overpass(
         // while a merely overloaded instance deserves one second opinion. Without
         // this the user waits out all six timeouts (~30 min) for a foregone answer.
         const TRUNCATIONS_BEFORE_GIVING_UP: usize = 2;
-        let (response, data): (String, OsmData) = 'server_loop: {
+        let mut data: OsmData = 'server_loop: {
             for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
                     120
@@ -504,7 +508,7 @@ pub fn fetch_data_from_overpass(
                 let result = result.and_then(|body| {
                     answered += 1;
                     match parse_overpass_response(&body) {
-                        Ok(data) => Ok((body, data)),
+                        Ok(data) => Ok(data),
                         Err(e) => {
                             if matches!(e, ResponseError::Truncated(_)) {
                                 truncated += 1;
@@ -595,9 +599,7 @@ pub fn fetch_data_from_overpass(
         };
 
         if let Some(save_file) = save_file {
-            let mut file: File = File::create(save_file)?;
-            file.write_all(response.as_bytes())?;
-            println!("API response saved to: {save_file}");
+            save_osm_json(&mut data, &bbox, save_file)?;
         }
 
         if data.is_empty() {
@@ -682,16 +684,17 @@ mod save_tests {
             {"type":"relation","id":4,"members":[{"type":"way","ref":3,"role":"outer"}],
              "tags":{"type":"multipolygon","natural":"wood"}}
         ]}"#;
-        let data: OsmData = serde_json::from_str(json).unwrap();
+        let mut data: OsmData = serde_json::from_str(json).unwrap();
+        let bbox = LLBBox::new(54.602, 9.902, 54.608, 9.908).unwrap();
         let path = std::env::temp_dir().join(format!("arnis-save-{}.json", std::process::id()));
         let path = path.to_str().unwrap();
-        save_osm_json(&data, path).unwrap();
-        let (back, _) = fetch_data_from_file(path).unwrap();
+        save_osm_json(&mut data, &bbox, path).unwrap();
+        let (back, bounds) = fetch_data_from_file(path).unwrap();
         let _ = std::fs::remove_file(path);
 
         let saved = serde_json::to_value(&data).unwrap();
         assert_eq!(serde_json::to_value(&back).unwrap(), saved);
-        // Like an Overpass response: what an element does not have is left out.
+        assert_eq!(bounds, Some(bbox));
         assert!(saved["elements"][1].get("tags").is_none());
         assert!(saved["elements"][0].get("members").is_none());
         assert!(saved.get("remark").is_none());
@@ -877,8 +880,8 @@ mod fetch_from_file_tests {
         );
     }
 
-    // Any non-.osm/.xml extension keeps the original Arnis JSON-dump path, which carries no
-    // <bounds> (None). Paired with the .osm case above, this proves routing keys off the extension.
+    // Any non-.osm/.xml extension is read as JSON, which has no bounds unless saved with them.
+    // Paired with the .osm case above, this proves routing keys off the extension.
     #[test]
     fn json_extension_keeps_json_path_and_has_no_bounds() {
         let dir = tempfile::tempdir().unwrap();
