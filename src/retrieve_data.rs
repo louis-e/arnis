@@ -10,7 +10,7 @@ use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
 use serde_json::Value;
 use std::fs::File;
-use std::io::{self, BufReader, Cursor, Write};
+use std::io::{self, BufReader, BufWriter, Cursor, Write};
 use std::process::Command;
 use std::time::Duration;
 
@@ -311,7 +311,12 @@ pub fn fetch_osm_data(
         }
         // A miss is a coverage gap or a network problem, and Overpass still has the data.
         match crate::osm_tiles::fetch_data_from_tiles(bbox, tiles_url, scale) {
-            Ok(data) => return Ok(data),
+            Ok(data) => {
+                if let Some(path) = save_file {
+                    save_osm_json(&data, path)?;
+                }
+                return Ok(data);
+            }
             Err(e) => {
                 eprintln!(
                     "{}",
@@ -328,6 +333,16 @@ pub fn fetch_osm_data(
         }
     }
     fetch_data_from_overpass(bbox, debug, download_method, save_file)
+}
+
+/// Writes the data the archive gave as Overpass JSON, the format `--file` reads back. The
+/// Overpass path saves the response itself.
+fn save_osm_json(data: &OsmData, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut writer = BufWriter::new(File::create(path)?);
+    serde_json::to_writer(&mut writer, data)?;
+    writer.flush()?;
+    println!("OSM data saved to: {path}");
+    Ok(())
 }
 
 /// Main function to fetch data
@@ -652,6 +667,35 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    #[test]
+    fn saved_osm_data_reads_back_the_same() {
+        let json = r#"{"elements":[
+            {"type":"node","id":1,"lat":54.6,"lon":9.9,"tags":{"amenity":"bench"}},
+            {"type":"node","id":2,"lat":54.61,"lon":9.91},
+            {"type":"way","id":3,"nodes":[1,2],"tags":{"highway":"footway"}},
+            {"type":"relation","id":4,"members":[{"type":"way","ref":3,"role":"outer"}],
+             "tags":{"type":"multipolygon","natural":"wood"}}
+        ]}"#;
+        let data: OsmData = serde_json::from_str(json).unwrap();
+        let path = std::env::temp_dir().join(format!("arnis-save-{}.json", std::process::id()));
+        let path = path.to_str().unwrap();
+        save_osm_json(&data, path).unwrap();
+        let (back, _) = fetch_data_from_file(path).unwrap();
+        let _ = std::fs::remove_file(path);
+
+        let saved = serde_json::to_value(&data).unwrap();
+        assert_eq!(serde_json::to_value(&back).unwrap(), saved);
+        // Like an Overpass response: what an element does not have is left out.
+        assert!(saved["elements"][1].get("tags").is_none());
+        assert!(saved["elements"][0].get("members").is_none());
+        assert!(saved.get("remark").is_none());
+    }
 }
 
 #[cfg(test)]

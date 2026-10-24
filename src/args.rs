@@ -19,7 +19,8 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub file: Option<String>,
 
-    /// JSON file to save OSM data to (optional)
+    /// Save the OSM data this run uses to a file (Overpass JSON), to generate from it again
+    /// later with --file
     #[arg(long, group = "location")]
     pub save_json_file: Option<String>,
 

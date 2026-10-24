@@ -4,7 +4,7 @@ use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fnv::{FnvHashMap, FnvHashSet};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -85,31 +85,35 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     tags
 }
 
-// Raw data from OSM
+// Raw data from OSM, in the Overpass JSON layout it is read from and saved as.
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OsmMember {
     pub r#type: String,
     pub r#ref: u64,
     pub r#role: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OsmElement {
     pub r#type: String,
     pub id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lat: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lon: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nodes: Option<Vec<u64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<HashMap<String, String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<OsmMember>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OsmData {
     elements: Vec<OsmElement>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
 }
 
