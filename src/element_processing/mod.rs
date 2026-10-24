@@ -73,7 +73,7 @@ impl RelationArea {
             Some(Self::Building)
         } else if tags.contains_key("water") || matches!(natural, Some("water" | "bay")) {
             Some(Self::Water)
-        } else if natural.is_some_and(|n| !natural::is_landform(n)) {
+        } else if natural.is_some() {
             Some(Self::Natural)
         } else if tags.contains_key("landuse") {
             Some(Self::Landuse)

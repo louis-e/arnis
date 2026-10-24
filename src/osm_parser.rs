@@ -74,18 +74,48 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
         }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
     });
-    // A proposed or razed road is not on the ground, so no part of Arnis should take it for
-    // one: no surface, no bridge deck, no road mask, no junction paint.
+    // Proposed and razed roads don't exist, and neither do their bridges or tunnels.
     if matches!(
         tags.get("highway").map(String::as_str),
         Some("proposed" | "razed")
     ) {
         tags.remove("highway");
+        if !tags.contains_key("railway") {
+            for key in ["bridge", "tunnel", "layer"] {
+                tags.remove(key);
+            }
+        }
+    }
+    if tags
+        .get("natural")
+        .is_some_and(|natural| is_landform(natural))
+    {
+        tags.remove("natural");
     }
     tags
 }
 
-// Raw data from OSM, in the Overpass JSON layout it is read from and saved as.
+/// Natural values naming a region, like a peninsula, rather than what covers the ground.
+fn is_landform(natural: &str) -> bool {
+    matches!(
+        natural,
+        "peninsula"
+            | "isthmus"
+            | "cape"
+            | "valley"
+            | "plateau"
+            | "massif"
+            | "mountain_range"
+            | "gorge"
+            | "landform"
+            | "plain"
+            | "arete"
+            | "couloir"
+            | "coastline"
+    )
+}
+
+// Raw data from OSM
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OsmMember {
@@ -1219,9 +1249,10 @@ pub fn parse_osm_data(
         if !seen_relations.insert(element.id) {
             continue;
         }
-        let Some(tags) = &element.tags else {
+        let Some(raw_tags) = &element.tags else {
             continue;
         };
+        let tags = &filter_tags(raw_tags.clone());
 
         // Process multipolygons and building relations
         let relation_type = tags.get("type").map(|x: &String| x.as_str());
@@ -1280,7 +1311,7 @@ pub fn parse_osm_data(
                 processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                     id: element.id,
                     members,
-                    tags: filter_tags(tags.clone()),
+                    tags: tags.clone(),
                 }));
             }
             continue;
@@ -1342,7 +1373,7 @@ pub fn parse_osm_data(
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
-                tags: filter_tags(tags.clone()),
+                tags: tags.clone(),
             }));
         }
     }
@@ -3935,15 +3966,35 @@ mod lifecycle_tests {
     #[test]
     fn roads_that_are_not_built_lose_their_highway_tag() {
         for value in ["proposed", "razed"] {
-            let kept = filter_tags(tags(&[("highway", value), ("bridge", "yes")]));
-            assert!(!kept.contains_key("highway"), "highway={value} kept");
-            assert_eq!(kept.get("bridge").map(String::as_str), Some("yes"));
+            let kept = filter_tags(tags(&[
+                ("highway", value),
+                ("bridge", "yes"),
+                ("layer", "1"),
+            ]));
+            assert!(kept.is_empty(), "highway={value} kept {kept:?}");
         }
-        // A road being built is on the ground, so it stays a road.
+        // A railway on the same bridge keeps it.
+        let kept = filter_tags(tags(&[
+            ("highway", "proposed"),
+            ("railway", "rail"),
+            ("bridge", "yes"),
+        ]));
+        assert_eq!(kept.get("bridge").map(String::as_str), Some("yes"));
         let kept = filter_tags(tags(&[("highway", "construction")]));
         assert_eq!(
             kept.get("highway").map(String::as_str),
             Some("construction")
         );
+    }
+
+    #[test]
+    fn a_landform_is_no_natural_area_but_its_other_tags_stay() {
+        for landform in ["peninsula", "mountain_range", "valley", "coastline"] {
+            let kept = filter_tags(tags(&[("natural", landform), ("barrier", "wall")]));
+            assert!(!kept.contains_key("natural"), "natural={landform} kept");
+            assert_eq!(kept.get("barrier").map(String::as_str), Some("wall"));
+        }
+        let kept = filter_tags(tags(&[("natural", "wood")]));
+        assert_eq!(kept.get("natural").map(String::as_str), Some("wood"));
     }
 }

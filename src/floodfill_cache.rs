@@ -679,11 +679,7 @@ impl FloodFillCache {
             || way
                 .tags
                 .get("natural")
-                .map(|v| {
-                    v != "tree"
-                        && v != "tree_row"
-                        && !crate::element_processing::natural::is_landform(v)
-                })
+                .map(|v| v != "tree" && v != "tree_row")
                 .unwrap_or(false)
             // Highway areas (like pedestrian plazas) use flood fill when area=yes
             || (way.tags.contains_key("highway")

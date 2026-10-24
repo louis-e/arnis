@@ -15,29 +15,6 @@ use crate::trees::mapped::{tree_row_positions, MappedTree};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
 
-/// `natural` values that name a stretch of landscape rather than what covers it. A peninsula or
-/// a mountain range takes in towns, fields and forests alike, and painting its ground would
-/// cover all of them with grass or rock, so the land cover data shows what is there instead.
-/// The coastline is left to it too, as the OSM sources already do.
-pub(crate) fn is_landform(natural: &str) -> bool {
-    matches!(
-        natural,
-        "peninsula"
-            | "isthmus"
-            | "cape"
-            | "valley"
-            | "plateau"
-            | "massif"
-            | "mountain_range"
-            | "gorge"
-            | "landform"
-            | "plain"
-            | "arete"
-            | "couloir"
-            | "coastline"
-    )
-}
-
 pub fn generate_natural(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -68,9 +45,6 @@ fn natural_area(
     holes: Option<&Holes>,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
-        if is_landform(natural_type) {
-            return;
-        }
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
                 let mapped = MappedTree::from_tags(&node.tags, node.id);
@@ -1019,19 +993,6 @@ mod tests {
         assert_eq!(count(&gravel, 0, &[GRAVEL]), 1600);
         let sand = render_natural(place, &[("natural", "beach")]);
         assert_eq!(count(&sand, 0, &[SAND]), 1600);
-    }
-
-    #[test]
-    fn a_landform_paints_no_ground() {
-        let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
-        for landform in ["peninsula", "mountain_range", "valley", "coastline"] {
-            let editor = render_natural(place, &[("natural", landform)]);
-            assert_eq!(
-                count(&editor, 0, &[GRASS_BLOCK, COBBLESTONE, STONE]),
-                0,
-                "{landform}"
-            );
-        }
     }
 
     #[test]
