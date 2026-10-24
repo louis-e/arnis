@@ -2549,24 +2549,72 @@ pub(crate) fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
 /// white centerline + white edge stripes, taxiways a lighter surface with a yellow centerline.
 /// No threshold "piano keys" — OSM splits runways into segments, so a per-way renderer can't tell
 /// a real end from an internal split.
+/// The pavement an aeroway polygon is filled with, or None when the way is no paved area.
+/// Aprons and `area:aeroway` surfaces are areas, and so are runways and taxiways tagged
+/// `area=yes`. Runway surfaces are gray like the runway strips, the others light gray.
+pub(crate) fn aeroway_area_block(way: &ProcessedWay) -> Option<Block> {
+    let closed = way.nodes.len() >= 4
+        && way.nodes.first().map(|n| (n.x, n.z)) == way.nodes.last().map(|n| (n.x, n.z));
+    if !closed {
+        return None;
+    }
+    let area = way.tags.get("area").map(String::as_str) == Some("yes");
+    let surface = match way.tags.get("area:aeroway").map(String::as_str) {
+        Some(kind) => kind,
+        None => match way.tags.get("aeroway").map(String::as_str) {
+            Some("apron") => "apron",
+            Some(kind @ ("runway" | "taxiway")) if area => kind,
+            _ => return None,
+        },
+    };
+    match surface {
+        "runway" | "stopway" | "blastpad" | "blast_pad" => Some(GRAY_CONCRETE),
+        "taxiway" | "apron" | "parking_position" => Some(LIGHT_GRAY_CONCRETE),
+        _ => None,
+    }
+}
+
 pub fn generate_aeroway(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
     args: &Args,
     building_footprints: &CoordinateBitmap,
+    flood_fill_cache: &FloodFillCache,
 ) {
     let aeroway = way.tags.get("aeroway").map(String::as_str);
-    let is_runway = aeroway == Some("runway");
-    let is_taxiway = aeroway == Some("taxiway");
-    // A parking position is the painted lead-in to one stand, not a 24 m slab of pavement.
-    let is_stand_line = aeroway == Some("parking_position");
 
     if aeroway == Some("helipad") {
         generate_helipad_way(editor, way, args, building_footprints);
         return;
     }
 
-    let base_block = if is_runway {
+    // Paved polygons are filled, not drawn as a strip along their outline. Grass mapped
+    // inside an apron keeps its cells, as it does inside a parking lot.
+    if let Some(block) = aeroway_area_block(way) {
+        let runway_overwrites = [LIGHT_GRAY_CONCRETE, YELLOW_CONCRETE];
+        let over: Option<&[Block]> = (block == GRAY_CONCRETE).then_some(&runway_overwrites[..]);
+        let filled = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+        for &(x, z) in filled.iter() {
+            if !editor.nested_area_owns(x, z) {
+                editor.set_block(block, x, 0, z, over, None);
+            }
+        }
+        return;
+    }
+
+    let is_runway = aeroway == Some("runway");
+    let is_taxiway = aeroway == Some("taxiway");
+    // A parking position or taxilane is a painted lead-in across the apron, not a 24 m slab.
+    let is_stand_line = matches!(aeroway, Some("parking_position" | "taxilane"));
+    // The paved run-off past a runway end: runway pavement without its markings.
+    let is_stopway = aeroway == Some("stopway");
+    // Everything else draws nothing: an aerodrome boundary, a hangar or terminal without a
+    // building tag or a holding position line has no pavement of its own.
+    if !(is_runway || is_taxiway || is_stand_line || is_stopway) {
+        return;
+    }
+
+    let base_block = if is_runway || is_stopway {
         GRAY_CONCRETE
     } else {
         LIGHT_GRAY_CONCRETE
@@ -3450,6 +3498,115 @@ mod tests {
         }
     }
 
+    fn ring_aeroway(tags: &[(&str, &str)]) -> ProcessedWay {
+        let corners = [(100, 20), (200, 20), (200, 80), (100, 80), (100, 20)];
+        ProcessedWay {
+            id: 7,
+            nodes: corners
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: 70 + i as u64,
+                    tags: StdMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    fn draw_aeroway(way: &ProcessedWay) -> WorldEditor<'static> {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let xzbbox = Box::leak(Box::new(
+            XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap(),
+        ));
+        let mut editor = test_editor(xzbbox);
+        generate_aeroway(
+            &mut editor,
+            way,
+            &args,
+            &CoordinateBitmap::new_empty(),
+            &FloodFillCache::new(),
+        );
+        editor
+    }
+
+    #[test]
+    fn an_apron_is_filled_not_outlined() {
+        let editor = draw_aeroway(&ring_aeroway(&[("aeroway", "apron")]));
+        assert!(
+            editor.check_for_block(150, 0, 50, Some(&[LIGHT_GRAY_CONCRETE])),
+            "the middle of the apron is paved"
+        );
+        // A strip along the outline used to reach 12 blocks past the edge.
+        assert!(
+            !editor.check_for_block(150, 0, 90, Some(&[LIGHT_GRAY_CONCRETE])),
+            "nothing past its edge"
+        );
+    }
+
+    #[test]
+    fn a_runway_area_is_filled_gray() {
+        let editor = draw_aeroway(&ring_aeroway(&[("area:aeroway", "runway")]));
+        assert!(editor.check_for_block(150, 0, 50, Some(&[GRAY_CONCRETE])));
+        assert!(editor.check_for_block(101, 0, 50, Some(&[GRAY_CONCRETE])));
+    }
+
+    #[test]
+    fn an_aerodrome_boundary_draws_nothing() {
+        let editor = draw_aeroway(&ring_aeroway(&[("aeroway", "aerodrome")]));
+        for (x, z) in [(100, 20), (150, 20), (150, 50), (150, 30)] {
+            assert!(
+                !editor.check_for_block(x, 0, z, Some(&[GRAY_CONCRETE, LIGHT_GRAY_CONCRETE])),
+                "pavement at {x},{z}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_taxilane_is_a_narrow_lead_in_line() {
+        let editor = draw_aeroway(&straight_aeroway("taxilane"));
+        assert!(
+            editor.check_for_block(100, 0, 50, Some(&[YELLOW_CONCRETE])),
+            "yellow centre line"
+        );
+        assert!(
+            !editor.check_for_block(100, 0, 58, Some(&[LIGHT_GRAY_CONCRETE])),
+            "no 24 m slab"
+        );
+    }
+
+    #[test]
+    fn a_stopway_is_runway_pavement_without_markings() {
+        let editor = draw_aeroway(&straight_aeroway("stopway"));
+        assert!(
+            editor.check_for_block(10, 0, 50, Some(&[GRAY_CONCRETE])),
+            "no centre dash"
+        );
+        assert!(
+            editor.check_for_block(10, 0, 39, Some(&[GRAY_CONCRETE])),
+            "no edge stripe"
+        );
+    }
+
+    #[test]
+    fn a_road_under_construction_is_a_bare_bed_as_wide_as_the_road_it_becomes() {
+        let tags: HashMap<String, String> = [("construction", "primary"), ("surface", "asphalt")]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        assert_eq!(surface_palette("construction", &tags), CONSTRUCTION_BED);
+        assert_eq!(
+            highway_block_range("construction", &tags, 1.0),
+            highway_block_range("primary", &tags, 1.0)
+        );
+        assert_eq!(lane_marking_count("construction", &tags), 1);
+    }
+
     #[test]
     fn runway_paints_white_centerline_and_edges_over_gray() {
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
@@ -3461,6 +3618,7 @@ mod tests {
             &straight_aeroway("runway"),
             &args,
             &CoordinateBitmap::new_empty(),
+            &FloodFillCache::new(),
         );
 
         // Centerline at the way start (s=0, dash on) is white; a dash-gap cell stays gray.
@@ -3499,6 +3657,7 @@ mod tests {
             &straight_aeroway("taxiway"),
             &args,
             &CoordinateBitmap::new_empty(),
+            &FloodFillCache::new(),
         );
 
         assert!(
@@ -3524,7 +3683,13 @@ mod tests {
 
         let mut way = straight_aeroway("runway");
         way.tags.insert("width".to_string(), "60".to_string());
-        generate_aeroway(&mut editor, &way, &args, &CoordinateBitmap::new_empty());
+        generate_aeroway(
+            &mut editor,
+            &way,
+            &args,
+            &CoordinateBitmap::new_empty(),
+            &FloodFillCache::new(),
+        );
 
         // 60 m wide ⇒ half-width 30: asphalt reaches z=70 and the edge stripe sits at z=50+29.
         assert!(
@@ -3564,12 +3729,19 @@ mod tests {
             ],
             tags,
         };
-        generate_aeroway(&mut editor, &taxiway, &args, &CoordinateBitmap::new_empty());
+        generate_aeroway(
+            &mut editor,
+            &taxiway,
+            &args,
+            &CoordinateBitmap::new_empty(),
+            &FloodFillCache::new(),
+        );
         generate_aeroway(
             &mut editor,
             &straight_aeroway("runway"),
             &args,
             &CoordinateBitmap::new_empty(),
+            &FloodFillCache::new(),
         );
 
         // The crossing cell belongs to the runway, not the taxiway.
