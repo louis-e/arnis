@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Fotos reales de la calle de cada edificio, cuando existen.",
   "world_time_desc": "Hora del día en la que empieza el mundo.",
   "world_type_desc": "Lo que hay más allá del borde del área. Solo Java.",
-  "map_item_desc": "Empieza con un mapa de toda el área en el inventario. Solo Java.",
+  "map_item_desc": "Empieza con un mapa de toda el área en el inventario. En Bedrock, el mapa inicial del propio juego.",
   "custom_world_name_desc": "Pon nombre a los mundos nuevos en lugar de «Arnis World N». Solo Java.",
   "overture_desc": "Rellena huecos de OpenStreetMap con huellas detectadas por satélite.",
   "three_dmr_desc": "Monumentos famosos, además de coches, barcos, grúas y aerogeneradores.",

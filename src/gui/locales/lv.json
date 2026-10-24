@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Īstas ielu fotogrāfijas katrai ēkai, ja tādas ir.",
   "world_time_desc": "Diennakts laiks, kurā pasaule sākas.",
   "world_type_desc": "Kas atrodas aiz apgabala malas. Tikai Java.",
-  "map_item_desc": "Sāciet ar visa apgabala karti inventārā. Tikai Java.",
+  "map_item_desc": "Sāciet ar visa apgabala karti inventārā. Bedrock versijā: pašas spēles sākuma karte.",
   "custom_world_name_desc": "Nosauciet jaunās pasaules paši, nevis „Arnis World N”. Tikai Java.",
   "overture_desc": "Aizpilda OpenStreetMap robus ar satelītattēlos atklātām kontūrām.",
   "three_dmr_desc": "Slaveni orientieri, kā arī automašīnas, laivas, celtņi un vēja turbīnas.",

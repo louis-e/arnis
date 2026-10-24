@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Valódi utcai fotók az egyes épületekről, ahol elérhetők.",
   "world_time_desc": "A napszak, amelyben a világ kezdődik.",
   "world_type_desc": "Mi van a terület szélén túl. Csak Java.",
-  "map_item_desc": "Kezdj a teljes terület térképével a leltárban. Csak Java.",
+  "map_item_desc": "Kezdj a teljes terület térképével a leltárban. Bedrockon a játék saját kezdőtérképe.",
   "custom_world_name_desc": "Nevezd el magad az új világokat az „Arnis World N” helyett. Csak Java.",
   "overture_desc": "Kitölti az OpenStreetMap hiányait műholdról felismert alaprajzokkal.",
   "three_dmr_desc": "Híres nevezetességek, valamint autók, hajók, daruk és szélturbinák.",

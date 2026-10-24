@@ -151,7 +151,7 @@
   "facade_source_mapillary_desc": "Real street photos of each building, where available.",
   "world_time_desc": "Time of day the world starts at.",
   "world_type_desc": "What lies past the edge of the area. Java only.",
-  "map_item_desc": "Start with a map of the whole area in your inventory. Java only.",
+  "map_item_desc": "Start with a map of the whole area in your inventory. On Bedrock, the game's own starting map.",
   "custom_world_name_desc": "Name new worlds yourself instead of \"Arnis World N\". Java only.",
   "overture_desc": "Fills gaps in OpenStreetMap with satellite-detected footprints.",
   "three_dmr_desc": "Famous landmarks plus cars, boats, cranes and wind turbines.",
