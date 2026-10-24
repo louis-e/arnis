@@ -348,10 +348,14 @@ pub fn fetch_data_from_overpass(
     let api_servers: Vec<&str> = vec![];
     let fallback_api_servers: Vec<&str> = vec![];
 
-    // Generate Overpass API query for bounding box.
-    // Ocean/coastal elements are excluded because ESA WorldCover satellite data
-    // handles ocean detection more reliably at 10m resolution (LC_WATER class).
-    // Inland water (lakes, rivers, ponds) is still fetched from OSM.
+    // Generate Overpass API query for bounding box. It selects what the tile archive carries
+    // (arnis-tiles `tags.rs`), so a fallback run gets the same data:
+    // - nodes and relations with one of the listed keys,
+    // - every tagged way, because ways render from keys the list does not name, such as
+    //   `area:aeroway`, and an untagged way that is no relation member draws nothing,
+    // - then ocean and coastal features are subtracted from all of them. ESA WorldCover
+    //   resolves the sea more reliably at 10m (LC_WATER), while inland water (lakes, rivers,
+    //   ponds) still comes from OSM.
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
@@ -359,11 +363,11 @@ pub fn fetch_data_from_overpass(
         nwr["building:part"];
         relation["type"="building"];
         nwr["highway"];
-        nwr["landuse"]["landuse"!="salt_pond"];
-        nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
+        nwr["landuse"];
+        nwr["natural"];
         nwr["leisure"];
-        nwr["water"]["water"!="bay"]["water"!="ocean"]["water"!="sea"]["tidal"!="yes"];
-        nwr["waterway"]["waterway"!="tidal_channel"];
+        nwr["water"];
+        nwr["waterway"];
         nwr["amenity"];
         nwr["tourism"];
         nwr["bridge"];
@@ -383,19 +387,27 @@ pub fn fetch_data_from_overpass(
         nwr["3dmr"];
         nwr["shop"];
         nwr["office"];
-        way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
-        way;
-    )->.relsinbbox;
+        way[~"."~"."];
+    )->.candidates;
     (
-        way(r.relsinbbox);
-    )->.waysinbbox;
+        nwr.candidates["landuse"="salt_pond"];
+        nwr.candidates["natural"~"^(coastline|bay|strait)$"];
+        nwr.candidates["water"~"^(bay|ocean|sea)$"];
+        nwr.candidates["tidal"="yes"];
+        nwr.candidates["waterway"="tidal_channel"];
+        nwr.candidates["place"~"^(ocean|sea|bay|strait|sound|fjord)$"];
+    )->.excluded;
+    (.candidates; - .excluded;)->.wanted;
     (
-        node(w.waysinbbox);
-        node(w.relsinbbox);
-    )->.nodesinbbox;
-    .relsinbbox out body;
-    .waysinbbox out body;
-    .nodesinbbox out skel qt;"#,
+        way(r.wanted);
+    )->.members;
+    (
+        node(w.members);
+        node(w.wanted);
+    )->.waynodes;
+    .wanted out body;
+    .members out body;
+    .waynodes out skel qt;"#,
         bbox.min().lat(),
         bbox.min().lng(),
         bbox.max().lat(),
