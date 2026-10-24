@@ -2570,6 +2570,24 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     PRIORITY_ORDER.len()
 }
 
+/// Puts elements into the order they are rendered in: by `get_priority`, with every landuse
+/// element after everything else.
+///
+/// Ground is only written where nothing stands yet, so the broad landuse areas go last and fill
+/// in around the more specific features inside and beside them (a parking lot keeps its outline
+/// instead of a meadow painting over it). `sort_ground_fill_areas` later swaps the ground-filling
+/// areas among their own slots by size, which keeps the largest of them at the back. The CLI, the
+/// GUI and the tests all sort through here, so the same area renders the same way whichever of
+/// them generates it. The sort is stable.
+pub fn sort_by_priority(elements: &mut [ProcessedElement]) {
+    elements.sort_by_cached_key(|element| {
+        (
+            element.tags().contains_key("landuse"),
+            get_priority(element),
+        )
+    });
+}
+
 #[cfg(test)]
 mod outline_suppression_tests {
     use super::*;
@@ -3820,5 +3838,37 @@ mod arch_era_tests {
         );
         assert_eq!(arch_era_from_hint(StyleHint::Glass), ArchEra::Contemporary);
         assert_eq!(arch_era_from_hint(StyleHint::None), ArchEra::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod priority_sort_tests {
+    use super::*;
+
+    fn way(id: u64, pairs: &[(&str, &str)]) -> ProcessedElement {
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes: Vec::new(),
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn landuse_renders_after_everything_it_surrounds() {
+        // Parse order puts the meadow first; it must still yield to the lot, the part and the mast.
+        let mut elements = vec![
+            way(1, &[("landuse", "meadow")]),
+            way(2, &[("man_made", "mast")]),
+            way(3, &[("amenity", "parking")]),
+            way(4, &[("building:part", "yes")]),
+            way(5, &[("highway", "service")]),
+            way(6, &[("building", "yes")]),
+        ];
+        sort_by_priority(&mut elements);
+        let order: Vec<u64> = elements.iter().map(ProcessedElement::id).collect();
+        assert_eq!(order, vec![6, 5, 3, 4, 2, 1]);
     }
 }
