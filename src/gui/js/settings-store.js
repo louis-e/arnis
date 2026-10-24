@@ -27,6 +27,7 @@ const SETTINGS = [
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
   { id: 'interior-toggle', kind: 'checkbox', store: OWN },
   { id: 'height-multiplier-slider', kind: 'number', store: OWN },
+  { id: 'terrain-detail-level-group', kind: 'segmented', store: OWN, valueAttr: 'data-terrain-detail-level' },
   { id: 'fillground-toggle', kind: 'checkbox', store: OWN },
   { id: 'caves-toggle', kind: 'checkbox', store: OWN },
   { id: 'canopy-height-toggle', kind: 'checkbox', store: OWN },

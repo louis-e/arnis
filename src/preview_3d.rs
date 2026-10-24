@@ -4,10 +4,11 @@
 
 use crate::coordinate_system::geographic::LLBBox;
 use crate::coordinate_system::transformation::geo_distance;
-use crate::elevation::{compute_grid_dims, fetch_elevation_data};
+use crate::elevation::{compute_grid_dims_with_detail, fetch_elevation_data};
 use crate::land_cover;
 use crate::overture;
 use crate::progress;
+use crate::terrain_detail::TerrainDetailLevel;
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -57,10 +58,10 @@ impl Drop for ProgressMute {
 /// Computes the preview scale and grid dims for a bbox (grid capped at
 /// PREVIEW_MAX_DIM per side); shared by the terrain and land-cover payloads
 /// so their grids always align.
-fn preview_grid_dims(bbox: &LLBBox) -> (f64, usize, usize) {
-    let (world_w, world_h, _, _) = compute_grid_dims(bbox, 1.0);
+fn preview_grid_dims(bbox: &LLBBox, detail: TerrainDetailLevel) -> (f64, usize, usize) {
+    let (world_w, world_h, _, _) = compute_grid_dims_with_detail(bbox, 1.0, detail);
     let preview_scale = (PREVIEW_MAX_DIM as f64 / world_w.max(world_h) as f64).min(1.0);
-    let (_, _, grid_w, grid_h) = compute_grid_dims(bbox, preview_scale);
+    let (_, _, grid_w, grid_h) = compute_grid_dims_with_detail(bbox, preview_scale, detail);
     (preview_scale, grid_w, grid_h)
 }
 
@@ -72,7 +73,11 @@ fn preview_grid_dims(bbox: &LLBBox) -> (f64, usize, usize) {
 /// (row 0 = north, quantized over [min_elev, max_elev]). Land cover ships
 /// separately via `build_landcover_grid`, fetched only when the user
 /// enables the overlay.
-pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>, String> {
+pub fn build_preview_payload(
+    bbox_text: &str,
+    aws_only: bool,
+    detail: TerrainDetailLevel,
+) -> Result<Vec<u8>, String> {
     let my_epoch = TERRAIN_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
     let _guard = TERRAIN_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     if TERRAIN_EPOCH.load(Ordering::SeqCst) != my_epoch {
@@ -83,7 +88,7 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
     // Shrink the scale until the grid fits the preview cap; the fetch goes
     // through the normal providers, so it reads/warms the same tile caches
     // as a real generation run and retains nothing afterwards.
-    let (preview_scale, _, _) = preview_grid_dims(&bbox);
+    let (preview_scale, _, _) = preview_grid_dims(&bbox, detail);
 
     let _mute = ProgressMute::new();
 
@@ -107,7 +112,7 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
         None,
         source_mode,
         false,
-        compute_grid_dims(&bbox, preview_scale),
+        compute_grid_dims_with_detail(&bbox, preview_scale, detail),
         crate::elevation::AffinePolicy::Fit,
         &crate::elevation::PeakSource::none(),
     )
@@ -171,9 +176,12 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
 /// the overlay toggle. Layout (little-endian): magic "APL1", grid_w u32,
 /// grid_h u32, then grid_w*grid_h u8 class codes (row 0 = north). Grid dims
 /// match the terrain payload for the same bbox.
-pub fn build_landcover_grid(bbox_text: &str) -> Result<Vec<u8>, String> {
+pub fn build_landcover_grid(
+    bbox_text: &str,
+    detail: TerrainDetailLevel,
+) -> Result<Vec<u8>, String> {
     let bbox = LLBBox::from_str(bbox_text).map_err(|e| format!("Invalid bounding box: {e}"))?;
-    let (_, grid_w, grid_h) = preview_grid_dims(&bbox);
+    let (_, grid_w, grid_h) = preview_grid_dims(&bbox, detail);
 
     let _mute = ProgressMute::new();
     let lc = land_cover::fetch_land_cover_data(&bbox, grid_w, grid_h)
@@ -277,11 +285,32 @@ fn round1(v: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use crate::terrain_detail::TerrainDetailLevel;
+
+    #[test]
+    fn preview_grid_uses_the_selected_detail_level() {
+        let bbox =
+            crate::coordinate_system::geographic::LLBBox::from_str("47.3700 8.5350 47.3790 8.5480")
+                .unwrap();
+        let (_, low_w, low_h) = super::preview_grid_dims(&bbox, TerrainDetailLevel::Low);
+        let (_, balanced_w, balanced_h) =
+            super::preview_grid_dims(&bbox, TerrainDetailLevel::Balanced);
+        let (_, high_w, high_h) = super::preview_grid_dims(&bbox, TerrainDetailLevel::High);
+
+        assert!(high_w > balanced_w && balanced_w > low_w);
+        assert!(high_h > balanced_h && balanced_h > low_h);
+    }
+
     // Live-network smoke test: cargo test preview_payload_smoke -- --ignored --nocapture
     #[test]
     #[ignore]
     fn preview_payload_smoke() {
-        let payload = super::build_preview_payload("48.130 11.545 48.145 11.565", true).unwrap();
+        let payload = super::build_preview_payload(
+            "48.130 11.545 48.145 11.565",
+            true,
+            TerrainDetailLevel::Balanced,
+        )
+        .unwrap();
         // Set PREVIEW_DUMP=<path> to save the payload for frontend debugging.
         if let Ok(path) = std::env::var("PREVIEW_DUMP") {
             std::fs::write(path, &payload).unwrap();
@@ -307,7 +336,11 @@ mod tests {
     #[test]
     #[ignore]
     fn preview_landcover_smoke() {
-        let payload = super::build_landcover_grid("48.130 11.545 48.145 11.565").unwrap();
+        let payload = super::build_landcover_grid(
+            "48.130 11.545 48.145 11.565",
+            TerrainDetailLevel::Balanced,
+        )
+        .unwrap();
         assert_eq!(&payload[0..4], b"APL1");
         let gw = u32::from_le_bytes(payload[4..8].try_into().unwrap()) as usize;
         let gh = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;

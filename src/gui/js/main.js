@@ -1311,6 +1311,15 @@ function initSettings() {
     });
   });
 
+  const terrainDetailGroup = document.getElementById("terrain-detail-level-group");
+  terrainDetailGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      terrainDetailGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      if (window.arnisPreview3D) window.arnisPreview3D.refreshTerrain();
+    });
+  });
+
   // World time slider (clock minutes 00:00-23:50; converted to ticks on submit)
   const timeSlider = document.getElementById("world-time-slider");
   const timeValue = document.getElementById("world-time-value");
@@ -3408,6 +3417,10 @@ async function startGeneration() {
     // Disabled means unsupported for this body or format, so never send a stale tick.
     var disable_height_limit = !heightLimitToggle.disabled && heightLimitToggle.checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
+    var terrainDetailButton = document.querySelector("#terrain-detail-level-group .segment.active");
+    var terrainDetailLevel = terrainDetailButton
+      ? terrainDetailButton.dataset.terrainDetailLevel
+      : "balanced";
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
@@ -3465,6 +3478,7 @@ async function startGeneration() {
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
+        terrainDetailLevel: terrainDetailLevel,
         bakeLightingEnabled: bake_lighting,
         voxyLodEnabled: voxy_lod,
         isNewWorld: true,

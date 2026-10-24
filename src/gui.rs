@@ -717,9 +717,14 @@ pub fn update_player_spawn_y_after_generation(
 async fn gui_get_terrain_preview(
     bbox_text: String,
     aws_only: bool,
+    terrain_detail_level: String,
 ) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        crate::preview_3d::build_preview_payload(&bbox_text, aws_only)
+        crate::preview_3d::build_preview_payload(
+            &bbox_text,
+            aws_only,
+            crate::terrain_detail::TerrainDetailLevel::from_str_lossy(&terrain_detail_level),
+        )
     })
     .await
     .map_err(|e| format!("Preview task failed: {e}"))??;
@@ -729,9 +734,15 @@ async fn gui_get_terrain_preview(
 /// ESA land-cover grid for the 3D preview, fetched lazily when the user
 /// enables the overlay toggle (layout in preview_3d.rs).
 #[tauri::command]
-async fn gui_get_preview_landcover(bbox_text: String) -> Result<tauri::ipc::Response, String> {
+async fn gui_get_preview_landcover(
+    bbox_text: String,
+    terrain_detail_level: String,
+) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        crate::preview_3d::build_landcover_grid(&bbox_text)
+        crate::preview_3d::build_landcover_grid(
+            &bbox_text,
+            crate::terrain_detail::TerrainDetailLevel::from_str_lossy(&terrain_detail_level),
+        )
     })
     .await
     .map_err(|e| format!("Preview land cover task failed: {e}"))??;
@@ -1392,6 +1403,7 @@ fn gui_start_generation(
     use_3d_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
+    terrain_detail_level: String,
     bake_lighting_enabled: bool,
     voxy_lod_enabled: bool,
     is_new_world: bool,
@@ -1656,6 +1668,9 @@ fn gui_start_generation(
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 disable_height_limit,
                 aws_only_elevation,
+                terrain_detail_level: crate::terrain_detail::TerrainDetailLevel::from_str_lossy(
+                    &terrain_detail_level,
+                ),
                 benchmark: false,
                 bake_lighting: bake_lighting_enabled,
                 voxy_lod: voxy_lod_enabled,
