@@ -521,14 +521,6 @@
       "license": "Public domain",
       "artist": "Kris Capraro et al. NASA/JPL-Caltech"
     },
-    "Q41225": {
-      "label": "Big Ben",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Big%20Ben.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 96.0
-    },
     "Q41312515": {
       "label": "Rathaus",
       "url": "https://commons.wikimedia.org/wiki/Special:FilePath/3D-Modell%20des%20Rathaus%20Hof%2020250702.stl",

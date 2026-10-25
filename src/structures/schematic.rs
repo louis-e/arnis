@@ -296,7 +296,8 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         // Bridge segment blocks. Wall signs are block entities and stay dropped.
         "sandstone_stairs" => SMOOTH_SANDSTONE_STAIRS,
         "sandstone_slab" => CUT_SANDSTONE_SLAB,
-        "cut_sandstone" => SMOOTH_SANDSTONE,
+        "cut_sandstone" => CUT_SANDSTONE,
+        "chiseled_sandstone" => CHISELED_SANDSTONE,
         "sea_lantern" | "beacon" => SEA_LANTERN,
         "stripped_warped_stem" => STRIPPED_WARPED_STEM,
         "stripped_warped_hyphae" => STRIPPED_WARPED_HYPHAE,

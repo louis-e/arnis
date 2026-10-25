@@ -28,17 +28,6 @@
         { "y_max_frac": 0.22, "blocks": ["SMOOTH_STONE"] },
         { "y_max_frac": 1.00, "blocks": ["CALCITE"] }
       ]
-    },
-    "Q41225": {
-      "label": "Big Ben",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Big%20Ben.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 96.0,
-      "palette_layers": [
-        { "y_max_frac": 1.00, "blocks": ["SANDSTONE", "SMOOTH_SANDSTONE"] }
-      ]
     }
   }
 }
