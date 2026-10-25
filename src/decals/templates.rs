@@ -180,9 +180,11 @@ pub fn text_sign(canvas: &mut Canvas, style: TextStyle, text: &str) {
         }
         TextStyle::StopName => {
             let (y0, h) = (46, 36);
-            canvas.rounded_rect(4, y0, w - 8, h, 3, WHITE);
-            canvas.stroke_rounded_rect(4, y0, w - 8, h, 3, 2, DARK_GRAY);
-            if let Some(layout) = fit_or_abbreviate(text, w - 20, h - 8, FontSize::S28, false) {
+            canvas.rounded_rect(0, y0, w, h, 3, WHITE);
+            canvas.stroke_rounded_rect(0, y0, w, h, 3, 2, DARK_GRAY);
+            // Two lines of the smallest font need 30 px. Keep them inside the existing
+            // 36 px plate and use its width before truncating long stop names.
+            if let Some(layout) = fit_or_abbreviate(text, w - 2, h - 4, FontSize::S28, true) {
                 layout.draw_centered(canvas, cx, y0 + h / 2, BLACK);
             }
         }
@@ -495,6 +497,15 @@ mod tests {
         assert_eq!(c.get(64, 124), TRANSPARENT);
         assert_eq!(c.get(64, 76), WHITE);
         assert!(inked(&c) > 3000);
+    }
+
+    #[test]
+    fn stop_name_uses_two_lines_without_truncating_when_it_fits() {
+        let name = "Zwickau, Zentralhaltestelle";
+        let layout = fit_or_abbreviate(name, 128 - 2, 36 - 4, FontSize::S28, true).unwrap();
+
+        assert_eq!(layout.lines.len(), 2);
+        assert_eq!(layout.lines.join(" "), name);
     }
 
     #[test]
