@@ -30,12 +30,53 @@ pub fn replace_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> 
     })
 }
 
-/// Returns the Desktop directory for Bedrock .mcworld file output.
-/// Falls back to home directory, then current directory.
-pub fn get_bedrock_output_directory() -> PathBuf {
+/// The Desktop, else home, for .mcworld output. Only names it, so it asks no permission.
+pub fn default_bedrock_output_directory() -> PathBuf {
     dirs::desktop_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// The first writable of Desktop, Documents, Downloads and home for .mcworld output.
+pub fn get_bedrock_output_directory() -> PathBuf {
+    [
+        dirs::desktop_dir(),
+        dirs::document_dir(),
+        dirs::download_dir(),
+        dirs::home_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|dir| is_writable_dir(dir))
+    .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Whether a file can be created in `dir`, found by creating one since ACLs decide it.
+pub fn is_writable_dir(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let probe = dir.join(format!(".arnis-write-test-{}", unique_suffix()));
+    let created = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .is_ok();
+    if created {
+        let _ = fs::remove_file(&probe);
+    }
+    created
+}
+
+/// Process id, clock and a counter, for names no other run or call picks at once.
+pub fn unique_suffix() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{nanos:x}-{n}", std::process::id())
 }
 
 /// Returns Luanti's worlds directory for the current OS.

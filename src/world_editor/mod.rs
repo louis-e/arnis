@@ -15,6 +15,7 @@ mod luanti;
 mod style;
 
 pub mod bedrock;
+mod bedrock_entities;
 
 pub(crate) use common::WorldToModify;
 #[cfg(test)]
@@ -2591,7 +2592,8 @@ impl<'a> WorldEditor<'a> {
         emit_gui_progress_update(90.0, "Saving Bedrock world...");
 
         if let Err(error) = self.save_bedrock_internal() {
-            let user_msg = format!("Failed to save Bedrock world: {error}");
+            // The GUI shows this again and cuts it at 35 characters, so the cause leads.
+            let user_msg = format!("Bedrock save: {} ({error})", error.reason());
             eprintln!("{user_msg}");
             #[cfg(feature = "gui")]
             emit_gui_error(&user_msg);
@@ -2622,6 +2624,7 @@ impl<'a> WorldEditor<'a> {
             self.world_time,
             self.start_with_map,
         )
+        .with_ground_origin((self.ground_origin_x, self.ground_origin_z))
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
 
