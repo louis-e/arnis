@@ -235,16 +235,16 @@ fn dial(u: i32, dy: i32) -> (Part, Block) {
     if dy == -5 {
         return (
             b(if u % 2 == 0 {
-                GOLD_BLOCK
+                RAW_GOLD_BLOCK
             } else {
-                BLUE_TERRACOTTA
+                LAPIS_BLOCK
             }),
             SANDSTONE,
         );
     }
     // A gilded frame round carved spandrels, each with a gilded rosette.
     if u.abs() == 4 || dy.abs() == 4 || (u.abs() == 3 && dy.abs() == 3) {
-        return (b(GOLD_BLOCK), SANDSTONE);
+        return (b(RAW_GOLD_BLOCK), SANDSTONE);
     }
     if !in_disc(u, dy) {
         return (b(CHISELED_SANDSTONE), SANDSTONE);
@@ -253,13 +253,13 @@ fn dial(u: i32, dy: i32) -> (Part, Block) {
         !(in_disc(u + 1, dy) && in_disc(u - 1, dy) && in_disc(u, dy + 1) && in_disc(u, dy - 1));
     // Chapter ring, hub and hands in Prussian blue: minute hand at twelve, hour hand at nine.
     if rim {
-        return (b(BLUE_CONCRETE), SANDSTONE);
+        return (b(LAPIS_BLOCK), SANDSTONE);
     }
     if matches!((u, dy), (0, 0) | (0, 1) | (0, 2) | (-1, 0)) {
-        return (b(BLUE_CONCRETE), GLOWSTONE);
+        return (b(LAPIS_BLOCK), SEA_LANTERN);
     }
-    // Opal glass lit from behind.
-    (b(WHITE_STAINED_GLASS), GLOWSTONE)
+    // Opal glass lit from behind, white by day.
+    (b(WHITE_STAINED_GLASS), SEA_LANTERN)
 }
 
 fn clock_stage(t: &mut Tower) {
@@ -272,7 +272,7 @@ fn clock_stage(t: &mut Tower) {
                     let shield = if u % 2 != 0 {
                         WHITE_CONCRETE
                     } else {
-                        GOLD_BLOCK
+                        RAW_GOLD_BLOCK
                     };
                     (b(shield), SMOOTH_SANDSTONE)
                 } else if y == 47 || y == 59 {
@@ -296,7 +296,7 @@ fn clock_stage(t: &mut Tower) {
         Some(b(if u.abs() == 7 {
             SANDSTONE_WALL
         } else if u % 2 == 0 {
-            GOLD_BLOCK
+            RAW_GOLD_BLOCK
         } else {
             CUT_SANDSTONE_SLAB
         }))
@@ -319,7 +319,7 @@ fn belfry(t: &mut Tower) {
             for u in -6..=6i32 {
                 let lancet = u % 2 == 0 && u.abs() <= 4;
                 let part = match y {
-                    65 if u % 2 == 0 && u.abs() < 6 => b(GOLD_BLOCK),
+                    65 if u % 2 == 0 && u.abs() < 6 => b(RAW_GOLD_BLOCK),
                     60 | 65 => b(SMOOTH_SANDSTONE),
                     // Open lancets onto the bells, pointed by an overhang at their heads.
                     61..=63 if lancet => {
@@ -352,36 +352,36 @@ fn roof(t: &mut Tower) {
             y,
             h,
             next,
-            DEEPSLATE_TILES,
-            DEEPSLATE_TILE_STAIRS,
-            b(POLISHED_DEEPSLATE),
+            POLISHED_ANDESITE,
+            POLISHED_ANDESITE_STAIRS,
+            b(ANDESITE),
         );
     }
     for (y, h, us) in [(67, 5, &[-2, 0, 2][..]), (70, 4, &[0][..])] {
         for f in 0..4 {
             for &u in us {
                 t.face(f, u, y, h, b(BLACK_STAINED_GLASS));
-                t.face(f, u, y + 1, h, b(DEEPSLATE_TILE_SLAB));
+                t.face(f, u, y + 1, h, b(POLISHED_ANDESITE_SLAB));
             }
         }
     }
     // The Ayrton Light: a gilded lantern on a gilded gallery, glazed in tall slits.
-    t.ring(72, 3, |_, _| Some(b(GOLD_BLOCK)));
+    t.ring(72, 3, |_, _| Some(b(RAW_GOLD_BLOCK)));
     for y in 73..=75 {
         t.ring(y, 3, |_, u| {
             Some(b(if u % 2 == 0 {
                 BLACK_STAINED_GLASS
             } else {
-                GOLD_BLOCK
+                RAW_GOLD_BLOCK
             }))
         });
     }
-    t.fill(76, 3, b(DEEPSLATE_TILES));
+    t.fill(76, 3, b(POLISHED_ANDESITE));
     t.ring(76, 3, |_, u| {
         Some(if u.abs() == 3 {
-            b(GOLD_BLOCK)
+            b(RAW_GOLD_BLOCK)
         } else {
-            b(DEEPSLATE_TILE_SLAB)
+            b(POLISHED_ANDESITE_SLAB)
         })
     });
 
@@ -391,21 +391,21 @@ fn roof(t: &mut Tower) {
         let y = 77 + i as i32;
         let next = halves.get(i + 1).copied().unwrap_or(0);
         if h == 0 {
-            t.set(C, y, C, b(DEEPSLATE_TILE_WALL));
+            t.set(C, y, C, b(ANDESITE_WALL));
             continue;
         }
         t.roof_layer(
             y,
             h,
             next,
-            DEEPSLATE_TILES,
-            DEEPSLATE_TILE_STAIRS,
-            b(GOLD_BLOCK),
+            POLISHED_ANDESITE,
+            POLISHED_ANDESITE_STAIRS,
+            b(RAW_GOLD_BLOCK),
         );
-        t.fill(y, h - 1, b(DEEPSLATE_TILES));
+        t.fill(y, h - 1, b(POLISHED_ANDESITE));
     }
     // Finial: orb and gilded spike.
-    t.set(C, 91, C, b(DEEPSLATE_TILE_WALL));
+    t.set(C, 91, C, b(ANDESITE_WALL));
     t.set(C, 92, C, b(GOLD_BLOCK));
     for y in 93..=95 {
         t.set(C, y, C, b(LIGHTNING_ROD));
@@ -507,7 +507,7 @@ mod tests {
         let south = C as i16 + 7;
         assert_eq!(
             cells.get(&(C as i16, DIAL_Y as i16, south)),
-            Some(&BLUE_CONCRETE),
+            Some(&LAPIS_BLOCK),
             "dial hub"
         );
         assert_eq!(
@@ -516,7 +516,7 @@ mod tests {
         );
         assert_eq!(
             cells.get(&(C as i16 + 1, DIAL_Y as i16, south - 1)),
-            Some(&GLOWSTONE)
+            Some(&SEA_LANTERN)
         );
     }
 }

@@ -879,6 +879,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         515 => "mcl_core:glass_lime",
         516 => "mcl_core:sandstonecarved",
         517 => "mcl_core:sandstonesmooth",
+        518 => "mcl_raw_ores:raw_gold_block",
+        519 => "mcl_core:lapisblock",
         _ => "mcl_core:stone",
     };
     LuantiNode {

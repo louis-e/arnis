@@ -603,6 +603,8 @@ impl Block {
             515 => "lime_stained_glass",
             516 => "chiseled_sandstone",
             517 => "cut_sandstone",
+            518 => "raw_gold_block",
+            519 => "lapis_block",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -1721,6 +1723,8 @@ pub const RED_STAINED_GLASS: Block = Block::new(514);
 pub const LIME_STAINED_GLASS: Block = Block::new(515);
 pub const CHISELED_SANDSTONE: Block = Block::new(516);
 pub const CUT_SANDSTONE: Block = Block::new(517);
+pub const RAW_GOLD_BLOCK: Block = Block::new(518);
+pub const LAPIS_BLOCK: Block = Block::new(519);
 /// A vine clinging to the wall on its north, east, south or west side.
 pub const VINES: [Block; 4] = [
     Block::new(499),
