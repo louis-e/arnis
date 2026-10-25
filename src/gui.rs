@@ -202,10 +202,11 @@ fn gui_get_default_save_path() -> String {
     detect_minecraft_saves_directory().display().to_string()
 }
 
-/// Returns the default directory for Bedrock .mcworld files (the Desktop).
+/// Returns the default directory for Bedrock .mcworld files (the Desktop). Checked for
+/// write access only when a world is generated, so a launch writes nothing there.
 #[tauri::command]
 fn gui_get_default_bedrock_save_path() -> String {
-    crate::world_utils::get_bedrock_output_directory()
+    crate::world_utils::default_bedrock_output_directory()
         .display()
         .to_string()
 }
@@ -215,11 +216,11 @@ fn resolve_bedrock_output_dir(configured: &str) -> PathBuf {
     let trimmed = configured.trim();
     if !trimmed.is_empty() {
         let configured_dir = PathBuf::from(trimmed);
-        if configured_dir.is_dir() {
+        if crate::world_utils::is_writable_dir(&configured_dir) {
             return configured_dir;
         }
         eprintln!(
-            "Warning: Bedrock save path '{trimmed}' is not a directory, using the default instead."
+            "Warning: Bedrock save path '{trimmed}' is not a writable directory, using the default instead."
         );
     }
     crate::world_utils::get_bedrock_output_directory()

@@ -1,12 +1,16 @@
 //! Bedrock Block Mapping
 //!
-//! This module provides translation between the internal Block representation
-//! and Bedrock Edition block format. Bedrock uses string identifiers with
-//! state properties that differ slightly from Java Edition.
+//! Turns the internal Java-style blocks into Bedrock states of the 1.26.30 palette, the
+//! newest published one. The game derives the stair corners and fence connections 26.50
+//! added on load. A test checks every block against `tests/fixtures/bedrock_block_states.json`.
 
 use crate::block_definitions::Block;
-use std::collections::BTreeMap;
+use fastnbt::Value;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
+
+/// The block state version of every palette entry, 1.21.60.33, still current in 26.50.
+pub const BLOCK_STATE_VERSION: i32 = (1 << 24) | (21 << 16) | (60 << 8) | 33;
 
 /// Represents a Bedrock block with its identifier and state properties.
 ///
@@ -40,6 +44,17 @@ pub enum BedrockBlockStateValue {
     Int(i32),
 }
 
+/// A state value as NBT: bools are bytes.
+impl From<&BedrockBlockStateValue> for Value {
+    fn from(value: &BedrockBlockStateValue) -> Self {
+        match value {
+            BedrockBlockStateValue::String(s) => Value::String(s.clone()),
+            BedrockBlockStateValue::Bool(b) => Value::Byte(*b as i8),
+            BedrockBlockStateValue::Int(i) => Value::Int(*i),
+        }
+    }
+}
+
 impl BedrockBlock {
     /// Creates a simple block with no state properties.
     pub fn simple(name: &str) -> Self {
@@ -62,2406 +77,874 @@ impl BedrockBlock {
     }
 }
 
-/// Converts an internal Block to a BedrockBlock representation.
-///
-/// This function handles the mapping between Java Edition block names/properties
-/// and their Bedrock Edition equivalents. Many blocks are identical, but some
-/// require translation of property names or values.
-pub fn to_bedrock_block(block: Block) -> BedrockBlock {
-    let java_name = block.name();
+/// A block's Java properties, stored as strings as Java does.
+struct Props<'a>(Option<&'a HashMap<String, Value>>);
 
-    // Most blocks have the same name in both editions
-    // Handle special cases first, then fall back to direct mapping
-    match java_name {
-        // Grass block is just "grass_block" in both editions
-        "grass_block" => BedrockBlock::simple("grass_block"),
-
-        // Short grass is just "short_grass" in Java but "tallgrass" in Bedrock
-        "short_grass" => BedrockBlock::with_states(
-            "tallgrass",
-            vec![(
-                "tall_grass_type",
-                BedrockBlockStateValue::String("tall".to_string()),
-            )],
-        ),
-
-        // Tall grass needs height state
-        "tall_grass" => BedrockBlock::with_states(
-            "double_plant",
-            vec![(
-                "double_plant_type",
-                BedrockBlockStateValue::String("grass".to_string()),
-            )],
-        ),
-
-        // Bedrock never renamed sugar cane; "reeds" is still the current id.
-        "sugar_cane" => {
-            BedrockBlock::with_states("reeds", vec![("age", BedrockBlockStateValue::Int(0))])
+impl Props<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        match self.0?.get(key)? {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
         }
+    }
 
-        // Oak leaves with persistence
-        "oak_leaves" => BedrockBlock::with_states(
-            "leaves",
-            vec![
-                (
-                    "old_leaf_type",
-                    BedrockBlockStateValue::String("oak".to_string()),
-                ),
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
+    /// The value, or Java's default for the block when it is unset.
+    fn or<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
+        self.get(key).unwrap_or(default)
+    }
 
-        // Birch leaves with persistence
-        "birch_leaves" => BedrockBlock::with_states(
-            "leaves",
-            vec![
-                (
-                    "old_leaf_type",
-                    BedrockBlockStateValue::String("birch".to_string()),
-                ),
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
+    fn flag(&self, key: &str, default: bool) -> bool {
+        self.get(key).map_or(default, |v| v == "true")
+    }
 
-        // Oak log with axis (default up_down)
-        "oak_log" => BedrockBlock::with_states(
-            "oak_log",
-            vec![(
-                "pillar_axis",
-                BedrockBlockStateValue::String("y".to_string()),
-            )],
-        ),
-
-        // Birch log with axis
-        "birch_log" => BedrockBlock::with_states(
-            "birch_log",
-            vec![(
-                "pillar_axis",
-                BedrockBlockStateValue::String("y".to_string()),
-            )],
-        ),
-
-        // Spruce log with axis
-        "spruce_log" => BedrockBlock::with_states(
-            "spruce_log",
-            vec![(
-                "pillar_axis",
-                BedrockBlockStateValue::String("y".to_string()),
-            )],
-        ),
-
-        // Dark oak log with axis
-        "dark_oak_log" => BedrockBlock::with_states(
-            "dark_oak_log",
-            vec![(
-                "pillar_axis",
-                BedrockBlockStateValue::String("y".to_string()),
-            )],
-        ),
-
-        // Jungle log with axis
-        "jungle_log" => BedrockBlock::with_states(
-            "jungle_log",
-            vec![(
-                "pillar_axis",
-                BedrockBlockStateValue::String("y".to_string()),
-            )],
-        ),
-
-        // Acacia log with axis
-        "acacia_log" => BedrockBlock::with_states(
-            "acacia_log",
-            vec![(
-                "pillar_axis",
-                BedrockBlockStateValue::String("y".to_string()),
-            )],
-        ),
-
-        // Spruce leaves with persistence
-        "spruce_leaves" => BedrockBlock::with_states(
-            "leaves",
-            vec![
-                (
-                    "old_leaf_type",
-                    BedrockBlockStateValue::String("spruce".to_string()),
-                ),
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Dark oak leaves with persistence
-        "dark_oak_leaves" => BedrockBlock::with_states(
-            "leaves2",
-            vec![
-                (
-                    "new_leaf_type",
-                    BedrockBlockStateValue::String("dark_oak".to_string()),
-                ),
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Jungle leaves with persistence
-        "jungle_leaves" => BedrockBlock::with_states(
-            "leaves",
-            vec![
-                (
-                    "old_leaf_type",
-                    BedrockBlockStateValue::String("jungle".to_string()),
-                ),
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Acacia leaves with persistence
-        "acacia_leaves" => BedrockBlock::with_states(
-            "leaves2",
-            vec![
-                (
-                    "new_leaf_type",
-                    BedrockBlockStateValue::String("acacia".to_string()),
-                ),
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Cherry leaves with persistence (1.20+)
-        "cherry_leaves" => BedrockBlock::with_states(
-            "cherry_leaves",
-            vec![
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Mangrove leaves with persistence (1.19+)
-        "mangrove_leaves" => BedrockBlock::with_states(
-            "mangrove_leaves",
-            vec![
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Azalea leaves with persistence (1.17+)
-        "azalea_leaves" => BedrockBlock::with_states(
-            "azalea_leaves",
-            vec![
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-        "melon" => BedrockBlock::simple("melon_block"),
-        "flowering_azalea_leaves" => BedrockBlock::with_states(
-            "azalea_leaves_flowered",
-            vec![
-                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
-                ("update_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Slabs and stairs share their name/state handling with the
-        // property-aware path so both entry points stay in sync.
-        name if name.ends_with("_slab") => convert_slab(name, None),
-        name if name.ends_with("_stairs") => convert_stairs(name, None),
-
-        // Water (flowing by default)
-        "water" => BedrockBlock::with_states(
-            "water",
-            vec![("liquid_depth", BedrockBlockStateValue::Int(0))],
-        ),
-
-        // Rail with shape state
-        "rail" => BedrockBlock::with_states(
-            "rail",
-            vec![("rail_direction", BedrockBlockStateValue::Int(0))],
-        ),
-
-        // Farmland with moisture
-        "farmland" => BedrockBlock::with_states(
-            "farmland",
-            vec![("moisturized_amount", BedrockBlockStateValue::Int(7))],
-        ),
-
-        // Snow layer
-        "snow" => BedrockBlock::with_states(
-            "snow_layer",
-            vec![
-                ("height", BedrockBlockStateValue::Int(0)),
-                ("covered_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        "fire" => BedrockBlock::with_states("fire", vec![("age", BedrockBlockStateValue::Int(0))]),
-
-        // Cobblestone wall
-        "cobblestone_wall" => BedrockBlock::with_states(
-            "cobblestone_wall",
-            vec![(
-                "wall_block_type",
-                BedrockBlockStateValue::String("cobblestone".to_string()),
-            )],
-        ),
-
-        // Andesite wall
-        "andesite_wall" => BedrockBlock::with_states(
-            "cobblestone_wall",
-            vec![(
-                "wall_block_type",
-                BedrockBlockStateValue::String("andesite".to_string()),
-            )],
-        ),
-
-        // Stone brick wall
-        "stone_brick_wall" => BedrockBlock::with_states(
-            "cobblestone_wall",
-            vec![(
-                "wall_block_type",
-                BedrockBlockStateValue::String("stone_brick".to_string()),
-            )],
-        ),
-        "brick_wall" => BedrockBlock::with_states(
-            "cobblestone_wall",
-            vec![(
-                "wall_block_type",
-                BedrockBlockStateValue::String("brick".to_string()),
-            )],
-        ),
-
-        // Flowers - poppy is just "red_flower" in Bedrock
-        "poppy" => BedrockBlock::with_states(
-            "red_flower",
-            vec![(
-                "flower_type",
-                BedrockBlockStateValue::String("poppy".to_string()),
-            )],
-        ),
-
-        // Dandelion is "yellow_flower" in Bedrock
-        "dandelion" => BedrockBlock::simple("yellow_flower"),
-
-        // Blue orchid
-        "blue_orchid" => BedrockBlock::with_states(
-            "red_flower",
-            vec![(
-                "flower_type",
-                BedrockBlockStateValue::String("orchid".to_string()),
-            )],
-        ),
-
-        // Azure bluet
-        "azure_bluet" => BedrockBlock::with_states(
-            "red_flower",
-            vec![(
-                "flower_type",
-                BedrockBlockStateValue::String("houstonia".to_string()),
-            )],
-        ),
-
-        // The other small flowers share red_flower too, told apart by flower_type.
-        "cornflower" | "oxeye_daisy" | "allium" | "lily_of_the_valley" | "red_tulip"
-        | "orange_tulip" | "white_tulip" | "pink_tulip" => BedrockBlock::with_states(
-            "red_flower",
-            vec![(
-                "flower_type",
-                BedrockBlockStateValue::String(red_flower_type(java_name).to_string()),
-            )],
-        ),
-
-        "sunflower" | "lilac" | "rose_bush" | "peony" => convert_double_plant(java_name, None),
-        "sweet_berry_bush" => BedrockBlock::with_states(
-            "sweet_berry_bush",
-            vec![("growth", BedrockBlockStateValue::Int(3))],
-        ),
-        "pumpkin" => BedrockBlock::with_states(
-            "pumpkin",
-            vec![("direction", BedrockBlockStateValue::Int(0))],
-        ),
-        "lily_pad" => BedrockBlock::simple("waterlily"),
-        "cactus" => {
-            BedrockBlock::with_states("cactus", vec![("age", BedrockBlockStateValue::Int(0))])
+    fn int(&self, key: &str, default: i32) -> i32 {
+        match self.0.and_then(|m| m.get(key)) {
+            Some(Value::String(s)) => s.parse().unwrap_or(default),
+            Some(Value::Int(i)) => *i,
+            Some(Value::Byte(b)) => i32::from(*b),
+            Some(Value::Short(s)) => i32::from(*s),
+            _ => default,
         }
-
-        // Concrete colors (Bedrock uses a single block with color state)
-        "white_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("white".to_string()))],
-        ),
-        "black_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("black".to_string()))],
-        ),
-        "gray_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
-        ),
-        "gray_concrete_powder" => BedrockBlock::with_states(
-            "concretePowder",
-            vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
-        ),
-        "light_gray_concrete_powder" => BedrockBlock::with_states(
-            "concretePowder",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("silver".to_string()),
-            )],
-        ),
-        "brown_concrete_powder" => BedrockBlock::with_states(
-            "concretePowder",
-            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
-        ),
-        "light_gray_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("silver".to_string()),
-            )],
-        ),
-        "light_blue_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("light_blue".to_string()),
-            )],
-        ),
-        "cyan_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
-        ),
-        "blue_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
-        ),
-        "purple_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("purple".to_string()),
-            )],
-        ),
-        "magenta_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("magenta".to_string()),
-            )],
-        ),
-        "red_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
-        ),
-        "orange_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("orange".to_string()),
-            )],
-        ),
-        "yellow_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("yellow".to_string()),
-            )],
-        ),
-        "lime_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("lime".to_string()))],
-        ),
-        "brown_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
-        ),
-        "green_concrete" => BedrockBlock::with_states(
-            "concrete",
-            vec![("color", BedrockBlockStateValue::String("green".to_string()))],
-        ),
-
-        // Terracotta colors
-        "white_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("white".to_string()))],
-        ),
-        "orange_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("orange".to_string()),
-            )],
-        ),
-        "yellow_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("yellow".to_string()),
-            )],
-        ),
-        "pink_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("pink".to_string()))],
-        ),
-        "lime_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("lime".to_string()))],
-        ),
-        "light_blue_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("light_blue".to_string()),
-            )],
-        ),
-        "blue_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
-        ),
-        "cyan_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
-        ),
-        "gray_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
-        ),
-        "green_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("green".to_string()))],
-        ),
-        "red_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
-        ),
-        "brown_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
-        ),
-        "black_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("black".to_string()))],
-        ),
-        "light_gray_terracotta" => BedrockBlock::with_states(
-            "stained_hardened_clay",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("silver".to_string()),
-            )],
-        ),
-        // Plain terracotta
-        "terracotta" => BedrockBlock::simple("hardened_clay"),
-        // Wall banner — Bedrock uses "minecraft:wall_banner" with a
-        // "facing_direction" int state: 2=north, 3=south, 4=west, 5=east.
-        // The color is stored in the block entity (Base field), not the block state.
-        // The facing string→int mapping is handled by to_bedrock_block_with_properties.
-        // Every dyed variant collapses onto the same Bedrock block, so match
-        // on the suffix instead of listing colours (a missing colour used to
-        // fall through to a non-existent "minecraft:<colour>_wall_banner").
-        name if name.ends_with("_wall_banner") => BedrockBlock::with_states(
-            "wall_banner",
-            vec![("facing_direction", BedrockBlockStateValue::Int(2))], // default north
-        ),
-        // Wool colors
-        "white_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("white".to_string()))],
-        ),
-        "black_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("black".to_string()))],
-        ),
-        "red_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
-        ),
-        "green_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("green".to_string()))],
-        ),
-        "light_gray_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("silver".to_string()),
-            )],
-        ),
-        "brown_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
-        ),
-        "cyan_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
-        ),
-        "yellow_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("yellow".to_string()),
-            )],
-        ),
-        "orange_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("orange".to_string()),
-            )],
-        ),
-        "blue_wool" => BedrockBlock::with_states(
-            "wool",
-            vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
-        ),
-
-        // Carpets
-        "white_carpet" => BedrockBlock::with_states(
-            "carpet",
-            vec![("color", BedrockBlockStateValue::String("white".to_string()))],
-        ),
-        "red_carpet" => BedrockBlock::with_states(
-            "carpet",
-            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
-        ),
-
-        // Stained glass
-        "white_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("white".to_string()))],
-        ),
-        "gray_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
-        ),
-        "light_gray_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("silver".to_string()),
-            )],
-        ),
-        "brown_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
-        ),
-        "cyan_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
-        ),
-        "blue_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
-        ),
-        "light_blue_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("light_blue".to_string()),
-            )],
-        ),
-        "red_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
-        ),
-        "yellow_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("yellow".to_string()),
-            )],
-        ),
-        "purple_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("purple".to_string()),
-            )],
-        ),
-        "orange_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("orange".to_string()),
-            )],
-        ),
-        "magenta_stained_glass" => BedrockBlock::with_states(
-            "stained_glass",
-            vec![(
-                "color",
-                BedrockBlockStateValue::String("magenta".to_string()),
-            )],
-        ),
-        "daylight_detector" => BedrockBlock::simple("daylight_detector"),
-        "redstone_lamp" => BedrockBlock::simple("redstone_lamp"),
-
-        // Planks - Bedrock uses single "planks" block with wood_type state
-        "oak_planks" => BedrockBlock::with_states(
-            "planks",
-            vec![(
-                "wood_type",
-                BedrockBlockStateValue::String("oak".to_string()),
-            )],
-        ),
-        "spruce_planks" => BedrockBlock::with_states(
-            "planks",
-            vec![(
-                "wood_type",
-                BedrockBlockStateValue::String("spruce".to_string()),
-            )],
-        ),
-        "birch_planks" => BedrockBlock::with_states(
-            "planks",
-            vec![(
-                "wood_type",
-                BedrockBlockStateValue::String("birch".to_string()),
-            )],
-        ),
-        "jungle_planks" => BedrockBlock::with_states(
-            "planks",
-            vec![(
-                "wood_type",
-                BedrockBlockStateValue::String("jungle".to_string()),
-            )],
-        ),
-        "acacia_planks" => BedrockBlock::with_states(
-            "planks",
-            vec![(
-                "wood_type",
-                BedrockBlockStateValue::String("acacia".to_string()),
-            )],
-        ),
-        "dark_oak_planks" => BedrockBlock::with_states(
-            "planks",
-            vec![(
-                "wood_type",
-                BedrockBlockStateValue::String("dark_oak".to_string()),
-            )],
-        ),
-        "crimson_planks" => BedrockBlock::simple("crimson_planks"),
-        "warped_planks" => BedrockBlock::simple("warped_planks"),
-
-        // Stone variants
-        "stone" => BedrockBlock::simple("stone"),
-        "granite" => BedrockBlock::with_states(
-            "stone",
-            vec![(
-                "stone_type",
-                BedrockBlockStateValue::String("granite".to_string()),
-            )],
-        ),
-        "polished_granite" => BedrockBlock::with_states(
-            "stone",
-            vec![(
-                "stone_type",
-                BedrockBlockStateValue::String("granite_smooth".to_string()),
-            )],
-        ),
-        "diorite" => BedrockBlock::with_states(
-            "stone",
-            vec![(
-                "stone_type",
-                BedrockBlockStateValue::String("diorite".to_string()),
-            )],
-        ),
-        "polished_diorite" => BedrockBlock::with_states(
-            "stone",
-            vec![(
-                "stone_type",
-                BedrockBlockStateValue::String("diorite_smooth".to_string()),
-            )],
-        ),
-        "andesite" => BedrockBlock::with_states(
-            "stone",
-            vec![(
-                "stone_type",
-                BedrockBlockStateValue::String("andesite".to_string()),
-            )],
-        ),
-        "polished_andesite" => BedrockBlock::with_states(
-            "stone",
-            vec![(
-                "stone_type",
-                BedrockBlockStateValue::String("andesite_smooth".to_string()),
-            )],
-        ),
-
-        // Blocks with different names in Bedrock
-        "bricks" => BedrockBlock::simple("brick_block"),
-        "end_stone_bricks" => BedrockBlock::simple("end_bricks"),
-        "nether_bricks" => BedrockBlock::simple("nether_brick"),
-        "red_nether_bricks" => BedrockBlock::simple("red_nether_brick"),
-        "snow_block" => BedrockBlock::simple("snow"),
-        "dirt_path" => BedrockBlock::simple("grass_path"),
-        "dead_bush" => BedrockBlock::simple("deadbush"),
-        "note_block" => BedrockBlock::simple("noteblock"),
-
-        // Bedrock never renamed these to match Java's flattening, so the
-        // Java name resolves to nothing at all.
-        "magma_block" => BedrockBlock::simple("magma"),
-        "waxed_copper_block" => BedrockBlock::simple("waxed_copper"),
-        "oak_button" => BedrockBlock::with_states(
-            "wooden_button",
-            vec![
-                ("facing_direction", BedrockBlockStateValue::Int(1)),
-                ("button_pressed_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-        "oak_fence_gate" => BedrockBlock::with_states(
-            "fence_gate",
-            vec![
-                ("direction", BedrockBlockStateValue::Int(0)),
-                ("in_wall_bit", BedrockBlockStateValue::Bool(false)),
-                ("open_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-        "powered_rail" => BedrockBlock::with_states(
-            "golden_rail",
-            vec![
-                ("rail_direction", BedrockBlockStateValue::Int(0)),
-                ("rail_data_bit", BedrockBlockStateValue::Bool(false)),
-            ],
-        ),
-
-        // Cauldrons: Bedrock keeps one block and encodes the contents in states.
-        "cauldron" => BedrockBlock::with_states(
-            "cauldron",
-            vec![
-                (
-                    "cauldron_liquid",
-                    BedrockBlockStateValue::String("water".to_string()),
-                ),
-                ("fill_level", BedrockBlockStateValue::Int(0)),
-            ],
-        ),
-        "water_cauldron" => BedrockBlock::with_states(
-            "cauldron",
-            vec![
-                (
-                    "cauldron_liquid",
-                    BedrockBlockStateValue::String("water".to_string()),
-                ),
-                ("fill_level", BedrockBlockStateValue::Int(6)),
-            ],
-        ),
-
-        // Bedrock has no separate kelp stem block: a column is all
-        // minecraft:kelp, and kelp_age on the top block drives further
-        // growth. 25 is fully grown, so generated columns stay as placed.
-        "kelp_plant" | "kelp" => {
-            BedrockBlock::with_states("kelp", vec![("kelp_age", BedrockBlockStateValue::Int(25))])
-        }
-
-        // Seagrass: one Bedrock block, the half is encoded in sea_grass_type.
-        "seagrass" => BedrockBlock::with_states(
-            "seagrass",
-            vec![(
-                "sea_grass_type",
-                BedrockBlockStateValue::String("default".to_string()),
-            )],
-        ),
-
-        // Oak items mapped to dark_oak in Bedrock (or generic equivalents)
-        "oak_pressure_plate" => BedrockBlock::with_states(
-            "wooden_pressure_plate",
-            vec![("redstone_signal", BedrockBlockStateValue::Int(0))],
-        ),
-        "oak_door" => BedrockBlock::simple("wooden_door"),
-        "spruce_door" => BedrockBlock::simple("spruce_door"),
-        "dark_oak_door" => BedrockBlock::simple("dark_oak_door"),
-        "oak_trapdoor" => BedrockBlock::simple("trapdoor"),
-
-        // These two still carry legacy states on Bedrock. The other new blocks keep their name.
-        "purpur_block" => BedrockBlock::with_states(
-            "purpur_block",
-            vec![
-                (
-                    "chisel_type",
-                    BedrockBlockStateValue::String("default".to_string()),
-                ),
-                (
-                    "pillar_axis",
-                    BedrockBlockStateValue::String("y".to_string()),
-                ),
-            ],
-        ),
-        "dark_prismarine" => BedrockBlock::with_states(
-            "prismarine",
-            vec![(
-                "prismarine_block_type",
-                BedrockBlockStateValue::String("dark".to_string()),
-            )],
-        ),
-
-        // Vegetation with different Bedrock names
-        "fern" => BedrockBlock::with_states(
-            "tallgrass",
-            vec![(
-                "tall_grass_type",
-                BedrockBlockStateValue::String("fern".to_string()),
-            )],
-        ),
-        "large_fern" => BedrockBlock::with_states(
-            "double_plant",
-            vec![(
-                "double_plant_type",
-                BedrockBlockStateValue::String("fern".to_string()),
-            )],
-        ),
-        "cobweb" => BedrockBlock::simple("web"),
-
-        // Potted plants (Bedrock uses "flower_pot" for all variants;
-        // the contained plant is a block entity, not a block state)
-        "flower_pot" => BedrockBlock::with_states(
-            "flower_pot",
-            vec![("update_bit", BedrockBlockStateValue::Bool(false))],
-        ),
-        "potted_poppy" => BedrockBlock::with_states(
-            "flower_pot",
-            vec![("update_bit", BedrockBlockStateValue::Bool(false))],
-        ),
-        "potted_red_tulip" => BedrockBlock::with_states(
-            "flower_pot",
-            vec![("update_bit", BedrockBlockStateValue::Bool(false))],
-        ),
-        "potted_dandelion" => BedrockBlock::with_states(
-            "flower_pot",
-            vec![("update_bit", BedrockBlockStateValue::Bool(false))],
-        ),
-        "potted_blue_orchid" => BedrockBlock::with_states(
-            "flower_pot",
-            vec![("update_bit", BedrockBlockStateValue::Bool(false))],
-        ),
-
-        // Legacy id + level state, like the other families this map keeps on the
-        // encoding every Bedrock version resolves.
-        "light" => BedrockBlock::with_states(
-            "light_block",
-            vec![("block_light_level", BedrockBlockStateValue::Int(15))],
-        ),
-
-        // Beds always carry facing/part properties, so convert_bed owns them;
-        // Bedrock stores the colour in the Bed block entity, not the state.
-        name if name.ends_with("_bed") => convert_bed(name, None),
-
-        // Default: use the same name (works for many blocks)
-        // Log unmapped blocks to help identify missing mappings
-        _ => BedrockBlock::simple(java_name),
     }
 }
 
-/// Converts an internal Block with optional Java properties to a BedrockBlock.
-///
-/// This function extends `to_bedrock_block` by also handling block-specific properties
-/// like stair facing/shape, slab type, etc. Java property names and values are converted
-/// to their Bedrock equivalents.
+use BedrockBlockStateValue::{Bool, Int, String as Str};
+
+fn s(value: &str) -> BedrockBlockStateValue {
+    Str(value.to_string())
+}
+
+/// Bedrock's `facing_direction`: down, up, north, south, west, east.
+fn facing_direction(facing: &str) -> i32 {
+    match facing {
+        "down" => 0,
+        "up" => 1,
+        "south" => 3,
+        "west" => 4,
+        "east" => 5,
+        _ => 2,
+    }
+}
+
+/// The legacy `direction` of beds, looms and the like: south, west, north, east.
+fn legacy_direction(facing: &str) -> i32 {
+    match facing {
+        "west" => 1,
+        "north" => 2,
+        "east" => 3,
+        _ => 0,
+    }
+}
+
+/// The `direction` of stairs (`weirdo_direction`) and trapdoors: east, west, south, north.
+fn weirdo_direction(facing: &str) -> i32 {
+    match facing {
+        "west" => 1,
+        "south" => 2,
+        "north" => 3,
+        _ => 0,
+    }
+}
+
+/// Geyser's `huge_mushroom_bits` by Java faces: down 1, east 2, north 4, south 8, up 16, west 32.
+const MUSHROOM_CAP_BITS: [u8; 64] = [
+    0, 14, 6, 6, 2, 2, 3, 3, 8, 8, 9, 9, 2, 2, 3, 3, 5, 5, 6, 6, 2, 2, 3, 3, 8, 8, 9, 9, 2, 2, 3,
+    3, 4, 4, 4, 4, 1, 1, 1, 1, 7, 7, 7, 7, 1, 1, 1, 1, 4, 4, 4, 4, 1, 1, 1, 1, 7, 7, 7, 7, 1, 1,
+    14, 14,
+];
+const MUSHROOM_STEM_BITS: [u8; 64] = [
+    0, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15, 10, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+];
+
+/// Bedrock ids that differ from the Java ones.
+fn renamed(java_name: &str) -> &str {
+    match java_name {
+        "bricks" => "brick_block",
+        "cobweb" => "web",
+        "dead_bush" => "deadbush",
+        "dirt_path" => "grass_path",
+        "end_stone_bricks" => "end_bricks",
+        "flowering_azalea_leaves" => "azalea_leaves_flowered",
+        "lily_pad" => "waterlily",
+        "magma_block" => "magma",
+        "melon" => "melon_block",
+        "nether_bricks" => "nether_brick",
+        "note_block" => "noteblock",
+        "red_nether_bricks" => "red_nether_brick",
+        "snow_block" => "snow",
+        "sugar_cane" => "reeds",
+        "terracotta" => "hardened_clay",
+        "waxed_copper_block" => "waxed_copper",
+        "chain" => "iron_chain",
+        "oak_button" => "wooden_button",
+        "oak_door" => "wooden_door",
+        "oak_fence_gate" => "fence_gate",
+        "oak_pressure_plate" => "wooden_pressure_plate",
+        "oak_trapdoor" => "trapdoor",
+        "cobblestone_stairs" => "stone_stairs",
+        "stone_stairs" => "normal_stone_stairs",
+        "end_stone_brick_stairs" => "end_brick_stairs",
+        "stone_slab" => "normal_stone_slab",
+        other => other,
+    }
+}
+
+/// Whether a block stands in water, which Bedrock stores as a second block in the cell.
+/// Java's `waterlogged` decides; without it, the blocks that are wet in Java by default.
+pub fn is_waterlogged(block: Block, java_properties: Option<&Value>) -> bool {
+    let fallback = block.properties();
+    if let Some(Value::Compound(map)) = java_properties.or(fallback.as_ref()) {
+        if let Some(Value::String(v)) = map.get("waterlogged") {
+            return v == "true";
+        }
+    }
+    let name = block.name();
+    matches!(
+        name,
+        "kelp"
+            | "kelp_plant"
+            | "seagrass"
+            | "tall_seagrass"
+            | "bubble_column"
+            | "sea_pickle"
+            | "conduit"
+    ) || name.ends_with("_coral")
+        || name.ends_with("_coral_fan")
+        || name.ends_with("_coral_wall_fan")
+}
+
+/// The plant in a Java potted block, which Bedrock keeps in the pot's block entity.
+pub fn potted_plant(block: Block) -> Option<BedrockBlock> {
+    let plant = block.name().strip_prefix("potted_")?;
+    Some(convert(plant, &Props(None)))
+}
+
+/// The Bedrock state of a block, with its own default properties when none are stored.
 pub fn to_bedrock_block_with_properties(
     block: Block,
-    java_properties: Option<&fastnbt::Value>,
+    java_properties: Option<&Value>,
 ) -> BedrockBlock {
-    let java_name = block.name();
-
-    // If no stored properties were passed, fall back to block.properties()
-    // so that blocks placed via set_block_absolute (e.g. doors with half=upper/lower)
-    // still get their default properties forwarded to the Bedrock converter.
-    let fallback_props = block.properties();
-    let effective_properties = java_properties.or(fallback_props.as_ref());
-
-    // Extract Java properties as a map if present
-    let props_map = effective_properties.and_then(|v| {
-        if let fastnbt::Value::Compound(map) = v {
-            Some(map)
-        } else {
-            None
-        }
-    });
-
-    // Handle stairs with facing/shape properties
-    if java_name.ends_with("_stairs") {
-        return convert_stairs(java_name, props_map);
-    }
-
-    // Java names the faces a vine clings to; Bedrock packs them into bits.
-    if java_name == "vine" {
-        let bits = [("south", 1), ("west", 2), ("north", 4), ("east", 8)]
-            .iter()
-            .filter(|(face, _)| {
-                props_map
-                    .and_then(|m| m.get(*face))
-                    .is_some_and(|v| matches!(v, fastnbt::Value::String(s) if s == "true"))
-            })
-            .map(|(_, bit)| *bit)
-            .sum();
-        return BedrockBlock::with_states(
-            "vine",
-            vec![("vine_direction_bits", BedrockBlockStateValue::Int(bits))],
-        );
-    }
-
-    // Handle barrel facing direction
-    if java_name == "barrel" {
-        return convert_barrel(java_name, props_map);
-    }
-
-    // Inverted daylight sensors and lit redstone lamps are separate blocks on Bedrock.
-    if java_name == "daylight_detector"
-        && props_map
-            .and_then(|m| m.get("inverted"))
-            .is_some_and(|v| matches!(v, fastnbt::Value::String(s) if s == "true"))
-    {
-        return BedrockBlock::with_states(
-            "daylight_detector_inverted",
-            vec![("redstone_signal", BedrockBlockStateValue::Int(11))],
-        );
-    }
-    if java_name == "redstone_lamp"
-        && props_map
-            .and_then(|m| m.get("lit"))
-            .is_some_and(|v| matches!(v, fastnbt::Value::String(s) if s == "true"))
-    {
-        return BedrockBlock::simple("lit_redstone_lamp");
-    }
-
-    // Handle slabs with type property (top/bottom/double)
-    if java_name.ends_with("_slab") {
-        return convert_slab(java_name, props_map);
-    }
-
-    // Handle logs (and chains, which use the same pillar_axis) with axis property
-    if java_name.ends_with("_log") || java_name.ends_with("_wood") || java_name == "chain" {
-        return convert_log(java_name, props_map);
-    }
-
-    // Handle doors with half property (upper/lower -> upper_block_bit), iron ones included.
-    if java_name.ends_with("_door") {
-        return convert_door(java_name, props_map);
-    }
-
-    // Handle trapdoors with facing/open/half properties
-    if java_name.ends_with("_trapdoor") {
-        return convert_trapdoor(java_name, props_map);
-    }
-
-    // Handle beds with facing/part/occupied properties
-    if java_name.ends_with("_bed") {
-        return convert_bed(java_name, props_map);
-    }
-
-    // Handle rails with shape property
-    if java_name == "rail" {
-        return convert_rail(props_map);
-    }
-
-    // Handle wall banners with facing property
-    if java_name.ends_with("_wall_banner") {
-        return convert_wall_banner(props_map);
-    }
-
-    // Blocks whose Java property has a differently named Bedrock counterpart
-    if java_name == "redstone_wall_torch" {
-        return convert_redstone_wall_torch(props_map);
-    }
-    if matches!(java_name, "wheat" | "carrots" | "potatoes") {
-        return convert_crop(java_name, props_map);
-    }
-    if matches!(
-        java_name,
-        "tall_grass" | "large_fern" | "sunflower" | "lilac" | "rose_bush" | "peony"
-    ) {
-        return convert_double_plant(java_name, props_map);
-    }
-    if java_name == "tall_seagrass" {
-        return convert_tall_seagrass(props_map);
-    }
-    if java_name == "oak_sign" {
-        return convert_standing_sign(props_map);
-    }
-    if java_name == "sea_pickle" {
-        return convert_sea_pickle(props_map);
-    }
-    if java_name == "snow" {
-        return convert_snow_layer(props_map);
-    }
-    if java_name == "chiseled_bookshelf" {
-        return convert_chiseled_bookshelf(props_map);
-    }
-    if let Some(cave_block) = convert_cave_block(java_name, props_map) {
-        return cave_block;
-    }
-    if java_name.ends_with("_wall") {
-        if let Some(props) = props_map {
-            return convert_connected_wall(to_bedrock_block(block), props);
-        }
-    }
-    if java_name.ends_with("_fence_gate") {
-        if let Some(props) = props_map {
-            return convert_fence_gate(to_bedrock_block(block), props);
-        }
-    }
-
-    // Fall back to basic conversion without properties
-    to_bedrock_block(block)
-}
-
-/// Carries Java wall connections over to Bedrock's wall states.
-fn convert_connected_wall(
-    mut wall: BedrockBlock,
-    props: &std::collections::HashMap<String, fastnbt::Value>,
-) -> BedrockBlock {
-    let prop = |key: &str| match props.get(key) {
-        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
+    let fallback = block.properties();
+    let map = match java_properties.or(fallback.as_ref()) {
+        Some(Value::Compound(map)) => Some(map),
         _ => None,
     };
-    for side in ["east", "north", "south", "west"] {
-        let connection = match prop(side) {
-            Some("low") => "short",
-            Some("tall") => "tall",
-            _ => "none",
-        };
-        wall.states.insert(
-            format!("wall_connection_type_{side}"),
-            BedrockBlockStateValue::String(connection.to_string()),
-        );
-    }
-    wall.states.insert(
-        "wall_post_bit".to_string(),
-        BedrockBlockStateValue::Bool(prop("up") != Some("false")),
-    );
-    wall
+    convert(block.name(), &Props(map))
 }
 
-/// Carries a Java fence gate's facing, open and in_wall states over to Bedrock.
-fn convert_fence_gate(
-    mut gate: BedrockBlock,
-    props: &std::collections::HashMap<String, fastnbt::Value>,
-) -> BedrockBlock {
-    let prop = |key: &str| match props.get(key) {
-        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
-        _ => None,
+fn convert(name: &str, p: &Props) -> BedrockBlock {
+    let id = renamed(name);
+    // Every block below that reads `facing` only turns horizontally.
+    let facing = match p.or("facing", "north") {
+        f @ ("south" | "west" | "east") => f,
+        _ => "north",
     };
-    // Bedrock's legacy direction: 0=south, 1=west, 2=north, 3=east.
-    let direction = match prop("facing") {
-        Some("west") => 1,
-        Some("north") => 2,
-        Some("east") => 3,
-        _ => 0,
-    };
-    gate.states.insert(
-        "direction".to_string(),
-        BedrockBlockStateValue::Int(direction),
-    );
-    gate.states.insert(
-        "open_bit".to_string(),
-        BedrockBlockStateValue::Bool(prop("open") == Some("true")),
-    );
-    gate.states.insert(
-        "in_wall_bit".to_string(),
-        BedrockBlockStateValue::Bool(prop("in_wall") == Some("true")),
-    );
-    gate
-}
+    let with = |states: Vec<(&str, BedrockBlockStateValue)>| BedrockBlock::with_states(id, states);
 
-/// Blocks the cave passes place whose Bedrock form differs from Java's. Like the rest of this
-/// file, the older Bedrock names (`coral_block` with a colour state) are used; the game
-/// upgrades them on load.
-fn convert_cave_block(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> Option<BedrockBlock> {
-    use BedrockBlockStateValue::{Bool, Int, String as Str};
-    let prop = |key: &str| match props.and_then(|p| p.get(key)) {
-        Some(fastnbt::Value::String(v)) => Some(v.as_str()),
-        _ => None,
-    };
-    let is_true = |key: &str| prop(key) == Some("true");
-    // Bedrock's facing_direction order: down, up, north, south, west, east.
-    let facing_direction = |facing: Option<&str>| match facing {
-        Some("down") => 0,
-        Some("north") => 2,
-        Some("south") => 3,
-        Some("west") => 4,
-        Some("east") => 5,
-        _ => 1,
-    };
-    let coral_color = |species: &str| match species {
-        "tube" => "blue",
-        "brain" => "pink",
-        "bubble" => "purple",
-        "fire" => "red",
-        _ => "yellow",
-    };
-
-    Some(match java_name {
-        "pointed_dripstone" => BedrockBlock::with_states(
-            "pointed_dripstone",
+    match name {
+        n if n.ends_with("_stairs") => with(vec![
+            ("weirdo_direction", Int(weirdo_direction(facing))),
+            ("upside_down_bit", Bool(p.or("half", "bottom") == "top")),
+        ]),
+        n if n.ends_with("_slab") => {
+            let slab_type = p.or("type", "bottom");
+            let id = if slab_type != "double" {
+                id.to_string()
+            } else if let Some(prefix) = id.strip_suffix("cut_copper_slab") {
+                format!("{prefix}double_cut_copper_slab")
+            } else {
+                format!("{}_double_slab", id.trim_end_matches("_slab"))
+            };
+            let half = if slab_type == "top" { "top" } else { "bottom" };
+            BedrockBlock::with_states(&id, vec![("minecraft:vertical_half", s(half))])
+        }
+        n if n.ends_with("_wall_banner") || n.ends_with("_wall_sign") || n == "ladder" => {
+            let id = if n.ends_with("_wall_banner") {
+                "wall_banner"
+            } else {
+                id
+            };
+            BedrockBlock::with_states(
+                id,
+                vec![("facing_direction", Int(facing_direction(facing)))],
+            )
+        }
+        n if n.ends_with("_wall") => {
+            let connection = |side: &str| match p.or(side, "none") {
+                "low" => "short",
+                "tall" => "tall",
+                _ => "none",
+            };
+            with(vec![
+                ("wall_connection_type_east", s(connection("east"))),
+                ("wall_connection_type_north", s(connection("north"))),
+                ("wall_connection_type_south", s(connection("south"))),
+                ("wall_connection_type_west", s(connection("west"))),
+                ("wall_post_bit", Bool(p.flag("up", true))),
+            ])
+        }
+        // Always persistent: hedges and trees away from a log would decay otherwise.
+        n if n.ends_with("_leaves") => with(vec![
+            ("persistent_bit", Bool(true)),
+            ("update_bit", Bool(false)),
+        ]),
+        n if n.ends_with("_trapdoor") => with(vec![
+            ("direction", Int(weirdo_direction(facing))),
+            ("open_bit", Bool(p.flag("open", false))),
+            ("upside_down_bit", Bool(p.or("half", "bottom") == "top")),
+        ]),
+        // A Bedrock door records the facing turned a quarter clockwise.
+        n if n.ends_with("_door") => {
+            let turned = match facing {
+                "east" => "south",
+                "south" => "west",
+                "west" => "north",
+                _ => "east",
+            };
+            with(vec![
+                ("door_hinge_bit", Bool(p.or("hinge", "left") == "right")),
+                ("minecraft:cardinal_direction", s(turned)),
+                ("open_bit", Bool(p.flag("open", false))),
+                ("upper_block_bit", Bool(p.or("half", "lower") == "upper")),
+            ])
+        }
+        n if n.ends_with("_fence_gate") => with(vec![
+            ("in_wall_bit", Bool(p.flag("in_wall", false))),
+            ("minecraft:cardinal_direction", s(facing)),
+            ("open_bit", Bool(p.flag("open", false))),
+        ]),
+        n if n.ends_with("_button") => {
+            let direction = match p.or("face", "wall") {
+                "floor" => 1,
+                "ceiling" => 0,
+                _ => facing_direction(facing),
+            };
+            with(vec![
+                ("button_pressed_bit", Bool(p.flag("powered", false))),
+                ("facing_direction", Int(direction)),
+            ])
+        }
+        n if n.ends_with("_pressure_plate") => with(vec![(
+            "redstone_signal",
+            Int(if p.flag("powered", false) { 15 } else { 0 }),
+        )]),
+        // The colour lives in the Bed block entity.
+        n if n.ends_with("_bed") => BedrockBlock::with_states(
+            "bed",
             vec![
-                (
-                    "dripstone_thickness",
-                    Str(match prop("thickness").unwrap_or("tip") {
-                        "tip_merge" => "merge".to_string(),
-                        other => other.to_string(),
-                    }),
-                ),
-                ("hanging", Bool(prop("vertical_direction") == Some("down"))),
+                ("direction", Int(legacy_direction(facing))),
+                ("head_piece_bit", Bool(p.or("part", "foot") == "head")),
+                ("occupied_bit", Bool(p.flag("occupied", false))),
             ],
         ),
-        // One bit per covered face: down, up, south, west, north, east.
-        "glow_lichen" | "sculk_vein" => {
-            let bits = ["down", "up", "south", "west", "north", "east"]
-                .iter()
-                .enumerate()
-                .filter(|(_, face)| is_true(face))
-                .fold(0, |acc, (i, _)| acc | (1 << i));
-            // 0 would cover every face; a face-less block lies on the floor.
-            let bits = if bits == 0 { 1 } else { bits };
-            BedrockBlock::with_states(java_name, vec![("multi_face_direction_bits", Int(bits))])
+        n if n.ends_with("_log")
+            || n.ends_with("_wood")
+            || n.ends_with("_hyphae")
+            || n.ends_with("crimson_stem")
+            || n.ends_with("warped_stem")
+            || matches!(
+                n,
+                "chain"
+                    | "basalt"
+                    | "polished_basalt"
+                    | "deepslate"
+                    | "quartz_pillar"
+                    | "purpur_pillar"
+            ) =>
+        {
+            with(vec![("pillar_axis", s(p.or("axis", "y")))])
         }
-        // Bedrock splits the vines by berries and by head/body rather than using a state.
-        "cave_vines" | "cave_vines_plant" => {
-            let name = match (java_name == "cave_vines", is_true("berries")) {
-                (true, true) => "cave_vines_head_with_berries",
-                (false, true) => "cave_vines_body_with_berries",
-                _ => "cave_vines",
-            };
-            BedrockBlock::with_states(name, vec![("growing_plant_age", Int(25))])
+        "hay_block" | "bone_block" => with(vec![
+            ("deprecated", Int(0)),
+            ("pillar_axis", s(p.or("axis", "y"))),
+        ]),
+        // Java has no axis on these; Bedrock still stores one.
+        "chiseled_quartz_block" | "purpur_block" | "quartz_block" | "smooth_quartz" => {
+            with(vec![("pillar_axis", s("y"))])
+        }
+        n if n.ends_with("_coral_fan") => with(vec![("coral_fan_direction", Int(0))]),
+        // The plant lives in the FlowerPot block entity.
+        n if n == "flower_pot" || n.starts_with("potted_") => {
+            BedrockBlock::with_states("flower_pot", vec![("update_bit", Bool(false))])
+        }
+        "tall_grass" | "large_fern" | "sunflower" | "lilac" | "rose_bush" | "peony" => {
+            with(vec![(
+                "upper_block_bit",
+                Bool(p.or("half", "lower") == "upper"),
+            )])
         }
         "amethyst_cluster"
         | "small_amethyst_bud"
         | "medium_amethyst_bud"
-        | "large_amethyst_bud" => BedrockBlock::with_states(
-            java_name,
-            vec![("facing_direction", Int(facing_direction(prop("facing"))))],
-        ),
-        "big_dripleaf" | "big_dripleaf_stem" => BedrockBlock::with_states(
-            "big_dripleaf",
-            vec![
-                ("big_dripleaf_head", Bool(java_name == "big_dripleaf")),
-                ("big_dripleaf_tilt", Str("none".to_string())),
-                ("direction", Int(0)),
-            ],
-        ),
-        "small_dripleaf" => BedrockBlock::with_states(
-            "small_dripleaf_block",
-            vec![
-                ("upper_block_bit", Bool(prop("half") == Some("upper"))),
-                ("direction", Int(0)),
-            ],
-        ),
-        "basalt" => convert_log(java_name, props),
-        // All six faces show the cap (14) or the stem (15).
-        "red_mushroom_block" | "brown_mushroom_block" => {
-            BedrockBlock::with_states(java_name, vec![("huge_mushroom_bits", Int(14))])
+        | "large_amethyst_bud" => with(vec![("minecraft:block_face", s(p.or("facing", "up")))]),
+        "anvil" | "chipped_anvil" | "damaged_anvil" | "chest" | "trapped_chest" | "ender_chest" => {
+            with(vec![("minecraft:cardinal_direction", s(facing))])
         }
-        "mushroom_stem" => {
-            BedrockBlock::with_states("mushroom_stem", vec![("huge_mushroom_bits", Int(15))])
+        "furnace" | "blast_furnace" | "smoker" => {
+            let id = if p.flag("lit", false) {
+                format!("lit_{id}")
+            } else {
+                id.to_string()
+            };
+            BedrockBlock::with_states(&id, vec![("minecraft:cardinal_direction", s(facing))])
         }
-        name if name.ends_with("_coral_block") => {
-            let dead = name.starts_with("dead_");
-            let species = name
-                .trim_start_matches("dead_")
-                .trim_end_matches("_coral_block");
+        "lectern" => with(vec![
+            ("minecraft:cardinal_direction", s(facing)),
+            ("powered_bit", Bool(p.flag("powered", false))),
+        ]),
+        "pumpkin" => with(vec![("minecraft:cardinal_direction", s("north"))]),
+        "big_dripleaf" | "big_dripleaf_stem" => {
+            let head = name == "big_dripleaf";
+            let tilt = match p.or("tilt", "none") {
+                "full" if head => "full_tilt",
+                "partial" if head => "partial_tilt",
+                "unstable" if head => "unstable",
+                _ => "none",
+            };
             BedrockBlock::with_states(
-                "coral_block",
+                "big_dripleaf",
                 vec![
-                    ("coral_color", Str(coral_color(species).to_string())),
-                    ("dead_bit", Bool(dead)),
+                    ("big_dripleaf_head", Bool(head)),
+                    ("big_dripleaf_tilt", s(tilt)),
+                    ("minecraft:cardinal_direction", s(facing)),
                 ],
             )
         }
-        name if name.ends_with("_coral_fan") => BedrockBlock::with_states(
-            "coral_fan",
-            vec![
-                (
-                    "coral_color",
-                    Str(coral_color(name.trim_end_matches("_coral_fan")).to_string()),
-                ),
-                ("coral_fan_direction", Int(0)),
-            ],
-        ),
-        name if name.ends_with("_coral") => BedrockBlock::with_states(
-            "coral",
-            vec![
-                (
-                    "coral_color",
-                    Str(coral_color(name.trim_end_matches("_coral")).to_string()),
-                ),
-                ("dead_bit", Bool(false)),
-            ],
-        ),
-        _ => return None,
-    })
-}
-
-/// Convert Java stair block to Bedrock format with proper orientation.
-fn convert_stairs(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    // Map Java stair names to Bedrock equivalents.
-    //
-    // Bedrock never renamed its two oldest stair ids, so they read as swapped
-    // next to Java: "minecraft:stone_stairs" IS cobblestone stairs, and the
-    // stone ones are "minecraft:normal_stone_stairs". Taking the Java names
-    // at face value gave cobblestone stairs a non-existent id and turned
-    // stone stairs into cobblestone.
-    let bedrock_name = match java_name {
-        "end_stone_brick_stairs" => "end_brick_stairs",
-        "cobblestone_stairs" => "stone_stairs",
-        "stone_stairs" => "normal_stone_stairs",
-        _ => java_name, // Most stairs have the same name
-    };
-
-    let mut states = BTreeMap::new();
-
-    // Convert facing: Java uses "north/south/east/west", Bedrock uses "weirdo_direction" (0-3)
-    // Bedrock: 0=east, 1=west, 2=south, 3=north
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
-            let direction = match facing.as_str() {
-                "east" => 0,
-                "west" => 1,
-                "south" => 2,
-                "north" => 3,
-                _ => 0,
+        // Small dripleaf faces are turned a quarter counter-clockwise on Bedrock.
+        "small_dripleaf" => {
+            let turned = match facing {
+                "east" => "north",
+                "south" => "east",
+                "west" => "south",
+                _ => "west",
             };
-            states.insert(
-                "weirdo_direction".to_string(),
-                BedrockBlockStateValue::Int(direction),
-            );
+            BedrockBlock::with_states(
+                "small_dripleaf_block",
+                vec![
+                    ("minecraft:cardinal_direction", s(turned)),
+                    ("upper_block_bit", Bool(p.or("half", "lower") == "upper")),
+                ],
+            )
         }
-
-        // Convert half: Java uses "top/bottom", Bedrock uses "upside_down_bit"
-        if let Some(fastnbt::Value::String(half)) = props.get("half") {
-            let upside_down = half == "top";
-            states.insert(
-                "upside_down_bit".to_string(),
-                BedrockBlockStateValue::Bool(upside_down),
-            );
+        "cactus" | "fire" | "sugar_cane" => with(vec![("age", Int(p.int("age", 0)))]),
+        "wheat" | "carrots" | "potatoes" | "beetroots" | "sweet_berry_bush" => {
+            with(vec![("growth", Int(p.int("age", 0)))])
         }
-    }
-
-    // If no properties were set, use defaults
-    if states.is_empty() {
-        states.insert(
-            "weirdo_direction".to_string(),
-            BedrockBlockStateValue::Int(0),
-        );
-        states.insert(
-            "upside_down_bit".to_string(),
-            BedrockBlockStateValue::Bool(false),
-        );
-    }
-
-    BedrockBlock {
-        name: format!("minecraft:{bedrock_name}"),
-        states,
-    }
-}
-
-/// Convert Java barrel to Bedrock format with facing direction.
-fn convert_barrel(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let mut states = BTreeMap::new();
-
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
-            let facing_direction = match facing.as_str() {
+        "red_mushroom_block" | "brown_mushroom_block" | "mushroom_stem" => {
+            let faces = ["down", "east", "north", "south", "up", "west"]
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| p.flag(face, true))
+                .fold(0, |bits, (i, _)| bits | (1 << i));
+            let table = if name == "mushroom_stem" {
+                &MUSHROOM_STEM_BITS
+            } else {
+                &MUSHROOM_CAP_BITS
+            };
+            with(vec![("huge_mushroom_bits", Int(i32::from(table[faces])))])
+        }
+        "glow_lichen" | "sculk_vein" => {
+            let bits = ["down", "up", "south", "west", "north", "east"]
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| p.flag(face, false))
+                .fold(0, |bits, (i, _)| bits | (1 << i));
+            // A face-less lichen cannot exist; it lies on the floor.
+            with(vec![(
+                "multi_face_direction_bits",
+                Int(if bits == 0 { 1 } else { bits }),
+            )])
+        }
+        "vine" => {
+            let bits = [("south", 1), ("west", 2), ("north", 4), ("east", 8)]
+                .iter()
+                .filter(|(face, _)| p.flag(face, false))
+                .map(|(_, bit)| bit)
+                .sum();
+            with(vec![("vine_direction_bits", Int(bits))])
+        }
+        "lantern" | "soul_lantern" => with(vec![("hanging", Bool(p.flag("hanging", false)))]),
+        "water" | "lava" => {
+            let level = p.int("level", 0);
+            let id = if level == 0 {
+                id.to_string()
+            } else {
+                format!("flowing_{id}")
+            };
+            BedrockBlock::with_states(&id, vec![("liquid_depth", Int(level))])
+        }
+        "barrel" => with(vec![
+            (
+                "facing_direction",
+                Int(facing_direction(p.or("facing", "north"))),
+            ),
+            ("open_bit", Bool(p.flag("open", false))),
+        ]),
+        "dispenser" | "dropper" => with(vec![
+            (
+                "facing_direction",
+                Int(facing_direction(p.or("facing", "north"))),
+            ),
+            ("triggered_bit", Bool(p.flag("triggered", false))),
+        ]),
+        "hopper" => with(vec![
+            (
+                "facing_direction",
+                Int(facing_direction(p.or("facing", "down"))),
+            ),
+            ("toggle_bit", Bool(p.flag("enabled", true))),
+        ]),
+        "lightning_rod" => with(vec![
+            (
+                "facing_direction",
+                Int(facing_direction(p.or("facing", "up"))),
+            ),
+            ("powered_bit", Bool(p.flag("powered", false))),
+        ]),
+        // End rods swap the horizontal directions.
+        "end_rod" => {
+            let direction = match p.or("facing", "up") {
                 "down" => 0,
-                "up" => 1,
-                "north" => 2,
-                "south" => 3,
-                "west" => 4,
-                "east" => 5,
+                "north" => 3,
+                "south" => 2,
+                "west" => 5,
+                "east" => 4,
                 _ => 1,
             };
-            states.insert(
-                "facing_direction".to_string(),
-                BedrockBlockStateValue::Int(facing_direction),
-            );
+            with(vec![("facing_direction", Int(direction))])
         }
-    }
-
-    if !states.contains_key("facing_direction") {
-        states.insert(
-            "facing_direction".to_string(),
-            BedrockBlockStateValue::Int(1),
-        );
-    }
-
-    states.insert("open_bit".to_string(), BedrockBlockStateValue::Bool(false));
-
-    BedrockBlock {
-        name: format!("minecraft:{java_name}"),
-        states,
-    }
-}
-
-/// Mineral slabs live in four numbered Bedrock families, each with its own
-/// `stone_slab_type*` state. The flattened per-material ids (`minecraft:andesite_slab`
-/// and friends) only exist from 1.21.30 onwards and take `minecraft:vertical_half`
-/// instead of `top_slot_bit`, so emitting one of those names together with
-/// `top_slot_bit` yields a state set no Bedrock version can resolve. Going through
-/// the legacy family ids keeps a single encoding that every version resolves.
-///
-/// Returns `(bedrock_id, state_name, state_value)`.
-fn stone_slab_family(java_name: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    let (family, value) = match java_name {
-        "smooth_stone_slab" => (1, "smooth_stone"),
-        "sandstone_slab" => (1, "sandstone"),
-        "petrified_oak_slab" => (1, "wood"),
-        "cobblestone_slab" => (1, "cobblestone"),
-        "brick_slab" => (1, "brick"),
-        "stone_brick_slab" => (1, "stone_brick"),
-        "quartz_slab" => (1, "quartz"),
-        "nether_brick_slab" => (1, "nether_brick"),
-
-        "red_sandstone_slab" => (2, "red_sandstone"),
-        "purpur_slab" => (2, "purpur"),
-        "prismarine_slab" => (2, "prismarine_rough"),
-        "dark_prismarine_slab" => (2, "prismarine_dark"),
-        "prismarine_brick_slab" => (2, "prismarine_brick"),
-        "mossy_cobblestone_slab" => (2, "mossy_cobblestone"),
-        "smooth_sandstone_slab" => (2, "smooth_sandstone"),
-        "red_nether_brick_slab" => (2, "red_nether_brick"),
-
-        "end_stone_brick_slab" => (3, "end_stone_brick"),
-        "smooth_red_sandstone_slab" => (3, "smooth_red_sandstone"),
-        "polished_andesite_slab" => (3, "polished_andesite"),
-        "andesite_slab" => (3, "andesite"),
-        "diorite_slab" => (3, "diorite"),
-        "polished_diorite_slab" => (3, "polished_diorite"),
-        "granite_slab" => (3, "granite"),
-        "polished_granite_slab" => (3, "polished_granite"),
-
-        "mossy_stone_brick_slab" => (4, "mossy_stone_brick"),
-        "smooth_quartz_slab" => (4, "smooth_quartz"),
-        // Java "stone_slab" is the plain stone slab, which lives in family 4.
-        // (Family 1's "smooth_stone" is Java's smooth_stone_slab.)
-        "stone_slab" => (4, "stone"),
-        "cut_sandstone_slab" => (4, "cut_sandstone"),
-        "cut_red_sandstone_slab" => (4, "cut_red_sandstone"),
-
-        _ => return None,
-    };
-
-    Some(match family {
-        1 => ("stone_block_slab", "stone_slab_type", value),
-        2 => ("stone_block_slab2", "stone_slab_type_2", value),
-        3 => ("stone_block_slab3", "stone_slab_type_3", value),
-        _ => ("stone_block_slab4", "stone_slab_type_4", value),
-    })
-}
-
-/// Convert Java slab block to Bedrock format with proper type.
-///
-/// Java encodes a full-height slab as `type=double` on the slab block itself.
-/// Bedrock instead has a separate double-slab id per material, so `type=double`
-/// selects a different block rather than a different state. Treating it as an
-/// ordinary slab left half-height blocks in place of full ones — the bundled
-/// schematics (cars, boats, bridge segments, playgrounds) rely on double slabs.
-fn convert_slab(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let slab_type = props.and_then(|p| p.get("type")).and_then(|v| match v {
-        fastnbt::Value::String(s) => Some(s.as_str()),
-        _ => None,
-    });
-    let is_double = slab_type == Some("double");
-
-    let mut states = BTreeMap::new();
-
-    // Convert type: Java uses "top"/"bottom", Bedrock uses "top_slot_bit".
-    // Double slabs keep the state (it is inert for them) so that the legacy
-    // family ids still carry their full state set.
-    states.insert(
-        "top_slot_bit".to_string(),
-        BedrockBlockStateValue::Bool(slab_type == Some("top")),
-    );
-
-    let bedrock_name = if let Some((name, state, value)) = stone_slab_family(java_name) {
-        states.insert(
-            state.to_string(),
-            BedrockBlockStateValue::String(value.to_string()),
-        );
-        if is_double {
-            // stone_block_slab3 -> double_stone_block_slab3
-            format!("double_{name}")
-        } else {
-            name.to_string()
+        "bedrock" => with(vec![("infiniburn_bit", Bool(false))]),
+        "brewing_stand" => with(vec![
+            (
+                "brewing_stand_slot_a_bit",
+                Bool(p.flag("has_bottle_0", false)),
+            ),
+            (
+                "brewing_stand_slot_b_bit",
+                Bool(p.flag("has_bottle_1", false)),
+            ),
+            (
+                "brewing_stand_slot_c_bit",
+                Bool(p.flag("has_bottle_2", false)),
+            ),
+        ]),
+        "cake" => with(vec![("bite_counter", Int(p.int("bites", 0)))]),
+        "cauldron" => with(vec![
+            ("cauldron_liquid", s("water")),
+            ("fill_level", Int(0)),
+        ]),
+        "water_cauldron" => {
+            // Arnis places these without a level and means them full.
+            let fill = match p.int("level", 3) {
+                2 => 4,
+                3 => 6,
+                _ => 3,
+            };
+            BedrockBlock::with_states(
+                "cauldron",
+                vec![("cauldron_liquid", s("water")), ("fill_level", Int(fill))],
+            )
         }
-    } else if matches!(
-        java_name,
-        "oak_slab" | "spruce_slab" | "birch_slab" | "jungle_slab" | "acacia_slab" | "dark_oak_slab"
-    ) {
-        states.insert(
-            "wood_type".to_string(),
-            BedrockBlockStateValue::String(java_name.trim_end_matches("_slab").to_string()),
-        );
-        if is_double {
-            "double_wooden_slab".to_string()
-        } else {
-            "wooden_slab".to_string()
+        // Bedrock splits the vines by berries and by head or body rather than using states.
+        "cave_vines" | "cave_vines_plant" => {
+            let head = name == "cave_vines";
+            let id = match (head, p.flag("berries", false)) {
+                (true, true) => "cave_vines_head_with_berries",
+                (false, true) => "cave_vines_body_with_berries",
+                _ => "cave_vines",
+            };
+            let age = if head { p.int("age", 0) } else { 0 };
+            BedrockBlock::with_states(id, vec![("growing_plant_age", Int(age))])
         }
-    } else {
-        // Slabs added after the wood/stone families (blackstone, deepslate, mud
-        // brick, bamboo, warped, cut copper, ...) already have their own id and
-        // took top_slot_bit from the start, so the name carries over as-is.
-        // Their double form is spelled "<material>_double_slab".
-        match java_name.strip_suffix("_slab") {
-            Some(material) if is_double => format!("{material}_double_slab"),
-            _ => java_name.to_string(),
+        "chiseled_bookshelf" => {
+            let books = (0..6)
+                .filter(|i| p.flag(&format!("slot_{i}_occupied"), false))
+                .fold(0, |bits, i| bits | (1 << i));
+            with(vec![
+                ("books_stored", Int(books)),
+                ("direction", Int(legacy_direction(facing))),
+            ])
         }
-    };
-
-    BedrockBlock {
-        name: format!("minecraft:{bedrock_name}"),
-        states,
-    }
-}
-
-/// Convert Java log/wood block to Bedrock format with proper axis.
-fn convert_log(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let bedrock_name = java_name;
-    let mut states = BTreeMap::new();
-
-    // Convert axis: Java uses "x/y/z", Bedrock uses "pillar_axis"
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(axis)) = props.get("axis") {
-            states.insert(
-                "pillar_axis".to_string(),
-                BedrockBlockStateValue::String(axis.clone()),
-            );
+        "composter" => with(vec![("composter_fill_level", Int(p.int("level", 0)))]),
+        "daylight_detector" => {
+            let id = if p.flag("inverted", false) {
+                "daylight_detector_inverted"
+            } else {
+                "daylight_detector"
+            };
+            BedrockBlock::with_states(id, vec![("redstone_signal", Int(p.int("power", 0)))])
         }
-    }
-
-    // Default to y-axis if not specified
-    if states.is_empty() {
-        states.insert(
-            "pillar_axis".to_string(),
-            BedrockBlockStateValue::String("y".to_string()),
-        );
-    }
-
-    BedrockBlock {
-        name: format!("minecraft:{bedrock_name}"),
-        states,
-    }
-}
-
-/// Convert Java door block to Bedrock format with upper_block_bit.
-///
-/// Java doors use `half=upper/lower`, Bedrock uses `upper_block_bit` (bool).
-/// Also maps door names: `oak_door` → `wooden_door`, others keep their names.
-fn convert_door(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let bedrock_name = match java_name {
-        "oak_door" => "wooden_door",
-        _ => java_name, // spruce_door, dark_oak_door, etc. keep their name
-    };
-
-    let mut states = BTreeMap::new();
-
-    if let Some(props) = props {
-        // Convert half: Java "upper"/"lower" → Bedrock upper_block_bit true/false
-        if let Some(fastnbt::Value::String(half)) = props.get("half") {
-            let is_upper = half == "upper";
-            states.insert(
-                "upper_block_bit".to_string(),
-                BedrockBlockStateValue::Bool(is_upper),
-            );
+        // Wet unless stated, so a field without a crop does not dry out to dirt.
+        "farmland" => with(vec![("moisturized_amount", Int(p.int("moisture", 7)))]),
+        "grindstone" => {
+            let attachment = match p.or("face", "wall") {
+                "floor" => "standing",
+                "ceiling" => "hanging",
+                _ => "side",
+            };
+            with(vec![
+                ("attachment", s(attachment)),
+                ("direction", Int(legacy_direction(facing))),
+            ])
         }
-
-        // Convert facing if present.
-        //
-        // Bedrock's door `direction` uses the legacy cardinal order
-        // 0=south, 1=west, 2=north, 3=east, but doors additionally store the
-        // facing rotated 90° clockwise — a Bedrock door recorded as "east" is a
-        // door that faces north. The two effects compose into the table below,
-        // which is why it looks off-by-one next to convert_bed's:
-        //   north → east  → 3      east → south → 0
-        //   south → west  → 1      west → north → 2
-        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
-            let direction = match facing.as_str() {
-                "east" => 0,
-                "south" => 1,
-                "west" => 2,
-                "north" => 3,
+        "loom" => with(vec![("direction", Int(legacy_direction(facing)))]),
+        "tripwire_hook" => with(vec![
+            ("attached_bit", Bool(p.flag("attached", false))),
+            ("direction", Int(legacy_direction(facing))),
+            ("powered_bit", Bool(p.flag("powered", false))),
+        ]),
+        // A generated kelp column should stay as placed, so an unset age is fully grown.
+        "kelp" => with(vec![("kelp_age", Int(p.int("age", 25)))]),
+        "kelp_plant" => BedrockBlock::with_states("kelp", vec![("kelp_age", Int(0))]),
+        "lever" => {
+            let face = p.or("face", "wall");
+            let north_south = matches!(facing, "north" | "south");
+            let direction = match face {
+                "floor" if north_south => "up_north_south",
+                "floor" => "up_east_west",
+                "ceiling" if north_south => "down_north_south",
+                "ceiling" => "down_east_west",
+                _ => facing,
+            };
+            // On the floor and ceiling the throw also says which way the lever points.
+            let flipped = face != "wall" && matches!(facing, "south" | "east");
+            with(vec![
+                ("lever_direction", s(direction)),
+                ("open_bit", Bool(p.flag("powered", false) != flipped)),
+            ])
+        }
+        // Java's rotation and Bedrock's ground_sign_direction share their scale and origin.
+        "oak_sign" => BedrockBlock::with_states(
+            "standing_sign",
+            vec![(
+                "ground_sign_direction",
+                Int(p.int("rotation", 0).rem_euclid(16)),
+            )],
+        ),
+        "pointed_dripstone" => {
+            let thickness = match p.or("thickness", "tip") {
+                "tip_merge" => "merge",
+                other => other,
+            };
+            with(vec![
+                ("dripstone_thickness", s(thickness)),
+                ("hanging", Bool(p.or("vertical_direction", "up") == "down")),
+            ])
+        }
+        "rail" | "powered_rail" => {
+            let direction = match p.or("shape", "north_south") {
+                "east_west" => 1,
+                "ascending_east" => 2,
+                "ascending_west" => 3,
+                "ascending_north" => 4,
+                "ascending_south" => 5,
+                "south_east" => 6,
+                "south_west" => 7,
+                "north_west" => 8,
+                "north_east" => 9,
                 _ => 0,
             };
-            states.insert(
-                "direction".to_string(),
-                BedrockBlockStateValue::Int(direction),
-            );
+            if name == "rail" {
+                with(vec![("rail_direction", Int(direction))])
+            } else {
+                // Powered rails cannot curve.
+                let direction = if direction > 5 { 0 } else { direction };
+                BedrockBlock::with_states(
+                    "golden_rail",
+                    vec![
+                        ("rail_data_bit", Bool(p.flag("powered", false))),
+                        ("rail_direction", Int(direction)),
+                    ],
+                )
+            }
         }
-
-        // Convert hinge if present
-        if let Some(fastnbt::Value::String(hinge)) = props.get("hinge") {
-            let door_hinge = hinge == "right";
-            states.insert(
-                "door_hinge_bit".to_string(),
-                BedrockBlockStateValue::Bool(door_hinge),
-            );
+        // Bedrock's torch_facing_direction names the opposite of the way the torch
+        // points (MCPE-152036), so the horizontal values are swapped.
+        "redstone_torch" | "redstone_wall_torch" | "torch" | "wall_torch" => {
+            let redstone = name.starts_with("redstone");
+            let id = match (redstone, p.flag("lit", true)) {
+                (true, true) => "redstone_torch",
+                (true, false) => "unlit_redstone_torch",
+                (false, _) => "torch",
+            };
+            let direction = if name.ends_with("wall_torch") {
+                match facing {
+                    "south" => "north",
+                    "east" => "west",
+                    "west" => "east",
+                    _ => "south",
+                }
+            } else {
+                "top"
+            };
+            BedrockBlock::with_states(id, vec![("torch_facing_direction", s(direction))])
         }
-
-        // Convert open if present
-        if let Some(fastnbt::Value::String(open)) = props.get("open") {
-            let is_open = open == "true";
-            states.insert(
-                "open_bit".to_string(),
-                BedrockBlockStateValue::Bool(is_open),
-            );
+        "redstone_lamp" | "redstone_ore" | "deepslate_redstone_ore" if p.flag("lit", false) => {
+            BedrockBlock::simple(&format!("lit_{name}"))
         }
-    }
-
-    // Defaults if no properties were set
-    if !states.contains_key("upper_block_bit") {
-        states.insert(
-            "upper_block_bit".to_string(),
-            BedrockBlockStateValue::Bool(false),
-        );
-    }
-    if !states.contains_key("direction") {
-        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
-    }
-
-    BedrockBlock {
-        name: format!("minecraft:{bedrock_name}"),
-        states,
-    }
-}
-
-/// Convert Java trapdoor block to Bedrock format with facing/open/half states.
-fn convert_trapdoor(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    // Map Java trapdoor names to Bedrock equivalents
-    let bedrock_name = match java_name {
-        "oak_trapdoor" => "trapdoor",
-        "iron_trapdoor" => "iron_trapdoor",
-        _ => java_name, // spruce_trapdoor, dark_oak_trapdoor, birch_trapdoor, etc.
-    };
-
-    let mut states = BTreeMap::new();
-
-    if let Some(props) = props {
-        // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
-        // Bedrock trapdoor direction: 0=east, 1=west, 2=south, 3=north
-        // (same encoding as stairs weirdo_direction).
-        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
-            let direction = match facing.as_str() {
-                "east" => 0,
-                "west" => 1,
-                "south" => 2,
-                "north" => 3,
+        "light" => {
+            BedrockBlock::simple(&format!("light_block_{}", p.int("level", 15).clamp(0, 15)))
+        }
+        "scaffolding" => with(vec![
+            ("stability", Int(p.int("distance", 7))),
+            ("stability_check", Bool(true)),
+        ]),
+        "sculk_catalyst" => with(vec![("bloom", Bool(p.flag("bloom", false)))]),
+        "sculk_sensor" => {
+            let phase = match p.or("sculk_sensor_phase", "inactive") {
+                "active" => 1,
+                "cooldown" => 2,
                 _ => 0,
             };
-            states.insert(
-                "direction".to_string(),
-                BedrockBlockStateValue::Int(direction),
-            );
+            with(vec![("sculk_sensor_phase", Int(phase))])
         }
-
-        // Convert open: Java "true"/"false" → Bedrock open_bit
-        if let Some(fastnbt::Value::String(open)) = props.get("open") {
-            let is_open = open == "true";
-            states.insert(
-                "open_bit".to_string(),
-                BedrockBlockStateValue::Bool(is_open),
-            );
-        }
-
-        // Convert half: Java "top"/"bottom" → Bedrock upside_down_bit
-        if let Some(fastnbt::Value::String(half)) = props.get("half") {
-            let upside_down = half == "top";
-            states.insert(
-                "upside_down_bit".to_string(),
-                BedrockBlockStateValue::Bool(upside_down),
-            );
-        }
-    }
-
-    // Defaults if no properties were set
-    if !states.contains_key("direction") {
-        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
-    }
-    if !states.contains_key("open_bit") {
-        states.insert("open_bit".to_string(), BedrockBlockStateValue::Bool(false));
-    }
-    if !states.contains_key("upside_down_bit") {
-        states.insert(
-            "upside_down_bit".to_string(),
-            BedrockBlockStateValue::Bool(false),
-        );
-    }
-
-    BedrockBlock {
-        name: format!("minecraft:{bedrock_name}"),
-        states,
-    }
-}
-
-/// Convert Java bed block to Bedrock format with direction, head/foot, and occupied states.
-fn convert_bed(
-    _java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let mut states = BTreeMap::new();
-
-    // Bedrock has a single "minecraft:bed" block and stores the dye colour in the
-    // Bed block entity, NOT in the block state. Emitting a "color" state produced
-    // a state set that resolves to no vanilla block at all.
-
-    if let Some(props) = props {
-        // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3).
-        // Beds use the legacy cardinal order 0=south, 1=west, 2=north, 3=east —
-        // NOT the stairs/trapdoor "weirdo" order, and unlike doors they carry no
-        // 90° rotation. Reusing the trapdoor table rotated most beds.
-        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
-            let direction = match facing.as_str() {
-                "south" => 0,
-                "west" => 1,
-                "north" => 2,
-                "east" => 3,
-                _ => 0,
+        "sculk_shrieker" => with(vec![
+            ("active", Bool(p.flag("shrieking", false))),
+            ("can_summon", Bool(p.flag("can_summon", false))),
+        ]),
+        // dead_bit marks a pickle out of the water.
+        "sea_pickle" => with(vec![
+            ("cluster_count", Int((p.int("pickles", 1) - 1).clamp(0, 3))),
+            ("dead_bit", Bool(!p.flag("waterlogged", true))),
+        ]),
+        "seagrass" => with(vec![("sea_grass_type", s("default"))]),
+        "tall_seagrass" => {
+            let half = if p.or("half", "lower") == "upper" {
+                "double_top"
+            } else {
+                "double_bot"
             };
-            states.insert(
-                "direction".to_string(),
-                BedrockBlockStateValue::Int(direction),
-            );
+            BedrockBlock::with_states("seagrass", vec![("sea_grass_type", s(half))])
         }
-
-        // Convert part: Java "head"/"foot" → Bedrock head_piece_bit
-        if let Some(fastnbt::Value::String(part)) = props.get("part") {
-            let is_head = part == "head";
-            states.insert(
-                "head_piece_bit".to_string(),
-                BedrockBlockStateValue::Bool(is_head),
-            );
-        }
-
-        // Convert occupied: Java "true"/"false" → Bedrock occupied_bit
-        if let Some(fastnbt::Value::String(occupied)) = props.get("occupied") {
-            let is_occupied = occupied == "true";
-            states.insert(
-                "occupied_bit".to_string(),
-                BedrockBlockStateValue::Bool(is_occupied),
-            );
-        }
-    }
-
-    // Defaults if no properties were set
-    if !states.contains_key("direction") {
-        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
-    }
-    if !states.contains_key("head_piece_bit") {
-        states.insert(
-            "head_piece_bit".to_string(),
-            BedrockBlockStateValue::Bool(false),
-        );
-    }
-    if !states.contains_key("occupied_bit") {
-        states.insert(
-            "occupied_bit".to_string(),
-            BedrockBlockStateValue::Bool(false),
-        );
-    }
-
-    BedrockBlock {
-        name: "minecraft:bed".to_string(),
-        states,
-    }
-}
-
-/// Convert Java wall banner to Bedrock format.
-///
-/// Java stores facing as a string ("north"/"south"/"east"/"west") on the block state.
-/// Bedrock uses `facing_direction` as an integer on `minecraft:wall_banner`:
-///   2 = north, 3 = south, 4 = west, 5 = east
-///
-/// The banner color (light_gray = 7) and patterns live in the block entity, not here.
-fn convert_wall_banner(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let facing_direction = props
-        .and_then(|p| p.get("facing"))
-        .and_then(|v| match v {
-            fastnbt::Value::String(s) => Some(s.as_str()),
-            _ => None,
-        })
-        .map(|f| match f {
-            "north" => 2,
-            "south" => 3,
-            "west" => 4,
-            "east" => 5,
-            _ => 2, // default north
-        })
-        .unwrap_or(2);
-
-    BedrockBlock::with_states(
-        "wall_banner",
-        vec![(
-            "facing_direction",
-            BedrockBlockStateValue::Int(facing_direction),
-        )],
-    )
-}
-
-/// Convert a Java wall torch to Bedrock's single `redstone_torch` block.
-///
-/// Bedrock encodes the mount as `torch_facing_direction`, but its horizontal
-/// values are inverted relative to the direction the torch actually points
-/// (MCPE-152036) — a torch pointing north is stored as "south". Copying the Java
-/// `facing` name across unchanged mounts the torch on the opposite wall.
-fn convert_redstone_wall_torch(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let facing = props
-        .and_then(|p| p.get("facing"))
-        .and_then(|v| match v {
-            fastnbt::Value::String(s) => Some(s.as_str()),
-            _ => None,
-        })
-        .unwrap_or("north");
-
-    let bedrock_facing = match facing {
-        "north" => "south",
-        "south" => "north",
-        "east" => "west",
-        "west" => "east",
-        _ => "south",
-    };
-
-    BedrockBlock::with_states(
-        "redstone_torch",
-        vec![(
-            "torch_facing_direction",
-            BedrockBlockStateValue::String(bedrock_facing.to_string()),
-        )],
-    )
-}
-
-/// Convert a Java crop, translating `age` (0-7) to Bedrock's `growth` (0-7).
-///
-/// Without this the growth stage is dropped and every field renders as freshly
-/// sown seedlings instead of the ripe crop the generator asked for.
-fn convert_crop(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let growth = props
-        .and_then(|p| p.get("age"))
-        .and_then(parse_int_property)
-        .unwrap_or(0)
-        .clamp(0, 7);
-
-    BedrockBlock::with_states(
-        java_name,
-        vec![("growth", BedrockBlockStateValue::Int(growth))],
-    )
-}
-
-/// Convert Java's two-block plants to Bedrock's `double_plant`.
-///
-/// Java stores the half in `half=lower/upper`; Bedrock uses `upper_block_bit`.
-/// Dropping it stacked two lower halves on top of each other.
-fn convert_double_plant(
-    java_name: &str,
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let plant_type = match java_name {
-        "large_fern" => "fern",
-        "sunflower" => "sunflower",
-        "lilac" => "syringa",
-        "rose_bush" => "rose",
-        "peony" => "paeonia",
-        _ => "grass",
-    };
-
-    BedrockBlock::with_states(
-        "double_plant",
-        vec![
-            (
-                "double_plant_type",
-                BedrockBlockStateValue::String(plant_type.to_string()),
-            ),
-            (
-                "upper_block_bit",
-                BedrockBlockStateValue::Bool(is_upper_half(props)),
-            ),
-        ],
-    )
-}
-
-/// Legacy `flower_type` of the small flowers Bedrock folds into `red_flower`.
-fn red_flower_type(java_name: &str) -> &'static str {
-    match java_name {
-        "cornflower" => "cornflower",
-        "oxeye_daisy" => "oxeye",
-        "allium" => "allium",
-        "lily_of_the_valley" => "lily_of_the_valley",
-        "red_tulip" => "tulip_red",
-        "orange_tulip" => "tulip_orange",
-        "white_tulip" => "tulip_white",
-        "pink_tulip" => "tulip_pink",
-        _ => "poppy",
-    }
-}
-
-/// Convert Java `tall_seagrass` to Bedrock's `seagrass`, which encodes both
-/// halves of the plant in `sea_grass_type` rather than using a separate id.
-fn convert_tall_seagrass(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let sea_grass_type = if is_upper_half(props) {
-        "double_top"
-    } else {
-        "double_bot"
-    };
-
-    BedrockBlock::with_states(
-        "seagrass",
-        vec![(
-            "sea_grass_type",
-            BedrockBlockStateValue::String(sea_grass_type.to_string()),
-        )],
-    )
-}
-
-/// Convert a Java standing sign to Bedrock's `standing_sign`.
-///
-/// Java's `rotation` and Bedrock's `ground_sign_direction` share the same 0-15
-/// scale and origin, so the value carries over unchanged. Hardcoding it made
-/// every sign face the same way regardless of how it was placed.
-fn convert_standing_sign(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let rotation = props
-        .and_then(|p| p.get("rotation"))
-        .and_then(parse_int_property)
-        .unwrap_or(0)
-        .rem_euclid(16);
-
-    BedrockBlock::with_states(
-        "standing_sign",
-        vec![(
-            "ground_sign_direction",
-            BedrockBlockStateValue::Int(rotation),
-        )],
-    )
-}
-
-/// Convert a Java sea pickle, translating `pickles` (1-4) to Bedrock's
-/// `cluster_count` (0-3, i.e. one less). Dropping it collapsed every cluster
-/// down to a single pickle.
-fn convert_sea_pickle(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let pickles = props
-        .and_then(|p| p.get("pickles"))
-        .and_then(parse_int_property)
-        .unwrap_or(1);
-
-    BedrockBlock::with_states(
-        "sea_pickle",
-        vec![
-            (
-                "cluster_count",
-                BedrockBlockStateValue::Int((pickles - 1).clamp(0, 3)),
-            ),
-            // dead_bit marks a pickle that is NOT underwater; Arnis only places
-            // them submerged.
-            ("dead_bit", BedrockBlockStateValue::Bool(false)),
-        ],
-    )
-}
-
-/// Convert a Java snow layer; Bedrock counts `height` from zero.
-fn convert_snow_layer(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let layers = props
-        .and_then(|p| p.get("layers"))
-        .and_then(parse_int_property)
-        .unwrap_or(1);
-    BedrockBlock::with_states(
-        "snow_layer",
-        vec![
-            (
-                "height",
-                BedrockBlockStateValue::Int((layers - 1).clamp(0, 7)),
-            ),
-            ("covered_bit", BedrockBlockStateValue::Bool(false)),
-        ],
-    )
-}
-
-/// Convert a Java chiseled bookshelf, translating `facing` to Bedrock's
-/// `direction` (the legacy S-W-N-E order, same as beds).
-fn convert_chiseled_bookshelf(
-    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
-) -> BedrockBlock {
-    let direction = props
-        .and_then(|p| p.get("facing"))
-        .and_then(|v| match v {
-            fastnbt::Value::String(s) => Some(s.as_str()),
-            _ => None,
-        })
-        .map(|f| match f {
-            "south" => 0,
-            "west" => 1,
-            "north" => 2,
-            "east" => 3,
-            _ => 0,
-        })
-        .unwrap_or(0);
-
-    BedrockBlock::with_states(
-        "chiseled_bookshelf",
-        vec![
-            ("direction", BedrockBlockStateValue::Int(direction)),
-            ("books_stored", BedrockBlockStateValue::Int(0)),
-        ],
-    )
-}
-
-/// Java stores small integers in block properties as strings; accept the numeric
-/// NBT tags too so stored properties round-trip either way.
-fn parse_int_property(value: &fastnbt::Value) -> Option<i32> {
-    match value {
-        fastnbt::Value::String(s) => s.parse::<i32>().ok(),
-        fastnbt::Value::Int(i) => Some(*i),
-        fastnbt::Value::Byte(b) => Some(i32::from(*b)),
-        fastnbt::Value::Short(v) => Some(i32::from(*v)),
-        _ => None,
-    }
-}
-
-/// True when a two-block plant's `half` property marks the upper block.
-fn is_upper_half(props: Option<&std::collections::HashMap<String, fastnbt::Value>>) -> bool {
-    matches!(
-        props.and_then(|p| p.get("half")),
-        Some(fastnbt::Value::String(h)) if h == "upper"
-    )
-}
-
-/// Convert Java rail to Bedrock format with rail_direction from shape property.
-///
-/// Java uses `shape` strings ("north_south", "east_west", "ascending_east", etc.)
-/// while Bedrock uses `rail_direction` integers (0–9).
-fn convert_rail(props: Option<&std::collections::HashMap<String, fastnbt::Value>>) -> BedrockBlock {
-    let direction = props
-        .and_then(|p| p.get("shape"))
-        .and_then(|v| match v {
-            fastnbt::Value::String(s) => Some(s.as_str()),
-            _ => None,
-        })
-        .map(|shape| match shape {
-            "north_south" => 0,
-            "east_west" => 1,
-            "ascending_east" => 2,
-            "ascending_west" => 3,
-            "ascending_north" => 4,
-            "ascending_south" => 5,
-            "south_east" => 6,
-            "south_west" => 7,
-            "north_west" => 8,
-            "north_east" => 9,
-            _ => 0,
-        })
-        .unwrap_or(0);
-
-    let mut states = BTreeMap::new();
-    states.insert(
-        "rail_direction".to_string(),
-        BedrockBlockStateValue::Int(direction),
-    );
-
-    BedrockBlock {
-        name: "minecraft:rail".to_string(),
-        states,
+        "snow" => BedrockBlock::with_states(
+            "snow_layer",
+            vec![
+                ("covered_bit", Bool(false)),
+                ("height", Int((p.int("layers", 1) - 1).clamp(0, 7))),
+            ],
+        ),
+        _ => BedrockBlock::simple(id),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_definitions::{AIR, GRASS_BLOCK, STONE};
+    use crate::block_definitions::*;
+    use std::collections::HashSet;
+
+    fn props(entries: &[(&str, &str)]) -> Value {
+        Value::Compound(
+            entries
+                .iter()
+                .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
+                .collect(),
+        )
+    }
+
+    fn convert_with(block: Block, entries: &[(&str, &str)]) -> BedrockBlock {
+        to_bedrock_block_with_properties(block, Some(&props(entries)))
+    }
+
+    fn state(block: &BedrockBlock, key: &str) -> Option<BedrockBlockStateValue> {
+        block.states.get(key).cloned()
+    }
+
+    /// Every block of the palette with its states and the values each may take.
+    struct Palette(HashMap<String, BTreeMap<String, (String, HashSet<String>)>>);
+
+    impl Palette {
+        fn load() -> Self {
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/bedrock_block_states.json"
+            );
+            let json: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let blocks = json["blocks"].as_object().unwrap();
+            Palette(
+                blocks
+                    .iter()
+                    .map(|(name, states)| {
+                        let states = states
+                            .as_object()
+                            .unwrap()
+                            .iter()
+                            .map(|(key, spec)| {
+                                let kind = spec["type"].as_str().unwrap().to_string();
+                                let values = spec["values"]
+                                    .as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .map(|v| v.to_string().trim_matches('"').to_string())
+                                    .collect();
+                                (key.clone(), (kind, values))
+                            })
+                            .collect();
+                        (name.clone(), states)
+                    })
+                    .collect(),
+            )
+        }
+
+        fn check(&self, block: &BedrockBlock) -> Result<(), String> {
+            let Some(states) = self.0.get(&block.name) else {
+                return Err(format!("{} is not a Bedrock block", block.name));
+            };
+            let wanted: Vec<_> = states.keys().collect();
+            let have: Vec<_> = block.states.keys().collect();
+            if wanted != have {
+                return Err(format!("{} takes {wanted:?}, got {have:?}", block.name));
+            }
+            for (key, value) in &block.states {
+                let (kind, values) = &states[key];
+                let (ok_kind, text) = match value {
+                    BedrockBlockStateValue::String(v) => (kind == "string", v.clone()),
+                    BedrockBlockStateValue::Bool(v) => (kind == "byte", (*v as u8).to_string()),
+                    BedrockBlockStateValue::Int(v) => (kind == "int", v.to_string()),
+                };
+                if !ok_kind || !values.contains(&text) {
+                    return Err(format!(
+                        "{}: {key}={text} is not a valid {kind}",
+                        block.name
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Each block with its defaults and with common properties set one at a time.
+    #[test]
+    fn every_block_maps_to_a_valid_bedrock_state() {
+        let palette = Palette::load();
+        let sweeps: &[(&str, &[&str])] = &[
+            ("facing", &["north", "south", "east", "west", "up", "down"]),
+            ("half", &["top", "bottom", "upper", "lower"]),
+            ("type", &["top", "bottom", "double"]),
+            ("axis", &["x", "y", "z"]),
+            ("face", &["floor", "wall", "ceiling"]),
+            ("open", &["true"]),
+            ("powered", &["true"]),
+            ("lit", &["true", "false"]),
+            ("inverted", &["true"]),
+            ("berries", &["true"]),
+            ("part", &["head"]),
+            ("age", &["3", "7"]),
+            ("level", &["0", "3", "8"]),
+            ("layers", &["8"]),
+            ("north", &["true", "low", "tall"]),
+            ("up", &["false"]),
+            ("shape", &["east_west", "ascending_north", "north_east"]),
+            ("thickness", &["tip_merge", "base"]),
+            ("tilt", &["partial"]),
+        ];
+        let mut failures = Vec::new();
+        for id in 0..=u16::MAX {
+            let block = Block::from_raw_id(id);
+            if block.try_name().is_none() {
+                continue;
+            }
+            let base = match block.properties() {
+                Some(Value::Compound(map)) => map,
+                _ => HashMap::new(),
+            };
+            let mut variants = vec![to_bedrock_block_with_properties(block, None)];
+            for (key, values) in sweeps {
+                for value in *values {
+                    let mut map = base.clone();
+                    map.insert(key.to_string(), Value::String(value.to_string()));
+                    variants.push(to_bedrock_block_with_properties(
+                        block,
+                        Some(&Value::Compound(map)),
+                    ));
+                }
+            }
+            for bedrock in variants {
+                if let Err(e) = palette.check(&bedrock) {
+                    failures.push(format!("{}: {e}", block.name()));
+                }
+            }
+        }
+        failures.sort();
+        failures.dedup();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 
     #[test]
     fn snow_layers_keep_their_height() {
-        for (i, layer) in crate::block_definitions::SNOW_LAYERS.iter().enumerate() {
+        for (i, layer) in SNOW_LAYERS.iter().enumerate() {
             let bedrock = to_bedrock_block_with_properties(*layer, None);
             assert_eq!(bedrock.name, "minecraft:snow_layer");
-            assert_eq!(
-                bedrock.states.get("height"),
-                Some(&BedrockBlockStateValue::Int(i as i32))
-            );
+            assert_eq!(state(&bedrock, "height"), Some(Int(i as i32)));
         }
     }
 
     #[test]
-    fn test_simple_blocks() {
-        let bedrock = to_bedrock_block(STONE);
-        assert_eq!(bedrock.name, "minecraft:stone");
-        assert!(bedrock.states.is_empty());
-
-        let bedrock = to_bedrock_block(AIR);
-        assert_eq!(bedrock.name, "minecraft:air");
+    fn flattened_blocks_use_their_own_ids() {
+        for (block, name) in [
+            (STONE, "minecraft:stone"),
+            (GRANITE, "minecraft:granite"),
+            (OAK_PLANKS, "minecraft:oak_planks"),
+            (WHITE_CONCRETE, "minecraft:white_concrete"),
+            (LIGHT_GRAY_CONCRETE, "minecraft:light_gray_concrete"),
+            (CYAN_TERRACOTTA, "minecraft:cyan_terracotta"),
+            (GRAY_CONCRETE_POWDER, "minecraft:gray_concrete_powder"),
+            (RED_FLOWER, "minecraft:poppy"),
+            (YELLOW_FLOWER, "minecraft:dandelion"),
+            (GRASS, "minecraft:short_grass"),
+            (TERRACOTTA, "minecraft:hardened_clay"),
+            (BRICK, "minecraft:brick_block"),
+            (CHAIN_Y, "minecraft:iron_chain"),
+        ] {
+            assert_eq!(to_bedrock_block_with_properties(block, None).name, name);
+        }
     }
 
     #[test]
-    fn test_grass_block() {
-        let bedrock = to_bedrock_block(GRASS_BLOCK);
-        assert_eq!(bedrock.name, "minecraft:grass_block");
-    }
-
-    #[test]
-    fn test_colored_blocks() {
-        use crate::block_definitions::WHITE_CONCRETE;
-        let bedrock = to_bedrock_block(WHITE_CONCRETE);
-        assert_eq!(bedrock.name, "minecraft:concrete");
-        assert!(matches!(
-            bedrock.states.get("color"),
-            Some(BedrockBlockStateValue::String(s)) if s == "white"
-        ));
-    }
-
-    #[test]
-    fn test_gray_concrete_powder_bedrock_mapping() {
-        use crate::block_definitions::GRAY_CONCRETE_POWDER;
-        let bedrock = to_bedrock_block(GRAY_CONCRETE_POWDER);
-        assert_eq!(bedrock.name, "minecraft:concretePowder");
-        assert!(matches!(
-            bedrock.states.get("color"),
-            Some(BedrockBlockStateValue::String(s)) if s == "gray"
-        ));
-    }
-
-    #[test]
-    fn joined_walls_keep_their_connections_on_bedrock() {
-        use crate::block_definitions::BRICK_WALL;
-        let props = fastnbt::Value::Compound(std::collections::HashMap::from([
-            (
-                "east".to_string(),
-                fastnbt::Value::String("low".to_string()),
-            ),
-            (
-                "west".to_string(),
-                fastnbt::Value::String("low".to_string()),
-            ),
-            (
-                "north".to_string(),
-                fastnbt::Value::String("none".to_string()),
-            ),
-            (
-                "south".to_string(),
-                fastnbt::Value::String("none".to_string()),
-            ),
-            (
-                "up".to_string(),
-                fastnbt::Value::String("false".to_string()),
-            ),
-        ]));
-        let bedrock = to_bedrock_block_with_properties(BRICK_WALL, Some(&props));
-        let state = |k: &str| bedrock.states.get(k).cloned();
+    fn walls_keep_their_connections() {
+        let bedrock = convert_with(
+            BRICK_WALL,
+            &[
+                ("east", "low"),
+                ("west", "low"),
+                ("north", "none"),
+                ("south", "none"),
+                ("up", "false"),
+            ],
+        );
+        assert_eq!(bedrock.name, "minecraft:brick_wall");
         assert_eq!(
-            state("wall_connection_type_east"),
-            Some(BedrockBlockStateValue::String("short".to_string()))
+            state(&bedrock, "wall_connection_type_east"),
+            Some(s("short"))
         );
         assert_eq!(
-            state("wall_connection_type_north"),
-            Some(BedrockBlockStateValue::String("none".to_string()))
+            state(&bedrock, "wall_connection_type_north"),
+            Some(s("none"))
         );
-        assert_eq!(
-            state("wall_post_bit"),
-            Some(BedrockBlockStateValue::Bool(false))
-        );
-        assert!(bedrock.states.contains_key("wall_block_type"));
+        assert_eq!(state(&bedrock, "wall_post_bit"), Some(Bool(false)));
     }
 
     #[test]
     fn fence_gates_carry_facing_and_in_wall() {
-        use crate::block_definitions::OAK_FENCE_GATE;
-        let props = fastnbt::Value::Compound(std::collections::HashMap::from([
-            (
-                "facing".to_string(),
-                fastnbt::Value::String("east".to_string()),
-            ),
-            (
-                "in_wall".to_string(),
-                fastnbt::Value::String("true".to_string()),
-            ),
-            (
-                "open".to_string(),
-                fastnbt::Value::String("false".to_string()),
-            ),
-        ]));
-        let bedrock = to_bedrock_block_with_properties(OAK_FENCE_GATE, Some(&props));
+        let bedrock = convert_with(OAK_FENCE_GATE, &[("facing", "east"), ("in_wall", "true")]);
         assert_eq!(bedrock.name, "minecraft:fence_gate");
-        let state = |k: &str| bedrock.states.get(k).cloned();
-        assert_eq!(state("direction"), Some(BedrockBlockStateValue::Int(3)));
         assert_eq!(
-            state("in_wall_bit"),
-            Some(BedrockBlockStateValue::Bool(true))
+            state(&bedrock, "minecraft:cardinal_direction"),
+            Some(s("east"))
         );
-        assert_eq!(state("open_bit"), Some(BedrockBlockStateValue::Bool(false)));
+        assert_eq!(state(&bedrock, "in_wall_bit"), Some(Bool(true)));
+        assert_eq!(state(&bedrock, "open_bit"), Some(Bool(false)));
     }
 
     #[test]
-    fn test_brown_concrete_powder_bedrock_mapping() {
-        use crate::block_definitions::BROWN_CONCRETE_POWDER;
-        let bedrock = to_bedrock_block(BROWN_CONCRETE_POWDER);
-        assert_eq!(bedrock.name, "minecraft:concretePowder");
-        assert!(matches!(
-            bedrock.states.get("color"),
-            Some(BedrockBlockStateValue::String(s)) if s == "brown"
-        ));
-    }
-
-    #[test]
-    fn test_cyan_terracotta_bedrock_mapping() {
-        use crate::block_definitions::CYAN_TERRACOTTA;
-        let bedrock = to_bedrock_block(CYAN_TERRACOTTA);
-        assert_eq!(bedrock.name, "minecraft:stained_hardened_clay");
-        assert!(matches!(
-            bedrock.states.get("color"),
-            Some(BedrockBlockStateValue::String(s)) if s == "cyan"
-        ));
-    }
-
-    #[test]
-    fn test_stairs_with_properties() {
-        use crate::block_definitions::OAK_STAIRS;
-        use std::collections::HashMap as StdHashMap;
-
-        // Create Java properties for a south-facing stair
-        let mut props = StdHashMap::new();
-        props.insert(
-            "facing".to_string(),
-            fastnbt::Value::String("south".to_string()),
-        );
-        props.insert(
-            "half".to_string(),
-            fastnbt::Value::String("bottom".to_string()),
-        );
-        let java_props = fastnbt::Value::Compound(props);
-
-        let bedrock = to_bedrock_block_with_properties(OAK_STAIRS, Some(&java_props));
-        assert_eq!(bedrock.name, "minecraft:oak_stairs");
-
-        // Check weirdo_direction is set correctly (south = 2)
-        assert!(matches!(
-            bedrock.states.get("weirdo_direction"),
-            Some(BedrockBlockStateValue::Int(2))
-        ));
-
-        // Check upside_down_bit is false for bottom half
-        assert!(matches!(
-            bedrock.states.get("upside_down_bit"),
-            Some(BedrockBlockStateValue::Bool(false))
-        ));
-    }
-
-    #[test]
-    fn test_stairs_upside_down() {
-        use crate::block_definitions::STONE_BRICK_STAIRS;
-        use std::collections::HashMap as StdHashMap;
-
-        // Create Java properties for an upside-down north-facing stair
-        let mut props = StdHashMap::new();
-        props.insert(
-            "facing".to_string(),
-            fastnbt::Value::String("north".to_string()),
-        );
-        props.insert(
-            "half".to_string(),
-            fastnbt::Value::String("top".to_string()),
-        );
-        let java_props = fastnbt::Value::Compound(props);
-
-        let bedrock = to_bedrock_block_with_properties(STONE_BRICK_STAIRS, Some(&java_props));
-
-        // Check weirdo_direction is set correctly (north = 3)
-        assert!(matches!(
-            bedrock.states.get("weirdo_direction"),
-            Some(BedrockBlockStateValue::Int(3))
-        ));
-
-        // Check upside_down_bit is true for top half
-        assert!(matches!(
-            bedrock.states.get("upside_down_bit"),
-            Some(BedrockBlockStateValue::Bool(true))
-        ));
-    }
-
-    #[test]
-    fn test_bed_with_properties() {
-        use crate::block_definitions::RED_BED_NORTH_HEAD;
-        use std::collections::HashMap as StdHashMap;
-
-        let mut props = StdHashMap::new();
-        props.insert(
-            "facing".to_string(),
-            fastnbt::Value::String("north".to_string()),
-        );
-        props.insert(
-            "part".to_string(),
-            fastnbt::Value::String("head".to_string()),
-        );
-        props.insert(
-            "occupied".to_string(),
-            fastnbt::Value::String("false".to_string()),
-        );
-        let java_props = fastnbt::Value::Compound(props);
-
-        let bedrock = to_bedrock_block_with_properties(RED_BED_NORTH_HEAD, Some(&java_props));
-        assert_eq!(bedrock.name, "minecraft:bed");
-
-        // Bedrock stores the bed colour in the block entity, not the block state.
-        assert!(!bedrock.states.contains_key("color"));
-        // Bedrock bed direction is the legacy S-W-N-E order: facing=north → 2
-        assert!(matches!(
-            bedrock.states.get("direction"),
-            Some(BedrockBlockStateValue::Int(2))
-        ));
-        assert!(matches!(
-            bedrock.states.get("head_piece_bit"),
-            Some(BedrockBlockStateValue::Bool(true))
-        ));
-        assert!(matches!(
-            bedrock.states.get("occupied_bit"),
-            Some(BedrockBlockStateValue::Bool(false))
-        ));
-    }
-
-    #[test]
-    fn test_bed_defaults_without_properties() {
-        use crate::block_definitions::RED_BED_SOUTH_FOOT;
-
-        let bedrock = to_bedrock_block_with_properties(RED_BED_SOUTH_FOOT, None);
-        assert_eq!(bedrock.name, "minecraft:bed");
-
-        // Should use defaults from block.properties() (south facing, foot)
-        assert!(!bedrock.states.contains_key("color"));
-        // facing=south → direction=0
-        assert!(matches!(
-            bedrock.states.get("direction"),
-            Some(BedrockBlockStateValue::Int(0))
-        ));
-        assert!(matches!(
-            bedrock.states.get("head_piece_bit"),
-            Some(BedrockBlockStateValue::Bool(false))
-        ));
-        assert!(matches!(
-            bedrock.states.get("occupied_bit"),
-            Some(BedrockBlockStateValue::Bool(false))
-        ));
-    }
-
-    #[test]
-    fn test_rail_shape_conversion() {
-        use crate::block_definitions::RAIL;
-
-        let cases = [
-            ("north_south", 0),
-            ("east_west", 1),
-            ("ascending_east", 2),
-            ("ascending_west", 3),
-            ("ascending_north", 4),
-            ("ascending_south", 5),
-            ("south_east", 6),
-            ("south_west", 7),
-            ("north_west", 8),
-            ("north_east", 9),
-        ];
-
-        for (shape, expected_direction) in cases {
-            let mut props = std::collections::HashMap::new();
-            props.insert(
-                "shape".to_string(),
-                fastnbt::Value::String(shape.to_string()),
-            );
-            let java_props = fastnbt::Value::Compound(props);
-
-            let bedrock = to_bedrock_block_with_properties(RAIL, Some(&java_props));
-            assert_eq!(bedrock.name, "minecraft:rail");
-            assert!(
-                matches!(
-                    bedrock.states.get("rail_direction"),
-                    Some(BedrockBlockStateValue::Int(d)) if *d == expected_direction
-                ),
-                "shape={shape}: expected rail_direction={expected_direction}, got {:?}",
-                bedrock.states.get("rail_direction")
-            );
-        }
-    }
-
-    #[test]
-    fn test_rail_default_without_properties() {
-        use crate::block_definitions::RAIL;
-
-        let bedrock = to_bedrock_block_with_properties(RAIL, None);
-        assert_eq!(bedrock.name, "minecraft:rail");
-        // RAIL (id=66) has no built-in properties, so falls back to
-        // to_bedrock_block which hardcodes rail_direction=0
-        assert!(matches!(
-            bedrock.states.get("rail_direction"),
-            Some(BedrockBlockStateValue::Int(0))
-        ));
-    }
-
-    /// Java block names that have no Bedrock counterpart under the same name.
-    /// Every one of these used to be emitted verbatim and resolved to nothing.
-    #[test]
-    fn test_renamed_bedrock_ids() {
-        use crate::block_definitions::*;
-
-        let cases: &[(Block, &str)] = &[
-            (MAGMA_BLOCK, "minecraft:magma"),
-            (WAXED_COPPER_BLOCK, "minecraft:waxed_copper"),
-            (OAK_BUTTON, "minecraft:wooden_button"),
-            (OAK_FENCE_GATE, "minecraft:fence_gate"),
-            (SIGN, "minecraft:standing_sign"),
-            (POWERED_RAIL, "minecraft:golden_rail"),
-            (WATER_CAULDRON, "minecraft:cauldron"),
-            (KELP, "minecraft:kelp"),
-            (KELP_PLANT, "minecraft:kelp"),
-            (SEAGRASS, "minecraft:seagrass"),
-            (TALL_SEAGRASS_BOTTOM, "minecraft:seagrass"),
-            (TALL_SEAGRASS_TOP, "minecraft:seagrass"),
-            (REDSTONE_WALL_TORCH, "minecraft:redstone_torch"),
-            (GRAY_WALL_BANNER, "minecraft:wall_banner"),
-        ];
-
-        for (block, expected) in cases {
-            let bedrock = to_bedrock_block_with_properties(*block, None);
-            assert_eq!(
-                &bedrock.name,
-                expected,
-                "{} mapped to {}",
-                block.name(),
-                bedrock.name
-            );
-        }
-    }
-
-    /// Bedrock never renamed its two oldest stair ids, so they read as swapped
-    /// next to Java: minecraft:stone_stairs is cobblestone, and there is no
-    /// minecraft:cobblestone_stairs at all.
-    #[test]
-    fn test_stone_and_cobblestone_stairs_are_not_swapped() {
-        use crate::block_definitions::{COBBLESTONE_STAIRS, STONE_STAIRS};
-
+    fn stairs_keep_facing_and_half() {
+        let bedrock = convert_with(OAK_STAIRS, &[("facing", "north"), ("half", "top")]);
+        assert_eq!(state(&bedrock, "weirdo_direction"), Some(Int(3)));
+        assert_eq!(state(&bedrock, "upside_down_bit"), Some(Bool(true)));
+        // Bedrock never renamed its two oldest stair ids, so they read as swapped.
         assert_eq!(
             to_bedrock_block_with_properties(COBBLESTONE_STAIRS, None).name,
             "minecraft:stone_stairs"
@@ -2472,309 +955,106 @@ mod tests {
         );
     }
 
-    /// The flattened per-material slab ids only accept minecraft:vertical_half,
-    /// so they must be routed through the legacy stone_block_slab families that
-    /// still take top_slot_bit.
     #[test]
-    fn test_stone_slabs_use_legacy_families() {
-        use crate::block_definitions::SMOOTH_STONE_SLAB;
-
-        let bedrock = to_bedrock_block_with_properties(SMOOTH_STONE_SLAB, None);
-        assert_eq!(bedrock.name, "minecraft:stone_block_slab");
-        assert!(matches!(
-            bedrock.states.get("stone_slab_type"),
-            Some(BedrockBlockStateValue::String(t)) if t == "smooth_stone"
-        ));
-        assert!(matches!(
-            bedrock.states.get("top_slot_bit"),
-            Some(BedrockBlockStateValue::Bool(false))
-        ));
-
-        // Java stone_slab is family 4 ("stone"), not family 1 ("smooth_stone").
-        assert_eq!(
-            stone_slab_family("stone_slab"),
-            Some(("stone_block_slab4", "stone_slab_type_4", "stone"))
-        );
-
-        // Blocks newer than the slab families keep their own id.
-        assert_eq!(
-            convert_slab("polished_blackstone_slab", None).name,
-            "minecraft:polished_blackstone_slab"
-        );
-    }
-
-    /// Crops carry age=7 in block_definitions; Bedrock calls it "growth".
-    #[test]
-    fn test_crops_keep_their_growth_stage() {
-        use crate::block_definitions::{CARROTS, POTATOES, WHEAT};
-
-        for block in [WHEAT, CARROTS, POTATOES] {
-            let bedrock = to_bedrock_block_with_properties(block, None);
-            assert!(
-                matches!(
-                    bedrock.states.get("growth"),
-                    Some(BedrockBlockStateValue::Int(7))
-                ),
-                "{} lost its growth stage: {:?}",
-                block.name(),
-                bedrock.states
-            );
-        }
-    }
-
-    /// Both halves of a two-block plant share one Bedrock id and differ only in
-    /// upper_block_bit; dropping it stacked two lower halves.
-    #[test]
-    fn test_double_plants_keep_their_half() {
-        use crate::block_definitions::{
-            LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, PEONY_LOWER, PEONY_UPPER,
-            ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SUNFLOWER_LOWER, SUNFLOWER_UPPER, TALL_GRASS_BOTTOM,
-            TALL_GRASS_TOP,
-        };
-
-        for (lower, upper, plant) in [
-            (TALL_GRASS_BOTTOM, TALL_GRASS_TOP, "grass"),
-            (LARGE_FERN_LOWER, LARGE_FERN_UPPER, "fern"),
-            (SUNFLOWER_LOWER, SUNFLOWER_UPPER, "sunflower"),
-            (LILAC_LOWER, LILAC_UPPER, "syringa"),
-            (ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, "rose"),
-            (PEONY_LOWER, PEONY_UPPER, "paeonia"),
-        ] {
-            for (block, is_upper) in [(lower, false), (upper, true)] {
-                let bedrock = to_bedrock_block_with_properties(block, None);
-                assert_eq!(bedrock.name, "minecraft:double_plant");
-                assert!(matches!(
-                    bedrock.states.get("double_plant_type"),
-                    Some(BedrockBlockStateValue::String(t)) if t == plant
-                ));
-                assert!(
-                    matches!(
-                        bedrock.states.get("upper_block_bit"),
-                        Some(BedrockBlockStateValue::Bool(b)) if *b == is_upper
-                    ),
-                    "wrong half for {plant} (upper={is_upper})"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_small_flowers_fold_into_red_flower() {
-        use crate::block_definitions::{CORNFLOWER, OXEYE_DAISY, PINK_TULIP};
-
-        for (block, flower_type) in [
-            (CORNFLOWER, "cornflower"),
-            (OXEYE_DAISY, "oxeye"),
-            (PINK_TULIP, "tulip_pink"),
-        ] {
-            let bedrock = to_bedrock_block_with_properties(block, None);
-            assert_eq!(bedrock.name, "minecraft:red_flower");
-            assert!(matches!(
-                bedrock.states.get("flower_type"),
-                Some(BedrockBlockStateValue::String(t)) if t == flower_type
-            ));
-        }
-    }
-
-    /// Bedrock's torch_facing_direction is inverted relative to the direction
-    /// the torch points (MCPE-152036).
-    #[test]
-    fn test_redstone_wall_torch_facing_is_inverted() {
-        use std::collections::HashMap as StdHashMap;
-
-        for (java_facing, bedrock_facing) in [
-            ("north", "south"),
-            ("south", "north"),
-            ("east", "west"),
-            ("west", "east"),
-        ] {
-            let mut props = StdHashMap::new();
-            props.insert(
-                "facing".to_string(),
-                fastnbt::Value::String(java_facing.to_string()),
-            );
-
-            let bedrock = convert_redstone_wall_torch(Some(&props));
-            assert_eq!(bedrock.name, "minecraft:redstone_torch");
-            assert!(
-                matches!(
-                    bedrock.states.get("torch_facing_direction"),
-                    Some(BedrockBlockStateValue::String(f)) if f == bedrock_facing
-                ),
-                "wall torch facing={java_facing} should store {bedrock_facing}"
-            );
-        }
-    }
-
-    /// Doors are stored rotated 90 degrees clockwise; beds are not. Pinning both
-    /// tables stops one from being "corrected" into the other.
-    #[test]
-    fn test_door_and_bed_direction_tables_differ() {
-        use std::collections::HashMap as StdHashMap;
-
-        let facing = |f: &str| {
-            let mut props = StdHashMap::new();
-            props.insert("facing".to_string(), fastnbt::Value::String(f.to_string()));
-            props
-        };
-
-        // Door: a Java north-facing door is stored as Bedrock "east" (3).
-        for (java_facing, expected) in [("east", 0), ("south", 1), ("west", 2), ("north", 3)] {
-            let bedrock = convert_door("oak_door", Some(&facing(java_facing)));
-            assert!(
-                matches!(
-                    bedrock.states.get("direction"),
-                    Some(BedrockBlockStateValue::Int(d)) if *d == expected
-                ),
-                "door facing={java_facing} should be direction={expected}"
-            );
-        }
-
-        // Bed: plain S-W-N-E, no rotation.
-        for (java_facing, expected) in [("south", 0), ("west", 1), ("north", 2), ("east", 3)] {
-            let bedrock = convert_bed("red_bed", Some(&facing(java_facing)));
-            assert!(
-                matches!(
-                    bedrock.states.get("direction"),
-                    Some(BedrockBlockStateValue::Int(d)) if *d == expected
-                ),
-                "bed facing={java_facing} should be direction={expected}"
-            );
-        }
-    }
-
-    /// Sea pickle cluster_count is one less than Java's pickle count.
-    #[test]
-    fn test_sea_pickle_cluster_count() {
-        use crate::block_definitions::SEA_PICKLE;
-
-        let bedrock = to_bedrock_block_with_properties(SEA_PICKLE, None);
-        assert_eq!(bedrock.name, "minecraft:sea_pickle");
-        assert!(matches!(
-            bedrock.states.get("cluster_count"),
-            Some(BedrockBlockStateValue::Int(1))
-        ));
-    }
-
-    /// Standing signs must keep their Java rotation.
-    /// The jetbridge cab doors are iron and have to keep their half, facing and hinge.
-    #[test]
-    fn test_iron_door_keeps_its_states() {
-        use crate::block_definitions::IRON_DOOR;
-        use std::collections::HashMap as StdHashMap;
-
-        let mut props = StdHashMap::new();
-        props.insert(
-            "half".to_string(),
-            fastnbt::Value::String("upper".to_string()),
-        );
-        props.insert(
-            "facing".to_string(),
-            fastnbt::Value::String("west".to_string()),
-        );
-        props.insert(
-            "hinge".to_string(),
-            fastnbt::Value::String("left".to_string()),
-        );
-        let bedrock =
-            to_bedrock_block_with_properties(IRON_DOOR, Some(&fastnbt::Value::Compound(props)));
-        assert_eq!(bedrock.name, "minecraft:iron_door");
-        assert!(matches!(
-            bedrock.states.get("upper_block_bit"),
-            Some(BedrockBlockStateValue::Bool(true))
-        ));
-        assert!(matches!(
-            bedrock.states.get("direction"),
-            Some(BedrockBlockStateValue::Int(2))
-        ));
-    }
-
-    #[test]
-    fn test_standing_sign_keeps_rotation() {
-        use crate::block_definitions::SIGN;
-
-        let bedrock = to_bedrock_block_with_properties(SIGN, None);
-        assert_eq!(bedrock.name, "minecraft:standing_sign");
-        assert!(matches!(
-            bedrock.states.get("ground_sign_direction"),
-            Some(BedrockBlockStateValue::Int(6))
-        ));
-    }
-
-    /// Java encodes a full block as `type=double` on the slab; Bedrock has a
-    /// separate id per material. The bundled schematics (cars, boats, bridge
-    /// segments, playgrounds, crane, starship) all contain double slabs.
-    #[test]
-    fn test_double_slabs_become_double_slab_ids() {
-        use std::collections::HashMap as StdHashMap;
-
-        let double = || {
-            let mut props = StdHashMap::new();
-            props.insert(
-                "type".to_string(),
-                fastnbt::Value::String("double".to_string()),
-            );
-            props.insert(
-                "waterlogged".to_string(),
-                fastnbt::Value::String("false".to_string()),
-            );
-            props
-        };
-
-        // Every combination that actually appears in assets/structures/*.schem.
-        let cases = [
-            ("stone_slab", "minecraft:double_stone_block_slab4"),
-            ("cobblestone_slab", "minecraft:double_stone_block_slab"),
-            ("stone_brick_slab", "minecraft:double_stone_block_slab"),
-            ("quartz_slab", "minecraft:double_stone_block_slab"),
-            ("smooth_stone_slab", "minecraft:double_stone_block_slab"),
-            ("smooth_quartz_slab", "minecraft:double_stone_block_slab4"),
+    fn slabs_keep_their_half_and_double_slabs_their_own_id() {
+        let top = convert_with(ANDESITE_SLAB, &[("type", "top")]);
+        assert_eq!(top.name, "minecraft:andesite_slab");
+        assert_eq!(state(&top, "minecraft:vertical_half"), Some(s("top")));
+        for (block, double) in [
+            (ANDESITE_SLAB, "minecraft:andesite_double_slab"),
+            (STONE_BLOCK_SLAB, "minecraft:normal_stone_double_slab"),
+            (OAK_SLAB, "minecraft:oak_double_slab"),
             (
-                "polished_andesite_slab",
-                "minecraft:double_stone_block_slab3",
+                WAXED_EXPOSED_CUT_COPPER_SLAB,
+                "minecraft:waxed_exposed_double_cut_copper_slab",
             ),
-            ("jungle_slab", "minecraft:double_wooden_slab"),
-            ("dark_oak_slab", "minecraft:double_wooden_slab"),
-            ("warped_slab", "minecraft:warped_double_slab"),
-            (
-                "polished_blackstone_slab",
-                "minecraft:polished_blackstone_double_slab",
-            ),
-        ];
-
-        for (java_name, expected) in cases {
-            let bedrock = convert_slab(java_name, Some(&double()));
-            assert_eq!(
-                bedrock.name, expected,
-                "{java_name}[type=double] should map to {expected}"
-            );
+        ] {
+            assert_eq!(convert_with(block, &[("type", "double")]).name, double);
         }
+    }
 
-        // The material state still has to ride along on the legacy families.
-        let bedrock = convert_slab("cobblestone_slab", Some(&double()));
-        assert!(matches!(
-            bedrock.states.get("stone_slab_type"),
-            Some(BedrockBlockStateValue::String(t)) if t == "cobblestone"
-        ));
-        let bedrock = convert_slab("jungle_slab", Some(&double()));
-        assert!(matches!(
-            bedrock.states.get("wood_type"),
-            Some(BedrockBlockStateValue::String(t)) if t == "jungle"
-        ));
+    /// Doors store the facing turned a quarter; beds use the plain legacy order.
+    #[test]
+    fn door_and_bed_directions_differ() {
+        let door = convert_with(OAK_DOOR, &[("facing", "north"), ("half", "upper")]);
+        assert_eq!(door.name, "minecraft:wooden_door");
+        assert_eq!(
+            state(&door, "minecraft:cardinal_direction"),
+            Some(s("east"))
+        );
+        assert_eq!(state(&door, "upper_block_bit"), Some(Bool(true)));
+        let bed = convert_with(RED_BED_NORTH_HEAD, &[("facing", "north"), ("part", "head")]);
+        assert_eq!(bed.name, "minecraft:bed");
+        assert_eq!(state(&bed, "direction"), Some(Int(2)));
+        assert_eq!(state(&bed, "head_piece_bit"), Some(Bool(true)));
+    }
 
-        // ...and a half slab must NOT pick up a double id.
-        let mut half = StdHashMap::new();
-        half.insert(
-            "type".to_string(),
-            fastnbt::Value::String("bottom".to_string()),
-        );
+    #[test]
+    fn wall_torch_facing_is_inverted() {
+        let torch = convert_with(REDSTONE_WALL_TORCH, &[("facing", "north")]);
+        assert_eq!(torch.name, "minecraft:redstone_torch");
+        assert_eq!(state(&torch, "torch_facing_direction"), Some(s("south")));
+    }
+
+    #[test]
+    fn rails_crops_and_plants_keep_their_states() {
+        let rail = convert_with(RAIL, &[("shape", "north_west")]);
+        assert_eq!(state(&rail, "rail_direction"), Some(Int(8)));
+        let wheat = convert_with(WHEAT, &[("age", "7")]);
+        assert_eq!(state(&wheat, "growth"), Some(Int(7)));
+        let lilac = convert_with(LILAC_UPPER, &[("half", "upper")]);
+        assert_eq!(lilac.name, "minecraft:lilac");
+        assert_eq!(state(&lilac, "upper_block_bit"), Some(Bool(true)));
+        let pickle = convert_with(SEA_PICKLE, &[("pickles", "3")]);
+        assert_eq!(state(&pickle, "cluster_count"), Some(Int(2)));
+        assert_eq!(state(&pickle, "dead_bit"), Some(Bool(false)));
+        let sign = convert_with(SIGN, &[("rotation", "11")]);
+        assert_eq!(state(&sign, "ground_sign_direction"), Some(Int(11)));
+    }
+
+    #[test]
+    fn plants_of_the_sea_stand_in_water() {
+        assert!(is_waterlogged(KELP, None));
+        assert!(is_waterlogged(SEAGRASS, None));
+        assert!(is_waterlogged(
+            SEA_PICKLE,
+            Some(&props(&[("waterlogged", "true")]))
+        ));
+        assert!(!is_waterlogged(
+            SEA_PICKLE,
+            Some(&props(&[("waterlogged", "false")]))
+        ));
+        assert!(is_waterlogged(
+            OAK_STAIRS,
+            Some(&props(&[("waterlogged", "true")]))
+        ));
+        assert!(!is_waterlogged(OAK_STAIRS, None));
+        assert!(!is_waterlogged(STONE, None));
+    }
+
+    #[test]
+    fn potted_plants_name_their_plant() {
+        // FLOWER_POT is a pot with a poppy in it.
+        assert_eq!(potted_plant(FLOWER_POT).unwrap().name, "minecraft:poppy");
         assert_eq!(
-            convert_slab("warped_slab", Some(&half)).name,
-            "minecraft:warped_slab"
+            potted_plant(POTTED_RED_TULIP).unwrap().name,
+            "minecraft:red_tulip"
         );
+        assert!(potted_plant(STONE).is_none());
+    }
+
+    #[test]
+    fn lit_and_flowing_variants_are_their_own_blocks() {
         assert_eq!(
-            convert_slab("stone_slab", Some(&half)).name,
-            "minecraft:stone_block_slab4"
+            convert_with(REDSTONE_LAMP, &[("lit", "true")]).name,
+            "minecraft:lit_redstone_lamp"
+        );
+        let flowing = convert_with(WATER, &[("level", "3")]);
+        assert_eq!(flowing.name, "minecraft:flowing_water");
+        assert_eq!(state(&flowing, "liquid_depth"), Some(Int(3)));
+        assert_eq!(
+            to_bedrock_block_with_properties(WATER, None).name,
+            "minecraft:water"
         );
     }
 }

@@ -3,11 +3,14 @@
 //! This module handles saving worlds in the Bedrock Edition format,
 //! producing .mcworld files that can be imported into Minecraft Bedrock.
 
-use super::common::{ChunkToModify, SectionToModify, WorldToModify};
+use super::bedrock_entities;
+use super::common::{BlockStorage, ChunkToModify, SectionToModify, WorldToModify};
 use super::WorldMetadata;
 use crate::bedrock_block_map::{
-    to_bedrock_block_with_properties, BedrockBlock, BedrockBlockStateValue,
+    is_waterlogged, potted_plant, to_bedrock_block_with_properties, BedrockBlock,
+    BedrockBlockStateValue, BLOCK_STATE_VERSION,
 };
+use crate::block_definitions::{Block, AIR};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
@@ -42,8 +45,40 @@ pub enum BedrockSaveError {
     Io(std::io::Error),
     Zip(zip::result::ZipError),
     Serialization(serde_json::Error),
-    Database(String),
+    Database(rusty_leveldb::Status),
     Nbt(String),
+}
+
+impl BedrockSaveError {
+    /// The cause in a few words, for the GUI's one-line status.
+    pub fn reason(&self) -> &'static str {
+        use std::io::ErrorKind;
+        let kind = match self {
+            BedrockSaveError::Io(e) | BedrockSaveError::Zip(zip::result::ZipError::Io(e)) => {
+                Some(e.kind())
+            }
+            BedrockSaveError::Database(s)
+                if s.code == rusty_leveldb::StatusCode::PermissionDenied =>
+            {
+                Some(ErrorKind::PermissionDenied)
+            }
+            // rusty-leveldb keeps only the message of other io errors.
+            BedrockSaveError::Database(s)
+                if s.err.contains("os error 28") || s.err.contains("os error 112") =>
+            {
+                Some(ErrorKind::StorageFull)
+            }
+            _ => None,
+        };
+        match (kind, self) {
+            (Some(ErrorKind::PermissionDenied), _) => "access denied",
+            (Some(ErrorKind::StorageFull), _) => "disk is full",
+            (Some(ErrorKind::AlreadyExists), _) => "folder in the way",
+            (_, BedrockSaveError::Database(_)) => "LevelDB error",
+            (_, BedrockSaveError::Io(_) | BedrockSaveError::Zip(_)) => "file error",
+            (_, BedrockSaveError::Serialization(_) | BedrockSaveError::Nbt(_)) => "encoding error",
+        }
+    }
 }
 
 impl std::fmt::Display for BedrockSaveError {
@@ -58,8 +93,8 @@ impl std::fmt::Display for BedrockSaveError {
             BedrockSaveError::Serialization(err) => {
                 write!(f, "Failed to serialize Bedrock metadata: {err}")
             }
-            BedrockSaveError::Database(err) => {
-                write!(f, "LevelDB error: {err}")
+            BedrockSaveError::Database(status) => {
+                write!(f, "LevelDB error: {status}")
             }
             BedrockSaveError::Nbt(err) => {
                 write!(f, "NBT serialization error: {err}")
@@ -88,7 +123,21 @@ impl From<serde_json::Error> for BedrockSaveError {
     }
 }
 
+impl From<rusty_leveldb::Status> for BedrockSaveError {
+    fn from(status: rusty_leveldb::Status) -> Self {
+        BedrockSaveError::Database(status)
+    }
+}
+
 const DEFAULT_BEDROCK_COMPRESSION_LEVEL: u8 = 6;
+
+/// The chunk format of 1.21.120 and later.
+const CHUNK_VERSION: u8 = 42;
+
+/// The version the world claims and needs: 1.21.120, the first with chunk format 42.
+const SAVED_WITH_VERSION: [i32; 5] = [1, 21, 120, 0, 0];
+const SAVED_WITH_INVENTORY_VERSION: &str = "1.21.120";
+const SAVED_WITH_PROTOCOL: i32 = 859;
 
 /// rusty-leveldb 3.0.3's LRU `remove` leaves the list's tail pointer dangling
 /// when it removes the last node, and the table cache is the only cache that
@@ -107,9 +156,47 @@ fn bedrock_db_options() -> Options {
     opts
 }
 
-/// The stock disk env with a monotonic clock. rusty-leveldb times compactions
-/// by subtracting wall-clock readings, which overflows when the system clock
-/// steps backwards mid-compaction. The timings only feed its stats.
+/// Tries at a file that a virus scanner or sync client holds for a moment, about 1.5 s in all.
+const TRANSIENT_ATTEMPTS: u32 = 10;
+
+/// Whether an error is such a hold. Only Windows refuses a file another process has open.
+fn is_transient_io_error(e: &std::io::Error) -> bool {
+    // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION.
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// Runs `op` again while `transient` calls its error a passing hold.
+fn retry_while<T, E>(
+    mut op: impl FnMut() -> Result<T, E>,
+    transient: impl Fn(&E) -> bool,
+) -> Result<T, E> {
+    let mut delay = std::time::Duration::from_millis(10);
+    let mut attempt = 1;
+    loop {
+        match op() {
+            Err(e) if attempt < TRANSIENT_ATTEMPTS && transient(&e) => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(std::time::Duration::from_millis(250));
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
+fn retry_transient<T>(op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    retry_while(op, is_transient_io_error)
+}
+
+/// An io error as rusty-leveldb reports it, naming the operation and the file.
+fn leveldb_status(method: &str, path: &Path, e: std::io::Error) -> rusty_leveldb::Status {
+    let mut status = rusty_leveldb::Status::from(e);
+    status.err = format!("{method}: {}: {}", status.err, path.display());
+    status
+}
+
+/// The stock disk env with retries on file opens, renames and deletes, and a monotonic
+/// clock, since rusty-leveldb's compaction stats overflow when the wall clock steps back.
 struct MonotonicDiskEnv {
     inner: PosixDiskEnv,
     epoch: Instant,
@@ -126,16 +213,30 @@ impl MonotonicDiskEnv {
 
 impl Env for MonotonicDiskEnv {
     fn open_sequential_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn std::io::Read>> {
-        self.inner.open_sequential_file(p)
+        retry_transient(|| File::open(p))
+            .map(|f| Box::new(f) as Box<dyn std::io::Read>)
+            .map_err(|e| leveldb_status("open (seq)", p, e))
     }
     fn open_random_access_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn RandomAccess>> {
-        self.inner.open_random_access_file(p)
+        retry_transient(|| File::open(p))
+            .map(|f| Box::new(f) as Box<dyn RandomAccess>)
+            .map_err(|e| leveldb_status("open (randomaccess)", p, e))
     }
     fn open_writable_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn IoWrite>> {
-        self.inner.open_writable_file(p)
+        retry_transient(|| {
+            fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(p)
+        })
+        .map(|f| Box::new(f) as Box<dyn IoWrite>)
+        .map_err(|e| leveldb_status("open (write)", p, e))
     }
     fn open_appendable_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn IoWrite>> {
-        self.inner.open_appendable_file(p)
+        retry_transient(|| fs::OpenOptions::new().create(true).append(true).open(p))
+            .map(|f| Box::new(f) as Box<dyn IoWrite>)
+            .map_err(|e| leveldb_status("open (append)", p, e))
     }
     fn exists(&self, p: &Path) -> rusty_leveldb::Result<bool> {
         self.inner.exists(p)
@@ -147,7 +248,7 @@ impl Env for MonotonicDiskEnv {
         self.inner.size_of(p)
     }
     fn delete(&self, p: &Path) -> rusty_leveldb::Result<()> {
-        self.inner.delete(p)
+        retry_transient(|| fs::remove_file(p)).map_err(|e| leveldb_status("delete", p, e))
     }
     fn mkdir(&self, p: &Path) -> rusty_leveldb::Result<()> {
         self.inner.mkdir(p)
@@ -156,10 +257,21 @@ impl Env for MonotonicDiskEnv {
         self.inner.rmdir(p)
     }
     fn rename(&self, from: &Path, to: &Path) -> rusty_leveldb::Result<()> {
-        self.inner.rename(from, to)
+        retry_transient(|| fs::rename(from, to)).map_err(|e| leveldb_status("rename", from, e))
     }
     fn lock(&self, p: &Path) -> rusty_leveldb::Result<FileLock> {
-        self.inner.lock(p)
+        // Creating the lock file can meet the same holds; a held lock is LockError.
+        retry_while(
+            || self.inner.lock(p),
+            |e| {
+                cfg!(windows)
+                    && matches!(
+                        e.code,
+                        rusty_leveldb::StatusCode::PermissionDenied
+                            | rusty_leveldb::StatusCode::IOError
+                    )
+            },
+        )
     }
     fn unlock(&self, l: FileLock) -> rusty_leveldb::Result<()> {
         self.inner.unlock(l)
@@ -179,9 +291,73 @@ impl Env for MonotonicDiskEnv {
 /// Marks the staging directory as ours. Never packaged, `package_mcworld` names its files.
 const STAGING_MARKER: &str = ".arnis-staging";
 
+/// A private staging folder untouched this long belongs to a run that died.
+const STALE_STAGING_SECS: u64 = 24 * 60 * 60;
+
+/// The folder a world is assembled in before it is packaged. Removed when dropped.
+struct Staging {
+    dir: PathBuf,
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        if let Err(e) = fs::remove_dir_all(&self.dir) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "Warning: could not remove the Bedrock staging folder '{}': {e}",
+                    self.dir.display()
+                );
+            }
+        }
+    }
+}
+
+/// The local cache, which no sync client watches and which is never a RAM disk.
+fn private_staging_root() -> Option<PathBuf> {
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join("arnis-test-bedrock-staging"));
+    }
+    dirs::cache_dir().map(|dir| dir.join("arnis").join("bedrock-staging"))
+}
+
+/// Removes the staging folders of runs that died, i.e. untouched for a day.
+fn remove_stale_staging(root: &Path) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let max_age = std::time::Duration::from_secs(STALE_STAGING_SECS);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let last_write = [path.clone(), path.join("db")]
+            .iter()
+            .filter_map(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+            .max();
+        let stale = last_write
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if stale && path.join(STAGING_MARKER).is_file() {
+            let _ = fs::remove_dir_all(&path);
+        }
+    }
+}
+
 /// A LevelDB (key, value) record, and all records for one chunk.
 type DbRecord = (Vec<u8>, Vec<u8>);
 type ChunkRecords = Vec<DbRecord>;
+
+/// The potted plants of a section by section index.
+type PottedPlants = Vec<(usize, BedrockBlock)>;
+
+/// A section in Bedrock's terms: its blocks, the water of waterlogged cells, its pots.
+struct BedrockSection {
+    palette: Vec<BedrockBlock>,
+    indices: Box<[u16; 4096]>,
+    water: Option<Box<[bool; 4096]>>,
+    pots: PottedPlants,
+}
+
+/// Prepares one of the folders a world can be staged in.
+type PrepareStaging = fn(&BedrockWriter) -> Result<Staging, BedrockSaveError>;
 
 /// Metadata for Bedrock worlds
 #[derive(Serialize)]
@@ -196,33 +372,17 @@ struct BedrockMetadata {
 #[derive(Serialize)]
 struct BedrockBlockState {
     name: String,
-    states: BTreeMap<String, BedrockNbtValue>,
-}
-
-/// NBT-compatible value types for Bedrock block states
-#[derive(Serialize)]
-#[serde(untagged)]
-enum BedrockNbtValue {
-    String(String),
-    Byte(i8),
-    Int(i32),
-}
-
-impl From<&BedrockBlockStateValue> for BedrockNbtValue {
-    #[inline]
-    fn from(value: &BedrockBlockStateValue) -> Self {
-        match value {
-            BedrockBlockStateValue::String(s) => BedrockNbtValue::String(s.clone()),
-            BedrockBlockStateValue::Bool(b) => BedrockNbtValue::Byte(if *b { 1 } else { 0 }),
-            BedrockBlockStateValue::Int(i) => BedrockNbtValue::Int(*i),
-        }
-    }
+    states: BTreeMap<String, Value>,
+    version: i32,
 }
 
 /// Writer for Bedrock Edition worlds
 pub struct BedrockWriter {
-    output_dir: PathBuf,
     mcworld_path: PathBuf,
+    /// World position of the ground grid's first cell; the area's corner when unset.
+    ground_origin: Option<(i32, i32)>,
+    /// Latitude of the area's centre, which picks temperate biome variants.
+    center_lat: f64,
     level_name: String,
     spawn_point: Option<(i32, i32)>,
     ground: Option<Arc<Ground>>,
@@ -254,14 +414,11 @@ impl BedrockWriter {
         } else {
             append_mcworld_extension(&output_path)
         };
-        // Not the bare name: unpacking the archive in place creates that folder.
-        let mut staging = mcworld_path.clone().into_os_string();
-        staging.push(".staging");
-        let output_dir = PathBuf::from(staging);
 
         Self {
-            output_dir,
             mcworld_path,
+            ground_origin: None,
+            center_lat: 0.0,
             level_name,
             spawn_point,
             ground,
@@ -274,6 +431,12 @@ impl BedrockWriter {
         }
     }
 
+    /// Where the ground grid starts, which the biomes and the spawn height read it from.
+    pub fn with_ground_origin(mut self, origin: (i32, i32)) -> Self {
+        self.ground_origin = Some(origin);
+        self
+    }
+
     /// Writes the world to disk
     pub fn write_world(
         &mut self,
@@ -281,64 +444,129 @@ impl BedrockWriter {
         xzbbox: &XZBBox,
         llbbox: &LLBBox,
     ) -> Result<(), BedrockSaveError> {
-        self.prepare_output_dir()?;
-        self.write_level_name()?;
-
-        emit_gui_progress_update(91.0, "Saving Bedrock world...");
-        self.write_level_dat(xzbbox)?;
-
-        emit_gui_progress_update(92.0, "Saving Bedrock world...");
-        self.write_chunks_to_db(world)?;
-
-        emit_gui_progress_update(97.0, "Saving Bedrock world...");
-        self.write_metadata(world, xzbbox, llbbox)?;
+        self.ground_origin
+            .get_or_insert((xzbbox.min_x(), xzbbox.min_z()));
+        self.center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
+        self.remove_legacy_staging();
+        let staging = self.stage_world(world, xzbbox, llbbox)?;
 
         emit_gui_progress_update(98.0, "Saving Bedrock world...");
-        self.package_mcworld()?;
+        self.package_mcworld(&staging.dir)?;
 
         emit_gui_progress_update(99.0, "Saving Bedrock world...");
-        self.cleanup_temp_dir()?;
+        drop(staging);
         Ok(())
     }
 
-    /// Prepares the staging directory, reusing leftovers but never deleting foreign data.
-    fn prepare_output_dir(&self) -> Result<(), BedrockSaveError> {
-        if self.output_dir.exists() {
-            if !is_arnis_staging_dir(&self.output_dir) {
+    /// Assembles the world in the private staging folder, or beside the archive if that fails.
+    fn stage_world(
+        &self,
+        world: &WorldToModify,
+        xzbbox: &XZBBox,
+        llbbox: &LLBBox,
+    ) -> Result<Staging, BedrockSaveError> {
+        let candidates: [PrepareStaging; 2] = [Self::private_staging, Self::staging_beside_archive];
+        // The first failure is reported: the fallback's own trouble rarely explains it.
+        let mut failure = None;
+        for prepare in candidates {
+            let staging = match prepare(self) {
+                Ok(staging) => staging,
+                Err(e) => {
+                    eprintln!("Warning: could not create a Bedrock staging folder: {e}");
+                    failure.get_or_insert(e);
+                    continue;
+                }
+            };
+            match self.write_staging(&staging.dir, world, xzbbox, llbbox) {
+                Ok(()) => return Ok(staging),
+                // Only the disk can fail differently somewhere else.
+                Err(e @ (BedrockSaveError::Io(_) | BedrockSaveError::Database(_))) => {
+                    eprintln!(
+                        "Warning: staging the Bedrock world in '{}' failed: {e}",
+                        staging.dir.display()
+                    );
+                    failure.get_or_insert(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(failure.expect("at least one staging candidate"))
+    }
+
+    fn write_staging(
+        &self,
+        dir: &Path,
+        world: &WorldToModify,
+        xzbbox: &XZBBox,
+        llbbox: &LLBBox,
+    ) -> Result<(), BedrockSaveError> {
+        fs::write(dir.join("levelname.txt"), &self.level_name)?;
+
+        emit_gui_progress_update(91.0, "Saving Bedrock world...");
+        self.write_level_dat(dir, xzbbox)?;
+
+        emit_gui_progress_update(92.0, "Saving Bedrock world...");
+        self.write_chunks_to_db(dir, world)?;
+
+        emit_gui_progress_update(97.0, "Saving Bedrock world...");
+        self.write_metadata(dir, world, xzbbox, llbbox)
+    }
+
+    /// A fresh folder in the local cache, away from a Desktop that OneDrive syncs.
+    fn private_staging(&self) -> Result<Staging, BedrockSaveError> {
+        let root = private_staging_root().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no cache directory")
+        })?;
+        fs::create_dir_all(&root)?;
+        remove_stale_staging(&root);
+        let dir = root.join(format!("world-{}", crate::world_utils::unique_suffix()));
+        fs::create_dir(&dir)?;
+        let staging = Staging { dir };
+        fs::write(staging.dir.join(STAGING_MARKER), b"")?;
+        Ok(staging)
+    }
+
+    /// `<name>.mcworld.staging`, never the bare name, which unpacking the archive creates.
+    fn staging_beside_archive(&self) -> Result<Staging, BedrockSaveError> {
+        let dir = self.beside_archive_staging_dir();
+        if dir.exists() {
+            if !is_arnis_staging_dir(&dir) {
                 return Err(BedrockSaveError::Io(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
                     format!(
                         "'{}' already exists and was not created by Arnis. \
                          Rename or move it, or choose a different Bedrock save path.",
-                        self.output_dir.display()
+                        dir.display()
                     ),
                 )));
             }
-            fs::remove_dir_all(&self.output_dir)?;
+            fs::remove_dir_all(&dir)?;
         }
-        if self.mcworld_path.exists() {
-            fs::remove_file(&self.mcworld_path)?;
-        }
-        // Earlier versions staged under the bare name. Only a folder they marked is theirs to
-        // remove; anything else there is a world the user unpacked.
-        let legacy = self.mcworld_path.with_extension("");
-        if legacy.join(STAGING_MARKER).is_file() {
-            let _ = fs::remove_dir_all(&legacy);
-        }
-
-        fs::create_dir_all(&self.output_dir)?;
-        fs::write(self.output_dir.join(STAGING_MARKER), b"")?;
-        // db directory will be created by LevelDB
-        Ok(())
+        fs::create_dir_all(&dir)?;
+        let staging = Staging { dir };
+        fs::write(staging.dir.join(STAGING_MARKER), b"")?;
+        Ok(staging)
     }
 
-    fn write_level_name(&self) -> Result<(), BedrockSaveError> {
-        let levelname_path = self.output_dir.join("levelname.txt");
-        fs::write(levelname_path, &self.level_name)?;
-        Ok(())
+    fn beside_archive_staging_dir(&self) -> PathBuf {
+        let mut staging = self.mcworld_path.clone().into_os_string();
+        staging.push(".staging");
+        PathBuf::from(staging)
     }
 
-    fn write_level_dat(&self, xzbbox: &XZBBox) -> Result<(), BedrockSaveError> {
+    /// Removes marked staging folders earlier runs left beside the archive.
+    fn remove_legacy_staging(&self) {
+        for dir in [
+            self.mcworld_path.with_extension(""),
+            self.beside_archive_staging_dir(),
+        ] {
+            if dir.join(STAGING_MARKER).is_file() {
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
+    }
+
+    fn write_level_dat(&self, dir: &Path, xzbbox: &XZBBox) -> Result<(), BedrockSaveError> {
         // Create a complete level.dat for Bedrock with all required fields
         // The format is: 8 bytes header + NBT data
         // Header: version (4 bytes LE) + length (4 bytes LE)
@@ -355,9 +583,12 @@ impl BedrockWriter {
             .ground
             .as_ref()
             .map(|ground| {
-                // Ground elevation data expects coordinates relative to the XZ bbox origin
-                let rel_x = spawn_x - xzbbox.min_x();
-                let rel_z = spawn_z - xzbbox.min_z();
+                // Ground elevation data is indexed from the ground grid's origin
+                let (origin_x, origin_z) = self
+                    .ground_origin
+                    .unwrap_or((xzbbox.min_x(), xzbbox.min_z()));
+                let rel_x = spawn_x - origin_x;
+                let rel_z = spawn_z - origin_z;
                 let coord = crate::coordinate_system::cartesian::XZPoint::new(rel_x, rel_z);
                 ground.level(coord) + 3 // Add 3 blocks above ground for safety
             })
@@ -368,27 +599,15 @@ impl BedrockWriter {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // Extended worlds require 1.21.40+ for Custom Biomes / dimension_bounds.
-        // Only the user-facing version markers are bumped; network_version and
-        // inventory_version stay at 1.21.0 because they're used for multiplayer
-        // protocol and inventory storage format, neither of which changes with
-        // the dimension_bounds feature. Bedrock tolerates this mix — what it
-        // gates on is last_opened_with_version and minimum_compatible_client_version.
-        let version_array: Vec<i32> = if self.extend_build_height {
-            vec![1, 21, 40, 0, 0]
-        } else {
-            vec![1, 21, 0, 0, 0]
-        };
-
         // Build complete level.dat NBT structure
         let level_dat = BedrockLevelDat {
             // Version information - critical for Bedrock to recognize the world
             storage_version: 10,
-            network_version: 685, // Bedrock 1.21.0 protocol
+            network_version: SAVED_WITH_PROTOCOL,
             world_version: 1,
-            inventory_version: "1.21.0".to_string(),
-            last_opened_with_version: version_array.clone(),
-            minimum_compatible_client_version: version_array,
+            inventory_version: SAVED_WITH_INVENTORY_VERSION.to_string(),
+            last_opened_with_version: SAVED_WITH_VERSION.to_vec(),
+            minimum_compatible_client_version: SAVED_WITH_VERSION.to_vec(),
 
             // World identity
             level_name: self.level_name.clone(),
@@ -507,15 +726,13 @@ impl BedrockWriter {
             show_recipe_messages: true,
             show_border_effect: true,
             show_days_played: false,
+            // 26.30 replaced it with playerwaypoints and migrates it.
             locator_bar: true,
             tnt_explosion_drop_decay: true,
-            // dimension_bounds is gated behind the Custom Biomes experiment;
-            // without these three flags the bundled BP is silently ignored
-            // and blocks above Y=319 disappear on first load.
-            saved_with_toggled_experiments: self.extend_build_height,
-            experiments_ever_used: self.extend_build_height,
+            // The tall pack needs no experiment since Custom Biomes left it in 1.21.110.
             experiments: BedrockExperiments {
-                data_driven_biomes: self.extend_build_height,
+                experiments_ever_used: false,
+                saved_with_toggled_experiments: false,
             },
 
             // Editor
@@ -541,7 +758,7 @@ impl BedrockWriter {
             .map_err(|e| BedrockSaveError::Nbt(format!("level.dat: {e}")))?;
 
         // Write with header
-        let mut file = File::create(self.output_dir.join("level.dat"))?;
+        let mut file = File::create(dir.join("level.dat"))?;
         // Storage version: 10 (current Bedrock format)
         file.write_u32::<LittleEndian>(10)?;
         // Length of NBT data
@@ -551,14 +768,17 @@ impl BedrockWriter {
         Ok(())
     }
 
-    fn write_chunks_to_db(&self, world: &WorldToModify) -> Result<(), BedrockSaveError> {
-        let db_path = self.output_dir.join("db");
+    fn write_chunks_to_db(
+        &self,
+        dir: &Path,
+        world: &WorldToModify,
+    ) -> Result<(), BedrockSaveError> {
+        let db_path = dir.join("db");
 
         // Open LevelDB once for all writes (blocks, entities, block entities)
         let mut opts = bedrock_db_options();
         opts.create_if_missing = true;
-        let mut db = DB::open(db_path.into_boxed_path(), opts)
-            .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+        let mut db = DB::open(db_path.into_boxed_path(), opts)?;
 
         // Chunks per parallel-encode window. Bounds transient memory (only one window of encoded
         // bytes is held at a time) while giving rayon plenty of work per batch.
@@ -604,8 +824,7 @@ impl BedrockWriter {
 
             for records in &encoded {
                 for (key, value) in records {
-                    db.put(key, value)
-                        .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+                    db.put(key, value)?;
                 }
                 chunks_processed += 1;
                 progress_bar.inc(1);
@@ -617,6 +836,8 @@ impl BedrockWriter {
             }
         }
 
+        // Closed here so a failed flush is an error, not missing chunks.
+        db.close()?;
         progress_bar.finish_with_message("Chunks written to LevelDB");
         Ok(())
     }
@@ -631,19 +852,61 @@ impl BedrockWriter {
         let chunk_pos = Vec2::new(abs_chunk_x, abs_chunk_z);
         let mut records: ChunkRecords = Vec::with_capacity(chunk.sections.len() + 4);
 
-        // Version marker (42 = Bedrock 1.21+).
+        // Chunk format 42, current since 1.21.120.
         records.push((
             build_chunk_key_bytes(chunk_pos, Dimension::Overworld, KeyTypeTag::Version, None),
-            vec![42],
+            vec![CHUNK_VERSION],
+        ));
+        // Fully generated, so the game neither populates nor regenerates the chunk.
+        records.push((
+            build_chunk_key_bytes(
+                chunk_pos,
+                Dimension::Overworld,
+                KeyTypeTag::FinalizedState,
+                None,
+            ),
+            2i32.to_le_bytes().to_vec(),
         ));
         // Data3D (heightmap + biomes), required for a valid chunk.
         records.push((
             build_chunk_key_bytes(chunk_pos, Dimension::Overworld, KeyTypeTag::Data3D, None),
-            self.create_data3d(chunk),
+            self.create_data3d(abs_chunk_x, abs_chunk_z, chunk),
         ));
+        // Bedrock's item frames are blocks, so each needs an empty cell in a stored section;
+        // one in a wall would cut a hole into it.
+        let mut frame_cells = std::collections::HashSet::new();
+        let frames: Vec<_> = compound_list(chunk.other.get("entities"))
+            .filter_map(bedrock_entities::item_frame)
+            .filter(|((x, y, z), _, _)| {
+                x >> 4 == abs_chunk_x
+                    && z >> 4 == abs_chunk_z
+                    && chunk.sections.get((y >> 4) as i8).is_some()
+                    && chunk
+                        .get_block((x & 15) as u8, *y, (z & 15) as u8)
+                        .is_none()
+                    && frame_cells.insert((*x, *y, *z))
+            })
+            .collect();
+        let mut overrides: StdHashMap<i8, StdHashMap<usize, BedrockBlock>> = StdHashMap::new();
+        for ((x, y, z), block, _) in &frames {
+            let index =
+                (y.rem_euclid(16) * 256 + z.rem_euclid(16) * 16 + x.rem_euclid(16)) as usize;
+            overrides
+                .entry((y >> 4) as i8)
+                .or_default()
+                .insert(index, block.clone());
+        }
+
         // Subchunks.
+        let mut pots = Vec::new();
         for (section_y, section) in chunk.sections.iter() {
-            let bytes = self.encode_subchunk(section, section_y)?;
+            let (bytes, section_pots) =
+                self.encode_subchunk(section, section_y, overrides.get(&section_y))?;
+            pots.extend(section_pots.into_iter().map(|(index, plant)| {
+                let (x, z) = ((index % 16) as i32, (index / 16 % 16) as i32);
+                let y = i32::from(section_y) * 16 + (index / 256) as i32;
+                ((abs_chunk_x * 16 + x, y, abs_chunk_z * 16 + z), plant)
+            }));
             records.push((
                 build_chunk_key_bytes(
                     chunk_pos,
@@ -654,70 +917,76 @@ impl BedrockWriter {
                 bytes,
             ));
         }
-        // Block entities and entities.
-        if let Some(record) = self.encode_compound_list_record(
-            chunk_pos,
-            KeyTypeTag::BlockEntity,
-            chunk.other.get("block_entities"),
-        )? {
-            records.push(record);
+
+        // No entity record: the Java entities other than frames have no Bedrock form.
+        let mut block_entities = Vec::new();
+        if let Some(Value::List(list)) = chunk.other.get("block_entities") {
+            for be in dedup_compound_list(list) {
+                let Value::Compound(be) = be else { continue };
+                let block = get_entity_coords(&be)
+                    .and_then(|(x, y, z)| chunk.get_block((x & 15) as u8, y, (z & 15) as u8));
+                block_entities.extend(bedrock_entities::block_entity(&be, block));
+            }
         }
-        if let Some(record) = self.encode_compound_list_record(
-            chunk_pos,
-            KeyTypeTag::Entity,
-            chunk.other.get("entities"),
-        )? {
-            records.push(record);
+        block_entities.extend(frames.into_iter().map(|(_, _, be)| be));
+        block_entities.extend(
+            pots.into_iter()
+                .map(|(pos, plant)| bedrock_entities::flower_pot(pos, &plant)),
+        );
+        if !block_entities.is_empty() {
+            // Concatenated compounds, no list around them.
+            let mut data: Vec<u8> = Vec::new();
+            for compound in &block_entities {
+                let bytes = nbtx::to_le_bytes(compound)
+                    .map_err(|e| BedrockSaveError::Nbt(format!("block entity compound: {e}")))?;
+                data.extend_from_slice(&bytes);
+            }
+            records.push((
+                build_chunk_key_bytes(
+                    chunk_pos,
+                    Dimension::Overworld,
+                    KeyTypeTag::BlockEntity,
+                    None,
+                ),
+                data,
+            ));
         }
 
         Ok(records)
     }
 
-    /// Encodes a block-entity / entity record as a (key, value) pair, or None if empty.
-    fn encode_compound_list_record(
-        &self,
-        chunk_pos: Vec2<i32>,
-        key_type: KeyTypeTag,
-        value: Option<&Value>,
-    ) -> Result<Option<DbRecord>, BedrockSaveError> {
-        let Some(Value::List(values)) = value else {
-            return Ok(None);
-        };
-        if values.is_empty() {
-            return Ok(None);
-        }
-        let deduped = dedup_compound_list(values);
-        if deduped.is_empty() {
-            return Ok(None);
+    /// A heightmap, then one biome storage per subchunk of the dimension from the bottom.
+    fn create_data3d(&self, abs_chunk_x: i32, abs_chunk_z: i32, chunk: &ChunkToModify) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(512 + 64);
+        for height in column_heights(chunk) {
+            buffer.extend_from_slice(&height.to_le_bytes());
         }
 
-        // Bedrock stores these as concatenated individual NBT compounds (no TAG_List wrapper).
-        let mut data: Vec<u8> = Vec::new();
-        for compound in &deduped {
-            let bytes = nbtx::to_le_bytes(compound)
-                .map_err(|e| BedrockSaveError::Nbt(format!("block-entity/entity compound: {e}")))?;
-            data.extend_from_slice(&bytes);
-        }
-
-        let key = build_chunk_key_bytes(chunk_pos, Dimension::Overworld, key_type, None);
-        Ok(Some((key, data)))
+        let origin = self.ground_origin.unwrap_or_default();
+        let names = crate::biome::chunk_biome_names(
+            abs_chunk_x,
+            abs_chunk_z,
+            self.ground.as_deref(),
+            self.center_lat,
+            origin,
+        );
+        // Biomes do not change with height, so the rest say "same as below".
+        write_biome_storage(&mut buffer, &names.map(bedrock_biome_id));
+        let (min_section, max_section) = self.section_span();
+        buffer.extend(std::iter::repeat_n(
+            0xFF,
+            (max_section - min_section) as usize,
+        ));
+        buffer
     }
 
-    /// Creates a Data3D record containing heightmap and biome data.
-    ///
-    /// Format: 512 bytes heightmap (256 x i16 LE) + 28 bytes minimal biome data
-    fn create_data3d(&self, _chunk: &ChunkToModify) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(540);
-
-        // Heightmap: 256 entries (16x16) as i16 LE, fixed height of 4 for flat world
-        for _ in 0..256 {
-            buffer.extend_from_slice(&4i16.to_le_bytes());
+    /// The lowest and highest subchunk of the overworld, with the tall pack's bounds.
+    fn section_span(&self) -> (i32, i32) {
+        if self.extend_build_height {
+            (-32, 31)
+        } else {
+            (-4, 19)
         }
-
-        // Minimal biome data padding (biomes will be regenerated by the game)
-        buffer.extend_from_slice(&[255u8; 28]);
-
-        buffer
     }
 
     /// Encode a section into Bedrock subchunk format
@@ -725,128 +994,115 @@ impl BedrockWriter {
         &self,
         section: &SectionToModify,
         y_index: i8,
-    ) -> Result<Vec<u8>, BedrockSaveError> {
+        overrides: Option<&StdHashMap<usize, BedrockBlock>>,
+    ) -> Result<(Vec<u8>, PottedPlants), BedrockSaveError> {
         let mut buffer = Cursor::new(Vec::new());
+        let section = self.build_palette_and_indices(section, overrides);
 
-        // Subchunk format version (9 is current)
+        // Format 9, one or two storage layers, then the Y index.
         buffer.write_u8(9)?;
-
-        // Number of storage layers (we use 1)
-        buffer.write_u8(1)?;
-
-        // Y index
+        buffer.write_u8(if section.water.is_some() { 2 } else { 1 })?;
         buffer.write_i8(y_index)?;
 
-        // Build palette and block indices
-        let (palette, indices) = self.build_palette_and_indices(section)?;
-
-        // Calculate bits per block using valid Bedrock values: {1, 2, 3, 4, 5, 6, 8, 16}
-        let bits_per_block = bedrock_bits_per_block(palette.len() as u32);
-
-        // Write palette type (bits << 1, not network format)
-        buffer.write_u8(bits_per_block << 1)?;
-
-        // Calculate word packing parameters (matching Chunker's PaletteUtil exactly)
-        // blocksPerWord = floor(32 / bitsPerBlock)
-        // wordSize = ceil(4096 / blocksPerWord)
-        let blocks_per_word = 32 / bits_per_block as u32; // Integer division = floor
-        let word_count = 4096_u32.div_ceil(blocks_per_word);
-        let mask = (1u32 << bits_per_block) - 1;
-
-        // Pack indices into 32-bit words (matching Chunker's loop exactly)
-        let mut block_index = 0usize;
-        for _ in 0..word_count {
-            let mut word = 0u32;
-            // Important: iterate blockIndex from 0 to blocksPerWord-1
-            // NOT bit_offset from 0 to 32 in steps of bits_per_block
-            for block_in_word in 0..blocks_per_word {
-                if block_index >= 4096 {
-                    break;
-                }
-                let start_bit_index = bits_per_block as u32 * block_in_word;
-                let index_val = indices[block_index] as u32 & mask;
-                word |= index_val << start_bit_index;
-                block_index += 1;
-            }
-            buffer.write_u32::<LittleEndian>(word)?;
+        write_block_storage(&mut buffer, &section.palette, |i| {
+            u32::from(section.indices[i])
+        })?;
+        // Water in the second layer, as Bedrock keeps a waterlogged block's water.
+        if let Some(water) = &section.water {
+            let palette = [
+                BedrockBlock::simple("air"),
+                BedrockBlock::with_states(
+                    "water",
+                    vec![("liquid_depth", BedrockBlockStateValue::Int(0))],
+                ),
+            ];
+            write_block_storage(&mut buffer, &palette, |i| u32::from(water[i]))?;
         }
 
-        // Write palette count
-        buffer.write_u32::<LittleEndian>(palette.len() as u32)?;
-
-        // Write palette entries as NBT
-        for block in &palette {
-            let state = BedrockBlockState {
-                name: block.name.clone(),
-                states: block
-                    .states
-                    .iter()
-                    .map(|(k, v)| (k.clone(), BedrockNbtValue::from(v)))
-                    .collect(),
-            };
-            let nbt_bytes = nbtx::to_le_bytes(&state).map_err(|e| {
-                BedrockSaveError::Nbt(format!("block palette state ({}): {e}", state.name))
-            })?;
-            buffer.write_all(&nbt_bytes)?;
-        }
-
-        Ok(buffer.into_inner())
+        Ok((buffer.into_inner(), section.pots))
     }
 
-    /// Builds a palette and index array from a section.
-    ///
-    /// Converts from internal YZX ordering to Bedrock's XZY ordering:
-    /// - Internal: index = y*256 + z*16 + x
-    /// - Bedrock:  index = x*256 + z*16 + y
-    ///
-    /// Also propagates stored block properties (e.g., stair facing/shape) to the
-    /// Bedrock palette, ensuring blocks with non-default states are serialized correctly.
+    /// Converts a section to Bedrock's XZY order: internal index y*256 + z*16 + x, Bedrock
+    /// index x*256 + z*16 + y.
     fn build_palette_and_indices(
         &self,
         section: &SectionToModify,
-    ) -> Result<(Vec<BedrockBlock>, [u16; 4096]), BedrockSaveError> {
+        overrides: Option<&StdHashMap<usize, BedrockBlock>>,
+    ) -> BedrockSection {
         let mut palette: Vec<BedrockBlock> = Vec::new();
         let mut palette_map: StdHashMap<BedrockBlock, u16> = StdHashMap::new();
-        let mut indices = [0u16; 4096];
+        let mut indices = Box::new([0u16; 4096]);
+        let mut water = Box::new([false; 4096]);
+        let mut pots = Vec::new();
 
-        // Add air as first palette entry (required by Bedrock format)
-        let air_block = BedrockBlock::simple("air");
-        palette_map.insert(air_block.clone(), 0);
-        palette.push(air_block);
+        // Air comes first, as the game writes it.
+        palette_slot(&mut palette, &mut palette_map, BedrockBlock::simple("air"));
 
-        // Convert blocks from internal YZX to Bedrock XZY ordering
+        // One block throughout, e.g. stone underground or the sky: converted once.
+        if let BlockStorage::Uniform(block) = section.storage {
+            if section.properties.is_empty() && overrides.is_none() && potted_plant(block).is_none()
+            {
+                let idx = palette_slot(
+                    &mut palette,
+                    &mut palette_map,
+                    to_bedrock_block_with_properties(block, None),
+                );
+                let wet = is_waterlogged(block, None);
+                return BedrockSection {
+                    palette,
+                    indices: Box::new([idx; 4096]),
+                    water: wet.then(|| Box::new([true; 4096])),
+                    pots,
+                };
+            }
+        }
+
+        // Identical property compounds share one Arc, so its address stands for the compound.
+        let mut converted: StdHashMap<(Block, usize), (u16, bool, bool)> = StdHashMap::new();
+        converted.insert((AIR, 0), (0, false, false));
         for x in 0..16usize {
             for z in 0..16usize {
                 for y in 0..16usize {
                     let internal_idx = y * 256 + z * 16 + x;
-                    let block = section.get_block_at_index(internal_idx);
-
-                    // Get stored properties for this block position (if any)
-                    let properties = section.properties.get(&internal_idx).map(|p| p.as_ref());
-
-                    // Convert to Bedrock format, preserving properties
-                    let bedrock_block = to_bedrock_block_with_properties(block, properties);
-
-                    let palette_index = if let Some(&idx) = palette_map.get(&bedrock_block) {
-                        idx
-                    } else {
-                        let idx = palette.len() as u16;
-                        palette_map.insert(bedrock_block.clone(), idx);
-                        palette.push(bedrock_block);
-                        idx
-                    };
-
                     let bedrock_idx = x * 256 + z * 16 + y;
-                    indices[bedrock_idx] = palette_index;
+                    if let Some(frame) = overrides.and_then(|o| o.get(&internal_idx)) {
+                        indices[bedrock_idx] =
+                            palette_slot(&mut palette, &mut palette_map, frame.clone());
+                        continue;
+                    }
+                    let block = section.get_block_at_index(internal_idx);
+                    let properties = section.properties.get(&internal_idx);
+                    let key = (block, properties.map_or(0, |p| Arc::as_ptr(p) as usize));
+                    let (idx, wet, potted) = *converted.entry(key).or_insert_with(|| {
+                        let properties = properties.map(|p| p.as_ref());
+                        let bedrock_block = to_bedrock_block_with_properties(block, properties);
+                        (
+                            palette_slot(&mut palette, &mut palette_map, bedrock_block),
+                            is_waterlogged(block, properties),
+                            potted_plant(block).is_some(),
+                        )
+                    });
+                    indices[bedrock_idx] = idx;
+                    water[bedrock_idx] = wet;
+                    if potted {
+                        pots.extend(potted_plant(block).map(|plant| (internal_idx, plant)));
+                    }
                 }
             }
         }
 
-        Ok((palette, indices))
+        let any_water = water.iter().any(|&w| w);
+        BedrockSection {
+            palette,
+            indices,
+            water: any_water.then_some(water),
+            pots,
+        }
     }
 
     fn write_metadata(
         &self,
+        dir: &Path,
         world: &WorldToModify,
         xzbbox: &XZBBox,
         llbbox: &LLBBox,
@@ -875,23 +1131,38 @@ impl BedrockWriter {
         };
 
         let metadata_bytes = serde_json::to_vec_pretty(&metadata)?;
-        let metadata_path = self.output_dir.join("metadata.json");
+        let metadata_path = dir.join("metadata.json");
         let mut file = File::create(metadata_path)?;
         file.write_all(&metadata_bytes)?;
         Ok(())
     }
 
-    fn package_mcworld(&self) -> Result<(), BedrockSaveError> {
-        let file = File::create(&self.mcworld_path)?;
+    /// Packages the staging folder beside the archive and renames it into place, so a
+    /// failure leaves the previous archive of the same name as it was.
+    fn package_mcworld(&self, dir: &Path) -> Result<(), BedrockSaveError> {
+        let mut part = self.mcworld_path.clone().into_os_string();
+        part.push(".part");
+        let part = PathBuf::from(part);
+        let result = self
+            .write_mcworld_archive(dir, &part)
+            .and_then(|()| Ok(retry_transient(|| fs::rename(&part, &self.mcworld_path))?));
+        if result.is_err() {
+            let _ = fs::remove_file(&part);
+        }
+        result
+    }
+
+    fn write_mcworld_archive(&self, dir: &Path, archive: &Path) -> Result<(), BedrockSaveError> {
+        let file = File::create(archive)?;
         let mut writer = ZipWriter::new(file);
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
 
         // Add top-level files
         for file_name in ["levelname.txt", "metadata.json", "level.dat"] {
-            let path = self.output_dir.join(file_name);
+            let path = dir.join(file_name);
             if path.exists() {
                 writer.start_file(file_name, options)?;
-                let contents = fs::read(&path)?;
+                let contents = retry_transient(|| fs::read(&path))?;
                 writer.write_all(&contents)?;
             }
         }
@@ -929,20 +1200,12 @@ impl BedrockWriter {
         }
 
         // Add db directory and its contents
-        let db_path = self.output_dir.join("db");
+        let db_path = dir.join("db");
         if db_path.is_dir() {
             add_directory_to_zip(&mut writer, &db_path, "db", options)?;
         }
 
-        writer.finish()?;
-        Ok(())
-    }
-
-    /// Clean up the temporary directory after packaging mcworld
-    fn cleanup_temp_dir(&self) -> Result<(), BedrockSaveError> {
-        if self.output_dir.exists() {
-            fs::remove_dir_all(&self.output_dir)?;
-        }
+        writer.finish()?.sync_all()?;
         Ok(())
     }
 }
@@ -983,13 +1246,195 @@ fn add_directory_to_zip(
 
         if path.is_file() {
             writer.start_file(&zip_path, options)?;
-            let contents = fs::read(&path)?;
+            let contents = retry_transient(|| fs::read(&path))?;
             writer.write_all(&contents)?;
         } else if path.is_dir() {
             add_directory_to_zip(writer, &path, &zip_path, options)?;
         }
     }
 
+    Ok(())
+}
+
+/// One above the highest block of each column, x fastest, 0 when empty, as Chunker writes it.
+fn column_heights(chunk: &ChunkToModify) -> [i16; 256] {
+    let mut heights = [0i16; 256];
+    let mut found = [false; 256];
+    let mut open = 256;
+    let sections: Vec<_> = chunk.sections.iter().collect();
+    for (section_y, section) in sections.into_iter().rev() {
+        if matches!(section.storage, BlockStorage::Uniform(AIR)) {
+            continue;
+        }
+        for column in 0..256usize {
+            if found[column] {
+                continue;
+            }
+            let (x, z) = ((column % 16) as u8, (column / 16) as u8);
+            if let Some(y) = (0..16u8)
+                .rev()
+                .find(|&y| section.get_block(x, y, z).is_some())
+            {
+                heights[column] = (i32::from(section_y) * 16 + i32::from(y) + 1) as i16;
+                found[column] = true;
+                open -= 1;
+            }
+        }
+        if open == 0 {
+            break;
+        }
+    }
+    heights
+}
+
+/// One subchunk's biomes from the chunk's 4x4 column grid, in the runtime form the game writes.
+fn write_biome_storage(buffer: &mut Vec<u8>, ids: &[i32; 16]) {
+    let mut palette: Vec<i32> = Vec::with_capacity(4);
+    let mut grid = [0u32; 16];
+    for (cell, id) in ids.iter().enumerate() {
+        grid[cell] = match palette.iter().position(|p| p == id) {
+            Some(i) => i as u32,
+            None => {
+                palette.push(*id);
+                palette.len() as u32 - 1
+            }
+        };
+    }
+    if palette.len() == 1 {
+        buffer.push(1);
+        buffer.extend_from_slice(&palette[0].to_le_bytes());
+        return;
+    }
+    let bits = bedrock_bits_per_block(palette.len() as u32);
+    buffer.push((bits << 1) | 1);
+    // XZY order; the grid cell is (z / 4) * 4 + x / 4.
+    write_packed_indices(buffer, bits, |i| grid[(i >> 4 & 15) / 4 * 4 + (i >> 8) / 4])
+        .expect("writing to a Vec cannot fail");
+    buffer.extend_from_slice(&(palette.len() as i32).to_le_bytes());
+    for id in palette {
+        buffer.extend_from_slice(&id.to_le_bytes());
+    }
+}
+
+/// Bedrock's numeric id of a Java biome; plains for one this table lacks.
+fn bedrock_biome_id(java: &str) -> i32 {
+    match java.trim_start_matches("minecraft:") {
+        "ocean" => 0,
+        "desert" => 2,
+        "windswept_hills" => 3,
+        "forest" => 4,
+        "taiga" => 5,
+        "swamp" => 6,
+        "river" => 7,
+        "frozen_river" => 11,
+        "snowy_plains" => 12,
+        "mushroom_fields" => 14,
+        "beach" => 16,
+        "jungle" => 21,
+        "sparse_jungle" => 23,
+        "deep_ocean" => 24,
+        "stony_shore" => 25,
+        "snowy_beach" => 26,
+        "birch_forest" => 27,
+        "dark_forest" => 29,
+        "snowy_taiga" => 30,
+        "old_growth_pine_taiga" => 32,
+        "windswept_forest" => 34,
+        "savanna" => 35,
+        "savanna_plateau" => 36,
+        "badlands" => 37,
+        "wooded_badlands" => 38,
+        "warm_ocean" => 40,
+        "lukewarm_ocean" => 42,
+        "deep_lukewarm_ocean" => 43,
+        "cold_ocean" => 44,
+        "deep_cold_ocean" => 45,
+        "frozen_ocean" => 46,
+        "deep_frozen_ocean" => 47,
+        "bamboo_jungle" => 48,
+        "sunflower_plains" => 129,
+        "windswept_gravelly_hills" => 131,
+        "flower_forest" => 132,
+        "ice_spikes" => 140,
+        "old_growth_birch_forest" => 155,
+        "old_growth_spruce_taiga" => 160,
+        "windswept_savanna" => 163,
+        "eroded_badlands" => 165,
+        "jagged_peaks" => 182,
+        "frozen_peaks" => 183,
+        "snowy_slopes" => 184,
+        "grove" => 185,
+        "meadow" => 186,
+        "lush_caves" => 187,
+        "dripstone_caves" => 188,
+        "stony_peaks" => 189,
+        "deep_dark" => 190,
+        "mangrove_swamp" => 191,
+        "cherry_grove" => 192,
+        "pale_garden" => 193,
+        _ => 1,
+    }
+}
+
+/// One block storage layer: the packed indices, then the palette as NBT states.
+fn write_block_storage(
+    buffer: &mut impl IoWrite,
+    palette: &[BedrockBlock],
+    index: impl Fn(usize) -> u32,
+) -> Result<(), BedrockSaveError> {
+    let bits_per_block = bedrock_bits_per_block(palette.len() as u32);
+    buffer.write_u8(bits_per_block << 1)?;
+    write_packed_indices(buffer, bits_per_block, index)?;
+    buffer.write_u32::<LittleEndian>(palette.len() as u32)?;
+    for block in palette {
+        let state = BedrockBlockState {
+            name: block.name.clone(),
+            states: block
+                .states
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::from(v)))
+                .collect(),
+            version: BLOCK_STATE_VERSION,
+        };
+        let nbt_bytes = nbtx::to_le_bytes(&state).map_err(|e| {
+            BedrockSaveError::Nbt(format!("block palette state ({}): {e}", state.name))
+        })?;
+        buffer.write_all(&nbt_bytes)?;
+    }
+    Ok(())
+}
+
+/// The palette index of `block`, adding it when new.
+fn palette_slot(
+    palette: &mut Vec<BedrockBlock>,
+    palette_map: &mut StdHashMap<BedrockBlock, u16>,
+    block: BedrockBlock,
+) -> u16 {
+    if let Some(&idx) = palette_map.get(&block) {
+        return idx;
+    }
+    let idx = palette.len() as u16;
+    palette_map.insert(block.clone(), idx);
+    palette.push(block);
+    idx
+}
+
+/// Packs 4096 palette indices into words, `32 / bits` to a word and none split across two.
+fn write_packed_indices(
+    buffer: &mut impl IoWrite,
+    bits_per_block: u8,
+    index: impl Fn(usize) -> u32,
+) -> std::io::Result<()> {
+    let blocks_per_word = 32 / u32::from(bits_per_block);
+    let mask = (1u32 << bits_per_block) - 1;
+    for word_start in (0..4096).step_by(blocks_per_word as usize) {
+        let mut word = 0u32;
+        for (slot, i) in (word_start..(word_start + blocks_per_word as usize).min(4096)).enumerate()
+        {
+            word |= (index(i) & mask) << (u32::from(bits_per_block) * slot as u32);
+        }
+        buffer.write_u32::<LittleEndian>(word)?;
+    }
     Ok(())
 }
 
@@ -1033,6 +1478,18 @@ fn build_chunk_key_bytes(
     buffer
 }
 
+/// The compounds of an NBT list, or nothing when it is absent or not a list.
+fn compound_list(value: Option<&Value>) -> impl Iterator<Item = &StdHashMap<String, Value>> {
+    let items = match value {
+        Some(Value::List(items)) => items.as_slice(),
+        _ => &[],
+    };
+    items.iter().filter_map(|item| match item {
+        Value::Compound(c) => Some(c),
+        _ => None,
+    })
+}
+
 fn dedup_compound_list(values: &[Value]) -> Vec<Value> {
     let mut coord_index: StdHashMap<(i32, i32, i32), usize> = StdHashMap::new();
     let mut deduped: Vec<Value> = Vec::with_capacity(values.len());
@@ -1058,9 +1515,9 @@ fn get_entity_coords(entity: &StdHashMap<String, Value>) -> Option<(i32, i32, i3
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
             if let (Some(x), Some(y), Some(z)) = (
-                value_to_i32(&pos[0]),
-                value_to_i32(&pos[1]),
-                value_to_i32(&pos[2]),
+                bedrock_entities::int(&pos[0]),
+                bedrock_entities::int(&pos[1]),
+                bedrock_entities::int(&pos[2]),
             ) {
                 return Some((x, y, z));
             }
@@ -1068,26 +1525,14 @@ fn get_entity_coords(entity: &StdHashMap<String, Value>) -> Option<(i32, i32, i3
     }
 
     let (Some(x), Some(y), Some(z)) = (
-        entity.get("x").and_then(value_to_i32),
-        entity.get("y").and_then(value_to_i32),
-        entity.get("z").and_then(value_to_i32),
+        entity.get("x").and_then(bedrock_entities::int),
+        entity.get("y").and_then(bedrock_entities::int),
+        entity.get("z").and_then(bedrock_entities::int),
     ) else {
         return None;
     };
 
     Some((x, y, z))
-}
-
-fn value_to_i32(value: &Value) -> Option<i32> {
-    match value {
-        Value::Byte(v) => Some(i32::from(*v)),
-        Value::Short(v) => Some(i32::from(*v)),
-        Value::Int(v) => Some(*v),
-        Value::Long(v) => i32::try_from(*v).ok(),
-        Value::Float(v) => Some(*v as i32),
-        Value::Double(v) => Some(*v as i32),
-        _ => None,
-    }
 }
 
 /// Level.dat structure for Bedrock Edition
@@ -1323,13 +1768,6 @@ struct BedrockLevelDat {
     locator_bar: bool,
     #[serde(rename = "tntexplosiondropdecay")]
     tnt_explosion_drop_decay: bool,
-    #[serde(rename = "saved_with_toggled_experiments")]
-    saved_with_toggled_experiments: bool,
-    #[serde(rename = "experiments_ever_used")]
-    experiments_ever_used: bool,
-    /// Always emitted with all-false contents on standard worlds.
-    /// nbtx can't skip optional fields, and an all-false compound
-    /// is a no-op to Bedrock.
     #[serde(rename = "experiments")]
     experiments: BedrockExperiments,
 
@@ -1360,12 +1798,11 @@ struct BedrockLevelDat {
     daylight_cycle: i32,
 }
 
-/// Bedrock experimental-features NBT toggles. Must pair with
-/// `experiments_ever_used` + `saved_with_toggled_experiments` on the root.
+/// The experiments compound as the game writes it with none toggled.
 #[derive(Serialize)]
 struct BedrockExperiments {
-    /// Gates data-driven worldgen, incl. `minecraft:dimension_bounds`.
-    data_driven_biomes: bool,
+    experiments_ever_used: bool,
+    saved_with_toggled_experiments: bool,
 }
 
 #[cfg(test)]
@@ -1408,7 +1845,7 @@ mod tests {
         let writer = test_writer(output.clone());
         assert_eq!(writer.mcworld_path, output);
         assert_eq!(
-            writer.output_dir,
+            writer.beside_archive_staging_dir(),
             PathBuf::from("Arnis St. Louis.mcworld.staging")
         );
     }
@@ -1421,8 +1858,9 @@ mod tests {
         fs::write(unpacked.join("levelname.txt"), b"Arnis World: Test").unwrap();
 
         let writer = test_writer(unpacked.with_extension("mcworld"));
-        writer.prepare_output_dir().unwrap();
-        assert!(writer.output_dir.join(STAGING_MARKER).is_file());
+        writer.remove_legacy_staging();
+        let staging = writer.staging_beside_archive().unwrap();
+        assert!(staging.dir.join(STAGING_MARKER).is_file());
         assert!(unpacked.join("levelname.txt").is_file());
     }
 
@@ -1432,59 +1870,167 @@ mod tests {
         let legacy = tmp.path().join("Arnis Test");
         fs::create_dir_all(legacy.join("db")).unwrap();
         fs::write(legacy.join(STAGING_MARKER), b"").unwrap();
-
         let writer = test_writer(legacy.with_extension("mcworld"));
-        writer.prepare_output_dir().unwrap();
+        let beside = writer.beside_archive_staging_dir();
+        fs::create_dir_all(beside.join("db")).unwrap();
+        fs::write(beside.join(STAGING_MARKER), b"").unwrap();
+
+        writer.remove_legacy_staging();
         assert!(!legacy.exists());
+        assert!(!beside.exists());
     }
 
     #[test]
-    fn prepare_output_dir_keeps_foreign_directory() {
+    fn staging_beside_archive_keeps_foreign_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
-        let staging = &writer.output_dir;
-        fs::create_dir_all(staging).unwrap();
+        let staging = writer.beside_archive_staging_dir();
+        fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("notes.txt"), b"not ours").unwrap();
 
-        assert!(writer.prepare_output_dir().is_err());
+        assert!(writer.staging_beside_archive().is_err());
         assert!(staging.join("notes.txt").is_file());
     }
 
     #[test]
-    fn prepare_output_dir_keeps_existing_bedrock_world() {
+    fn staging_beside_archive_keeps_existing_bedrock_world() {
         let tmp = tempfile::tempdir().unwrap();
         let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
-        let staging = &writer.output_dir;
+        let staging = writer.beside_archive_staging_dir();
         fs::create_dir_all(staging.join("db")).unwrap();
         fs::write(staging.join("levelname.txt"), b"Someone's World").unwrap();
         fs::write(staging.join("db").join("CURRENT"), b"leveldb").unwrap();
 
-        assert!(writer.prepare_output_dir().is_err());
+        assert!(writer.staging_beside_archive().is_err());
         assert!(staging.join("db").join("CURRENT").is_file());
     }
 
     #[test]
-    fn prepare_output_dir_wipes_previous_staging_dir() {
+    fn staging_beside_archive_wipes_previous_staging_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
-        let staging = &writer.output_dir;
-        fs::create_dir_all(staging.join("db")).unwrap();
-        fs::write(staging.join(STAGING_MARKER), b"").unwrap();
-        fs::write(staging.join("levelname.txt"), b"Arnis World: Old").unwrap();
+        let dir = writer.beside_archive_staging_dir();
+        fs::create_dir_all(dir.join("db")).unwrap();
+        fs::write(dir.join(STAGING_MARKER), b"").unwrap();
+        fs::write(dir.join("levelname.txt"), b"Arnis World: Old").unwrap();
 
-        writer.prepare_output_dir().unwrap();
-        assert!(staging.join(STAGING_MARKER).is_file());
-        assert!(!staging.join("levelname.txt").exists());
+        let staging = writer.staging_beside_archive().unwrap();
+        assert!(staging.dir.join(STAGING_MARKER).is_file());
+        assert!(!staging.dir.join("levelname.txt").exists());
+        drop(staging);
+        assert!(!dir.exists());
     }
 
     #[test]
-    fn prepare_output_dir_accepts_empty_directory() {
+    fn staging_beside_archive_accepts_empty_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
-        fs::create_dir_all(&writer.output_dir).unwrap();
+        fs::create_dir_all(writer.beside_archive_staging_dir()).unwrap();
 
-        writer.prepare_output_dir().unwrap();
-        assert!(writer.output_dir.join(STAGING_MARKER).is_file());
+        let staging = writer.staging_beside_archive().unwrap();
+        assert!(staging.dir.join(STAGING_MARKER).is_file());
+    }
+
+    #[test]
+    fn a_foreign_folder_beside_the_archive_does_not_stop_the_save() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        let foreign = writer.beside_archive_staging_dir();
+        fs::create_dir_all(&foreign).unwrap();
+        fs::write(foreign.join("notes.txt"), b"not ours").unwrap();
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        writer
+            .write_world(&WorldToModify::default(), &xzbbox, &llbbox)
+            .unwrap();
+        assert!(writer.mcworld_path.is_file());
+        assert!(foreign.join("notes.txt").is_file());
+    }
+
+    #[test]
+    fn a_failed_save_keeps_what_was_at_the_archive_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        // A folder where the archive goes cannot be replaced by a file.
+        fs::create_dir_all(writer.mcworld_path.join("keep")).unwrap();
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        assert!(writer
+            .write_world(&WorldToModify::default(), &xzbbox, &llbbox)
+            .is_err());
+        assert!(writer.mcworld_path.join("keep").is_dir());
+        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(
+            leftovers,
+            vec![std::ffi::OsString::from("Arnis Test.mcworld")]
+        );
+    }
+
+    #[test]
+    fn transient_errors_are_retried_and_lasting_ones_are_not() {
+        let mut calls = 0;
+        let result = retry_while(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err("held")
+                } else {
+                    Ok(calls)
+                }
+            },
+            |e| *e == "held",
+        );
+        assert_eq!(result.unwrap(), 3);
+
+        let mut calls = 0;
+        let result: Result<(), &str> = retry_while(
+            || {
+                calls += 1;
+                Err("gone")
+            },
+            |e| *e == "held",
+        );
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+
+        // A sharing violation is a hold on Windows; elsewhere nothing is.
+        let sharing = std::io::Error::from_raw_os_error(32);
+        assert_eq!(is_transient_io_error(&sharing), cfg!(windows));
+        assert!(!is_transient_io_error(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_stale_marked_staging_folders_are_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 24 * 3600);
+        let make = |name: &str, marked: bool, stale: bool| {
+            let dir = root.path().join(name);
+            fs::create_dir_all(&dir).unwrap();
+            if marked {
+                fs::write(dir.join(STAGING_MARKER), b"").unwrap();
+            }
+            if stale {
+                File::open(&dir).unwrap().set_modified(old).unwrap();
+            }
+            dir
+        };
+        let stale = make("world-stale", true, true);
+        let fresh = make("world-fresh", true, false);
+        let foreign = make("someone-else", false, true);
+
+        remove_stale_staging(root.path());
+        assert!(!stale.exists());
+        assert!(fresh.exists());
+        assert!(foreign.exists());
     }
 
     #[test]
@@ -1687,6 +2233,192 @@ mod tests {
         );
     }
 
+    /// Every compound of a record that holds several back to back.
+    fn compounds(mut bytes: &[u8]) -> Vec<StdHashMap<String, nbtx::Value>> {
+        let mut out = Vec::new();
+        while !bytes.is_empty() {
+            out.push(nbtx::from_le_bytes(&mut bytes).expect("compound"));
+        }
+        out
+    }
+
+    fn nbt_str(value: Option<&nbtx::Value>) -> Option<&str> {
+        match value {
+            Some(nbtx::Value::String(s)) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// A chunk with a block, a potted plant, a chest and an item frame, read back.
+    #[test]
+    fn a_chunk_is_written_in_the_current_format() {
+        use fastnbt::Value as V;
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(2, 64, 3, crate::block_definitions::STONE);
+        world.set_block_if_absent(5, 64, 5, crate::block_definitions::POTTED_RED_TULIP);
+        world.set_block_if_absent(6, 64, 5, crate::block_definitions::CHEST);
+        let chunk = world.get_or_create_region(0, 0).get_or_create_chunk(0, 0);
+        let item = StdHashMap::from([
+            ("id".to_string(), V::String("minecraft:apple".into())),
+            ("count".to_string(), V::Int(2)),
+            ("Slot".to_string(), V::Byte(0)),
+        ]);
+        let chest = StdHashMap::from([
+            ("id".to_string(), V::String("minecraft:chest".into())),
+            ("x".to_string(), V::Int(6)),
+            ("y".to_string(), V::Int(64)),
+            ("z".to_string(), V::Int(5)),
+            ("Items".to_string(), V::List(vec![V::Compound(item)])),
+        ]);
+        chunk.other.insert(
+            "block_entities".to_string(),
+            V::List(vec![V::Compound(chest)]),
+        );
+        let frame = StdHashMap::from([
+            ("id".to_string(), V::String("minecraft:item_frame".into())),
+            ("TileX".to_string(), V::Int(7)),
+            ("TileY".to_string(), V::Int(65)),
+            ("TileZ".to_string(), V::Int(5)),
+            ("Facing".to_string(), V::Byte(3)),
+        ]);
+        let display = StdHashMap::from([(
+            "id".to_string(),
+            V::String("minecraft:block_display".into()),
+        )]);
+        chunk.other.insert(
+            "entities".to_string(),
+            V::List(vec![V::Compound(frame), V::Compound(display)]),
+        );
+
+        let writer = test_writer(PathBuf::from("unused.mcworld"));
+        let records: StdHashMap<Vec<u8>, Vec<u8>> = writer
+            .encode_chunk_records(
+                0,
+                0,
+                world.get_or_create_region(0, 0).get_or_create_chunk(0, 0),
+            )
+            .unwrap()
+            .into_iter()
+            .collect();
+        let pos = Vec2::new(0, 0);
+        let record = |tag, y| {
+            records
+                .get(&build_chunk_key_bytes(pos, Dimension::Overworld, tag, y))
+                .cloned()
+        };
+
+        assert_eq!(record(KeyTypeTag::Version, None), Some(vec![CHUNK_VERSION]));
+        assert_eq!(
+            record(KeyTypeTag::FinalizedState, None),
+            Some(2i32.to_le_bytes().to_vec())
+        );
+        assert!(record(KeyTypeTag::Entity, None).is_none());
+
+        // Heightmap, then one plains storage and 23 "same as below".
+        let data3d = record(KeyTypeTag::Data3D, None).unwrap();
+        assert_eq!(data3d.len(), 512 + 5 + 23);
+        assert_eq!(i16::from_le_bytes([data3d[100], data3d[101]]), 65);
+        assert_eq!(&data3d[512..517], &[1, 1, 0, 0, 0]);
+        assert!(data3d[517..].iter().all(|&b| b == 0xFF));
+
+        // Section 4: air, stone, pot, chest and frame, so 3 bits, 10 to a word.
+        let sub = record(KeyTypeTag::SubChunkPrefix, Some(4)).unwrap();
+        assert_eq!(&sub[..4], &[9, 1, 4, 3 << 1]);
+        let count_at = 4 + 4096usize.div_ceil(10) * 4;
+        let count = u32::from_le_bytes(sub[count_at..count_at + 4].try_into().unwrap());
+        let palette = compounds(&sub[count_at + 4..]);
+        assert_eq!(palette.len(), count as usize);
+        assert!(palette.iter().all(
+            |e| matches!(e.get("version"), Some(nbtx::Value::Int(v)) if *v == BLOCK_STATE_VERSION)
+        ));
+        let names: Vec<_> = palette
+            .iter()
+            .filter_map(|e| nbt_str(e.get("name")))
+            .collect();
+        assert!(names.contains(&"minecraft:frame"), "{names:?}");
+        assert!(names.contains(&"minecraft:flower_pot"), "{names:?}");
+
+        let entities = compounds(&record(KeyTypeTag::BlockEntity, None).unwrap());
+        let ids: Vec<_> = entities
+            .iter()
+            .filter_map(|e| nbt_str(e.get("id")))
+            .collect();
+        assert_eq!(ids.len(), 3, "{ids:?}");
+        for id in ["Chest", "ItemFrame", "FlowerPot"] {
+            assert!(ids.contains(&id), "{ids:?}");
+        }
+    }
+
+    #[test]
+    fn kelp_gets_water_in_the_second_layer_and_frames_skip_walls() {
+        use fastnbt::Value as V;
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(1, 40, 1, crate::block_definitions::KELP);
+        world.set_block_if_absent(4, 40, 4, crate::block_definitions::STONE);
+        let chunk = world.get_or_create_region(0, 0).get_or_create_chunk(0, 0);
+        let frame = StdHashMap::from([
+            ("id".to_string(), V::String("minecraft:item_frame".into())),
+            ("TileX".to_string(), V::Int(4)),
+            ("TileY".to_string(), V::Int(40)),
+            ("TileZ".to_string(), V::Int(4)),
+        ]);
+        chunk
+            .other
+            .insert("entities".to_string(), V::List(vec![V::Compound(frame)]));
+
+        let writer = test_writer(PathBuf::from("unused.mcworld"));
+        let chunk = world.get_or_create_region(0, 0).get_or_create_chunk(0, 0);
+        let records: StdHashMap<Vec<u8>, Vec<u8>> = writer
+            .encode_chunk_records(0, 0, chunk)
+            .unwrap()
+            .into_iter()
+            .collect();
+        let key = |tag, y| build_chunk_key_bytes(Vec2::new(0, 0), Dimension::Overworld, tag, y);
+
+        // Air, kelp and stone in 2 bits, 16 to a word; then the water layer in 1 bit.
+        let sub = &records[&key(KeyTypeTag::SubChunkPrefix, Some(2))];
+        assert_eq!(&sub[..4], &[9, 2, 2, 2 << 1]);
+        let mut rest = &sub[4 + 256 * 4..];
+        let count = u32::from_le_bytes(rest[..4].try_into().unwrap());
+        rest = &rest[4..];
+        let blocks: Vec<StdHashMap<String, nbtx::Value>> = (0..count)
+            .map(|_| nbtx::from_le_bytes(&mut rest).unwrap())
+            .collect();
+        assert!(!blocks
+            .iter()
+            .any(|b| nbt_str(b.get("name")) == Some("minecraft:frame")));
+        assert_eq!(rest[0], 1 << 1);
+        let water = compounds(&rest[1 + 128 * 4 + 4..]);
+        let names: Vec<_> = water
+            .iter()
+            .filter_map(|e| nbt_str(e.get("name")))
+            .collect();
+        assert_eq!(names, ["minecraft:air", "minecraft:water"]);
+        assert!(!records.contains_key(&key(KeyTypeTag::BlockEntity, None)));
+    }
+
+    #[test]
+    fn mixed_biomes_are_packed_per_block() {
+        let mut ids = [1i32; 16];
+        ids[3] = 2; // x 12..16, z 0..4
+        let mut buffer = Vec::new();
+        write_biome_storage(&mut buffer, &ids);
+        assert_eq!(buffer[0], (1 << 1) | 1);
+        // 128 words, then the palette.
+        assert_eq!(&buffer[1 + 512..], &[2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0]);
+        let bit = |i: usize| {
+            let word = u32::from_le_bytes(
+                buffer[1 + i / 32 * 4..1 + i / 32 * 4 + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            word >> (i % 32) & 1
+        };
+        // XZY order: x 12, z 0 is desert; x 0, z 12 is plains.
+        assert_eq!(bit(12 * 256), 1);
+        assert_eq!(bit(12 * 16), 0);
+    }
+
     /// Multi-chunk, multi-section world: exercises the parallel encode path and verifies the
     /// expected LevelDB records actually land (the empty-world tests above never reached encoding).
     #[test]
@@ -1718,14 +2450,16 @@ mod tests {
             6000,
             false,
         );
-        writer.prepare_output_dir().expect("prepare dir");
-        writer.write_chunks_to_db(&world).expect("write chunks");
+        let staging = temp_dir.path().join("staging");
+        fs::create_dir_all(&staging).expect("staging dir");
+        writer
+            .write_chunks_to_db(&staging, &world)
+            .expect("write chunks");
 
         // Reopen the LevelDB and verify each populated chunk got version + Data3D + subchunk(4).
         let mut opts = bedrock_db_options();
         opts.create_if_missing = false;
-        let mut db =
-            DB::open(writer.output_dir.join("db").into_boxed_path(), opts).expect("reopen db");
+        let mut db = DB::open(staging.join("db").into_boxed_path(), opts).expect("reopen db");
 
         for &(cx, cz) in &chunk_coords {
             let pos = Vec2::new(cx, cz);

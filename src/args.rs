@@ -211,8 +211,8 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
 
-    /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
-    /// Bedrock 1.21.40+: up to Y=511). Both are experimental.
+    /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031, experimental;
+    /// Bedrock 1.21.120+: up to Y=511).
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
 
