@@ -127,6 +127,9 @@ struct ArchiveEntry {
     /// then only the bbox is available.
     #[serde(default)]
     cells: Vec<u32>,
+    /// Bake date as YYYYMMDD. Absent in older indexes.
+    #[serde(default)]
+    built: Option<String>,
     min_lat: f64,
     min_lon: f64,
     max_lat: f64,
@@ -268,9 +271,15 @@ struct Collected {
 pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str, scale: f64) -> Result<OsmData> {
     println!("{} Fetching data from the tile archive...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
-    let (data, tiles_read, bytes) = read_tiles(bbox, base_url, max_area_km2(scale))?;
+    let (data, tiles_read, bytes, built) = read_tiles(bbox, base_url, max_area_km2(scale))?;
+    // The bake date tells support whether a missing feature is just newer than the data.
+    let built = if built.is_empty() {
+        String::new()
+    } else {
+        format!(", built {}", built.join(", "))
+    };
     println!(
-        "Read {tiles_read} tiles ({:.1} MB) from the archive",
+        "Read {tiles_read} tiles ({:.1} MB) from the archive{built}",
         bytes as f64 / 1e6
     );
     emit_gui_progress_update(5.0, "");
@@ -280,7 +289,16 @@ pub fn fetch_data_from_tiles(bbox: LLBBox, base_url: &str, scale: f64) -> Result
 /// [`fetch_data_from_tiles`] without progress output, held to the scale 1 limit: the facade
 /// fetch reads real buildings whatever the world's scale.
 pub fn fetch_data_from_tiles_quietly(bbox: LLBBox, base_url: &str) -> Result<OsmData> {
-    read_tiles(bbox, base_url, AREA_KM2_AT_SCALE_1).map(|(data, _, _)| data)
+    read_tiles(bbox, base_url, AREA_KM2_AT_SCALE_1).map(|(data, ..)| data)
+}
+
+/// `20261025` as `2026-10-25`; anything else as it is.
+fn display_date(built: &str) -> String {
+    if built.len() == 8 && built.bytes().all(|b| b.is_ascii_digit()) {
+        format!("{}-{}-{}", &built[..4], &built[4..6], &built[6..])
+    } else {
+        built.to_string()
+    }
 }
 
 fn tiles_needed(bbox: &LLBBox) -> usize {
@@ -309,7 +327,12 @@ fn size_limit(bbox: &LLBBox, max_area_km2: f64) -> Result<()> {
     Ok(())
 }
 
-fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmData, usize, u64)> {
+/// The area's data, the tiles read, the bytes fetched and the bake dates of the archives used.
+fn read_tiles(
+    bbox: LLBBox,
+    base_url: &str,
+    max_area_km2: f64,
+) -> Result<(OsmData, usize, u64, Vec<String>)> {
     size_limit(&bbox, max_area_km2)?;
     let client = client()?;
     let manifest = manifest(&client, base_url)?;
@@ -328,6 +351,7 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
     let mut collected = Collected::default();
     let mut tiles_read = 0usize;
     let mut bytes = 0u64;
+    let mut built: Vec<String> = Vec::new();
 
     if manifest.cell_zoom > ZOOM {
         return Err(format!(
@@ -366,6 +390,7 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
         }
         let k = opened.len();
         let mut is_aot2 = false;
+        let tiles_before = tiles_read;
         // Fetched and decompressed in parallel: a large bbox is dozens of tiles, and serially
         // that is dominated by round trips (72 tiles took 94s, most of it waiting). In batches,
         // so a large area holds one batch of tiles rather than all of them.
@@ -397,6 +422,13 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
                 }
                 absorb(tile, &mut collected);
                 tiles_read += 1;
+            }
+        }
+        if tiles_read > tiles_before {
+            if let Some(date) = entry.built.as_deref().map(display_date) {
+                if !built.contains(&date) {
+                    built.push(date);
+                }
             }
         }
         opened.push(archive);
@@ -484,7 +516,7 @@ fn read_tiles(bbox: LLBBox, base_url: &str, max_area_km2: f64) -> Result<(OsmDat
         );
     }
 
-    Ok((assemble(collected, &bbox), tiles_read, bytes))
+    Ok((assemble(collected, &bbox), tiles_read, bytes, built))
 }
 
 /// Archives set tile_compression=none, so the baker's zstd frame is still around the payload.
@@ -988,6 +1020,7 @@ mod tests {
         ArchiveEntry {
             file: file.to_string(),
             cells: Vec::new(),
+            built: None,
             min_lat: 0.0,
             min_lon: 0.0,
             max_lat: 1.0,
@@ -1001,6 +1034,16 @@ mod tests {
         let dlat = side / 111.32;
         let dlon = side / (111.32 * (lat + dlat / 2.0).to_radians().cos());
         LLBBox::new(lat, 10.0, lat + dlat, 10.0 + dlon).unwrap()
+    }
+
+    #[test]
+    fn the_bake_date_is_read_and_shown_as_a_date() {
+        let index = r#"{"zoom":13,"archives":[{"file":"europe-20261025-1.pmtiles","built":"20261025","min_lat":0,"min_lon":0,"max_lat":1,"max_lon":1},{"file":"old.pmtiles","min_lat":0,"min_lon":0,"max_lat":1,"max_lon":1}]}"#;
+        let manifest: Manifest = serde_json::from_str(index).unwrap();
+        assert_eq!(manifest.archives[0].built.as_deref(), Some("20261025"));
+        assert_eq!(manifest.archives[1].built, None);
+        assert_eq!(display_date("20261025"), "2026-10-25");
+        assert_eq!(display_date("2026-10"), "2026-10");
     }
 
     #[test]
