@@ -218,7 +218,9 @@ pub struct Args {
     pub vanilla_height: bool,
 
     /// Add the extended build height pack even where the area fits the vanilla height.
-    /// Once the terrain fit has run, true whenever the world has the extended height.
+    /// Before the terrain fit this says the height is fixed as extended (this flag or a
+    /// One World); `ground::settle_build_height` then sets it for an area that needs it,
+    /// so from there on it is the world's height.
     #[arg(long, default_value_t = false, hide = true)]
     pub disable_height_limit: bool,
 
@@ -1105,10 +1107,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
 /// height from the area may use the extended range: a base outside vanilla's makes it extend.
 fn ground_level_bounds(args: &Args) -> (i32, i32) {
     let extended = args.disable_height_limit || crate::ground::auto_height(args);
-    let floor = crate::ground::world_min_y(args, extended) + 2;
-    let ceiling = crate::ground::world_top_y(args, extended)
-        - crate::elevation::postprocess::TERRAIN_HEIGHT_BUFFER;
-    (floor, ceiling)
+    let range = crate::ground::ground_level_range(args, extended);
+    (*range.start(), *range.end())
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {

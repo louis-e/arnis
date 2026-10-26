@@ -37,25 +37,58 @@ pub struct TerrainHints {
 }
 
 impl TerrainHints {
-    /// The hints a run's terrain fit wants from its raw OSM data. Models and structures only
-    /// count where the mode builds them.
-    pub fn from_osm(data: &crate::osm_parser::OsmData, args: &crate::args::Args) -> Self {
-        let objects = !args.skip_objects();
-        let buildings = objects && args.mode != crate::args::GenerationMode::Blueprint;
+    /// The hints a run's terrain fit wants from its raw OSM data, and from Overture when
+    /// `wants_overture`. Models and structures only count where the mode builds them.
+    pub fn from_osm(
+        data: &crate::osm_parser::OsmData,
+        args: &crate::args::Args,
+        overture: Option<&crate::overture::OvertureData>,
+    ) -> Self {
         Self {
             peaks: peaks_in(data),
-            tall_models: if args.use_3d && objects {
+            tall_models: if args.use_3d && !args.skip_objects() {
                 crate::models_3d::wikidata::tall_models_in(data)
             } else {
                 Vec::new()
             },
-            tall_structures: if buildings && crate::ground::auto_height(args) {
-                tall_structures_in(data, args.scale)
+            tall_structures: if wants_structures(args) {
+                let mut found = tall_structures_in(data, args.scale, overture.map(|o| &o.hints));
+                found.extend(
+                    overture
+                        .iter()
+                        .flat_map(|o| o.tall_structures.iter().copied()),
+                );
+                found
             } else {
                 Vec::new()
             },
         }
     }
+
+    /// Whether the hints should wait for the Overture fetch, whose building heights count
+    /// as much as OSM's.
+    pub fn wants_overture(args: &crate::args::Args) -> bool {
+        args.overture && wants_structures(args)
+    }
+}
+
+/// A run that picks its build height from the area and builds full buildings.
+fn wants_structures(args: &crate::args::Args) -> bool {
+    !args.skip_objects()
+        && args.mode != crate::args::GenerationMode::Blueprint
+        && crate::ground::auto_height(args)
+}
+
+/// Whether a structure this tall could reach past the vanilla ceiling at `scale`. Anything
+/// shorter stays under it wherever the terrain itself fits.
+pub(crate) fn may_pass_vanilla(height_m: f64, scale: f64) -> bool {
+    height_m * scale > f64::from(super::postprocess::TERRAIN_HEIGHT_BUFFER - 2)
+}
+
+/// Whether a point lies in `bbox`, edges included.
+pub(crate) fn inside(bbox: &LLBBox, lat: f64, lon: f64) -> bool {
+    (bbox.min().lat()..=bbox.max().lat()).contains(&lat)
+        && (bbox.min().lng()..=bbox.max().lng()).contains(&lon)
 }
 
 /// Hints handed to the terrain thread, which runs alongside the OSM fetch.
@@ -137,42 +170,84 @@ fn structure_height_m(tags: &HashMap<String, String>) -> Option<(f64, bool)> {
     None
 }
 
-/// Structures whose mapped height could take them past the vanilla ceiling at `scale`. A way
-/// stands at its first node, which is close enough to read the terrain under it.
-pub fn tall_structures_in(data: &crate::osm_parser::OsmData, scale: f64) -> Vec<TallModel> {
-    // Anything shorter stays under the ceiling wherever the terrain itself fits.
-    let min_m = f64::from(super::postprocess::TERRAIN_HEIGHT_BUFFER - 2) / scale.max(1e-9);
+/// Structures whose mapped height could take them past the vanilla ceiling at `scale`, with
+/// the heights Overture adds to untagged OSM buildings. An outline counts at every node, as
+/// a building stands on the highest ground under it; a relation by its member ways.
+pub fn tall_structures_in(
+    data: &crate::osm_parser::OsmData,
+    scale: f64,
+    overture: Option<&crate::overture::OvertureHints>,
+) -> Vec<TallModel> {
     let mut found = Vec::new();
-    let mut ways: Vec<(u64, f64)> = Vec::new();
+    let mut outlines: Vec<(&[u64], f64)> = Vec::new();
+    let mut relations: Vec<(&[crate::osm_parser::OsmMember], f64)> = Vec::new();
     for e in data.elements() {
-        let Some((height_m, node_ok)) = e.tags.as_ref().and_then(structure_height_m) else {
+        let Some(tags) = e.tags.as_ref() else {
             continue;
         };
-        if height_m <= min_m {
+        let kind = match e.r#type.as_str() {
+            "way" => "way",
+            "relation" => "relation",
+            _ => "node",
+        };
+        let filled = overture
+            .filter(|_| kind != "node")
+            .and_then(|o| o.filled(kind, e.id, tags));
+        let Some((height_m, node_ok)) = structure_height_m(filled.as_ref().unwrap_or(tags)) else {
+            continue;
+        };
+        if !may_pass_vanilla(height_m, scale) {
             continue;
         }
-        match (e.r#type.as_str(), e.lat, e.lon, e.nodes.as_deref()) {
-            ("node", Some(lat), Some(lon), _) if node_ok => {
+        match (kind, e.lat, e.lon) {
+            ("node", Some(lat), Some(lon)) if node_ok => {
                 found.push(TallModel { lat, lon, height_m })
             }
-            ("way", _, _, Some([first, ..])) => ways.push((*first, height_m)),
+            ("way", _, _) => outlines.extend(e.nodes.as_deref().map(|n| (n, height_m))),
+            ("relation", _, _) => relations.push((&e.members, height_m)),
             _ => {}
         }
     }
-    if ways.is_empty() {
+    if !relations.is_empty() {
+        let members: HashSet<u64> = relations
+            .iter()
+            .flat_map(|(m, _)| m.iter().filter(|m| m.r#type == "way").map(|m| m.r#ref))
+            .collect();
+        let way_nodes: HashMap<u64, &[u64]> = data
+            .elements()
+            .iter()
+            .filter(|e| e.r#type == "way" && members.contains(&e.id))
+            .filter_map(|e| Some((e.id, e.nodes.as_deref()?)))
+            .collect();
+        for (members, height_m) in relations {
+            outlines.extend(
+                members
+                    .iter()
+                    .filter(|m| m.r#type == "way")
+                    .filter_map(|m| way_nodes.get(&m.r#ref))
+                    .map(|nodes| (*nodes, height_m)),
+            );
+        }
+    }
+    if outlines.is_empty() {
         return found;
     }
-    let wanted: HashSet<u64> = ways.iter().map(|&(id, _)| id).collect();
+    let wanted: HashSet<u64> = outlines
+        .iter()
+        .flat_map(|(n, _)| n.iter().copied())
+        .collect();
     let coords: HashMap<u64, (f64, f64)> = data
         .elements()
         .iter()
         .filter(|e| e.r#type == "node" && wanted.contains(&e.id))
         .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
         .collect();
-    found.extend(ways.into_iter().filter_map(|(id, height_m)| {
-        let &(lat, lon) = coords.get(&id)?;
-        Some(TallModel { lat, lon, height_m })
-    }));
+    for (nodes, height_m) in outlines {
+        found.extend(nodes.iter().filter_map(|id| {
+            let &(lat, lon) = coords.get(id)?;
+            Some(TallModel { lat, lon, height_m })
+        }));
+    }
     found
 }
 
@@ -278,7 +353,7 @@ pub(crate) fn model_cells(
     let (min_lon, max_lon) = (bbox.min().lng(), bbox.max().lng());
     models
         .iter()
-        .filter(|m| (min_lat..=max_lat).contains(&m.lat) && (min_lon..=max_lon).contains(&m.lon))
+        .filter(|m| inside(bbox, m.lat, m.lon))
         .filter_map(|m| {
             let x = ((m.lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64).round() as usize;
             let y = ((max_lat - m.lat) / (max_lat - min_lat) * (h - 1) as f64).round() as usize;
@@ -335,34 +410,47 @@ mod tests {
                 {"type": "way", "id": 14, "nodes": [1, 2], "tags": {"building": "yes", "height": "1640"}},
                 {"type": "way", "id": 15, "nodes": [1, 2], "tags": {"highway": "primary", "height": "400"}},
                 {"type": "node", "id": 4, "lat": 40.3, "lon": -74.3, "tags": {"building": "yes", "height": "400"}},
-                {"type": "way", "id": 16, "nodes": [99], "tags": {"building": "yes", "height": "400"}}
+                {"type": "way", "id": 16, "nodes": [99], "tags": {"building": "yes", "height": "400"}},
+                {"type": "node", "id": 5, "lat": 40.5, "lon": -74.5},
+                {"type": "way", "id": 17, "nodes": [5, 1]},
+                {"type": "relation", "id": 20, "members": [
+                    {"type": "way", "ref": 17, "role": "outer"},
+                    {"type": "way", "ref": 98, "role": "inner"}
+                ], "tags": {"type": "multipolygon", "building": "yes", "height": "450"}}
             ]}"#,
         )
         .unwrap();
-        let found = tall_structures_in(&data, 1.0);
+        let found = tall_structures_in(&data, 1.0, None);
         let at = |lat: f64, lon: f64, height_m: f64| TallModel { lat, lon, height_m };
+        // Every node of an outline counts, as the building stands on the highest of them.
         // 100 office storeys at 4 blocks each, plus the taller ground floor.
         assert_eq!(
             found,
             vec![
                 at(40.2, -74.2, 300.0),
                 at(40.0, -74.0, 541.0),
+                at(40.1, -74.1, 541.0),
                 at(40.1, -74.1, 402.0),
+                at(40.0, -74.0, 402.0),
                 at(40.0, -74.0, 368.0),
+                at(40.1, -74.1, 368.0),
+                at(40.5, -74.5, 450.0),
+                at(40.0, -74.0, 450.0),
             ]
         );
         // At scale 3 an 8 m house rises 24 blocks, enough to matter on the highest ground.
-        assert_eq!(tall_structures_in(&data, 3.0).len(), 5);
+        assert_eq!(tall_structures_in(&data, 3.0, None).len(), 11);
 
         // Only a run that builds them and still picks its build height wants them.
         let hints = |extra: &[&str]| {
             use clap::Parser;
             let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
             cmd.extend_from_slice(extra);
-            TerrainHints::from_osm(&data, &crate::args::Args::parse_from(cmd)).tall_structures
+            let args = crate::args::Args::parse_from(cmd);
+            TerrainHints::from_osm(&data, &args, None).tall_structures
         };
-        assert_eq!(hints(&[]).len(), 4);
-        assert_eq!(hints(&["--mode", "geo-only"]).len(), 4);
+        assert_eq!(hints(&[]).len(), 9);
+        assert_eq!(hints(&["--mode", "geo-only"]).len(), 9);
         for none in [
             &["--mode", "terrain-only"][..],
             &["--mode", "blueprint"][..],

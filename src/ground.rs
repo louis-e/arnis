@@ -1379,9 +1379,9 @@ pub fn generate_ground_data(
     crate::world_editor::common::set_terrain_top_y(args.ground_level);
     let frame = GroundFrame::from_args(args, &bbox);
     let auto = auto_height(args);
+    let (height, taller) = height_choice(args);
     if args.terrain() {
         println!("{} Fetching elevation...", "[3/7]".bold());
-        let (height, taller) = height_choice(args);
         let mut ground = Ground::new_enabled(
             &bbox,
             args.scale,
@@ -1397,7 +1397,7 @@ pub fn generate_ground_data(
             peaks,
         );
         if auto && !ground.elevation_enabled {
-            ground.extended_ceiling = !flat_fits_vanilla(args, &bbox, peaks);
+            ground.extended_ceiling = height.extended || !flat_fits_vanilla(args, &bbox, peaks);
         }
         if auto && ground.extended_ceiling {
             extend_world_bounds(args);
@@ -1425,7 +1425,7 @@ pub fn generate_ground_data(
         args.canopy_height,
         &frame,
     );
-    if auto && !flat_fits_vanilla(args, &bbox, peaks) {
+    if auto && (height.extended || !flat_fits_vanilla(args, &bbox, peaks)) {
         ground.extended_ceiling = true;
         extend_world_bounds(args);
     }
@@ -1561,10 +1561,11 @@ impl WorldHeight {
     }
 }
 
-/// Bases the vanilla build height can hold, as `validate_args` allows them without the pack.
-fn vanilla_ground_levels() -> std::ops::RangeInclusive<i32> {
-    crate::world_editor::DEFAULT_MIN_Y + 2
-        ..=crate::world_editor::DEFAULT_MAX_Y - crate::elevation::postprocess::TERRAIN_HEIGHT_BUFFER
+/// Terrain bases a world can stand on: two above its floor, up to its ceiling less the
+/// terrain buffer, or the scaler's clamp would have its min above its max.
+pub(crate) fn ground_level_range(args: &Args, extended: bool) -> std::ops::RangeInclusive<i32> {
+    world_min_y(args, extended) + 2
+        ..=world_top_y(args, extended) - crate::elevation::postprocess::TERRAIN_HEIGHT_BUFFER
 }
 
 /// The build height the fit starts from, and the extended one it may switch to.
@@ -1574,7 +1575,7 @@ fn height_choice(args: &Args) -> (WorldHeight, Option<WorldHeight>) {
         return (current, None);
     }
     let extended = WorldHeight::of(args, true);
-    if !vanilla_ground_levels().contains(&args.ground_level) {
+    if !ground_level_range(args, false).contains(&args.ground_level) {
         eprintln!(
             "Extended build height: ground level {} is outside the vanilla range",
             args.ground_level
@@ -1589,26 +1590,14 @@ fn extend_world_bounds(args: &Args) {
     crate::world_editor::set_world_bounds(world_min_y(args, true), world_top_y(args, true));
 }
 
-/// Without a relief to fit: whether the base and every tall structure stay under vanilla's
-/// ceiling.
+/// Without a relief to fit: whether every tall structure stays under vanilla's ceiling.
 fn flat_fits_vanilla(args: &Args, bbox: &LLBBox, peaks: &crate::elevation::PeakSource) -> bool {
-    if !vanilla_ground_levels().contains(&args.ground_level) {
-        eprintln!(
-            "Extended build height: ground level {} is outside the vanilla range",
-            args.ground_level
-        );
-        return false;
-    }
     let hints = peaks.take();
-    let inside = |m: &&crate::elevation::TallModel| {
-        (bbox.min().lat()..=bbox.max().lat()).contains(&m.lat)
-            && (bbox.min().lng()..=bbox.max().lng()).contains(&m.lon)
-    };
     let tops: Vec<(f64, f64)> = hints
         .tall_models
         .iter()
         .chain(&hints.tall_structures)
-        .filter(inside)
+        .filter(|m| crate::elevation::peaks::inside(bbox, m.lat, m.lon))
         .map(|m| (0.0, m.height_m))
         .collect();
     match crate::elevation::postprocess::vanilla_overflow(

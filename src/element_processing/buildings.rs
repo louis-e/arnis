@@ -5994,8 +5994,8 @@ fn parse_building_height_tag(tags: &HashMap<String, String>) -> Option<f64> {
 }
 
 /// Top of a building or part from its tags alone, in metres above its ground: the `height`
-/// tag, or the storeys at the cycle `calculate_building_height` gives them. None when
-/// neither is mapped.
+/// tag, which includes the roof, or the storeys at the cycle `calculate_building_height`
+/// gives them plus the roof on top. None when neither is mapped.
 pub(crate) fn mapped_height_m(tags: &HashMap<String, String>) -> Option<f64> {
     if let Some(height) = parse_building_height_tag(tags) {
         return Some(height);
@@ -6008,7 +6008,29 @@ pub(crate) fn mapped_height_m(tags: &HashMap<String, String>) -> Option<f64> {
         .filter(|l| l.is_finite() && *l >= 1.0)?;
     let building_type = tags.get("building").map(String::as_str).unwrap_or("yes");
     let cycle = floor_cycle_for(building_type, tags, false);
-    let height = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
+    let walls = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
+    // A mapped roof:height, or at most the steepest rise the generator infers when a roof
+    // shape or roof storeys ask for a roof.
+    let roof = match tags
+        .get("roof:height")
+        .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+        .filter(|m| m.is_finite() && *m > 0.0)
+    {
+        Some(m) => m,
+        None => {
+            let shaped = tags.get("roof:shape").is_some_and(|s| s != "flat");
+            let storeys = tags
+                .get("roof:levels")
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .is_some_and(|l| l >= 1.0);
+            if shaped || storeys {
+                f64::from(max_inferred_rise(true, 1.0))
+            } else {
+                0.0
+            }
+        }
+    };
+    let height = walls + roof;
     (height <= MAX_PLAUSIBLE_HEIGHT_M).then_some(height)
 }
 
@@ -18142,6 +18164,33 @@ mod height_tests {
         assert_eq!(
             mapped_height_m(&way_with_tags(&[("building", "yes"), ("height", "1640")]).tags),
             None
+        );
+
+        // Storeys leave the roof out, so it goes on top: mapped, or the steepest inferred rise.
+        let top = |pairs: &[(&str, &str)]| mapped_height_m(&way_with_tags(pairs).tags);
+        let office: &[(&str, &str)] = &[("building", "office"), ("building:levels", "75")];
+        assert_eq!(top(office), Some(302.0));
+        assert_eq!(
+            top(&[office, &[("roof:height", "20")]].concat()),
+            Some(322.0)
+        );
+        let pyramid = [office, &[("roof:shape", "pyramidal")]].concat();
+        assert_eq!(
+            top(&pyramid),
+            Some(302.0 + f64::from(max_inferred_rise(true, 1.0)))
+        );
+        assert_eq!(
+            top(&[office, &[("roof:shape", "flat")]].concat()),
+            Some(302.0)
+        );
+        // A mapped height already includes the roof.
+        assert_eq!(
+            top(&[
+                ("building", "yes"),
+                ("height", "300"),
+                ("roof:height", "20")
+            ]),
+            Some(300.0)
         );
     }
 

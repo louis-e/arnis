@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Kansio, johon .mcworld-tiedosto tallennetaan.",
   "luanti_save_path_desc": "Kansio, johon uudet Luanti-maailmat luodaan.",
   "clear_tile_cache_desc": "Poista välimuistissa olevat karttalaatat ja julkisivutekstuurit.",
-  "disable_height_limit_desc": "Nostaa korkeusrajaa 1:1-vuoria varten. Ei Realmsille.",
+  "disable_height_limit_desc": "Nostaa korkeusrajaa, kun alue sitä tarvitsee. Ei Realmsille.",
   "aws_only_elevation_desc": "Vanhempi, karkeampi korkeuslähde, jos oletuslähde ei toimi.",
   "bake_lighting_desc": "Esilaskettu valo LOD-modeille, kuten Voxylle. Hitaampi.",
   "voxy_lod_desc": "Kaukainen maasto näkyy jo ensimmäisellä liittymisellä. Vain Java.",

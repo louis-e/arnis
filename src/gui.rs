@@ -1648,8 +1648,10 @@ fn gui_start_generation(
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 // The toggle lets the terrain fit extend the build height where the area
-                // needs it. A One World is sent the height it keeps.
-                vanilla_height: !disable_height_limit,
+                // needs it, in a world this run creates. A One World is sent the height it
+                // keeps.
+                vanilla_height: !disable_height_limit
+                    || (world_format == WorldFormat::JavaAnvil && !is_new_world && !one_world),
                 disable_height_limit: one_world && disable_height_limit,
                 aws_only_elevation,
                 benchmark: false,
@@ -1865,8 +1867,8 @@ fn gui_start_generation(
             );
 
             // Same as run_cli, once the terrain fit has settled the build height.
-            let new_java_world =
-                (world_format == WorldFormat::JavaAnvil).then_some(generation_path.as_path());
+            let new_java_world = (world_format == WorldFormat::JavaAnvil && is_new_world)
+                .then_some(generation_path.as_path());
             let settle = |args: &mut Args, ground: &ground::Ground| {
                 ground::settle_build_height(
                     args,
@@ -1969,11 +1971,13 @@ fn gui_start_generation(
                     &args.osm_tiles_url,
                     !args.no_tile_archive,
                 );
-                // The terrain thread waits on this before fitting its height range.
-                if let Ok(raw) = fetch_result.as_ref() {
-                    let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args));
+                // The terrain thread waits on this before fitting its height range, and so
+                // on Overture too when its building heights help decide the build height.
+                let with_overture = crate::elevation::TerrainHints::wants_overture(&args);
+                if let (Ok(raw), false) = (fetch_result.as_ref(), with_overture) {
+                    let _ =
+                        peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args, None));
                 }
-                drop(peak_tx);
                 // A panicked worker already reported itself through the panic hook.
                 // Overture is supplementary, so drop it and keep going; terrain is
                 // not, so hand the failure back instead of taking the app down.
@@ -1981,6 +1985,14 @@ fn gui_start_generation(
                     eprintln!("Overture fetch failed, continuing without Overture buildings.");
                     overture::OvertureData::default()
                 });
+                if let (Ok(raw), true) = (fetch_result.as_ref(), with_overture) {
+                    let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(
+                        raw,
+                        &args,
+                        Some(&overture_data),
+                    ));
+                }
+                drop(peak_tx);
                 (fetch_result, overture_data, ground_handle.join().ok())
             });
 
@@ -2011,6 +2023,7 @@ fn gui_start_generation(
                     let overture::OvertureData {
                         elements: overture_elements,
                         hints: overture_hints,
+                        ..
                     } = overture_data;
 
                     // Fill height/levels on OSM buildings that have neither

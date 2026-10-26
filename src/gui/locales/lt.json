@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Aplankas, į kurį įrašomas .mcworld failas.",
   "luanti_save_path_desc": "Aplankas, kuriame kuriami nauji Luanti pasauliai.",
   "clear_tile_cache_desc": "Ištrinti talpykloje esančias žemėlapio plyteles ir fasadų tekstūras.",
-  "disable_height_limit_desc": "Padidina aukščio ribą 1:1 kalnams. Netinka Realms.",
+  "disable_height_limit_desc": "Padidina aukščio ribą, kai vietovei to reikia. Netinka Realms.",
   "aws_only_elevation_desc": "Senesnis, grubesnis aukščio šaltinis, jei numatytasis neveikia.",
   "bake_lighting_desc": "Iš anksto apskaičiuotas apšvietimas LOD modams, pvz., Voxy. Lėčiau.",
   "voxy_lod_desc": "Tolimas reljefas matomas nuo pirmo įėjimo. Tik Java.",

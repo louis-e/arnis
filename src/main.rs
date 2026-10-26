@@ -553,8 +553,14 @@ fn run_cli() {
             })
         };
         bench.report("osm_fetch", t.elapsed());
-        // The terrain thread waits on this before fitting its height range.
-        let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(&raw_data, &args));
+        // The terrain thread waits on this before fitting its height range, and so on
+        // Overture too when its building heights help decide the build height.
+        let with_overture = crate::elevation::TerrainHints::wants_overture(&args);
+        if !with_overture {
+            let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(
+                &raw_data, &args, None,
+            ));
+        }
 
         // A panicked worker already reported itself through the panic hook, so
         // degrade instead of taking the whole run down with it.
@@ -566,6 +572,13 @@ fn run_cli() {
             (overture::OvertureData::default(), std::time::Duration::ZERO)
         });
         bench.report("overture_fetch", overture_dur);
+        if with_overture {
+            let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(
+                &raw_data,
+                &args,
+                Some(&overture_data),
+            ));
+        }
         let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {
             eprintln!("{} Terrain fetch failed.", "Error:".red().bold());
             exit_failed();
@@ -610,6 +623,7 @@ fn run_cli() {
     let overture::OvertureData {
         elements: overture_elements,
         hints: overture_hints,
+        ..
     } = overture_data;
 
     // Fill height/levels on OSM buildings that have neither, before the

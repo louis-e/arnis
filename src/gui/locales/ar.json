@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "المجلد الذي يُحفظ فيه ملف .mcworld.",
   "luanti_save_path_desc": "المجلد الذي تُنشأ فيه عوالم Luanti الجديدة.",
   "clear_tile_cache_desc": "حذف بلاطات الخرائط وأنسجة الواجهات المخزنة مؤقتًا.",
-  "disable_height_limit_desc": "يرفع حد الارتفاع للجبال بمقياس 1:1. غير متوافق مع Realms.",
+  "disable_height_limit_desc": "يرفع حد الارتفاع عندما تحتاجه المنطقة. غير متوافق مع Realms.",
   "aws_only_elevation_desc": "مصدر ارتفاعات أقدم وأقل دقة عند تعذر المصدر الافتراضي.",
   "bake_lighting_desc": "إضاءة محسوبة مسبقًا لتعديلات LOD مثل Voxy. أبطأ.",
   "voxy_lod_desc": "تظهر التضاريس البعيدة من أول دخول. Java فقط.",

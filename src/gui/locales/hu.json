@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Mappa, ahová a .mcworld fájl mentődik.",
   "luanti_save_path_desc": "Mappa, ahol az új Luanti-világok létrejönnek.",
   "clear_tile_cache_desc": "A gyorsítótárazott térképcsempék és homlokzattextúrák törlése.",
-  "disable_height_limit_desc": "Megemeli a magassági korlátot 1:1 hegyekhez. Realmshez nem.",
+  "disable_height_limit_desc": "Megemeli a magassági korlátot, ha a terület igényli. Realmshez nem.",
   "aws_only_elevation_desc": "Régebbi, durvább magassági forrás, ha az alapértelmezett nem elérhető.",
   "bake_lighting_desc": "Előre kiszámított fény LOD-modokhoz, például a Voxyhoz. Lassabb.",
   "voxy_lod_desc": "A távoli terep már az első belépéskor megjelenik. Csak Java.",
