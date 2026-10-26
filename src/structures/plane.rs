@@ -315,6 +315,10 @@ fn extract_aeroway_segment(element: &ProcessedElement) -> Option<Seg> {
     if w.tags.get("area").map(|s| s.as_str()) == Some("yes") {
         return None;
     }
+    // Grass and dirt strips serve light aircraft, not the airliner model.
+    if crate::element_processing::highways::is_unpaved_aeroway(&w.tags) {
+        return None;
+    }
     if w.nodes.len() < 2 {
         return None;
     }
@@ -814,6 +818,21 @@ mod tests {
         let mut tags = StdMap::new();
         tags.insert("aeroway".to_string(), "taxiway".to_string());
         ProcessedElement::Way(ProcessedWay { id, nodes, tags })
+    }
+
+    #[test]
+    fn grass_strips_get_no_airliner() {
+        let mut tags = runway_tags();
+        tags.insert("surface".to_string(), "grass".to_string());
+        let grass = ProcessedElement::Way(ProcessedWay {
+            id: 1,
+            nodes: vec![mk_node(1, 0, 0), mk_node(2, 500, 0)],
+            tags,
+        });
+        assert!(collect_aeroways(&[grass]).is_empty());
+
+        let paved = runway_way(2, vec![mk_node(3, 0, 0), mk_node(4, 500, 0)]);
+        assert_eq!(collect_aeroways(&[paved]).len(), 1);
     }
 
     #[test]
