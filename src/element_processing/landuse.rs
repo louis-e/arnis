@@ -48,6 +48,10 @@ fn landuse_area(
     bridge_surface: &BridgeSurfaceMap,
     holes: Option<&Holes>,
 ) {
+    if !super::landuse_paints_ground(&element.tags) {
+        return;
+    }
+
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
@@ -61,12 +65,6 @@ fn landuse_area(
         "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
-        // residential and commercial are too broad, they cover entire zones including
-        // gardens, parks, and green spaces. ESA WorldCover handles built-up classification
-        // at 10m satellite resolution, which is far more precise.
-        "residential" | "commercial" => return,
-        "education" => POLISHED_ANDESITE,
-        "religious" => POLISHED_ANDESITE,
         "industrial" => STONE,     // Randomized per-block below
         "military" => GRASS_BLOCK, // Chosen per block by military_ground below
         "railway" => GRAVEL,
@@ -722,6 +720,40 @@ mod sealed_surface_tests {
             editor.check_for_block(20, 0, 20, Some(&[GRASS_BLOCK])),
             "the forest still paints the ground beside it"
         );
+    }
+
+    #[test]
+    fn church_and_school_grounds_are_left_to_the_land_cover() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let args = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--mode",
+            "geo-only",
+            "--ground-level",
+            "0",
+        ]);
+        for landuse in ["religious", "education"] {
+            let mut editor = test_editor(&xzbbox);
+            let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+            let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+            let way = rect_way(1, 5, 5, 34, 34, &[("landuse", landuse)]);
+            generate_landuse(
+                &mut editor,
+                &way,
+                &args,
+                &FloodFillCache::new(),
+                &BuildingFootprintBitmap::new_empty(),
+                &RoadMaskBitmap::new_empty(),
+                &surface,
+            );
+            assert!(
+                !editor.check_for_block(20, 0, 20, Some(&[POLISHED_ANDESITE])),
+                "landuse={landuse} paves its lawns"
+            );
+        }
     }
 
     #[test]

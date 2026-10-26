@@ -107,14 +107,18 @@ impl RelationArea {
     }
 }
 
+/// `landuse` values that leave the ground to the land cover. They cover whole zones or grounds,
+/// gardens, lawns and playing fields included, which the 10 m land cover resolves far better.
+pub const LANDUSE_FROM_LAND_COVER: &[&str] =
+    &["residential", "commercial", "education", "religious"];
+
 /// Whether a `landuse` value paints ground at all.
 /// `generate_landuse` bails on these before placing anything, and they are typically the largest
 /// polygons around, so including them would push every real area behind unrelated elements.
 pub fn landuse_paints_ground(tags: &HashMap<String, String>) -> bool {
-    !matches!(
-        tags.get("landuse").map(String::as_str),
-        Some("residential") | Some("commercial")
-    )
+    !tags
+        .get("landuse")
+        .is_some_and(|landuse| LANDUSE_FROM_LAND_COVER.contains(&landuse.as_str()))
 }
 
 /// Merges way segments that share endpoints into closed rings.
