@@ -1337,12 +1337,12 @@
         {
             "key": "landuse",
             "value": "education",
-            "description": "Generates educational area surfaces with polished andesite."
+            "description": "Education areas are skipped. The ground there comes from land cover data."
         },
         {
             "key": "landuse",
             "value": "religious",
-            "description": "Generates religious area surfaces with polished andesite."
+            "description": "Religious areas are skipped. The ground there comes from land cover data."
         },
         {
             "key": "landuse",
