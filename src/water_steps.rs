@@ -1,15 +1,14 @@
 //! Flowing water on the run-up to a one-block drop in a water surface, so it reads as a slope.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 
 use crate::block_definitions::{
-    Block, BlockWithProperties, BRAIN_CORAL, BRAIN_CORAL_FAN, BUBBLE_CORAL, BUBBLE_CORAL_FAN,
-    FIRE_CORAL, FIRE_CORAL_FAN, HORN_CORAL, HORN_CORAL_FAN, KELP, KELP_PLANT, SEAGRASS, SEA_PICKLE,
+    BlockWithProperties, BRAIN_CORAL, BRAIN_CORAL_FAN, BUBBLE_CORAL, BUBBLE_CORAL_FAN, FIRE_CORAL,
+    FIRE_CORAL_FAN, HORN_CORAL, HORN_CORAL_FAN, KELP, KELP_PLANT, SEAGRASS, SEA_PICKLE,
     TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, TUBE_CORAL, TUBE_CORAL_FAN, WATER,
 };
 use crate::element_processing::structure_kit::with_prop;
@@ -62,9 +61,9 @@ impl Col {
 
 /// Water, and what stands in it: sea plants, corals and anything waterlogged.
 #[inline]
-fn is_wet(block: Block, props: Option<&Arc<Value>>) -> bool {
+fn is_wet(section: &SectionToModify, idx: usize) -> bool {
     matches!(
-        block,
+        section.storage.get(idx),
         WATER
             | SEAGRASS
             | TALL_SEAGRASS_BOTTOM
@@ -82,10 +81,11 @@ fn is_wet(block: Block, props: Option<&Arc<Value>>) -> bool {
             | BUBBLE_CORAL_FAN
             | FIRE_CORAL_FAN
             | HORN_CORAL_FAN
-    ) || props.is_some_and(|p| {
-        matches!(p.as_ref(), Value::Compound(m)
-            if matches!(m.get("waterlogged"), Some(Value::String(v)) if v == "true"))
-    })
+    ) || (!section.properties.is_empty()
+        && section.properties.get(&idx).is_some_and(|p| {
+            matches!(p.as_ref(), Value::Compound(m)
+                if matches!(m.get("waterlogged"), Some(Value::String(v)) if v == "true"))
+        }))
 }
 
 /// Whether the block at `y` in a column holds water.
@@ -96,17 +96,7 @@ fn wet_at(chunk: &ChunkToModify, lx: u8, y: i32, lz: u8) -> bool {
     else {
         return false;
     };
-    let idx = SectionToModify::index(lx, (y & 15) as u8, lz);
-    is_wet(section.storage.get(idx), props(section, idx))
-}
-
-#[inline]
-fn props(section: &SectionToModify, idx: usize) -> Option<&Arc<Value>> {
-    if section.properties.is_empty() {
-        None
-    } else {
-        section.properties.get(&idx)
-    }
+    is_wet(section, SectionToModify::index(lx, (y & 15) as u8, lz))
 }
 
 /// Inclusive block rectangle.
@@ -364,8 +354,7 @@ fn column(chunk: &ChunkToModify, wet_sections: &[i8], lx: u8, lz: u8) -> Col {
         };
         for ly in (0..16u8).rev() {
             let idx = SectionToModify::index(lx, ly, lz);
-            let block = section.storage.get(idx);
-            if !is_wet(block, props(section, idx)) {
+            if !is_wet(section, idx) {
                 continue;
             }
             let top = i32::from(sy) * 16 + i32::from(ly);
@@ -376,7 +365,7 @@ fn column(chunk: &ChunkToModify, wet_sections: &[i8], lx: u8, lz: u8) -> Col {
             let floored =
                 depth == DEPTH_CAP || chunk.get_block(lx, top - i32::from(depth), lz).is_some();
             let open = chunk.get_block(lx, top + 1, lz).is_none();
-            let plain = block == WATER && !section.properties.contains_key(&idx);
+            let plain = section.storage.get(idx) == WATER && !section.properties.contains_key(&idx);
             let mut flags = 0;
             if open {
                 flags |= OPEN;
@@ -488,6 +477,7 @@ mod tests {
     use crate::coordinate_system::geographic::LLBBox;
     use crate::deterministic_rng::coord_rng;
     use rand::Rng;
+    use std::sync::Arc;
 
     /// `levels` as one level per column.
     fn dense(cols: &[Col], w: usize, h: usize) -> Vec<u8> {
