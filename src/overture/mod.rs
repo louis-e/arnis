@@ -378,6 +378,48 @@ fn parse_osm_ref(field: &parquet::record::Field) -> Option<OsmRef> {
     out
 }
 
+/// Whether OSM supplied a row's geometry, going by the `sources` entry with an
+/// empty `property`. The other entries only name the source of one attribute,
+/// and the licence of other datasets can mention OpenStreetMap too, as Esri's
+/// does. `None` when the value holds no entry with a dataset.
+fn geometry_is_osm(field: &parquet::record::Field) -> Option<bool> {
+    fn collect<'a>(field: &'a parquet::record::Field, out: &mut Vec<(bool, &'a str)>) {
+        match field {
+            parquet::record::Field::ListInternal(list) => {
+                for element in list.elements() {
+                    collect(element, out);
+                }
+            }
+            parquet::record::Field::Group(row) => {
+                let mut dataset = None;
+                let mut covers_geometry = true;
+                for (name, sub) in row.get_column_iter() {
+                    match (name.as_str(), sub) {
+                        ("dataset", parquet::record::Field::Str(v)) => dataset = Some(v.as_str()),
+                        ("property", parquet::record::Field::Str(v)) => {
+                            covers_geometry = v.is_empty()
+                        }
+                        ("dataset" | "property", _) => {}
+                        _ => collect(sub, out),
+                    }
+                }
+                if let Some(dataset) = dataset {
+                    out.push((covers_geometry, dataset));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut entries = Vec::new();
+    collect(field, &mut entries);
+    let (_, dataset) = entries
+        .iter()
+        .find(|(covers_geometry, _)| *covers_geometry)
+        .or(entries.first())?;
+    Some(dataset.eq_ignore_ascii_case("OpenStreetMap"))
+}
+
 /// `"w519166507@9"` -> way 519166507. Also accepts `r`/`n` prefixes and a
 /// missing `@version` suffix.
 fn parse_record_id(record_id: &str) -> Option<OsmRef> {
@@ -1635,6 +1677,7 @@ fn parse_overture_row(
     let mut id: Option<String> = None;
     let mut geometry_bytes: Option<Vec<u8>> = None;
     let mut sources_str: Option<String> = None;
+    let mut geometry_osm: Option<bool> = None;
     let mut osm_ref: Option<OsmRef> = None;
     let mut height: Option<f64> = None;
     let mut min_height: Option<f64> = None;
@@ -1667,11 +1710,9 @@ fn parse_overture_row(
                 }
             }
             "sources" => {
-                // Sources is a complex nested struct; convert to string for analysis
+                geometry_osm = geometry_is_osm(field);
+                // Kept for a `sources` shape the structured read does not know.
                 sources_str = Some(format!("{field}"));
-                // Best-effort structured read for the OSM back-reference. The
-                // string test above stays authoritative for dedup so a schema
-                // change cannot resurrect duplicate footprints.
                 osm_ref = parse_osm_ref(field);
             }
             "height" => {
@@ -1785,11 +1826,11 @@ fn parse_overture_row(
         return None;
     }
 
-    // Check if primary source is OSM
-    let is_osm = sources_str
-        .as_deref()
-        .map(|s| s.contains("OpenStreetMap"))
-        .unwrap_or(false);
+    let is_osm = geometry_osm.unwrap_or_else(|| {
+        sources_str
+            .as_deref()
+            .is_some_and(|s| s.contains("OpenStreetMap"))
+    });
 
     let id = id?;
 

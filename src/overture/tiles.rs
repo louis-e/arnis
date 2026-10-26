@@ -223,6 +223,31 @@ fn parse_sources(sources: &str) -> Option<OsmRef> {
     None
 }
 
+/// Whether OSM supplied the geometry, going by the `sources` entry with an empty
+/// `property`. The other entries only name the source of one attribute, and the
+/// licence of other datasets can mention OpenStreetMap too, as Esri's does.
+fn geometry_is_osm(sources: &str) -> bool {
+    let Ok(serde_json::Value::Array(entries)) = serde_json::from_str(sources) else {
+        return false;
+    };
+    fn dataset(entry: &serde_json::Value) -> Option<&str> {
+        entry.get("dataset").and_then(|v| v.as_str())
+    }
+    fn covers_geometry(entry: &serde_json::Value) -> bool {
+        entry
+            .get("property")
+            .and_then(|v| v.as_str())
+            .is_none_or(str::is_empty)
+    }
+    entries
+        .iter()
+        .filter(|entry| dataset(entry).is_some())
+        .find(|entry| covers_geometry(entry))
+        .or_else(|| entries.iter().find(|entry| dataset(entry).is_some()))
+        .and_then(dataset)
+        .is_some_and(|d| d.eq_ignore_ascii_case("OpenStreetMap"))
+}
+
 /// Convert one tile feature into a building, in geographic coordinates.
 ///
 /// Returns `None` for a feature that is not a polygon, has no id, or whose
@@ -261,15 +286,13 @@ fn feature_to_building(
 
     let sources = layer.attr_str(feature, "sources");
     let osm_ref = sources.and_then(parse_sources);
-    // `@geometry_source` states the primary source directly, which is exactly
-    // what the Parquet path infers by scanning the sources struct for the same
-    // name. Either answering yes is enough: misclassifying a building as
-    // OSM-sourced costs a duplicate footprint that OSM already provides, while
-    // missing one adds a second copy of a building the world already has.
-    let is_osm_sourced = layer
-        .attr_str(feature, "@geometry_source")
-        .is_some_and(|s| s.eq_ignore_ascii_case("OpenStreetMap"))
-        || sources.is_some_and(|s| s.contains("OpenStreetMap"));
+    // `@geometry_source` names the primary source directly. A building wrongly
+    // taken for OSM's is dropped, while a missed one is still caught by the
+    // overlap check against the OSM buildings.
+    let is_osm_sourced = match layer.attr_str(feature, "@geometry_source") {
+        Some(source) => source.eq_ignore_ascii_case("OpenStreetMap"),
+        None => sources.is_some_and(geometry_is_osm),
+    };
 
     Some(TileBuilding {
         area2: ring_area2(&exterior_ring),
@@ -570,6 +593,28 @@ mod tests {
             r#"[{"dataset":"OpenStreetMap"}]"#,
         ] {
             assert!(parse_sources(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_the_geometry_entry_decides_whether_a_building_is_osms() {
+        // Verbatim Esri row: its licence names OpenStreetMap, but Esri drew it.
+        let esri = r#"[{"property":"","dataset":"Esri Community Maps","license":"Creative Commons by Attribution (CC BY 4.0) with OpenStreetMap waivers","record_id":"AD1E27D1-839F-4FF3-BA53-DDB90EFDD947","update_time":"2025-08-11T00:00:00.000Z","provider":"esri","resource":"community_maps_buildings","version":"2025-08-11"},{"property":"/properties/height","dataset":"Microsoft ML Buildings","license":"ODbL-1.0","provider":"microsoft","resource":"ml_buildings","version":"2026-08-11"}]"#;
+        assert!(!geometry_is_osm(esri));
+
+        let osm_with_esri_height = r#"[{"property":"","dataset":"OpenStreetMap","record_id":"w7@2"},{"property":"/properties/height","dataset":"Esri Community Maps"}]"#;
+        assert!(geometry_is_osm(osm_with_esri_height));
+
+        let ml_with_osm_height = r#"[{"property":"","dataset":"Microsoft ML Buildings"},{"property":"/properties/height","dataset":"OpenStreetMap"}]"#;
+        assert!(!geometry_is_osm(ml_with_osm_height));
+
+        // Without a property, the first entry with a dataset is the geometry's.
+        assert!(geometry_is_osm(
+            r#"[{"note":"x"},{"dataset":"OpenStreetMap"}]"#
+        ));
+
+        for bad in ["", "null", "{}", "[", "[{}]"] {
+            assert!(!geometry_is_osm(bad), "{bad}");
         }
     }
 
