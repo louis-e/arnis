@@ -494,6 +494,38 @@ pub fn check_run_size(
     })
 }
 
+/// `check_run_size`'s disk check again, for a run whose terrain fit just extended the build
+/// height. Only caves and filled ground grow with it, so otherwise there is nothing to redo.
+pub fn check_disk_for_extended_height(
+    args: &crate::args::Args,
+    bbox: &LLBBox,
+    format: crate::world_editor::WorldFormat,
+    dir: &Path,
+) -> Result<(), String> {
+    let km2 = blocks_km2(args, bbox);
+    let options = WorldSizeOptions::of(args);
+    let needed = estimated_world_bytes(
+        km2,
+        format,
+        WorldSizeOptions {
+            tall: true,
+            ..options
+        },
+    );
+    let before = estimated_world_bytes(
+        km2,
+        format,
+        WorldSizeOptions {
+            tall: false,
+            ..options
+        },
+    );
+    if needed <= before {
+        return Ok(());
+    }
+    check_disk_space(dir, needed)
+}
+
 /// Fails when the disk that will hold `dir` has less than `needed` plus the headroom free.
 /// Reads the nearest folder that exists, since a missing one confuses the Windows volume
 /// lookup; a reading of 0 or an error is "can't tell" and lets the run go ahead (#824).

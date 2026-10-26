@@ -211,9 +211,15 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
 
-    /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031, experimental;
-    /// Bedrock 1.21.120+: up to Y=511).
-    #[arg(long, default_value_t = false)]
+    /// Keep the vanilla build height (Y -64 to 319) and compress taller terrain to fit. By
+    /// default an area that needs more room gets a bundled pack that extends the build
+    /// height (Java 1.21.4+: Y -2032 to 2031, experimental; Bedrock 1.21.120+: up to Y 511).
+    #[arg(long, default_value_t = false, conflicts_with = "disable_height_limit")]
+    pub vanilla_height: bool,
+
+    /// Add the extended build height pack even where the area fits the vanilla height.
+    /// Once the terrain fit has run, true whenever the world has the extended height.
+    #[arg(long, default_value_t = false, hide = true)]
     pub disable_height_limit: bool,
 
     /// Use only the legacy AWS Terrain Tiles source (~30m) instead of
@@ -769,6 +775,7 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.mapillary_facades = Some(false);
     // Relief already fits vanilla height, so the pack would add only empty sky.
     args.disable_height_limit = false;
+    args.vanilla_height = true;
     // No roads or places off Earth.
     args.traffic_lights = false;
     args.discoveries = false;
@@ -1094,11 +1101,13 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
 
 /// Legal `--ground-level` range for the chosen output format. The scaler clamps every column
 /// into `[ground_level, ceiling]`, so a base above the ceiling makes that clamp's min exceed
-/// its max and aborts the run after the whole elevation download.
+/// its max and aborts the run after the whole elevation download. A run that picks its build
+/// height from the area may use the extended range: a base outside vanilla's makes it extend.
 fn ground_level_bounds(args: &Args) -> (i32, i32) {
-    let floor = crate::ground::extended_min_y_for(args) + 2;
-    let ceiling =
-        crate::ground::world_top_y_for(args) - crate::elevation::postprocess::TERRAIN_HEIGHT_BUFFER;
+    let extended = args.disable_height_limit || crate::ground::auto_height(args);
+    let floor = crate::ground::world_min_y(args, extended) + 2;
+    let ceiling = crate::ground::world_top_y(args, extended)
+        - crate::elevation::postprocess::TERRAIN_HEIGHT_BUFFER;
     (floor, ceiling)
 }
 
@@ -1271,19 +1280,39 @@ mod tests {
 
         assert!(validate_args(&parse(&[])).is_ok());
         // Vanilla ceiling is 319 - 15; above it the scaler's clamp has min > max and panics.
-        assert!(gl(&[], 304).is_ok());
-        assert!(gl(&[], 305).is_err());
-        assert!(gl(&[], 400).is_err());
+        let vanilla: &[&str] = &["--vanilla-height"];
+        assert!(gl(vanilla, 304).is_ok());
+        assert!(gl(vanilla, 305).is_err());
+        assert!(gl(vanilla, 400).is_err());
         // Below the bedrock plane there is nothing to stand on.
-        assert!(gl(&[], -63).is_err());
+        assert!(gl(vanilla, -63).is_err());
 
         // The tall datapack raises the ceiling to 2031; Bedrock's pack stops far below it.
-        let dhl: &[&str] = &["--disable-height-limit"];
-        assert!(gl(dhl, 2016).is_ok());
-        assert!(gl(dhl, 2017).is_err());
-        assert!(gl(dhl, -2030).is_ok());
-        assert!(gl(dhl, -2031).is_err());
+        // By default a base outside vanilla's range is what makes the run extend.
+        for extended in [&[][..], &["--disable-height-limit"][..]] {
+            assert!(gl(extended, 2016).is_ok(), "{extended:?}");
+            assert!(gl(extended, 2017).is_err(), "{extended:?}");
+            assert!(gl(extended, -2030).is_ok(), "{extended:?}");
+            assert!(gl(extended, -2031).is_err(), "{extended:?}");
+        }
         assert!(gl(&["--bedrock", "--disable-height-limit"], 500).is_err());
+        assert!(gl(&["--bedrock"], 500).is_err());
+    }
+
+    #[test]
+    fn vanilla_height_and_the_forced_pack_exclude_each_other() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let cmd = |extra: &[&'static str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            cmd
+        };
+        let args = Args::try_parse_from(cmd(&["--vanilla-height"])).unwrap();
+        assert!(args.vanilla_height && !args.disable_height_limit);
+        assert!(
+            Args::try_parse_from(cmd(&["--vanilla-height", "--disable-height-limit"])).is_err()
+        );
     }
 
     #[test]
@@ -1301,7 +1330,8 @@ mod tests {
         for flags in [
             &["--luanti"][..],
             &["--luanti", "--disable-height-limit"][..],
-            &["--bedrock"][..],
+            &["--bedrock", "--vanilla-height"][..],
+            &["--body", "moon"][..],
         ] {
             assert!(gl(flags, -62).is_ok(), "{flags:?} rejected the default");
             assert!(gl(flags, 304).is_ok(), "{flags:?} rejected 304");
@@ -1310,10 +1340,14 @@ mod tests {
         }
 
         // Bedrock's behavior pack raises the ceiling to 511 but leaves the floor vanilla.
-        let bedrock_dhl: &[&str] = &["--bedrock", "--disable-height-limit"];
-        assert!(gl(bedrock_dhl, 496).is_ok());
-        assert!(gl(bedrock_dhl, 497).is_err());
-        assert!(gl(bedrock_dhl, -63).is_err());
+        for bedrock in [
+            &["--bedrock"][..],
+            &["--bedrock", "--disable-height-limit"][..],
+        ] {
+            assert!(gl(bedrock, 496).is_ok(), "{bedrock:?}");
+            assert!(gl(bedrock, 497).is_err(), "{bedrock:?}");
+            assert!(gl(bedrock, -63).is_err(), "{bedrock:?}");
+        }
     }
 
     #[test]

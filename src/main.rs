@@ -463,20 +463,6 @@ fn run_cli() {
             "Created new world at: {}",
             world_path.display().to_string().bright_white().bold()
         );
-        if args.disable_height_limit {
-            if let Err(e) = world_utils::install_tall_datapack(&world_path) {
-                eprintln!(
-                    "{} Failed to install tall-world datapack: {}",
-                    "Error:".red().bold(),
-                    e
-                );
-                std::process::exit(1);
-            }
-            eprintln!(
-                "Note: tall-world datapack installed (requires Minecraft 1.21.4+). \
-                 First load will prompt 'Experimental Features'; world can't be uploaded to Realms."
-            );
-        }
         (world_path, None)
     };
 
@@ -568,14 +554,7 @@ fn run_cli() {
         };
         bench.report("osm_fetch", t.elapsed());
         // The terrain thread waits on this before fitting its height range.
-        let _ = peak_tx.send(crate::elevation::TerrainHints {
-            peaks: crate::elevation::peaks::peaks_in(&raw_data),
-            tall_models: if args.use_3d {
-                crate::models_3d::wikidata::tall_models_in(&raw_data)
-            } else {
-                Vec::new()
-            },
-        });
+        let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(&raw_data, &args));
 
         // A panicked worker already reported itself through the panic hook, so
         // degrade instead of taking the whole run down with it.
@@ -597,6 +576,25 @@ fn run_cli() {
     });
     bench.report("fetch_total", fetch_start.elapsed());
     bench.reset();
+
+    // The terrain fit has settled the build height.
+    let mut args = args;
+    if !args.mapillary_probe {
+        let new_java_world = (world_format == world_editor::WorldFormat::JavaAnvil)
+            .then_some(generation_path.as_path());
+        if let Err(e) = ground::settle_build_height(
+            &mut args,
+            &ground,
+            &effective_bbox,
+            world_format,
+            &disk_dir,
+            new_java_world,
+        ) {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            exit_failed();
+        }
+    }
+    let args = args;
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =

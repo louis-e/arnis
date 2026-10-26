@@ -5993,6 +5993,25 @@ fn parse_building_height_tag(tags: &HashMap<String, String>) -> Option<f64> {
     (height.is_finite() && height <= MAX_PLAUSIBLE_HEIGHT_M).then_some(height)
 }
 
+/// Top of a building or part from its tags alone, in metres above its ground: the `height`
+/// tag, or the storeys at the cycle `calculate_building_height` gives them. None when
+/// neither is mapped.
+pub(crate) fn mapped_height_m(tags: &HashMap<String, String>) -> Option<f64> {
+    if let Some(height) = parse_building_height_tag(tags) {
+        return Some(height);
+    }
+    let levels = tags
+        .get("building:levels")?
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|l| l.is_finite() && *l >= 1.0)?;
+    let building_type = tags.get("building").map(String::as_str).unwrap_or("yes");
+    let cycle = floor_cycle_for(building_type, tags, false);
+    let height = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
+    (height <= MAX_PLAUSIBLE_HEIGHT_M).then_some(height)
+}
+
 /// Rise of the pitched roof the generator will put on a building whose mapped
 /// `height` already includes it, or None when the walls keep the full height:
 /// flat roofs, a mapped roof:height or roof:angle (roof_peak_cap reads those),
@@ -18090,6 +18109,40 @@ mod height_tests {
         let way = way_with_tags(&[("height", "828")]);
         let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 100, 1);
         assert_eq!(h, 828);
+    }
+
+    // The build height check reads a building's top from its tags alone.
+    #[test]
+    fn mapped_height_matches_the_generated_walls() {
+        for tags in [
+            &[("building", "office"), ("building:levels", "100")][..],
+            &[("building", "apartments"), ("building:levels", "60")][..],
+            &[("building", "yes"), ("building:levels", "12.5")][..],
+            &[("building:part", "yes"), ("building:levels", "40")][..],
+            &[("building", "yes"), ("height", "541")][..],
+        ] {
+            let way = way_with_tags(tags);
+            let btype = way
+                .tags
+                .get("building")
+                .map(String::as_str)
+                .unwrap_or("yes");
+            let cycle = floor_cycle_for(btype, &way.tags, false);
+            let (h, _) = calculate_building_height(&way, btype, 0, 1.0, None, cycle, 100, 1);
+            assert_eq!(
+                mapped_height_m(&way.tags).map(|m| m as i32),
+                Some(h),
+                "{tags:?}"
+            );
+        }
+        assert_eq!(
+            mapped_height_m(&way_with_tags(&[("building", "yes")]).tags),
+            None
+        );
+        assert_eq!(
+            mapped_height_m(&way_with_tags(&[("building", "yes"), ("height", "1640")]).tags),
+            None
+        );
     }
 
     #[test]

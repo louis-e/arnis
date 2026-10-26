@@ -2,9 +2,10 @@
 //! Corcovado's summit, statue included, about 170 m too low. A `natural=peak`
 //! with an `ele` is surveyed, so where the terrain falls short of it the summit
 //! is lifted back up with a bump that fades into the DEM around it. The same
-//! hand-off carries the tall landmark models, so the height fit leaves them room.
+//! hand-off carries the tall landmark models, so the height fit leaves them room,
+//! and the tall buildings, so it can tell whether the vanilla build height holds them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
 
@@ -31,6 +32,30 @@ pub struct TallModel {
 pub struct TerrainHints {
     pub peaks: Vec<PeakHint>,
     pub tall_models: Vec<TallModel>,
+    /// Buildings and towers, for a run that extends the build height only where needed.
+    pub tall_structures: Vec<TallModel>,
+}
+
+impl TerrainHints {
+    /// The hints a run's terrain fit wants from its raw OSM data. Models and structures only
+    /// count where the mode builds them.
+    pub fn from_osm(data: &crate::osm_parser::OsmData, args: &crate::args::Args) -> Self {
+        let objects = !args.skip_objects();
+        let buildings = objects && args.mode != crate::args::GenerationMode::Blueprint;
+        Self {
+            peaks: peaks_in(data),
+            tall_models: if args.use_3d && objects {
+                crate::models_3d::wikidata::tall_models_in(data)
+            } else {
+                Vec::new()
+            },
+            tall_structures: if buildings && crate::ground::auto_height(args) {
+                tall_structures_in(data, args.scale)
+            } else {
+                Vec::new()
+            },
+        }
+    }
 }
 
 /// Hints handed to the terrain thread, which runs alongside the OSM fetch.
@@ -93,6 +118,62 @@ pub fn peaks_in(data: &crate::osm_parser::OsmData) -> Vec<PeakHint> {
         .filter(|e| e.r#type == "node")
         .filter_map(|e| peak_from_tags(e.lat?, e.lon?, e.tags.as_ref()?))
         .collect()
+}
+
+/// Mapped height of a building, building part or tower way, or of a mast, antenna or
+/// chimney, which may also be a node. The flag says whether a node counts.
+fn structure_height_m(tags: &HashMap<String, String>) -> Option<(f64, bool)> {
+    let man_made = tags.get("man_made").map(String::as_str);
+    if matches!(man_made, Some("mast" | "antenna" | "chimney")) {
+        let m = crate::mapillary::geometry::parse_length_m(tags.get("height")?)?;
+        return (m > 0.0 && m < 1000.0).then_some((m, true));
+    }
+    if tags.contains_key("building")
+        || tags.contains_key("building:part")
+        || man_made == Some("tower")
+    {
+        return crate::element_processing::buildings::mapped_height_m(tags).map(|m| (m, false));
+    }
+    None
+}
+
+/// Structures whose mapped height could take them past the vanilla ceiling at `scale`. A way
+/// stands at its first node, which is close enough to read the terrain under it.
+pub fn tall_structures_in(data: &crate::osm_parser::OsmData, scale: f64) -> Vec<TallModel> {
+    // Anything shorter stays under the ceiling wherever the terrain itself fits.
+    let min_m = f64::from(super::postprocess::TERRAIN_HEIGHT_BUFFER - 2) / scale.max(1e-9);
+    let mut found = Vec::new();
+    let mut ways: Vec<(u64, f64)> = Vec::new();
+    for e in data.elements() {
+        let Some((height_m, node_ok)) = e.tags.as_ref().and_then(structure_height_m) else {
+            continue;
+        };
+        if height_m <= min_m {
+            continue;
+        }
+        match (e.r#type.as_str(), e.lat, e.lon, e.nodes.as_deref()) {
+            ("node", Some(lat), Some(lon), _) if node_ok => {
+                found.push(TallModel { lat, lon, height_m })
+            }
+            ("way", _, _, Some([first, ..])) => ways.push((*first, height_m)),
+            _ => {}
+        }
+    }
+    if ways.is_empty() {
+        return found;
+    }
+    let wanted: HashSet<u64> = ways.iter().map(|&(id, _)| id).collect();
+    let coords: HashMap<u64, (f64, f64)> = data
+        .elements()
+        .iter()
+        .filter(|e| e.r#type == "node" && wanted.contains(&e.id))
+        .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
+        .collect();
+    found.extend(ways.into_iter().filter_map(|(id, height_m)| {
+        let &(lat, lon) = coords.get(&id)?;
+        Some(TallModel { lat, lon, height_m })
+    }));
+    found
 }
 
 /// Spread of the bump. Fitted on Corcovado, whose OSM building `ele`s fall from
@@ -238,6 +319,58 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn tall_structures_are_buildings_towers_and_masts_with_a_height() {
+        let data: crate::osm_parser::OsmData = serde_json::from_str(
+            r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 40.0, "lon": -74.0},
+                {"type": "node", "id": 2, "lat": 40.1, "lon": -74.1},
+                {"type": "way", "id": 10, "nodes": [1, 2], "tags": {"building": "yes", "height": "541"}},
+                {"type": "way", "id": 11, "nodes": [2, 1], "tags": {"building": "office", "building:levels": "100"}},
+                {"type": "way", "id": 12, "nodes": [1, 2], "tags": {"man_made": "tower", "height": "368"}},
+                {"type": "node", "id": 3, "lat": 40.2, "lon": -74.2, "tags": {"man_made": "mast", "height": "300 m"}},
+                {"type": "way", "id": 13, "nodes": [1, 2], "tags": {"building": "house", "height": "8"}},
+                {"type": "way", "id": 14, "nodes": [1, 2], "tags": {"building": "yes", "height": "1640"}},
+                {"type": "way", "id": 15, "nodes": [1, 2], "tags": {"highway": "primary", "height": "400"}},
+                {"type": "node", "id": 4, "lat": 40.3, "lon": -74.3, "tags": {"building": "yes", "height": "400"}},
+                {"type": "way", "id": 16, "nodes": [99], "tags": {"building": "yes", "height": "400"}}
+            ]}"#,
+        )
+        .unwrap();
+        let found = tall_structures_in(&data, 1.0);
+        let at = |lat: f64, lon: f64, height_m: f64| TallModel { lat, lon, height_m };
+        // 100 office storeys at 4 blocks each, plus the taller ground floor.
+        assert_eq!(
+            found,
+            vec![
+                at(40.2, -74.2, 300.0),
+                at(40.0, -74.0, 541.0),
+                at(40.1, -74.1, 402.0),
+                at(40.0, -74.0, 368.0),
+            ]
+        );
+        // At scale 3 an 8 m house rises 24 blocks, enough to matter on the highest ground.
+        assert_eq!(tall_structures_in(&data, 3.0).len(), 5);
+
+        // Only a run that builds them and still picks its build height wants them.
+        let hints = |extra: &[&str]| {
+            use clap::Parser;
+            let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            TerrainHints::from_osm(&data, &crate::args::Args::parse_from(cmd)).tall_structures
+        };
+        assert_eq!(hints(&[]).len(), 4);
+        assert_eq!(hints(&["--mode", "geo-only"]).len(), 4);
+        for none in [
+            &["--mode", "terrain-only"][..],
+            &["--mode", "blueprint"][..],
+            &["--vanilla-height"][..],
+            &["--disable-height-limit"][..],
+        ] {
+            assert!(hints(none).is_empty(), "{none:?}");
+        }
     }
 
     #[test]

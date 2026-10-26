@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Ordner, in dem die .mcworld-Datei gespeichert wird.",
   "luanti_save_path_desc": "Ordner, in dem neue Luanti-Welten angelegt werden.",
   "clear_tile_cache_desc": "Zwischengespeicherte Kartenkacheln und Fassadentexturen löschen.",
-  "disable_height_limit_desc": "Hebt das Höhenlimit für Berge im Maßstab 1:1 an. Nicht für Realms.",
+  "disable_height_limit_desc": "Hebt das Höhenlimit an, wenn ein Gebiet es braucht. Nicht für Realms.",
   "aws_only_elevation_desc": "Ältere, gröbere Höhenquelle, falls die Standardquelle ausfällt.",
   "bake_lighting_desc": "Vorberechnetes Licht für LOD-Mods wie Voxy. Langsamer.",
   "voxy_lod_desc": "Entferntes Terrain erscheint beim ersten Betreten. Nur Java.",
