@@ -1626,20 +1626,32 @@ pub fn settle_build_height(
     disk_dir: &std::path::Path,
     new_java_world: Option<&std::path::Path>,
 ) -> Result<(), String> {
+    // A base outside vanilla's range is a height of its own choosing, not one to compress.
+    let compressible = ground_level_range(args, false).contains(&args.ground_level);
+    let instead = if compressible {
+        " Use --vanilla-height to compress the terrain instead."
+    } else {
+        ""
+    };
     if auto_height(args) && ground.extended_ceiling {
         args.disable_height_limit = true;
         crate::world_utils::check_disk_for_extended_height(args, bbox, format, disk_dir).map_err(
             |e| {
+                let keep = if compressible {
+                    "; keep the vanilla height to compress the terrain instead"
+                } else {
+                    ""
+                };
                 format!(
-                    "{e} The area needs the extended build height, which makes the world larger; \
-                 keep the vanilla height to compress the terrain instead."
+                    "{e} The area needs the extended build height, which makes the world \
+                     larger{keep}."
                 )
             },
         )?;
         if args.bedrock {
             println!(
                 "Note: the world carries a behavior pack that extends the build height \
-                 (Bedrock 1.21.120+). Use --vanilla-height to compress the terrain instead."
+                 (Bedrock 1.21.120+).{instead}"
             );
         }
         crate::progress::emit_gui_progress_update(
@@ -1657,8 +1669,7 @@ pub fn settle_build_height(
         .map_err(|e| format!("Failed to install tall-world datapack: {e}"))?;
     println!(
         "Note: added the tall-world datapack (Minecraft 1.21.4+). The first load asks about \
-         experimental features, and the world can't be uploaded to Realms. Use \
-         --vanilla-height to compress the terrain instead."
+         experimental features, and the world can't be uploaded to Realms.{instead}"
     );
     Ok(())
 }

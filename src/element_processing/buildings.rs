@@ -5993,9 +5993,23 @@ fn parse_building_height_tag(tags: &HashMap<String, String>) -> Option<f64> {
     (height.is_finite() && height <= MAX_PLAUSIBLE_HEIGHT_M).then_some(height)
 }
 
+/// Untagged towers read better on the taller commercial rhythm; a part keeps the cycle its
+/// group shares.
+fn takes_commercial_rhythm(
+    is_tall_building: bool,
+    building_type: &str,
+    floor_cycle: i32,
+    tags: &HashMap<String, String>,
+) -> bool {
+    is_tall_building
+        && building_type == "yes"
+        && floor_cycle == 3
+        && !tags.contains_key("building:part")
+}
+
 /// Top of a building or part from its tags alone, in metres above its ground: the `height`
-/// tag, which includes the roof, or the storeys at the cycle `calculate_building_height`
-/// gives them plus the roof on top. None when neither is mapped.
+/// tag, which includes the roof, or the storeys at the cycle the generator builds them at
+/// plus the roof on top. None when neither is mapped.
 pub(crate) fn mapped_height_m(tags: &HashMap<String, String>) -> Option<f64> {
     if let Some(height) = parse_building_height_tag(tags) {
         return Some(height);
@@ -6006,8 +6020,16 @@ pub(crate) fn mapped_height_m(tags: &HashMap<String, String>) -> Option<f64> {
         .parse::<f64>()
         .ok()
         .filter(|l| l.is_finite() && *l >= 1.0)?;
-    let building_type = tags.get("building").map(String::as_str).unwrap_or("yes");
-    let cycle = floor_cycle_for(building_type, tags, false);
+    let building_type = tags
+        .get("building")
+        .or_else(|| tags.get("building:part"))
+        .map(String::as_str)
+        .unwrap_or("yes");
+    let mut cycle = floor_cycle_for(building_type, tags, false);
+    // More than seven storeys is what `calculate_building_height` calls tall.
+    if takes_commercial_rhythm(levels > 7.0, building_type, cycle, tags) {
+        cycle = 4;
+    }
     let walls = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
     // A mapped roof:height, or at most the steepest rise the generator infers when a roof
     // shape or roof storeys ask for a roof.
@@ -11885,14 +11907,8 @@ pub fn generate_buildings(
         cached_footprint_size,
         group_seed,
     );
-    // Untagged towers read better on the taller commercial rhythm; a part
-    // keeps the cycle its group shares.
-    let takes_commercial_rhythm = is_tall_building
-        && building_type == "yes"
-        && floor_cycle == 3
-        && !element.tags.contains_key("building:part");
     let (floor_cycle, building_height, is_tall_building, min_level_offset) =
-        if takes_commercial_rhythm {
+        if takes_commercial_rhythm(is_tall_building, building_type, floor_cycle, &element.tags) {
             let (h, tall) = calculate_building_height(
                 element,
                 building_type,
@@ -18142,15 +18158,22 @@ mod height_tests {
             &[("building", "yes"), ("building:levels", "12.5")][..],
             &[("building:part", "yes"), ("building:levels", "40")][..],
             &[("building", "yes"), ("height", "541")][..],
+            &[("building", "yes"), ("building:levels", "100")][..],
+            &[("building", "yes"), ("building:levels", "7")][..],
         ] {
             let way = way_with_tags(tags);
             let btype = way
                 .tags
                 .get("building")
+                .or_else(|| way.tags.get("building:part"))
                 .map(String::as_str)
                 .unwrap_or("yes");
             let cycle = floor_cycle_for(btype, &way.tags, false);
-            let (h, _) = calculate_building_height(&way, btype, 0, 1.0, None, cycle, 100, 1);
+            let (mut h, tall) = calculate_building_height(&way, btype, 0, 1.0, None, cycle, 100, 1);
+            // The generator builds the walls again on the commercial rhythm.
+            if takes_commercial_rhythm(tall, btype, cycle, &way.tags) {
+                h = calculate_building_height(&way, btype, 0, 1.0, None, 4, 100, 1).0;
+            }
             assert_eq!(
                 mapped_height_m(&way.tags).map(|m| m as i32),
                 Some(h),
@@ -18166,8 +18189,14 @@ mod height_tests {
             None
         );
 
-        // Storeys leave the roof out, so it goes on top: mapped, or the steepest inferred rise.
+        // An untagged tower of 100 storeys stands on 4-block storeys, not 3.
         let top = |pairs: &[(&str, &str)]| mapped_height_m(&way_with_tags(pairs).tags);
+        assert_eq!(
+            top(&[("building", "yes"), ("building:levels", "100")]),
+            Some(402.0)
+        );
+
+        // Storeys leave the roof out, so it goes on top: mapped, or the steepest inferred rise.
         let office: &[(&str, &str)] = &[("building", "office"), ("building:levels", "75")];
         assert_eq!(top(office), Some(302.0));
         assert_eq!(

@@ -87,8 +87,7 @@ pub(crate) fn may_pass_vanilla(height_m: f64, scale: f64) -> bool {
 
 /// Whether a point lies in `bbox`, edges included.
 pub(crate) fn inside(bbox: &LLBBox, lat: f64, lon: f64) -> bool {
-    (bbox.min().lat()..=bbox.max().lat()).contains(&lat)
-        && (bbox.min().lng()..=bbox.max().lng()).contains(&lon)
+    crate::coordinate_system::geographic::LLPoint::new(lat, lon).is_ok_and(|p| bbox.contains(&p))
 }
 
 /// Hints handed to the terrain thread, which runs alongside the OSM fetch.
@@ -154,12 +153,23 @@ pub fn peaks_in(data: &crate::osm_parser::OsmData) -> Vec<PeakHint> {
 }
 
 /// Mapped height of a building, building part or tower way, or of a mast, antenna or
-/// chimney, which may also be a node. The flag says whether a node counts.
+/// chimney, which may also be a node and without a height stands as tall as the generator
+/// builds it on the ground. The flag says whether a node counts.
 fn structure_height_m(tags: &HashMap<String, String>) -> Option<(f64, bool)> {
     let man_made = tags.get("man_made").map(String::as_str);
     if matches!(man_made, Some("mast" | "antenna" | "chimney")) {
-        let m = crate::mapillary::geometry::parse_length_m(tags.get("height")?)?;
-        return (m > 0.0 && m < 1000.0).then_some((m, true));
+        let mapped = tags
+            .get("height")
+            .and_then(|v| crate::mapillary::geometry::parse_length_m(v))
+            .filter(|m| *m > 0.0 && *m < 1000.0);
+        let lighting = tags.get("tower:type").map(String::as_str) == Some("lighting");
+        let default_m = match man_made {
+            Some("chimney") => 40.0,
+            _ if lighting => 20.0,
+            Some("antenna") => 10.0,
+            _ => 30.0,
+        };
+        return Some((mapped.unwrap_or(default_m), true));
     }
     if tags.contains_key("building")
         || tags.contains_key("building:part")
@@ -459,6 +469,25 @@ mod tests {
         ] {
             assert!(hints(none).is_empty(), "{none:?}");
         }
+    }
+
+    #[test]
+    fn masts_and_chimneys_without_a_height_stand_as_tall_as_generated() {
+        let h = |pairs: &[(&str, &str)]| structure_height_m(&tags(pairs)).map(|(m, _)| m);
+        assert_eq!(h(&[("man_made", "mast")]), Some(30.0));
+        assert_eq!(
+            h(&[("man_made", "mast"), ("tower:type", "lighting")]),
+            Some(20.0)
+        );
+        assert_eq!(h(&[("man_made", "antenna")]), Some(10.0));
+        assert_eq!(h(&[("man_made", "chimney")]), Some(40.0));
+        assert_eq!(
+            h(&[("man_made", "chimney"), ("height", "120")]),
+            Some(120.0)
+        );
+        // An implausible height falls back like the generator's does.
+        assert_eq!(h(&[("man_made", "mast"), ("height", "2000")]), Some(30.0));
+        assert_eq!(h(&[("man_made", "tower")]), None);
     }
 
     #[test]

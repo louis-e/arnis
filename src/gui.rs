@@ -1598,6 +1598,13 @@ fn gui_start_generation(
                 }
             };
 
+            // The toggle lets the terrain fit extend the build height where the area needs it,
+            // in a world this run creates. A world that already exists keeps the height it
+            // has, and a One World is sent the height it keeps.
+            let existing_java =
+                world_format == WorldFormat::JavaAnvil && !is_new_world && !one_world;
+            let existing_tall = existing_java && crate::world_utils::has_tall_datapack(&world_path);
+
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
             let mut args: Args = Args {
@@ -1647,12 +1654,8 @@ fn gui_start_generation(
                 spawn_lat: None,
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
-                // The toggle lets the terrain fit extend the build height where the area
-                // needs it, in a world this run creates. A One World is sent the height it
-                // keeps.
-                vanilla_height: !disable_height_limit
-                    || (world_format == WorldFormat::JavaAnvil && !is_new_world && !one_world),
-                disable_height_limit: one_world && disable_height_limit,
+                vanilla_height: !existing_tall && (!disable_height_limit || existing_java),
+                disable_height_limit: existing_tall || (one_world && disable_height_limit),
                 aws_only_elevation,
                 benchmark: false,
                 bake_lighting: bake_lighting_enabled,

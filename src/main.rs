@@ -509,6 +509,8 @@ fn run_cli() {
     let fetch_start = std::time::Instant::now();
     let (peak_tx, peaks) = crate::elevation::PeakSource::channel();
     let (raw_data, overture_data, mut ground) = std::thread::scope(|s| {
+        // Owned here, so a panic below drops it and the terrain thread stops waiting.
+        let peak_tx = peak_tx;
         let overture_handle = s.spawn(|| {
             let t = std::time::Instant::now();
             let data = if args.overture && !skip_objects {

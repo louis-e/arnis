@@ -317,19 +317,26 @@ impl OvertureHints {
         tags: &HashMap<String, String>,
     ) -> Option<HashMap<String, String>> {
         let hint = self.hints.get(&OsmRef { kind, id })?;
+        if !takes_hint(tags) {
+            return None;
+        }
         let mut tags = tags.clone();
         fill_tags(hint, &mut tags).then_some(tags)
     }
 }
 
+/// A building without a vertical tag of its own.
+fn takes_hint(tags: &HashMap<String, String>) -> bool {
+    // Only buildings; Overture's building theme has no other feature type.
+    // Any existing vertical tag means OSM already knows better.
+    (tags.contains_key("building") || tags.contains_key("building:part"))
+        && !tags.contains_key("height")
+        && !tags.contains_key("building:levels")
+}
+
 /// Writes `hint` onto a building's tags unless OSM already has a vertical tag.
 fn fill_tags(hint: &OsmAttributeHint, tags: &mut HashMap<String, String>) -> bool {
-    // Only buildings; Overture's building theme has no other feature type.
-    if !tags.contains_key("building") && !tags.contains_key("building:part") {
-        return false;
-    }
-    // Any existing vertical tag means OSM already knows better.
-    if tags.contains_key("height") || tags.contains_key("building:levels") {
+    if !takes_hint(tags) {
         return false;
     }
 

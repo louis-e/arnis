@@ -2892,8 +2892,9 @@ pub(crate) fn vanilla_overflow(
         .fold(f64::MIN, f64::max);
     (top > limit).then(|| {
         format!(
-            "a building or landmark reaches Y {:.0}, above the vanilla limit of {MAX_Y}",
-            top.ceil()
+            "a building or landmark reaches Y {:.0}, vanilla Minecraft has room up to Y {}",
+            top.ceil(),
+            MAX_Y - 2
         )
     })
 }

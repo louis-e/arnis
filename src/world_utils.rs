@@ -783,6 +783,16 @@ fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String
 /// Name of the bundled Java datapack that extends the Overworld build height.
 pub const TALL_DATAPACK_NAME: &str = "arnis_tall";
 
+/// Whether a Java world already carries the tall-world datapack.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn has_tall_datapack(world_path: &Path) -> bool {
+    world_path
+        .join("datapacks")
+        .join(TALL_DATAPACK_NAME)
+        .join("pack.mcmeta")
+        .is_file()
+}
+
 /// Install the bundled tall-world datapack into a Java world and register it
 /// in `level.dat`'s `Data.DataPacks.Enabled` so it auto-activates on first
 /// load. The base `data/` tree uses the legacy flat dimension_type schema
@@ -1957,6 +1967,15 @@ mod tests {
             path.push(dir);
         }
         read_json(&path.join("data/minecraft/dimension_type/overworld.json"))
+    }
+
+    #[test]
+    fn an_installed_tall_datapack_is_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fresh = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        assert!(!has_tall_datapack(&fresh));
+        let tall = install_pack_for_test(tmp.path());
+        assert!(has_tall_datapack(tall.parent().unwrap().parent().unwrap()));
     }
 
     #[test]
