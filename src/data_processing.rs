@@ -1305,6 +1305,7 @@ pub fn generate_world_with_options(
     let mut hash_acc: u64 = 0;
     let mut real_regions: HashSet<(i32, i32)> = HashSet::new();
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
+    let mut water_borders = crate::water_steps::Borders::default();
     // Background writer for eviction; None unless eviction is active.
     let mut flush_worker: Option<FlushWorker> = None;
     // The spawn's region is kept resident (never evicted) so the finalize map-item lands on
@@ -1442,6 +1443,7 @@ pub fn generate_world_with_options(
         }
 
         let mut merge_dur = std::time::Duration::ZERO;
+        let mut water_steps_dur = std::time::Duration::ZERO;
         let total_tiles = indexed_tiles.len().max(1);
         // Counted per tile, not per element: measured per-tile cost is near flat
         // (the area work dominates), so tile count tracks time despite LPT order.
@@ -1704,6 +1706,7 @@ pub fn generate_world_with_options(
                     )) = pending.remove(&next_merge)
                     {
                         let merge_start = std::time::Instant::now();
+                        let shaped_before = water_steps_dur;
                         editor.merge_world(
                             tile_world,
                             tiles[tile_idx].min_x,
@@ -1741,6 +1744,17 @@ pub fn generate_world_with_options(
                                     *c -= 1;
                                     if *c > 0 {
                                         continue;
+                                    }
+                                    if !args.winter {
+                                        let shape_start = std::time::Instant::now();
+                                        crate::water_steps::shape_region(
+                                            &mut editor,
+                                            d,
+                                            args.caves,
+                                            &mut water_borders,
+                                            |r| real_regions.contains(&r),
+                                        );
+                                        water_steps_dur += shape_start.elapsed();
                                     }
                                     flushable.push(d);
                                     for wave in deferred.complete(d) {
@@ -1795,7 +1809,10 @@ pub fn generate_world_with_options(
                             emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
                             last_emitted_pct = pct;
                         }
-                        merge_dur += merge_start.elapsed();
+                        // Shaping is reported on its own line.
+                        merge_dur += merge_start
+                            .elapsed()
+                            .saturating_sub(water_steps_dur - shaped_before);
 
                         next_merge += 1;
                         *gate.0.lock().unwrap_or_else(|p| p.into_inner()) = next_merge;
@@ -1812,6 +1829,9 @@ pub fn generate_world_with_options(
         let place_dur = place_start.elapsed();
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);
+        if eviction_active {
+            bench.report("water_steps", water_steps_dur);
+        }
         bench.reset();
 
         if eviction_active && args.benchmark {
@@ -2056,6 +2076,17 @@ pub fn generate_world_with_options(
             xzbbox.max_z(),
         );
     }
+
+    // Streaming shaped each region as its neighbourhood merged; placements come after either way.
+    // Winter freezes rivers along their banks, which would strand the run-ups.
+    if !eviction_active && !args.winter && matches!(world_format, WorldFormat::JavaAnvil) {
+        let shape_start = std::time::Instant::now();
+        crate::water_steps::shape_all(&mut editor, args.caves);
+        let shaped = shape_start.elapsed();
+        bench.report("water_steps", shaped);
+        bench.exclude(shaped);
+    }
+    drop(water_borders);
 
     // Run after ground generation so anchor Y reflects the final terrain. Streaming placed
     // them as their regions completed; only stragglers are left.

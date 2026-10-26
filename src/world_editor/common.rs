@@ -621,6 +621,17 @@ impl BlockStorage {
         }
     }
 
+    /// Whether some cell may hold `block`; a paletted section can still list a block it no longer holds.
+    #[inline]
+    pub fn may_contain(&self, block: Block) -> bool {
+        match self {
+            BlockStorage::Uniform(b) => *b == block,
+            BlockStorage::Dense(v) => u8::try_from(block.id()).is_ok_and(|id| v.contains(&id)),
+            BlockStorage::Paletted(storage) => storage.palette.contains(&block),
+            BlockStorage::Direct(v) => v.contains(&block),
+        }
+    }
+
     /// Iterate over all 4 096 blocks.
     #[inline]
     pub fn iter(&self) -> BlockStorageIter<'_> {

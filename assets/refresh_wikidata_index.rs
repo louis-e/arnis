@@ -16,7 +16,8 @@ const OUTPUT_PATH: &str = "assets/wikidata_3d_models.json";
 
 /// QIDs to skip. OSM tagging produces better output than the Wikimedia model.
 const DENY_LIST: &[&str] = &[
-    "Q9188", // Empire State Building — wrong height_m (1500), generic block model
+    "Q9188",  // Empire State Building — wrong height_m (1500), generic block model
+    "Q41225", // Big Ben — built in code as a landmark
 ];
 
 #[derive(Serialize, Debug, Clone)]

@@ -14,8 +14,16 @@ use crate::block_definitions::{
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::osm_parser::ProcessedElement;
-use crate::structures::schematic::{load_palettized, rotate_props};
+use crate::structures::schematic::{load_palettized, rotate_props, PalettizedSchematic};
 use crate::world_editor::WorldEditor;
+
+/// Where a landmark's blocks come from.
+enum Source {
+    /// A gzipped Sponge `.schem`.
+    Schem(&'static [u8]),
+    /// Built in code, laid out as a loaded `.schem`.
+    Built(fn() -> PalettizedSchematic),
+}
 
 /// One bundled landmark model.
 struct Landmark {
@@ -25,8 +33,8 @@ struct Landmark {
     qid: &'static str,
     /// Fallback identity if the element lost its `wikidata` tag.
     osm_ids: &'static [(&'static str, u64)],
-    /// Gzipped Sponge `.schem`, north-up at one block per metre.
-    schematic: &'static [u8],
+    /// North-up at one block per metre.
+    model: Source,
     /// Point the anchor is pinned to.
     lat: f64,
     lon: f64,
@@ -54,7 +62,9 @@ const LANDMARKS: &[Landmark] = &[
         name: "Olympiastadion München",
         qid: "Q131610",
         osm_ids: &[("way", 419_656_920)],
-        schematic: include_bytes!("../assets/structures/landmarks/olympiastadion_munich.schem"),
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/olympiastadion_munich.schem"
+        )),
         // Centre of the leisure=stadium footprint; model bowl 230x261 vs 241x260 m.
         lat: 48.173_101_2,
         lon: 11.546_483_3,
@@ -75,7 +85,9 @@ const LANDMARKS: &[Landmark] = &[
         name: "Olympiahalle",
         qid: "Q48849",
         osm_ids: &[("way", 303_099_272)],
-        schematic: include_bytes!("../assets/structures/landmarks/olympiahalle_munich.schem"),
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/olympiahalle_munich.schem"
+        )),
         // Fitted by overlapping the model body with the OSM polygon: 16847/16860 m2.
         lat: 48.174_905_8,
         lon: 11.550_030_8,
@@ -96,9 +108,9 @@ const LANDMARKS: &[Landmark] = &[
         name: "Olympia-Schwimmhalle",
         qid: "Q3882013",
         osm_ids: &[("way", 227_012_665)],
-        schematic: include_bytes!(
+        model: Source::Schem(include_bytes!(
             "../assets/structures/landmarks/olympia_schwimmhalle_munich.schem"
-        ),
+        )),
         // The glazed facade encloses 83x124 blocks against the real 82x123 m.
         lat: 48.173_572_3,
         lon: 11.551_479_7,
@@ -120,7 +132,9 @@ const LANDMARKS: &[Landmark] = &[
         name: "Olympiaturm",
         qid: "Q599148",
         osm_ids: &[("way", 164_084_344)],
-        schematic: include_bytes!("../assets/structures/landmarks/olympiaturm_munich.schem"),
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/olympiaturm_munich.schem"
+        )),
         // Centre of the tower's OSM footprint.
         lat: 48.174_409_5,
         lon: 11.553_740_1,
@@ -134,6 +148,25 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_x: 22.0,
         suppress_half_z: 22.0,
         reach_m: 30,
+    },
+    Landmark {
+        name: "Elizabeth Tower",
+        qid: "Q41225",
+        osm_ids: &[("way", 123_557_148)],
+        model: Source::Built(crate::structures::elizabeth_tower::build),
+        // Centre of the mapped outline. That turns 6 degrees off north; the model stands square.
+        lat: 51.500_701_2,
+        lon: -0.124_573_0,
+        anchor_x: 8.5,
+        anchor_z: 8.5,
+        ground_y: 0,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The tower's own parts, not the Palace wings against it.
+        suppress_half_x: 8.0,
+        suppress_half_z: 8.0,
+        reach_m: 13,
     },
 ];
 
@@ -349,7 +382,10 @@ struct Model {
 
 impl Model {
     fn load(landmark: &Landmark) -> Result<Self, String> {
-        let parsed = load_palettized(landmark.schematic)?;
+        let parsed = match landmark.model {
+            Source::Schem(bytes) => load_palettized(bytes)?,
+            Source::Built(build) => build(),
+        };
         let mut voxels = parsed.voxels;
         if voxels.is_empty() {
             return Err("no mapped blocks".to_string());
