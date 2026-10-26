@@ -937,7 +937,7 @@ impl BedrockWriter {
             // Concatenated compounds, no list around them.
             let mut data: Vec<u8> = Vec::new();
             for compound in &block_entities {
-                let bytes = nbtx::to_le_bytes(compound)
+                let bytes = nbtx::to_le_bytes(&without_empty_lists(compound))
                     .map_err(|e| BedrockSaveError::Nbt(format!("block entity compound: {e}")))?;
                 data.extend_from_slice(&bytes);
             }
@@ -1476,6 +1476,24 @@ fn build_chunk_key_bytes(
     }
 
     buffer
+}
+
+/// The compound without its empty lists, at any depth. nbtx writes an empty list
+/// without its element type and length, which leaves every tag after it
+/// unreadable. Bedrock reads a missing list as an empty one.
+fn without_empty_lists(compound: &StdHashMap<String, Value>) -> StdHashMap<String, Value> {
+    fn nested(value: &Value) -> Value {
+        match value {
+            Value::Compound(compound) => Value::Compound(without_empty_lists(compound)),
+            Value::List(items) => Value::List(items.iter().map(nested).collect()),
+            other => other.clone(),
+        }
+    }
+    compound
+        .iter()
+        .filter(|(_, value)| !matches!(value, Value::List(items) if items.is_empty()))
+        .map(|(key, value)| (key.clone(), nested(value)))
+        .collect()
 }
 
 /// The compounds of an NBT list, or nothing when it is absent or not a list.
@@ -2347,6 +2365,66 @@ mod tests {
         for id in ["Chest", "ItemFrame", "FlowerPot"] {
             assert!(ids.contains(&id), "{ids:?}");
         }
+    }
+
+    #[test]
+    fn an_empty_chest_does_not_break_the_block_entities_after_it() {
+        use fastnbt::Value as V;
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(1, 64, 1, crate::block_definitions::CHEST);
+        world.set_block_if_absent(2, 64, 1, crate::block_definitions::CHEST);
+        let chest = |x: i32, items: Vec<V>| {
+            V::Compound(StdHashMap::from([
+                ("id".to_string(), V::String("minecraft:chest".into())),
+                ("x".to_string(), V::Int(x)),
+                ("y".to_string(), V::Int(64)),
+                ("z".to_string(), V::Int(1)),
+                ("Items".to_string(), V::List(items)),
+            ]))
+        };
+        let apple = V::Compound(StdHashMap::from([
+            ("id".to_string(), V::String("minecraft:apple".into())),
+            ("count".to_string(), V::Int(1)),
+            ("Slot".to_string(), V::Byte(0)),
+        ]));
+        let chunk = world.get_or_create_region(0, 0).get_or_create_chunk(0, 0);
+        chunk.other.insert(
+            "block_entities".to_string(),
+            V::List(vec![chest(1, Vec::new()), chest(2, vec![apple])]),
+        );
+
+        let writer = test_writer(PathBuf::from("unused.mcworld"));
+        let records = writer
+            .encode_chunk_records(
+                0,
+                0,
+                world.get_or_create_region(0, 0).get_or_create_chunk(0, 0),
+            )
+            .unwrap();
+        let key = build_chunk_key_bytes(
+            Vec2::new(0, 0),
+            Dimension::Overworld,
+            KeyTypeTag::BlockEntity,
+            None,
+        );
+        let (_, data) = records.iter().find(|(k, _)| *k == key).unwrap();
+        let entities = compounds(data);
+        assert_eq!(entities.len(), 2);
+        for entity in &entities {
+            assert_eq!(nbt_str(entity.get("id")), Some("Chest"));
+            assert!(matches!(entity.get("Findable"), Some(nbtx::Value::Byte(0))));
+        }
+        let item_counts: Vec<usize> = entities
+            .iter()
+            .map(|e| match e.get("Items") {
+                Some(nbtx::Value::List(items)) => items.len(),
+                _ => 0,
+            })
+            .collect();
+        assert!(
+            item_counts.contains(&0) && item_counts.contains(&1),
+            "{item_counts:?}"
+        );
     }
 
     #[test]
