@@ -50,6 +50,7 @@ const SETTINGS = [
   { id: 'traffic-lights-toggle', kind: 'checkbox', store: OWN },
   { id: 'moving-cars-toggle', kind: 'checkbox', store: OWN },
   { id: 'zombie-outbreak-toggle', kind: 'checkbox', store: OWN },
+  { id: 'disasters-toggle', kind: 'checkbox', store: OWN },
   { id: 'body-gravity-toggle', kind: 'checkbox', store: OWN },
   // The facade controls. Registered here like every other segmented control,
   // so the panel's Revert and Reset to defaults reach them: the store reads the

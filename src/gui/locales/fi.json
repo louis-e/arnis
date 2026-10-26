@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Liikennevalot, jotka oikeasti vaihtuvat.",
   "zombie_outbreak": "Zombiepuhkeama",
   "zombie_outbreak_desc": "Viisi yötä zombiaaltoja kaduillasi, lopussa pomo.",
+  "disasters": "Katastrofit",
+  "disasters_desc": "Katastrofi muutaman minuutin välein: tulvia, tornadoja, maanjäristyksiä ja muuta.",
   "body_gravity": "Kuun ja Marsin painovoima",
   "body_gravity_desc": "Aito matala painovoima Kuu- ja Mars-maailmoissa.",
   "moving_vehicles": "Liikkuvat ajoneuvot",

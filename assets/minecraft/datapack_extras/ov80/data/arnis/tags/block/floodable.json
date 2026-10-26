@@ -1,0 +1,16 @@
+{
+  "values": [
+    "minecraft:air",
+    "minecraft:cave_air",
+    "minecraft:short_grass",
+    "minecraft:fern",
+    "minecraft:dead_bush",
+    "minecraft:fire",
+    "minecraft:snow",
+    "#minecraft:small_flowers",
+    { "id": "minecraft:bush", "required": false },
+    { "id": "minecraft:short_dry_grass", "required": false },
+    { "id": "minecraft:leaf_litter", "required": false },
+    { "id": "minecraft:wildflowers", "required": false }
+  ]
+}

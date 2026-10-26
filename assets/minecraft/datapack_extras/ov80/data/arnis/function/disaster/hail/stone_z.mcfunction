@@ -1,0 +1,16 @@
+execute if score #hz arnis.ds matches 0 run summon snowball ~ ~ ~-15 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 1 run summon snowball ~ ~ ~-13 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 2 run summon snowball ~ ~ ~-11 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 3 run summon snowball ~ ~ ~-9 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 4 run summon snowball ~ ~ ~-7 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 5 run summon snowball ~ ~ ~-5 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 6 run summon snowball ~ ~ ~-3 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 7 run summon snowball ~ ~ ~-1 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 8 run summon snowball ~ ~ ~1 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 9 run summon snowball ~ ~ ~3 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 10 run summon snowball ~ ~ ~5 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 11 run summon snowball ~ ~ ~7 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 12 run summon snowball ~ ~ ~9 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 13 run summon snowball ~ ~ ~11 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 14 run summon snowball ~ ~ ~13 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}
+execute if score #hz arnis.ds matches 15 run summon snowball ~ ~ ~15 {Item:{id:"minecraft:packed_ice",count:1},Motion:[0.12d,-1.3d,0.05d],Tags:["arnis.ds.ent"]}

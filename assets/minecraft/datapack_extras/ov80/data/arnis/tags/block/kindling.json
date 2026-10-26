@@ -1,0 +1,17 @@
+{
+  "values": [
+    "minecraft:short_grass",
+    "minecraft:tall_grass",
+    "minecraft:fern",
+    "minecraft:large_fern",
+    "minecraft:dead_bush",
+    "minecraft:sweet_berry_bush",
+    "#minecraft:small_flowers",
+    "#minecraft:wool_carpets",
+    { "id": "minecraft:bush", "required": false },
+    { "id": "minecraft:short_dry_grass", "required": false },
+    { "id": "minecraft:tall_dry_grass", "required": false },
+    { "id": "minecraft:leaf_litter", "required": false },
+    { "id": "minecraft:wildflowers", "required": false }
+  ]
+}

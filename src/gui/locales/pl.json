@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Sygnalizacja świetlna, która naprawdę się zmienia.",
   "zombie_outbreak": "Epidemia zombie",
   "zombie_outbreak_desc": "Pięć nocy fal zombie na twoich ulicach, z bossem.",
+  "disasters": "Katastrofy",
+  "disasters_desc": "Co kilka minut katastrofa: powodzie, tornada, trzęsienia ziemi i więcej.",
   "body_gravity": "Grawitacja Księżyca i Marsa",
   "body_gravity_desc": "Prawdziwa niska grawitacja w światach Księżyca i Marsa.",
   "moving_vehicles": "Jeżdżące pojazdy",

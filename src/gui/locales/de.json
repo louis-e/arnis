@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Ampeln, die wirklich umschalten.",
   "zombie_outbreak": "Zombie-Ausbruch",
   "zombie_outbreak_desc": "Fünf Nächte Zombiewellen durch deine Straßen, mit Endgegner.",
+  "disasters": "Katastrophen",
+  "disasters_desc": "Alle paar Minuten eine Katastrophe: Fluten, Tornados, Erdbeben und mehr.",
   "body_gravity": "Mond- & Mars-Schwerkraft",
   "body_gravity_desc": "Echte geringe Schwerkraft in Mond- und Marswelten.",
   "moving_vehicles": "Fahrende Fahrzeuge",

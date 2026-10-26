@@ -1,0 +1,9 @@
+execute if score #kind arnis.ds matches 1 run function arnis:disaster/meteor/tick
+execute if score #kind arnis.ds matches 2 run function arnis:disaster/storm/tick
+execute if score #kind arnis.ds matches 3 run function arnis:disaster/hail/tick
+execute if score #kind arnis.ds matches 4 run function arnis:disaster/sinkhole/tick
+execute if score #kind arnis.ds matches 5 run function arnis:disaster/tornado/tick
+execute if score #kind arnis.ds matches 6 run function arnis:disaster/quake/tick
+execute if score #kind arnis.ds matches 8 run function arnis:disaster/wildfire/tick
+execute if score #kind arnis.ds matches 10 run function arnis:disaster/kaiju/tick
+execute if score #kind arnis.ds matches 11 run function arnis:disaster/snow/tick

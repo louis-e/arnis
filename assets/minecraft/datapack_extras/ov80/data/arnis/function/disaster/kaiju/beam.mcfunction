@@ -1,0 +1,14 @@
+particle minecraft:sonic_boom ^ ^ ^2 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^5 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^8 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^11 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^14 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^17 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^20 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^23 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^26 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^29 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^32 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^35 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^38 0 0 0 0 1 force
+particle minecraft:sonic_boom ^ ^ ^41 0 0 0 0 1 force

@@ -1249,6 +1249,12 @@ pub fn generate_world_with_options(
             (places, settlement)
         });
 
+    // The flood maps are worked out from the world as it is written.
+    let disaster_woods = (extras.disasters && world_format == WorldFormat::JavaAnvil)
+        .then(|| crate::datapack::disasters::wooded(&elements, &ground, &xzbbox));
+    // Ends the recording however this run ends, so a failed one does not keep it.
+    let _recording = crate::datapack::disasters::Surface::record(disaster_woods.map(|_| &xzbbox));
+
     // Runway segments merge across ways, so planes prescan here and stamp after the merge.
     let planes = crate::structures::plane::prescan(&elements, args);
 
@@ -2328,6 +2334,18 @@ pub fn generate_world_with_options(
 
     if world_format == WorldFormat::JavaAnvil && extras.any() {
         let (places, settlement) = extras_places.unwrap_or_default();
+        let surface = crate::datapack::disasters::Surface::finish();
+        let disasters = disaster_woods.map(|wooded| {
+            let plan = crate::datapack::disasters::Plan::build(
+                surface.as_deref(),
+                &ground,
+                &xzbbox,
+                args.body,
+                wooded,
+            );
+            println!("  Disasters: {}", plan.summary());
+            plan
+        });
         let ctx = crate::datapack::PackContext {
             extras,
             area: extras_area_name(&output_path, args, llbbox, settlement),
@@ -2372,6 +2390,7 @@ pub fn generate_world_with_options(
                     net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
                 })
                 .unwrap_or_default(),
+            disasters,
         };
         match crate::datapack::install(&output_path, &ctx) {
             Ok(()) => println!("Installed the {} data pack.", crate::datapack::PACK_NAME),

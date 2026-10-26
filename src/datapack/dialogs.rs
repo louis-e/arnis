@@ -1,5 +1,7 @@
-//! The pause menu dialogs (1.21.6+): welcome, travel, discoveries, outbreak and credits.
+//! The pause menu dialogs (1.21.6+): welcome, travel, discoveries, outbreak, disasters and
+//! credits.
 
+use super::disasters::Plan;
 use super::{Credits, PackContext};
 use serde_json::{json, Value};
 
@@ -64,6 +66,13 @@ pub fn menu(ctx: &PackContext) -> Value {
             "Zombie Outbreak",
             "Restart, skip to night or stop",
             show("arnis:outbreak"),
+        ));
+    }
+    if ctx.extras.disasters {
+        actions.push(button(
+            "Disasters",
+            "Restart, skip the wait or stop",
+            show("arnis:disasters"),
         ));
     }
     actions.push(button(
@@ -164,6 +173,29 @@ pub fn outbreak(ctx: &PackContext) -> Value {
             button("Restart", "Start again from day one", run("trigger arnis.ob.ctl set 1")),
             button("Skip to Night", "Bring on the next wave now", run("trigger arnis.ob.ctl set 2")),
             button("Stop", "End the outbreak and remove the zombies", run("trigger arnis.ob.ctl set 3")),
+        ],
+        "exit_action": back(ctx.extras.pause_menu),
+        "pause": false,
+    })
+}
+
+pub fn disasters(ctx: &PackContext, plan: &Plan) -> Value {
+    json!({
+        "type": "minecraft:multi_action",
+        "title": text("Disasters", "red"),
+        "body": [
+            message(json!([
+                text("A disaster hits ", "gray"),
+                text(ctx.area.clone(), "white"),
+                text(" every few minutes, in random order, each with a short warning first.", "gray"),
+            ])),
+            message(text(format!("Coming: {}.", plan.coming()), "gray")),
+        ],
+        "columns": 3,
+        "actions": [
+            button("Restart", "Start again from the first disaster", run("trigger arnis.ds.ctl set 1")),
+            button("Skip the Wait", "Bring on the next disaster now", run("trigger arnis.ds.ctl set 2")),
+            button("Stop", "End the disasters", run("trigger arnis.ds.ctl set 3")),
         ],
         "exit_action": back(ctx.extras.pause_menu),
         "pause": false,

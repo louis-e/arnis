@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Semaforji, ki se res preklapljajo.",
   "zombie_outbreak": "Zombi izbruh",
   "zombie_outbreak_desc": "Pet noči valov zombijev po tvojih ulicah, z glavnim nasprotnikom.",
+  "disasters": "Nesreče",
+  "disasters_desc": "Vsakih nekaj minut nesreča: poplave, tornadi, potresi in še več.",
   "body_gravity": "Gravitacija Lune in Marsa",
   "body_gravity_desc": "Prava nizka gravitacija v svetovih Lune in Marsa.",
   "moving_vehicles": "Vozeča vozila",

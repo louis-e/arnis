@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Közlekedési lámpák, amelyek tényleg váltanak.",
   "zombie_outbreak": "Zombijárvány",
   "zombie_outbreak_desc": "Öt éjszakányi zombihullám az utcáidon, a végén főellenséggel.",
+  "disasters": "Katasztrófák",
+  "disasters_desc": "Néhány percenként egy katasztrófa: árvizek, tornádók, földrengések és még sok más.",
   "body_gravity": "Hold- és Mars-gravitáció",
   "body_gravity_desc": "Valódi alacsony gravitáció a Hold- és Mars-világokban.",
   "moving_vehicles": "Mozgó járművek",

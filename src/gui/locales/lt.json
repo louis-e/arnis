@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Šviesoforai, kurie tikrai persijungia.",
   "zombie_outbreak": "Zombių protrūkis",
   "zombie_outbreak_desc": "Penkios naktys zombių bangų jūsų gatvėse, su bosu.",
+  "disasters": "Katastrofos",
+  "disasters_desc": "Kas kelias minutes nauja katastrofa: potvyniai, tornadai, žemės drebėjimai ir dar daugiau.",
   "body_gravity": "Mėnulio ir Marso gravitacija",
   "body_gravity_desc": "Tikra maža gravitacija Mėnulio ir Marso pasauliuose.",
   "moving_vehicles": "Važiuojančios transporto priemonės",

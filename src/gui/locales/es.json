@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Semáforos que cambian de verdad.",
   "zombie_outbreak": "Brote zombi",
   "zombie_outbreak_desc": "Cinco noches de oleadas de zombis por tus calles, con un jefe final.",
+  "disasters": "Desastres",
+  "disasters_desc": "Un desastre cada pocos minutos: inundaciones, tornados, terremotos y más.",
   "body_gravity": "Gravedad de la Luna y Marte",
   "body_gravity_desc": "Gravedad baja real en mundos de la Luna y Marte.",
   "moving_vehicles": "Vehículos en movimiento",

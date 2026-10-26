@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Des feux qui changent vraiment de couleur.",
   "zombie_outbreak": "Épidémie zombie",
   "zombie_outbreak_desc": "Cinq nuits de vagues de zombies dans vos rues, avec un boss.",
+  "disasters": "Catastrophes",
+  "disasters_desc": "Une catastrophe toutes les quelques minutes : inondations, tornades, séismes et plus encore.",
   "body_gravity": "Gravité Lune et Mars",
   "body_gravity_desc": "Une vraie faible gravité dans les mondes Lune et Mars.",
   "moving_vehicles": "Véhicules en mouvement",

@@ -237,6 +237,8 @@
   "traffic_lights_desc": "真正会切换的红绿灯。",
   "zombie_outbreak": "僵尸爆发",
   "zombie_outbreak_desc": "在你的街道上抵御五个夜晚的僵尸潮，最后还有首领。",
+  "disasters": "灾难",
+  "disasters_desc": "每隔几分钟一场灾难：洪水、龙卷风、地震等等。",
   "body_gravity": "月球与火星重力",
   "body_gravity_desc": "月球和火星世界中的真实低重力。",
   "moving_vehicles": "行驶的交通工具",

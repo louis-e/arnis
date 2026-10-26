@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Traffic lights that actually switch.",
   "zombie_outbreak": "Zombie Outbreak",
   "zombie_outbreak_desc": "Five nights of zombie waves through your streets, with a boss.",
+  "disasters": "Disasters",
+  "disasters_desc": "A disaster every few minutes: floods, tornadoes, earthquakes and more.",
   "body_gravity": "Moon & Mars Gravity",
   "body_gravity_desc": "Real low gravity on Moon and Mars worlds.",
   "moving_vehicles": "Moving Vehicles",

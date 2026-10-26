@@ -217,10 +217,7 @@ fn run_cli() {
     // Parse input arguments
     let mut args: Args = Args::parse();
     args::apply_body_defaults(&mut args);
-    // Caves carve into the filled ground, so they bring it with them.
-    if args.caves {
-        args.fillground = true;
-    }
+    args::apply_feature_needs(&mut args);
 
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
