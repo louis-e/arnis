@@ -1415,6 +1415,7 @@ fn gui_start_generation(
     discoveries: bool,
     traffic_lights: bool,
     zombie_outbreak: bool,
+    disasters: bool,
     moving_vehicles: bool,
     body_gravity: bool,
     one_world: bool,
@@ -1706,15 +1707,13 @@ fn gui_start_generation(
                 discoveries,
                 pause_menu,
                 zombie_outbreak,
+                disasters,
                 moving_vehicles,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
-            // Same as run_cli: caves carve into the filled ground, so they bring it with them.
-            if args.caves {
-                args.fillground = true;
-            }
+            crate::args::apply_feature_needs(&mut args);
 
             let mut one_world_extending = false;
             if one_world {

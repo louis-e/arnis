@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Semafoare care chiar își schimbă culoarea.",
   "zombie_outbreak": "Invazie de zombi",
   "zombie_outbreak_desc": "Cinci nopți de valuri de zombi pe străzile tale, cu un boss.",
+  "disasters": "Dezastre",
+  "disasters_desc": "Un dezastru la câteva minute: inundații, tornade, cutremure și altele.",
   "body_gravity": "Gravitație pe Lună și Marte",
   "body_gravity_desc": "Gravitație redusă reală în lumile Lună și Marte.",
   "moving_vehicles": "Vehicule în mișcare",

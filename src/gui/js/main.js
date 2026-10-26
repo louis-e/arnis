@@ -53,6 +53,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initDialogs();
   initVoxyLightingCoupling();
   initCavesFillCoupling();
+  initDisastersCoupling();
   refreshHeightLimitRow();
   refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
@@ -1651,6 +1652,14 @@ let selectedWorldFormat = 'java'; // Default to Java
 
 const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
 
+// Sets a toggle another one depends on. Dispatches, so the settings store persists the
+// knock-on change too.
+function setChecked(el, value) {
+  if (el.checked === value) return;
+  el.checked = value;
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 // Voxy renders distant terrain from the per-voxel light stored in its LOD
 // cache, so pre-generating one without baked lighting would give a black
 // horizon. Keep the two toggles consistent in the UI rather than quietly
@@ -1660,18 +1669,11 @@ function initVoxyLightingCoupling() {
   const bake = document.getElementById('bake-lighting-toggle');
   if (!voxy || !bake) return;
 
-  // Dispatch so the settings store persists the knock-on change too.
-  const set = (el, value) => {
-    if (el.checked === value) return;
-    el.checked = value;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  };
-
   voxy.addEventListener('change', () => {
-    if (voxy.checked) set(bake, true);
+    if (voxy.checked) setChecked(bake, true);
   });
   bake.addEventListener('change', () => {
-    if (!bake.checked) set(voxy, false);
+    if (!bake.checked) setChecked(voxy, false);
   });
 }
 
@@ -1682,18 +1684,31 @@ function initCavesFillCoupling() {
   const fill = document.getElementById('fillground-toggle');
   if (!caves || !fill) return;
 
-  // Dispatch so the settings store persists the knock-on change too.
-  const set = (el, value) => {
-    if (el.checked === value) return;
-    el.checked = value;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  };
-
   caves.addEventListener('change', () => {
-    if (caves.checked) set(fill, true);
+    if (caves.checked) setChecked(fill, true);
   });
   fill.addEventListener('change', () => {
-    if (!fill.checked) set(caves, false);
+    if (!fill.checked) setChecked(caves, false);
+  });
+}
+
+// Disasters open up the ground and send people indoors, so turning them on turns on Fill
+// Ground and interiors. Turning Fill Ground off takes the disasters with it, as with caves.
+function initDisastersCoupling() {
+  const disasters = document.getElementById('disasters-toggle');
+  const fill = document.getElementById('fillground-toggle');
+  const interior = document.getElementById('interior-toggle');
+  if (!disasters || !fill || !interior) return;
+
+  // Only on a click: restoring saved settings fires change events too, and must not undo a
+  // choice to leave interiors off.
+  disasters.addEventListener('change', (event) => {
+    if (!disasters.checked || !event.isTrusted) return;
+    setChecked(fill, true);
+    if (!interior.disabled) setChecked(interior, true);
+  });
+  fill.addEventListener('change', () => {
+    if (!fill.checked) setChecked(disasters, false);
   });
 }
 
@@ -1804,6 +1819,7 @@ function refreshGameplayRows(format) {
   const earth = selectedCelestialBody === 'earth';
   setSettingsRowAvailable('pause-menu-toggle', pack);
   setSettingsRowAvailable('zombie-outbreak-toggle', pack);
+  setSettingsRowAvailable('disasters-toggle', pack);
   setSettingsRowAvailable('discoveries-toggle', pack && earth);
   setSettingsRowAvailable('traffic-lights-toggle', pack && earth);
   setSettingsRowAvailable('moving-cars-toggle', pack && earth);
@@ -3488,6 +3504,7 @@ async function startGeneration() {
         trafficLights: gameplayToggle('traffic-lights-toggle'),
         movingVehicles: gameplayToggle('moving-cars-toggle'),
         zombieOutbreak: gameplayToggle('zombie-outbreak-toggle'),
+        disasters: gameplayToggle('disasters-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : ""

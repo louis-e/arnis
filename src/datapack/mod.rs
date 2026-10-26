@@ -8,6 +8,7 @@
 //! function an overlay replaces also exists, as a stub if need be, in the base layer.
 
 mod dialogs;
+pub mod disasters;
 pub mod discoveries;
 mod resources;
 
@@ -189,6 +190,248 @@ const OUTBREAK: &[(&str, &[u8])] = static_files![
     "ov121/data/arnis/loot_table/outbreak/supply_drop.json",
 ];
 
+const DISASTERS: &[(&str, &[u8])] = static_files![
+    "data/arnis/function/disaster/load.mcfunction",
+    "data/arnis/function/disaster/tick.mcfunction",
+    "data/arnis/function/disaster/unsupported.mcfunction",
+    "ov80/data/arnis/function/disaster/active.mcfunction",
+    "ov80/data/arnis/function/disaster/active_tick.mcfunction",
+    "ov80/data/arnis/function/disaster/bag/refill.mcfunction",
+    "ov80/data/arnis/function/disaster/bag/roll.mcfunction",
+    "ov80/data/arnis/function/disaster/bag/take.mcfunction",
+    "ov80/data/arnis/function/disaster/bag/text.mcfunction",
+    "ov80/data/arnis/function/disaster/begin.mcfunction",
+    "ov80/data/arnis/function/disaster/calm.mcfunction",
+    "ov80/data/arnis/function/disaster/clear.mcfunction",
+    "ov80/data/arnis/function/disaster/control.mcfunction",
+    "ov80/data/arnis/function/disaster/end.mcfunction",
+    "ov80/data/arnis/function/disaster/fireworks.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/boat.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/drowned.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/drowned_spot.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/level.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/second.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/start.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/flood/warn.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/fall.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/hit.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/rattle.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/second.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/start.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/stone.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/stone_z.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/hail/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/active.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/calm.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/clock.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/status.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/timed.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/update.mcfunction",
+    "ov80/data/arnis/function/disaster/hud/warn.mcfunction",
+    "ov80/data/arnis/function/disaster/intro.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/act.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/aim.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/anywhere.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/attempt.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/beam.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/blast.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/charge.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/crash.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/gone.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/heartbeat.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/leave.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/look.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/mark.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/place.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/probe.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/rise.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/risen.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/second.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/seek.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/setup.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/sink.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/smash.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/spawn.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/start.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/steer.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/step.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/turn.mcfunction",
+    "ov80/data/arnis/function/disaster/kaiju/walk.mcfunction",
+    "ov80/data/arnis/function/disaster/load.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/aim.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/fly.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/impact.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/launch.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/mark.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/remains.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/rock.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/settle.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/start.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/meteor/volley.mcfunction",
+    "ov80/data/arnis/function/disaster/next.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/branch.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/cave_in.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/crack.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/damage.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/debris.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/falling.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/fissure.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/fissure_at.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/fissures.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/foreshock.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/hit.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/sag.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/sag_at.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/second.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/shake.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/shatter.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/split.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/start.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/tremor.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/twig.mcfunction",
+    "ov80/data/arnis/function/disaster/quake/veer.mcfunction",
+    "ov80/data/arnis/function/disaster/running.mcfunction",
+    "ov80/data/arnis/function/disaster/second.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/aim.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/arm.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/attempt.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/crack.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/depth.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/disc.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/drop.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/dust.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/edge.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/grow.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/ring_n.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/second.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/seek.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/start.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/sinkhole/volley.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/ask.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/cold.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/drift.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/fall.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/flurry.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/narrow.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/near.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/need.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/pulse.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/second.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/settle.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/start.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/try.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/warn.mcfunction",
+    "ov80/data/arnis/function/disaster/snow/widen.mcfunction",
+    "ov80/data/arnis/function/disaster/start.mcfunction",
+    "ov80/data/arnis/function/disaster/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/arm.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/bolt.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/start.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/strike.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/try.mcfunction",
+    "ov80/data/arnis/function/disaster/storm/volley.mcfunction",
+    "ov80/data/arnis/function/disaster/sweep.mcfunction",
+    "ov80/data/arnis/function/disaster/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/caught.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/core.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/debris.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/debris_end.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/debris_spawn.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/fling.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/goal.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/lost.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/place.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/pull.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/regoal.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/spawn.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/start.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/swirl.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/throw.mcfunction",
+    "ov80/data/arnis/function/disaster/tornado/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/tsunami/level.mcfunction",
+    "ov80/data/arnis/function/disaster/tsunami/roar.mcfunction",
+    "ov80/data/arnis/function/disaster/tsunami/second.mcfunction",
+    "ov80/data/arnis/function/disaster/tsunami/start.mcfunction",
+    "ov80/data/arnis/function/disaster/tsunami/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/tsunami/warn.mcfunction",
+    "ov80/data/arnis/function/disaster/util/follow_ground.mcfunction",
+    "ov80/data/arnis/function/disaster/util/forward.mcfunction",
+    "ov80/data/arnis/function/disaster/util/gust.mcfunction",
+    "ov80/data/arnis/function/disaster/util/gust_end.mcfunction",
+    "ov80/data/arnis/function/disaster/util/gust_floor.mcfunction",
+    "ov80/data/arnis/function/disaster/util/gust_tick.mcfunction",
+    "ov80/data/arnis/function/disaster/util/outdoors.mcfunction",
+    "ov80/data/arnis/function/disaster/util/probe.mcfunction",
+    "ov80/data/arnis/function/disaster/util/scatter.mcfunction",
+    "ov80/data/arnis/function/disaster/util/scatter_by.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_blow.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_gust.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_gusts.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_push.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_start.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_stop.mcfunction",
+    "ov80/data/arnis/function/disaster/util/wind_tick.mcfunction",
+    "ov80/data/arnis/function/disaster/victory.mcfunction",
+    "ov80/data/arnis/function/disaster/warn.mcfunction",
+    "ov80/data/arnis/function/disaster/warn_tick.mcfunction",
+    "ov80/data/arnis/function/disaster/warning.mcfunction",
+    "ov80/data/arnis/function/disaster/water/around.mcfunction",
+    "ov80/data/arnis/function/disaster/water/ask.mcfunction",
+    "ov80/data/arnis/function/disaster/water/begin.mcfunction",
+    "ov80/data/arnis/function/disaster/water/cell.mcfunction",
+    "ov80/data/arnis/function/disaster/water/down.mcfunction",
+    "ov80/data/arnis/function/disaster/water/hold.mcfunction",
+    "ov80/data/arnis/function/disaster/water/need.mcfunction",
+    "ov80/data/arnis/function/disaster/water/pulse.mcfunction",
+    "ov80/data/arnis/function/disaster/water/release.mcfunction",
+    "ov80/data/arnis/function/disaster/water/rest.mcfunction",
+    "ov80/data/arnis/function/disaster/water/ring.mcfunction",
+    "ov80/data/arnis/function/disaster/water/rule.mcfunction",
+    "ov80/data/arnis/function/disaster/water/second.mcfunction",
+    "ov80/data/arnis/function/disaster/water/step.mcfunction",
+    "ov80/data/arnis/function/disaster/water/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/water/try.mcfunction",
+    "ov80/data/arnis/function/disaster/water/turn.mcfunction",
+    "ov80/data/arnis/function/disaster/water/up.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/ash.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/burn.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/ember.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/embers.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/front.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/more.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/place.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/seed.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/smoke.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/spark.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/spark_at.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/start.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/stop.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/tick.mcfunction",
+    "ov80/data/arnis/function/disaster/wildfire/warn.mcfunction",
+    "ov80/data/arnis/tags/block/floodable.json",
+    "ov80/data/arnis/tags/block/kindling.json",
+    "ov80/data/arnis/tags/block/no_snow.json",
+    "ov80/data/arnis/tags/block/shatters.json",
+    "ov80/data/arnis/tags/block/stained_glass.json",
+    "ov80/data/arnis/tags/block/windblown.json",
+    "ov80/data/arnis/tags/entity_type/tornado_proof.json",
+];
+
 /// Which extras a world gets. All of them are opt-in.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Extras {
@@ -197,6 +440,7 @@ pub struct Extras {
     pub discoveries: bool,
     pub pause_menu: bool,
     pub outbreak: bool,
+    pub disasters: bool,
     pub cars: bool,
     /// Set once the rail network turns out to have trains on it.
     pub trains: bool,
@@ -214,6 +458,7 @@ impl Extras {
             discoveries: args.discoveries,
             pause_menu: args.pause_menu,
             outbreak: args.zombie_outbreak,
+            disasters: args.disasters,
             cars: args.moving_vehicles,
             trains: false,
         }
@@ -225,6 +470,7 @@ impl Extras {
             || self.discoveries
             || self.pause_menu
             || self.outbreak
+            || self.disasters
             || self.cars
             || self.trains
     }
@@ -290,6 +536,8 @@ pub struct PackContext {
     /// The functions that hold the routes and timetables, run each train and summon its
     /// carriages.
     pub train_functions: Vec<(String, String)>,
+    /// Which disasters the area gets and the water maps they rise by.
+    pub disasters: Option<disasters::Plan>,
 }
 
 impl PackContext {
@@ -352,7 +600,7 @@ pub fn install(world: &Path, ctx: &PackContext) -> Result<(), String> {
             eprintln!("Warning: the pause menu logo was left out of resources.zip: {e}");
         }
     }
-    if ctx.extras.outbreak {
+    if ctx.extras.outbreak || ctx.extras.disasters {
         crate::world_utils::start_in_survival(world)?;
     }
     Ok(())
@@ -369,6 +617,16 @@ fn pretty(value: &Value) -> Vec<u8> {
 /// Every file of the pack, as (path in the pack, contents).
 fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     let ex = ctx.extras;
+    // Planned from the world as it was written; without that, only what needs no map of it.
+    let unplanned;
+    let disaster_plan = match ctx.disasters.as_ref() {
+        Some(plan) => Some(plan),
+        None if ex.disasters => {
+            unplanned = disasters::Plan::without_maps(ctx.body);
+            Some(&unplanned)
+        }
+        None => None,
+    };
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
     let mut add_static = |set: &[(&str, &[u8])]| {
         out.extend(set.iter().map(|(p, b)| (p.to_string(), b.to_vec())));
@@ -385,6 +643,9 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     }
     if ex.outbreak {
         add_static(OUTBREAK);
+    }
+    if ex.disasters {
+        add_static(DISASTERS);
     }
     if ex.cars {
         add_static(CARS);
@@ -405,6 +666,7 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
         (ex.traffic_lights, "traffic"),
         (ex.pause_menu, "menu"),
         (ex.outbreak, "outbreak"),
+        (ex.disasters, "disaster"),
         (ex.cars, "cars"),
         (ex.trains, "trains"),
     ]
@@ -496,16 +758,23 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
         }
     }
 
-    if ex.pause_menu || ex.outbreak {
+    if ex.pause_menu || ex.outbreak || ex.disasters {
         let ov = "ov80/data/arnis/dialog";
-        let pause = if ex.pause_menu {
-            "arnis:menu"
+        // The menu leads to the game modes; without it each gets a pause button of its own.
+        let pause: Vec<&str> = if ex.pause_menu {
+            vec!["arnis:menu"]
         } else {
-            "arnis:outbreak"
+            [
+                (ex.outbreak, "arnis:outbreak"),
+                (ex.disasters, "arnis:disasters"),
+            ]
+            .into_iter()
+            .filter_map(|(on, id)| on.then_some(id))
+            .collect()
         };
         out.push((
             "ov80/data/minecraft/tags/dialog/pause_screen_additions.json".to_string(),
-            pretty(&json!({ "values": [pause] })),
+            pretty(&json!({ "values": pause })),
         ));
         if ex.pause_menu {
             out.push((format!("{ov}/menu.json"), pretty(&dialogs::menu(ctx))));
@@ -526,6 +795,16 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
                 pretty(&dialogs::outbreak(ctx)),
             ));
         }
+        if let Some(plan) = disaster_plan.filter(|_| ex.disasters) {
+            out.push((
+                format!("{ov}/disasters.json"),
+                pretty(&dialogs::disasters(ctx, plan)),
+            ));
+        }
+    }
+
+    if let Some(plan) = disaster_plan.filter(|_| ex.disasters) {
+        out.extend(plan.files(&ctx.area));
     }
 
     if ex.outbreak {
@@ -556,6 +835,7 @@ fn pack_mcmeta(ex: Extras) -> Value {
         (ex.discoveries, "discoveries"),
         (ex.pause_menu, "pause menu"),
         (ex.outbreak, "zombie outbreak"),
+        (ex.disasters, "disasters"),
         (ex.cars, "moving cars"),
         (ex.trains, "trains"),
     ] {
@@ -680,6 +960,9 @@ mod tests {
             red_amber: true,
             car_functions: Vec::new(),
             train_functions: Vec::new(),
+            disasters: extras
+                .disasters
+                .then(|| disasters::Plan::for_tests(CelestialBody::Moon)),
         }
     }
 
@@ -690,6 +973,7 @@ mod tests {
             discoveries: true,
             pause_menu: true,
             outbreak: true,
+            disasters: true,
             cars: true,
             trains: true,
         }
@@ -727,11 +1011,12 @@ mod tests {
     #[test]
     fn every_bundled_file_is_shipped_by_some_feature() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/minecraft/datapack_extras");
-        let listed: std::collections::HashSet<&str> =
-            [CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, CARS, TRAINS]
-                .iter()
-                .flat_map(|set| set.iter().map(|(p, _)| *p))
-                .collect();
+        let listed: std::collections::HashSet<&str> = [
+            CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, DISASTERS, CARS, TRAINS,
+        ]
+        .iter()
+        .flat_map(|set| set.iter().map(|(p, _)| *p))
+        .collect();
         let mut stack = vec![root.clone()];
         while let Some(dir) = stack.pop() {
             for entry in fs::read_dir(&dir).unwrap() {
@@ -746,6 +1031,79 @@ mod tests {
                     .to_string_lossy()
                     .replace('\\', "/");
                 assert!(listed.contains(rel.as_str()), "{rel} is never shipped");
+            }
+        }
+    }
+
+    /// The overlay a file sits in, by the pack format it starts at; 0 for the base layer.
+    fn layer(path: &str) -> (u32, &str) {
+        match path.strip_prefix("ov").and_then(|p| p.split_once('/')) {
+            Some((n, rest)) => (n.parse().unwrap(), rest),
+            None => (0, path),
+        }
+    }
+
+    #[test]
+    fn every_function_and_tag_a_function_names_exists_where_it_runs() {
+        let files = files(&ctx(all()));
+        let mut have: Vec<(u32, String)> = Vec::new();
+        for (path, _) in &files {
+            let (from, rest) = layer(path);
+            if let Some(f) = rest
+                .strip_prefix("data/arnis/function/")
+                .and_then(|f| f.strip_suffix(".mcfunction"))
+            {
+                have.push((from, format!("arnis:{f}")));
+            }
+            if let Some(t) = rest
+                .strip_prefix("data/arnis/tags/")
+                .and_then(|t| t.strip_suffix(".json"))
+                .and_then(|t| t.split_once('/'))
+            {
+                have.push((from, format!("#arnis:{}", t.1)));
+            }
+        }
+        for (path, bytes) in files.iter().filter(|(p, _)| p.ends_with(".mcfunction")) {
+            let (from, _) = layer(path);
+            let text = String::from_utf8_lossy(bytes);
+            for line in text.lines().filter(|l| !l.starts_with('#')) {
+                let names = line
+                    .match_indices("function arnis:")
+                    .map(|(i, _)| &line[i + "function ".len()..])
+                    .chain(line.match_indices("#arnis:").map(|(i, _)| &line[i..]));
+                for name in names {
+                    let name = name.split([' ', '{', ']']).next().unwrap();
+                    // Built by a macro at run time, or written from a road or rail
+                    // network, which the test has none of.
+                    let networked = ["clear", "ease", "look", "network", "body/", "all"]
+                        .iter()
+                        .any(|f| {
+                            name.starts_with(&format!("arnis:cars/{f}"))
+                                || name.starts_with(&format!("arnis:trains/{f}"))
+                        });
+                    if name.contains("$(") || networked {
+                        continue;
+                    }
+                    assert!(
+                        have.iter().any(|(at, n)| n == name && *at <= from),
+                        "{path} calls {name}, which is not there for it"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn macro_lines_and_only_they_use_variables() {
+        for (path, bytes) in files(&ctx(all()))
+            .iter()
+            .filter(|(p, _)| p.ends_with(".mcfunction"))
+        {
+            for line in String::from_utf8_lossy(bytes)
+                .lines()
+                .filter(|l| !l.starts_with('#'))
+            {
+                assert_eq!(line.starts_with('$'), line.contains("$("), "{path}: {line}");
             }
         }
     }

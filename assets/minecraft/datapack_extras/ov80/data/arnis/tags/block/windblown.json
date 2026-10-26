@@ -1,0 +1,31 @@
+{
+  "values": [
+    "#minecraft:leaves",
+    "#minecraft:flowers",
+    "#minecraft:saplings",
+    "#minecraft:crops",
+    "#minecraft:fences",
+    "#minecraft:fence_gates",
+    "#minecraft:wool",
+    "#minecraft:wool_carpets",
+    "#minecraft:banners",
+    "#minecraft:flower_pots",
+    "minecraft:glass",
+    "minecraft:glass_pane",
+    "#arnis:stained_glass",
+    "minecraft:short_grass",
+    "minecraft:tall_grass",
+    "minecraft:fern",
+    "minecraft:large_fern",
+    "minecraft:dead_bush",
+    "minecraft:sugar_cane",
+    "minecraft:vine",
+    "minecraft:lantern",
+    "minecraft:soul_lantern",
+    { "id": "minecraft:bush", "required": false },
+    { "id": "minecraft:short_dry_grass", "required": false },
+    { "id": "minecraft:tall_dry_grass", "required": false },
+    { "id": "minecraft:leaf_litter", "required": false },
+    { "id": "minecraft:wildflowers", "required": false }
+  ]
+}

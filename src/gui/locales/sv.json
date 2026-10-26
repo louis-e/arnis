@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Trafikljus som faktiskt växlar.",
   "zombie_outbreak": "Zombieutbrott",
   "zombie_outbreak_desc": "Fem nätter av zombievågor genom dina gator, med en boss.",
+  "disasters": "Katastrofer",
+  "disasters_desc": "En katastrof med några minuters mellanrum: översvämningar, tornados, jordbävningar och mer.",
   "body_gravity": "Månens och Mars gravitation",
   "body_gravity_desc": "Verklig låg gravitation i mån- och Marsvärldar.",
   "moving_vehicles": "Rörliga fordon",

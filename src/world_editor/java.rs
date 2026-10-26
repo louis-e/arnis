@@ -492,6 +492,13 @@ fn write_region_to_disk(
                     );
                 }
 
+                crate::datapack::disasters::record_chunk(
+                    abs_chunk_x,
+                    abs_chunk_z,
+                    &sections,
+                    &biome_names,
+                );
+
                 let chunk = Chunk {
                     sections,
                     x_pos: abs_chunk_x,

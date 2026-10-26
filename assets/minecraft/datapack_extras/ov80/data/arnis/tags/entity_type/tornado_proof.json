@@ -1,0 +1,27 @@
+{
+  "values": [
+    "minecraft:armor_stand",
+    "minecraft:marker",
+    "minecraft:block_display",
+    "minecraft:item_display",
+    "minecraft:text_display",
+    "minecraft:interaction",
+    "minecraft:item_frame",
+    "minecraft:glow_item_frame",
+    "minecraft:painting",
+    "minecraft:leash_knot",
+    "minecraft:lightning_bolt",
+    "minecraft:falling_block",
+    "minecraft:area_effect_cloud",
+    "minecraft:end_crystal",
+    "minecraft:wind_charge",
+    "minecraft:breeze_wind_charge",
+    "minecraft:minecart",
+    "minecraft:chest_minecart",
+    "minecraft:furnace_minecart",
+    "minecraft:hopper_minecart",
+    "minecraft:tnt_minecart",
+    "minecraft:command_block_minecart",
+    "minecraft:spawner_minecart"
+  ]
+}

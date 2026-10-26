@@ -237,6 +237,8 @@
   "traffic_lights_desc": "Luksofori, kas tiešām pārslēdzas.",
   "zombie_outbreak": "Zombiju uzliesmojums",
   "zombie_outbreak_desc": "Piecas naktis zombiju viļņu tavās ielās, ar bosu.",
+  "disasters": "Katastrofas",
+  "disasters_desc": "Ik pēc dažām minūtēm katastrofa: plūdi, tornado, zemestrīces un vēl vairāk.",
   "body_gravity": "Mēness un Marsa gravitācija",
   "body_gravity_desc": "Īsta zema gravitācija Mēness un Marsa pasaulēs.",
   "moving_vehicles": "Braucoši transportlīdzekļi",

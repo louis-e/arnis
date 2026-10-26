@@ -375,6 +375,13 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub zombie_outbreak: bool,
 
+    /// Disasters: a meteor shower, a tornado, a flood, an earthquake and more, one every few
+    /// minutes in random order, picked from those the area can have. Floods rise from the
+    /// mapped rivers and the sea. Starts the world in survival. Implies --fillground and a
+    /// ground level of at least -40, as sinkholes and cracks open up the ground. Java 1.21.6+.
+    #[arg(long, default_value_t = false)]
+    pub disasters: bool,
+
     /// Cars that drive the streets at the speed limit, queue behind each other, turn at
     /// junctions and, with --traffic-lights, stop at red; and trains, S-Bahns, metros and
     /// trams that run the mapped tracks and stop at their stations. Java 1.21.4+.
@@ -716,6 +723,21 @@ impl GameMode {
     }
 }
 
+/// Lowest ground a world with disasters is built on. The default puts the lowest ground two
+/// blocks above bedrock, which leaves sinkholes and cracks nothing to open into.
+pub const DISASTER_GROUND_LEVEL: i32 = -40;
+
+/// What some features need from the rest of the world: caves carve into the filled ground,
+/// and disasters dig holes in it, with rock under even the lowest ground.
+pub fn apply_feature_needs(args: &mut Args) {
+    if args.caves || args.disasters {
+        args.fillground = true;
+    }
+    if args.disasters {
+        args.ground_level = args.ground_level.max(DISASTER_GROUND_LEVEL);
+    }
+}
+
 /// Validates CLI arguments after parsing.
 /// For Java Edition: `--path` is required. If the directory doesn't exist, it will be created.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
@@ -800,6 +822,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.discoveries, "--discoveries"),
         (args.traffic_lights, "--traffic-lights"),
         (args.zombie_outbreak, "--zombie-outbreak"),
+        (args.disasters, "--disasters"),
         (args.body_gravity, "--body-gravity"),
         (args.moving_vehicles, "--moving-vehicles"),
     ];
@@ -1106,6 +1129,30 @@ mod tests {
         assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
         let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();
         assert!(one_world.contains("--pause-menu"), "{one_world}");
+    }
+
+    #[test]
+    fn disasters_bring_filled_ground_with_rock_under_the_lowest_point() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            apply_feature_needs(&mut args);
+            args
+        };
+        let plain = parse(&[]);
+        assert!(!plain.fillground);
+        assert_eq!(plain.ground_level, -62);
+        let disasters = parse(&["--disasters"]);
+        assert!(disasters.fillground);
+        assert_eq!(disasters.ground_level, DISASTER_GROUND_LEVEL);
+        assert!(validate_args(&disasters).is_ok());
+        let higher = parse(&["--disasters", "--ground-level", "10"]);
+        assert_eq!(higher.ground_level, 10);
+        assert!(parse(&["--caves"]).fillground);
     }
 
     #[test]
