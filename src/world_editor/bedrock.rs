@@ -936,8 +936,9 @@ impl BedrockWriter {
         if !block_entities.is_empty() {
             // Concatenated compounds, no list around them.
             let mut data: Vec<u8> = Vec::new();
-            for compound in &block_entities {
-                let bytes = nbtx::to_le_bytes(&without_empty_lists(compound))
+            for compound in &mut block_entities {
+                strip_empty_lists(compound);
+                let bytes = nbtx::to_le_bytes(&*compound)
                     .map_err(|e| BedrockSaveError::Nbt(format!("block entity compound: {e}")))?;
                 data.extend_from_slice(&bytes);
             }
@@ -1478,22 +1479,23 @@ fn build_chunk_key_bytes(
     buffer
 }
 
-/// The compound without its empty lists, at any depth. nbtx writes an empty list
+/// Leaves out the compound's empty lists, at any depth. nbtx writes an empty list
 /// without its element type and length, which leaves every tag after it
 /// unreadable. Bedrock reads a missing list as an empty one.
-fn without_empty_lists(compound: &StdHashMap<String, Value>) -> StdHashMap<String, Value> {
-    fn nested(value: &Value) -> Value {
+fn strip_empty_lists(compound: &mut StdHashMap<String, Value>) {
+    // False for a list that is or holds an empty list. One inside a list can't be left
+    // out without shifting the others, so the whole outer list goes.
+    fn keep(value: &mut Value) -> bool {
         match value {
-            Value::Compound(compound) => Value::Compound(without_empty_lists(compound)),
-            Value::List(items) => Value::List(items.iter().map(nested).collect()),
-            other => other.clone(),
+            Value::Compound(compound) => {
+                strip_empty_lists(compound);
+                true
+            }
+            Value::List(items) => !items.is_empty() && items.iter_mut().all(keep),
+            _ => true,
         }
     }
-    compound
-        .iter()
-        .filter(|(_, value)| !matches!(value, Value::List(items) if items.is_empty()))
-        .map(|(key, value)| (key.clone(), nested(value)))
-        .collect()
+    compound.retain(|_, value| keep(value));
 }
 
 /// The compounds of an NBT list, or nothing when it is absent or not a list.
@@ -2365,6 +2367,33 @@ mod tests {
         for id in ["Chest", "ItemFrame", "FlowerPot"] {
             assert!(ids.contains(&id), "{ids:?}");
         }
+    }
+
+    #[test]
+    fn empty_lists_are_left_out_at_any_depth() {
+        use fastnbt::Value as V;
+        let mut compound = StdHashMap::from([
+            ("lists".to_string(), V::List(vec![V::List(Vec::new())])),
+            (
+                "items".to_string(),
+                V::List(vec![V::Compound(StdHashMap::from([
+                    ("tags".to_string(), V::List(Vec::new())),
+                    ("count".to_string(), V::Int(1)),
+                ]))]),
+            ),
+            ("x".to_string(), V::Int(4)),
+        ]);
+        strip_empty_lists(&mut compound);
+        assert!(!compound.contains_key("lists"));
+        assert_eq!(compound.get("x"), Some(&V::Int(4)));
+        let Some(V::List(items)) = compound.get("items") else {
+            panic!("items kept");
+        };
+        let V::Compound(item) = &items[0] else {
+            panic!("an item compound");
+        };
+        assert!(!item.contains_key("tags"));
+        assert_eq!(item.get("count"), Some(&V::Int(1)));
     }
 
     #[test]

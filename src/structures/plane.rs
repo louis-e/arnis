@@ -315,8 +315,12 @@ fn extract_aeroway_segment(element: &ProcessedElement) -> Option<Seg> {
     if w.tags.get("area").map(|s| s.as_str()) == Some("yes") {
         return None;
     }
-    // Grass and dirt strips serve light aircraft, not the airliner model.
-    if crate::element_processing::highways::is_unpaved_aeroway(&w.tags) {
+    // Grass and dirt strips serve light aircraft, not the airliner model. Gravel stays:
+    // jets land on gravel runways in the Arctic.
+    if matches!(
+        w.tags.get("surface").map(String::as_str),
+        Some("grass" | "dirt" | "ground" | "earth" | "soil" | "sand" | "mud" | "clay")
+    ) {
         return None;
     }
     if w.nodes.len() < 2 {
@@ -833,6 +837,15 @@ mod tests {
 
         let paved = runway_way(2, vec![mk_node(3, 0, 0), mk_node(4, 500, 0)]);
         assert_eq!(collect_aeroways(&[paved]).len(), 1);
+
+        let mut tags = runway_tags();
+        tags.insert("surface".to_string(), "gravel".to_string());
+        let gravel = ProcessedElement::Way(ProcessedWay {
+            id: 3,
+            nodes: vec![mk_node(5, 0, 0), mk_node(6, 500, 0)],
+            tags,
+        });
+        assert_eq!(collect_aeroways(&[gravel]).len(), 1);
     }
 
     #[test]

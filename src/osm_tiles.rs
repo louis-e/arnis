@@ -408,8 +408,8 @@ fn read_tiles(
                     Ok(Some((on_wire, plain.starts_with(b"AOT2"), tile)))
                 })
                 .collect();
-            for entry in fetched {
-                let Some((on_wire, aot2_tile, tile)) = entry? else {
+            for fetched_tile in fetched {
+                let Some((on_wire, aot2_tile, tile)) = fetched_tile? else {
                     continue;
                 };
                 bytes += on_wire;
@@ -425,10 +425,13 @@ fn read_tiles(
             }
         }
         if tiles_read > tiles_before {
-            if let Some(date) = entry.built.as_deref().map(display_date) {
-                if !built.contains(&date) {
-                    built.push(date);
-                }
+            let date = entry
+                .built
+                .as_deref()
+                .filter(|b| !b.is_empty())
+                .map_or_else(|| "undated".to_string(), display_date);
+            if !built.contains(&date) {
+                built.push(date);
             }
         }
         opened.push(archive);

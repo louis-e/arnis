@@ -2587,11 +2587,6 @@ fn unpaved_aeroway_block(tags: &HashMap<String, String>) -> Option<Block> {
     }
 }
 
-/// Whether an aeroway is unpaved, like a grass strip.
-pub(crate) fn is_unpaved_aeroway(tags: &HashMap<String, String>) -> bool {
-    unpaved_aeroway_block(tags).is_some()
-}
-
 /// Concrete for a paved aeroway area: gray for runways, light gray for the rest.
 pub(crate) fn aeroway_area_block(way: &ProcessedWay) -> Option<Block> {
     if unpaved_aeroway_block(&way.tags).is_some() {

@@ -48,6 +48,10 @@ fn landuse_area(
     bridge_surface: &BridgeSurfaceMap,
     holes: Option<&Holes>,
 ) {
+    if !super::landuse_paints_ground(&element.tags) {
+        return;
+    }
+
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
@@ -61,10 +65,6 @@ fn landuse_area(
         "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
-        // These are too broad, they cover entire zones or grounds including
-        // gardens, parks, lawns and playing fields. ESA WorldCover handles built-up
-        // classification at 10m satellite resolution, which is far more precise.
-        "residential" | "commercial" | "education" | "religious" => return,
         "industrial" => STONE,     // Randomized per-block below
         "military" => GRASS_BLOCK, // Chosen per block by military_ground below
         "railway" => GRAVEL,

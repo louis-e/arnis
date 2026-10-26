@@ -708,7 +708,7 @@ impl FloodFillCache {
             return false;
         }
         if let Some(landuse) = tags.get("landuse") {
-            return matches!(landuse.as_str(), "residential" | "commercial");
+            return crate::element_processing::LANDUSE_FROM_LAND_COVER.contains(&landuse.as_str());
         }
         if tags.contains_key("natural")
             && tags.get("amenity").map(String::as_str) != Some("fountain")

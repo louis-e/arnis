@@ -1676,8 +1676,7 @@ fn parse_overture_row(
 ) -> Option<OvertureBuilding> {
     let mut id: Option<String> = None;
     let mut geometry_bytes: Option<Vec<u8>> = None;
-    let mut sources_str: Option<String> = None;
-    let mut geometry_osm: Option<bool> = None;
+    let mut is_osm = false;
     let mut osm_ref: Option<OsmRef> = None;
     let mut height: Option<f64> = None;
     let mut min_height: Option<f64> = None;
@@ -1710,9 +1709,9 @@ fn parse_overture_row(
                 }
             }
             "sources" => {
-                geometry_osm = geometry_is_osm(field);
-                // Kept for a `sources` shape the structured read does not know.
-                sources_str = Some(format!("{field}"));
+                // The text test only for a `sources` shape the structured read does not know.
+                is_osm = geometry_is_osm(field)
+                    .unwrap_or_else(|| format!("{field}").contains("OpenStreetMap"));
                 osm_ref = parse_osm_ref(field);
             }
             "height" => {
@@ -1825,12 +1824,6 @@ fn parse_overture_row(
     if exterior_ring.len() < 3 {
         return None;
     }
-
-    let is_osm = geometry_osm.unwrap_or_else(|| {
-        sources_str
-            .as_deref()
-            .is_some_and(|s| s.contains("OpenStreetMap"))
-    });
 
     let id = id?;
 
