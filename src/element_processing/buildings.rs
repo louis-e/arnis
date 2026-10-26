@@ -6295,10 +6295,15 @@ fn generate_roof_only_structure(
                 }
             })
             .unwrap_or(0)
-    } else if let Some(layer) = element.tags.get("layer") {
+    } else if let Some(layer) = element
+        .tags
+        .get("layer")
+        .filter(|_| element.tags.get("building:part").map(String::as_str) == Some("roof"))
+    {
         // For building:part=roof elements without explicit height tags, interpret
         // the layer tag as a coarse vertical-placement hint.  Each layer maps to
         // one floor cycle, producing reasonable stacking for multi-shell roof structures.
+        // On a building=roof, such as a porch, layer only says it covers the ground.
         layer
             .parse::<i32>()
             .ok()
@@ -21713,6 +21718,26 @@ mod facade_integration_tests {
             flank < crown_mid,
             "flank {flank} should sit below crown {crown_mid}"
         );
+    }
+
+    // Mappers put layer=1 on porch roofs to say they cover the ground below,
+    // not that they sit a storey up. Only roof parts stack by layer.
+    #[test]
+    fn a_porch_roof_with_layer_1_stays_at_porch_height() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = CoordinateBitmap::new(&xz);
+        let footprints = CoordinateBitmap::new(&xz);
+        let roof_top = |tags: &[(&str, &str)]| {
+            let way = rect_way(78, 10, 10, 16, 14, tags);
+            let mut editor = test_editor(&xz);
+            run_building(&mut editor, &way, &road, &footprints);
+            editor.highest_block_between(13, 12, 0, 200)
+        };
+        let plain = roof_top(&[("building", "roof")]).expect("a roof");
+        let porch = roof_top(&[("building", "roof"), ("layer", "1")]).expect("a roof");
+        assert_eq!(porch, plain);
+        let part = roof_top(&[("building:part", "roof"), ("layer", "1")]).expect("a roof");
+        assert!(part > plain, "part {part} should stack above {plain}");
     }
 
     #[test]
