@@ -1329,6 +1329,16 @@ impl<'a> WorldEditor<'a> {
         })
     }
 
+    /// `terrain_level` before rounding to a whole block.
+    pub fn terrain_level_exact(&self, x: i32, z: i32) -> Option<f64> {
+        self.ground.as_ref().map(|g| {
+            g.level_exact(XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            ))
+        })
+    }
+
     /// Register a flattened ground Y for a road cell. See
     /// `road_surface_overrides` for the full rationale; in short: wide roads
     /// choose a single Y per cross-section so all lateral blocks sit flat,

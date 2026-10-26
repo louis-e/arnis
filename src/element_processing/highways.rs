@@ -22,104 +22,160 @@ use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::{HashMap, HashSet};
 
-/// Upper bound on `block_range` used by wide-road width flattening. The
-/// stamp is `2 * block_range + 1`; with `MAX_BLOCK_RANGE = 8` we can sort
-/// up to 17 samples on the stack. Keep this generous — a `debug_assert`
-/// below catches it if a caller ever exceeds it.
+/// Widest road half-width in blocks.
 const MAX_BLOCK_RANGE: usize = 8;
 
 /// Centerline cells between pillars under a raised non-bridge road.
 const OVERPASS_PILLAR_INTERVAL: usize = 8;
 
-/// Median of the ground levels along the road's width-perpendicular
-/// strip at one along-length coordinate. Pure primitive — no along-length
-/// smoothing. Callers should use `perpendicular_median_ground_y` unless
-/// they specifically need the unsmoothed value.
-#[inline]
-fn perpendicular_median_raw(
-    editor: &WorldEditor,
-    set_x: i32,
-    set_z: i32,
-    centerline_x: i32,
-    centerline_z: i32,
-    block_range: i32,
-    dir_horizontal: bool,
-) -> i32 {
-    debug_assert!(block_range as usize <= MAX_BLOCK_RANGE);
-    let len = 2 * block_range as usize + 1;
-    // Stack buffer keeps this allocation-free on a hot path that runs
-    // millions of times for a city-scale bbox.
-    let mut ys = [0i32; 2 * MAX_BLOCK_RANGE + 1];
-    if dir_horizontal {
-        for (i, t) in (-block_range..=block_range).enumerate() {
-            ys[i] = editor.get_ground_level(set_x, centerline_z + t);
-        }
-    } else {
-        for (i, t) in (-block_range..=block_range).enumerate() {
-            ys[i] = editor.get_ground_level(centerline_x + t, set_z);
-        }
-    }
-    ys[..len].sort_unstable();
-    ys[len / 2]
+/// What one level change costs a road profile, in squared blocks of deviation from the
+/// ground. Dips shorter than about ten cells cost more than they save and are levelled.
+const ROAD_STEP_COST: f64 = 5.0;
+/// Levels either side of the smoothed ground a road profile may take.
+const ROAD_PROFILE_REACH: i32 = 2;
+const ROAD_PROFILE_LEVELS: usize = (2 * ROAD_PROFILE_REACH + 2) as usize;
+/// Centerline cells either side a road's heading is read over.
+const ROAD_HEADING_CELLS: usize = 4;
+/// Gaussian, sigma 2 cells, so a diagonal centerline stepping across a side slope
+/// doesn't read as bumps.
+const ROAD_SMOOTHING: [f64; 13] = [
+    0.0022, 0.0088, 0.0270, 0.0648, 0.1210, 0.1760, 0.1995, 0.1760, 0.1210, 0.0648, 0.0270, 0.0088,
+    0.0022,
+];
+/// Half the side of the square a junction's level is averaged over.
+const JUNCTION_RADIUS: i32 = 3;
+
+/// Unrounded ground at a column, ignoring any surface a road has set.
+fn terrain_exact(editor: &WorldEditor, x: i32, z: i32) -> f64 {
+    editor
+        .terrain_level_exact(x, z)
+        .filter(|h| h.is_finite())
+        .unwrap_or_else(|| f64::from(editor.get_ground_level(x, z)))
 }
 
-/// Precompute one target Y per axial position in a centerline's stamp.
-///
-/// Each slot is the median of the ground levels along the road's width-perpendicular strip
-/// **at that cell's along-length coordinate**. Nothing is sampled in the travel direction,
-/// so the target Y follows the terrain along the road while staying identical across the
-/// width at any length position: every lateral cross-section sits flat, not pitched
-/// sideways down a slope.
-///
-/// A 3-tap median along the length axis is layered on top, purely to kill 1-cell terrain
-/// noise that would otherwise leave single-block potholes in the road surface
-/// (e.g. `…1 1 0 1 1…` → `…1 1 1 1 1…`). A monotone ramp is unaffected because the 3-tap
-/// median of any monotonic triple is the middle value.
-///
-/// Hot-loop optimization: every cell of the `(2b+1) × (2b+1)` stamp that shares an axial
-/// offset (dx for horizontal travel, dz for vertical travel) gets the same Y, and
-/// neighbouring offsets share two of their three raw strip medians, so each raw median is
-/// taken once per centerline point.
-///
-/// The table layout maps axial offset `a ∈ [-block_range, block_range]` to index
-/// `(a + block_range) as usize`. `out.len()` must be at least `2 * block_range + 1`.
-/// `dir_horizontal` is true when `|dx_segment| >= |dz_segment|`, i.e. travel is
-/// x-dominant and the strips run along z.
-#[inline]
-fn precompute_row_medians(
+/// The level every way through a junction is held to, from the ground around it alone,
+/// so each way reaches the same level whatever order or tile it is drawn in.
+fn junction_level(editor: &WorldEditor, x: i32, z: i32) -> i32 {
+    let mut sum = 0.0;
+    for dz in -JUNCTION_RADIUS..=JUNCTION_RADIUS {
+        for dx in -JUNCTION_RADIUS..=JUNCTION_RADIUS {
+            sum += terrain_exact(editor, x + dx, z + dz);
+        }
+    }
+    let side = f64::from(2 * JUNCTION_RADIUS + 1);
+    (sum / (side * side)).round() as i32
+}
+
+/// Surface Y of an at-grade road for each cell of its centerline path, in the order the
+/// renderer walks it. The ground across the road is averaged, smoothed along it, then
+/// levelled so the road steps only where the ground does. Points it shares with another
+/// highway are held to their junction level.
+fn road_profile(
     editor: &WorldEditor,
-    centerline_x: i32,
-    centerline_z: i32,
+    way: &ProcessedWay,
     block_range: i32,
-    dir_horizontal: bool,
-    out: &mut [i32],
-) {
-    debug_assert!(block_range as usize <= MAX_BLOCK_RANGE);
-    let len = 2 * block_range as usize + 1;
-    debug_assert!(out.len() >= len);
-    let mut raw = [0i32; 2 * MAX_BLOCK_RANGE + 3];
-    for (i, slot) in raw[..len + 2].iter_mut().enumerate() {
-        let axial = -block_range - 1 + i as i32;
-        let (sx, sz) = if dir_horizontal {
-            (centerline_x + axial, centerline_z)
-        } else {
-            (centerline_x, centerline_z + axial)
-        };
-        *slot = perpendicular_median_raw(
-            editor,
-            sx,
-            sz,
-            centerline_x,
-            centerline_z,
-            block_range,
-            dir_horizontal,
-        );
+    connectivity: &HighwayConnectivityMap,
+) -> Vec<i32> {
+    let Some(first) = way.nodes.first() else {
+        return Vec::new();
+    };
+    let mut cells: Vec<(i32, i32)> = vec![(first.x, first.z)];
+    let mut node_cells: Vec<usize> = vec![0];
+    for pair in way.nodes.windows(2) {
+        let path = bresenham_line(pair[0].x, 0, pair[0].z, pair[1].x, 0, pair[1].z);
+        cells.extend(path.iter().skip(1).map(|&(x, _, z)| (x, z)));
+        node_cells.push(cells.len() - 1);
     }
-    for (i, slot) in out[..len].iter_mut().enumerate() {
-        let mut taps = [raw[i], raw[i + 1], raw[i + 2]];
-        taps.sort_unstable();
-        *slot = taps[1];
+    let n = cells.len();
+    let width = f64::from(2 * block_range + 1);
+    let across: Vec<f64> = (0..n)
+        .map(|i| {
+            let (ax, az) = cells[i.saturating_sub(ROAD_HEADING_CELLS)];
+            let (bx, bz) = cells[(i + ROAD_HEADING_CELLS).min(n - 1)];
+            let (tx, tz) = (f64::from(bx - ax), f64::from(bz - az));
+            let len = tx.hypot(tz);
+            let (px, pz) = if len > 0.0 {
+                (-tz / len, tx / len)
+            } else {
+                (0.0, 0.0)
+            };
+            let (cx, cz) = (f64::from(cells[i].0), f64::from(cells[i].1));
+            let sum: f64 = (-block_range..=block_range)
+                .map(|k| {
+                    let k = f64::from(k);
+                    terrain_exact(
+                        editor,
+                        (cx + px * k).round() as i32,
+                        (cz + pz * k).round() as i32,
+                    )
+                })
+                .sum();
+            sum / width
+        })
+        .collect();
+    let half = ROAD_SMOOTHING.len() / 2;
+    let smooth: Vec<f64> = (0..n)
+        .map(|i| {
+            ROAD_SMOOTHING
+                .iter()
+                .enumerate()
+                .map(|(k, w)| w * across[(i + k).saturating_sub(half).min(n - 1)])
+                .sum()
+        })
+        .collect();
+
+    let mut pins: Vec<Option<i32>> = vec![None; n];
+    for (node, &cell) in way.nodes.iter().zip(&node_cells) {
+        if connectivity.is_shared(node.x, node.z) {
+            pins[cell] = Some(junction_level(editor, node.x, node.z));
+        }
     }
+    level_profile(&smooth, &pins)
+}
+
+/// Whole-block heights for a smoothed profile: the sequence paying least in squared
+/// deviation plus `ROAD_STEP_COST` per level changed, held to `pins` where given.
+fn level_profile(smooth: &[f64], pins: &[Option<i32>]) -> Vec<i32> {
+    const W: usize = ROAD_PROFILE_LEVELS;
+    let n = smooth.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    // The levels a cell may take: W from `low`, or only its pin.
+    let low = |i: usize| pins[i].unwrap_or(smooth[i].floor() as i32 - ROAD_PROFILE_REACH);
+    let span = |i: usize| if pins[i].is_some() { 1 } else { W };
+    let own = |i: usize, y: i32| (f64::from(y) - smooth[i]).powi(2);
+    let mut cost = [f64::INFINITY; W];
+    for (k, c) in cost.iter_mut().enumerate().take(span(0)) {
+        *c = own(0, low(0) + k as i32);
+    }
+    let mut back = vec![0u8; n * W];
+    for i in 1..n {
+        let (prev_low, lo) = (low(i - 1), low(i));
+        let mut next = [f64::INFINITY; W];
+        for (k, slot) in next.iter_mut().enumerate().take(span(i)) {
+            let y = lo + k as i32;
+            let mut best = (f64::INFINITY, 0u8);
+            for (j, &c) in cost.iter().enumerate().take(span(i - 1)) {
+                let c = c + ROAD_STEP_COST * f64::from((y - prev_low - j as i32).abs());
+                if c < best.0 {
+                    best = (c, j as u8);
+                }
+            }
+            *slot = best.0 + own(i, y);
+            back[i * W + k] = best.1;
+        }
+        cost = next;
+    }
+    let mut k = (0..span(n - 1))
+        .min_by(|&a, &b| cost[a].total_cmp(&cost[b]))
+        .unwrap_or(0);
+    let mut out = vec![0; n];
+    for i in (0..n).rev() {
+        out[i] = low(i) + k as i32;
+        k = usize::from(back[i * W + k]);
+    }
+    out
 }
 
 /// Default block-mix used for road surfaces when no `surface=*` tag is
@@ -230,8 +286,29 @@ fn is_pedestrian_way_tags(tags: &HashMap<String, String>) -> bool {
     matches!(tags.get("footway").map(|s| s.as_str()), Some(v) if v != "no")
 }
 
-/// Type alias for highway connectivity map
-pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
+/// Where highways meet: the layers of the ways ending at each point, and every point
+/// two or more highways pass through.
+#[derive(Default)]
+pub struct HighwayConnectivityMap {
+    ends: HashMap<(i32, i32), Vec<i32>>,
+    /// Packed with `pack_xz`, sorted.
+    shared: Vec<u64>,
+}
+
+impl HighwayConnectivityMap {
+    #[cfg(test)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn is_shared(&self, x: i32, z: i32) -> bool {
+        self.shared.binary_search(&pack_xz(x, z)).is_ok()
+    }
+}
+
+fn pack_xz(x: i32, z: i32) -> u64 {
+    (u64::from(x as u32) << 32) | u64::from(z as u32)
+}
 
 /// How far off a deck a lamp tagged with a `layer` moves onto it, as one mapped on a sidewalk
 /// the deck leaves out.
@@ -1269,7 +1346,9 @@ fn place_way_lamps(
 
 /// Build a connectivity map for highway endpoints to determine where slopes are needed.
 pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayConnectivityMap {
-    let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
+    let mut ends: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
+    let mut points: Vec<u64> = Vec::new();
+    let mut own: Vec<u64> = Vec::new();
 
     for element in elements {
         if let ProcessedElement::Way(way) = element {
@@ -1284,27 +1363,34 @@ pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayC
                 let layer_value = if layer_value < 0 { 0 } else { layer_value };
 
                 // Add connectivity for start and end nodes
-                if !way.nodes.is_empty() {
-                    let start_node = &way.nodes[0];
-                    let end_node = &way.nodes[way.nodes.len() - 1];
-
-                    let start_coord = (start_node.x, start_node.z);
-                    let end_coord = (end_node.x, end_node.z);
-
-                    connectivity_map
-                        .entry(start_coord)
+                if let (Some(start_node), Some(end_node)) = (way.nodes.first(), way.nodes.last()) {
+                    ends.entry((start_node.x, start_node.z))
                         .or_default()
                         .push(layer_value);
-                    connectivity_map
-                        .entry(end_coord)
+                    ends.entry((end_node.x, end_node.z))
                         .or_default()
                         .push(layer_value);
                 }
+
+                // Each way counts once per point, so a loop's closing node isn't shared.
+                own.clear();
+                own.extend(way.nodes.iter().map(|n| pack_xz(n.x, n.z)));
+                own.sort_unstable();
+                own.dedup();
+                points.extend_from_slice(&own);
             }
         }
     }
 
-    connectivity_map
+    points.sort_unstable();
+    let mut shared: Vec<u64> = points
+        .windows(2)
+        .filter(|pair| pair[0] == pair[1])
+        .map(|pair| pair[0])
+        .collect();
+    shared.dedup();
+    shared.shrink_to_fit();
+    HighwayConnectivityMap { ends, shared }
 }
 
 /// Internal function that generates highways with connectivity context for elevation handling
@@ -1313,7 +1399,7 @@ fn generate_highways_internal(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     args: &Args,
-    highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
+    highway_connectivity: &HighwayConnectivityMap,
     flood_fill_cache: &FloodFillCache,
     road_mask: &RoadMaskBitmap,
     bridge_structures: &BridgeStructureMap,
@@ -1639,8 +1725,8 @@ fn generate_highways_internal(
                 tunnel_portals.approach(way.id)
             };
 
-            // Raw DEM up front: the perpendicular median reads back this road's own
-            // overrides, so folding a descent into it would compound cell after cell.
+            // Raw DEM up front: the ground level reads back this road's own overrides,
+            // so folding a descent into it would compound cell after cell.
             let tunnel_approach_terrain: Vec<i32> = if tunnel_approach.is_none() {
                 Vec::new()
             } else {
@@ -1704,6 +1790,17 @@ fn generate_highways_internal(
                     .map(|c| c.palette())
             };
 
+            // One surface level per centerline cell; bridges and ramps carry their own.
+            let road_ys: Vec<i32> = if is_bridge_member || is_bridge_ramp {
+                Vec::new()
+            } else {
+                road_profile(editor, way, block_range, highway_connectivity)
+            };
+            let road_y_at = |tds: usize, along: i32| {
+                let at = (tds as i32 + along).clamp(0, road_ys.len() as i32 - 1);
+                road_ys[at as usize]
+            };
+
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
             let total_segments = way.nodes.len() - 1;
@@ -1733,19 +1830,11 @@ fn generate_highways_internal(
                     // Calculate elevation for this segment
                     let segment_length = bresenham_points.len();
 
-                    // Travel direction for this segment. The perpendicular
-                    // median sampling runs along the *other* axis, so that
-                    // lateral cross-sections end up level while the road's
-                    // Y still varies along length as the terrain climbs /
-                    // descends.
+                    // Dominant axis of this segment, which stripes and crossing lines run across.
                     let dir_horizontal = (x2 - x1).abs() >= (z2 - z1).abs();
 
-                    // Whether wide-road Y-flattening applies to this
-                    // segment. Bridges and 1-cell paths keep their legacy
-                    // per-call behaviour; everything else gets the
-                    // perpendicular median via
-                    // `perpendicular_median_ground_y`.
-                    let flatten_width = !is_bridge_member && !is_bridge_ramp && block_range >= 1;
+                    // At-grade roads take their surface from the way's profile.
+                    let flatten_width = !road_ys.is_empty();
                     // Whether the road cross-section also registers an
                     // effective-ground override is decided per bresenham
                     // point below — `offset` varies inside a segment (slope
@@ -1787,6 +1876,11 @@ fn generate_highways_internal(
                             ((dx as f32 * ex + dz as f32 * ez) * inv).round() as i32
                         }
                     };
+                    // Profile height of a column, placed from the segment's start so every
+                    // stamp along it reads the same cell.
+                    let segment_tds = cumulative_distance_from_start;
+                    let profile_y =
+                        |cx: i32, cz: i32| road_y_at(segment_tds, along_offset(cx - x1, cz - z1));
 
                     // Bridges/ramps drive their Y from cumulative tds, so skip the duplicate
                     // shared endpoint on later segments. Non-bridge slope offsets keep the
@@ -1838,25 +1932,6 @@ fn generate_highways_internal(
                         let register_ground_override = flatten_width && offset == 0;
 
                         let use_absolute_y = is_bridge_member || is_bridge_ramp || flatten_width;
-
-                        // Precompute per-axial-offset perpendicular medians
-                        // once for this centerline. Every cell in the stamp
-                        // that shares an axial offset picks up the same
-                        // value — without this cache, we'd recompute the
-                        // full 3-tap median (which itself touches ~15
-                        // ground samples) for every `(dx, dz)` cell, making
-                        // wide-road rendering O(width²) per centerline.
-                        let mut row_medians = [0i32; 2 * MAX_BLOCK_RANGE + 1];
-                        if flatten_width {
-                            precompute_row_medians(
-                                editor,
-                                *x,
-                                *z,
-                                block_range,
-                                dir_horizontal,
-                                &mut row_medians,
-                            );
-                        }
 
                         // Only Arch actually reads this; other styles re-sample inside place_pillar.
                         let centerline_ground_y =
@@ -1920,8 +1995,12 @@ fn generate_highways_internal(
                                 } else if let Some(ay) = approach_y {
                                     ay
                                 } else if flatten_width {
-                                    let axial = if dir_horizontal { dx } else { dz };
-                                    row_medians[(axial + block_range) as usize] + offset
+                                    // A column another road already surfaced keeps its
+                                    // level, so the two never stack.
+                                    match editor.surface_override(set_x, set_z) {
+                                        Some(y) if offset == 0 => y,
+                                        _ => profile_y(set_x, set_z) + offset,
+                                    }
                                 } else {
                                     offset
                                 };
@@ -2213,9 +2292,10 @@ fn generate_highways_internal(
                             } else if let Some(ay) = approach_at(sx - *x, sz - *z) {
                                 ay
                             } else if flatten_width {
-                                let axial = if dir_horizontal { sx - *x } else { sz - *z };
-                                let idx = (axial + block_range).clamp(0, 2 * block_range);
-                                row_medians[idx as usize] + offset
+                                match editor.surface_override(sx, sz) {
+                                    Some(y) if offset == 0 => y,
+                                    _ => profile_y(sx, sz) + offset,
+                                }
                             } else {
                                 offset
                             };
@@ -2356,17 +2436,17 @@ fn generate_highways_internal(
 fn should_add_slope_at_node(
     node: &crate::osm_parser::ProcessedNode,
     current_layer: i32,
-    highway_connectivity: &HashMap<(i32, i32), Vec<i32>>,
+    highway_connectivity: &HighwayConnectivityMap,
 ) -> bool {
     let node_coord = (node.x, node.z);
 
     // If we don't have connectivity information, always add slopes for non-zero layers
-    if highway_connectivity.is_empty() {
+    if highway_connectivity.ends.is_empty() {
         return current_layer != 0;
     }
 
     // Check if there are other highways at different layers connected to this node
-    if let Some(connected_layers) = highway_connectivity.get(&node_coord) {
+    if let Some(connected_layers) = highway_connectivity.ends.get(&node_coord) {
         // Count how many ways are at the same layer as current way
         let same_layer_count = connected_layers
             .iter()
@@ -5336,5 +5416,234 @@ mod tests {
         let mut elements = vec![building(30, 0, 0, 10, 10, true)];
         assert_eq!(drop_buildings_on_aircraft_pavement(&mut elements, 1.0), 0);
         assert_eq!(elements.len(), 1);
+    }
+
+    fn sloped_ground(w: usize, h: usize, at: impl Fn(i32, i32) -> f32) -> crate::ground::Ground {
+        let heights = (0..h)
+            .map(|z| (0..w).map(|x| at(x as i32, z as i32)).collect())
+            .collect();
+        crate::ground::Ground::new_elevation_test(heights, w, h)
+    }
+
+    /// Highways alone, in the given order, with the connectivity a real run builds.
+    fn render_roads(editor: &mut WorldEditor, xzbbox: &XZBBox, elems: &[ProcessedElement]) {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let connectivity = build_highway_connectivity_map(elems);
+        let endpoints = collect_tunnel_internal_endpoints(elems, xzbbox);
+        let portals = test_portals(editor, elems, &endpoints);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        let mut cells = Vec::new();
+        for elem in elems {
+            generate_highways(
+                editor,
+                elem,
+                &args,
+                &connectivity,
+                &FloodFillCache::new(),
+                &empty,
+                &structures,
+                &surface,
+                &endpoints,
+                &portals,
+                &empty,
+                &mut cells,
+                &RoadMarkingIndex::default(),
+            );
+        }
+    }
+
+    /// Every road column tops out at its registered surface, so nothing stacks above it.
+    fn assert_no_stacked_surface(editor: &WorldEditor, x0: i32, x1: i32, z0: i32, z1: i32) {
+        for x in x0..=x1 {
+            for z in z0..=z1 {
+                if let Some(y) = editor.surface_override(x, z) {
+                    assert_eq!(
+                        editor.highest_block_between(x, z, y - 3, y + 3),
+                        Some(y),
+                        "road block above the surface at ({x}, {z})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn level_profile_holds_a_level_hovering_at_a_half_block() {
+        let smooth: Vec<f64> = (0..60)
+            .map(|i| if i % 3 == 0 { 4.56 } else { 4.44 })
+            .collect();
+        let ys = level_profile(&smooth, &vec![None; smooth.len()]);
+        assert!(ys.windows(2).all(|w| w[0] == w[1]), "{ys:?}");
+    }
+
+    #[test]
+    fn level_profile_climbs_a_ramp_one_block_at_a_time() {
+        let smooth: Vec<f64> = (0..80).map(|i| 0.13 * f64::from(i)).collect();
+        let ys = level_profile(&smooth, &vec![None; smooth.len()]);
+        for (i, w) in ys.windows(2).enumerate() {
+            assert!((0..=1).contains(&(w[1] - w[0])), "step at {i}: {ys:?}");
+        }
+        for (y, s) in ys.iter().zip(&smooth) {
+            assert!((f64::from(*y) - s).abs() <= 1.0, "{y} strays from {s}");
+        }
+    }
+
+    #[test]
+    fn level_profile_levels_a_short_dip_and_keeps_a_long_one() {
+        let dip = |len: usize| {
+            let smooth: Vec<f64> = (0..100)
+                .map(|i| {
+                    if (40..40 + len).contains(&i) {
+                        9.0
+                    } else {
+                        10.0
+                    }
+                })
+                .collect();
+            level_profile(&smooth, &vec![None; smooth.len()])
+        };
+        assert!(dip(3).iter().all(|&y| y == 10), "{:?}", dip(3));
+        let long = dip(30);
+        assert!(
+            long[55] == 9 && long[10] == 10 && long[90] == 10,
+            "{long:?}"
+        );
+    }
+
+    #[test]
+    fn level_profile_meets_its_pins() {
+        let smooth = vec![3.4; 40];
+        let mut pins = vec![None; 40];
+        pins[0] = Some(5);
+        pins[39] = Some(1);
+        let ys = level_profile(&smooth, &pins);
+        assert_eq!((ys[0], ys[39]), (5, 1));
+        assert!(ys[10..30].iter().all(|&y| y == 3), "{ys:?}");
+    }
+
+    #[test]
+    fn shared_points_are_where_two_highways_pass() {
+        let road = [("highway", "residential")];
+        let elems = vec![
+            line_way(1, &[(0, 0), (10, 0), (20, 0)], &road),
+            line_way(2, &[(10, 0), (10, 10)], &road),
+            line_way(3, &[(50, 50), (60, 50), (60, 60), (50, 50)], &road),
+            line_way(4, &[(20, 0), (30, 0)], &[("building", "yes")]),
+        ];
+        let map = build_highway_connectivity_map(&elems);
+        assert!(map.is_shared(10, 0));
+        assert!(!map.is_shared(0, 0) && !map.is_shared(20, 0) && !map.is_shared(10, 10));
+        assert!(!map.is_shared(50, 50), "a loop's closing node is its own");
+        assert_eq!(map.ends.get(&(10, 0)), Some(&vec![0]));
+    }
+
+    #[test]
+    fn a_short_dip_in_the_ground_leaves_the_road_level() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 99.0).unwrap();
+        let ground = sloped_ground(
+            200,
+            100,
+            |x, _| if (70..=71).contains(&x) { -1.0 } else { 0.0 },
+        );
+        let mut editor = tunnel_editor(&xzbbox, ground);
+        let road = line_way(1, &[(10, 50), (150, 50)], &[("highway", "residential")]);
+        render_roads(&mut editor, &xzbbox, &[road]);
+        for x in 12..=148 {
+            assert_eq!(editor.surface_override(x, 50), Some(0), "dip at x={x}");
+        }
+    }
+
+    #[test]
+    fn a_diagonal_road_is_level_across_its_width() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 199.0).unwrap();
+        let ground = sloped_ground(200, 200, |x, _| 0.5 * x as f32);
+        let mut editor = tunnel_editor(&xzbbox, ground);
+        let road = line_way(1, &[(20, 20), (120, 120)], &[("highway", "residential")]);
+        render_roads(&mut editor, &xzbbox, &[road]);
+        // Across a (1, 1) way is (1, -1).
+        for t in 30..=110 {
+            let centre = editor.surface_override(t, t);
+            assert!(centre.is_some(), "no road at ({t}, {t})");
+            for k in [-1, 1] {
+                assert_eq!(
+                    editor.surface_override(t + k, t - k),
+                    centre,
+                    "tilted across the road at ({t}, {t})"
+                );
+            }
+        }
+        assert_no_stacked_surface(&editor, 20, 120, 20, 120);
+    }
+
+    #[test]
+    fn roads_meet_at_a_junction_at_one_level_in_either_order() {
+        let ground = || sloped_ground(200, 200, |x, z| 0.3 * x as f32 + 0.1 * z as f32);
+        let road = [("highway", "residential")];
+        let main = line_way(1, &[(10, 100), (100, 100), (190, 100)], &road);
+        let side = line_way(2, &[(100, 100), (100, 190)], &road);
+        let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 199.0).unwrap();
+        let mut levels = Vec::new();
+        for order in [[&main, &side], [&side, &main]] {
+            let mut editor = tunnel_editor(&xzbbox, ground());
+            let elems: Vec<ProcessedElement> = order.iter().map(|e| (*e).clone()).collect();
+            render_roads(&mut editor, &xzbbox, &elems);
+            assert_eq!(
+                editor.surface_override(100, 100),
+                Some(junction_level(&editor, 100, 100))
+            );
+            assert_no_stacked_surface(&editor, 5, 195, 95, 195);
+            levels.push(editor.surface_override(100, 100));
+        }
+        assert_eq!(levels[0], levels[1]);
+    }
+
+    #[test]
+    fn a_street_split_into_two_ways_has_no_seam() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 199.0).unwrap();
+        // Rising gently, so independent levelling could step either side of the split.
+        let ground = sloped_ground(200, 200, |x, _| 0.45 + 0.012 * x as f32);
+        let mut editor = tunnel_editor(&xzbbox, ground);
+        let road = [("highway", "residential")];
+        render_roads(
+            &mut editor,
+            &xzbbox,
+            &[
+                line_way(1, &[(10, 100), (97, 100)], &road),
+                line_way(2, &[(97, 100), (190, 100)], &road),
+            ],
+        );
+        let ys: Vec<i32> = (12..=188)
+            .map(|x| editor.surface_override(x, 100).unwrap())
+            .collect();
+        assert!(
+            ys.windows(2).all(|w| (0..=1).contains(&(w[1] - w[0]))),
+            "{ys:?}"
+        );
+    }
+
+    #[test]
+    fn a_loop_closes_without_a_step() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 199.0).unwrap();
+        let ground = sloped_ground(200, 200, |x, z| 0.08 * x as f32 + 0.05 * z as f32);
+        let mut editor = tunnel_editor(&xzbbox, ground);
+        let ring = [(60, 60), (140, 60), (140, 140), (60, 140), (60, 60)];
+        render_roads(
+            &mut editor,
+            &xzbbox,
+            &[line_way(1, &ring, &[("highway", "residential")])],
+        );
+        let mut path = Vec::new();
+        for pair in ring.windows(2) {
+            for (x, _, z) in bresenham_line(pair[0].0, 0, pair[0].1, pair[1].0, 0, pair[1].1) {
+                path.push(editor.surface_override(x, z).unwrap());
+            }
+        }
+        assert!(
+            path.windows(2).all(|w| (w[1] - w[0]).abs() <= 1),
+            "{path:?}"
+        );
     }
 }
