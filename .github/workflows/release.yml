@@ -58,6 +58,10 @@ jobs:
       if: runner.os != 'Linux'
       run: cargo build --release --target ${{ matrix.target }}
 
+    # A tracked file changed during the build gives the binary a -dirty build hash.
+    - name: Check the build left tracked files unchanged
+      run: git diff --exit-code HEAD
+
     - name: Rename binary for release
       run: mv target/${{ matrix.target }}/release/${{ matrix.binary_name }} target/release/${{ matrix.asset_name }}
 
