@@ -221,6 +221,10 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub aws_only_elevation: bool,
 
+    /// Chosen by the GUI; CLI generations keep the previous full-resolution sampling.
+    #[arg(skip = crate::terrain_detail::TerrainDetailLevel::High)]
+    pub(crate) terrain_detail_level: crate::terrain_detail::TerrainDetailLevel,
+
     /// Print generation-only timing to stderr (excludes data fetching)
     #[arg(long, hide = true)]
     pub benchmark: bool,
@@ -1123,6 +1127,10 @@ mod tests {
         // geo-terrain: objects on real elevation (the default)
         let args = parse(&["--mode", "geo-terrain"]);
         assert_eq!(args.mode, GenerationMode::GeoTerrain);
+        assert_eq!(
+            args.terrain_detail_level,
+            crate::terrain_detail::TerrainDetailLevel::High
+        );
         assert!(args.terrain());
         assert!(!args.skip_objects());
         assert!(validate_args(&args).is_ok());

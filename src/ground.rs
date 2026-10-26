@@ -7,7 +7,8 @@ use crate::coordinate_system::{
 };
 use crate::ecoregion::{EcoMap, Ecoregion};
 use crate::elevation::{
-    compute_grid_dims, compute_grid_dims_for_world, AffinePolicy, ElevationAffine,
+    compute_grid_dims_for_world_with_detail, compute_grid_dims_with_detail, AffinePolicy,
+    ElevationAffine,
 };
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
@@ -15,6 +16,7 @@ use crate::osm_parser::ProcessedElement;
 use crate::projection::WebMercatorProjection;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use crate::terrain_detail::TerrainDetailLevel;
 use colored::Colorize;
 use image::{Rgb, RgbImage};
 use std::sync::Arc;
@@ -144,9 +146,9 @@ impl GroundFrame {
 
     /// The padding is dropped when the padded grid would be capped, since the
     /// crop is only exact at one cell per block.
-    fn fetch_plan(&self, bbox: &LLBBox, scale: f64) -> FetchPlan {
+    fn fetch_plan(&self, bbox: &LLBBox, scale: f64, detail: TerrainDetailLevel) -> FetchPlan {
         let Some((world_w, world_h)) = self.world_dims else {
-            let (ww, wh, gw, gh) = compute_grid_dims(bbox, scale);
+            let (ww, wh, gw, gh) = compute_grid_dims_with_detail(bbox, scale, detail);
             return FetchPlan {
                 bbox: *bbox,
                 dims: (ww, wh, gw, gh),
@@ -156,7 +158,7 @@ impl GroundFrame {
         };
         let pad = self.pad_blocks;
         let (pw, ph) = (world_w + 2 * pad, world_h + 2 * pad);
-        let (_, _, gw, gh) = compute_grid_dims_for_world(pw, ph);
+        let (_, _, gw, gh) = compute_grid_dims_for_world_with_detail(pw, ph, detail);
         if let (Some(proj), true) = (&self.mercator, gw == pw && gh == ph) {
             // Providers sample a bbox edge to edge, so with one cell per block a
             // bbox running from first to last block centre samples every block
@@ -182,7 +184,7 @@ impl GroundFrame {
                 };
             }
         }
-        let (_, _, gw, gh) = compute_grid_dims_for_world(world_w, world_h);
+        let (_, _, gw, gh) = compute_grid_dims_for_world_with_detail(world_w, world_h, detail);
         FetchPlan {
             bbox: *bbox,
             dims: (world_w, world_h, gw, gh),
@@ -273,9 +275,10 @@ impl Ground {
         scale: f64,
         ground_level: i32,
         canopy_height: bool,
+        terrain_detail_level: TerrainDetailLevel,
         frame: &GroundFrame,
     ) -> Self {
-        let plan = frame.fetch_plan(bbox, scale);
+        let plan = frame.fetch_plan(bbox, scale, terrain_detail_level);
         let fetch_bbox = plan.bbox;
         let (grid_w, grid_h) = plan.grid_dims();
         // Canopy depends on neither, so it downloads alongside the land cover.
@@ -430,6 +433,7 @@ impl Ground {
         disable_height_limit: bool,
         extended_max_y: i32,
         aws_only_elevation: bool,
+        terrain_detail_level: TerrainDetailLevel,
         benchmark: bool,
         canopy_height: bool,
         body: CelestialBody,
@@ -444,7 +448,7 @@ impl Ground {
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
-        let plan = frame.fetch_plan(bbox, scale);
+        let plan = frame.fetch_plan(bbox, scale, terrain_detail_level);
         let requested_bbox = *bbox;
         let bbox = &plan.bbox;
         let (world_w, world_h, grid_w, grid_h) = plan.dims;
@@ -1386,6 +1390,7 @@ pub fn generate_ground_data(
             args.disable_height_limit,
             extended_max_y_for(args),
             args.aws_only_elevation,
+            args.terrain_detail_level,
             args.benchmark,
             args.canopy_height,
             args.body,
@@ -1413,6 +1418,7 @@ pub fn generate_ground_data(
         args.scale,
         args.ground_level,
         args.canopy_height,
+        args.terrain_detail_level,
         &frame,
     );
     ground.set_winter(args.winter);
@@ -1852,8 +1858,8 @@ mod frame_tests {
     #[test]
     fn the_local_frame_reads_everything_off_the_bbox() {
         let bbox = LLBBox::new(48.13, 11.56, 48.14, 11.58).unwrap();
-        let plan = GroundFrame::local().fetch_plan(&bbox, 1.0);
-        let (ww, wh, gw, gh) = compute_grid_dims(&bbox, 1.0);
+        let plan = GroundFrame::local().fetch_plan(&bbox, 1.0, TerrainDetailLevel::High);
+        let (ww, wh, gw, gh) = crate::elevation::compute_grid_dims(&bbox, 1.0);
         assert_eq!(plan.dims, (ww, wh, gw, gh));
         assert_eq!(plan.pad, 0);
         assert_eq!(plan.final_dims, (ww, wh));
@@ -1867,7 +1873,7 @@ mod frame_tests {
         let (rect, eff) = snap_bbox_to_chunks(&proj, &req).unwrap();
         let w = (rect.max_x() - rect.min_x() + 1) as usize;
         let h = (rect.max_z() - rect.min_z() + 1) as usize;
-        let plan = projected_frame(100, w, h).fetch_plan(&eff, 1.0);
+        let plan = projected_frame(100, w, h).fetch_plan(&eff, 1.0, TerrainDetailLevel::High);
         assert_eq!(plan.pad, 100);
         assert_eq!(plan.dims, (w + 200, h + 200, w + 200, h + 200));
         assert_eq!(plan.final_dims, (w, h));
@@ -1896,7 +1902,7 @@ mod frame_tests {
         let proj = WebMercatorProjection::new(0.0, 0.0, 1.0);
         let rect = XZBBox::rect_from_min_max(0, 0, side as i32 - 1, 15).unwrap();
         let eff = llbbox_for_rect(&proj, &rect).unwrap();
-        let plan = projected_frame(100, side, 16).fetch_plan(&eff, 1.0);
+        let plan = projected_frame(100, side, 16).fetch_plan(&eff, 1.0, TerrainDetailLevel::High);
         assert_eq!(plan.pad, 0);
         assert_eq!(plan.final_dims, (side, 16));
     }

@@ -312,15 +312,21 @@
     // flipping it refetches.
     const legacyToggle = document.getElementById("aws-only-elevation-toggle");
     const awsOnly = !!(legacyToggle && legacyToggle.checked);
-    const cacheKey = bboxText + "|" + awsOnly;
+    const detailButton = document.querySelector("#terrain-detail-level-group .segment.active");
+    const terrainDetailLevel = detailButton
+      ? detailButton.dataset.terrainDetailLevel
+      : "balanced";
+    const cacheKey = bboxText + "|" + awsOnly + "|" + terrainDetailLevel;
     if (payloadCache.key === cacheKey && payloadCache.data) return payloadCache.data;
     const buffer = await window.__TAURI__.core.invoke("gui_get_terrain_preview", {
       bboxText: bboxText,
       awsOnly: awsOnly,
+      terrainDetailLevel: terrainDetailLevel,
     });
     const d = parsePayload(buffer);
     d.gen = nextGen++;
     d.bboxText = bboxText;
+    d.terrainDetailLevel = terrainDetailLevel;
     datasets.set(d.gen, d);
     payloadCache = { key: cacheKey, data: d };
     gcDatasets();
@@ -574,15 +580,17 @@
       if (!d) return;
 
       toggle.disabled = true;
-      let url = landCoverCache.key === d.bboxText ? landCoverCache.url : null;
+      const landCoverKey = d.bboxText + "|" + d.terrainDetailLevel;
+      let url = landCoverCache.key === landCoverKey ? landCoverCache.url : null;
       if (!url) {
         const raw = await window.__TAURI__.core.invoke("gui_get_preview_landcover", {
           bboxText: d.bboxText,
+          terrainDetailLevel: d.terrainDetailLevel,
         });
         const { buffer, gw, gh } = readPayloadHeader(raw, "APL1");
         if (gw !== d.gw || gh !== d.gh) throw new Error("land cover grid mismatch");
         url = landCoverUrl(new Uint8Array(buffer, 12, gw * gh), gw, gh);
-        landCoverCache = { key: d.bboxText, url: url };
+        landCoverCache = { key: landCoverKey, url: url };
       }
       if (!modalView || modalView.map !== map) return;
       map.addSource("landcover", {
@@ -883,6 +891,12 @@
     },
     setGenerationRunning: function (running) {
       generationRunning = !!running;
+    },
+    refreshTerrain: function () {
+      const data = payloadCache.data;
+      if (miniView && data && data.bboxText && !generationRunning) {
+        requestMiniRender(data.bboxText);
+      }
     },
     // Called after a precompute or a generation has written facades into the
     // cache. The rendered preview is left alone until there is a payload to
