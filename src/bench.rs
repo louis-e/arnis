@@ -28,6 +28,11 @@ impl Bench {
         self.last = Instant::now();
     }
 
+    /// Leave a phase reported on its own line out of the next mark.
+    pub fn exclude(&mut self, dur: Duration) {
+        self.last += dur;
+    }
+
     /// Report a pre-accumulated duration (for phases timed across a loop).
     pub fn report(&self, label: &str, dur: Duration) {
         if self.on {

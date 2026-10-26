@@ -1,14 +1,16 @@
-//! Flowing water on the run-up to a one-block drop in a water surface, one level lower per
-//! block as vanilla spreads it, so the drop reads as a slope instead of a ledge.
+//! Flowing water on the run-up to a one-block drop in a water surface, so it reads as a slope.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
+use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 
 use crate::block_definitions::{
-    Block, BlockWithProperties, KELP, KELP_PLANT, SEAGRASS, SEA_PICKLE, TALL_SEAGRASS_BOTTOM,
-    TALL_SEAGRASS_TOP, WATER,
+    Block, BlockWithProperties, BRAIN_CORAL, BRAIN_CORAL_FAN, BUBBLE_CORAL, BUBBLE_CORAL_FAN,
+    FIRE_CORAL, FIRE_CORAL_FAN, HORN_CORAL, HORN_CORAL_FAN, KELP, KELP_PLANT, SEAGRASS, SEA_PICKLE,
+    TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, TUBE_CORAL, TUBE_CORAL_FAN, WATER,
 };
 use crate::element_processing::structure_kit::with_prop;
 use crate::world_editor::common::{ChunkToModify, SectionToModify};
@@ -16,10 +18,9 @@ use crate::world_editor::WorldEditor;
 
 /// Furthest vanilla water spreads from a source, so the longest run-up.
 const MAX_LEVEL: u8 = 7;
-/// Columns one decision reads around it: the level fill (7), its run-up check (1), the run-up (7)
-/// and the drop (1), plus slack.
+/// Columns a decision reads around it: fill 7, run-up check 1, run-up 7, drop 1, plus slack.
 const MARGIN: i32 = 20;
-/// Top water this far under the terrain is a cave pool, not a surface.
+/// Top water this far under the water level is a cave pool, not a surface.
 const CAVE_DEPTH: i32 = 5;
 /// Wet blocks counted under a top; a deeper run only has to read as wet.
 const DEPTH_CAP: u8 = 16;
@@ -59,9 +60,9 @@ impl Col {
     }
 }
 
-/// Water and the plants that always stand waterlogged in it.
+/// Water, and what stands in it: sea plants, corals and anything waterlogged.
 #[inline]
-fn is_wet(block: Block) -> bool {
+fn is_wet(block: Block, props: Option<&Arc<Value>>) -> bool {
     matches!(
         block,
         WATER
@@ -71,7 +72,41 @@ fn is_wet(block: Block) -> bool {
             | KELP
             | KELP_PLANT
             | SEA_PICKLE
-    )
+            | TUBE_CORAL
+            | BRAIN_CORAL
+            | BUBBLE_CORAL
+            | FIRE_CORAL
+            | HORN_CORAL
+            | TUBE_CORAL_FAN
+            | BRAIN_CORAL_FAN
+            | BUBBLE_CORAL_FAN
+            | FIRE_CORAL_FAN
+            | HORN_CORAL_FAN
+    ) || props.is_some_and(|p| {
+        matches!(p.as_ref(), Value::Compound(m)
+            if matches!(m.get("waterlogged"), Some(Value::String(v)) if v == "true"))
+    })
+}
+
+/// Whether the block at `y` in a column holds water.
+fn wet_at(chunk: &ChunkToModify, lx: u8, y: i32, lz: u8) -> bool {
+    let Some(section) = i8::try_from(y >> 4)
+        .ok()
+        .and_then(|sy| chunk.sections.get(sy))
+    else {
+        return false;
+    };
+    let idx = SectionToModify::index(lx, (y & 15) as u8, lz);
+    is_wet(section.storage.get(idx), props(section, idx))
+}
+
+#[inline]
+fn props(section: &SectionToModify, idx: usize) -> Option<&Arc<Value>> {
+    if section.properties.is_empty() {
+        None
+    } else {
+        section.properties.get(&idx)
+    }
 }
 
 /// Inclusive block rectangle.
@@ -112,8 +147,7 @@ impl Rect {
     }
 }
 
-/// Columns along the edges of regions already shaped, as they were before shaping, for the
-/// neighbours shaped after them once streaming may have written them out.
+/// Pre-shaping border columns of shaped regions, for neighbours shaped after they are written out.
 #[derive(Default)]
 pub(crate) struct Borders {
     saved: FnvHashMap<(i32, i32), Border>,
@@ -307,11 +341,7 @@ fn scan(
                         continue;
                     }
                     // Caves keep below the terrain, so only they put a top that low.
-                    if caves
-                        && editor
-                            .terrain_level(x, z)
-                            .is_some_and(|t| i32::from(col.top) < t - CAVE_DEPTH)
-                    {
+                    if caves && i32::from(col.top) < editor.get_water_level(x, z) - CAVE_DEPTH {
                         continue;
                     }
                     // Water beyond the area is unknown, so its edge columns stay sources.
@@ -335,16 +365,12 @@ fn column(chunk: &ChunkToModify, wet_sections: &[i8], lx: u8, lz: u8) -> Col {
         for ly in (0..16u8).rev() {
             let idx = SectionToModify::index(lx, ly, lz);
             let block = section.storage.get(idx);
-            if !is_wet(block) {
+            if !is_wet(block, props(section, idx)) {
                 continue;
             }
             let top = i32::from(sy) * 16 + i32::from(ly);
             let mut depth = 1u8;
-            while depth < DEPTH_CAP
-                && chunk
-                    .get_block(lx, top - i32::from(depth), lz)
-                    .is_some_and(is_wet)
-            {
+            while depth < DEPTH_CAP && wet_at(chunk, lx, top - i32::from(depth), lz) {
                 depth += 1;
             }
             let floored =
@@ -381,8 +407,7 @@ fn neighbours(i: usize, w: usize, h: usize) -> impl Iterator<Item = usize> {
     .flatten()
 }
 
-/// Flowing columns and their levels: a run-up reaches back from a column beside a surface one
-/// lower, at most `MAX_LEVEL` along its own surface, and falls one level per block from its source.
+/// Flowing columns and levels: run-ups of at most `MAX_LEVEL` back from a drop, fed from their far end.
 fn levels(cols: &[Col], w: usize, h: usize) -> Vec<(usize, u8)> {
     // Distances are stored one up, so zeroed memory reads as unreached.
     let mut dist = vec![0u8; w * h];
@@ -462,9 +487,7 @@ mod tests {
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
     use crate::deterministic_rng::coord_rng;
-    use fastnbt::Value;
     use rand::Rng;
-    use std::sync::Arc;
 
     /// `levels` as one level per column.
     fn dense(cols: &[Col], w: usize, h: usize) -> Vec<u8> {

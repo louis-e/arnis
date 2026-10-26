@@ -1745,15 +1745,17 @@ pub fn generate_world_with_options(
                                     if *c > 0 {
                                         continue;
                                     }
-                                    let shape_start = std::time::Instant::now();
-                                    crate::water_steps::shape_region(
-                                        &mut editor,
-                                        d,
-                                        args.caves,
-                                        &mut water_borders,
-                                        |r| real_regions.contains(&r),
-                                    );
-                                    water_steps_dur += shape_start.elapsed();
+                                    if !args.winter {
+                                        let shape_start = std::time::Instant::now();
+                                        crate::water_steps::shape_region(
+                                            &mut editor,
+                                            d,
+                                            args.caves,
+                                            &mut water_borders,
+                                            |r| real_regions.contains(&r),
+                                        );
+                                        water_steps_dur += shape_start.elapsed();
+                                    }
                                     flushable.push(d);
                                     for wave in deferred.complete(d) {
                                         place_units(&mut editor, &wave);
@@ -2076,10 +2078,13 @@ pub fn generate_world_with_options(
     }
 
     // Streaming shaped each region as its neighbourhood merged; placements come after either way.
-    if !eviction_active && matches!(world_format, WorldFormat::JavaAnvil) {
+    // Winter freezes rivers along their banks, which would strand the run-ups.
+    if !eviction_active && !args.winter && matches!(world_format, WorldFormat::JavaAnvil) {
         let shape_start = std::time::Instant::now();
         crate::water_steps::shape_all(&mut editor, args.caves);
-        bench.report("water_steps", shape_start.elapsed());
+        let shaped = shape_start.elapsed();
+        bench.report("water_steps", shaped);
+        bench.exclude(shaped);
     }
     drop(water_borders);
 

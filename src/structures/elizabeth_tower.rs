@@ -86,16 +86,6 @@ impl Tower {
         }
     }
 
-    fn hollow(&mut self, ys: std::ops::RangeInclusive<i32>, h: i32) {
-        for y in ys {
-            for x in C - h..=C + h {
-                for z in C - h..=C + h {
-                    self.cells.remove(&(x, y, z));
-                }
-            }
-        }
-    }
-
     /// A pyramid layer of half-width `h`: stairs on its edges where the next layer steps in.
     fn roof_layer(&mut self, y: i32, h: i32, next: i32, tile: Block, stair: Block, hip: Part) {
         self.ring(y, h, |f, u| {
@@ -412,17 +402,8 @@ fn roof(t: &mut Tower) {
     }
 }
 
-/// The shaft, clock room and belfry stand open inside, under a roof lit by the lantern.
+/// The bell frame behind the lancets, so they look into shadow, and the lantern's light.
 fn interior(t: &mut Tower) {
-    t.hollow(1..=58, 4);
-    t.hollow(1..=4, 5);
-    t.hollow(47..=58, 5);
-    t.hollow(60..=65, 5);
-    for (y, h) in ROOF {
-        t.hollow(y..=y, h - 1);
-    }
-    t.hollow(73..=75, 2);
-    // The bell frame, so the lancets look into shadow rather than through the tower.
     for y in 61..=64 {
         t.fill(y, 3, b(DARK_OAK_PLANKS));
     }
