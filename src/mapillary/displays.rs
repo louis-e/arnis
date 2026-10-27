@@ -785,10 +785,7 @@ pub(crate) fn hang_wall(
     )
 }
 
-/// [`hang_wall`] for a source that crops later: `crop` returns what the
-/// pixels will be made from, `picture` names them at the atlas floor, and
-/// `keep` gets each hung piece's name and quad with it, returning false to
-/// stop.
+/// [`hang_wall`] for pieces cropped later, named at the atlas floor; `keep` false stops.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn hang_wall_with<T>(
     editor: &mut WorldEditor,

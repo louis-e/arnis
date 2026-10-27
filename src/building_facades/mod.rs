@@ -982,9 +982,7 @@ fn place_candidate(
     hung
 }
 
-/// A name for the pixels a piece will hold at a given px per block, for
-/// [`displays::Pending`]. Asked per resolution because each gather rounds to
-/// its own source pixels.
+/// Names a piece's pixels per px per block, since each gather rounds to its own source pixels.
 fn picture_at(
     entry: usize,
     fit: Fit,
@@ -1203,8 +1201,7 @@ fn place_pending(editor: &mut WorldEditor, mut indices: Vec<usize>) {
     }
 }
 
-/// Crops every hung panel at the set's resolution, which is the pack's by
-/// now, and hands it to the pack.
+/// Crops every hung panel at the pack's resolution and hands it to the pack.
 fn crop_hung() {
     let (set, hung) = {
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
@@ -2177,9 +2174,7 @@ mod tests {
         displays::reset(false, 16);
     }
 
-    /// The same for panels hung while their region was flushed: they wait
-    /// for the pack's resolution instead of being cropped at the requested
-    /// one and shrunk by the writer.
+    /// Panels hung under a flushed region wait for the pack's resolution too.
     #[test]
     fn a_flushed_region_is_cropped_at_the_resolution_the_pack_ends_at() {
         let _guard = facades::TEST_GLOBALS
@@ -2247,9 +2242,7 @@ mod tests {
         displays::reset(false, 16);
     }
 
-    /// Enough buildings at scale 2 that 16 px would overflow the atlas, every
-    /// one its own size, so no two of them read the same metres of one
-    /// picture and the estimate cannot fold them together.
+    /// A city that overflows the atlas at 16 px, every building its own size so none fold together.
     fn collect_city<'a>(
         dir: &std::path::Path,
         xz: &'a crate::coordinate_system::cartesian::XZBBox,
