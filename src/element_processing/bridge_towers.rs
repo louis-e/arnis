@@ -51,8 +51,14 @@ struct Part<'a> {
     base_y: i32,
 }
 
+/// Metres, dropping heights buildings would not draw either.
 fn metres(v: Option<&String>) -> Option<f64> {
-    v?.trim().trim_end_matches('m').trim().parse::<f64>().ok()
+    v?.trim()
+        .trim_end_matches('m')
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|m| (0.0..=1000.0).contains(m))
 }
 
 fn part_of<'a>(way: &'a ProcessedWay, editor: &WorldEditor) -> Option<Part<'a>> {
@@ -403,6 +409,16 @@ mod tests {
             1.0,
         );
         assert!(s.is_none());
+    }
+
+    #[test]
+    fn heights_past_what_buildings_draw_are_dropped() {
+        let m = |v: &str| metres(Some(&v.to_string()));
+        assert_eq!(m("227"), Some(227.0));
+        assert_eq!(m("67.5 m"), Some(67.5));
+        for junk in ["inf", "1e10", "NaN", "-5", "1001"] {
+            assert_eq!(m(junk), None, "{junk}");
+        }
     }
 
     #[test]
