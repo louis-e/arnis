@@ -1671,7 +1671,8 @@ pub fn settle_build_height(
                         ""
                     };
                     format!(
-                        "{e} The area needs the extended build height, which makes the world                          larger{keep}."
+                        "{e} The area needs the extended build height, which makes the world \
+                         larger{keep}."
                     )
                 })?;
         }
