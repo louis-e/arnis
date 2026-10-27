@@ -6,6 +6,7 @@ use crate::block_definitions::Block;
 #[cfg(test)]
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::railways::{determine_rail_with_slope, smooth_diagonal_rails};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use fnv::FnvHashMap;
@@ -58,6 +59,8 @@ impl Default for TrackEnd {
 #[derive(Default)]
 pub struct RailJoins {
     ends: FnvHashMap<u64, [TrackEnd; 2]>,
+    /// In One World, the area being built, whose track the next area's meets at the edge.
+    area: Option<XZBBox>,
 }
 
 struct Track<'a> {
@@ -183,12 +186,32 @@ impl RailJoins {
             }
             ends.insert(track.way.id, pair);
         }
-        Self { ends }
+        Self { ends, area: None }
     }
 
     /// What lies past the start and the end of a way.
     pub fn ends(&self, way: u64) -> [TrackEnd; 2] {
         self.ends.get(&way).cloned().unwrap_or_default()
+    }
+
+    /// Meets the track of the areas built next to `area` at its edge.
+    pub fn meet_at_edge_of(&mut self, area: XZBBox) {
+        self.area = Some(area);
+    }
+
+    /// Where a run of cells crosses the area's edge, as the cell inside and the one outside.
+    pub fn edge_crossings(&self, cells: &[(i32, i32)]) -> Vec<[usize; 2]> {
+        let Some(area) = &self.area else {
+            return Vec::new();
+        };
+        let inside = |&(x, z): &(i32, i32)| area.contains(&XZPoint::new(x, z));
+        (1..cells.len())
+            .filter_map(|i| match (inside(&cells[i - 1]), inside(&cells[i])) {
+                (true, false) => Some([i - 1, i]),
+                (false, true) => Some([i, i - 1]),
+                _ => None,
+            })
+            .collect()
     }
 }
 

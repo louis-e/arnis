@@ -299,6 +299,7 @@ fn generate_at_grade_rail(
             .and_then(|(way, cell, _)| deck_y(bridge_structures, way, cell));
         pin_end(&mut pins, e, end, level.unwrap_or(ground[end_cell(n, e)]));
     }
+    pin_area_edge(&mut pins, rail_joins, &cells, |i| ground[i]);
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -409,6 +410,21 @@ fn pin_end(pins: &mut [Option<i32>], e: usize, end: &TrackEnd, level: i32) {
     };
     for i in [at, next] {
         pins[i].get_or_insert(level);
+    }
+}
+
+/// Holds both cells across One World's area edge at the inside one's level, as the next area does.
+fn pin_area_edge(
+    pins: &mut [Option<i32>],
+    rail_joins: &RailJoins,
+    cells: &[(i32, i32)],
+    level: impl Fn(usize) -> i32,
+) {
+    for [inside, outside] in rail_joins.edge_crossings(cells) {
+        let y = level(inside);
+        for i in [inside, outside] {
+            pins[i].get_or_insert(y);
+        }
     }
 }
 
@@ -1496,6 +1512,7 @@ fn generate_rail_tunnel_shell(
             }
         }
     }
+    pin_area_edge(&mut pins, rail_joins, &cells, |i| deep[i].max(lowest));
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -1950,6 +1967,32 @@ mod tests {
         assert_eq!(a.len(), 41);
         assert_eq!(a, record([true, false]));
         assert_eq!(a[&(1, 60, 50)], 2);
+    }
+
+    #[test]
+    fn one_world_areas_either_side_of_an_edge_lay_one_joined_track() {
+        // A diagonal up a slope, from one area into the next at x = 100.
+        let mut laid = Vec::new();
+        for (x0, x1) in [(0, 99), (100, 199)] {
+            let area = XZBBox::rect_from_min_max(x0, 0, x1, 199).unwrap();
+            let mut editor = test_editor(&area);
+            let heights = (0..200)
+                .map(|z| (x0..=x1).map(|x| (x + z) as f32 / 25.0).collect())
+                .collect();
+            editor.set_ground(std::sync::Arc::new(
+                crate::ground::Ground::new_elevation_test(heights, 100, 200),
+            ));
+            // Each clipped 64 blocks past its own area.
+            let mut way = straight_rail(&[("railway", "rail")]);
+            let (from, to) = ((x0 - 64).max(0), (x1 + 64).min(199));
+            (way.nodes[0].x, way.nodes[0].z) = (from, from);
+            (way.nodes[1].x, way.nodes[1].z) = (to, to);
+            let mut joins = RailJoins::default();
+            joins.meet_at_edge_of(area.clone());
+            run_joined(&mut editor, &way, &CoordinateBitmap::new(&area), &joins);
+            laid.extend(laid_rails(&editor, x0, 0, x1, 199));
+        }
+        assert_eq!(crate::element_processing::rail_track::loose_ends(&laid), 2);
     }
 
     #[test]

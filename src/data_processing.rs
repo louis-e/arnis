@@ -1157,7 +1157,11 @@ pub fn generate_world_with_options(
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
     // What each track way joins at its ends, so every tile lays the joints alike.
-    let rail_joins = railways::RailJoins::build(&elements, railways::track_level);
+    let mut rail_joins = railways::RailJoins::build(&elements, railways::track_level);
+    // Each area clips ways at its own padding, so tracks keep level where areas meet.
+    if one_world.is_some() {
+        rail_joins.meet_at_edge_of(xzbbox.clone());
+    }
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
 
