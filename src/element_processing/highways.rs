@@ -45,6 +45,9 @@ const ROAD_SMOOTHING: [f64; 13] = [
 /// Half the side of the square a junction's level is averaged over.
 const JUNCTION_RADIUS: i32 = 3;
 
+/// Height over the ground from which a ramp spans a way below it rather than walling it in.
+const RAMP_SPAN_CLEARANCE: i32 = 4;
+
 /// Unrounded ground at a column, ignoring any surface a road has set.
 fn terrain_exact(editor: &WorldEditor, x: i32, z: i32) -> f64 {
     editor
@@ -68,13 +71,13 @@ pub(crate) fn junction_level(editor: &WorldEditor, x: i32, z: i32) -> i32 {
 
 /// Surface Y of an at-grade road for each cell of its centerline path, in the order the
 /// renderer walks it. The ground across the road is averaged, smoothed along it, then
-/// levelled so the road steps only where the ground does. Points it shares with another
-/// highway are held to their junction level.
+/// levelled so the road steps only where the ground does. Nodes `pin_at` gives a level are
+/// held to it.
 pub(crate) fn road_profile(
     editor: &WorldEditor,
     way: &ProcessedWay,
     block_range: i32,
-    connectivity: &HighwayConnectivityMap,
+    pin_at: impl Fn(i32, i32) -> Option<i32>,
 ) -> Vec<i32> {
     let Some(first) = way.nodes.first() else {
         return Vec::new();
@@ -126,8 +129,8 @@ pub(crate) fn road_profile(
 
     let mut pins: Vec<Option<i32>> = vec![None; n];
     for (node, &cell) in way.nodes.iter().zip(&node_cells) {
-        if connectivity.is_shared(node.x, node.z) {
-            pins[cell] = Some(junction_level(editor, node.x, node.z));
+        if let Some(level) = pin_at(node.x, node.z) {
+            pins[cell] = Some(level);
         }
     }
     level_profile(&smooth, &pins)
@@ -437,6 +440,8 @@ impl TunnelApproach {
 pub struct TunnelPortalMap {
     ways: HashMap<u64, TunnelApproach>,
     nodes: HashMap<(i32, i32), i32>,
+    /// Every open tunnel end, approach or not.
+    open_ends: HashSet<(i32, i32)>,
 }
 
 impl TunnelPortalMap {
@@ -452,6 +457,10 @@ impl TunnelPortalMap {
     /// Blocks the road has already descended at this portal node.
     fn drop_at(&self, xz: (i32, i32)) -> i32 {
         self.nodes.get(&xz).copied().unwrap_or(0)
+    }
+
+    fn is_open_end(&self, xz: (i32, i32)) -> bool {
+        self.open_ends.contains(&xz)
     }
 }
 
@@ -691,7 +700,11 @@ pub fn collect_tunnel_portals(
         let tunnel_is_pedestrian = is_pedestrian_way_tags(&w.tags);
         for node in [&w.nodes[0], &w.nodes[w.nodes.len() - 1]] {
             let xz = (node.x, node.z);
-            if internal.contains(&xz) || portals.nodes.contains_key(&xz) {
+            if internal.contains(&xz) {
+                continue;
+            }
+            portals.open_ends.insert(xz);
+            if portals.nodes.contains_key(&xz) {
                 continue;
             }
             // Never below the bedrock plane at the portal itself.
@@ -850,7 +863,7 @@ pub fn generate_highway_tunnel_shell(
 
     // Raw DEM keeps road_y identical when a way is reprocessed across tiles.
     // `cover_ys` is the lowest ground the footprint touches; it decides the roof.
-    let (mut terrain_ys, cover_ys) = tunnel_cover_profile(editor, &pts, wall_off);
+    let (terrain_ys, cover_ys) = tunnel_cover_profile(editor, &pts, wall_off);
 
     let floor = tunnel_min_road_y();
     // No room anywhere: a road at grade beats a brick pit.
@@ -858,16 +871,10 @@ pub fn generate_highway_tunnel_shell(
         return false;
     }
 
-    let start_internal = internal_endpoints.contains(&pts[0]);
-    let end_internal = internal_endpoints.contains(&pts[last]);
-    // An open portal sits at the level the road outside reaches it at.
-    for (i, internal) in [(0, start_internal), (last, end_internal)] {
-        if !internal {
-            terrain_ys[i] = junction_level(editor, pts[i].0, pts[i].1);
-        }
-    }
     let start_ground = terrain_ys[0];
     let end_ground = terrain_ys[last];
+    let start_internal = internal_endpoints.contains(&pts[0]);
+    let end_internal = internal_endpoints.contains(&pts[last]);
     let denom = last.max(1) as f32;
     let layer_extra = tunnel_layer_extra(&way.tags);
     let cover_drop = TUNNEL_COVER_DROP.saturating_add(layer_extra);
@@ -1779,7 +1786,18 @@ fn generate_highways_internal(
             let own_profile: Vec<i32> = if is_bridge_member || is_bridge_ramp {
                 Vec::new()
             } else {
-                road_profile(editor, way, block_range, highway_connectivity)
+                // A tunnel portal keeps the ground at its mouth, which the bore starts from.
+                road_profile(editor, way, block_range, |x, z| {
+                    highway_connectivity.is_shared(x, z).then(|| {
+                        if tunnel_portals.is_open_end((x, z)) {
+                            editor
+                                .terrain_level(x, z)
+                                .unwrap_or_else(|| editor.get_ground_level(x, z))
+                        } else {
+                            junction_level(editor, x, z)
+                        }
+                    })
+                })
             };
             let road_ys: &[i32] = bridge_ramp.map_or(&own_profile, |ramp| ramp.ys());
             let road_y_at = |tds: usize, along: i32| {
@@ -1998,7 +2016,9 @@ fn generate_highways_internal(
                                     None
                                 };
                                 if let Some(ground) = raised_ground {
-                                    if bridge_surface.over_grade_way(set_x, set_z) {
+                                    if bridge_surface.over_grade_way(set_x, set_z)
+                                        && cell_y - ground >= RAMP_SPAN_CLEARANCE
+                                    {
                                         editor.set_block_absolute(
                                             STONE_BRICKS,
                                             set_x,
@@ -2271,9 +2291,11 @@ fn generate_highways_internal(
                                         );
                                         // A ramp's side is a retaining wall down to the ground,
                                         // unless another way runs below it.
-                                        if is_bridge_ramp && !road_mask.contains(rx, rz) {
+                                        if is_bridge_ramp {
                                             let ground = editor.get_ground_level(rx, rz);
-                                            if ground < by - 2 {
+                                            let spans = road_mask.contains(rx, rz)
+                                                && by - ground >= RAMP_SPAN_CLEARANCE;
+                                            if ground < by - 2 && !spans {
                                                 editor.fill_column_absolute(
                                                     STONE_BRICKS,
                                                     rx,
@@ -5575,6 +5597,40 @@ mod tests {
     }
 
     #[test]
+    fn a_short_ramp_is_solid_where_the_road_at_its_foot_reaches() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(99.0, 99.0).unwrap();
+        let mut editor = tunnel_editor(&xzbbox, sloped_ground(100, 100, |_, _| 0.0));
+        let road = [("highway", "residential")];
+        let elems = [
+            line_way(1, &[(0, 50), (34, 50)], &road),
+            line_way(
+                2,
+                &[(34, 50), (40, 50)],
+                &[("highway", "residential"), ("embankment", "yes")],
+            ),
+            line_way(
+                3,
+                &[(40, 50), (80, 50)],
+                &[
+                    ("highway", "residential"),
+                    ("bridge", "yes"),
+                    ("layer", "1"),
+                ],
+            ),
+        ];
+        render_roads(&mut editor, &xzbbox, &elems);
+        // Three cells up a steep ramp, still within reach of the road it leaves.
+        let y = editor.highest_block_between(37, 50, -5, 20).unwrap();
+        assert!(y >= 3, "the ramp is up at x=37: {y}");
+        for fill in 1..y {
+            assert!(
+                editor.get_block_absolute(37, fill, 50).is_some(),
+                "air under the ramp at y={fill}"
+            );
+        }
+    }
+
+    #[test]
     fn a_ramp_spans_a_street_along_its_edge() {
         let xzbbox = XZBBox::rect_from_xz_lengths(99.0, 99.0).unwrap();
         let mut editor = tunnel_editor(&xzbbox, sloped_ground(100, 100, |_, _| 0.0));
@@ -5593,6 +5649,34 @@ mod tests {
             editor.get_block_absolute(30, y - 2, 47),
             Some(STONE_BRICKS),
             "the far side keeps its wall"
+        );
+    }
+
+    #[test]
+    fn a_portal_at_the_foot_of_a_face_keeps_the_ground_in_front() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 99.0).unwrap();
+        let ground = sloped_ground(200, 100, |x, _| if x > 80 { 30.0 } else { 10.0 });
+        let mut editor = tunnel_editor(&xzbbox, ground);
+        let elems = [
+            line_way(1, &[(10, 50), (80, 50)], &[("highway", "residential")]),
+            line_way(
+                2,
+                &[(80, 50), (150, 50)],
+                &[("highway", "residential"), ("tunnel", "yes")],
+            ),
+        ];
+        render_roads(&mut editor, &xzbbox, &elems);
+        let ys: Vec<i32> = (50..=79)
+            .map(|x| editor.highest_block_between(x, 50, -20, 40).unwrap())
+            .collect();
+        assert!(
+            ys.windows(2).all(|w| w[1] <= w[0]),
+            "climbs to the mouth: {ys:?}"
+        );
+        assert!(ys[ys.len() - 1] < 10, "{ys:?}");
+        assert!(
+            editor.highest_block_between(80, 50, -20, 40).unwrap() < 10,
+            "nothing at the mouth stands above the ground in front"
         );
     }
 

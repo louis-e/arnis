@@ -2,7 +2,8 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
 use crate::elevation::providers::tile_math::{
-    grid_cell_m, pixel_m, sample_pixels, MAX_TILES_PER_FETCH, SMOOTH_PIXEL_CELLS,
+    decode_terrarium, grid_cell_m, in_tile, pixel_m, sample_pixels, MAX_TILES_PER_FETCH,
+    SMOOTH_PIXEL_CELLS,
 };
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -12,8 +13,6 @@ use std::path::Path;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
-/// Terrarium format offset for height decoding
-const TERRARIUM_OFFSET: f64 = 32768.0;
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -141,8 +140,8 @@ impl ElevationProvider for AwsTerrain {
                     let n_tiles = n as i64;
                     let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
                     let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
-                    let px = (fx_global - tile_x as f64 * 256.0).min(255.5);
-                    let py = (fy_global - tile_y as f64 * 256.0).min(255.5);
+                    let px = in_tile(fx_global, tile_x as f64 * 256.0, 256);
+                    let py = in_tile(fy_global, tile_y as f64 * 256.0, 256);
                     let Some(tile) = tile_map.get(&(tile_x, tile_y)) else {
                         continue;
                     };
@@ -197,11 +196,6 @@ fn sample_tile_pixel(
         return None;
     }
     Some(decode_terrarium(tile.get_pixel(x, y)))
-}
-
-#[inline]
-fn decode_terrarium(pixel: &image::Rgb<u8>) -> f64 {
-    (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0) - TERRARIUM_OFFSET
 }
 
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
@@ -394,6 +388,7 @@ fn fetch_or_load_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elevation::providers::tile_math::TERRARIUM_OFFSET;
 
     #[test]
     fn test_terrarium_height_decoding() {

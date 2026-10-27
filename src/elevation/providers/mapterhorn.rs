@@ -12,12 +12,13 @@ use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
-use super::tile_math::{grid_cell_m, pixel_m, sample_pixels, SMOOTH_PIXEL_CELLS};
+use super::tile_math::{
+    decode_terrarium, grid_cell_m, in_tile, pixel_m, sample_pixels, SMOOTH_PIXEL_CELLS,
+};
 
 const MAPTERHORN_URL: &str = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 /// 512px tiles, so one zoom lower fetches the same ground resolution as AWS 256px.
 const TILE_PX: u32 = 512;
-const TERRARIUM_OFFSET: f64 = 32768.0;
 /// z17 (~0.4 m/px) is only reachable with --scale > 1 over sub-meter source regions.
 const MAX_ZOOM: u8 = 17;
 /// Pyramid floor; any land tile exists at z6, only mid-ocean is absent there.
@@ -574,10 +575,6 @@ fn download_tile(
 // ─── Sampling ──────────────────────────────────────────────────────────
 
 #[inline]
-fn decode_terrarium(pixel: &image::Rgb<u8>) -> f64 {
-    (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0) - TERRARIUM_OFFSET
-}
-
 fn row_lat(bbox: &LLBBox, gy: usize, grid_height: usize) -> f64 {
     bbox.max().lat()
         - (gy as f64 / (grid_height - 1).max(1) as f64) * (bbox.max().lat() - bbox.min().lat())
@@ -741,11 +738,9 @@ fn sample_height(
         };
 
         let n = 2.0_f64.powi(z as i32);
-        // At the exact +180/south world edge the clamped key leaves px/py at
-        // TILE_PX; hold them on the last real pixel instead of NaN.
-        let edge = TILE_PX as f64 - 0.5;
-        let px = (norm_x * n * TILE_PX as f64 - key.x as f64 * TILE_PX as f64).min(edge);
-        let py = (norm_y * n * TILE_PX as f64 - key.y as f64 * TILE_PX as f64).min(edge);
+        let size = TILE_PX as f64;
+        let px = in_tile(norm_x * n * size, key.x as f64 * size, TILE_PX);
+        let py = in_tile(norm_y * n * size, key.y as f64 * size, TILE_PX);
         let (w, h) = (tile.width() as i32, tile.height() as i32);
         // Taps inside this tile read it directly; only edge taps look up a neighbour.
         let value = sample_pixels(px, py, z < smooth_below, |x, y| {
@@ -804,6 +799,7 @@ fn sample_tile_pixel(
 mod tests {
     use super::super::tile_math::bbox_dimensions_m;
     use super::*;
+    use crate::elevation::providers::tile_math::TERRARIUM_OFFSET;
 
     fn flat_tile(height_m: f64) -> TileImage {
         let raw = (height_m + TERRARIUM_OFFSET).round() as u32;
@@ -947,6 +943,16 @@ mod tests {
         // The spline is symmetric about the seam too, and settles within two pixels.
         assert!((at(0.0, 13) - 200.0).abs() < 1e-6, "got {}", at(0.0, 13));
         assert!((at(2.5, 13) - 300.0).abs() < 1e-6, "got {}", at(2.5, 13));
+        // Between the two pixel centres the height runs straight across the seam.
+        for k in -5..=5 {
+            let off = 0.1 * k as f64;
+            let want = 200.0 + 200.0 * off;
+            assert!(
+                (at(off, 12) - want).abs() < 1e-6,
+                "at {off}: {}",
+                at(off, 12)
+            );
+        }
     }
 
     #[test]

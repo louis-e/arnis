@@ -9,6 +9,28 @@ pub(super) const MAX_TILES_PER_FETCH: usize = 2048;
 /// Earth radius used by the Web Mercator projection (EPSG:3857).
 const EARTH_RADIUS_M: f64 = 6_378_137.0;
 
+/// Offset of the Terrarium encoding, in metres.
+pub(super) const TERRARIUM_OFFSET: f64 = 32768.0;
+
+/// Height in metres of a Terrarium-encoded pixel.
+#[inline]
+pub(super) fn decode_terrarium(pixel: &image::Rgb<u8>) -> f64 {
+    (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0) - TERRARIUM_OFFSET
+}
+
+/// Position `global` (in pixels) within the tile starting at `origin`. Only past the tile's
+/// far edge, where a clamped tile index leaves it at the world edge, is it held on the last
+/// pixel centre; anywhere inside, taps beyond the edge come from the neighbour tile.
+#[inline]
+pub(super) fn in_tile(global: f64, origin: f64, tile_px: u32) -> f64 {
+    let local = global - origin;
+    if local >= tile_px as f64 {
+        tile_px as f64 - 0.5
+    } else {
+        local
+    }
+}
+
 /// Approximate physical bbox dimensions in meters. Precise enough for
 /// resolution-level selection.
 pub(super) fn bbox_dimensions_m(bbox: &LLBBox) -> (f64, f64) {
@@ -124,6 +146,13 @@ pub(super) fn sample_pixels(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_tile_runs_up_to_the_edge_and_holds_only_past_it() {
+        assert_eq!(in_tile(1023.9, 512.0, 512), 511.9);
+        assert_eq!(in_tile(1024.0, 512.0, 512), 511.5);
+        assert_eq!(in_tile(512.0, 512.0, 512), 0.0);
+    }
 
     fn ramp(x: i32, y: i32) -> f64 {
         3.0 * x as f64 - 2.0 * y as f64 + 7.0

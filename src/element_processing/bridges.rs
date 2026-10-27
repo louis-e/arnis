@@ -419,16 +419,9 @@ impl BridgeStructureMap {
                         .collect()
                 })
                 .collect();
-            let Some(terrain_max) = terrain.iter().flatten().copied().max() else {
+            if terrain.iter().all(Vec::is_empty) {
                 continue;
-            };
-            let terrain_min = terrain
-                .iter()
-                .flatten()
-                .copied()
-                .min()
-                .unwrap_or(terrain_max);
-            let dip = terrain_max - terrain_min;
+            }
             let total_length: usize = group_indices
                 .iter()
                 .map(|&i| way_length_blocks(bridge_ways[i]))
@@ -584,13 +577,23 @@ impl BridgeStructureMap {
             // A road landing on the deck reaches that node at its junction level.
             for (m, &idx) in group_indices.iter().enumerate() {
                 let (s, e) = ends(idx);
-                let last = cells[m].len() - 1;
+                let last = cells[m].len().saturating_sub(1);
                 for (xz, i) in [(s, 0), (e, last)] {
                     if anchors_end(xz) && connectivity.is_shared(xz.0, xz.1) {
                         terrain[m][i] = junction_level(editor, xz.0, xz.1);
                     }
                 }
             }
+            let Some(terrain_max) = terrain.iter().flatten().copied().max() else {
+                continue;
+            };
+            let terrain_min = terrain
+                .iter()
+                .flatten()
+                .copied()
+                .min()
+                .unwrap_or(terrain_max);
+            let dip = terrain_max - terrain_min;
 
             // Profile axis: the two member ends furthest apart.
             let end_points: Vec<(i32, i32)> = group_indices
@@ -883,7 +886,11 @@ impl BridgeStructureMap {
                         &candidate.tags,
                         scale,
                     ),
-                    connectivity,
+                    |x, z| {
+                        connectivity
+                            .is_shared(x, z)
+                            .then(|| junction_level(editor, x, z))
+                    },
                 );
                 if ground.is_empty() {
                     continue;
@@ -2524,7 +2531,11 @@ mod tests {
         let structures =
             BridgeStructureMap::build(&elements, &editor, &connectivity, &outlines, 1.0);
         let block_range = highway_block_range("residential", &road.tags, 1.0);
-        let road_ys = road_profile(&editor, &road, block_range, &connectivity);
+        let road_ys = road_profile(&editor, &road, block_range, |x, z| {
+            connectivity
+                .is_shared(x, z)
+                .then(|| junction_level(&editor, x, z))
+        });
         assert_eq!(Some(&ys(&structures, 1)[0]), road_ys.last());
     }
 
