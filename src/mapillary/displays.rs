@@ -693,6 +693,45 @@ pub(crate) fn hang_wall(
     total_h: i32,
     crop: &mut dyn FnMut(i32, i32, i32, i32) -> Option<RgbImage>,
 ) -> usize {
+    hang_wall_with(
+        editor,
+        prefix,
+        way_id,
+        wall,
+        cells,
+        n,
+        step,
+        base_y,
+        total_h,
+        crop,
+        &mut |name, quad, tex| {
+            add_panel(Panel {
+                name,
+                w: quad.w,
+                h: quad.h,
+                tex,
+            })
+        },
+    )
+}
+
+/// [`hang_wall`] for a source that crops later: `crop` returns what the
+/// pixels will be made from, and `keep` gets each hung piece's name and quad
+/// with it, returning false to stop.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hang_wall_with<T>(
+    editor: &mut WorldEditor,
+    prefix: char,
+    way_id: u64,
+    wall: u32,
+    cells: &[(i32, i32)],
+    n: (f64, f64),
+    step: f64,
+    base_y: i32,
+    total_h: i32,
+    crop: &mut dyn FnMut(i32, i32, i32, i32) -> Option<T>,
+    keep: &mut dyn FnMut(String, &Quad, T) -> bool,
+) -> usize {
     let mut hung = 0usize;
     for piece in pieces(cells, n, step, base_y, total_h) {
         let Some(tex) = crop(piece.p0, piece.p1, piece.b0, piece.b1) else {
@@ -704,19 +743,22 @@ pub(crate) fn hang_wall(
         if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
             continue;
         }
-        let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-        if !r.enabled {
+        if !keep(name, &quad, tex) {
             return hung;
         }
-        r.panels.push(Panel {
-            name,
-            w: quad.w,
-            h: quad.h,
-            tex,
-        });
         hung += 1;
     }
     hung
+}
+
+/// Adds one panel to the pack; false once the registry is off.
+pub(crate) fn add_panel(panel: Panel) -> bool {
+    let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    if !r.enabled {
+        return false;
+    }
+    r.panels.push(panel);
+    true
 }
 
 /// Places one collected wall: works out its quad, cuts it into pieces the
@@ -1379,8 +1421,7 @@ pub(crate) struct PendingFit {
 
 /// Sizes the atlas from everything the pack will carry before the pieces in
 /// `pending` are cropped: the panels already in the registry, which are the
-/// Mapillary walls and whatever eviction settled early, plus the pending
-/// pieces by their geometry. Returns the pixels per block the pack will be
+/// Mapillary walls, plus the pending pieces by their geometry. Returns the pixels per block the pack will be
 /// written at, and lowers the registry's own px to it, so the pending crops
 /// can be built at that resolution and the writer, whose ladder now starts
 /// there, finds them already the size it wants. None when the registry is off.
