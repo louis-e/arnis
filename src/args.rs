@@ -273,12 +273,7 @@ pub struct Args {
 
     /// Mapillary API token, from https://www.mapillary.com/developer. Required by
     /// --mapillary-facades and --mapillary-probe.
-    ///
-    /// `hide_env_values` because clap prints `[env: NAME=value]` in `--help` by
-    /// default, and this value is a credential: `arnis --help` with the variable
-    /// set would put the token on stdout, which is where a bug report or a CI log
-    /// picks it up. The variable's name still shows, so the help still says where
-    /// the token can come from.
+    // A credential: --help shows the variable's name but never its value.
     #[arg(long, env = "MAPILLARY_TOKEN", hide_env_values = true)]
     pub mapillary_token: Option<String>,
 
@@ -1668,6 +1663,7 @@ mod tests {
             "the help should name the variable without its value"
         );
         assert!(!help.contains("MAPILLARY_TOKEN="));
+        assert!(!help.contains("hide_env_values"));
     }
 
     #[test]
