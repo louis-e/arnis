@@ -41,7 +41,8 @@ const SETTINGS = [
   { id: 'world-type-group', kind: 'segmented', store: OWN, valueAttr: 'data-world-type' },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
-  { id: 'one-world-toggle', kind: 'checkbox', store: OWN },
+  // Turning One World off writes its pinned values back, so a reset does it first.
+  { id: 'one-world-toggle', kind: 'checkbox', store: OWN, resetFirst: true },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
 
   // Gameplay
@@ -393,7 +394,8 @@ function resetAll() {
 
   applying = true;
   try {
-    for (const entry of SETTINGS) {
+    const order = [...SETTINGS.filter((e) => e.resetFirst), ...SETTINGS.filter((e) => !e.resetFirst)];
+    for (const entry of order) {
       if (entry.revertable === false || entry.resettable === false) continue;
       const def = defaultValue(entry);
       if (def === undefined) continue;
