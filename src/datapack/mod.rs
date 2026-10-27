@@ -430,6 +430,11 @@ const DISASTERS: &[(&str, &[u8])] = static_files![
     "ov80/data/arnis/tags/block/stained_glass.json",
     "ov80/data/arnis/tags/block/windblown.json",
     "ov80/data/arnis/tags/entity_type/tornado_proof.json",
+    "ov121/data/arnis/function/disaster/kaiju/crash.mcfunction",
+    "ov121/data/arnis/function/disaster/meteor/rock.mcfunction",
+    "ov121/data/arnis/function/disaster/quake/debris.mcfunction",
+    "ov121/data/arnis/function/disaster/tornado/debris_spawn.mcfunction",
+    "ov121/data/arnis/function/disaster/tornado/throw.mcfunction",
 ];
 
 /// Which extras a world gets. All of them are opt-in.
@@ -1090,6 +1095,20 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn block_states_are_named_bare_from_26_3_on() {
+        // 26.3 reads {id,properties} or a bare id, so a {Name:..} state loads as air or sand.
+        let files = files(&ctx(all()));
+        for (path, bytes) in &files {
+            if !String::from_utf8_lossy(bytes).contains("{Name:") {
+                continue;
+            }
+            let (from, rest) = layer(path);
+            let copy = format!("ov121/{rest}");
+            assert!(from < 121 && files.iter().any(|(p, _)| *p == copy), "{path}");
         }
     }
 

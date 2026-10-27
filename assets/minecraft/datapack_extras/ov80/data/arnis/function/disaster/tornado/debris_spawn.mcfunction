@@ -2,6 +2,7 @@ execute store result score #n arnis.ds if entity @e[type=block_display,tag=arnis
 execute if score #n arnis.ds matches 18.. run return 0
 summon block_display ~ ~ ~ {Tags:["arnis.ds.ent","arnis.ds.debris","arnis.ds.new"],teleport_duration:2,block_state:{Name:"minecraft:oak_leaves"},transformation:{left_rotation:[0.0f,0.0f,0.0f,1.0f],right_rotation:[0.0f,0.0f,0.0f,1.0f],translation:[1.5f,0.3f,0.0f],scale:[0.8f,0.8f,0.8f]}}
 execute store result score #r arnis.ds run random value 1..8
+execute if score #r arnis.ds matches 1 run tag @e[type=block_display,tag=arnis.ds.new,limit=1] add arnis.ds.leaf
 execute if score #r arnis.ds matches 2 run data modify entity @e[type=block_display,tag=arnis.ds.new,limit=1] block_state.Name set value "minecraft:birch_leaves"
 execute if score #r arnis.ds matches 3 run data modify entity @e[type=block_display,tag=arnis.ds.new,limit=1] block_state.Name set value "minecraft:dirt"
 execute if score #r arnis.ds matches 4 run data modify entity @e[type=block_display,tag=arnis.ds.new,limit=1] block_state.Name set value "minecraft:oak_planks"
