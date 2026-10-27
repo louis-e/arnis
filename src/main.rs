@@ -277,6 +277,15 @@ fn run_cli() {
                     std::process::exit(1);
                 }
             };
+            // Whole ways reach past the downloaded area, and One World would overwrite
+            // every chunk out to them.
+            if args.one_world && args.bbox.is_none() && file_bounds.is_none() {
+                eprintln!(
+                    "{} '{file}' has no bounds; --one-world needs --bbox, or the area would grow to every node in the file.",
+                    "Error:".red().bold()
+                );
+                std::process::exit(1);
+            }
             let bbox = match osm_parser::resolve_bbox(args.bbox, file_bounds, &data) {
                 Some(bbox) => bbox,
                 None => {
