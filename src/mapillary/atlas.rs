@@ -49,7 +49,7 @@ pub(super) fn atlas_budget() -> u64 {
 }
 
 /// Lowest resolution the budget rule falls back to, in pixels per block.
-pub(super) const MIN_PX_PER_BLOCK: u32 = 4;
+pub(crate) const MIN_PX_PER_BLOCK: u32 = 4;
 
 #[cfg(test)]
 mod tests {

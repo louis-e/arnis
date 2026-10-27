@@ -343,7 +343,44 @@ struct Registry {
     /// Candidate indices by the 512-block regions their cells touch, so a
     /// region can be settled before stream-to-disk eviction drops it.
     by_region: FnvHashMap<(i32, i32), Vec<usize>>,
+    atlas: Charged,
     stats: PlacementStats,
+}
+
+/// The textures hung so far, charged at the atlas floor, which the pack can
+/// always be lowered to.
+struct Charged {
+    textures: FnvHashSet<(Picture, Sprite)>,
+    area: u64,
+    /// Panels refused for want of room.
+    left_out: usize,
+}
+
+impl Charged {
+    const fn new() -> Charged {
+        Charged {
+            textures: FnvHashSet::with_hasher(fnv::FnvBuildHasher::new()),
+            area: 0,
+            left_out: 0,
+        }
+    }
+
+    /// Whether a panel of `texture` may hang. Once one may not, no later one
+    /// may, so the cut is one point in the settling order and not scattered.
+    fn has_room(&mut self, texture: &(Picture, Sprite), budget: u64) -> bool {
+        let room = self.left_out == 0
+            && (self.textures.contains(texture) || self.area + texture.1.area() <= budget);
+        if !room {
+            self.left_out += 1;
+        }
+        room
+    }
+
+    fn charge(&mut self, texture: (Picture, Sprite)) {
+        if self.textures.insert(texture) {
+            self.area += texture.1.area();
+        }
+    }
 }
 
 /// Replaced on every generation, like the facade store: the GUI generates
@@ -356,6 +393,7 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     claimed: FnvHashSet::with_hasher(fnv::FnvBuildHasher::new()),
     candidates: Vec::new(),
     by_region: FnvHashMap::with_hasher(fnv::FnvBuildHasher::new()),
+    atlas: Charged::new(),
     stats: PlacementStats {
         candidates: 0,
         displays: 0,
@@ -376,8 +414,18 @@ pub fn reset(enabled: bool, px: u32) {
         claimed: FnvHashSet::default(),
         candidates: Vec::new(),
         by_region: FnvHashMap::default(),
+        atlas: Charged::new(),
         stats: PlacementStats::default(),
     };
+}
+
+/// Panels left out so far because the atlas was full.
+pub(crate) fn left_out() -> usize {
+    REGISTRY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .atlas
+        .left_out
 }
 
 /// The outcome so far, for tests.
@@ -404,6 +452,26 @@ pub(crate) fn panel_sizes_for_test() -> Vec<(String, f64, f64, u32, u32)> {
 #[cfg(test)]
 pub(crate) fn px_for_test() -> u32 {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).px
+}
+
+/// Atlas pixels charged so far, for tests.
+#[cfg(test)]
+pub(crate) fn charged_for_test() -> u64 {
+    REGISTRY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .atlas
+        .area
+}
+
+/// Leaves the atlas `room` pixels short of full, for tests.
+#[cfg(test)]
+pub(crate) fn fill_atlas_for_test(room: u64) {
+    REGISTRY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .atlas
+        .area = atlas_budget() - room;
 }
 
 /// One warning in the two lengths its two destinations have room for.
@@ -679,7 +747,8 @@ pub(crate) fn pieces(
 /// viewer's right so that a piece's crop and its world position run the same
 /// way. `crop(p0, p1, b0, b1)` is given the half-open cell range and wall row
 /// range of a piece and returns its image, or `None` to leave that piece bare.
-/// Returns how many panels were hung.
+/// A piece the atlas has no room left for is left bare too. Returns how many
+/// panels were hung.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn hang_wall(
     editor: &mut WorldEditor,
@@ -704,6 +773,7 @@ pub(crate) fn hang_wall(
         base_y,
         total_h,
         crop,
+        &|tex| Picture::Pixels(pixel_hash(tex)),
         &mut |name, quad, tex| {
             add_panel(Panel {
                 name,
@@ -716,8 +786,9 @@ pub(crate) fn hang_wall(
 }
 
 /// [`hang_wall`] for a source that crops later: `crop` returns what the
-/// pixels will be made from, and `keep` gets each hung piece's name and quad
-/// with it, returning false to stop.
+/// pixels will be made from, `picture` names them at the atlas floor, and
+/// `keep` gets each hung piece's name and quad with it, returning false to
+/// stop.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn hang_wall_with<T>(
     editor: &mut WorldEditor,
@@ -730,6 +801,7 @@ pub(crate) fn hang_wall_with<T>(
     base_y: i32,
     total_h: i32,
     crop: &mut dyn FnMut(i32, i32, i32, i32) -> Option<T>,
+    picture: &dyn Fn(&T) -> Picture,
     keep: &mut dyn FnMut(String, &Quad, T) -> bool,
 ) -> usize {
     let mut hung = 0usize;
@@ -738,11 +810,26 @@ pub(crate) fn hang_wall_with<T>(
             continue;
         };
         let quad = piece.quad;
+        // Here and not in the writer: under eviction the entity's region is gone by then.
+        let texture = (picture(&tex), Sprite::of(quad.w, quad.h, MIN_PX_PER_BLOCK));
+        let room = REGISTRY
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .atlas
+            .has_room(&texture, atlas_budget());
+        if !room {
+            continue;
+        }
         let name = panel_name(prefix, way_id, wall, piece.p0, piece.b0);
         let nbt = display_nbt(&name, &quad);
         if !editor.add_item_display(quad.cx, quad.cy, quad.cz, name_seed(&name), nbt) {
             continue;
         }
+        REGISTRY
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .atlas
+            .charge(texture);
         if !keep(name, &quad, tex) {
             return hung;
         }
@@ -957,31 +1044,37 @@ fn median_colour(pixels: &[[u8; 3]]) -> Option<[u8; 3]> {
 }
 
 /// Settles the candidates at `indices` that are still pending.
-fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usize>) {
+fn place_pending(editor: &mut WorldEditor, mut indices: Vec<usize>) {
     let Some(s) = facades::store() else {
         return;
     };
+    // The atlas cap makes order matter, and collection order is the threads'.
+    {
+        let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        indices.sort_by_key(|&i| r.candidates.get(i).and_then(Option::as_ref).map(|c| c.wall));
+    }
     for i in indices {
         // The registry lock is taken around the bookkeeping and released
         // across the placement, because `hang_wall` takes it once per panel to
         // push it and a re-entrant lock would deadlock.
-        let cand = {
+        let (cand, left_out) = {
             let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
             if !r.enabled {
                 return;
             }
+            let left_out = r.atlas.left_out;
             match r.candidates.get_mut(i).and_then(Option::take) {
-                Some(cand) => cand,
+                Some(cand) => (cand, left_out),
                 None => continue,
             }
         };
         let hung = place_candidate(editor, &s, cand);
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         r.stats.displays += hung;
-        if hung == 0 {
-            r.stats.dropped += 1;
-        } else {
+        if hung > 0 {
             r.stats.placed += 1;
+        } else if r.atlas.left_out == left_out {
+            r.stats.dropped += 1;
         }
     }
 }
@@ -1013,7 +1106,7 @@ pub fn finalize(editor: &mut WorldEditor) -> Option<PlacementReport> {
         }
         r.candidates.len()
     };
-    place_pending(editor, 0..count);
+    place_pending(editor, (0..count).collect());
     let report = PlacementReport {
         stats: REGISTRY.lock().unwrap_or_else(|e| e.into_inner()).stats,
     };
@@ -1248,14 +1341,28 @@ impl fmt::Display for PackReport {
 /// item model definitions are resource pack files. `Ok(None)` when the run
 /// placed nothing.
 pub fn write_packs(world_path: &Path) -> Result<Option<PackReport>, String> {
-    let (panels, px, requested_px) = {
+    let (panels, px, requested_px, left_out) = {
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         if !r.enabled || r.panels.is_empty() {
             return Ok(None);
         }
-        (std::mem::take(&mut r.panels), r.px, r.requested_px)
+        (
+            std::mem::take(&mut r.panels),
+            r.px,
+            r.requested_px,
+            r.atlas.left_out,
+        )
     };
     emit_gui_progress_update(98.0, "Writing facade panels...");
+    if left_out > 0 {
+        warn(
+            "Facades: some walls left bare to fit the atlas",
+            &format!(
+                "Facade panels: {left_out} panels left out to fit the game's block atlas; \
+                 their walls keep their blocks."
+            ),
+        );
+    }
     write_packs_for(world_path, panels, px, requested_px).map(Some)
 }
 
@@ -1272,12 +1379,12 @@ pub fn discard() {
 /// What makes two panels the same picture: the pixels, and the size they are
 /// written at. A city hangs the same facade on hundreds of walls, so most
 /// panels are byte identical to another one.
-fn pixel_hash(p: &Panel) -> u64 {
+fn pixel_hash(tex: &RgbImage) -> u64 {
     use std::hash::Hasher;
     let mut h = fnv::FnvHasher::default();
-    h.write(p.tex.as_raw());
-    h.write_u32(p.tex.width());
-    h.write_u32(p.tex.height());
+    h.write(tex.as_raw());
+    h.write_u32(tex.width());
+    h.write_u32(tex.height());
     h.finish()
 }
 
@@ -1288,7 +1395,7 @@ fn pixel_hash(p: &Panel) -> u64 {
 /// is taken once here instead of once per `fit_px` step and once more while
 /// the zip is written.
 fn pixel_hashes(panels: &[Panel]) -> Vec<u64> {
-    panels.par_iter().map(pixel_hash).collect()
+    panels.par_iter().map(|p| pixel_hash(&p.tex)).collect()
 }
 
 /// What a panel's texture is: its pixels and the sprite they are laid out as.
@@ -1307,7 +1414,7 @@ fn panel_key(p: &Panel, pixels: u64, px: u32) -> (u64, Sprite) {
 /// Two with different names may still turn out identical, which only makes
 /// the estimate charge the atlas for a texture the pack will not carry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Picture {
+pub(crate) enum Picture {
     Pixels(u64),
     Geometry(u64),
 }
@@ -2076,6 +2183,88 @@ mod tests {
         );
         reset(false, 16);
         assert_eq!(fit_pending(&distinct), None, "nothing to fit when off");
+    }
+
+    #[test]
+    fn the_atlas_takes_panels_until_it_is_full_and_then_no_more() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        // 128 by 128 at the floor, so 2457 of them fill the budget. Pictures
+        // 0 to 399 come round twice.
+        let panel = |i: usize| Panel {
+            name: format!("p{i}"),
+            w: 32.0,
+            h: 32.0,
+            tex: RgbImage::from_pixel(1, 1, Rgb([(i % 251) as u8, (i / 251) as u8, 7])),
+        };
+        let all: Vec<Panel> = (0..3000).map(|i| panel(i % 2600)).collect();
+        let hashes = pixel_hashes(&all);
+        let admit = |panels: &[Panel]| {
+            let mut atlas = Charged::new();
+            let mut hung = Vec::new();
+            for (i, p) in panels.iter().enumerate() {
+                let texture = (
+                    Picture::Pixels(hashes[i]),
+                    Sprite::of(p.w, p.h, MIN_PX_PER_BLOCK),
+                );
+                if atlas.has_room(&texture, atlas_budget()) {
+                    atlas.charge(texture);
+                    hung.push(panel(i % 2600));
+                }
+            }
+            (hung, atlas.left_out)
+        };
+
+        let (hung, left_out) = admit(&all[..100]);
+        assert_eq!(
+            (hung.len(), left_out),
+            (100, 0),
+            "under budget nothing is left out"
+        );
+
+        assert!(atlas_area_of(&all, MIN_PX_PER_BLOCK) > atlas_budget());
+        let (hung, left_out) = admit(&all);
+        assert_eq!(hung.len(), 2457);
+        assert_eq!(
+            left_out, 543,
+            "a picture already in the pack is refused too once it is full"
+        );
+        assert!(atlas_area_of(&hung, MIN_PX_PER_BLOCK) <= atlas_budget());
+        assert!(atlas_area_of(&hung, fit_px_of(&hung, 16)) <= atlas_budget());
+    }
+
+    #[test]
+    fn a_wall_the_atlas_has_no_room_for_hangs_nothing() {
+        let _guard = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        const WAY: u64 = 5454;
+        let walls = vec![FacadeWall::for_test(
+            WAY,
+            1,
+            2,
+            20,
+            12,
+            two_tone_tex(20, 12),
+        )];
+        let mut cells: FnvHashMap<(i32, i32), CellRef> = FnvHashMap::default();
+        wall_along_x(&mut cells, 0, 100, 50, 20, 1);
+        facades::install_displays_for_test(walls, cells, vec![(19, 0)], 1.0);
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 200.0).unwrap();
+        let cost = Sprite::of(20.0, 12.0, MIN_PX_PER_BLOCK).area();
+        for (room, hangs) in [(cost - 1, 0), (cost, 1)] {
+            let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+            editor.set_map_decals(true);
+            reset(true, 16);
+            fill_atlas_for_test(room);
+            assert_eq!(collect(&mut editor, WAY, 0, 0, 12), 1);
+            let stats = finalize(&mut editor).unwrap().stats;
+            assert_eq!(editor.item_displays().len(), hangs, "room for {room} px");
+            assert_eq!(panel_sizes().len(), hangs);
+            assert_eq!(left_out(), 1 - hangs);
+            assert_eq!(
+                (stats.placed, stats.dropped),
+                (hangs, 0),
+                "a full atlas is not a failed crop"
+            );
+        }
     }
 
     #[test]

@@ -70,6 +70,7 @@ use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::bresenham::bresenham_line;
 use crate::element_processing::buildings::BuildingCategory;
+use crate::mapillary::atlas::MIN_PX_PER_BLOCK;
 use crate::mapillary::displays::{self, cell_step, outward_normal, right_of};
 use crate::mapillary::facades;
 use crate::osm_parser::ProcessedNode;
@@ -952,6 +953,11 @@ fn place_candidate(
             base_y,
             rows,
             &mut crop,
+            &|&metres| {
+                displays::Picture::Geometry(picture_at(choice.entry, fit, scale, metres)(
+                    MIN_PX_PER_BLOCK,
+                ))
+            },
             &mut |name, quad, metres| {
                 hung.push(Hung {
                     name,
@@ -1050,6 +1056,8 @@ fn pending_pieces(
 /// not cropped yet, plus the pieces every pending run would hang, sized the
 /// way `displays::fit_pending` sizes the panels it already holds.
 fn fit_resolution(editor: &mut WorldEditor) {
+    // A full atlas refuses every run still pending.
+    let full = displays::left_out() > 0;
     let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
     let Some(set) = r.set.clone() else {
         return;
@@ -1064,9 +1072,11 @@ fn fit_resolution(editor: &mut WorldEditor) {
             picture: picture_at(p.entry, p.fit, scale, p.metres),
         })
         .collect();
-    for cand in r.candidates.iter().flatten() {
-        let choice = picture_of(&r.groups, cand);
-        pending_pieces(editor, &set, cand, choice, scale, &mut pending);
+    if !full {
+        for cand in r.candidates.iter().flatten() {
+            let choice = picture_of(&r.groups, cand);
+            pending_pieces(editor, &set, cand, choice, scale, &mut pending);
+        }
     }
     drop(r);
     if pending.is_empty() {
@@ -1132,12 +1142,19 @@ fn picture_of(groups: &FnvHashMap<u64, GroupPick>, cand: &Candidate) -> Choice {
 }
 
 /// Settles the candidates at `indices` that are still pending.
-fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usize>) {
+fn place_pending(editor: &mut WorldEditor, mut indices: Vec<usize>) {
     let (set, scale) = {
         let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         if !r.enabled {
             return;
         }
+        // The atlas cap makes order matter, and collection order is the threads'.
+        indices.sort_by_key(|&i| {
+            r.candidates
+                .get(i)
+                .and_then(Option::as_ref)
+                .map(|c| (c.way_id, c.run))
+        });
         (r.set.clone(), r.scale)
     };
     let Some(set) = set else {
@@ -1164,16 +1181,18 @@ fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usi
             continue;
         };
         let party = cand.party;
+        let left_out = displays::left_out();
         let hung = place_candidate(editor, &set, &cand, choice, scale);
+        let refused = displays::left_out() > left_out;
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         r.stats.panels += hung.len();
-        if hung.is_empty() {
+        if !hung.is_empty() {
+            r.stats.placed += 1;
+        } else if !refused {
             r.stats.dropped += 1;
             if party {
                 r.stats.behind += 1;
             }
-        } else {
-            r.stats.placed += 1;
         }
         r.hung.extend(hung);
     }
@@ -1265,7 +1284,7 @@ pub fn finalize(editor: &mut WorldEditor) -> Option<Report> {
     // Every candidate is known, so the resolution the pack will end at can be
     // settled now and the crops built at it.
     fit_resolution(editor);
-    place_pending(editor, 0..count);
+    place_pending(editor, (0..count).collect());
     crop_hung();
     // Every panel is cropped, so the photographs have no reader left. Letting
     // go of them here and not at the next `reset` returns the decoded set
@@ -2172,6 +2191,50 @@ mod tests {
         finalize(&mut editor).unwrap();
         let sizes = assert_cropped_at_the_pack_px(&set);
         assert_eq!(sizes, REGISTRY.lock().unwrap().stats.panels);
+        reset(false, None, 16, 1.0);
+        displays::reset(false, 16);
+    }
+
+    /// An atlas with room for half a city: the runs settled after it fills
+    /// hang nothing, and every panel that does hang has its texture.
+    #[test]
+    fn a_full_atlas_leaves_the_runs_after_it_bare() {
+        let _guard = facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = set_dir_with_pictures();
+        let xz = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(0, 0, 2000, 2000)
+            .unwrap();
+        let (mut editor, _) = collect_city(dir.path(), &xz);
+        finalize(&mut editor).unwrap();
+        assert_eq!(displays::left_out(), 0, "the real budget holds this city");
+        let whole = displays::panel_sizes_for_test();
+        let cost = displays::charged_for_test();
+
+        fn capped(editor: &mut WorldEditor, room: u64) -> Vec<(String, f64, f64, u32, u32)> {
+            displays::fill_atlas_for_test(room);
+            flush_region(editor, 0, 0);
+            finalize(editor).unwrap();
+            assert!(displays::left_out() > 0);
+            let panels = displays::panel_sizes_for_test();
+            assert_eq!(
+                editor.item_displays().len(),
+                panels.len(),
+                "no entity without its texture"
+            );
+            assert_eq!(REGISTRY.lock().unwrap().stats.panels, panels.len());
+            panels
+        }
+        let (mut editor, _) = collect_city(dir.path(), &xz);
+        let first = capped(&mut editor, cost / 2);
+        assert!(!first.is_empty() && first.len() < whole.len());
+        assert!(first.iter().all(|p| whole.iter().any(|q| q.0 == p.0)));
+        let (mut editor, _) = collect_city(dir.path(), &xz);
+        assert_eq!(
+            capped(&mut editor, cost / 2),
+            first,
+            "the same walls every time"
+        );
         reset(false, None, 16, 1.0);
         displays::reset(false, 16);
     }

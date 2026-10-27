@@ -343,7 +343,7 @@ pub struct Args {
     /// Texture resolution of the facade panels in pixels per block (4, 8, 16 or
     /// 32), for the Mapillary photos and the preset facades alike. Lowered
     /// automatically when the panels would not fit the atlas --facade-detail
-    /// allows.
+    /// allows; walls that still do not fit at 4 are left without a panel.
     #[arg(long, default_value_t = 16, value_parser = parse_facade_px)]
     pub facade_px: u32,
 
