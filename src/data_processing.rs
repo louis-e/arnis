@@ -659,6 +659,7 @@ fn world_style<'a>(args: &Args, footprints: Option<&'a CoordinateBitmap>) -> Wor
         winter: args.winter,
         ruins: args.post_apocalyptic,
         footprints,
+        bare: (args.mode == GenerationMode::Blueprint).then_some(blueprint::OUTLINE),
     }
 }
 

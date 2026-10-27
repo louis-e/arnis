@@ -59,6 +59,8 @@ pub(crate) struct WorldStyle<'a> {
     pub ruins: bool,
     /// Building footprints, which the ruins break open and pile rubble around.
     pub footprints: Option<&'a CoordinateBitmap>,
+    /// A ground marking snow leaves bare: the blueprint's building outline.
+    pub bare: Option<Block>,
 }
 
 impl WorldStyle<'_> {
@@ -374,7 +376,7 @@ impl WorldEditor<'_> {
             }
             if style.winter {
                 for &(col, ground_y) in &columns {
-                    snow_over(chunk, col, ground_y, &terrain);
+                    snow_over(chunk, col, ground_y, &terrain, style.bare);
                 }
             }
         }
@@ -713,7 +715,13 @@ fn rubble(h: u64) -> Block {
 }
 
 /// Lays snow over the column's top, buries its small plants, and freezes open water.
-fn snow_over(chunk: &mut ChunkToModify, col: Column, ground_y: i32, terrain: &Terrain) {
+fn snow_over(
+    chunk: &mut ChunkToModify,
+    col: Column,
+    ground_y: i32,
+    terrain: &Terrain,
+    bare: Option<Block>,
+) {
     let Some((top, block)) = col.top(chunk) else {
         return;
     };
@@ -740,6 +748,9 @@ fn snow_over(chunk: &mut ChunkToModify, col: Column, ground_y: i32, terrain: &Te
             snowy_ground(chunk, col, at - 1);
         }
         Kind::Leaves | Kind::Solid | Kind::Shaped if top < world_max_y() => {
+            if on_ground && bare == Some(block) {
+                return;
+            }
             // Ploughed roads keep only scattered ridges of snow.
             let road = on_ground && terrain.sealed(col.x, col.z);
             if road && patch_noise(col.x, col.z, 3, SALT_PLOW) < 0.92 {
@@ -888,7 +899,7 @@ mod tests {
         };
 
         let mut chunk = chunk_with(&[(0, GRASS_BLOCK), (1, GRASS)]);
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert_eq!(col.get(&chunk, 0), Some(SNOWY_GRASS_BLOCK));
         assert!(col.get(&chunk, 1).is_some_and(|b| kind(b) == Kind::Snowy));
 
@@ -897,16 +908,16 @@ mod tests {
             (1, TALL_GRASS_BOTTOM),
             (2, TALL_GRASS_TOP),
         ]);
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert_eq!(col.get(&chunk, 2), None);
         assert!(col.get(&chunk, 1).is_some_and(|b| kind(b) == Kind::Snowy));
 
         let mut chunk = chunk_with(&[(0, STONE), (1, GLASS_PANE)]);
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert_eq!(col.get(&chunk, 2), None);
 
         let mut chunk = chunk_with(&[(0, crate::block_definitions::WATER)]);
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert_eq!(col.get(&chunk, 0), Some(ICE));
     }
 
@@ -1013,7 +1024,7 @@ mod tests {
         ] {
             let mut chunk = chunk_with(&[(0, STONE)]);
             chunk.set_block_with_properties(3, 5, 4, BlockWithProperties::new(block, props));
-            snow_over(&mut chunk, col, 0, &terrain);
+            snow_over(&mut chunk, col, 0, &terrain, None);
             assert!(covered(&chunk));
         }
 
@@ -1026,7 +1037,7 @@ mod tests {
             4,
             BlockWithProperties::new(STONE_BRICK_STAIRS, stair.clone()),
         );
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert!(!covered(&chunk));
         assert!(matches!(
             col.get(&chunk, 5),
@@ -1039,7 +1050,7 @@ mod tests {
 
         // A slab without a state is a bottom one.
         let mut chunk = chunk_with(&[(0, STONE), (5, STONE_BRICK_SLAB)]);
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert!(!covered(&chunk));
     }
 
@@ -1054,9 +1065,31 @@ mod tests {
             z: 4,
         };
         let mut chunk = chunk_with(&[(0, FARMLAND), (1, crate::block_definitions::WHEAT)]);
-        snow_over(&mut chunk, col, 0, &terrain);
+        snow_over(&mut chunk, col, 0, &terrain, None);
         assert_eq!(col.get(&chunk, 0), Some(DIRT));
         assert!(col.get(&chunk, 1).is_some_and(|b| kind(b) == Kind::Snowy));
+    }
+
+    #[test]
+    fn snow_leaves_a_blueprint_outline_bare() {
+        use crate::block_definitions::LIGHT_BLUE_CONCRETE;
+        let overrides = Default::default();
+        let terrain = terrain_without_ground(&overrides);
+        let col = Column {
+            lx: 3,
+            lz: 4,
+            x: 3,
+            z: 4,
+        };
+        let mut chunk = chunk_with(&[(0, GRASS_BLOCK), (1, LIGHT_BLUE_CONCRETE)]);
+        snow_over(&mut chunk, col, 0, &terrain, Some(LIGHT_BLUE_CONCRETE));
+        assert_eq!(col.get(&chunk, 2), None);
+        // The same block anywhere else, or in another mode, is snowed over.
+        let mut roof = chunk_with(&[(0, GRASS_BLOCK), (5, LIGHT_BLUE_CONCRETE)]);
+        snow_over(&mut roof, col, 0, &terrain, Some(LIGHT_BLUE_CONCRETE));
+        assert!(col.get(&roof, 6).is_some_and(|b| kind(b) == Kind::Snowy));
+        snow_over(&mut chunk, col, 0, &terrain, None);
+        assert!(col.get(&chunk, 2).is_some_and(|b| kind(b) == Kind::Snowy));
     }
 
     #[test]
