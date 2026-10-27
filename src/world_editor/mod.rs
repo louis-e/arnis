@@ -2742,7 +2742,8 @@ pub(crate) fn per_region_estimate_mb(fillground: bool) -> u64 {
     if !fillground {
         return BASE_MB;
     }
-    let span = (world_max_y() - terrain_floor_y()).max(VANILLA_SPAN) as u64;
+    // The fill stops under the terrain, so a ceiling raised for a tower costs it nothing.
+    let span = (common::terrain_top_y() - terrain_floor_y()).max(VANILLA_SPAN) as u64;
     BASE_MB * span / VANILLA_SPAN as u64
 }
 
