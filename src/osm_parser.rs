@@ -16,7 +16,6 @@ const IGNORED_TAGS: &[&str] = &[
     "FIXME",
     "todo",
     "TODO",
-    "wikipedia",
     "wikimedia_commons",
     "import_uuid",
     "import",
@@ -64,12 +63,17 @@ const IGNORED_PREFIXES: &[&str] = &[
 fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     // start_date is otherwise filtered, but on buildings the construction year picks the facade style.
     let keep_start_date = tags.contains_key("building") || tags.contains_key("building:part");
-    tags.retain(|k, _| {
+    tags.retain(|k, v| {
         if k == "start_date" {
             return keep_start_date;
         }
         // The house number feeds the door plate; the rest of addr:* stays out.
         if k == "addr:housenumber" {
+            return true;
+        }
+        // Discoveries only ask whether an article exists.
+        if k == "wikipedia" {
+            v.clear();
             return true;
         }
         !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
@@ -2517,7 +2521,9 @@ fn repeating_outers<'a>(
         && crate::element_processing::RelationArea::of(tags)
             .is_some_and(|area| area.draws_area(tags));
     let said = |key: &str| {
-        key == "name" || key.ends_with("_name") || matches!(key, "wikidata" | "area" | "type")
+        key == "name"
+            || key.ends_with("_name")
+            || matches!(key, "wikidata" | "wikipedia" | "area" | "type")
     };
     raw.iter()
         .zip(roles)
@@ -3659,7 +3665,7 @@ mod osm_xml_tests {
                 .iter()
                 .any(|e| matches!(e, ProcessedElement::Way(w) if w.id == 20))
         };
-        let forest = r#"<tag k="landuse" v="forest"/><tag k="name" v="Hart"/>"#;
+        let forest = r#"<tag k="landuse" v="forest"/><tag k="name" v="Hart"/><tag k="wikipedia" v="pl:Hart"/>"#;
         assert!(
             !way_kept(wood("outer", "inner", forest)),
             "the relation draws it"
@@ -3996,6 +4002,17 @@ mod lifecycle_tests {
             kept.get("highway").map(String::as_str),
             Some("construction")
         );
+    }
+
+    #[test]
+    fn wikipedia_is_kept_without_its_article() {
+        let kept = filter_tags(tags(&[
+            ("historic", "memorial"),
+            ("wikipedia", "de:Anti-Kriegs-Museum"),
+            ("wikimedia_commons", "File:Plaque.jpg"),
+        ]));
+        assert_eq!(kept.get("wikipedia").map(String::as_str), Some(""));
+        assert!(!kept.contains_key("wikimedia_commons"));
     }
 
     #[test]
