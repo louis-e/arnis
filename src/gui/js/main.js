@@ -744,6 +744,7 @@ function setCelestialBody(body) {
   // the world format and the stored source too.
   refreshHeightLimitRow();
   refreshGameplayRows();
+  refreshWorldTypeRow();
   refreshFacadeRows();
   refreshOneWorldState();
 
@@ -1802,13 +1803,16 @@ function refreshHeightLimitRow(format) {
 
 // Bedrock and Luanti keep their own flat generators, so the choice only means
 // something for Java. Greyed rather than hidden, like the other format gates.
+// A One World's areas sit at their real heights and a superflat off Earth is
+// grass, so the backend makes both void.
 function refreshWorldTypeRow(format) {
   const group = document.getElementById('world-type-group');
   if (!group) return;
-  const java = (format || selectedWorldFormat) === 'java';
-  group.classList.toggle('segmented-disabled', !java);
+  const available = (format || selectedWorldFormat) === 'java'
+    && selectedCelestialBody === 'earth' && !isOneWorldEnabled();
+  group.classList.toggle('segmented-disabled', !available);
   const row = group.closest('.settings-row');
-  if (row) row.classList.toggle('settings-row-unavailable', !java);
+  if (row) row.classList.toggle('settings-row-unavailable', !available);
 }
 
 // The extras are a Java data pack, and each One World area would write its own over
@@ -3271,7 +3275,10 @@ function initOneWorld() {
   if (!toggle) return;
   // Also fires when the settings store restores the value.
   toggle.addEventListener('change', refreshOneWorldState);
-  toggle.addEventListener('change', () => refreshGameplayRows());
+  toggle.addEventListener('change', () => {
+    refreshGameplayRows();
+    refreshWorldTypeRow();
+  });
   const mode = document.getElementById('generation-mode-select');
   if (mode) mode.addEventListener('change', renderOneWorldStatus);
   const nameToggle = document.getElementById('custom-world-name-toggle');
