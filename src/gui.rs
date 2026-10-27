@@ -1801,8 +1801,11 @@ fn gui_start_generation(
                 }
                 WorldFormat::BedrockMcWorld => {
                     // Bedrock: generate .mcworld in the configured directory
-                    let (output_path, lvl_name) =
-                        crate::world_utils::build_bedrock_output(&bbox, bedrock_output_dir);
+                    let (output_path, lvl_name) = crate::world_utils::build_bedrock_output(
+                        &bbox,
+                        bedrock_output_dir,
+                        celestial_body,
+                    );
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }

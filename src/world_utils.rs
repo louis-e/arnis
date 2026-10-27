@@ -1,3 +1,4 @@
+use crate::celestial::CelestialBody;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::retrieve_data;
 use fastnbt::Value;
@@ -207,8 +208,17 @@ pub fn sanitize_for_filename(name: &str) -> String {
 
 /// Builds the Bedrock output path and level name for a given bounding box.
 /// Combines area name lookup, sanitization, and path construction.
-pub fn build_bedrock_output(bbox: &LLBBox, output_dir: PathBuf) -> (PathBuf, String) {
-    let area_name = get_area_name_for_bedrock(bbox);
+pub fn build_bedrock_output(
+    bbox: &LLBBox,
+    output_dir: PathBuf,
+    body: CelestialBody,
+) -> (PathBuf, String) {
+    // Nominatim would reverse-geocode lunar coordinates into a terrestrial place.
+    let area_name = if body.is_earth() {
+        get_area_name_for_bedrock(bbox)
+    } else {
+        body.display_name().to_string()
+    };
     let safe_name = sanitize_for_filename(&area_name);
     let filename = format!("Arnis {safe_name}.mcworld");
     let lvl_name = format!("Arnis World: {safe_name}");
@@ -1662,6 +1672,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let world = PathBuf::from(create_new_world_with_name(tmp.path(), None).unwrap());
         assert_eq!(world.file_name().unwrap(), "Arnis World 1");
+    }
+
+    #[test]
+    fn a_bedrock_world_off_earth_is_named_after_the_body() {
+        let bbox = LLBBox::new(10.0, 10.0, 12.0, 12.0).unwrap();
+        let (path, level) = build_bedrock_output(&bbox, PathBuf::from("out"), CelestialBody::Moon);
+        assert_eq!(path, PathBuf::from("out").join("Arnis Moon.mcworld"));
+        assert_eq!(level, "Arnis World: Moon");
     }
 
     #[test]

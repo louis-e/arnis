@@ -446,7 +446,7 @@ fn run_cli() {
             .clone()
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
         let (output_path, lvl_name) =
-            world_utils::build_bedrock_output(&effective_bbox, output_dir);
+            world_utils::build_bedrock_output(&effective_bbox, output_dir, args.body);
         (output_path, Some(lvl_name))
     } else if args.luanti {
         let base_dir = args
