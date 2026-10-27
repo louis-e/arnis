@@ -605,6 +605,7 @@ mod sealed_surface_tests {
     use crate::element_processing::bridge_styles::BridgeOutlineIndex;
     use crate::element_processing::bridges::{BridgeStructureMap, BridgeSurfaceMap};
     use crate::element_processing::building_test_support::{rect_way, test_editor};
+    use crate::element_processing::highways::HighwayConnectivityMap;
     use crate::floodfill_cache::SealedSurfaceBitmap;
     use clap::Parser as _;
     use std::sync::Arc;
@@ -615,7 +616,8 @@ mod sealed_surface_tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
         let mut editor = test_editor(&xzbbox);
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let args = Args::parse_from([
             "arnis",
@@ -684,7 +686,8 @@ mod sealed_surface_tests {
         editor.set_sealed_surface(Arc::new(mask));
 
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
 
         let args = Args::parse_from([
@@ -737,7 +740,13 @@ mod sealed_surface_tests {
         ]);
         for landuse in ["religious", "education"] {
             let mut editor = test_editor(&xzbbox);
-            let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+            let structures = BridgeStructureMap::build(
+                &[],
+                &editor,
+                &HighwayConnectivityMap::new(),
+                &outlines,
+                1.0,
+            );
             let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
             let way = rect_way(1, 5, 5, 34, 34, &[("landuse", landuse)]);
             generate_landuse(
@@ -761,7 +770,8 @@ mod sealed_surface_tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
         let mut editor = test_editor(&xzbbox);
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let args = Args::parse_from([
             "arnis",
@@ -806,7 +816,8 @@ mod sealed_surface_tests {
         tags: &[(&str, &str)],
     ) -> (usize, usize, usize, usize) {
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let args = Args::parse_from([
             "arnis",
@@ -926,7 +937,8 @@ mod sealed_surface_tests {
         editor.set_ground(Arc::new(crate::ground::Ground::new_flat(-250)));
 
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
 
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4", "--mode", "geo-only"]);

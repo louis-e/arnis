@@ -1666,6 +1666,9 @@ mod tests {
     use super::*;
     use crate::coordinate_system::geographic::LLBBox;
     use crate::element_processing::highways::hang_tunnel_lights;
+    use crate::element_processing::highways::{
+        build_highway_connectivity_map, HighwayConnectivityMap,
+    };
     use crate::osm_parser::ProcessedNode;
     use std::path::PathBuf;
 
@@ -1837,7 +1840,8 @@ mod tests {
         let clear = CoordinateBitmap::new(rail_mask_bbox());
         let mut rail_tunnel_points = Vec::new();
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         generate_railways(
             editor,
             way,
@@ -2204,7 +2208,13 @@ mod tests {
         let elements: Vec<ProcessedElement> =
             ways.iter().cloned().map(ProcessedElement::Way).collect();
         let outlines = BridgeOutlineIndex::build(&elements);
-        let structures = BridgeStructureMap::build(&elements, editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            &elements,
+            editor,
+            &build_highway_connectivity_map(&elements),
+            &outlines,
+            1.0,
+        );
         let surface = BridgeSurfaceMap::build(&elements, &structures, 1.0);
         let clear = CoordinateBitmap::new(rail_mask_bbox());
         for way in ways {

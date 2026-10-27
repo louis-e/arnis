@@ -1,7 +1,10 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
-use crate::elevation::providers::tile_math::MAX_TILES_PER_FETCH;
+use crate::elevation::providers::tile_math::{
+    decode_terrarium, grid_cell_m, in_tile, pixel_m, sample_pixels, MAX_TILES_PER_FETCH,
+    SMOOTH_PIXEL_CELLS,
+};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use rayon::prelude::*;
@@ -10,8 +13,6 @@ use std::path::Path;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
-/// Terrarium format offset for height decoding
-const TERRARIUM_OFFSET: f64 = 32768.0;
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -100,13 +101,15 @@ impl ElevationProvider for AwsTerrain {
         }
 
         println!(
-            "Bilinear sampling {} tiles into {}x{} grid...",
+            "Sampling {} tiles into {}x{} grid...",
             tile_map.len(),
             grid_width,
             grid_height
         );
 
         let n = 2.0_f64.powi(zoom as i32);
+        let smooth = pixel_m(bbox, zoom, 256)
+            > SMOOTH_PIXEL_CELLS * grid_cell_m(bbox, grid_width, grid_height);
 
         // Rows are independent; sample them in parallel
         let height_grid: Vec<Vec<f64>> = (0..grid_height)
@@ -137,25 +140,21 @@ impl ElevationProvider for AwsTerrain {
                     let n_tiles = n as i64;
                     let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
                     let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
-                    let px = fx_global - tile_x as f64 * 256.0;
-                    let py = fy_global - tile_y as f64 * 256.0;
+                    let px = in_tile(fx_global, tile_x as f64 * 256.0, 256);
+                    let py = in_tile(fy_global, tile_y as f64 * 256.0, 256);
+                    let Some(tile) = tile_map.get(&(tile_x, tile_y)) else {
+                        continue;
+                    };
 
-                    // Bilinear interpolation from the 4 surrounding pixels
-                    let x0 = px.floor() as i32;
-                    let y0 = py.floor() as i32;
-                    let dx = px - x0 as f64;
-                    let dy = py - y0 as f64;
-
-                    let v00 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0, y0);
-                    let v10 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0);
-                    let v01 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0, y0 + 1);
-                    let v11 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0 + 1);
-
-                    if let (Some(v00), Some(v10), Some(v01), Some(v11)) = (v00, v10, v01, v11) {
-                        let lerp_top = v00 + (v10 - v00) * dx;
-                        let lerp_bot = v01 + (v11 - v01) * dx;
-                        *cell = lerp_top + (lerp_bot - lerp_top) * dy;
-                    }
+                    // Taps inside this tile read it directly; only edge taps look up a neighbour.
+                    let (w, h) = (tile.width() as i32, tile.height() as i32);
+                    *cell = sample_pixels(px, py, smooth, |x, y| {
+                        if (0..w).contains(&x) && (0..h).contains(&y) {
+                            decode_terrarium(tile.get_pixel(x as u32, y as u32))
+                        } else {
+                            sample_tile_pixel(&tile_map, tile_x, tile_y, x, y).unwrap_or(f64::NAN)
+                        }
+                    });
                 }
                 row
             })
@@ -196,10 +195,7 @@ fn sample_tile_pixel(
     if x >= tile.width() || y >= tile.height() {
         return None;
     }
-    let pixel = tile.get_pixel(x, y);
-    let height =
-        (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0) - TERRARIUM_OFFSET;
-    Some(height)
+    Some(decode_terrarium(tile.get_pixel(x, y)))
 }
 
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
@@ -392,6 +388,7 @@ fn fetch_or_load_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elevation::providers::tile_math::TERRARIUM_OFFSET;
 
     #[test]
     fn test_terrarium_height_decoding() {
