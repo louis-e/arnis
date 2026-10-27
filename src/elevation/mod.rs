@@ -54,6 +54,66 @@ pub struct ElevationData {
     pub(crate) soft_top: Option<SoftTop>,
     /// The fit used a ceiling a pack raised above vanilla's.
     pub(crate) extended_ceiling: bool,
+    /// The margin `crop` cut away, read only past the area.
+    pub(crate) halo: Option<Halo>,
+}
+
+/// Heights of the margin a grid was fetched with, so geometry kept past a One World seam
+/// stands on the same terrain the neighbouring area builds there instead of on the edge.
+#[derive(Clone)]
+pub(crate) struct Halo {
+    x0: usize,
+    z0: usize,
+    inner: (usize, usize),
+    outer: (usize, usize),
+    /// Uncropped rows; those beside the area keep only the cells either side of it.
+    rows: Vec<Vec<f32>>,
+}
+
+impl Halo {
+    fn cut(grid: &[Vec<f32>], x0: usize, z0: usize, width: usize, height: usize) -> Self {
+        let rows = grid
+            .iter()
+            .enumerate()
+            .map(|(z, row)| {
+                if (z0..z0 + height).contains(&z) {
+                    row[..x0]
+                        .iter()
+                        .chain(&row[x0 + width..])
+                        .copied()
+                        .collect()
+                } else {
+                    row.clone()
+                }
+            })
+            .collect();
+        Self {
+            x0,
+            z0,
+            inner: (width, height),
+            outer: (grid.first().map_or(0, Vec::len), grid.len()),
+            rows,
+        }
+    }
+
+    /// Height at `(x, z)` from the area's corner, clamped to the margin; `None` inside the area.
+    #[inline(always)]
+    fn at(&self, x: i32, z: i32) -> Option<f32> {
+        let (x, z) = (i64::from(x), i64::from(z));
+        if (0..self.inner.0 as i64).contains(&x) && (0..self.inner.1 as i64).contains(&z) {
+            return None;
+        }
+        let px = (x + self.x0 as i64).clamp(0, self.outer.0 as i64 - 1) as usize;
+        let pz = (z + self.z0 as i64).clamp(0, self.outer.1 as i64 - 1) as usize;
+        let row = self.rows.get(pz)?;
+        if row.len() == self.outer.0 || px < self.x0 {
+            row.get(px).copied()
+        } else if px >= self.x0 + self.inner.0 {
+            row.get(px - self.inner.0).copied()
+        } else {
+            None
+        }
+    }
 }
 
 /// Room the height fit has: the base it starts from, the lowest base it may sink to and the
@@ -180,11 +240,18 @@ impl ElevationData {
 
     /// Only meaningful while one cell is one block.
     pub fn crop(&mut self, x0: usize, z0: usize, width: usize, height: usize) {
+        self.halo = Some(Halo::cut(&self.heights, x0, z0, width, height));
         crate::grid_ops::crop_rows(&mut self.heights, x0, z0, width, height);
         self.width = width;
         self.height = height;
         self.world_width = width;
         self.world_height = height;
+    }
+
+    /// Height of a block past the cropped area, or `None` inside it or without a margin.
+    #[inline(always)]
+    pub fn beyond(&self, x: i32, z: i32) -> Option<f32> {
+        self.halo.as_ref()?.at(x, z)
     }
 }
 
@@ -465,6 +532,7 @@ pub fn fetch_elevation_data(
         ground_level: effective_ground_level,
         soft_top,
         extended_ceiling: band.extended_ceiling(),
+        halo: None,
     })
 }
 

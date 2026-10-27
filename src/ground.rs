@@ -407,6 +407,7 @@ impl Ground {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                halo: None,
             }),
             land_cover: None,
             canopy: None,
@@ -1031,6 +1032,9 @@ impl Ground {
         }
 
         let data: &ElevationData = self.elevation_data.as_ref().unwrap();
+        if let Some(h) = data.beyond(coord.x, coord.z) {
+            return f64::from(h).round() as i32;
+        }
         let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
         self.interpolate_height(x_ratio, z_ratio, data)
     }
@@ -1040,6 +1044,9 @@ impl Ground {
     pub fn level_exact(&self, coord: XZPoint) -> f64 {
         match &self.elevation_data {
             Some(data) if self.elevation_enabled => {
+                if let Some(h) = data.beyond(coord.x, coord.z) {
+                    return f64::from(h);
+                }
                 let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
                 Self::interpolate_height_exact(x_ratio, z_ratio, data)
             }
@@ -1177,6 +1184,7 @@ impl Ground {
             data.height = grid_height;
             data.world_width = world_width;
             data.world_height = world_height;
+            data.halo = None;
         }
     }
 
@@ -1727,6 +1735,7 @@ mod tests {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                halo: None,
             }),
             land_cover: None,
             canopy: None,
@@ -1802,6 +1811,34 @@ mod tests {
         assert_eq!(ground.water_distance(XZPoint::new(1000, 1000)), 0);
     }
 
+    // So a building across a One World seam stands on the same ground in both areas.
+    #[test]
+    fn lookups_past_a_cropped_area_read_the_margin_it_was_fetched_with() {
+        // x + 100 z over a 10 x 8 fetch, cropped by 2 on every side.
+        let padded: Vec<Vec<f32>> = (0..8)
+            .map(|z| (0..10).map(|x| (x + 100 * z) as f32).collect())
+            .collect();
+        let mut g = ground_with(padded);
+        let data = g.elevation_data.as_mut().unwrap();
+        data.crop(2, 2, 6, 4);
+        // Inside, the cropped grid answers, as the later passes left it.
+        data.heights[0][0] = -1.0;
+        assert_eq!(g.level(XZPoint::new(0, 0)), -1);
+        assert_eq!(g.level(XZPoint::new(3, 2)), 405);
+        assert_eq!(g.level(XZPoint::new(-1, 0)), 201);
+        assert_eq!(g.level(XZPoint::new(6, 1)), 308);
+        assert_eq!(g.level(XZPoint::new(2, -2)), 4);
+        assert_eq!(g.level_exact(XZPoint::new(7, 5)), 709.0);
+        assert_eq!(g.level(XZPoint::new(-50, 1)), 300);
+
+        // Without a margin the edge repeats.
+        let edge = ground_with(ramp(1.0));
+        assert_eq!(
+            edge.level(XZPoint::new(-3, 4)),
+            edge.level(XZPoint::new(0, 4))
+        );
+    }
+
     // Water snaps to the local floor over small DEM steps, but not across a real cliff.
     #[test]
     fn water_level_snaps_small_steps_not_cliffs() {
@@ -1850,6 +1887,7 @@ mod tests {
             ground_level: 0,
             soft_top: None,
             extended_ceiling: false,
+            halo: None,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
         assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);
@@ -2123,6 +2161,7 @@ pub(crate) mod test_support {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                halo: None,
             }),
             land_cover: Some(land_cover),
             canopy: None,
