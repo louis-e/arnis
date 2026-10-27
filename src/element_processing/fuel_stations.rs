@@ -876,8 +876,9 @@ pub fn generate_station(
     }
     let shop_building = element.tags().contains_key("building");
     // A node mapped on its shop's outline stands where the shop does.
-    let on_shop =
-        shop_building || footprints.contains(site.x.floor() as i32, site.z.floor() as i32);
+    let on_shop = shop_building
+        || (site.ring.is_empty()
+            && footprints.contains(site.x.floor() as i32, site.z.floor() as i32));
     if on_shop && road.is_none() {
         return;
     }
@@ -1162,6 +1163,51 @@ mod tests {
         );
         assert_eq!(
             editor.get_block_absolute(30, 0, 12),
+            Some(LIGHT_GRAY_CONCRETE)
+        );
+    }
+
+    #[test]
+    fn a_forecourt_round_its_shop_keeps_the_canopy_on_it() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::element_processing::building_test_support::{bitmap_with_rect, test_editor};
+        use crate::osm_parser::{ProcessedNode, ProcessedWay};
+        use std::sync::Arc;
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let corners = [(10, 20), (70, 20), (70, 60), (10, 60), (10, 20)];
+        let station = ProcessedElement::Way(ProcessedWay {
+            id: 1,
+            nodes: corners
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: (i % 4) as u64,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: tags(&[("amenity", "fuel")]),
+        });
+        editor.set_fuel_index(Arc::new(FuelIndex::build(
+            std::slice::from_ref(&station),
+            1.0,
+        )));
+        // Shop in the middle, road too far below the forecourt for a canopy stepped in from it.
+        let shop = bitmap_with_rect(&xzbbox, 31, 33, 38, 39);
+        let road = bitmap_with_rect(&xzbbox, 0, 0, 79, 2);
+        generate_station(
+            &mut editor,
+            &station,
+            &FloodFillCache::new(),
+            &shop,
+            &road,
+            1.0,
+            None,
+        );
+        assert_eq!(
+            editor.get_block_absolute(34, 0, 45),
             Some(LIGHT_GRAY_CONCRETE)
         );
     }
