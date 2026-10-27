@@ -500,6 +500,13 @@ fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
     (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
 }
 
+/// The map marker, unless it lies outside the area: the map keeps it when the area moves.
+fn spawn_marker(spawn_point: Option<(f64, f64)>, bbox: &LLBBox) -> Option<LLPoint> {
+    spawn_point
+        .and_then(|(lat, lng)| LLPoint::new(lat, lng).ok())
+        .filter(|p| bbox.contains(p))
+}
+
 /// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
 /// The Y coordinate is set to a temporary value (150) and will be updated
 /// after terrain generation by `update_player_spawn_y_after_generation`.
@@ -1834,7 +1841,7 @@ fn gui_start_generation(
             let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
                 crate::projection::ProjectionSpec::from_args(&args).transformer(&bbox)
             {
-                let marker = spawn_point.and_then(|(lat, lng)| LLPoint::new(lat, lng).ok());
+                let marker = spawn_marker(spawn_point, &bbox);
                 match (marker, one_world_extending) {
                     (None, true) => None,
                     (marker, _) => {
@@ -2324,6 +2331,14 @@ mod tests {
         assert!(one_world_request(true, "bedrock", "earth").is_err());
         assert!(one_world_request(true, "luanti_mineclonia", "earth").is_err());
         assert!(one_world_request(true, "java", "moon").is_err());
+    }
+
+    #[test]
+    fn a_spawn_marker_outside_the_area_is_ignored() {
+        let bbox = LLBBox::from_str("52.50,13.37,52.53,13.42").unwrap();
+        assert!(spawn_marker(Some((52.51, 13.40)), &bbox).is_some());
+        assert!(spawn_marker(Some((48.14, 11.58)), &bbox).is_none());
+        assert!(spawn_marker(None, &bbox).is_none());
     }
 
     fn read_level_dat(world: &Path) -> Value {
