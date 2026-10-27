@@ -179,6 +179,7 @@ impl<'a> WorldEditor<'a> {
             self.void_world,
             self.preview.as_deref(),
             self.voxy.as_deref(),
+            self.dh.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -362,12 +363,12 @@ fn create_region_file(
 /// Serialize one region's chunks to its `.mca`. Shared by the synchronous save
 /// path and the background flush worker (hence free-standing, not `&self`).
 /// Every in-bbox region passes here exactly once, so the map preview and the
-/// voxy LOD cache are both fed here.
+/// voxy and Distant Horizons LOD caches are all fed here.
 ///
 /// Chunks are visited in Morton (quadtree) order. The `.mca` does not care -
-/// it allocates sectors as chunks land - but the voxy builder does: it finishes
-/// a level-`n` LOD column every `4^n` chunk columns, which is what keeps its
-/// working set at a handful of megabytes instead of a whole region's worth.
+/// it allocates sectors as chunks land - but the LOD builders do: each finishes
+/// a coarser section every few chunk columns, which is what keeps their
+/// working sets at a handful of megabytes instead of a whole region's worth.
 #[allow(clippy::too_many_arguments)]
 fn write_region_to_disk(
     world_dir: &std::path::Path,
@@ -377,6 +378,7 @@ fn write_region_to_disk(
     void_world: bool,
     preview: Option<&crate::map_renderer::PreviewAccumulator>,
     voxy: Option<&crate::voxy::VoxyWriter>,
+    dh: Option<&crate::distant_horizons::DhWriter>,
     region_x: i32,
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
@@ -422,6 +424,7 @@ fn write_region_to_disk(
             live_lod_sections(region_to_modify, region_x, region_z),
         )
     });
+    let mut dh_lod = dh.map(|writer| writer.region_lod());
 
     for column in 0..256usize {
         let (sx, sz) = morton_16(column);
@@ -491,6 +494,16 @@ fn write_region_to_disk(
                         &biome_names,
                     );
                 }
+                if let Some(lod) = dh_lod.as_mut() {
+                    lod.ingest_chunk(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        &sections,
+                        (span.0 as i32, span.1 as i32),
+                        lighting.as_deref(),
+                        &biome_names,
+                    );
+                }
 
                 crate::datapack::disasters::record_chunk(
                     abs_chunk_x,
@@ -519,9 +532,15 @@ fn write_region_to_disk(
         if let Some(lod) = lod.as_mut() {
             lod.end_column(column);
         }
+        if let Some(lod) = dh_lod.as_mut() {
+            lod.end_column(column);
+        }
     }
 
     if let Some(mut lod) = lod {
+        lod.finish();
+    }
+    if let Some(mut lod) = dh_lod {
         lod.finish();
     }
 
@@ -534,7 +553,7 @@ fn write_region_to_disk(
 }
 
 /// Morton (Z-order) index into a 16x16 grid of 2x2-chunk columns.
-fn morton_16(index: usize) -> (i32, i32) {
+pub(crate) fn morton_16(index: usize) -> (i32, i32) {
     let mut x = 0i32;
     let mut z = 0i32;
     for bit in 0..4 {
@@ -618,6 +637,7 @@ pub(crate) struct RegionWriteCtx {
     void_world: bool,
     preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
     voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
+    dh: Option<std::sync::Arc<crate::distant_horizons::DhWriter>>,
     mode: RegionWriteMode,
     ground_origin: (i32, i32),
 }
@@ -632,6 +652,7 @@ impl RegionWriteCtx {
         void_world: bool,
         preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
         voxy: Option<std::sync::Arc<crate::voxy::VoxyWriter>>,
+        dh: Option<std::sync::Arc<crate::distant_horizons::DhWriter>>,
         mode: RegionWriteMode,
         ground_origin: (i32, i32),
     ) -> Self {
@@ -643,6 +664,7 @@ impl RegionWriteCtx {
             void_world,
             preview,
             voxy,
+            dh,
             mode,
             ground_origin,
         }
@@ -662,6 +684,7 @@ impl RegionWriteCtx {
             self.void_world,
             self.preview.as_deref(),
             self.voxy.as_deref(),
+            self.dh.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -2091,6 +2114,7 @@ mod merge_tests {
             None,
             false,
             false,
+            None,
             None,
             None,
             0,

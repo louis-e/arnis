@@ -385,6 +385,7 @@ pub struct WorldSizeOptions {
     pub interior: bool,
     pub bake_lighting: bool,
     pub voxy_lod: bool,
+    pub dh_lod: bool,
     pub caves: bool,
     pub fillground: bool,
     /// The extended build height, where filled ground and caves reach 2000 blocks down.
@@ -397,6 +398,7 @@ impl WorldSizeOptions {
             interior: args.interior,
             bake_lighting: args.bake_lighting,
             voxy_lod: args.voxy_lod,
+            dh_lod: args.dh_lod,
             caves: args.caves,
             fillground: args.fillground,
             tall: args.disable_height_limit,
@@ -426,6 +428,9 @@ pub fn estimated_world_bytes(
     }
     if o.voxy_lod {
         per_km2 += 20.0; // Munich +19.0
+    }
+    if o.dh_lod {
+        per_km2 += 19.0; // Munich +17.9
     }
     // Caves bring the filled ground with them.
     per_km2 += match (o.caves, o.fillground, o.tall) {
@@ -1456,6 +1461,13 @@ mod tests {
                     ..o
                 },
                 312.7,
+            ),
+            (
+                "Munich Distant Horizons",
+                9.0,
+                JavaAnvil,
+                WorldSizeOptions { dh_lod: true, ..o },
+                303.6,
             ),
             ("Munich Bedrock", 9.0, BedrockMcWorld, o, 94.7),
             ("Manhattan Bedrock", 9.0, BedrockMcWorld, o, 116.0),

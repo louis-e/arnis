@@ -20,6 +20,7 @@ mod datapack;
 mod decals;
 mod deferred_placement;
 mod deterministic_rng;
+mod distant_horizons;
 mod ecoregion;
 mod element_processing;
 mod elevation;

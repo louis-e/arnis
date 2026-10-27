@@ -266,6 +266,8 @@ pub struct WorldEditor<'a> {
     void_world: bool,
     /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
+    /// Pre-generated Distant Horizons LOD database, fed the same way. Java only.
+    dh: Option<Arc<crate::distant_horizons::DhWriter>>,
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
     /// Driven by the same toggle as external 3D models (`args.use_3d`).
     place_schematics: bool,
@@ -338,6 +340,7 @@ impl<'a> WorldEditor<'a> {
             place_schematics: true,
             preview: None,
             voxy: None,
+            dh: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -400,6 +403,7 @@ impl<'a> WorldEditor<'a> {
             place_schematics: true,
             preview: None,
             voxy: None,
+            dh: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -462,6 +466,7 @@ impl<'a> WorldEditor<'a> {
             place_schematics: true,
             preview: None,
             voxy: None,
+            dh: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
@@ -1214,6 +1219,11 @@ impl<'a> WorldEditor<'a> {
         self.voxy = Some(voxy);
     }
 
+    /// Attach a Distant Horizons LOD writer, fed and finalized like voxy's.
+    pub fn set_dh(&mut self, dh: Arc<crate::distant_horizons::DhWriter>) {
+        self.dh = Some(dh);
+    }
+
     /// Owned, `Send` context for writing regions off the merge thread.
     pub(crate) fn region_write_ctx(&self) -> java::RegionWriteCtx {
         java::RegionWriteCtx::new(
@@ -1224,6 +1234,7 @@ impl<'a> WorldEditor<'a> {
             self.void_world,
             self.preview.clone(),
             self.voxy.clone(),
+            self.dh.clone(),
             self.region_write_mode(),
             (self.ground_origin_x, self.ground_origin_z),
         )
@@ -2577,6 +2588,7 @@ impl<'a> WorldEditor<'a> {
                     return Err(user_msg.into());
                 }
                 self.finish_voxy();
+                self.finish_dh();
             }
             WorldFormat::BedrockMcWorld => self.save_bedrock()?,
             WorldFormat::LuantiWorld => {
@@ -2619,6 +2631,26 @@ impl<'a> WorldEditor<'a> {
             ),
             Err(e) => {
                 let msg = format!("Failed to write the Voxy LOD cache: {e}");
+                eprintln!("{msg}");
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &msg);
+            }
+        }
+    }
+
+    /// Seal the Distant Horizons database; a failure is reported like voxy's.
+    fn finish_dh(&mut self) {
+        let Some(dh) = self.dh.take() else {
+            return;
+        };
+        match dh.finish() {
+            Ok((sections, bytes)) => println!(
+                "  Distant Horizons LOD: {} sections, {:.1} MB",
+                sections,
+                bytes as f64 / (1024.0 * 1024.0)
+            ),
+            Err(e) => {
+                let msg = format!("Failed to write the Distant Horizons LOD cache: {e}");
                 eprintln!("{msg}");
                 #[cfg(feature = "gui")]
                 send_log(LogLevel::Warning, &msg);
@@ -3028,6 +3060,7 @@ mod eviction_guard_tests {
             false,
             None,
             None,
+            None,
             java::RegionWriteMode::Fresh,
             (0, 0),
         )
@@ -3063,6 +3096,7 @@ mod eviction_guard_tests {
                 None,
                 false,
                 void_world,
+                None,
                 None,
                 None,
                 java::RegionWriteMode::Fresh,
