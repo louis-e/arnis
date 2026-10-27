@@ -1921,6 +1921,38 @@ mod tests {
     }
 
     #[test]
+    fn rail_heights_come_from_the_tile_that_owns_each_cell() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let way = straight_rail(&[("railway", "tram")]);
+        let record = |order: [bool; 2]| {
+            let heights = crate::world_editor::RailHeights::default();
+            for east in order {
+                let mut editor = test_editor(&xzbbox);
+                editor.set_rail_heights(std::sync::Arc::clone(&heights));
+                if east {
+                    editor.set_strict_bounds(40, 0, 200, 120);
+                    // Only the east tile has the street the tram runs up onto.
+                    for x in 45..=60 {
+                        editor.register_road_surface_y(x, 50, 1);
+                        editor.set_block_absolute(GRAY_CONCRETE, x, 1, 50, None, None);
+                    }
+                } else {
+                    editor.set_strict_bounds(0, 0, 39, 120);
+                }
+                run(&mut editor, &way, &CoordinateBitmap::new(&xzbbox));
+            }
+            std::sync::Arc::try_unwrap(heights)
+                .unwrap()
+                .into_inner()
+                .unwrap()
+        };
+        let a = record([false, true]);
+        assert_eq!(a.len(), 41);
+        assert_eq!(a, record([true, false]));
+        assert_eq!(a[&(1, 60, 50)], 2);
+    }
+
+    #[test]
     fn a_rail_goes_through_leaves_hanging_over_the_track() {
         let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
         let mut editor = test_editor(&xzbbox);

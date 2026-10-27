@@ -1381,6 +1381,10 @@ impl<'a> WorldEditor<'a> {
 
     /// Records that `way` laid a rail in the block at `y` of column (x, z).
     pub fn register_rail(&self, way: u64, x: i32, z: i32, y: i32) {
+        // Only the owner's rail survives the merge; other tiles see other roads there.
+        if !self.owns(x, z) {
+            return;
+        }
         if let Some(heights) = &self.rail_heights {
             if let Ok(mut map) = heights.lock() {
                 map.insert((way, x, z), y);
