@@ -500,6 +500,13 @@ fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
     (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
 }
 
+/// The map marker, unless it lies outside the area: the map keeps it when the area moves.
+fn spawn_marker(spawn_point: Option<(f64, f64)>, bbox: &LLBBox) -> Option<LLPoint> {
+    spawn_point
+        .and_then(|(lat, lng)| LLPoint::new(lat, lng).ok())
+        .filter(|p| bbox.contains(p))
+}
+
 /// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
 /// The Y coordinate is set to a temporary value (150) and will be updated
 /// after terrain generation by `update_player_spawn_y_after_generation`.
@@ -1041,11 +1048,19 @@ struct OneWorldInfo {
     area_count: usize,
     scale: Option<f64>,
     height_multiplier: Option<f64>,
+    ground_level: Option<i32>,
     terrain: Option<bool>,
     disable_height_limit: Option<bool>,
     aws_only_elevation: Option<bool>,
     /// Changes whenever an area is recorded.
     revision: u32,
+}
+
+fn one_world_request(one_world: bool, world_format: &str, body: &str) -> Result<(), String> {
+    if one_world && (world_format != "java" || body != "earth") {
+        return Err("One World needs a Java world on Earth".to_string());
+    }
+    Ok(())
 }
 
 fn one_world_dir(save_path: &str, world_name: &str) -> PathBuf {
@@ -1071,6 +1086,7 @@ fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldI
         area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
         scale: manifest.as_ref().map(|m| m.scale),
         height_multiplier: manifest.as_ref().map(|m| m.height_multiplier),
+        ground_level: manifest.as_ref().map(|m| m.ground_level),
         terrain: manifest.as_ref().map(|m| m.terrain),
         disable_height_limit: manifest.as_ref().map(|m| m.disable_height_limit),
         aws_only_elevation: manifest.as_ref().map(|m| m.aws_only_elevation),
@@ -1424,8 +1440,12 @@ fn gui_start_generation(
     use progress::emit_gui_error;
     use LLBBox;
 
-    // A One World is resolved inside the worker, once `Args` exist.
-    let one_world = one_world && world_format == "java" && celestial_body_name == "earth";
+    // A One World is resolved inside the worker, once `Args` exist. Refused rather than
+    // dropped: `selected_world` is then the saves folder, which a new-world cleanup deletes.
+    if let Err(e) = one_world_request(one_world, &world_format, &celestial_body_name) {
+        emit_gui_error(&e);
+        return Err(e);
+    }
     let is_new_world = is_new_world && !one_world;
 
     // Claim the process before touching any shared state. The frontend disables its button
@@ -1781,8 +1801,11 @@ fn gui_start_generation(
                 }
                 WorldFormat::BedrockMcWorld => {
                     // Bedrock: generate .mcworld in the configured directory
-                    let (output_path, lvl_name) =
-                        crate::world_utils::build_bedrock_output(&bbox, bedrock_output_dir);
+                    let (output_path, lvl_name) = crate::world_utils::build_bedrock_output(
+                        &bbox,
+                        bedrock_output_dir,
+                        celestial_body,
+                    );
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }
@@ -1823,7 +1846,7 @@ fn gui_start_generation(
             let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
                 crate::projection::ProjectionSpec::from_args(&args).transformer(&bbox)
             {
-                let marker = spawn_point.and_then(|(lat, lng)| LLPoint::new(lat, lng).ok());
+                let marker = spawn_marker(spawn_point, &bbox);
                 match (marker, one_world_extending) {
                     (None, true) => None,
                     (marker, _) => {
@@ -1933,6 +1956,7 @@ fn gui_start_generation(
                     generation_options.clone(),
                     osm_parser::OutlineSuppression::new(),
                     osm_parser::PartGroups::new(),
+                    osm_parser::HousingRelationParts::new(),
                 ) {
                     emit_gui_error(&e);
                     return Err(e);
@@ -2023,13 +2047,18 @@ fn gui_start_generation(
             // Run world generation
             match fetch_result {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
-                        osm_parser::parse_osm_data(
-                            raw_data,
-                            bbox,
-                            args.debug,
-                            &crate::projection::ProjectionSpec::from_args(&args),
-                        );
+                    let (
+                        mut parsed_elements,
+                        mut xzbbox,
+                        outline_suppression,
+                        part_groups,
+                        housing_parts,
+                    ) = osm_parser::parse_osm_data(
+                        raw_data,
+                        bbox,
+                        args.debug,
+                        &crate::projection::ProjectionSpec::from_args(&args),
+                    );
 
                     let overture::OvertureData {
                         elements: overture_elements,
@@ -2091,6 +2120,7 @@ fn gui_start_generation(
                         generation_options.clone(),
                         outline_suppression,
                         part_groups,
+                        housing_parts,
                     ) {
                         eprintln!("World generation failed: {e}");
                         send_log(LogLevel::Error, &format!("World generation failed: {e}"));
@@ -2305,6 +2335,23 @@ mod locale_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_one_world_off_java_or_off_earth_is_refused() {
+        assert!(one_world_request(true, "java", "earth").is_ok());
+        assert!(one_world_request(false, "bedrock", "moon").is_ok());
+        assert!(one_world_request(true, "bedrock", "earth").is_err());
+        assert!(one_world_request(true, "luanti_mineclonia", "earth").is_err());
+        assert!(one_world_request(true, "java", "moon").is_err());
+    }
+
+    #[test]
+    fn a_spawn_marker_outside_the_area_is_ignored() {
+        let bbox = LLBBox::from_str("52.50,13.37,52.53,13.42").unwrap();
+        assert!(spawn_marker(Some((52.51, 13.40)), &bbox).is_some());
+        assert!(spawn_marker(Some((48.14, 11.58)), &bbox).is_none());
+        assert!(spawn_marker(None, &bbox).is_none());
+    }
 
     fn read_level_dat(world: &Path) -> Value {
         let raw = fs::read(world.join("level.dat")).unwrap();

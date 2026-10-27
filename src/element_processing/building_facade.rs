@@ -90,6 +90,8 @@ pub struct BuildingContext<'a> {
     pub building_footprints: &'a CoordinateBitmap,
     /// group_seed -> sorted member way ids; only groups with >= 2 members.
     pub group_members: &'a FnvHashMap<u64, Vec<u64>>,
+    /// building:part relations of a housing block, which take its storey height.
+    pub housing_relation_parts: &'a crate::osm_parser::HousingRelationParts,
     /// Tenants and surrounding areas per building, for interiors.
     pub interior_uses: &'a InteriorUseIndex,
 }
@@ -439,6 +441,7 @@ mod tests {
         cache: FloodFillCache,
         passages: CoordinateBitmap,
         groups: FnvHashMap<u64, Vec<u64>>,
+        housing: crate::osm_parser::HousingRelationParts,
     }
 
     impl Fixtures {
@@ -447,6 +450,7 @@ mod tests {
                 cache: FloodFillCache::new(),
                 passages: CoordinateBitmap::new_empty(),
                 groups: FnvHashMap::default(),
+                housing: Default::default(),
             }
         }
         fn ctx<'a>(
@@ -460,6 +464,7 @@ mod tests {
                 road_mask: road,
                 building_footprints: footprints,
                 group_members: &self.groups,
+                housing_relation_parts: &self.housing,
                 interior_uses: InteriorUseIndex::empty(),
             }
         }

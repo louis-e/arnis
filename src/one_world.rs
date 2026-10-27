@@ -518,6 +518,17 @@ fn resolve(
         println!("Note: the preset building facades are off in One World mode.");
         args.building_facades = false;
     }
+    // A flat plane sits at the first area's lowest ground, which later areas need not share.
+    if args.world_type == crate::args::WorldType::Flat {
+        println!("Note: One World is always a void world; the flat world type is off.");
+        args.world_type = crate::args::WorldType::Void;
+    }
+    // level.dat and the map item are written by the first area only.
+    if extending {
+        println!(
+            "Note: One World keeps the game mode, time of day, world type and map item of its first area."
+        );
+    }
     args.map_preview = true;
 
     println!(
@@ -834,6 +845,16 @@ mod tests {
         drop(prepare(&world, &req, &mut args).unwrap());
         assert_eq!(args.height_multiplier, 2.0);
         assert_eq!(args.one_world_run.unwrap().elevation, Some(e));
+    }
+
+    #[test]
+    fn a_one_world_is_always_void() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let mut args = args_for(MUNICH, &["--world-type", "flat"]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        assert_eq!(args.world_type, crate::args::WorldType::Void);
     }
 
     #[test]

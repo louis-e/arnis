@@ -299,6 +299,7 @@ fn generate_at_grade_rail(
             .and_then(|(way, cell, _)| deck_y(bridge_structures, way, cell));
         pin_end(&mut pins, e, end, level.unwrap_or(ground[end_cell(n, e)]));
     }
+    pin_area_edge(&mut pins, rail_joins, &cells, |i| ground[i]);
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -412,6 +413,25 @@ fn pin_end(pins: &mut [Option<i32>], e: usize, end: &TrackEnd, level: i32) {
     }
 }
 
+/// Holds both cells across One World's area edge at the lower cell's level, as the next area does.
+fn pin_area_edge(
+    pins: &mut [Option<i32>],
+    rail_joins: &RailJoins,
+    cells: &[(i32, i32)],
+    level: impl Fn(usize) -> i32,
+) {
+    for [inside, outside] in rail_joins.edge_crossings(cells) {
+        let y = level(if cells[inside] < cells[outside] {
+            inside
+        } else {
+            outside
+        });
+        for i in [inside, outside] {
+            pins[i].get_or_insert(y);
+        }
+    }
+}
+
 /// The first cell past an end and its height: a bridge's deck there, or level with the end.
 fn beyond(
     end: &TrackEnd,
@@ -428,7 +448,7 @@ fn beyond(
 
 /// Whether a way lays the rail on cell `i` of `n`: an end cell only if it owns the joint.
 fn lays_cell(ends: &[TrackEnd; 2], n: usize, i: usize) -> bool {
-    !((i == 0 && !ends[0].owns) || (i + 1 == n && !ends[1].owns))
+    (i != 0 || ends[0].owns) && (i + 1 != n || ends[1].owns)
 }
 
 /// The deck a rail bridge's track lies on at one of its cells.
@@ -1496,6 +1516,10 @@ fn generate_rail_tunnel_shell(
             }
         }
     }
+    // Not `deep`: its portal ramps hang on where this area clipped the way.
+    pin_area_edge(&mut pins, rail_joins, &cells, |i| {
+        (ground[i] - depth).max(lowest)
+    });
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -1597,10 +1621,10 @@ fn generate_rail_tunnel_shell(
 /// ceiling lights.  Called AFTER ground generation so that the carved
 /// air blocks are not overwritten by the underground stone fill.
 ///
-/// Every tile a tunnel crosses records the whole centerline, so the merged list holds each
-/// point once per tile. A point is carved only the first time: carving just turns
-/// whitelisted blocks to air, and a lantern is never on the whitelist, so a second carve
-/// changes nothing. Lanterns come flagged per way, so neither order nor repeats matter.
+/// Ways crossing or sharing a cell list it more than once. A point is carved only the
+/// first time: carving just turns whitelisted blocks to air, and a lantern is never on the
+/// whitelist, so a second carve changes nothing. Lanterns come flagged per way, so neither
+/// order nor repeats matter.
 pub fn carve_rail_tunnel_interior(
     editor: &mut WorldEditor,
     rail_tunnel_points: &[RailTunnelPoint],
@@ -1917,6 +1941,66 @@ mod tests {
         run(&mut editor, &way, &CoordinateBitmap::new(&xzbbox));
         let laid = laid_rails(&editor, 0, 0, 80, 80);
         assert_eq!(laid.len(), 41);
+        assert_eq!(crate::element_processing::rail_track::loose_ends(&laid), 2);
+    }
+
+    #[test]
+    fn rail_heights_come_from_the_tile_that_owns_each_cell() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let way = straight_rail(&[("railway", "tram")]);
+        let record = |order: [bool; 2]| {
+            let heights = crate::world_editor::RailHeights::default();
+            for east in order {
+                let mut editor = test_editor(&xzbbox);
+                editor.set_rail_heights(std::sync::Arc::clone(&heights));
+                if east {
+                    editor.set_strict_bounds(40, 0, 200, 120);
+                    // Only the east tile has the street the tram runs up onto.
+                    for x in 45..=60 {
+                        editor.register_road_surface_y(x, 50, 1);
+                        editor.set_block_absolute(GRAY_CONCRETE, x, 1, 50, None, None);
+                    }
+                } else {
+                    editor.set_strict_bounds(0, 0, 39, 120);
+                }
+                run(&mut editor, &way, &CoordinateBitmap::new(&xzbbox));
+            }
+            std::sync::Arc::try_unwrap(heights)
+                .unwrap()
+                .into_inner()
+                .unwrap()
+        };
+        let a = record([false, true]);
+        assert_eq!(a.len(), 41);
+        assert_eq!(a, record([true, false]));
+        assert_eq!(a[&(1, 60, 50)], 2);
+    }
+
+    #[test]
+    fn one_world_areas_either_side_of_an_edge_lay_one_joined_track() {
+        // A diagonal up a slope, from one area into the next at x = 100.
+        let mut laid = Vec::new();
+        // The edge cells (99, 99) and (100, 99) round to 8 and 9; both areas read past their own.
+        let heights = (0..200)
+            .map(|z| (0..200).map(|x| (x + z + 14) as f32 / 25.0).collect())
+            .collect();
+        let ground =
+            std::sync::Arc::new(crate::ground::Ground::new_elevation_test(heights, 200, 200));
+        for (x0, x1) in [(0, 99), (100, 199)] {
+            let area = XZBBox::rect_from_min_max(x0, 0, x1, 199).unwrap();
+            let mut editor = test_editor(&area);
+            editor.set_ground(std::sync::Arc::clone(&ground));
+            editor.set_ground_origin(0, 0);
+            // Each clipped 64 blocks past its own area.
+            let mut way = straight_rail(&[("railway", "rail")]);
+            let (from, to) = ((x0 - 64).max(0), (x1 + 64).min(199));
+            (way.nodes[0].x, way.nodes[0].z) = (from, from);
+            (way.nodes[1].x, way.nodes[1].z) = (to, to);
+            let mut joins = RailJoins::default();
+            joins.meet_at_edge_of(area.clone());
+            run_joined(&mut editor, &way, &CoordinateBitmap::new(&area), &joins);
+            laid.extend(laid_rails(&editor, x0, 0, x1, 199));
+        }
         assert_eq!(crate::element_processing::rail_track::loose_ends(&laid), 2);
     }
 

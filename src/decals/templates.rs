@@ -87,14 +87,17 @@ fn fit_or_abbreviate(
     if let Some(l) = fit_text(text, max_w, max_h, largest, wrap) {
         return Some(l);
     }
-    if let Some(short) = abbreviate(text) {
-        if let Some(l) = fit_text(&short, max_w, max_h, largest, wrap) {
+    let short = abbreviate(text);
+    if let Some(short) = &short {
+        if let Some(l) = fit_text(short, max_w, max_h, largest, wrap) {
             return Some(l);
         }
     }
     if wrap {
-        if let Some(l) = fit_truncated_two_lines(text, max_w, max_h, largest) {
-            return Some(l);
+        for candidate in short.as_deref().into_iter().chain([text]) {
+            if let Some(l) = fit_truncated_two_lines(candidate, max_w, max_h, largest) {
+                return Some(l);
+            }
         }
     }
     // Last resort: truncate with an ellipsis so the plate is never blank.
@@ -107,6 +110,14 @@ fn fit_or_abbreviate(
         }
     }
     None
+}
+
+/// Fewest letters of a cut word on either line, so neither is an orphan.
+const MIN_CARRIED: usize = 3;
+
+/// True if a line may end right before `chars[i]`.
+fn breaks_before(chars: &[char], i: usize) -> bool {
+    chars[i].is_whitespace() || matches!(chars[i - 1], '-' | '/')
 }
 
 /// Fills two lines and truncates only the second one with an ellipsis.
@@ -130,8 +141,6 @@ fn fit_truncated_two_lines(
             continue;
         }
 
-        // Fill the first line, preferring the last complete word that fits. An unusually
-        // long first word is split at the last fitting character instead.
         let mut first_end = 0;
         for end in 1..chars.len() {
             let candidate: String = chars[..end].iter().collect();
@@ -143,22 +152,26 @@ fn fit_truncated_two_lines(
         if first_end == 0 {
             continue;
         }
-        // A line that ends right before a space keeps its last word.
-        let split = if chars[first_end].is_whitespace() {
-            first_end
-        } else {
-            chars[..first_end]
-                .iter()
-                .rposition(|c| c.is_whitespace())
-                .filter(|&i| i > 0)
-                .unwrap_or(first_end)
-        };
-        let line1: String = chars[..split]
-            .iter()
-            .collect::<String>()
-            .trim_end()
-            .to_string();
-        let mut rest_start = split;
+        // Break at the last space, '-' or '/' that fits, else cut the word with a hyphen.
+        let (line1, mut rest_start) =
+            if let Some(i) = (1..=first_end).rev().find(|&i| breaks_before(&chars, i)) {
+                let line1: String = chars[..i].iter().collect();
+                (line1.trim_end().to_string(), i)
+            } else {
+                let word_end = chars[first_end..]
+                    .iter()
+                    .position(|&c| c.is_whitespace() || matches!(c, '-' | '/'))
+                    .map_or(chars.len(), |p| first_end + p);
+                let last_cut = first_end.min(word_end.saturating_sub(MIN_CARRIED));
+                let cut = (MIN_CARRIED..=last_cut).rev().find(|&i| {
+                    let line1: String = chars[..i].iter().collect();
+                    font.width(&(line1 + "-"), 1) <= max_w
+                });
+                let Some(cut) = cut else {
+                    continue;
+                };
+                (chars[..cut].iter().collect::<String>() + "-", cut)
+            };
         while rest_start < chars.len() && chars[rest_start].is_whitespace() {
             rest_start += 1;
         }
@@ -287,8 +300,9 @@ pub fn text_sign(canvas: &mut Canvas, style: TextStyle, text: &str) {
             canvas.rounded_rect(0, y0, w, h, 3, WHITE);
             canvas.stroke_rounded_rect(0, y0, w, h, 3, 2, DARK_GRAY);
             // Two lines of the smallest font need 30 px. Keep them inside the existing
-            // 36 px plate and use its width before truncating long stop names.
-            if let Some(layout) = fit_or_abbreviate(text, w - 2, h - 4, FontSize::S28, true) {
+            // 36 px plate and use its width before truncating long stop names. Glyphs
+            // overhang their advance by up to 1 px, so w - 6 keeps them off the border.
+            if let Some(layout) = fit_or_abbreviate(text, w - 6, h - 4, FontSize::S28, true) {
                 layout.draw_centered(canvas, cx, y0 + h / 2, BLACK);
             }
         }
@@ -614,6 +628,49 @@ mod tests {
     }
 
     #[test]
+    fn long_words_break_at_hyphens_and_slashes() {
+        let blade = |name| fit_truncated_two_lines(name, 128 - 20, 44 - 8, FontSize::S28).unwrap();
+        assert_eq!(
+            blade("Aaron-Bernstein-Platz").lines,
+            ["Aaron-", "Bernstein-Platz"]
+        );
+        assert_eq!(
+            blade("Georgenstraße/Am Kupfergraben").lines[0],
+            "Georgenstraße/"
+        );
+    }
+
+    #[test]
+    fn a_word_cut_mid_way_carries_no_orphan() {
+        let blade = |name| fit_truncated_two_lines(name, 128 - 20, 44 - 8, FontSize::S28);
+        assert_eq!(
+            blade("Bethaniendamm").unwrap().lines,
+            ["Bethaniend-", "amm"]
+        );
+        assert_eq!(
+            blade("Friedrichsbrücke").unwrap().lines,
+            ["Friedrichsbrü-", "cke"]
+        );
+        // Too short to cut without one; left to the one-line ellipsis.
+        let max_w = Font::get(FontSize::S12).width("Mitt", 1);
+        assert!(fit_truncated_two_lines("Mitte", max_w, 32, FontSize::S12).is_none());
+    }
+
+    #[test]
+    fn two_line_fallback_tries_the_abbreviation_first() {
+        // The balanced split of the short form is too wide, but the greedy one fits.
+        let layout = fit_or_abbreviate(
+            "Avenue de la Porte Chaumont",
+            128 - 20,
+            44 - 8,
+            FontSize::S28,
+            true,
+        )
+        .unwrap();
+        assert_eq!(layout.lines, ["Ave de la Porte", "Chaumont"]);
+    }
+
+    #[test]
     fn street_blade_keeps_margins_transparent() {
         let mut c = Canvas::new(1, 1);
         text_sign(
@@ -632,7 +689,7 @@ mod tests {
     #[test]
     fn stop_name_uses_two_lines_without_truncating_when_it_fits() {
         let name = "Zwickau, Zentralhaltestelle";
-        let layout = fit_or_abbreviate(name, 128 - 2, 36 - 4, FontSize::S28, true).unwrap();
+        let layout = fit_or_abbreviate(name, 128 - 6, 36 - 4, FontSize::S28, true).unwrap();
 
         assert_eq!(layout.lines.len(), 2);
         assert_eq!(layout.lines.join(" "), name);
@@ -641,7 +698,7 @@ mod tests {
     #[test]
     fn stop_and_street_names_truncate_on_the_second_line() {
         let name = "Alte Reichenbacher Str.";
-        for (max_w, max_h) in [(128 - 2, 36 - 4), (128 - 20, 44 - 8)] {
+        for (max_w, max_h) in [(128 - 6, 36 - 4), (128 - 20, 44 - 8)] {
             let layout = fit_or_abbreviate(name, max_w, max_h, FontSize::S28, true).unwrap();
 
             assert_eq!(layout.lines.len(), 2);
@@ -653,6 +710,29 @@ mod tests {
                 layout.lines[1].trim_end_matches('…')
             );
             assert!(name.starts_with(&visible));
+        }
+    }
+
+    #[test]
+    fn stop_name_text_stays_off_the_border() {
+        let mut plate = Canvas::new(1, 1);
+        plate.rounded_rect(0, 46, 128, 36, 3, WHITE);
+        plate.stroke_rounded_rect(0, 46, 128, 36, 3, 2, DARK_GRAY);
+        // J and f overhang their advance, so a line of them is filled up to the edge.
+        let filled = (1..40).map(|n| format!("J{}", "f".repeat(n)));
+        let names = [
+            "Varian-Fry-Straße/Potsdamer Platz",
+            "Friedrichstraße/Reinhardtstraße",
+            "Mollstraße/Otto-Braun-Straße",
+        ];
+        for name in names.into_iter().map(String::from).chain(filled) {
+            let mut c = Canvas::new(1, 1);
+            text_sign(&mut c, TextStyle::StopName, &name);
+            for x in [0, 1, 126, 127] {
+                for y in 46..82 {
+                    assert_eq!(c.get(x, y), plate.get(x, y), "{name:?} at ({x}, {y})");
+                }
+            }
         }
     }
 

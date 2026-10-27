@@ -387,6 +387,7 @@ pub fn fetch_data_from_overpass(
         nwr["tourism"];
         nwr["bridge"];
         nwr["railway"];
+        node["public_transport"~"^(stop_position|station)$"][~"^(train|tram|subway|light_rail)$"~"^yes$"];
         nwr["roller_coaster"];
         nwr["aerialway"];
         nwr["attraction"];
@@ -402,6 +403,7 @@ pub fn fetch_data_from_overpass(
         nwr["3dmr"];
         nwr["shop"];
         nwr["office"];
+        node["place"~"^(city|town|borough|suburb|village|quarter|neighbourhood|hamlet)$"];
         way[~"."~"."];
     )->.candidates;
     (

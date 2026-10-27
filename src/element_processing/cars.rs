@@ -28,6 +28,8 @@ const MAX_SPAN: f64 = 24.0;
 /// The world's cars, spread over all of its lanes. Only those near a player move, so the
 /// cap is about what the world files hold, not what a tick costs.
 const MAX_CARS: usize = 1500;
+/// Lanes the pack stores per command.
+const LANES_PER_LINE: usize = 256;
 /// How far back from a mid-road signal the car stops.
 const STOP_BACK: f64 = 1.5;
 /// Speed across a junction, and over the last stretch of a lane into one.
@@ -68,7 +70,11 @@ fn step_speed(kmh: f64, scale: f64) -> i32 {
 
 /// The posted limit, or what roads of the class usually allow.
 fn limit_kmh(highway: &str, tags: &HashMap<String, String>) -> f64 {
-    let posted = tags.get("maxspeed").and_then(|m| parse_maxspeed(m));
+    // Junk like `inf` or `-5 mph` falls back to the class rather than overflow the speeds.
+    let posted = tags
+        .get("maxspeed")
+        .and_then(|m| parse_maxspeed(m))
+        .filter(|k| (1.0..=300.0).contains(k));
     posted.unwrap_or(match highway {
         "motorway" => 110.0,
         "trunk" => 80.0,
@@ -671,8 +677,8 @@ impl CarNetwork {
         self.cars.len()
     }
 
-    /// The pack function that loads the lanes into storage, one lane per line, and the
-    /// constants that depend on the world's scale.
+    /// The pack function that loads the lanes into storage, a batch of lanes per line, and
+    /// the constants that depend on the world's scale.
     pub fn storage_function(&self) -> String {
         let mut out = format!(
             "scoreboard players set #accel arnis {}\ndata modify storage arnis:cars seg set value []\n",
@@ -695,39 +701,50 @@ impl CarNetwork {
             list(&CAR_COLOURS),
             list(&VAN_COLOURS)
         );
-        for seg in &self.segments {
-            out.push_str("data modify storage arnis:cars seg append value {p:[");
-            for (k, p) in seg.points.iter().enumerate() {
-                if k > 0 {
+        // Batched, as one load runs at most maxCommandChainLength commands.
+        for batch in self.segments.chunks(LANES_PER_LINE) {
+            out.push_str("data modify storage arnis:cars batch set value [");
+            for (b, seg) in batch.iter().enumerate() {
+                if b > 0 {
                     out.push(',');
                 }
-                let _ = write!(
-                    out,
-                    "{{x:{:.2}d,y:{:.1}d,z:{:.2}d",
-                    macro_coord(p.x),
-                    p.y,
-                    macro_coord(p.z)
-                );
-                if let Some(g) = p.stop {
-                    let _ = write!(out, ",g:{g}b");
+                out.push_str("{p:[");
+                for (k, p) in seg.points.iter().enumerate() {
+                    if k > 0 {
+                        out.push(',');
+                    }
+                    let _ = write!(
+                        out,
+                        "{{x:{:.2}d,y:{:.1}d,z:{:.2}d",
+                        macro_coord(p.x),
+                        p.y,
+                        macro_coord(p.z)
+                    );
+                    if let Some(g) = p.stop {
+                        let _ = write!(out, ",g:{g}b");
+                    }
+                    if let Some(m) = p.cap {
+                        let _ = write!(out, ",m:{m}");
+                    }
+                    out.push('}');
                 }
-                if let Some(m) = p.cap {
-                    let _ = write!(out, ",m:{m}");
-                }
-                out.push('}');
+                let next: Vec<String> = seg
+                    .next
+                    .iter()
+                    .map(|t| {
+                        let crossing = if t.crossing { ",j:1b" } else { "" };
+                        format!("{{s:{},i:{}{crossing}}}", t.lane, t.entry)
+                    })
+                    .collect();
+                // A lane no car starts on is skipped by the respawn too.
+                let off = if seg.carries_cars() { "" } else { ",o:1b" };
+                let _ = write!(out, "],n:[{}],v:{}{off}}}", next.join(","), seg.speed);
             }
-            let next: Vec<String> = seg
-                .next
-                .iter()
-                .map(|t| {
-                    let crossing = if t.crossing { ",j:1b" } else { "" };
-                    format!("{{s:{},i:{}{crossing}}}", t.lane, t.entry)
-                })
-                .collect();
-            // A lane no car starts on is skipped by the respawn too.
-            let off = if seg.carries_cars() { "" } else { ",o:1b" };
-            let _ = writeln!(out, "],n:[{}],v:{}{off}}}", next.join(","), seg.speed);
+            out.push_str(
+                "]\ndata modify storage arnis:cars seg append from storage arnis:cars batch[]\n",
+            );
         }
+        out.push_str("data remove storage arnis:cars batch\n");
         out
     }
 
@@ -1896,6 +1913,10 @@ mod tests {
         );
         let net = CarNetwork::build(&[primary], 1.0, false, false, &world(), flat);
         assert_eq!(net.segments[0].speed, step_speed(50.0 * LIMIT_SHARE, 1.0));
+        for junk in ["inf", "NaN", "100000", "-5 mph", "zone0"] {
+            let tags = HashMap::from([("maxspeed".to_string(), junk.to_string())]);
+            assert_eq!(limit_kmh("primary", &tags), 50.0, "{junk}");
+        }
     }
 
     #[test]
@@ -1983,12 +2004,53 @@ mod tests {
     }
 
     #[test]
-    fn the_storage_function_writes_one_line_per_lane_with_its_speed() {
+    fn the_storage_function_writes_every_lane_with_its_speed() {
         let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat);
         let text = net.storage_function();
-        assert_eq!(text.lines().count(), 3 + net.segments.len());
+        assert_eq!(text.lines().count(), 3 + 2 + 1);
+        assert_eq!(text.matches("{p:[").count(), net.segments.len());
         assert!(text.contains(",g:1b"));
         assert!(text.contains(&format!(",v:{}}}", net.segments[0].speed)));
+    }
+
+    #[test]
+    fn a_big_network_loads_in_a_few_commands_with_its_lanes_in_order() {
+        let point = Waypoint {
+            x: 0.5,
+            y: 65.0,
+            z: 0.5,
+            stop: None,
+            cap: None,
+        };
+        let n: usize = 100_000;
+        let net = CarNetwork {
+            segments: (0..n)
+                .map(|i| Segment {
+                    way: 1,
+                    points: vec![point, point],
+                    arcs: vec![0.0, 0.0],
+                    next: Vec::new(),
+                    into_junction: false,
+                    turns_back: false,
+                    stub: false,
+                    speed: i as i32,
+                    density: 0.0,
+                })
+                .collect(),
+            cars: Vec::new(),
+            by_way: FnvHashMap::default(),
+            size: 1.0,
+            scale: 1.0,
+        };
+        let text = net.storage_function();
+        assert_eq!(text.lines().count(), 3 + 2 * n.div_ceil(LANES_PER_LINE) + 1);
+        let speeds: Vec<i32> = text
+            .split(",v:")
+            .skip(1)
+            .map(|s| s.split(|c: char| !c.is_ascii_digit()).next().unwrap())
+            .map(|v| v.parse().unwrap())
+            .collect();
+        assert_eq!(speeds, (0..n as i32).collect::<Vec<_>>());
     }
 
     #[test]
@@ -2405,10 +2467,14 @@ mod tests {
     fn lanes_no_car_starts_on_are_marked_off_for_the_respawn() {
         let net = CarNetwork::build(&stub_roads(), 1.0, false, false, &world(), flat);
         let text = net.storage_function();
-        let lines: Vec<&str> = text.lines().filter(|l| l.contains("seg append")).collect();
-        assert_eq!(lines.len(), net.segments.len());
-        for (seg, line) in net.segments.iter().zip(&lines) {
-            assert_eq!(line.contains(",o:1b"), !seg.carries_cars(), "{line}");
+        let lanes: Vec<&str> = text
+            .lines()
+            .filter(|l| l.contains("batch set value"))
+            .flat_map(|l| l.split("{p:[").skip(1))
+            .collect();
+        assert_eq!(lanes.len(), net.segments.len());
+        for (seg, lane) in net.segments.iter().zip(&lanes) {
+            assert_eq!(lane.contains(",o:1b"), !seg.carries_cars(), "{lane}");
         }
         assert!(net.segments.iter().any(|s| s.stub));
     }

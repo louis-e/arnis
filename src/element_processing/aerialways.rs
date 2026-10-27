@@ -1803,13 +1803,17 @@ fn generate_magic_carpet(editor: &mut WorldEditor, way: &ProcessedWay) {
 
 /// Cells kept free of trees along lift lines and round their terminals.
 pub fn clear_corridors(elements: &[ProcessedElement], xzbbox: &XZBBox) -> CoordinateBitmap {
-    let lifts: Vec<(&ProcessedWay, Kind)> = elements
+    let lifts: Vec<(&ProcessedWay, f64, f64)> = elements
         .iter()
         .filter_map(|e| match e {
             ProcessedElement::Way(way) if way.nodes.len() >= 2 => tag(&way.tags, "aerialway")
                 .and_then(Kind::from_tag)
                 .filter(|k| !matches!(k, Kind::MagicCarpet | Kind::RopeTow))
-                .map(|k| (way, k)),
+                .map(|k| {
+                    let spec = Spec::new(k, &way.tags);
+                    // Carriers plus a tree crown either side, and room round the terminals.
+                    (way, spec.gauge / 2.0 + 6.0, spec.mouth().max(4.0) + 8.0)
+                }),
             _ => None,
         })
         .collect();
@@ -1817,15 +1821,30 @@ pub fn clear_corridors(elements: &[ProcessedElement], xzbbox: &XZBBox) -> Coordi
     if lifts.is_empty() {
         return CoordinateBitmap::new_empty();
     }
-    let mut map = CoordinateBitmap::new(xzbbox);
-    for (way, kind) in lifts {
-        let spec = Spec::new(kind, &way.tags);
-        // Room for the carriers plus a tree crown either side.
-        let half = spec.gauge / 2.0 + 6.0;
+    // Even then it spans only the lifts' bands, clipped to the world.
+    let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for (way, half, reach) in &lifts {
+        let pad = half.max(*reach).ceil() as i32;
+        for n in &way.nodes {
+            x0 = x0.min(n.x - pad);
+            z0 = z0.min(n.z - pad);
+            x1 = x1.max(n.x + pad);
+            z1 = z1.max(n.z + pad);
+        }
+    }
+    let Ok(bounds) = XZBBox::rect_from_min_max(
+        x0.max(xzbbox.min_x()),
+        z0.max(xzbbox.min_z()),
+        x1.min(xzbbox.max_x()),
+        z1.min(xzbbox.max_z()),
+    ) else {
+        return CoordinateBitmap::new_empty();
+    };
+    let mut map = CoordinateBitmap::new(&bounds);
+    for (way, half, reach) in lifts {
         for w in way.nodes.windows(2) {
             mark_band(&mut map, w[0].x, w[0].z, w[1].x, w[1].z, half);
         }
-        let reach = spec.mouth().max(4.0) + 8.0;
         for node in [&way.nodes[0], &way.nodes[way.nodes.len() - 1]] {
             mark_band(&mut map, node.x, node.z, node.x, node.z, reach);
         }
@@ -2011,5 +2030,32 @@ mod tests {
         assert!(map.contains(125, 8) && !map.contains(125, 20));
         assert!(map.contains(-12, 0));
         assert!(clear_corridors(&[], &bbox).is_empty());
+    }
+
+    #[test]
+    fn corridors_stop_at_the_world_edge() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 400, 400).unwrap();
+        let lift = |id, (ax, az), (bx, bz)| {
+            let node = |id, x, z| crate::osm_parser::ProcessedNode {
+                id,
+                tags: HashMap::new(),
+                x,
+                z,
+            };
+            ProcessedElement::Way(ProcessedWay {
+                id,
+                nodes: vec![node(id, ax, az), node(id + 1, bx, bz)],
+                tags: [("aerialway".to_string(), "chair_lift".to_string())]
+                    .into_iter()
+                    .collect(),
+            })
+        };
+        // One lift runs in across the western edge, the other lies wholly outside.
+        let inside = lift(1, (-100, 200), (100, 200));
+        let outside = lift(3, (-500, -500), (-450, -500));
+        let map = clear_corridors(&[inside, outside.clone()], &bbox);
+        assert!(map.contains(0, 200) && map.contains(100, 208) && map.contains(112, 200));
+        assert!(!map.contains(300, 200) && !map.contains(0, 0));
+        assert!(clear_corridors(&[outside], &bbox).is_empty());
     }
 }

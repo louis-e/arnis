@@ -410,6 +410,19 @@ impl BridgeStructureMap {
                 group_nodes.extend(seen);
             }
             let is_boundary = |xz: (i32, i32)| node_members.get(&xz).copied().unwrap_or(0) <= 1;
+            // Where the area's clip cut a member: the bridge carries on past it.
+            let cut_ends: HashSet<(i32, i32)> = group_indices
+                .iter()
+                .flat_map(|&idx| {
+                    [
+                        bridge_ways[idx].nodes.first(),
+                        bridge_ways[idx].nodes.last(),
+                    ]
+                })
+                .flatten()
+                .filter(|n| crate::clipping::is_invented_node_id(n.id))
+                .map(|n| (n.x, n.z))
+                .collect();
             // Ends where decks fork and a road leaves outside them: one at grade lands the decks,
             // a raised one carries them on. A road deck forks only off a road.
             let mut fork_landings: HashSet<(i32, i32)> = HashSet::new();
@@ -644,6 +657,7 @@ impl BridgeStructureMap {
             // Where the deck has to come down to the terrain itself.
             let anchors_end = |xz: (i32, i32)| {
                 (is_boundary(xz) || fork_landings.contains(&xz))
+                    && !cut_ends.contains(&xz)
                     && !covered_boundaries.contains(&xz)
                     && !external_ramp_ends.contains(&xz)
                     && !joins_other_bridge(xz)
@@ -913,6 +927,7 @@ impl BridgeStructureMap {
                             &candidate.tags,
                             scale,
                         ),
+                        connectivity,
                         |x, z| {
                             connectivity
                                 .is_shared(x, z)
@@ -2795,6 +2810,21 @@ mod tests {
         assert!(!surface.support_blocked(15, 40, profile[5]));
     }
 
+    // A One World area cuts the way 64 blocks past its edge; the deck must not land there.
+    #[test]
+    fn a_deck_carries_on_past_the_end_the_clip_cut() {
+        let mut bridge = way_with(1, ROAD_BRIDGE, &[(10, 40), (34, 40)]);
+        bridge.nodes[1].id = 1 << 62;
+        let road = way_with(2, &[("highway", "residential")], &[(22, 10), (22, 70)]);
+        let (structures, _) = structures_over(&[bridge, road], |_| 0.0);
+        let profile = ys(&structures, 1);
+        assert_eq!(profile[0], 0, "the mapped end still lands");
+        assert!(
+            *profile.last().unwrap() >= ROAD_HEADROOM,
+            "stays up at the cut: {profile:?}"
+        );
+    }
+
     #[test]
     fn short_bridge_rises_no_steeper_than_a_block_per_cell() {
         let bridge = way_with(1, ROAD_BRIDGE, &[(20, 40), (26, 40)]);
@@ -2976,7 +3006,7 @@ mod tests {
         let structures =
             BridgeStructureMap::build(&elements, &editor, &connectivity, &outlines, 1.0);
         let block_range = highway_block_range("residential", &road.tags, 1.0);
-        let road_ys = road_profile(&editor, &road, block_range, |x, z| {
+        let road_ys = road_profile(&editor, &road, block_range, &connectivity, |x, z| {
             connectivity
                 .is_shared(x, z)
                 .then(|| junction_level(&editor, x, z))

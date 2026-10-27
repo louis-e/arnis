@@ -105,7 +105,7 @@ fn bspline_weights(t: f64) -> [f64; 4] {
 }
 
 /// Height at pixel position (`px`, `py`), with each pixel's value at its centre.
-/// Cubic B-spline when `smooth` and all 16 taps exist, else bilinear over the
+/// Cubic B-spline over the taps that exist when `smooth`, else bilinear over the
 /// nearest four that do. `pixel` returns NaN where there is no data.
 #[inline]
 pub(super) fn sample_pixels(
@@ -119,18 +119,21 @@ pub(super) fn sample_pixels(
     let (dx, dy) = (px - fx, py - fy);
     let (x0, y0) = (fx as i32, fy as i32);
     if smooth {
+        // Renormalizing keeps it continuous: a tap enters the window with zero weight.
         let (wx, wy) = (bspline_weights(dx), bspline_weights(dy));
-        let mut sum = 0.0;
-        for (j, w) in wy.iter().enumerate() {
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for (j, w_y) in wy.iter().enumerate() {
             let y = y0 - 1 + j as i32;
-            let row = wx[0] * pixel(x0 - 1, y)
-                + wx[1] * pixel(x0, y)
-                + wx[2] * pixel(x0 + 1, y)
-                + wx[3] * pixel(x0 + 2, y);
-            sum += w * row;
+            for (i, w_x) in wx.iter().enumerate() {
+                let v = pixel(x0 - 1 + i as i32, y);
+                if v.is_finite() {
+                    sum += w_x * w_y * v;
+                    weight += w_x * w_y;
+                }
+            }
         }
-        if sum.is_finite() {
-            return sum;
+        if weight > 0.0 {
+            return sum / weight;
         }
     }
     blend_finite_samples(
@@ -200,13 +203,44 @@ mod tests {
     #[test]
     fn missing_taps_fall_back_to_the_ones_present() {
         let holey = |x: i32, y: i32| if x < 0 { f64::NAN } else { ramp(x, y) };
-        // Next to the gap the spline lacks a tap, so bilinear over the present ones is used.
+        // The tap at x = -1 is left out and the other weights renormalized.
+        let (wx, wy) = (bspline_weights(0.25), bspline_weights(0.0));
+        let mut expected = 0.0;
+        for (j, w_y) in wy.iter().enumerate() {
+            for (i, w_x) in wx.iter().enumerate().skip(1) {
+                expected += w_x * w_y * ramp(i as i32 - 1, j as i32 - 1);
+            }
+        }
+        expected /= wx[1] + wx[2] + wx[3];
         let v = sample_pixels(0.75, 0.5, true, holey);
-        assert!(
-            (v - (0.75 * ramp(0, 0) + 0.25 * ramp(1, 0))).abs() < 1e-9,
-            "got {v}"
-        );
+        assert!((v - expected).abs() < 1e-9, "got {v}, want {expected}");
         assert!(sample_pixels(0.5, 0.5, true, |_, _| f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn spline_has_no_step_where_a_tap_goes_missing() {
+        // Curved, so the spline and bilinear differ. Data ends after column 3, so the
+        // window drops a tap once px reaches 2.5.
+        let bowl = |x: i32, y: i32| {
+            if x > 3 {
+                f64::NAN
+            } else {
+                f64::from(x * x + x * y + y * y)
+            }
+        };
+        for py in [0.5, 1.3, 2.8] {
+            let before = sample_pixels(2.5 - 1e-9, py, true, bowl);
+            let after = sample_pixels(2.5, py, true, bowl);
+            assert!(
+                (before - after).abs() < 1e-6,
+                "py {py}: {before} vs {after}"
+            );
+            let bilinear = sample_pixels(2.5, py, false, bowl);
+            assert!(
+                (after - bilinear).abs() > 0.1,
+                "surface is too flat to tell"
+            );
+        }
     }
 
     #[test]

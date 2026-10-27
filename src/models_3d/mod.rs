@@ -50,6 +50,9 @@ pub(crate) fn lowest_ground_in_bbox(
 /// Tallest tree the footprint sweep looks for above the ground.
 const TREE_SWEEP_HEIGHT: i32 = 64;
 
+/// How far past the footprint the sweep follows a tree; a crown reaches no further.
+const TREE_SWEEP_REACH: i32 = 10;
+
 /// Writes model voxels over whatever stands there. Trees inside the footprint go
 /// first, whole, so none grows through a lattice or a hollow statue.
 pub(crate) fn stamp_voxels(editor: &mut WorldEditor, voxels: &[([i32; 3], Block)]) {
@@ -74,6 +77,12 @@ fn clear_trees_in_footprint(editor: &mut WorldEditor, voxels: &[([i32; 3], Block
     }
     // Under a ring of legs or a platform edge counts as inside.
     let mask = crate::landmarks::fill_enclosed(&mask, span_x, span_z);
+    // Crowns touch across a wood, so an unbounded flood would clear the trees around it too.
+    let (reach_x, reach_z) = (
+        min_x - TREE_SWEEP_REACH..=max_x + TREE_SWEEP_REACH,
+        min_z - TREE_SWEEP_REACH..=max_z + TREE_SWEEP_REACH,
+    );
+    let near = |x: i32, z: i32| reach_x.contains(&x) && reach_z.contains(&z);
     for (i, _) in mask.iter().enumerate().filter(|(_, &m)| m) {
         let (x, z) = (min_x + (i % span_x) as i32, min_z + (i / span_x) as i32);
         let ground = editor.get_ground_level(x, z);
@@ -82,7 +91,7 @@ fn clear_trees_in_footprint(editor: &mut WorldEditor, voxels: &[([i32; 3], Block
                 .get_block_absolute(x, y, z)
                 .is_some_and(crate::water_depth::is_tree_part)
             {
-                crate::water_depth::clear_tree_from(editor, x, y, z);
+                crate::water_depth::clear_tree_within(editor, x, y, z, near);
             }
         }
     }

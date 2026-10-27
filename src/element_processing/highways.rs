@@ -72,11 +72,12 @@ pub(crate) fn junction_level(editor: &WorldEditor, x: i32, z: i32) -> i32 {
 /// Surface Y of an at-grade road for each cell of its centerline path, in the order the
 /// renderer walks it. The ground across the road is averaged, smoothed along it, then
 /// levelled so the road steps only where the ground does. Nodes `pin_at` gives a level are
-/// held to it.
+/// held to it, as are the cells across a One World area's edge.
 pub(crate) fn road_profile(
     editor: &WorldEditor,
     way: &ProcessedWay,
     block_range: i32,
+    connectivity: &HighwayConnectivityMap,
     pin_at: impl Fn(i32, i32) -> Option<i32>,
 ) -> Vec<i32> {
     let Some(first) = way.nodes.first() else {
@@ -131,6 +132,16 @@ pub(crate) fn road_profile(
     for (node, &cell) in way.nodes.iter().zip(&node_cells) {
         if let Some(level) = pin_at(node.x, node.z) {
             pins[cell] = Some(level);
+        }
+    }
+    // Each area clips the way at its own padding, so both take the edge's level from one cell.
+    if let Some(area) = &connectivity.area {
+        let inside = |i: usize| area.contains(&XZPoint::new(cells[i].0, cells[i].1));
+        for i in (1..n).filter(|&i| inside(i - 1) != inside(i)) {
+            let lower = if cells[i - 1] < cells[i] { i - 1 } else { i };
+            let y = smooth[lower].round() as i32;
+            pins[i - 1].get_or_insert(y);
+            pins[i].get_or_insert(y);
         }
     }
     level_profile(&smooth, &pins)
@@ -296,12 +307,19 @@ pub struct HighwayConnectivityMap {
     ends: HashMap<(i32, i32), Vec<i32>>,
     /// Packed with `pack_xz`, sorted.
     shared: Vec<u64>,
+    /// In One World, the area being built, whose roads the next area's meet at the edge.
+    area: Option<XZBBox>,
 }
 
 impl HighwayConnectivityMap {
     #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Meets the roads of the areas built next to `area` at its edge.
+    pub fn meet_at_edge_of(&mut self, area: XZBBox) {
+        self.area = Some(area);
     }
 
     pub(crate) fn is_shared(&self, x: i32, z: i32) -> bool {
@@ -1403,7 +1421,11 @@ pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayC
         .collect();
     shared.dedup();
     shared.shrink_to_fit();
-    HighwayConnectivityMap { ends, shared }
+    HighwayConnectivityMap {
+        ends,
+        shared,
+        area: None,
+    }
 }
 
 /// Internal function that generates highways with connectivity context for elevation handling
@@ -1787,7 +1809,7 @@ fn generate_highways_internal(
                 Vec::new()
             } else {
                 // A tunnel portal keeps the ground at its mouth, which the bore starts from.
-                road_profile(editor, way, block_range, |x, z| {
+                road_profile(editor, way, block_range, highway_connectivity, |x, z| {
                     highway_connectivity.is_shared(x, z).then(|| {
                         if tunnel_portals.is_open_end((x, z)) {
                             editor
@@ -3386,6 +3408,10 @@ pub(crate) fn surface_highway_type(way: &ProcessedWay) -> Option<&str> {
     }
     // Jet bridges render as a schematic, so the apron under them is not road.
     if way.tags.get("aeroway").is_some_and(|v| v == "jet_bridge") {
+        return None;
+    }
+    // A pier path is drawn as the deck, and the water under it is not road.
+    if way.tags.get("man_made").is_some_and(|v| v == "pier") {
         return None;
     }
     // Negative levels are indoor mapping.
@@ -5330,6 +5356,23 @@ mod tests {
         assert!(!mask.contains(50, 50), "tunnel is not a surface road");
     }
 
+    #[test]
+    fn pier_paths_leave_the_water_under_them_alone() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let elems = vec![
+            line_way(
+                1,
+                &[(10, 20), (50, 20)],
+                &[("highway", "footway"), ("man_made", "pier")],
+            ),
+            line_way(2, &[(10, 40), (50, 40)], &[("highway", "footway")]),
+        ];
+        let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0);
+        assert!(!mask.contains(30, 20), "a pier is a deck, not a road");
+        assert!(mask.contains(30, 40));
+    }
+
     fn line_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedElement {
         ProcessedElement::Way(ProcessedWay {
             id,
@@ -5765,6 +5808,39 @@ mod tests {
         let ys = level_profile(&smooth, &pins);
         assert_eq!((ys[0], ys[39]), (5, 1));
         assert!(ys[10..30].iter().all(|&y| y == 3), "{ys:?}");
+    }
+
+    #[test]
+    fn one_world_areas_either_side_of_an_edge_level_a_road_alike() {
+        // Hovering at a half block from x = 40 to 260, so each clip alone keeps its own end's level.
+        let ground = sloped_ground(300, 100, |x, _| {
+            if x < 40 {
+                4.0
+            } else if x < 260 {
+                4.5
+            } else {
+                5.0
+            }
+        });
+        let xzbbox = XZBBox::rect_from_xz_lengths(299.0, 99.0).unwrap();
+        let editor = tunnel_editor(&xzbbox, ground);
+        let edge: Vec<_> = [(0, 149), (150, 299)]
+            .into_iter()
+            .map(|(x0, x1)| {
+                let mut connectivity = HighwayConnectivityMap::new();
+                connectivity.meet_at_edge_of(XZBBox::rect_from_min_max(x0, 0, x1, 99).unwrap());
+                // Each clipped 64 blocks past its own area.
+                let (from, to) = ((x0 - 64).max(10), (x1 + 64).min(290));
+                let ProcessedElement::Way(road) =
+                    line_way(1, &[(from, 50), (to, 50)], &[("highway", "residential")])
+                else {
+                    unreachable!()
+                };
+                let ys = road_profile(&editor, &road, 2, &connectivity, |_, _| None);
+                [ys[(149 - from) as usize], ys[(150 - from) as usize]]
+            })
+            .collect();
+        assert_eq!(edge[0], edge[1]);
     }
 
     #[test]

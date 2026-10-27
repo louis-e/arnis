@@ -273,12 +273,7 @@ pub struct Args {
 
     /// Mapillary API token, from https://www.mapillary.com/developer. Required by
     /// --mapillary-facades and --mapillary-probe.
-    ///
-    /// `hide_env_values` because clap prints `[env: NAME=value]` in `--help` by
-    /// default, and this value is a credential: `arnis --help` with the variable
-    /// set would put the token on stdout, which is where a bug report or a CI log
-    /// picks it up. The variable's name still shows, so the help still says where
-    /// the token can come from.
+    // A credential: --help shows the variable's name but never its value.
     #[arg(long, env = "MAPILLARY_TOKEN", hide_env_values = true)]
     pub mapillary_token: Option<String>,
 
@@ -348,7 +343,7 @@ pub struct Args {
     /// Texture resolution of the facade panels in pixels per block (4, 8, 16 or
     /// 32), for the Mapillary photos and the preset facades alike. Lowered
     /// automatically when the panels would not fit the atlas --facade-detail
-    /// allows.
+    /// allows; walls that still do not fit at 4 are left without a panel.
     #[arg(long, default_value_t = 16, value_parser = parse_facade_px)]
     pub facade_px: u32,
 
@@ -760,6 +755,8 @@ pub fn apply_body_defaults(args: &mut Args) {
     // Snow and ruins dress Earth weather and Earth towns.
     args.winter = false;
     args.post_apocalyptic = false;
+    // The superflat template is a grass plain with villages.
+    args.world_type = WorldType::Void;
     args.scale = args.body.world_scale();
     args.mode = GenerationMode::TerrainOnly;
     args.overture = false;
@@ -790,7 +787,7 @@ pub fn apply_body_defaults(args: &mut Args) {
 }
 
 /// A blueprint shows where buildings stand, not what they look like, so whatever
-/// dresses a building or stands in for one is off.
+/// dresses a building or stands in for one is off, and so is street furniture.
 fn apply_mode_defaults(args: &mut Args) {
     if args.mode != GenerationMode::Blueprint {
         return;
@@ -799,6 +796,9 @@ fn apply_mode_defaults(args: &mut Args) {
     args.interior = false;
     args.building_facades = false;
     args.mapillary_facades = Some(false);
+    args.signage = SignageLevel::None;
+    // Signal nodes are left out, so cars would stop at lights that were never built.
+    args.traffic_lights = false;
 }
 
 /// Clap's `--world-time` default, so `apply_body_defaults` can tell left-alone
@@ -1071,8 +1071,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             let llpoint =
                 LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
 
-            // Validate that spawn point is within the bounding box. Only enforceable when the
-            // bbox is known up front; a file-derived bbox isn't available until the file is parsed.
+            // Validate that spawn point is within the bounding box. A file-derived bbox is
+            // checked in run_cli once the file is parsed.
             if let Some(bbox) = args.bbox {
                 if !bbox.contains(&llpoint) {
                     return Err(
@@ -1606,6 +1606,27 @@ mod tests {
     }
 
     #[test]
+    fn a_blueprint_has_no_street_furniture() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", "out", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            args
+        };
+        let args = parse(&["--traffic-lights", "--signage", "full"]);
+        assert!(args.traffic_lights && args.signage.full());
+        let args = parse(&[
+            "--mode",
+            "blueprint",
+            "--traffic-lights",
+            "--signage",
+            "full",
+        ]);
+        assert!(!args.traffic_lights && !args.signage.enabled());
+    }
+
+    #[test]
     fn gui_mode_names_match_the_cli() {
         assert_eq!(
             GenerationMode::from_name("blueprint"),
@@ -1640,6 +1661,22 @@ mod tests {
         assert!(!args.winter && !args.post_apocalyptic);
     }
 
+    #[test]
+    fn the_grass_plain_stays_on_earth() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", "out", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            args
+        };
+        assert_eq!(parse(&["--world-type", "flat"]).world_type, WorldType::Flat);
+        for body in ["moon", "mars"] {
+            let args = parse(&["--world-type", "flat", "--body", body]);
+            assert_eq!(args.world_type, WorldType::Void);
+        }
+    }
+
     /// `--help` must not print the Mapillary token.
     ///
     /// clap renders `[env: NAME=value]` for an env-backed argument unless
@@ -1668,6 +1705,7 @@ mod tests {
             "the help should name the variable without its value"
         );
         assert!(!help.contains("MAPILLARY_TOKEN="));
+        assert!(!help.contains("hide_env_values"));
     }
 
     #[test]

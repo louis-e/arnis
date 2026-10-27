@@ -62,6 +62,9 @@ pub struct Ground {
     ecoregions: Option<Arc<EcoMap>>,
     /// A winter run: every biome becomes its snowy counterpart.
     winter: bool,
+    /// Absolute block of the grids' first cell, so passes that draw patterns line up
+    /// across One World seams. (0, 0) in a local run.
+    origin: (i32, i32),
 }
 
 /// Layout of a run's ground grids. A projected run takes its size from the
@@ -117,12 +120,21 @@ impl GroundFrame {
         }
     }
 
+    /// Absolute block of the area's north-west corner, where its grids start.
+    fn origin(&self, bbox: &LLBBox) -> (i32, i32) {
+        self.mercator.as_ref().map_or((0, 0), |proj| {
+            (
+                crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false),
+                crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false),
+            )
+        })
+    }
+
     /// Ecoregions over the area, at the geography the land cover is laid out on.
     fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
         let map = match &self.mercator {
             Some(proj) => {
-                let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false);
-                let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false);
+                let (x0, z0) = self.origin(bbox);
                 EcoMap::build(world_w, world_h, (x0, z0), |gx, gz| {
                     (
                         proj.lat_for_z(f64::from(z0) + gz),
@@ -181,6 +193,12 @@ impl GroundFrame {
                     final_dims: (world_w, world_h),
                 };
             }
+        }
+        if pad > 0 {
+            println!(
+                "Note: this area is too wide for the seam margin, so terrain near its edges may \
+                 not match the neighbouring areas exactly."
+            );
         }
         let (_, _, gw, gh) = compute_grid_dims_for_world(world_w, world_h);
         FetchPlan {
@@ -264,6 +282,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -320,6 +339,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
+            origin: frame.origin(bbox),
         }
     }
 
@@ -344,6 +364,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -368,6 +389,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -407,6 +429,7 @@ impl Ground {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                halo: None,
             }),
             land_cover: None,
             canopy: None,
@@ -418,6 +441,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -504,6 +528,7 @@ impl Ground {
                 (world_w, world_h, grid_w, grid_h),
                 frame.affine,
                 peaks,
+                (frame.pad_blocks > 0).then_some(plan.pad),
             ) {
                 Ok(mut elevation_data) => {
                     let lat = (requested_bbox.min().lat() + requested_bbox.max().lat()) / 2.0;
@@ -555,6 +580,7 @@ impl Ground {
                             .then(|| frame.ecoregions(&requested_bbox, (final_w, final_h)))
                             .flatten(),
                         winter: false,
+                        origin: frame.origin(&requested_bbox),
                     }
                 }
                 Err(e) => {
@@ -590,6 +616,7 @@ impl Ground {
                             .then(|| frame.ecoregions(&requested_bbox, plan.final_dims))
                             .flatten(),
                         winter: false,
+                        origin: frame.origin(&requested_bbox),
                     }
                 }
             }
@@ -676,6 +703,16 @@ impl Ground {
         self.canopy_cell(origin, span).map(|(fraction, _)| fraction)
     }
 
+    /// Whether `canopy_cell` would answer, stopping at the first measured column.
+    pub fn canopy_measured(&self, origin: XZPoint, span: i32) -> bool {
+        (0..span).any(|dz| {
+            (0..span).any(|dx| {
+                self.canopy_height_m(XZPoint::new(origin.x + dx, origin.z + dz))
+                    .is_some()
+            })
+        })
+    }
+
     /// The canopy share of a `span` square at `origin` and its tallest crown in
     /// metres, or `None` where nothing in it was measured.
     pub fn canopy_cell(&self, origin: XZPoint, span: i32) -> Option<(f64, u8)> {
@@ -744,14 +781,15 @@ impl Ground {
     /// built-up land and fields to nature where the mode asks, then marks the beaches.
     pub fn finish_land_cover(&mut self, mode: GenerationMode) {
         if mode.natural_land_cover() {
-            self.naturalize_land_cover();
+            // A blueprint still draws roads and outlines on narrow land by the water.
+            self.naturalize_land_cover(mode.skip_objects());
         }
         self.mark_beaches();
     }
 
     /// Returns built-up land and fields to natural cover, for terrain-only worlds.
-    fn naturalize_land_cover(&mut self) {
-        let climate = self.climate;
+    fn naturalize_land_cover(&mut self, reclaim: bool) {
+        let (climate, origin) = (self.climate, self.origin);
         let Ground {
             land_cover,
             elevation_data,
@@ -761,7 +799,7 @@ impl Ground {
             return;
         };
         let heights = elevation_data.as_mut().map(|d| d.heights.as_mut_slice());
-        crate::land_cover::naturalize::naturalize(lc, heights, climate);
+        crate::land_cover::naturalize::naturalize(lc, heights, climate, origin, reclaim);
     }
 
     /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
@@ -1021,6 +1059,9 @@ impl Ground {
         }
 
         let data: &ElevationData = self.elevation_data.as_ref().unwrap();
+        if let Some(h) = data.beyond(coord.x, coord.z) {
+            return f64::from(h).round() as i32;
+        }
         let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
         self.interpolate_height(x_ratio, z_ratio, data)
     }
@@ -1030,6 +1071,9 @@ impl Ground {
     pub fn level_exact(&self, coord: XZPoint) -> f64 {
         match &self.elevation_data {
             Some(data) if self.elevation_enabled => {
+                if let Some(h) = data.beyond(coord.x, coord.z) {
+                    return f64::from(h);
+                }
                 let (x_ratio, z_ratio) = self.get_data_coordinates(coord, data);
                 Self::interpolate_height_exact(x_ratio, z_ratio, data)
             }
@@ -1167,6 +1211,7 @@ impl Ground {
             data.height = grid_height;
             data.world_width = world_width;
             data.world_height = world_height;
+            data.halo = None;
         }
     }
 
@@ -1661,7 +1706,8 @@ pub fn settle_build_height(
                         ""
                     };
                     format!(
-                        "{e} The area needs the extended build height, which makes the world                          larger{keep}."
+                        "{e} The area needs the extended build height, which makes the world \
+                         larger{keep}."
                     )
                 })?;
         }
@@ -1716,6 +1762,7 @@ mod tests {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                halo: None,
             }),
             land_cover: None,
             canopy: None,
@@ -1727,6 +1774,7 @@ mod tests {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -1755,9 +1803,18 @@ mod tests {
         );
         // A cell straddling the two averages only over what was measured.
         assert_eq!(ground.canopy_fraction(XZPoint::new(0, 2), 2), Some(1.0));
+        // The early-out probe agrees with the full scan.
+        for (x, z, span) in [(0, 0, 2), (2, 0, 2), (0, 3, 1), (0, 0, 0)] {
+            let o = XZPoint::new(x, z);
+            assert_eq!(
+                ground.canopy_measured(o, span),
+                ground.canopy_cell(o, span).is_some()
+            );
+        }
         // Without a canopy grid there is nothing to say.
         ground.canopy = None;
         assert_eq!(ground.canopy_fraction(XZPoint::new(0, 0), 2), None);
+        assert!(!ground.canopy_measured(XZPoint::new(0, 0), 2));
     }
 
     // Flat mode (no elevation) still maps land-cover lookups via the stored world dims, with edge clamping.
@@ -1780,6 +1837,34 @@ mod tests {
         // Out-of-range coords clamp to the last grid cell instead of panicking.
         assert_eq!(ground.cover_class(XZPoint::new(1000, 1000)), 10);
         assert_eq!(ground.water_distance(XZPoint::new(1000, 1000)), 0);
+    }
+
+    // So a building across a One World seam stands on the same ground in both areas.
+    #[test]
+    fn lookups_past_a_cropped_area_read_the_margin_it_was_fetched_with() {
+        // x + 100 z over a 10 x 8 fetch, cropped by 2 on every side.
+        let padded: Vec<Vec<f32>> = (0..8)
+            .map(|z| (0..10).map(|x| (x + 100 * z) as f32).collect())
+            .collect();
+        let mut g = ground_with(padded);
+        let data = g.elevation_data.as_mut().unwrap();
+        data.crop(2, 2, 6, 4);
+        // Inside, the cropped grid answers, as the later passes left it.
+        data.heights[0][0] = -1.0;
+        assert_eq!(g.level(XZPoint::new(0, 0)), -1);
+        assert_eq!(g.level(XZPoint::new(3, 2)), 405);
+        assert_eq!(g.level(XZPoint::new(-1, 0)), 201);
+        assert_eq!(g.level(XZPoint::new(6, 1)), 308);
+        assert_eq!(g.level(XZPoint::new(2, -2)), 4);
+        assert_eq!(g.level_exact(XZPoint::new(7, 5)), 709.0);
+        assert_eq!(g.level(XZPoint::new(-50, 1)), 300);
+
+        // Without a margin the edge repeats.
+        let edge = ground_with(ramp(1.0));
+        assert_eq!(
+            edge.level(XZPoint::new(-3, 4)),
+            edge.level(XZPoint::new(0, 4))
+        );
     }
 
     // Water snaps to the local floor over small DEM steps, but not across a real cliff.
@@ -1830,6 +1915,7 @@ mod tests {
             ground_level: 0,
             soft_top: None,
             extended_ceiling: false,
+            halo: None,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
         assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);
@@ -2103,6 +2189,7 @@ pub(crate) mod test_support {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                halo: None,
             }),
             land_cover: Some(land_cover),
             canopy: None,
@@ -2114,6 +2201,7 @@ pub(crate) mod test_support {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 }

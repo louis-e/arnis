@@ -6,6 +6,7 @@ use crate::block_definitions::Block;
 #[cfg(test)]
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::railways::{determine_rail_with_slope, smooth_diagonal_rails};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use fnv::FnvHashMap;
@@ -58,6 +59,8 @@ impl Default for TrackEnd {
 #[derive(Default)]
 pub struct RailJoins {
     ends: FnvHashMap<u64, [TrackEnd; 2]>,
+    /// In One World, the area being built, whose track the next area's meets at the edge.
+    area: Option<XZBBox>,
 }
 
 struct Track<'a> {
@@ -183,12 +186,32 @@ impl RailJoins {
             }
             ends.insert(track.way.id, pair);
         }
-        Self { ends }
+        Self { ends, area: None }
     }
 
     /// What lies past the start and the end of a way.
     pub fn ends(&self, way: u64) -> [TrackEnd; 2] {
         self.ends.get(&way).cloned().unwrap_or_default()
+    }
+
+    /// Meets the track of the areas built next to `area` at its edge.
+    pub fn meet_at_edge_of(&mut self, area: XZBBox) {
+        self.area = Some(area);
+    }
+
+    /// Where a run of cells crosses the area's edge, as the cell inside and the one outside.
+    pub fn edge_crossings(&self, cells: &[(i32, i32)]) -> Vec<[usize; 2]> {
+        let Some(area) = &self.area else {
+            return Vec::new();
+        };
+        let inside = |&(x, z): &(i32, i32)| area.contains(&XZPoint::new(x, z));
+        (1..cells.len())
+            .filter_map(|i| match (inside(&cells[i - 1]), inside(&cells[i])) {
+                (true, false) => Some([i - 1, i]),
+                (false, true) => Some([i, i - 1]),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -302,6 +325,8 @@ pub(crate) fn rail_profile(
         starts.push(back.len());
         back.resize(back.len() + w * 2, u32::MAX);
         let base = starts[i];
+        // What any jump of two blocks or more costs at the least.
+        let far_floor = prev.iter().copied().fold(f64::INFINITY, f64::min) + 2.0 * BROKEN;
         for bi in 0..w {
             let b = lo + bi as i32;
             let own = cost(i, b);
@@ -310,26 +335,37 @@ pub(crate) fn rail_profile(
                 continue;
             }
             let plo = lows[i - 1];
-            for (s, &was) in prev.iter().enumerate() {
-                if !was.is_finite() {
-                    continue;
+            let relax = |states: std::ops::Range<usize>, cur: &mut [f64], back: &mut [u32]| {
+                for s in states {
+                    let was = prev[s];
+                    if !was.is_finite() {
+                        continue;
+                    }
+                    let a = plo + (s / 2) as i32;
+                    let climbing_back = s % 2 == 1;
+                    let d = b - a;
+                    let (extra, low) = match d {
+                        0 => (0.0, false),
+                        1 if straight[i - 1] && !climbing_back => (step, false),
+                        -1 if straight[i] => (step, true),
+                        1 | -1 => (BROKEN, d < 0),
+                        _ => (BROKEN * d.abs() as f64, false),
+                    };
+                    let total = was + extra + own;
+                    let slot = bi * 2 + low as usize;
+                    if total < cur[slot] {
+                        cur[slot] = total;
+                        back[slot] = s as u32;
+                    }
                 }
-                let a = plo + (s / 2) as i32;
-                let climbing_back = s % 2 == 1;
-                let d = b - a;
-                let (extra, low) = match d {
-                    0 => (0.0, false),
-                    1 if straight[i - 1] && !climbing_back => (step, false),
-                    -1 if straight[i] => (step, true),
-                    1 | -1 => (BROKEN, d < 0),
-                    _ => (BROKEN * d.abs() as f64, false),
-                };
-                let total = was + extra + own;
-                let slot = bi * 2 + low as usize;
-                if total < cur[slot] {
-                    cur[slot] = total;
-                    back[base + slot] = s as u32;
-                }
+            };
+            // Further than a block only if nothing nearer beats a jump, rescanning so ties hold.
+            let state = |h: i32| (2 * (h - plo)).clamp(0, prev.len() as i32) as usize;
+            relax(state(b - 1)..state(b + 2), &mut cur, &mut back[base..]);
+            if cur[bi * 2] >= far_floor + own {
+                cur[bi * 2..bi * 2 + 2].fill(f64::INFINITY);
+                back[base + bi * 2..base + bi * 2 + 2].fill(u32::MAX);
+                relax(0..prev.len(), &mut cur, &mut back[base..]);
             }
         }
         lows.push(lo);
@@ -475,6 +511,95 @@ mod tests {
         // It climbs, not just lies flat.
         let ys: Vec<i32> = laid.iter().map(|l| l.1).collect();
         assert!(ys.iter().max().unwrap() - ys.iter().min().unwrap() >= 4);
+    }
+
+    // The profile as it was before nearby heights were tried first: every state against all.
+    fn full_scan_profile(
+        straight: &[bool],
+        range: impl Fn(usize) -> (i32, i32),
+        cost: impl Fn(usize, i32) -> f64,
+        step: f64,
+    ) -> Vec<i32> {
+        let n = straight.len();
+        let (mut lows, mut back, mut prev): (Vec<i32>, Vec<Vec<u32>>, Vec<Vec<f64>>) =
+            Default::default();
+        for i in 0..n {
+            let (lo, hi) = range(i);
+            let w = (hi - lo + 1) as usize;
+            let mut cur = vec![f64::INFINITY; w * 2];
+            let mut from = vec![u32::MAX; w * 2];
+            for bi in 0..w {
+                let b = lo + bi as i32;
+                let own = cost(i, b);
+                if i == 0 {
+                    cur[bi * 2] = own;
+                    continue;
+                }
+                for (s, &was) in prev[i - 1].iter().enumerate() {
+                    if !was.is_finite() {
+                        continue;
+                    }
+                    let d = b - (lows[i - 1] + (s / 2) as i32);
+                    let (extra, low) = match d {
+                        0 => (0.0, false),
+                        1 if straight[i - 1] && s % 2 == 0 => (step, false),
+                        -1 if straight[i] => (step, true),
+                        1 | -1 => (BROKEN, d < 0),
+                        _ => (BROKEN * d.abs() as f64, false),
+                    };
+                    let slot = bi * 2 + low as usize;
+                    if was + extra + own < cur[slot] {
+                        cur[slot] = was + extra + own;
+                        from[slot] = s as u32;
+                    }
+                }
+            }
+            lows.push(lo);
+            prev.push(cur);
+            back.push(from);
+        }
+        let last = &prev[n - 1];
+        let mut s = (0..last.len())
+            .min_by(|&a, &b| last[a].total_cmp(&last[b]))
+            .unwrap_or(0);
+        let mut heights = vec![0; n];
+        for i in (0..n).rev() {
+            heights[i] = lows[i] + (s / 2) as i32;
+            if i > 0 {
+                s = back[i][s] as usize;
+            }
+        }
+        heights
+    }
+
+    #[test]
+    fn trying_nearby_heights_first_lays_the_same_profile() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut rand = |m: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % m
+        };
+        for _ in 0..3000 {
+            let n = 1 + rand(40) as usize;
+            let straight: Vec<bool> = (0..n).map(|_| rand(3) > 0).collect();
+            let ground: Vec<i32> = (0..n).map(|_| rand(9) as i32 - 4).collect();
+            // Some cells pinned, a few far apart, so a jump of several blocks has to win.
+            let pins: Vec<Option<i32>> = (0..n)
+                .map(|_| (rand(6) == 0).then(|| rand(13) as i32 - 6))
+                .collect();
+            let reach = rand(4) as i32;
+            let step = [0.0, 0.7, 2.5][rand(3) as usize];
+            let range =
+                |i: usize| pins[i].map_or((ground[i] - reach, ground[i] + reach), |p| (p, p));
+            let cost =
+                |i: usize, y: i32| 0.25 * ((y - ground[i]).abs() as f64) + (i % 3) as f64 * 0.1;
+            assert_eq!(
+                rail_profile(&straight, range, cost, step),
+                full_scan_profile(&straight, range, cost, step)
+            );
+        }
     }
 
     #[test]

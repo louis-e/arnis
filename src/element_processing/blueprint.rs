@@ -7,7 +7,7 @@ use crate::world_editor::WorldEditor;
 
 /// One block high on the ground, in a colour nothing else in a blueprint uses, so a builder
 /// can follow it and later replace it in one go.
-const OUTLINE: Block = LIGHT_BLUE_CONCRETE;
+pub(crate) const OUTLINE: Block = LIGHT_BLUE_CONCRETE;
 
 pub fn generate_outline(editor: &mut WorldEditor, way: &ProcessedWay) {
     if !is_underground_building(&way.tags) {

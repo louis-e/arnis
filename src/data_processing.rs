@@ -10,8 +10,8 @@ use crate::ground_generation;
 use crate::map_preview;
 use crate::map_renderer::PreviewAccumulator;
 use crate::osm_parser::{
-    OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole, ProcessedNode,
-    ProcessedRelation, ProcessedWay,
+    HousingRelationParts, OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole,
+    ProcessedNode, ProcessedRelation, ProcessedWay,
 };
 use crate::progress::{
     emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
@@ -274,6 +274,7 @@ fn process_element(
     tunnel_portals: &highways::TunnelPortalMap,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
     part_groups: &PartGroups,
+    housing_relation_parts: &HousingRelationParts,
     group_members: &FnvHashMap<u64, Vec<u64>>,
     still_surfaces: &water_areas::StillWaterSurfaces,
     interior_uses: &InteriorUseIndex,
@@ -347,6 +348,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    housing_relation_parts,
                     interior_uses,
                 };
                 let anchor =
@@ -592,6 +594,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    housing_relation_parts,
                     interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
@@ -659,6 +662,7 @@ fn world_style<'a>(args: &Args, footprints: Option<&'a CoordinateBitmap>) -> Wor
         winter: args.winter,
         ruins: args.post_apocalyptic,
         footprints,
+        bare: (args.mode == GenerationMode::Blueprint).then_some(blueprint::OUTLINE),
     }
 }
 
@@ -762,6 +766,7 @@ pub fn generate_world_with_options(
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
     part_groups: PartGroups,
+    housing_parts: HousingRelationParts,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
@@ -822,6 +827,7 @@ pub fn generate_world_with_options(
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
+    editor.set_size_options(crate::world_utils::WorldSizeOptions::of(args));
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     if let Some(run) = one_world {
@@ -1036,7 +1042,11 @@ pub fn generate_world_with_options(
     emit_gui_progress_update(19.5, "Processing data...");
 
     // Build highway connectivity map once before processing
-    let highway_connectivity = highways::build_highway_connectivity_map(&elements);
+    let mut highway_connectivity = highways::build_highway_connectivity_map(&elements);
+    // Each area clips ways at its own padding, so roads keep level where areas meet.
+    if one_world.is_some() {
+        highway_connectivity.meet_at_edge_of(xzbbox.clone());
+    }
     let sign_region = crate::decals::region::SignRegion::detect(
         (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
         (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
@@ -1157,7 +1167,11 @@ pub fn generate_world_with_options(
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
     // What each track way joins at its ends, so every tile lays the joints alike.
-    let rail_joins = railways::RailJoins::build(&elements, railways::track_level);
+    let mut rail_joins = railways::RailJoins::build(&elements, railways::track_level);
+    // Each area clips ways at its own padding, so tracks keep level where areas meet.
+    if one_world.is_some() {
+        rail_joins.meet_at_edge_of(xzbbox.clone());
+    }
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
 
@@ -1393,6 +1407,9 @@ pub fn generate_world_with_options(
             });
         }
         let model_regions: HashSet<(i32, i32)> = deferred.regions().copied().collect();
+        // The spawn's map frame is placed after the loop, on the road surface.
+        let road_regions: HashSet<(i32, i32)> =
+            model_regions.iter().copied().chain(spawn_region).collect();
         // The styles read every region's roads, which then go when it is written.
         let keep_roads = world_style(args, None).is_active();
 
@@ -1547,6 +1564,7 @@ pub fn generate_world_with_options(
                     &tunnel_portals,
                     &mut tile_tunnel_cells,
                     &part_groups,
+                    &housing_parts,
                     &group_members,
                     &still_surfaces,
                     &interior_uses,
@@ -1725,9 +1743,9 @@ pub fn generate_world_with_options(
                             tiles[tile_idx].max_x - 1,
                             tiles[tile_idx].max_z - 1,
                         );
-                        // Under eviction only the deferred placements' regions keep theirs; the
-                        // rest are evicted, and this caps the extra resident RAM. A styled run
-                        // keeps them all and drops each region's once it is flushed.
+                        // Under eviction only the deferred placements' and spawn's regions keep
+                        // theirs; the rest are evicted, and this caps the extra resident RAM. A
+                        // styled run keeps them all and drops each region's once it is flushed.
                         editor.merge_road_surface_overrides(
                             tile_road_overrides,
                             (
@@ -1736,7 +1754,7 @@ pub fn generate_world_with_options(
                                 tiles[tile_idx].max_x - 1,
                                 tiles[tile_idx].max_z - 1,
                             ),
-                            (eviction_active && !keep_roads).then_some(&model_regions),
+                            (eviction_active && !keep_roads).then_some(&road_regions),
                         );
 
                         if eviction_active {
@@ -1809,7 +1827,12 @@ pub fn generate_world_with_options(
                         // Under eviction the in-tile carve already ran, and nothing reads
                         // these afterwards, so don't retain the points or the cells.
                         if !eviction_active {
-                            rail_tunnel_points.extend(tile_rail_tunnel_points);
+                            // Another tile's floors there need not match the owner's shell.
+                            rail_tunnel_points.extend(
+                                tile_rail_tunnel_points
+                                    .into_iter()
+                                    .filter(|p| tiles[tile_idx].contains(p.0, p.1)),
+                            );
                             tunnel_cells.extend(tile_tunnel_cells);
                         }
 
@@ -1965,6 +1988,7 @@ pub fn generate_world_with_options(
                 &tunnel_portals,
                 &mut tunnel_cells,
                 &part_groups,
+                &housing_parts,
                 &group_members,
                 &still_surfaces,
                 &interior_uses,

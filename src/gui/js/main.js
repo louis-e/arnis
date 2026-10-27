@@ -744,6 +744,7 @@ function setCelestialBody(body) {
   // the world format and the stored source too.
   refreshHeightLimitRow();
   refreshGameplayRows();
+  refreshWorldTypeRow();
   refreshFacadeRows();
   refreshOneWorldState();
 
@@ -1299,6 +1300,9 @@ function initSettings() {
     });
   });
 
+  // Blueprint greys out the traffic lights.
+  document.getElementById("generation-mode-select").addEventListener("change", () => refreshGameplayRows());
+
   // A reloaded map comes back on Earth; restore whatever was picked.
   const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
@@ -1802,26 +1806,32 @@ function refreshHeightLimitRow(format) {
 
 // Bedrock and Luanti keep their own flat generators, so the choice only means
 // something for Java. Greyed rather than hidden, like the other format gates.
+// A One World's areas sit at their real heights and a superflat off Earth is
+// grass, so the backend makes both void.
 function refreshWorldTypeRow(format) {
   const group = document.getElementById('world-type-group');
   if (!group) return;
-  const java = (format || selectedWorldFormat) === 'java';
-  group.classList.toggle('segmented-disabled', !java);
+  const available = (format || selectedWorldFormat) === 'java'
+    && selectedCelestialBody === 'earth' && !isOneWorldEnabled();
+  group.classList.toggle('segmented-disabled', !available);
   const row = group.closest('.settings-row');
-  if (row) row.classList.toggle('settings-row-unavailable', !java);
+  if (row) row.classList.toggle('settings-row-unavailable', !available);
 }
 
 // The extras are a Java data pack, and each One World area would write its own over
 // the last one's. Off Earth there are no roads or places, and gravity only differs there.
+// Blueprint builds no signal heads, so there are no lights to run.
 function refreshGameplayRows(format) {
   // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
   const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldEnabled();
   const earth = selectedCelestialBody === 'earth';
+  const mode = document.getElementById('generation-mode-select');
+  const blueprint = !!mode && mode.value === 'blueprint';
   setSettingsRowAvailable('pause-menu-toggle', pack);
   setSettingsRowAvailable('zombie-outbreak-toggle', pack);
   setSettingsRowAvailable('disasters-toggle', pack);
   setSettingsRowAvailable('discoveries-toggle', pack && earth);
-  setSettingsRowAvailable('traffic-lights-toggle', pack && earth);
+  setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
   setSettingsRowAvailable('moving-cars-toggle', pack && earth);
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
 }
@@ -3271,7 +3281,10 @@ function initOneWorld() {
   if (!toggle) return;
   // Also fires when the settings store restores the value.
   toggle.addEventListener('change', refreshOneWorldState);
-  toggle.addEventListener('change', () => refreshGameplayRows());
+  toggle.addEventListener('change', () => {
+    refreshGameplayRows();
+    refreshWorldTypeRow();
+  });
   const mode = document.getElementById('generation-mode-select');
   if (mode) mode.addEventListener('change', renderOneWorldStatus);
   const nameToggle = document.getElementById('custom-world-name-toggle');
@@ -3360,7 +3373,9 @@ async function startGeneration() {
     resetProgressUi(STARTING_MESSAGE);
 
     const oneWorld = isOneWorldEnabled();
-    if (oneWorld && !(await prepareOneWorldRun())) {
+    const oneWorldBBox = selectedBBox;
+    // The overlap dialog leaves the page live, so the body, format or area may have changed under it.
+    if (oneWorld && (!(await prepareOneWorldRun()) || !isOneWorldEnabled() || selectedBBox !== oneWorldBBox)) {
       const info = document.getElementById('progress-info');
       if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
       return;
@@ -3441,6 +3456,10 @@ async function startGeneration() {
 
     // Validate ground_level
     ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
+    // A world the CLI made may sit on another level, and the backend refuses any but its own.
+    if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
+      ground_level = oneWorldInfo.ground_level;
+    }
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;

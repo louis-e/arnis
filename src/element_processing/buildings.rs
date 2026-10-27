@@ -17638,6 +17638,9 @@ pub fn generate_building_from_relation(
         )
     };
 
+    // A part of a housing block takes its storey height, as its part ways do.
+    let housing = ctx.housing_relation_parts.contains(&relation.id);
+
     // Build a synthetic ProcessedWay for each assembled ring and render it.
     // The relation tags are applied so that building type, levels, and roof
     // shape from the relation are honoured.
@@ -17654,7 +17657,7 @@ pub fn generate_building_from_relation(
             relation_levels,
             hole_polygons.as_deref(),
             ctx,
-            merged_way.id,
+            crate::osm_parser::seed_with_residential_mark(merged_way.id, housing),
         );
     }
 }
@@ -21815,6 +21818,7 @@ mod facade_integration_tests {
             road_mask: road,
             building_footprints: footprints,
             group_members: &groups,
+            housing_relation_parts: &Default::default(),
             interior_uses:
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
@@ -21827,6 +21831,50 @@ mod facade_integration_tests {
             .flat_map(|x| (0..80).map(move |z| (x, z)))
             .map(|(x, z)| editor.highest_block_between(x, z, -64, 300))
             .collect()
+    }
+
+    // A building:part relation of a housing block takes the housing storey
+    // height, so it stacks flush on the block's part ways.
+    #[test]
+    fn housing_part_relations_take_housing_storeys() {
+        use crate::element_processing::building_test_support::tag_map;
+        use crate::osm_parser::{HousingRelationParts, ProcessedMember};
+        let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let road = CoordinateBitmap::new(&xz);
+        let footprints = CoordinateBitmap::new(&xz);
+        let relation = ProcessedRelation {
+            id: 9,
+            tags: tag_map(&[
+                ("type", "multipolygon"),
+                ("building:part", "yes"),
+                ("building:levels", "5"),
+                ("roof:shape", "flat"),
+            ]),
+            members: vec![ProcessedMember {
+                role: ProcessedMemberRole::Outer,
+                way: Arc::new(rect_way(7, 20, 20, 40, 36, &[])),
+            }],
+        };
+        let top = |housing: &HousingRelationParts| {
+            let mut editor = test_editor(&xz);
+            let cache = FloodFillCache::new();
+            let passages = CoordinateBitmap::new_empty();
+            let ctx = BuildingContext {
+                flood_fill_cache: &cache,
+                building_passages: &passages,
+                road_mask: &road,
+                building_footprints: &footprints,
+                group_members: &FnvHashMap::default(),
+                housing_relation_parts: housing,
+                interior_uses:
+                    crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
+            };
+            generate_building_from_relation(&mut editor, &relation, &flat_args(), &ctx, &xz);
+            editor.highest_block_between(30, 20, -64, 300)
+        };
+        // Five storeys of 4 or 3 blocks over the base, under a coping.
+        assert_eq!(top(&HousingRelationParts::new()), Some(23));
+        assert_eq!(top(&HousingRelationParts::from([9])), Some(18));
     }
 
     // A tower's crown ends at its mapped height: a screen carries the wall
@@ -22461,6 +22509,7 @@ mod facade_integration_tests {
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &groups,
+                housing_relation_parts: &Default::default(),
                 interior_uses:
                     crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
             };
@@ -23043,6 +23092,7 @@ mod facade_dump {
                     road_mask: &road,
                     building_footprints: &footprints,
                     group_members: &groups,
+                    housing_relation_parts: &Default::default(),
                     interior_uses:
                         crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
                 };
@@ -23209,6 +23259,7 @@ mod doorstep_tests {
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
+            housing_relation_parts: &Default::default(),
             interior_uses:
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };

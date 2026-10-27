@@ -97,7 +97,10 @@ fn shelter_kind(tags: &HashMap<String, String>) -> Option<ShelterKind> {
             Some(ShelterKind::LeanTo)
         }
         Some("gazebo" | "sun_shelter" | "pavilion") => Some(ShelterKind::Pavilion { table: false }),
-        _ if tag(tags, "bus") == Some("yes") || tag(tags, "public_transport").is_some() => {
+        _ if tag(tags, "bus") == Some("yes")
+            || tag(tags, "public_transport").is_some()
+            || tag(tags, "highway") == Some("bus_stop") =>
+        {
             Some(ShelterKind::Transit)
         }
         _ => Some(ShelterKind::Pavilion { table: true }),
@@ -118,9 +121,17 @@ pub fn generate_shelter_node(
     match kind {
         ShelterKind::Transit => transit_shelter(editor, node.x, node.z, base, along_x, toward),
         ShelterKind::Pavilion { table } => {
-            pavilion(editor, node.x, node.z, base);
+            // Step back from the road until no post or eave stands on it.
+            let (x, z) = (0..=3)
+                .map(|d| (node.x - toward.0 * d, node.z - toward.1 * d))
+                .find(|&(x, z)| {
+                    !(-2..=2).any(|a| (-2..=2).any(|b| road_mask.contains(x + a, z + b)))
+                })
+                .unwrap_or((node.x, node.z));
+            let base = editor.get_absolute_y(x, 0, z);
+            pavilion(editor, x, z, base);
             if table {
-                picnic_table(editor, node.x, node.z, base, along_x);
+                picnic_table(editor, x, z, base, along_x);
             }
         }
         ShelterKind::LeanTo => lean_to(editor, node.x, node.z, base, along_x, toward),
@@ -315,6 +326,19 @@ mod tests {
     }
 
     #[test]
+    fn a_pavilion_steps_back_off_the_road() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let mask = road_along_x(&xzbbox, 22);
+        let shelter = node(3, 20, 20, &[("amenity", "shelter")]);
+        generate_shelter_node(&mut editor, &shelter, &mask);
+        // One step back, the near posts stand just short of the road at z=22.
+        assert_eq!(editor.get_block_absolute(18, 1, 22), None);
+        assert_eq!(editor.get_block_absolute(18, 1, 21), Some(SPRUCE_FENCE));
+        assert_eq!(editor.get_block_absolute(22, 1, 17), Some(SPRUCE_FENCE));
+    }
+
+    #[test]
     fn a_parking_area_gets_a_roof_only_when_covered() {
         use crate::element_processing::building_test_support::rect_way;
         let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
@@ -348,6 +372,11 @@ mod tests {
         assert_eq!(
             shelter_kind(&tag_map(&[("shelter_type", "weather_shelter")])),
             Some(ShelterKind::LeanTo)
+        );
+        // The old tagging puts the shelter on the stop itself.
+        assert_eq!(
+            shelter_kind(&tag_map(&[("highway", "bus_stop")])),
+            Some(ShelterKind::Transit)
         );
     }
 }

@@ -54,9 +54,10 @@
 //!   finished world: a wall buried in a hillside is dropped, the picture is
 //!   fitted to the wall, and the panels are hung. A region has to be settled
 //!   before stream-to-disk eviction drops it, or the entities written into it
-//!   are lost. `finalize` first sizes the atlas from every candidate still
-//!   pending and brings the set to the resolution the pack will end at, so
-//!   the crops are built at that size rather than shrunk to it afterwards.
+//!   are lost. A hung panel keeps only the recipe for its pixels: `finalize`
+//!   sizes the atlas from those and every candidate still pending, brings the
+//!   set to the resolution the pack will end at and crops every panel once,
+//!   at that size, rather than at the requested one and shrunk afterwards.
 //! * The pack is written by `displays::write_packs`, which both sources share.
 
 pub mod choose;
@@ -66,9 +67,11 @@ pub mod manifest;
 use std::sync::{Arc, Mutex};
 
 use fnv::{FnvHashMap, FnvHashSet};
+use rayon::prelude::*;
 
 use crate::bresenham::bresenham_line;
 use crate::element_processing::buildings::BuildingCategory;
+use crate::mapillary::atlas::MIN_PX_PER_BLOCK;
 use crate::mapillary::displays::{self, cell_step, outward_normal, right_of};
 use crate::mapillary::facades;
 use crate::osm_parser::ProcessedNode;
@@ -133,6 +136,17 @@ struct Candidate {
     party: bool,
 }
 
+/// A hung panel's crop, made in `finalize` once the pack's resolution is known.
+struct Hung {
+    name: String,
+    w: f64,
+    h: f64,
+    entry: usize,
+    fit: Fit,
+    /// What `piece_metres` gave the piece.
+    metres: (f64, f64, f64, f64),
+}
+
 /// The member of a building whose picture the whole of it wears.
 ///
 /// The tallest one, ties broken by the lower element id, so the pick is a
@@ -190,6 +204,8 @@ struct Registry {
     candidates: Vec<Option<Candidate>>,
     /// Candidate indices by the 512-block regions their cells touch.
     by_region: FnvHashMap<(i32, i32), Vec<usize>>,
+    /// Panels hung and not yet cropped.
+    hung: Vec<Hung>,
     /// One picture per part group, keyed on the shared style seed the rest of
     /// the generator already groups a building's parts by.
     groups: FnvHashMap<u64, GroupPick>,
@@ -208,6 +224,7 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     claimed: FnvHashSet::with_hasher(fnv::FnvBuildHasher::new()),
     candidates: Vec::new(),
     by_region: FnvHashMap::with_hasher(fnv::FnvBuildHasher::new()),
+    hung: Vec::new(),
     groups: FnvHashMap::with_hasher(fnv::FnvBuildHasher::new()),
     world: None,
     stats: Stats {
@@ -301,6 +318,7 @@ pub fn reset(want: bool, dir: Option<&std::path::Path>, px: u32, scale: f64) {
         claimed: FnvHashSet::default(),
         candidates: Vec::new(),
         by_region: FnvHashMap::default(),
+        hung: Vec::new(),
         groups: FnvHashMap::default(),
         world: None,
         stats: Stats::default(),
@@ -870,40 +888,47 @@ fn piece_metres(
 }
 
 /// Places one collected run: fits the picture to the wall and hands the pieces
-/// to the shared display mechanism. Returns how many panels were hung.
+/// to the shared display mechanism. Returns the panels hung, still to be
+/// cropped.
 fn place_candidate(
     editor: &mut WorldEditor,
     set: &FacadeSet,
     cand: &Candidate,
     choice: Choice,
     scale: f64,
-) -> usize {
+) -> Vec<Hung> {
     let lay = match layout(editor, cand, scale) {
         Ok(lay) => lay,
         Err(why) => {
             if dump() {
                 eprintln!("FACADEPLACE {} {} 0 {why}", cand.way_id, cand.run);
             }
-            return 0;
+            return Vec::new();
         }
     };
-    let Some((src, px_per_m)) = set.image(choice.entry) else {
+    // Asked only so a picture that will not decode hangs nothing.
+    let Some((_, px_per_m)) = set.image(choice.entry) else {
         if dump() {
             eprintln!("FACADEPLACE {} {} 0 noimage", cand.way_id, cand.run);
         }
-        return 0;
+        return Vec::new();
     };
     let entry = &set.entries()[choice.entry];
     let fit = Fit::new(entry, px_per_m, lay.wall_w_m, lay.wall_h_m, choice.phase_m);
 
-    let mut hung = 0usize;
+    let mut hung: Vec<Hung> = Vec::new();
     for stretch in &lay.stretches {
         let base_y = cand.base_y + stretch.rows_hidden;
         let rows = cand.total_h - stretch.rows_hidden;
         let footprint = &lay.cells[stretch.range.clone()];
         let mut crop = |p0: i32, p1: i32, b0: i32, b1: i32| {
-            let (x0, x1, y0, y1) = piece_metres(&lay, stretch, scale, (p0, p1), (b0, b1));
-            let piece = fit.region(&src, x0, x1, y0, y1);
+            let metres = piece_metres(&lay, stretch, scale, (p0, p1), (b0, b1));
+            let (x0, x1, y0, y1) = metres;
+            // At the floor resolution, so it still crops at whatever px the pack ends at.
+            let piece = fit
+                .at(self::px_per_m(MIN_PX_PER_BLOCK, scale))
+                .covers(x0, x1, y0, y1)
+                .then_some(metres);
             if dump() {
                 let covered: Vec<String> = footprint[p0 as usize..p1 as usize]
                     .iter()
@@ -922,7 +947,7 @@ fn place_candidate(
             }
             piece
         };
-        hung += displays::hang_wall(
+        displays::hang_wall_with(
             editor,
             'b',
             cand.way_id,
@@ -933,12 +958,44 @@ fn place_candidate(
             base_y,
             rows,
             &mut crop,
+            &|&metres| {
+                displays::Picture::Geometry(picture_at(choice.entry, fit, scale, metres)(
+                    MIN_PX_PER_BLOCK,
+                ))
+            },
+            &mut |name, quad, metres| {
+                hung.push(Hung {
+                    name,
+                    w: quad.w,
+                    h: quad.h,
+                    entry: choice.entry,
+                    fit,
+                    metres,
+                });
+                true
+            },
         );
     }
     if dump() {
-        eprintln!("FACADEPLACE {} {} {hung} ok", cand.way_id, cand.run);
+        eprintln!("FACADEPLACE {} {} {} ok", cand.way_id, cand.run, hung.len());
     }
     hung
+}
+
+/// Names a piece's pixels per px per block, since each gather rounds to its own source pixels.
+fn picture_at(
+    entry: usize,
+    fit: Fit,
+    scale: f64,
+    (x0, x1, y0, y1): (f64, f64, f64, f64),
+) -> Box<dyn Fn(u32) -> u64 + Send + Sync> {
+    Box::new(move |px: u32| {
+        use std::hash::Hasher;
+        let mut h = fnv::FnvHasher::default();
+        h.write_usize(entry);
+        h.write_u64(fit.region_key_at(px_per_m(px, scale), x0, x1, y0, y1));
+        h.finish()
+    })
 }
 
 /// The pieces `place_candidate` would hang for `cand`, as the atlas estimate
@@ -975,28 +1032,17 @@ fn pending_pieces(
         let rows = cand.total_h - stretch.rows_hidden;
         let footprint = &lay.cells[stretch.range.clone()];
         for piece in displays::pieces(footprint, lay.n, lay.step, base_y, rows) {
-            let (x0, x1, y0, y1) = piece_metres(
+            let metres = piece_metres(
                 &lay,
                 stretch,
                 scale,
                 (piece.p0, piece.p1),
                 (piece.b0, piece.b1),
             );
-            // Named at whatever resolution the ladder asks about: the pixels
-            // two pieces share at one resolution they can differ in at another,
-            // because each gather rounds to its own source pixels.
-            let entry_index = choice.entry;
-            let picture = Box::new(move |px: u32| {
-                use std::hash::Hasher;
-                let mut h = fnv::FnvHasher::default();
-                h.write_usize(entry_index);
-                h.write_u64(fit.region_key_at(px_per_m(px, scale), x0, x1, y0, y1));
-                h.finish()
-            });
             out.push(displays::Pending {
                 w: piece.quad.w,
                 h: piece.quad.h,
-                picture,
+                picture: picture_at(choice.entry, fit, scale, metres),
             });
         }
     }
@@ -1009,21 +1055,31 @@ fn pending_pieces(
 /// requested resolution were two thirds of the run's peak memory, and the
 /// pack used under half of their pixels.
 ///
-/// The estimate is the pieces every pending run would hang, sized the way
-/// `displays::fit_pending` sizes the panels it already holds. Runs settled
-/// before this under region eviction were cropped at the requested
-/// resolution and are in the registry already, where the estimate counts
-/// them by their pixels; the writer shrinks those the way it always has.
+/// The estimate is the panels hung so far under region eviction, which are
+/// not cropped yet, plus the pieces every pending run would hang, sized the
+/// way `displays::fit_pending` sizes the panels it already holds.
 fn fit_resolution(editor: &mut WorldEditor) {
+    // A full atlas refuses every run still pending.
+    let full = displays::left_out() > 0;
     let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
     let Some(set) = r.set.clone() else {
         return;
     };
     let scale = r.scale;
-    let mut pending: Vec<displays::Pending> = Vec::new();
-    for cand in r.candidates.iter().flatten() {
-        let choice = picture_of(&r.groups, cand);
-        pending_pieces(editor, &set, cand, choice, scale, &mut pending);
+    let mut pending: Vec<displays::Pending> = r
+        .hung
+        .iter()
+        .map(|p| displays::Pending {
+            w: p.w,
+            h: p.h,
+            picture: picture_at(p.entry, p.fit, scale, p.metres),
+        })
+        .collect();
+    if !full {
+        for cand in r.candidates.iter().flatten() {
+            let choice = picture_of(&r.groups, cand);
+            pending_pieces(editor, &set, cand, choice, scale, &mut pending);
+        }
     }
     drop(r);
     if pending.is_empty() {
@@ -1089,21 +1145,27 @@ fn picture_of(groups: &FnvHashMap<u64, GroupPick>, cand: &Candidate) -> Choice {
 }
 
 /// Settles the candidates at `indices` that are still pending.
-fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usize>) {
+fn place_pending(editor: &mut WorldEditor, mut indices: Vec<usize>) {
     let (set, scale) = {
         let r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         if !r.enabled {
             return;
         }
+        // The atlas cap makes order matter, and collection order is the threads'.
+        indices.sort_by_key(|&i| {
+            r.candidates
+                .get(i)
+                .and_then(Option::as_ref)
+                .map(|c| (c.way_id, c.run))
+        });
         (r.set.clone(), r.scale)
     };
     let Some(set) = set else {
         return;
     };
     for i in indices {
-        // The lock is released across the placement: fitting the picture and
-        // writing the entity are the slow parts, and `displays::hang_wall`
-        // takes its own registry lock per panel.
+        // The lock is released across the placement: laying out the run and
+        // writing the entities are the slow parts.
         let Some((cand, choice)) = ({
             let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
             match r.candidates.get_mut(i).and_then(Option::take) {
@@ -1122,17 +1184,49 @@ fn place_pending(editor: &mut WorldEditor, indices: impl IntoIterator<Item = usi
             continue;
         };
         let party = cand.party;
+        let left_out = displays::left_out();
         let hung = place_candidate(editor, &set, &cand, choice, scale);
+        let refused = displays::left_out() > left_out;
         let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-        r.stats.panels += hung;
-        if hung == 0 {
+        r.stats.panels += hung.len();
+        if !hung.is_empty() {
+            r.stats.placed += 1;
+        } else if !refused {
             r.stats.dropped += 1;
             if party {
                 r.stats.behind += 1;
             }
-        } else {
-            r.stats.placed += 1;
         }
+        r.hung.extend(hung);
+    }
+}
+
+/// Crops every hung panel at the pack's resolution and hands it to the pack.
+fn crop_hung() {
+    let (set, hung) = {
+        let mut r = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        (r.set.clone(), std::mem::take(&mut r.hung))
+    };
+    let Some(set) = set else {
+        return;
+    };
+    let panels: Vec<displays::Panel> = hung
+        .into_par_iter()
+        .filter_map(|p| {
+            let (x0, x1, y0, y1) = p.metres;
+            let tex = set
+                .image(p.entry)
+                .and_then(|(src, px_per_m)| p.fit.at(px_per_m).region(&src, x0, x1, y0, y1))?;
+            Some(displays::Panel {
+                name: p.name,
+                w: p.w,
+                h: p.h,
+                tex,
+            })
+        })
+        .collect();
+    for panel in panels {
+        displays::add_panel(panel);
     }
 }
 
@@ -1195,8 +1289,9 @@ pub fn finalize(editor: &mut WorldEditor) -> Option<Report> {
     // Every candidate is known, so the resolution the pack will end at can be
     // settled now and the crops built at it.
     fit_resolution(editor);
-    place_pending(editor, 0..count);
-    // Every panel is placed, so the photographs have no reader left. Letting
+    place_pending(editor, (0..count).collect());
+    crop_hung();
+    // Every panel is cropped, so the photographs have no reader left. Letting
     // go of them here and not at the next `reset` returns the decoded set
     // before the world save, which is the run's own high-water mark.
     if let Some(set) = REGISTRY
@@ -2072,12 +2167,90 @@ mod tests {
         // Enough buildings that 16 px would overflow the atlas: the estimate
         // lowers the resolution first, the set follows, and every crop is at
         // the lower resolution rather than shrunk to it afterwards.
-        reset(true, Some(dir.path()), 16, 2.0);
+        let (mut editor, set) = collect_city(dir.path(), &xz);
+        finalize(&mut editor).unwrap();
+        assert_cropped_at_the_pack_px(&set);
+        reset(false, None, 16, 1.0);
+        displays::reset(false, 16);
+    }
+
+    /// Panels hung under a flushed region wait for the pack's resolution too.
+    #[test]
+    fn a_flushed_region_is_cropped_at_the_resolution_the_pack_ends_at() {
+        let _guard = facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = set_dir_with_pictures();
+        let xz = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(0, 0, 2000, 2000)
+            .unwrap();
+        let (mut editor, set) = collect_city(dir.path(), &xz);
+        flush_region(&mut editor, 0, 0);
+        let hung = REGISTRY.lock().unwrap().stats.panels;
+        assert!(hung > 0, "the region hung nothing");
+        assert!(
+            displays::panel_sizes_for_test().is_empty(),
+            "nothing is cropped before the resolution is known"
+        );
+        finalize(&mut editor).unwrap();
+        let sizes = assert_cropped_at_the_pack_px(&set);
+        assert_eq!(sizes, REGISTRY.lock().unwrap().stats.panels);
+        reset(false, None, 16, 1.0);
+        displays::reset(false, 16);
+    }
+
+    /// An atlas with room for half a city: the runs settled after it fills
+    /// hang nothing, and every panel that does hang has its texture.
+    #[test]
+    fn a_full_atlas_leaves_the_runs_after_it_bare() {
+        let _guard = facades::TEST_GLOBALS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = set_dir_with_pictures();
+        let xz = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(0, 0, 2000, 2000)
+            .unwrap();
+        let (mut editor, _) = collect_city(dir.path(), &xz);
+        finalize(&mut editor).unwrap();
+        assert_eq!(displays::left_out(), 0, "the real budget holds this city");
+        let whole = displays::panel_sizes_for_test();
+        let cost = displays::charged_for_test();
+
+        fn capped(editor: &mut WorldEditor, room: u64) -> Vec<(String, f64, f64, u32, u32)> {
+            displays::fill_atlas_for_test(room);
+            flush_region(editor, 0, 0);
+            finalize(editor).unwrap();
+            assert!(displays::left_out() > 0);
+            let panels = displays::panel_sizes_for_test();
+            assert_eq!(
+                editor.item_displays().len(),
+                panels.len(),
+                "no entity without its texture"
+            );
+            assert_eq!(REGISTRY.lock().unwrap().stats.panels, panels.len());
+            panels
+        }
+        let (mut editor, _) = collect_city(dir.path(), &xz);
+        let first = capped(&mut editor, cost / 2);
+        assert!(!first.is_empty() && first.len() < whole.len());
+        assert!(first.iter().all(|p| whole.iter().any(|q| q.0 == p.0)));
+        let (mut editor, _) = collect_city(dir.path(), &xz);
+        assert_eq!(
+            capped(&mut editor, cost / 2),
+            first,
+            "the same walls every time"
+        );
+        reset(false, None, 16, 1.0);
+        displays::reset(false, 16);
+    }
+
+    /// A city that overflows the atlas at 16 px, every building its own size so none fold together.
+    fn collect_city<'a>(
+        dir: &std::path::Path,
+        xz: &'a crate::coordinate_system::cartesian::XZBBox,
+    ) -> (WorldEditor<'a>, Arc<FacadeSet>) {
+        reset(true, Some(dir), 16, 2.0);
         displays::reset(true, 16);
-        let mut editor = crate::element_processing::building_test_support::test_editor(&xz);
+        let mut editor = crate::element_processing::building_test_support::test_editor(xz);
         editor.set_map_decals(true);
-        // Every building its own size, so no two of them read the same
-        // metres of one picture and the estimate cannot fold them together.
         let mut id = 1000u64;
         for i in 0..24 {
             for j in 0..24 {
@@ -2103,7 +2276,12 @@ mod tests {
             .set
             .clone()
             .unwrap();
-        finalize(&mut editor).unwrap();
+        (editor, set)
+    }
+
+    /// Asserts the pack was lowered below 16 px, the set followed it and every
+    /// crop is at it. Returns how many crops there are.
+    fn assert_cropped_at_the_pack_px(set: &FacadeSet) -> usize {
         let px = displays::px_for_test();
         assert!(
             px < 16,
@@ -2127,7 +2305,6 @@ mod tests {
                 "{name}: a {w} by {h} block quad cropped at {px} px"
             );
         }
-        reset(false, None, 16, 1.0);
-        displays::reset(false, 16);
+        sizes.len()
     }
 }

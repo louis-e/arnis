@@ -240,7 +240,7 @@ struct Roof {
 /// the roof its footprint allows; a relation by its member ways. A mast, antenna or chimney
 /// on such a building stands on its roof. With `overture`, only the OSM buildings it gives a
 /// height count. Buildings whose walls stay under 13 blocks are not read, and a mast on one
-/// counts from the ground.
+/// counts from the ground. An outline its parts replace counts only by its parts.
 pub fn tall_structures_in(
     data: &crate::osm_parser::OsmData,
     scale: f64,
@@ -253,6 +253,7 @@ pub fn tall_structures_in(
     let mut outlines: Vec<Outline> = Vec::new();
     let mut relations: Vec<(usize, &[crate::osm_parser::OsmMember])> = Vec::new();
     let mut masts: Vec<Mast> = Vec::new();
+    let mut replaced: Option<crate::osm_parser::OutlineSuppression> = None;
     for e in data.elements() {
         let Some(tags) = e.tags.as_ref() else {
             continue;
@@ -291,6 +292,13 @@ pub fn tall_structures_in(
                 && mapped_top_m(tags, hint, WIDEST_FOOTPRINT_M, WIDEST_FOOTPRINT_M)
                     .is_some_and(|m| may_pass_vanilla(m, scale)));
         if !reaches {
+            continue;
+        }
+        // Only worked out once a tall outline turns up.
+        if replaced
+            .get_or_insert_with(|| crate::osm_parser::outlines_replaced_by_parts(data))
+            .contains(&(kind, e.id))
+        {
             continue;
         }
         if kind == "relation" {
@@ -445,11 +453,14 @@ const RELIEF_SAMPLES: f64 = 50.0;
 
 /// Lift each summit the DEM keeps too low. Rows run north to south and columns
 /// west to east across `bbox`, end samples on its edges, as the providers sample.
+/// `seam_pad` is a One World's margin around its area: a lift that would cross the
+/// area's edge is left out, since the neighbouring area would not apply it.
 pub(crate) fn raise_peaks(
     grid: &mut [Vec<f64>],
     bbox: &LLBBox,
     peaks: &[PeakHint],
     m_per_cell: f64,
+    seam_pad: Option<usize>,
 ) {
     let h = grid.len();
     let w = grid.first().map_or(0, Vec::len);
@@ -458,6 +469,7 @@ pub(crate) fn raise_peaks(
     }
     let (min_lat, max_lat) = (bbox.min().lat(), bbox.max().lat());
     let (min_lon, max_lon) = (bbox.min().lng(), bbox.max().lng());
+    let reach = (3.0 * SIGMA_M / m_per_cell).ceil() as isize;
     for p in peaks {
         if p.lat < min_lat || p.lat > max_lat || p.lon < min_lon || p.lon > max_lon {
             continue;
@@ -465,6 +477,12 @@ pub(crate) fn raise_peaks(
         let gx = (p.lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64;
         let gy = (max_lat - p.lat) / (max_lat - min_lat) * (h - 1) as f64;
         let (cx, cy) = (gx.round() as usize, gy.round() as usize);
+        if let Some(pad) = seam_pad {
+            let m = pad + reach as usize;
+            if cx < m || cy < m || cx + m >= w || cy + m >= h {
+                continue;
+            }
+        }
         let Some(at_node) = grid.get(cy).and_then(|r| r.get(cx)).copied() else {
             continue;
         };
@@ -482,7 +500,6 @@ pub(crate) fn raise_peaks(
         }
         // Relative to the node's own cell, so the summit lands on the tagged height.
         let lift = p.ele_m - at_node;
-        let reach = (3.0 * SIGMA_M / m_per_cell).ceil() as isize;
         for (x, y) in cells_within(cx, cy, reach, w, h) {
             let d = ((x as f64 - gx).powi(2) + (y as f64 - gy).powi(2)).sqrt() * m_per_cell;
             let v = &mut grid[y][x];
@@ -629,6 +646,30 @@ mod tests {
         }
     }
 
+    // The IHZ: a 25-storey outline is built as its 93.5 m flat parts, so only they count.
+    #[test]
+    fn an_outline_replaced_by_its_parts_counts_by_its_parts() {
+        let tops = |part_key: &str| {
+            let json = r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 40.0, "lon": -74.0},
+                {"type": "node", "id": 2, "lat": 40.0, "lon": -73.999},
+                {"type": "node", "id": 3, "lat": 40.001, "lon": -73.999},
+                {"type": "node", "id": 4, "lat": 40.001, "lon": -74.0},
+                {"type": "way", "id": 10, "nodes": [1, 2, 3, 4, 1], "tags": {"building": "office", "building:levels": "25"}},
+                {"type": "way", "id": 11, "nodes": [1, 2, 3, 4, 1], "tags": {"KEY": "yes", "height": "93.5", "roof:shape": "flat"}}
+            ]}"#;
+            let data: crate::osm_parser::OsmData =
+                serde_json::from_str(&json.replace("KEY", part_key)).unwrap();
+            tall_structures_in(&data, 1.0, None)
+                .into_iter()
+                .map(|m| m.height_m)
+                .reduce(f64::max)
+        };
+        assert_eq!(tops("building:part"), Some(93.5));
+        // Two buildings on one footprint: the outline stands as itself.
+        assert!(tops("building").is_some_and(|m| m > 100.0));
+    }
+
     #[test]
     fn masts_and_chimneys_stand_as_tall_as_generated() {
         use crate::element_processing::man_made::mast_metres;
@@ -764,6 +805,7 @@ mod tests {
                 ele_m: 710.0,
             }],
             5.0,
+            None,
         );
         assert!(
             (grid[50][50] - 710.0).abs() < 1.0,
@@ -775,6 +817,35 @@ mod tests {
         assert!((top - grid[50][50]).abs() < 1e-6);
         assert!(grid[50][60] < grid[50][50] - 1.0);
         assert!((grid[0][0] - far_before).abs() < 0.5, "corner moved");
+    }
+
+    #[test]
+    fn a_lift_that_would_cross_a_seam_is_left_out() {
+        // A cone peaking at 530 m 50 cells from every edge; the lift reaches 36 cells.
+        let cone: Vec<Vec<f64>> = (0..101)
+            .map(|y| {
+                (0..101)
+                    .map(|x| {
+                        let d = ((x as f64 - 50.0).powi(2) + (y as f64 - 50.0).powi(2)).sqrt();
+                        530.0 - d * 4.0
+                    })
+                    .collect()
+            })
+            .collect();
+        let b = bbox();
+        let peak = PeakHint {
+            lat: (b.min().lat() + b.max().lat()) / 2.0,
+            lon: (b.min().lng() + b.max().lng()) / 2.0,
+            ele_m: 710.0,
+        };
+        let summit = |seam_pad| {
+            let mut grid = cone.clone();
+            raise_peaks(&mut grid, &b, &[peak], 5.0, seam_pad);
+            grid[50][50]
+        };
+        assert!(summit(None) > 700.0);
+        assert!(summit(Some(14)) > 700.0);
+        assert_eq!(summit(Some(15)), 530.0);
     }
 
     #[test]
@@ -807,6 +878,7 @@ mod tests {
                 ele_m: 710.0,
             }],
             5.0,
+            None,
         );
         let (mut best, mut at) = (f64::MIN, (0, 0));
         for (y, row) in grid.iter().enumerate() {
@@ -838,6 +910,7 @@ mod tests {
                 ele_m: 710.0,
             }],
             5.0,
+            None,
         );
         assert_eq!(grid, before);
     }
@@ -858,6 +931,7 @@ mod tests {
                 ele_m: 2330.0,
             }],
             5.0,
+            None,
         );
         assert_eq!(grid, before);
     }
@@ -889,6 +963,7 @@ mod tests {
                 ele_m: 492.0,
             }],
             5.0,
+            None,
         );
         assert_eq!(grid, before);
     }

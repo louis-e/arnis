@@ -189,13 +189,14 @@ fn leisure_area(
                 }
             }
 
-            let filled_area = without_holes(&filled_area, holes);
             // Stamp bundled playground structures (replaces the old procedural props).
             if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
+                let filled_area = without_holes(&filled_area, holes);
                 crate::structures::playground::scatter_playgrounds(editor, filled_area.as_slice());
             }
 
             if leisure_type == "pitch" {
+                let filled_area = without_holes(&filled_area, holes);
                 // Clear park/ground vegetation scattered onto the pitch before marking,
                 // but not the hedge around it.
                 for &(x, z) in filled_area.iter() {

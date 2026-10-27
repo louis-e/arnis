@@ -494,7 +494,8 @@ fn convert(name: &str, p: &Props) -> BedrockBlock {
                 "facing_direction",
                 Int(facing_direction(p.or("facing", "down"))),
             ),
-            ("toggle_bit", Bool(p.flag("enabled", true))),
+            // Set means locked, as if powered: the opposite of Java's `enabled`.
+            ("toggle_bit", Bool(!p.flag("enabled", true))),
         ]),
         "lightning_rod" => with(vec![
             (
@@ -994,6 +995,14 @@ mod tests {
         let torch = convert_with(REDSTONE_WALL_TORCH, &[("facing", "north")]);
         assert_eq!(torch.name, "minecraft:redstone_torch");
         assert_eq!(state(&torch, "torch_facing_direction"), Some(s("south")));
+    }
+
+    #[test]
+    fn hoppers_start_unlocked() {
+        let hopper = to_bedrock_block_with_properties(HOPPER, None);
+        assert_eq!(state(&hopper, "toggle_bit"), Some(Bool(false)));
+        let locked = convert_with(HOPPER, &[("enabled", "false")]);
+        assert_eq!(state(&locked, "toggle_bit"), Some(Bool(true)));
     }
 
     #[test]

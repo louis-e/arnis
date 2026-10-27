@@ -264,7 +264,7 @@ fn shield_style(highway: &str, reference: &str, region: SignRegion) -> ShieldSty
         }
         SignRegion::UkIreland => {
             // Primary routes are trunk roads in Britain and N roads in Ireland.
-            if reference.starts_with('M') {
+            if reference.starts_with('M') || highway.starts_with("motorway") {
                 ShieldStyle::Blue
             } else if highway.starts_with("trunk") || reference.starts_with('N') {
                 ShieldStyle::Green
@@ -2682,6 +2682,7 @@ mod tests {
     fn uk_shields_are_green_only_on_primary_routes() {
         let uk = SignRegion::UkIreland;
         assert_eq!(shield_style("motorway", "M25", uk), ShieldStyle::Blue);
+        assert_eq!(shield_style("motorway", "A1(M)", uk), ShieldStyle::Blue);
         assert_eq!(shield_style("trunk", "A40", uk), ShieldStyle::Green);
         assert_eq!(shield_style("primary", "N7", uk), ShieldStyle::Green);
         assert_eq!(shield_style("primary", "A501", uk), ShieldStyle::WhitePlate);

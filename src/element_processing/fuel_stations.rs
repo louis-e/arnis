@@ -416,6 +416,8 @@ struct Site {
     livery: Livery,
     has_canopy: bool,
     has_shop: bool,
+    /// The station is mapped as its shop building.
+    building: bool,
 }
 
 /// Stations and the canopies that belong to them, shared by every tile.
@@ -478,6 +480,7 @@ impl FuelIndex {
                 }
                 _ => continue,
             };
+            let building = tags.contains_key("building") && !is_roof(tags);
             sites.push(Site {
                 id: e.id(),
                 x,
@@ -485,7 +488,8 @@ impl FuelIndex {
                 ring,
                 livery: livery_for(tags, mix(e.id(), 0xF0E1)),
                 has_canopy: is_roof(tags),
-                has_shop: tags.contains_key("building") && !is_roof(tags),
+                has_shop: building,
+                building,
             });
         }
         // A node inside or beside a mapped station area is the same station.
@@ -510,19 +514,21 @@ impl FuelIndex {
             return index;
         }
         let reach = NODE_REACH * scale;
+        // A shop's canopy stands beside it, so a shop reaches out like a node.
+        let reaches = |s: &Site| s.ring.is_empty() || s.building;
         // Box round each site, so most buildings in a city are passed over at once.
         let boxes: Vec<(f64, f64, f64, f64)> = index
             .sites
             .iter()
             .map(|s| {
-                if s.ring.is_empty() {
-                    (s.x - reach, s.z - reach, s.x + reach, s.z + reach)
-                } else {
-                    s.ring.iter().fold(
-                        (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
-                        |(x0, z0, x1, z1), &(x, z)| (x0.min(x), z0.min(z), x1.max(x), z1.max(z)),
-                    )
-                }
+                let pad = if reaches(s) { reach } else { 0.0 };
+                let (x0, z0, x1, z1) = s
+                    .ring
+                    .iter()
+                    .fold((s.x, s.z, s.x, s.z), |(x0, z0, x1, z1), &(x, z)| {
+                        (x0.min(x), z0.min(z), x1.max(x), z1.max(z))
+                    });
+                (x0 - pad, z0 - pad, x1 + pad, z1 + pad)
             })
             .collect();
         let (bx0, bz0, bx1, bz1) = boxes.iter().fold(
@@ -558,11 +564,7 @@ impl FuelIndex {
                 })
                 .filter_map(|(i, s)| {
                     let d = ((s.x - cx).powi(2) + (s.z - cz).powi(2)).sqrt();
-                    let near = if s.ring.is_empty() {
-                        d <= reach
-                    } else {
-                        inside(&s.ring, cx, cz)
-                    };
+                    let near = (reaches(s) && d <= reach) || inside(&s.ring, cx, cz);
                     near.then_some((i, d))
                 })
                 .min_by(|a, b| a.1.total_cmp(&b.1));
@@ -873,7 +875,11 @@ pub fn generate_station(
         return;
     }
     let shop_building = element.tags().contains_key("building");
-    if shop_building && road.is_none() {
+    // A node mapped on its shop's outline stands where the shop does.
+    let on_shop = shop_building
+        || (site.ring.is_empty()
+            && footprints.contains(site.x.floor() as i32, site.z.floor() as i32));
+    if on_shop && road.is_none() {
         return;
     }
     // Area stations keep their canopy inside the area.
@@ -896,7 +902,7 @@ pub fn generate_station(
     let (half_l, half_w) = ((7.0 * scale).max(5.0), (4.5 * scale).max(3.5));
     // A shop building stands where the station is mapped, so its canopy steps in from the road.
     let (ox, oz, first) = match road {
-        Some((x, z)) if shop_building => (x as f64 + 0.5, z as f64 + 0.5, half_w + 2.0),
+        Some((x, z)) if on_shop => (x as f64 + 0.5, z as f64 + 0.5, half_w + 2.0),
         _ => (site.x, site.z, 0.0),
     };
     // Clear ground first; then over lanes mapped through the forecourt, never over buildings.
@@ -1107,5 +1113,102 @@ mod tests {
         ];
         let index = FuelIndex::build(&elements, 1.0);
         assert!(index.site(5).is_none() && index.site(6).is_some());
+
+        // A station mapped as its shop finds the canopy beside it.
+        let elements = vec![
+            rect(
+                8,
+                100,
+                100,
+                115,
+                110,
+                &[("amenity", "fuel"), ("building", "retail")],
+            ),
+            rect(9, 120, 98, 140, 112, &[("building", "roof")]),
+        ];
+        let index = FuelIndex::build(&elements, 1.0);
+        assert!(index.canopies.contains_key(&9));
+        assert!(index.site(8).unwrap().has_canopy);
+    }
+
+    #[test]
+    fn a_node_on_its_shop_puts_the_canopy_between_shop_and_road() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::element_processing::building_test_support::{bitmap_with_rect, test_editor};
+        use crate::osm_parser::ProcessedNode;
+        use std::sync::Arc;
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let station = ProcessedElement::Node(ProcessedNode {
+            id: 1,
+            tags: tags(&[("amenity", "fuel")]),
+            x: 30,
+            z: 40,
+        });
+        editor.set_fuel_index(Arc::new(FuelIndex::build(
+            std::slice::from_ref(&station),
+            1.0,
+        )));
+        // Shop round the node, road along z=0..2.
+        let shop = bitmap_with_rect(&xzbbox, 20, 35, 40, 45);
+        let road = bitmap_with_rect(&xzbbox, 0, 0, 59, 2);
+        generate_station(
+            &mut editor,
+            &station,
+            &FloodFillCache::new(),
+            &shop,
+            &road,
+            1.0,
+            None,
+        );
+        assert_eq!(
+            editor.get_block_absolute(30, 0, 12),
+            Some(LIGHT_GRAY_CONCRETE)
+        );
+    }
+
+    #[test]
+    fn a_forecourt_round_its_shop_keeps_the_canopy_on_it() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::element_processing::building_test_support::{bitmap_with_rect, test_editor};
+        use crate::osm_parser::{ProcessedNode, ProcessedWay};
+        use std::sync::Arc;
+        let xzbbox = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let corners = [(10, 20), (70, 20), (70, 60), (10, 60), (10, 20)];
+        let station = ProcessedElement::Way(ProcessedWay {
+            id: 1,
+            nodes: corners
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: (i % 4) as u64,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect(),
+            tags: tags(&[("amenity", "fuel")]),
+        });
+        editor.set_fuel_index(Arc::new(FuelIndex::build(
+            std::slice::from_ref(&station),
+            1.0,
+        )));
+        // Shop in the middle, road too far below the forecourt for a canopy stepped in from it.
+        let shop = bitmap_with_rect(&xzbbox, 31, 33, 38, 39);
+        let road = bitmap_with_rect(&xzbbox, 0, 0, 79, 2);
+        generate_station(
+            &mut editor,
+            &station,
+            &FloodFillCache::new(),
+            &shop,
+            &road,
+            1.0,
+            None,
+        );
+        assert_eq!(
+            editor.get_block_absolute(34, 0, 45),
+            Some(LIGHT_GRAY_CONCRETE)
+        );
     }
 }

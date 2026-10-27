@@ -520,7 +520,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         } // WARPED_TRAPDOOR
         212 => "mcl_trees:stripped_warped",
         213 => "mcl_trees:bark_stripped_warped",
-        214 => "mcl_stairs:slab_stone_double",
+        214 => "mcl_stairs:slab_stone",
         215 => "mcl_stairs:slab_deepslate_cobbled",
         216 => "mcl_colorblocks:hardened_clay_silver",
         217 => "mcl_stairs:slab_oak",
@@ -672,6 +672,13 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         343 => "mcl_stairs:slab_stonebrickmossy",
         344 => "mcl_ocean:prismarine",
         345 => "mcl_end:end_rod",
+        // Mineclonia has no tripwire hook; a button is as small and hangs on the same wall.
+        346 => {
+            return LuantiNode {
+                name: "mcl_buttons:button_stone_off",
+                param2: facing_to_wallmounted(prop_str(props, "facing").unwrap_or("north")),
+            }
+        }
         347 => "mcl_signs:wall_sign_spruce",
         348 => "mcl_colorblocks:concrete_powder_brown", // BROWN_CONCRETE_POWDER
         349 => return conv_stair(props, "mcl_stairs:stair_diorite"), // DIORITE_STAIRS
@@ -856,11 +863,11 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         496 => "mcl_noteblock:noteblock",
         497 => "mcl_colorblocks:hardened_clay_pink",
         498 => "mcl_colorblocks:hardened_clay_lime",
-        // Wallmounted toward the wall: north is -z, east +x, south +z, west -x.
+        // Wallmounted toward the wall; MC north (-z) is Luanti +z.
         499..=502 => {
             return LuantiNode {
                 name: "mcl_core:vine",
-                param2: [5, 2, 4, 3][usize::from(block.id() - 499)],
+                param2: [4, 2, 5, 3][usize::from(block.id() - 499)],
             }
         }
         503 => "mcl_nether:netherrack",
@@ -894,13 +901,13 @@ mod tests {
     use super::*;
     use crate::block_definitions::{
         CHAIN_X, CHAIN_Y, CHAIN_Z, OAK_FENCE_GATE, RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE,
-        WHITE_BED,
+        VINES, WHITE_BED,
     };
     use std::collections::HashMap;
 
     /// Blocks Mineclonia has no node for, so they can only fall back. Keep this
     /// list short: every entry is a block that exports as plain stone.
-    const NO_MINECLONIA_NODE: &[&str] = &["tripwire_hook"];
+    const NO_MINECLONIA_NODE: &[&str] = &[];
 
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
@@ -924,7 +931,9 @@ mod tests {
 
     #[test]
     fn slabs_export_their_half() {
-        use crate::block_definitions::{POLISHED_GRANITE_SLAB, QUARTZ_SLAB_TOP, STONE_BRICK_SLAB};
+        use crate::block_definitions::{
+            POLISHED_GRANITE_SLAB, QUARTZ_SLAB_TOP, SMOOTH_STONE_SLAB, STONE_BRICK_SLAB,
+        };
         let typed = |t: &str| {
             Value::Compound(HashMap::from([(
                 "type".to_string(),
@@ -947,6 +956,11 @@ mod tests {
         assert_eq!(
             name(STONE_BRICK_SLAB, Some(&typed("bottom"))),
             "mcl_stairs:slab_stonebrick"
+        );
+        assert_eq!(name(SMOOTH_STONE_SLAB, None), "mcl_stairs:slab_stone");
+        assert_eq!(
+            name(SMOOTH_STONE_SLAB, Some(&typed("top"))),
+            "mcl_stairs:slab_stone_top"
         );
         // A slab id that is the top half by default stays on top.
         assert_eq!(
@@ -981,6 +995,29 @@ mod tests {
             (param2(CHAIN_X), param2(CHAIN_Z), param2(CHAIN_Y)),
             (12, 4, 0)
         );
+    }
+
+    #[test]
+    fn vines_hang_on_their_wall() {
+        // North, east, south, west, with the Z flip like the multiface blocks.
+        assert_eq!(
+            VINES.map(|v| to_mineclonia_node(v, None).param2),
+            [4, 2, 5, 3]
+        );
+    }
+
+    #[test]
+    fn tripwire_hooks_become_buttons_on_their_wall() {
+        use crate::block_definitions::TRIPWIRE_HOOK;
+        let hook = |facing: &str| {
+            let props = Value::Compound(HashMap::from([(
+                "facing".to_string(),
+                Value::String(facing.to_string()),
+            )]));
+            to_mineclonia_node(TRIPWIRE_HOOK, Some(&props))
+        };
+        assert_eq!(hook("east").name, "mcl_buttons:button_stone_off");
+        assert_eq!((hook("east").param2, hook("south").param2), (3, 4));
     }
 
     #[test]

@@ -275,6 +275,8 @@ pub struct WorldEditor<'a> {
     world_time: i64,
     /// Bedrock only: give the player a starting map that reveals the world as they explore.
     start_with_map: bool,
+    /// Bedrock only: what the run adds to the world's size, which sizes its staging folder.
+    size_options: crate::world_utils::WorldSizeOptions,
     /// Place bundled map image decals as map item frames. Java only.
     map_decals: bool,
     /// Signage context (decal registry, styles, intersections); shared with tile editors.
@@ -339,6 +341,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            size_options: Default::default(),
             map_decals: false,
             signage: None,
             traffic_signals: None,
@@ -400,6 +403,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            size_options: Default::default(),
             map_decals: false,
             signage: None,
             traffic_signals: None,
@@ -461,6 +465,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            size_options: Default::default(),
             map_decals: false,
             signage: None,
             traffic_signals: None,
@@ -738,6 +743,11 @@ impl<'a> WorldEditor<'a> {
     /// Bedrock only: enable the starting map that reveals the world as the player explores.
     pub fn set_start_with_map(&mut self, enabled: bool) {
         self.start_with_map = enabled;
+    }
+
+    /// Bedrock only: the options the staging folder is sized for.
+    pub fn set_size_options(&mut self, options: crate::world_utils::WorldSizeOptions) {
+        self.size_options = options;
     }
 
     /// Enable map image decals (Java only).
@@ -1381,6 +1391,10 @@ impl<'a> WorldEditor<'a> {
 
     /// Records that `way` laid a rail in the block at `y` of column (x, z).
     pub fn register_rail(&self, way: u64, x: i32, z: i32, y: i32) {
+        // Only the owner's rail survives the merge; other tiles see other roads there.
+        if !self.owns(x, z) {
+            return;
+        }
         if let Some(heights) = &self.rail_heights {
             if let Ok(mut map) = heights.lock() {
                 map.insert((way, x, z), y);
@@ -2650,6 +2664,7 @@ impl<'a> WorldEditor<'a> {
             self.start_with_map,
         )
         .with_ground_origin((self.ground_origin_x, self.ground_origin_z))
+        .with_size_options(self.size_options)
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
 
@@ -2738,7 +2753,8 @@ pub(crate) fn per_region_estimate_mb(fillground: bool) -> u64 {
     if !fillground {
         return BASE_MB;
     }
-    let span = (world_max_y() - terrain_floor_y()).max(VANILLA_SPAN) as u64;
+    // The fill stops under the terrain, so a ceiling raised for a tower costs it nothing.
+    let span = (common::terrain_top_y() - terrain_floor_y()).max(VANILLA_SPAN) as u64;
     BASE_MB * span / VANILLA_SPAN as u64
 }
 

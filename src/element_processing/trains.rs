@@ -260,9 +260,13 @@ fn angle_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
     (a.0 * b.0 + a.1 * b.1).clamp(-1.0, 1.0).acos().to_degrees()
 }
 
+/// Most blocks a train moves in a step: under the 8 past its end the pack still clears a
+/// carriage at, and the 12 it looks for one within.
+const MAX_STEP: f64 = 7.9;
+
 /// Blocks a step at `kmh` on a world of `scale` blocks a metre.
 fn step_speed(kmh: f64, scale: f64) -> f64 {
-    kmh / 3.6 / STEPS_PER_S * scale
+    (kmh / 3.6 / STEPS_PER_S * scale).min(MAX_STEP)
 }
 
 /// `maxspeed` in km/h, from a number or a number in mph.
@@ -1677,6 +1681,25 @@ mod tests {
             }
         }
         assert!(net.train_count() >= 2);
+    }
+
+    #[test]
+    fn a_train_on_the_largest_scale_stays_within_what_the_pack_follows() {
+        let world = XZBBox::rect_from_min_max(0, 0, 4000, 2000).unwrap();
+        let elements = vec![track(1, line(100, (0, 1000), (4000, 1000), 40), "rail")];
+        let net = TrainNetwork::build(&elements, crate::args::MAX_SCALE, &world);
+        assert!(!net.services.is_empty());
+        for service in &net.services {
+            // A through route's timetable wraps by its lap.
+            let lap = service.period;
+            let step = |d: i64| match lap {
+                0 => d.abs(),
+                _ => d.rem_euclid(lap).min(lap - d.rem_euclid(lap)),
+            };
+            let t = &service.timetable;
+            let most = t.windows(2).map(|w| step(i64::from(w[1] - w[0]))).max();
+            assert!(most.is_some_and(|m| m > 7000 && m < 8000), "{most:?}");
+        }
     }
 
     #[test]

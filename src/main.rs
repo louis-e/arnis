@@ -277,6 +277,15 @@ fn run_cli() {
                     std::process::exit(1);
                 }
             };
+            // Whole ways reach past the downloaded area, and One World would overwrite
+            // every chunk out to them.
+            if args.one_world && args.bbox.is_none() && file_bounds.is_none() {
+                eprintln!(
+                    "{} '{file}' has no bounds; --one-world needs --bbox, or the area would grow to every node in the file.",
+                    "Error:".red().bold()
+                );
+                std::process::exit(1);
+            }
             let bbox = match osm_parser::resolve_bbox(args.bbox, file_bounds, &data) {
                 Some(bbox) => bbox,
                 None => {
@@ -316,6 +325,18 @@ fn run_cli() {
             (None, bbox)
         }
     };
+    // validate_args checks the spawn only against an explicit --bbox.
+    if let (None, Some(lat), Some(lng)) = (args.bbox, args.spawn_lat, args.spawn_lng) {
+        let inside = coordinate_system::geographic::LLPoint::new(lat, lng)
+            .is_ok_and(|p| effective_bbox.contains(&p));
+        if !inside {
+            eprintln!(
+                "{} Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box.",
+                "Error:".red().bold()
+            );
+            std::process::exit(1);
+        }
+    }
 
     // One World: snaps the bbox to the world's chunk grid and holds its lock.
     let mut one_world_paths: Option<PathBuf> = None;
@@ -425,7 +446,7 @@ fn run_cli() {
             .clone()
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
         let (output_path, lvl_name) =
-            world_utils::build_bedrock_output(&effective_bbox, output_dir);
+            world_utils::build_bedrock_output(&effective_bbox, output_dir, args.body);
         (output_path, Some(lvl_name))
     } else if args.luanti {
         let base_dir = args
@@ -613,7 +634,7 @@ fn run_cli() {
     let args = args;
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
+    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups, housing_parts) =
         osm_parser::parse_osm_data(
             raw_data,
             effective_bbox,
@@ -805,11 +826,13 @@ fn run_cli() {
         }
     }
 
+    // Generation places the map item at it; an extended One World moves it only to a marker.
+    let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
-        spawn_point,
+        spawn_point: if extending { spawn_point } else { java_spawn },
         luanti_game,
         ground_level: args.ground_level,
         facades: facade_job,
@@ -825,6 +848,7 @@ fn run_cli() {
         generation_options,
         outline_suppression,
         part_groups,
+        housing_parts,
     ) {
         Ok(_) => {
             if args.bedrock {
@@ -836,8 +860,7 @@ fn run_cli() {
             }
 
             // For Java Edition, write the spawn point into level.dat
-            let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
-            if !args.bedrock && !extending {
+            if world_format == world_editor::WorldFormat::JavaAnvil && !extending {
                 if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (java_spawn, spawn_y_for_java) {
                     if let Err(e) = world_utils::set_spawn_in_level_dat(
                         &generation_path,

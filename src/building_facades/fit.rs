@@ -142,7 +142,7 @@ impl Fit {
     /// The source's size is the one `load_scaled` makes at this resolution.
     pub fn region_key_at(&self, px_per_m: f64, x0_m: f64, x1_m: f64, y0_m: f64, y1_m: f64) -> u64 {
         use std::hash::Hasher;
-        let at = Fit { px_per_m, ..*self };
+        let at = self.at(px_per_m);
         let (src_w, src_h) = super::manifest::scaled_size(self.tex_w_m, self.tex_h_m, px_per_m);
         let mut h = fnv::FnvHasher::default();
         h.write_u32(src_w);
@@ -158,6 +158,24 @@ impl Fit {
             }
         }
         h.finish()
+    }
+
+    /// The same fit read from a source brought to `px_per_m`.
+    pub fn at(&self, px_per_m: f64) -> Fit {
+        Fit { px_per_m, ..*self }
+    }
+
+    /// Whether `region` has a whole pixel to return for these metres.
+    pub fn covers(&self, x0_m: f64, x1_m: f64, y0_m: f64, y1_m: f64) -> bool {
+        let (out_w, out_h) = self.out_size(x0_m, x1_m, y0_m, y1_m);
+        out_w > 0 && out_h > 0
+    }
+
+    /// The pixels `region` makes for these metres, before checking either is
+    /// a whole one.
+    fn out_size(&self, x0_m: f64, x1_m: f64, y0_m: f64, y1_m: f64) -> (u32, u32) {
+        let side = |m: f64| ((m * self.px_per_m).round() as i64).clamp(0, 1 << 15) as u32;
+        (side(x1_m - x0_m), side(y1_m - y0_m))
     }
 
     /// Source pixel column for `m` metres along the wall.
@@ -199,8 +217,7 @@ impl Fit {
         if src_w == 0 || src_h == 0 {
             return None;
         }
-        let out_w = (((x1_m - x0_m) * self.px_per_m).round() as i64).clamp(0, 1 << 15) as u32;
-        let out_h = (((y1_m - y0_m) * self.px_per_m).round() as i64).clamp(0, 1 << 15) as u32;
+        let (out_w, out_h) = self.out_size(x0_m, x1_m, y0_m, y1_m);
         if out_w == 0 || out_h == 0 {
             return None;
         }
