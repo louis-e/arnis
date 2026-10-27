@@ -856,11 +856,11 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         496 => "mcl_noteblock:noteblock",
         497 => "mcl_colorblocks:hardened_clay_pink",
         498 => "mcl_colorblocks:hardened_clay_lime",
-        // Wallmounted toward the wall: north is -z, east +x, south +z, west -x.
+        // Wallmounted toward the wall; MC north (-z) is Luanti +z.
         499..=502 => {
             return LuantiNode {
                 name: "mcl_core:vine",
-                param2: [5, 2, 4, 3][usize::from(block.id() - 499)],
+                param2: [4, 2, 5, 3][usize::from(block.id() - 499)],
             }
         }
         503 => "mcl_nether:netherrack",
@@ -894,7 +894,7 @@ mod tests {
     use super::*;
     use crate::block_definitions::{
         CHAIN_X, CHAIN_Y, CHAIN_Z, OAK_FENCE_GATE, RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, STONE,
-        WHITE_BED,
+        VINES, WHITE_BED,
     };
     use std::collections::HashMap;
 
@@ -981,6 +981,12 @@ mod tests {
             (param2(CHAIN_X), param2(CHAIN_Z), param2(CHAIN_Y)),
             (12, 4, 0)
         );
+    }
+
+    #[test]
+    fn vines_hang_on_their_wall() {
+        // North, east, south, west, with the Z flip like the multiface blocks.
+        assert_eq!(VINES.map(|v| to_mineclonia_node(v, None).param2), [4, 2, 5, 3]);
     }
 
     #[test]
