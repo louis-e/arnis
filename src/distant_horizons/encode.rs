@@ -382,9 +382,6 @@ impl Encoder {
         }
         let mapping = self.compressor.compress(&self.raw)?;
 
-        for &pair in &self.used {
-            self.remap[pair as usize] = u32::MAX;
-        }
         Ok(Row {
             data,
             north,
@@ -399,6 +396,10 @@ impl Encoder {
     }
 
     fn assign_ids(&mut self, columns: &[Vec<Point>], registry: &Registry) {
+        // Reset here rather than after encoding, so a row that failed can't leak its ids.
+        for &pair in &self.used {
+            self.remap[pair as usize] = u32::MAX;
+        }
         self.remap.resize(registry.pairs.len(), u32::MAX);
         self.used.clear();
         // Row id 0 must be air too: DH reads it for samples a column lacks.
@@ -766,8 +767,14 @@ pub(crate) mod tests {
                 "minecraft:desert_DH-BSW_minecraft:dirt"
             ]
         );
-        // The scratch map is reset, so the next row numbers from scratch.
-        assert!(encoder.remap.iter().all(|&id| id == u32::MAX));
+        // The next row numbers from scratch.
+        let row = encoder
+            .encode(&vec![Vec::new(); COLUMNS], &[0; COLUMNS], &registry)
+            .unwrap();
+        assert_eq!(
+            read_mapping(&decompress(&row.mapping)),
+            ["minecraft:plains_DH-BSW_AIR"]
+        );
     }
 
     #[test]
