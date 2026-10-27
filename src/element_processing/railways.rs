@@ -1597,10 +1597,10 @@ fn generate_rail_tunnel_shell(
 /// ceiling lights.  Called AFTER ground generation so that the carved
 /// air blocks are not overwritten by the underground stone fill.
 ///
-/// Every tile a tunnel crosses records the whole centerline, so the merged list holds each
-/// point once per tile. A point is carved only the first time: carving just turns
-/// whitelisted blocks to air, and a lantern is never on the whitelist, so a second carve
-/// changes nothing. Lanterns come flagged per way, so neither order nor repeats matter.
+/// Ways crossing or sharing a cell list it more than once. A point is carved only the
+/// first time: carving just turns whitelisted blocks to air, and a lantern is never on the
+/// whitelist, so a second carve changes nothing. Lanterns come flagged per way, so neither
+/// order nor repeats matter.
 pub fn carve_rail_tunnel_interior(
     editor: &mut WorldEditor,
     rail_tunnel_points: &[RailTunnelPoint],

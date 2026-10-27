@@ -1809,7 +1809,12 @@ pub fn generate_world_with_options(
                         // Under eviction the in-tile carve already ran, and nothing reads
                         // these afterwards, so don't retain the points or the cells.
                         if !eviction_active {
-                            rail_tunnel_points.extend(tile_rail_tunnel_points);
+                            // Another tile's floors there need not match the owner's shell.
+                            rail_tunnel_points.extend(
+                                tile_rail_tunnel_points
+                                    .into_iter()
+                                    .filter(|p| tiles[tile_idx].contains(p.0, p.1)),
+                            );
                             tunnel_cells.extend(tile_tunnel_cells);
                         }
 
