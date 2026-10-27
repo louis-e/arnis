@@ -913,6 +913,7 @@ impl BridgeStructureMap {
                             &candidate.tags,
                             scale,
                         ),
+                        connectivity,
                         |x, z| {
                             connectivity
                                 .is_shared(x, z)
@@ -2976,7 +2977,7 @@ mod tests {
         let structures =
             BridgeStructureMap::build(&elements, &editor, &connectivity, &outlines, 1.0);
         let block_range = highway_block_range("residential", &road.tags, 1.0);
-        let road_ys = road_profile(&editor, &road, block_range, |x, z| {
+        let road_ys = road_profile(&editor, &road, block_range, &connectivity, |x, z| {
             connectivity
                 .is_shared(x, z)
                 .then(|| junction_level(&editor, x, z))
