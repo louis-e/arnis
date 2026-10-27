@@ -300,8 +300,9 @@ pub fn text_sign(canvas: &mut Canvas, style: TextStyle, text: &str) {
             canvas.rounded_rect(0, y0, w, h, 3, WHITE);
             canvas.stroke_rounded_rect(0, y0, w, h, 3, 2, DARK_GRAY);
             // Two lines of the smallest font need 30 px. Keep them inside the existing
-            // 36 px plate and use its width before truncating long stop names.
-            if let Some(layout) = fit_or_abbreviate(text, w - 2, h - 4, FontSize::S28, true) {
+            // 36 px plate and use its width before truncating long stop names. Glyphs
+            // overhang their advance by up to 1 px, so w - 6 keeps them off the border.
+            if let Some(layout) = fit_or_abbreviate(text, w - 6, h - 4, FontSize::S28, true) {
                 layout.draw_centered(canvas, cx, y0 + h / 2, BLACK);
             }
         }
@@ -688,7 +689,7 @@ mod tests {
     #[test]
     fn stop_name_uses_two_lines_without_truncating_when_it_fits() {
         let name = "Zwickau, Zentralhaltestelle";
-        let layout = fit_or_abbreviate(name, 128 - 2, 36 - 4, FontSize::S28, true).unwrap();
+        let layout = fit_or_abbreviate(name, 128 - 6, 36 - 4, FontSize::S28, true).unwrap();
 
         assert_eq!(layout.lines.len(), 2);
         assert_eq!(layout.lines.join(" "), name);
@@ -697,7 +698,7 @@ mod tests {
     #[test]
     fn stop_and_street_names_truncate_on_the_second_line() {
         let name = "Alte Reichenbacher Str.";
-        for (max_w, max_h) in [(128 - 2, 36 - 4), (128 - 20, 44 - 8)] {
+        for (max_w, max_h) in [(128 - 6, 36 - 4), (128 - 20, 44 - 8)] {
             let layout = fit_or_abbreviate(name, max_w, max_h, FontSize::S28, true).unwrap();
 
             assert_eq!(layout.lines.len(), 2);
@@ -709,6 +710,29 @@ mod tests {
                 layout.lines[1].trim_end_matches('…')
             );
             assert!(name.starts_with(&visible));
+        }
+    }
+
+    #[test]
+    fn stop_name_text_stays_off_the_border() {
+        let mut plate = Canvas::new(1, 1);
+        plate.rounded_rect(0, 46, 128, 36, 3, WHITE);
+        plate.stroke_rounded_rect(0, 46, 128, 36, 3, 2, DARK_GRAY);
+        // J and f overhang their advance, so a line of them is filled up to the edge.
+        let filled = (1..40).map(|n| format!("J{}", "f".repeat(n)));
+        let names = [
+            "Varian-Fry-Straße/Potsdamer Platz",
+            "Friedrichstraße/Reinhardtstraße",
+            "Mollstraße/Otto-Braun-Straße",
+        ];
+        for name in names.into_iter().map(String::from).chain(filled) {
+            let mut c = Canvas::new(1, 1);
+            text_sign(&mut c, TextStyle::StopName, &name);
+            for x in [0, 1, 126, 127] {
+                for y in 46..82 {
+                    assert_eq!(c.get(x, y), plate.get(x, y), "{name:?} at ({x}, {y})");
+                }
+            }
         }
     }
 
