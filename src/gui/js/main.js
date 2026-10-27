@@ -3360,11 +3360,14 @@ async function startGeneration() {
     resetProgressUi(STARTING_MESSAGE);
 
     const oneWorld = isOneWorldEnabled();
+    const oneWorldBBox = selectedBBox;
     if (oneWorld && !(await prepareOneWorldRun())) {
       const info = document.getElementById('progress-info');
       if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
       return;
     }
+    // The overlap dialog leaves the page live, so the body, format or area may have changed under it.
+    if (oneWorld && (!isOneWorldEnabled() || selectedBBox !== oneWorldBBox)) return;
     lastRunOneWorld = oneWorld;
 
     // Auto-create world for Java format (a One World is resolved by the backend)

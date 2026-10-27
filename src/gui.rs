@@ -1048,6 +1048,13 @@ struct OneWorldInfo {
     revision: u32,
 }
 
+fn one_world_request(one_world: bool, world_format: &str, body: &str) -> Result<(), String> {
+    if one_world && (world_format != "java" || body != "earth") {
+        return Err("One World needs a Java world on Earth".to_string());
+    }
+    Ok(())
+}
+
 fn one_world_dir(save_path: &str, world_name: &str) -> PathBuf {
     let name = crate::world_utils::world_folder_name(world_name)
         .unwrap_or_else(|| crate::one_world::DEFAULT_WORLD_NAME.to_string());
@@ -1424,8 +1431,12 @@ fn gui_start_generation(
     use progress::emit_gui_error;
     use LLBBox;
 
-    // A One World is resolved inside the worker, once `Args` exist.
-    let one_world = one_world && world_format == "java" && celestial_body_name == "earth";
+    // A One World is resolved inside the worker, once `Args` exist. Refused rather than
+    // dropped: `selected_world` is then the saves folder, which a new-world cleanup deletes.
+    if let Err(e) = one_world_request(one_world, &world_format, &celestial_body_name) {
+        emit_gui_error(&e);
+        return Err(e);
+    }
     let is_new_world = is_new_world && !one_world;
 
     // Claim the process before touching any shared state. The frontend disables its button
@@ -2305,6 +2316,15 @@ mod locale_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_one_world_off_java_or_off_earth_is_refused() {
+        assert!(one_world_request(true, "java", "earth").is_ok());
+        assert!(one_world_request(false, "bedrock", "moon").is_ok());
+        assert!(one_world_request(true, "bedrock", "earth").is_err());
+        assert!(one_world_request(true, "luanti_mineclonia", "earth").is_err());
+        assert!(one_world_request(true, "java", "moon").is_err());
+    }
 
     fn read_level_dat(world: &Path) -> Value {
         let raw = fs::read(world.join("level.dat")).unwrap();
