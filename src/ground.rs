@@ -505,6 +505,7 @@ impl Ground {
                 (world_w, world_h, grid_w, grid_h),
                 frame.affine,
                 peaks,
+                (frame.pad_blocks > 0).then_some(plan.pad),
             ) {
                 Ok(mut elevation_data) => {
                     let lat = (requested_bbox.min().lat() + requested_bbox.max().lat()) / 2.0;

@@ -336,6 +336,7 @@ pub fn compute_grid_dims_for_world(
 /// `dims` comes from `compute_grid_dims`, so it matches the land cover grid.
 /// `height_multiplier` scales blocks per metre on the vertical axis only.
 /// The fit uses `band`, or `taller` when the area needs more room than `band` has.
+/// `seam_pad` is a One World's margin around its area, in cells.
 #[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
@@ -349,6 +350,7 @@ pub fn fetch_elevation_data(
     dims: (usize, usize, usize, usize),
     affine: AffinePolicy,
     peaks: &PeakSource,
+    seam_pad: Option<usize>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = dims;
@@ -433,7 +435,7 @@ pub fn fetch_elevation_data(
     // After the repairs, which would smooth a restored needle back down, and
     // before the fit, so the summit counts towards the height range.
     let mut hints = peaks.take();
-    peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell);
+    peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell, seam_pad);
     let band = pick_band(
         &height_grid,
         bbox,
