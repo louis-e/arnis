@@ -407,6 +407,12 @@ pub fn generate_ride(
     let colours = ride_colours(tags, seed);
     let height = height_m(tags).map(|h| h * scale);
     let own: HashSet<(i32, i32)> = site.cells.iter().copied().collect();
+    // A ride inside someone else's building would build through its floors and roof.
+    let centre = (site.cx.floor() as i32, site.cz.floor() as i32);
+    let building = tags.contains_key("building") || tags.contains_key("building:part");
+    if footprints.contains(centre.0, centre.1) && !(building && own.contains(&centre)) {
+        return false;
+    }
     let place = Placement {
         site: &site,
         own: &own,
@@ -1340,5 +1346,41 @@ mod tests {
         let t = tags(&[("attraction", "big_wheel")]);
         assert!(replaces_parts(&t));
         assert!(!replaces_parts(&tags(&[("attraction", "amusement_ride")])));
+    }
+
+    #[test]
+    fn rides_inside_another_building_are_left_to_it() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::element_processing::building_test_support::{
+            bitmap_with_rect, rect_way, test_editor,
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let cache = FloodFillCache::new();
+        let hall = bitmap_with_rect(&xzbbox, 10, 10, 50, 50);
+        let open = CoordinateBitmap::new(&xzbbox);
+        let draw = |ride: &ProcessedElement, footprints: &CoordinateBitmap| {
+            let mut editor = test_editor(&xzbbox);
+            let drawn = generate_ride(&mut editor, ride, &cache, footprints, &open, 1.0, None);
+            (drawn, editor.get_block_absolute(30, 1, 30).is_some())
+        };
+        let node = ProcessedElement::Node(ProcessedNode {
+            id: 1,
+            tags: tags(&[("attraction", "carousel")]),
+            x: 30,
+            z: 30,
+        });
+        assert_eq!(draw(&node, &hall), (false, false));
+        assert_eq!(draw(&node, &open), (true, true));
+        // A ride mapped as the building itself still draws.
+        let mut own = rect_way(
+            2,
+            10,
+            10,
+            50,
+            50,
+            &[("attraction", "carousel"), ("building", "yes")],
+        );
+        own.nodes[4].id = own.nodes[0].id;
+        assert_eq!(draw(&ProcessedElement::Way(own), &hall), (true, true));
     }
 }
