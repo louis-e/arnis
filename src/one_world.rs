@@ -523,6 +523,12 @@ fn resolve(
         println!("Note: One World is always a void world; the flat world type is off.");
         args.world_type = crate::args::WorldType::Void;
     }
+    // level.dat and the map item are written by the first area only.
+    if extending {
+        println!(
+            "Note: One World keeps the game mode, time of day, world type and map item of its first area."
+        );
+    }
     args.map_preview = true;
 
     println!(
