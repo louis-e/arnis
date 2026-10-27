@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "保存 .mcworld 文件的文件夹。",
   "luanti_save_path_desc": "创建新 Luanti 世界的文件夹。",
   "clear_tile_cache_desc": "删除缓存的地图瓦片和立面纹理。",
-  "disable_height_limit_desc": "提高高度上限以容纳 1:1 的山脉。不适用于 Realms。",
+  "disable_height_limit_desc": "在区域需要时提高高度上限。不适用于 Realms。",
   "aws_only_elevation_desc": "较旧、较粗糙的高程数据源，在默认源不可用时使用。",
   "bake_lighting_desc": "为 Voxy 等 LOD 模组预先计算光照。生成较慢。",
   "voxy_lod_desc": "首次进入时即可看到远处地形。仅限 Java 版。",

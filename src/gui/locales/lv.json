@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Mape, kurā tiek saglabāts .mcworld fails.",
   "luanti_save_path_desc": "Mape, kurā tiek veidotas jaunas Luanti pasaules.",
   "clear_tile_cache_desc": "Dzēst kešatmiņā saglabātās kartes flīzes un fasāžu tekstūras.",
-  "disable_height_limit_desc": "Paaugstina augstuma ierobežojumu 1:1 kalniem. Nav piemērots Realms.",
+  "disable_height_limit_desc": "Paaugstina augstuma ierobežojumu, ja apgabalam tas ir vajadzīgs. Nav piemērots Realms.",
   "aws_only_elevation_desc": "Vecāks, rupjāks augstuma avots, ja noklusējuma avots nedarbojas.",
   "bake_lighting_desc": "Iepriekš aprēķināts apgaismojums LOD modiem, piemēram, Voxy. Lēnāk.",
   "voxy_lod_desc": "Tālais reljefs redzams jau pirmajā ienākšanas reizē. Tikai Java.",

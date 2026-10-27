@@ -301,32 +301,60 @@ impl OvertureHints {
                 ProcessedElement::Relation(relation) => &mut relation.tags,
                 ProcessedElement::Node(_) => continue,
             };
-
-            // Only buildings; Overture's building theme has no other feature type.
-            if !tags.contains_key("building") && !tags.contains_key("building:part") {
-                continue;
+            if fill_tags(hint, tags) {
+                enriched += 1;
             }
-            // Any existing vertical tag means OSM already knows better.
-            if tags.contains_key("height") || tags.contains_key("building:levels") {
-                continue;
-            }
-
-            // Every stored hint holds at least one validated value (see `insert`).
-            if let Some(floors) = hint.num_floors {
-                tags.insert("building:levels".to_string(), floors.to_string());
-            }
-            if let Some(h) = hint.height_m {
-                tags.insert("height".to_string(), format!("{h:.1}"));
-            }
-            // Marks the provenance for debugging and for the licence notice.
-            tags.insert(
-                "arnis:height_source".to_string(),
-                "overture_maps".to_string(),
-            );
-            enriched += 1;
         }
         enriched
     }
+
+    /// What `apply` will write onto a raw OSM `kind` ("way" or "relation") building with
+    /// these `tags`, or None when it leaves it alone.
+    pub(crate) fn hint_for(
+        &self,
+        kind: &'static str,
+        id: u64,
+        tags: &HashMap<String, String>,
+    ) -> Option<crate::element_processing::buildings::HeightHint> {
+        if !takes_hint(tags) {
+            return None;
+        }
+        let hint = self.hints.get(&OsmRef { kind, id })?;
+        Some(crate::element_processing::buildings::HeightHint {
+            height_m: hint.height_m,
+            levels: hint.num_floors.map(f64::from),
+        })
+    }
+}
+
+/// A building without a vertical tag of its own.
+fn takes_hint(tags: &HashMap<String, String>) -> bool {
+    // Only buildings; Overture's building theme has no other feature type.
+    // Any existing vertical tag means OSM already knows better.
+    (tags.contains_key("building") || tags.contains_key("building:part"))
+        && !tags.contains_key("height")
+        && !tags.contains_key("building:levels")
+}
+
+/// Writes `hint` onto a building's tags unless OSM already has a vertical tag.
+fn fill_tags(hint: &OsmAttributeHint, tags: &mut HashMap<String, String>) -> bool {
+    if !takes_hint(tags) {
+        return false;
+    }
+
+    // Every stored hint holds at least one validated value (see `insert`).
+    if let Some(floors) = hint.num_floors {
+        tags.insert("building:levels".to_string(), floors.to_string());
+    }
+    if let Some(h) = hint.height_m {
+        tags.insert("height".to_string(), format!("{h:.1}"));
+    }
+    // Marks the provenance for debugging and for the licence notice.
+    tags.insert(
+        "arnis:height_source".to_string(),
+        "overture_maps".to_string(),
+    );
+    true
 }
 
 /// Pull the OSM back-reference out of an Overture `sources` value.
@@ -559,6 +587,9 @@ pub struct OvertureData {
     pub elements: Vec<ProcessedElement>,
     /// Attributes for OSM buildings that OSM itself leaves untagged.
     pub hints: OvertureHints,
+    /// Every vertex of the footprints above whose height may reach past the vanilla build
+    /// height, for the terrain fit to check.
+    pub tall_structures: Vec<crate::elevation::TallModel>,
 }
 
 /// Fetch Overture Maps building data for the given bbox.
@@ -1005,6 +1036,7 @@ fn fetch_overture_buildings_inner(
     let (coord_transformer, xzbbox) = projection.transformer(bbox)?;
     let clip_bbox = projection.clip_bbox(&xzbbox);
 
+    let mut tall_structures = Vec::new();
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
         .take(budget)
@@ -1043,11 +1075,33 @@ fn fetch_overture_buildings_inner(
                 }
             }
             way.nodes = clipped;
+            let (w_m, l_m) = crate::elevation::peaks::extent_m(
+                building.exterior_ring.iter().map(|&(lon, lat)| (lat, lon)),
+            );
+            if let Some(height_m) = crate::element_processing::buildings::mapped_top_m(
+                &way.tags,
+                Default::default(),
+                w_m,
+                l_m,
+            )
+            .filter(|&h| crate::elevation::peaks::may_pass_vanilla(h, projection.scale))
+            {
+                tall_structures.extend(
+                    building
+                        .exterior_ring
+                        .iter()
+                        .map(|&(lon, lat)| crate::elevation::TallModel { lat, lon, height_m }),
+                );
+            }
             Some(ProcessedElement::Way(way))
         })
         .collect();
 
-    Ok(OvertureData { elements, hints })
+    Ok(OvertureData {
+        elements,
+        hints,
+        tall_structures,
+    })
 }
 
 /// Sorts `YYYY-MM-DD.N` release names, comparing the revision numerically.
@@ -2643,6 +2697,35 @@ mod tests {
         );
         let mut elements = vec![hint_way(42, &[("building", "yes")])];
         assert_eq!(one_floor.apply(&mut elements), 0);
+    }
+
+    #[test]
+    fn hinted_heights_count_for_the_build_height_check() {
+        let mut hints = OvertureHints::default();
+        for id in [10, 11] {
+            hints.insert(
+                OsmRef { kind: "way", id },
+                OsmAttributeHint {
+                    height_m: Some(420.0),
+                    num_floors: None,
+                },
+            );
+        }
+        let data: crate::osm_parser::OsmData = serde_json::from_str(
+            r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 40.0, "lon": -74.0},
+                {"type": "way", "id": 10, "nodes": [1], "tags": {"building": "yes"}},
+                {"type": "way", "id": 11, "nodes": [1], "tags": {"building": "yes", "height": "10"}}
+            ]}"#,
+        )
+        .unwrap();
+        // The untagged building takes Overture's height, the tagged one keeps its own 10 m.
+        let found = crate::elevation::peaks::tall_structures_in(&data, 1.0, Some(&hints));
+        assert_eq!(
+            found.iter().map(|m| m.height_m).collect::<Vec<_>>(),
+            vec![420.0]
+        );
+        assert!(crate::elevation::peaks::tall_structures_in(&data, 1.0, None).is_empty());
     }
 
     #[test]

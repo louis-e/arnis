@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Mapa, v katero se shrani datoteka .mcworld.",
   "luanti_save_path_desc": "Mapa, v kateri se ustvarjajo novi svetovi Luanti.",
   "clear_tile_cache_desc": "Izbriši predpomnjene ploščice zemljevida in teksture fasad.",
-  "disable_height_limit_desc": "Dvigne omejitev višine za gore v merilu 1:1. Ne za Realms.",
+  "disable_height_limit_desc": "Dvigne omejitev višine, ko jo območje potrebuje. Ne za Realms.",
   "aws_only_elevation_desc": "Starejši, grobejši vir višin, če privzeti ne deluje.",
   "bake_lighting_desc": "Vnaprej izračunana svetloba za LOD mode, kot je Voxy. Počasneje.",
   "voxy_lod_desc": "Oddaljen teren je viden že ob prvem vstopu. Samo Java.",

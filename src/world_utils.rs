@@ -494,6 +494,38 @@ pub fn check_run_size(
     })
 }
 
+/// `check_run_size`'s disk check again, for a run whose terrain fit just extended the build
+/// height. Only caves and filled ground grow with it, so otherwise there is nothing to redo.
+pub fn check_disk_for_extended_height(
+    args: &crate::args::Args,
+    bbox: &LLBBox,
+    format: crate::world_editor::WorldFormat,
+    dir: &Path,
+) -> Result<(), String> {
+    let km2 = blocks_km2(args, bbox);
+    let options = WorldSizeOptions::of(args);
+    let needed = estimated_world_bytes(
+        km2,
+        format,
+        WorldSizeOptions {
+            tall: true,
+            ..options
+        },
+    );
+    let before = estimated_world_bytes(
+        km2,
+        format,
+        WorldSizeOptions {
+            tall: false,
+            ..options
+        },
+    );
+    if needed <= before {
+        return Ok(());
+    }
+    check_disk_space(dir, needed)
+}
+
 /// Fails when the disk that will hold `dir` has less than `needed` plus the headroom free.
 /// Reads the nearest folder that exists, since a missing one confuses the Windows volume
 /// lookup; a reading of 0 or an error is "can't tell" and lets the run go ahead (#824).
@@ -750,6 +782,16 @@ fn generate_unique_custom_world_name(base_path: &Path, raw_name: &str) -> String
 
 /// Name of the bundled Java datapack that extends the Overworld build height.
 pub const TALL_DATAPACK_NAME: &str = "arnis_tall";
+
+/// Whether a Java world already carries the tall-world datapack.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn has_tall_datapack(world_path: &Path) -> bool {
+    world_path
+        .join("datapacks")
+        .join(TALL_DATAPACK_NAME)
+        .join("pack.mcmeta")
+        .is_file()
+}
 
 /// Install the bundled tall-world datapack into a Java world and register it
 /// in `level.dat`'s `Data.DataPacks.Enabled` so it auto-activates on first
@@ -1925,6 +1967,15 @@ mod tests {
             path.push(dir);
         }
         read_json(&path.join("data/minecraft/dimension_type/overworld.json"))
+    }
+
+    #[test]
+    fn an_installed_tall_datapack_is_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fresh = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        assert!(!has_tall_datapack(&fresh));
+        let tall = install_pack_for_test(tmp.path());
+        assert!(has_tall_datapack(tall.parent().unwrap().parent().unwrap()));
     }
 
     #[test]

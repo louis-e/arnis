@@ -2849,6 +2849,56 @@ pub(crate) fn top_reserve_for(
     fits
 }
 
+/// Why the vanilla build height cannot hold this area at full height, or None when it can:
+/// the relief fits without compression and every model or structure in `tops` (ground
+/// metres, height metres) stays under the ceiling. The fit on `ground_level` then needs
+/// neither compression nor a top reserve. `scale` is the terrain's blocks per metre,
+/// `model_scale` the structures'.
+pub(crate) fn vanilla_overflow(
+    heights: &[Vec<f64>],
+    tops: &[(f64, f64)],
+    scale: f64,
+    model_scale: f64,
+    ground_level: i32,
+) -> Option<String> {
+    let ceiling = terrain_ceiling(false, 0);
+    let room = ceiling - ground_level;
+    let (lo, hi) = heights
+        .iter()
+        .flatten()
+        .filter(|h| h.is_finite())
+        .fold((f64::MAX, f64::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+    let range = if lo < hi { hi - lo } else { 0.0 };
+    let relief = range * scale;
+    if room < 0 || relief > room as f64 {
+        return Some(format!(
+            "the terrain needs {:.0} blocks, vanilla Minecraft holds {} above the base",
+            relief.ceil(),
+            room.max(0)
+        ));
+    }
+    // Uncompressed, the fit puts every cell at the base plus its height above the lowest.
+    let limit = (MAX_Y - 2) as f64;
+    let top = tops
+        .iter()
+        .map(|&(ground_m, height_m)| {
+            let lift = if range > 0.0 {
+                (ground_m - lo) * scale
+            } else {
+                0.0
+            };
+            ground_level as f64 + lift + height_m * model_scale
+        })
+        .fold(f64::MIN, f64::max);
+    (top > limit).then(|| {
+        format!(
+            "a building or landmark reaches Y {:.0}, vanilla Minecraft has room up to Y {}",
+            top.ceil(),
+            MAX_Y - 2
+        )
+    })
+}
+
 fn derive_affine(
     blurred_heights: &[Vec<f64>],
     scale: f64,
@@ -4277,6 +4327,83 @@ mod affine_policy_tests {
         assert_eq!(mc[0][1], -1594.0);
         assert_eq!(mc[0][2], -1064.0);
         assert!(mc[1][0] < mc[1][1] && mc[1][1] < mc[1][2] && mc[1][2] <= 2016.0);
+    }
+}
+
+#[cfg(test)]
+mod vanilla_fit_tests {
+    use super::*;
+
+    /// 8 x 8 cells rising evenly from `lo` to `hi` metres.
+    fn ramp(lo: f64, hi: f64) -> Vec<Vec<f64>> {
+        (0..8)
+            .map(|z| {
+                (0..8)
+                    .map(|x| lo + (hi - lo) * f64::from(x + z * 8) / 63.0)
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn relief_within_the_vanilla_column_needs_no_pack() {
+        // 366 blocks of room above Y -62.
+        assert!(vanilla_overflow(&ramp(500.0, 866.0), &[], 1.0, 1.0, -62).is_none());
+        assert!(vanilla_overflow(&ramp(500.0, 867.0), &[], 1.0, 1.0, -62).is_some());
+        assert!(vanilla_overflow(&ramp(0.0, 700.0), &[], 0.5, 0.5, -62).is_none());
+        assert!(vanilla_overflow(&ramp(0.0, 200.0), &[], 2.0, 1.0, -62).is_some());
+        // A raised base leaves less room.
+        assert!(vanilla_overflow(&ramp(0.0, 300.0), &[], 1.0, 1.0, 10).is_some());
+        assert!(vanilla_overflow(&[], &[], 1.0, 1.0, 304).is_none());
+        assert!(vanilla_overflow(&[], &[], 1.0, 1.0, 305).is_some());
+    }
+
+    #[test]
+    fn a_tower_past_the_ceiling_needs_the_pack() {
+        let grid = ramp(10.0, 20.0);
+        // On the lowest ground, a 379 m tower ends at Y 317.
+        assert!(vanilla_overflow(&grid, &[(10.0, 379.0)], 1.0, 1.0, -62).is_none());
+        assert!(vanilla_overflow(&grid, &[(10.0, 380.0)], 1.0, 1.0, -62).is_some());
+        assert!(vanilla_overflow(&grid, &[(20.0, 370.0)], 1.0, 1.0, -62).is_some());
+        // The multiplier lifts the ground it stands on, not the tower.
+        assert!(vanilla_overflow(&grid, &[(20.0, 300.0)], 3.0, 1.0, -62).is_none());
+        assert!(vanilla_overflow(&grid, &[(20.0, 300.0)], 1.0, 1.5, -62).is_some());
+        // Flat ground puts every structure on the base.
+        assert!(vanilla_overflow(&[], &[(500.0, 379.0)], 1.0, 1.0, -62).is_none());
+        assert!(vanilla_overflow(&[], &[(500.0, 380.0)], 1.0, 1.0, -62).is_some());
+    }
+
+    /// No overflow exactly when the vanilla fit keeps every metre: no reserve, no compression.
+    #[test]
+    fn agrees_with_the_vanilla_fit() {
+        for hi in [100.0, 365.0, 366.0, 367.0, 800.0] {
+            for model in [
+                None,
+                Some((0.0, 50.0)),
+                Some((hi, 20.0)),
+                Some((hi * 0.5, 300.0)),
+            ] {
+                let grid = ramp(0.0, hi);
+                let models: Vec<(f64, f64)> = model.into_iter().collect();
+                let reserve = top_reserve_for(&grid, &models, 1.0, 1.0, -62, -62, false, 0, false);
+                let (_, affine) = scale_to_minecraft_reserving(
+                    &grid,
+                    1.0,
+                    -62,
+                    -62,
+                    false,
+                    0,
+                    AffinePolicy::Fit,
+                    reserve,
+                );
+                let exact = reserve == 0 && (affine.blocks_per_meter - 1.0).abs() < 1e-12;
+                assert_eq!(
+                    vanilla_overflow(&grid, &models, 1.0, 1.0, -62).is_none(),
+                    exact,
+                    "relief {hi} m, model {model:?}"
+                );
+            }
+        }
     }
 }
 

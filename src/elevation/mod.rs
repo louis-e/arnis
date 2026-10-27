@@ -52,6 +52,84 @@ pub struct ElevationData {
     /// needed the extended floor. Every consumer of the affine must use this, not args.
     pub(crate) ground_level: i32,
     pub(crate) soft_top: Option<SoftTop>,
+    /// The fit used a ceiling a pack raised above vanilla's.
+    pub(crate) extended_ceiling: bool,
+}
+
+/// Room the height fit has: the base it starts from, the lowest base it may sink to and the
+/// ceiling (`extended_max_y` when `disable_height_limit`, vanilla's otherwise).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeightBand {
+    pub ground_level: i32,
+    pub min_ground_level: i32,
+    pub disable_height_limit: bool,
+    pub extended_max_y: i32,
+}
+
+impl HeightBand {
+    fn extended_ceiling(&self) -> bool {
+        self.disable_height_limit && self.extended_max_y > crate::world_editor::DEFAULT_MAX_Y
+    }
+}
+
+/// `band`, or `taller` when the area does not fit `band` at full height. `band` is then the
+/// vanilla one, and the tall structures count as well as the models. Overture's structures
+/// come from `overture`, which waits for them, and only when everything else fits.
+#[allow(clippy::too_many_arguments)]
+fn pick_band(
+    heights: &[Vec<f64>],
+    bbox: &LLBBox,
+    hints: &TerrainHints,
+    overture: impl FnOnce() -> Vec<TallModel>,
+    scale: f64,
+    height_multiplier: f64,
+    band: HeightBand,
+    taller: Option<HeightBand>,
+) -> HeightBand {
+    let Some(taller) = taller else {
+        return band;
+    };
+    let why = vanilla_misses(
+        hints,
+        overture,
+        |structures| peaks::model_cells(heights, bbox, structures),
+        |tops| {
+            postprocess::vanilla_overflow(
+                heights,
+                tops,
+                scale * height_multiplier,
+                scale,
+                band.ground_level,
+            )
+        },
+    );
+    match why {
+        Some(why) => {
+            eprintln!("Extended build height: {why}");
+            taller
+        }
+        None => band,
+    }
+}
+
+/// Why the vanilla height cannot hold an area: `overflow` on the models and structures OSM
+/// gave, turned into (ground metres, height metres) by `tops`, and only while those fit and
+/// Overture's follow, on those as well.
+pub(crate) fn vanilla_misses(
+    hints: &TerrainHints,
+    overture: impl FnOnce() -> Vec<TallModel>,
+    tops: impl Fn(&[TallModel]) -> Vec<(f64, f64)>,
+    overflow: impl Fn(&[(f64, f64)]) -> Option<String>,
+) -> Option<String> {
+    let mut all = tops(&hints.tall_models);
+    all.extend(tops(&hints.tall_structures));
+    match overflow(&all) {
+        None if hints.overture_follows => {
+            all.extend(tops(&overture()));
+            overflow(&all)
+        }
+        why => why,
+    }
 }
 
 impl ElevationData {
@@ -190,15 +268,14 @@ pub fn compute_grid_dims_for_world(
 ///
 /// `dims` comes from `compute_grid_dims`, so it matches the land cover grid.
 /// `height_multiplier` scales blocks per metre on the vertical axis only.
+/// The fit uses `band`, or `taller` when the area needs more room than `band` has.
 #[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
     height_multiplier: f64,
-    ground_level: i32,
-    min_ground_level: i32,
-    disable_height_limit: bool,
-    extended_max_y: i32,
+    band: HeightBand,
+    taller: Option<HeightBand>,
     land_cover: Option<&mut LandCoverData>,
     source_mode: SourceMode,
     benchmark: bool,
@@ -288,8 +365,26 @@ pub fn fetch_elevation_data(
     bench.mark("elev_landcover_repair");
     // After the repairs, which would smooth a restored needle back down, and
     // before the fit, so the summit counts towards the height range.
-    let hints = peaks.take();
+    let mut hints = peaks.take();
     peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell);
+    let band = pick_band(
+        &height_grid,
+        bbox,
+        &hints,
+        || peaks.take_overture(),
+        scale,
+        height_multiplier,
+        band,
+        taller,
+    );
+    // Only the band needed them, and a city's worth would sit through the fit.
+    hints.tall_structures = Vec::new();
+    let HeightBand {
+        ground_level,
+        min_ground_level,
+        disable_height_limit,
+        extended_max_y,
+    } = band;
     // The models stand at world scale, not at the terrain's compressed one.
     let top_reserve = match affine {
         AffinePolicy::Fixed(_) => 0,
@@ -369,6 +464,7 @@ pub fn fetch_elevation_data(
         },
         ground_level: effective_ground_level,
         soft_top,
+        extended_ceiling: band.extended_ceiling(),
     })
 }
 
@@ -454,6 +550,122 @@ fn compute_nan_ratio(heights: &[Vec<f64>]) -> f64 {
         return 1.0;
     }
     nan_count as f64 / total as f64
+}
+
+#[cfg(test)]
+mod band_tests {
+    use super::*;
+
+    fn band(extended: bool) -> HeightBand {
+        HeightBand {
+            ground_level: -62,
+            min_ground_level: if extended { -2030 } else { -62 },
+            disable_height_limit: extended,
+            extended_max_y: 2031,
+        }
+    }
+
+    fn bbox() -> LLBBox {
+        LLBBox::new(46.0, 7.0, 46.01, 7.01).unwrap()
+    }
+
+    fn tower(lat: f64, height_m: f64) -> TallModel {
+        TallModel {
+            lat,
+            lon: 7.005,
+            height_m,
+        }
+    }
+
+    fn pick(grid: &[Vec<f64>], hints: &TerrainHints, taller: bool) -> HeightBand {
+        pick_band(
+            grid,
+            &bbox(),
+            hints,
+            Vec::new,
+            1.0,
+            1.0,
+            band(false),
+            taller.then(|| band(true)),
+        )
+    }
+
+    #[test]
+    fn overture_is_waited_for_only_while_vanilla_still_fits() {
+        let hills = vec![vec![500.0, 600.0], vec![550.0, 650.0]];
+        let alps = vec![vec![500.0, 1500.0], vec![900.0, 2500.0]];
+        let follows = TerrainHints {
+            overture_follows: true,
+            ..Default::default()
+        };
+        let with = |grid: &[Vec<f64>], overture: Vec<TallModel>| {
+            pick_band(
+                grid,
+                &bbox(),
+                &follows,
+                move || overture,
+                1.0,
+                1.0,
+                band(false),
+                Some(band(true)),
+            )
+        };
+        assert_eq!(with(&hills, vec![tower(46.005, 541.0)]), band(true));
+        assert_eq!(with(&hills, vec![tower(46.005, 200.0)]), band(false));
+        // The relief decides on its own, so Overture is never asked.
+        let never = || -> Vec<TallModel> { panic!("waited for Overture") };
+        let picked = pick_band(
+            &alps,
+            &bbox(),
+            &follows,
+            never,
+            1.0,
+            1.0,
+            band(false),
+            Some(band(true)),
+        );
+        assert_eq!(picked, band(true));
+    }
+
+    #[test]
+    fn the_taller_band_is_picked_only_when_vanilla_cannot_hold_the_area() {
+        let hills = vec![vec![500.0, 600.0], vec![550.0, 650.0]];
+        let alps = vec![vec![500.0, 1500.0], vec![900.0, 2500.0]];
+        let none = TerrainHints::default();
+        assert_eq!(pick(&hills, &none, true), band(false));
+        assert_eq!(pick(&alps, &none, true), band(true));
+        // A run that settled its height keeps it.
+        assert_eq!(pick(&alps, &none, false), band(false));
+
+        let skyscraper = TerrainHints {
+            tall_structures: vec![tower(46.005, 541.0)],
+            ..Default::default()
+        };
+        assert_eq!(pick(&hills, &skyscraper, true), band(true));
+        let landmark = TerrainHints {
+            tall_models: vec![tower(46.005, 541.0)],
+            ..Default::default()
+        };
+        assert_eq!(pick(&hills, &landmark, true), band(true));
+        // Outside the area, or short enough, it changes nothing.
+        let elsewhere = TerrainHints {
+            tall_structures: vec![tower(47.0, 541.0), tower(46.005, 200.0)],
+            ..Default::default()
+        };
+        assert_eq!(pick(&hills, &elsewhere, true), band(false));
+    }
+
+    #[test]
+    fn the_extended_ceiling_needs_a_raised_cap() {
+        assert!(band(true).extended_ceiling());
+        assert!(!band(false).extended_ceiling());
+        // Luanti asks for the extended height but keeps vanilla's ceiling.
+        let luanti = HeightBand {
+            extended_max_y: crate::world_editor::DEFAULT_MAX_Y,
+            ..band(true)
+        };
+        assert!(!luanti.extended_ceiling());
+    }
 }
 
 #[cfg(test)]

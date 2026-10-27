@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": "Mapp där .mcworld-filen sparas.",
   "luanti_save_path_desc": "Mapp där nya Luanti-världar skapas.",
   "clear_tile_cache_desc": "Radera cachade kartplattor och fasadtexturer.",
-  "disable_height_limit_desc": "Höjer höjdgränsen för berg i skala 1:1. Inte för Realms.",
+  "disable_height_limit_desc": "Höjer höjdgränsen när området behöver det. Inte för Realms.",
   "aws_only_elevation_desc": "Äldre, grövre höjdkälla om standardkällan inte fungerar.",
   "bake_lighting_desc": "Förberäknat ljus för LOD-moddar som Voxy. Långsammare.",
   "voxy_lod_desc": "Avlägsen terräng syns redan första gången du går in. Endast Java.",

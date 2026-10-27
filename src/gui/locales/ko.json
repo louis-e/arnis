@@ -180,7 +180,7 @@
   "bedrock_save_path_desc": ".mcworld 파일을 저장하는 폴더입니다.",
   "luanti_save_path_desc": "새 Luanti 월드를 만드는 폴더입니다.",
   "clear_tile_cache_desc": "캐시된 지도 타일과 외관 텍스처를 삭제합니다.",
-  "disable_height_limit_desc": "1:1 산을 위해 높이 제한을 높입니다. Realms 미지원.",
+  "disable_height_limit_desc": "지역에 필요할 때 높이 제한을 높입니다. Realms 미지원.",
   "aws_only_elevation_desc": "기본 소스를 쓸 수 없을 때 쓰는 오래되고 거친 고도 소스.",
   "bake_lighting_desc": "Voxy 같은 LOD 모드를 위한 미리 계산된 조명. 더 느립니다.",
   "voxy_lod_desc": "처음 접속할 때부터 먼 지형이 보입니다. Java 전용.",

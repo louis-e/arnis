@@ -164,6 +164,40 @@ fn fit_height(metres: f64, scale: f64, base: i32, min: i32) -> i32 {
     ((metres * scale).round() as i32).clamp(min, (world_max_y() - base - 1).max(min))
 }
 
+/// Metres a mast, antenna or chimney is built to: its `height`, or the default for its kind
+/// on a roof or on the ground. None for anything else.
+pub(crate) fn mast_metres(tags: &HashMap<String, String>, on_roof: bool) -> Option<f64> {
+    let kind = tags.get("man_made").map(String::as_str)?;
+    let lighting = tags.get("tower:type").map(String::as_str) == Some("lighting");
+    let default_m = match (kind, on_roof, lighting) {
+        ("chimney", true, _) => 2.0,
+        ("chimney", false, _) => 40.0,
+        ("antenna", true, _) => 3.0,
+        ("mast", true, _) => 6.0,
+        ("antenna" | "mast", false, true) => 20.0,
+        ("antenna", false, false) => 10.0,
+        ("mast", false, false) => 30.0,
+        _ => return None,
+    };
+    let mapped = tags
+        .get("height")
+        .and_then(|v| parse_length_m(v))
+        .filter(|m| *m > 0.0 && *m < 1000.0);
+    Some(mapped.unwrap_or(default_m))
+}
+
+/// Metres above the ground where a feature `metres` tall ends on a roof `roof_m` up, as
+/// `rise_above` builds it at `scale`.
+pub(crate) fn top_over_roof_m(metres: f64, roof_m: f64, scale: f64) -> f64 {
+    let blocks = (metres * scale).round();
+    let roof = (roof_m * scale).round();
+    if roof > 0.0 && blocks > roof + 1.0 {
+        metres
+    } else {
+        roof_m + metres
+    }
+}
+
 /// Blocks a feature rises above `base`. OSM heights count from the ground, so on a roof
 /// a height taller than the building reaches that height overall; a shorter one is the
 /// feature's own.
@@ -209,20 +243,13 @@ fn generate_mast(
     let Some((x, z)) = anchor_point(element) else {
         return;
     };
-    let tags = element.tags();
-    let antenna = tags.get("man_made").map(String::as_str) == Some("antenna");
-    let lighting = tags.get("tower:type").map(String::as_str) == Some("lighting");
+    let lighting = element.tags().get("tower:type").map(String::as_str) == Some("lighting");
     let roof = roof_top(editor, footprints, x, z);
     let ground = editor.get_absolute_y(x, 0, z);
     let base = roof.unwrap_or(ground);
-    let default_m = match (roof.is_some(), antenna, lighting) {
-        (true, true, _) => 3.0,
-        (true, false, _) => 6.0,
-        (false, _, true) => 20.0,
-        (false, true, false) => 10.0,
-        (false, false, false) => 30.0,
+    let Some(metres) = mast_metres(element.tags(), roof.is_some()) else {
+        return;
     };
-    let metres = tag_metres(element, "height").unwrap_or(default_m);
     let height = rise_above(metres, args.scale, ground, base, 2);
     let top = base + height;
 
@@ -352,8 +379,9 @@ fn generate_chimney(
     let roof = roof_top(editor, footprints, x, z);
     let ground = editor.get_absolute_y(x, 0, z);
     let base = roof.unwrap_or(ground);
-    let default_m = if roof.is_some() { 2.0 } else { 40.0 };
-    let metres = tag_metres(element, "height").unwrap_or(default_m);
+    let Some(metres) = mast_metres(element.tags(), roof.is_some()) else {
+        return;
+    };
     let height = rise_above(metres, args.scale, ground, base, 2);
     let material = element
         .tags()

@@ -426,6 +426,12 @@ fn resolve(
                 ));
             }
             *owned = true;
+            if args.vanilla_height {
+                return Err(
+                    "A new One World always has the extended build height, so any place on Earth fits. Leave out --vanilla-height."
+                        .to_string(),
+                );
+            }
             // Room for any place on Earth, so the first area does not limit later ones.
             if !args.disable_height_limit {
                 println!(
@@ -763,6 +769,17 @@ mod tests {
             .err()
             .unwrap();
         assert!(err.contains("with terrain"), "{err}");
+    }
+
+    #[test]
+    fn a_new_world_refuses_the_vanilla_height() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let mut args = args_for(MUNICH, &["--vanilla-height"]);
+        let err = prepare(&world, &req, &mut args).err().unwrap();
+        assert!(err.contains("--vanilla-height"), "{err}");
+        assert!(!world.exists(), "the refused world was left behind");
     }
 
     #[test]
