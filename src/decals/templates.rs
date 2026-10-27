@@ -92,6 +92,11 @@ fn fit_or_abbreviate(
             return Some(l);
         }
     }
+    if wrap {
+        if let Some(l) = fit_truncated_two_lines(text, max_w, max_h, largest) {
+            return Some(l);
+        }
+    }
     // Last resort: truncate with an ellipsis so the plate is never blank.
     let mut chars: Vec<char> = text.chars().collect();
     while chars.len() > 3 {
@@ -100,6 +105,99 @@ fn fit_or_abbreviate(
         if let Some(l) = fit_text(&s, max_w, max_h, largest, false) {
             return Some(l);
         }
+    }
+    None
+}
+
+/// Fills two lines and truncates only the second one with an ellipsis.
+fn fit_truncated_two_lines(
+    text: &str,
+    max_w: i32,
+    max_h: i32,
+    largest: FontSize,
+) -> Option<TextLayout> {
+    let chars: Vec<char> = text.trim().chars().collect();
+    if chars.len() < 2 {
+        return None;
+    }
+
+    for &size in FontSize::ALL.iter().rev() {
+        if size > largest {
+            continue;
+        }
+        let font = Font::get(size);
+        if font.line_height() * 2 > max_h {
+            continue;
+        }
+
+        // Fill the first line, preferring the last complete word that fits. An unusually
+        // long first word is split at the last fitting character instead.
+        let mut first_end = 0;
+        for end in 1..chars.len() {
+            let candidate: String = chars[..end].iter().collect();
+            if font.width(&candidate, 1) > max_w {
+                break;
+            }
+            first_end = end;
+        }
+        if first_end == 0 {
+            continue;
+        }
+        let split = chars[..first_end]
+            .iter()
+            .rposition(|c| c.is_whitespace())
+            .filter(|&i| i > 0)
+            .unwrap_or(first_end);
+        let line1: String = chars[..split]
+            .iter()
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        let mut rest_start = split;
+        while rest_start < chars.len() && chars[rest_start].is_whitespace() {
+            rest_start += 1;
+        }
+        if rest_start >= chars.len() {
+            continue;
+        }
+
+        // A different word break may allow the complete remainder to fit.
+        let remainder: String = chars[rest_start..].iter().collect();
+        if font.width(&remainder, 1) <= max_w {
+            return Some(TextLayout {
+                size,
+                scale: 1,
+                lines: vec![line1, remainder],
+            });
+        }
+
+        let mut second_end = rest_start;
+        for end in rest_start + 1..=chars.len() {
+            let mut candidate: String = chars[rest_start..end]
+                .iter()
+                .collect::<String>()
+                .trim_end()
+                .to_string();
+            candidate.push('…');
+            if font.width(&candidate, 1) > max_w {
+                break;
+            }
+            second_end = end;
+        }
+        if second_end == rest_start {
+            continue;
+        }
+        let mut line2 = chars[rest_start..second_end]
+            .iter()
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        line2.push('…');
+        return Some(TextLayout {
+            size,
+            scale: 1,
+            lines: vec![line1, line2],
+        });
     }
     None
 }
@@ -180,9 +278,11 @@ pub fn text_sign(canvas: &mut Canvas, style: TextStyle, text: &str) {
         }
         TextStyle::StopName => {
             let (y0, h) = (46, 36);
-            canvas.rounded_rect(4, y0, w - 8, h, 3, WHITE);
-            canvas.stroke_rounded_rect(4, y0, w - 8, h, 3, 2, DARK_GRAY);
-            if let Some(layout) = fit_or_abbreviate(text, w - 20, h - 8, FontSize::S28, false) {
+            canvas.rounded_rect(0, y0, w, h, 3, WHITE);
+            canvas.stroke_rounded_rect(0, y0, w, h, 3, 2, DARK_GRAY);
+            // Two lines of the smallest font need 30 px. Keep them inside the existing
+            // 36 px plate and use its width before truncating long stop names.
+            if let Some(layout) = fit_or_abbreviate(text, w - 2, h - 4, FontSize::S28, true) {
                 layout.draw_centered(canvas, cx, y0 + h / 2, BLACK);
             }
         }
@@ -495,6 +595,33 @@ mod tests {
         assert_eq!(c.get(64, 124), TRANSPARENT);
         assert_eq!(c.get(64, 76), WHITE);
         assert!(inked(&c) > 3000);
+    }
+
+    #[test]
+    fn stop_name_uses_two_lines_without_truncating_when_it_fits() {
+        let name = "Zwickau, Zentralhaltestelle";
+        let layout = fit_or_abbreviate(name, 128 - 2, 36 - 4, FontSize::S28, true).unwrap();
+
+        assert_eq!(layout.lines.len(), 2);
+        assert_eq!(layout.lines.join(" "), name);
+    }
+
+    #[test]
+    fn stop_and_street_names_truncate_on_the_second_line() {
+        let name = "Alte Reichenbacher Str.";
+        for (max_w, max_h) in [(128 - 2, 36 - 4), (128 - 20, 44 - 8)] {
+            let layout = fit_or_abbreviate(name, max_w, max_h, FontSize::S28, true).unwrap();
+
+            assert_eq!(layout.lines.len(), 2);
+            assert!(!layout.lines[0].contains('…'));
+            assert!(layout.lines[1].ends_with('…'));
+            let visible = format!(
+                "{} {}",
+                layout.lines[0],
+                layout.lines[1].trim_end_matches('…')
+            );
+            assert!(name.starts_with(&visible));
+        }
     }
 
     #[test]
