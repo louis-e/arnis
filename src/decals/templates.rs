@@ -87,14 +87,17 @@ fn fit_or_abbreviate(
     if let Some(l) = fit_text(text, max_w, max_h, largest, wrap) {
         return Some(l);
     }
-    if let Some(short) = abbreviate(text) {
-        if let Some(l) = fit_text(&short, max_w, max_h, largest, wrap) {
+    let short = abbreviate(text);
+    if let Some(short) = &short {
+        if let Some(l) = fit_text(short, max_w, max_h, largest, wrap) {
             return Some(l);
         }
     }
     if wrap {
-        if let Some(l) = fit_truncated_two_lines(text, max_w, max_h, largest) {
-            return Some(l);
+        for candidate in short.as_deref().into_iter().chain([text]) {
+            if let Some(l) = fit_truncated_two_lines(candidate, max_w, max_h, largest) {
+                return Some(l);
+            }
         }
     }
     // Last resort: truncate with an ellipsis so the plate is never blank.
@@ -650,6 +653,20 @@ mod tests {
         // Too short to cut without one; left to the one-line ellipsis.
         let max_w = Font::get(FontSize::S12).width("Mitt", 1);
         assert!(fit_truncated_two_lines("Mitte", max_w, 32, FontSize::S12).is_none());
+    }
+
+    #[test]
+    fn two_line_fallback_tries_the_abbreviation_first() {
+        // The balanced split of the short form is too wide, but the greedy one fits.
+        let layout = fit_or_abbreviate(
+            "Avenue de la Porte Chaumont",
+            128 - 20,
+            44 - 8,
+            FontSize::S28,
+            true,
+        )
+        .unwrap();
+        assert_eq!(layout.lines, ["Ave de la Porte", "Chaumont"]);
     }
 
     #[test]
