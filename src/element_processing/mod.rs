@@ -38,6 +38,7 @@ pub mod street_furniture;
 pub(crate) mod structure_kit;
 pub mod subprocessor;
 mod surfaces;
+pub mod swimming_pools;
 pub mod tourisms;
 pub mod traffic_lights;
 pub mod train_bodies;

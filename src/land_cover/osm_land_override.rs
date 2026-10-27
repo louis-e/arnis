@@ -11,6 +11,7 @@ use crate::clipping::clip_water_ring_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::bridges::is_bridge_way;
 use crate::element_processing::highways::highway_block_range;
+use crate::element_processing::swimming_pools::is_swimming_pool;
 use crate::element_processing::waterways::{
     is_channel_waterway, is_underground_waterway, waterway_width, MAX_WATERWAY_WIDTH,
 };
@@ -96,7 +97,10 @@ pub fn apply_osm_land_override(
                 } else if let Some(half) = land_line_half_width(way, scale) {
                     stamp_line(&mut land, &way.nodes, half, &map, xzbbox);
                     any_land = true;
-                } else if is_building(&way.tags) && is_ring_closed(&way.nodes) {
+                } else if (is_building(&way.tags) || is_swimming_pool(&way.tags))
+                    && is_ring_closed(&way.nodes)
+                {
+                    // A pool is a basin built on land, which ESA often reads as water.
                     if let Some(ring) = clip_water_ring_to_bbox(&way.nodes, xzbbox) {
                         fill_rings(&mut land, &[ring], &map);
                         any_land = true;
@@ -384,6 +388,9 @@ fn has_explicit_water_tag(tags: &HashMap<String, String>) -> bool {
 
 fn is_water_area_way(way: &ProcessedWay) -> bool {
     let tags = &way.tags;
+    if is_swimming_pool(tags) {
+        return false;
+    }
     matches!(tags.get("natural").map(String::as_str), Some("water"))
         || has_explicit_water_tag(tags)
         || matches!(tags.get("landuse").map(String::as_str), Some("reservoir"))
@@ -597,6 +604,30 @@ mod tests {
                 lc.grid[30][x], LC_WATER,
                 "unmapped body at x={x} was trimmed"
             );
+        }
+    }
+
+    #[test]
+    fn esa_water_on_a_pool_goes_back_to_land() {
+        // ESA reads a large pool as a small pond; even tagged as water, the pool is land.
+        let (mut lc, bbox) = grid_from(|x, z| {
+            if (20..30).contains(&x) && (20..26).contains(&z) {
+                LC_WATER
+            } else {
+                LC_GRASSLAND
+            }
+        });
+        let ring = vec![
+            node(1, 20, 20),
+            node(2, 29, 20),
+            node(3, 29, 25),
+            node(4, 20, 25),
+            node(1, 20, 20),
+        ];
+        let tags = [("leisure", "swimming_pool"), ("natural", "water")];
+        run(&mut lc, &bbox, &[way(5, ring, &tags)]);
+        for x in 20..30 {
+            assert_eq!(lc.grid[22][x], LC_GRASSLAND, "x={x} still water");
         }
     }
 

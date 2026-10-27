@@ -28,7 +28,7 @@ fn pitch_kind(way: &ProcessedWay) -> Option<PitchKind> {
 }
 
 // Unit direction of the way's longest edge, or None for degenerate geometry.
-fn longest_edge_dir(way: &ProcessedWay) -> Option<(f64, f64)> {
+pub(crate) fn longest_edge_dir(way: &ProcessedWay) -> Option<(f64, f64)> {
     let mut best: Option<((f64, f64), f64)> = None;
     for w in way.nodes.windows(2) {
         let dx = (w[1].x - w[0].x) as f64;

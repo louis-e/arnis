@@ -70,7 +70,9 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     {
         return None;
     }
-    let fills_ground = if tags.contains_key("landuse") {
+    let fills_ground = if swimming_pools::is_swimming_pool(tags) {
+        true
+    } else if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
     } else if let Some(natural) = tags.get("natural") {
         // natural=* + amenity=fountain falls through to the fountain handler.
@@ -399,6 +401,15 @@ fn process_element(
                     building_footprints,
                     road_mask,
                     args.scale,
+                    args.timeout.as_ref(),
+                );
+            } else if swimming_pools::is_swimming_pool(&way.tags) {
+                // Ahead of natural=*, which a pool mapped as natural=water would take.
+                swimming_pools::generate_swimming_pool(
+                    editor,
+                    way,
+                    flood_fill_cache,
+                    building_footprints,
                     args.timeout.as_ref(),
                 );
             } else if way.tags.contains_key("landuse") {
