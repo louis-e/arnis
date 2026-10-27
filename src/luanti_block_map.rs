@@ -672,6 +672,13 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         343 => "mcl_stairs:slab_stonebrickmossy",
         344 => "mcl_ocean:prismarine",
         345 => "mcl_end:end_rod",
+        // Mineclonia has no tripwire hook; a button is as small and hangs on the same wall.
+        346 => {
+            return LuantiNode {
+                name: "mcl_buttons:button_stone_off",
+                param2: facing_to_wallmounted(prop_str(props, "facing").unwrap_or("north")),
+            }
+        }
         347 => "mcl_signs:wall_sign_spruce",
         348 => "mcl_colorblocks:concrete_powder_brown", // BROWN_CONCRETE_POWDER
         349 => return conv_stair(props, "mcl_stairs:stair_diorite"), // DIORITE_STAIRS
@@ -900,7 +907,7 @@ mod tests {
 
     /// Blocks Mineclonia has no node for, so they can only fall back. Keep this
     /// list short: every entry is a block that exports as plain stone.
-    const NO_MINECLONIA_NODE: &[&str] = &["tripwire_hook"];
+    const NO_MINECLONIA_NODE: &[&str] = &[];
 
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
@@ -994,6 +1001,20 @@ mod tests {
     fn vines_hang_on_their_wall() {
         // North, east, south, west, with the Z flip like the multiface blocks.
         assert_eq!(VINES.map(|v| to_mineclonia_node(v, None).param2), [4, 2, 5, 3]);
+    }
+
+    #[test]
+    fn tripwire_hooks_become_buttons_on_their_wall() {
+        use crate::block_definitions::TRIPWIRE_HOOK;
+        let hook = |facing: &str| {
+            let props = Value::Compound(HashMap::from([(
+                "facing".to_string(),
+                Value::String(facing.to_string()),
+            )]));
+            to_mineclonia_node(TRIPWIRE_HOOK, Some(&props))
+        };
+        assert_eq!(hook("east").name, "mcl_buttons:button_stone_off");
+        assert_eq!((hook("east").param2, hook("south").param2), (3, 4));
     }
 
     #[test]
