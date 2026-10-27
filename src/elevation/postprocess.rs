@@ -259,7 +259,7 @@ pub fn apply_land_cover_repair(
     // surface (ESA-misclassified riverbank walls / piers / shoreline
     // structures kept at their DSM elevation). Without this, the downstream
     // renderer still sees them as water, can't place water above the real
-    // water level, and falls through to grass + shoreline sand — producing
+    // water level, and falls through to land ground, producing
     // visible embankments and grid-aligned ridges INSIDE the water body.
     //
     // After reclassification the water_distance grid must be refreshed so

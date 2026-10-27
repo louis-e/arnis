@@ -8,7 +8,7 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
-use crate::land_cover::LC_WATER;
+use crate::land_cover::{coord_hash, LC_BEACH, LC_WATER};
 use crate::world_editor::{min_y, WorldEditor};
 
 /// Flat shoal width in chamfer-DT units; slope only starts past it.
@@ -415,7 +415,7 @@ pub fn carve_water_column(
 
     // Layered bed: gravel base with noise-driven sand/clay/dirt patches over stone.
     let (top_block, under_block) = match depth {
-        0..=1 => (SAND, SANDSTONE),
+        0..=1 => shallow_bed(editor, x, z),
         2..=6 if near_bridge => {
             if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 && depth <= 3 {
                 (SAND, STONE)
@@ -442,7 +442,7 @@ pub fn carve_water_column(
             // Per-block noise, sampled lazily so most cells skip the rare tiers.
             let vn = |dx, dz, s| crate::ground_generation::value_noise_01(wx + dx, wz + dz, s);
             let top = if d <= 1 {
-                SAND
+                shallow_bed(editor, x, z).0
             } else if d == 2 {
                 if vn(53, 97, 56) > 0.50 {
                     SAND
@@ -492,6 +492,45 @@ pub fn carve_water_column(
     if depth >= 3 && !near_bridge {
         place_underwater_vegetation(editor, x, z, water_y, bed_y + bump, depth);
     }
+}
+
+/// Bed and the block under it where the water is shallow enough to show the bed. Sand
+/// along a beach; elsewhere patches of gravel, earth and clay, or the shallows read as a
+/// sand stripe along every bank.
+pub(crate) fn shallow_bed(editor: &WorldEditor, x: i32, z: i32) -> (Block, Block) {
+    if near_beach(editor, x, z) {
+        (SAND, SANDSTONE)
+    } else {
+        (earthy_bed(x, z), DIRT)
+    }
+}
+
+/// `shallow_bed` away from any beach, without the land cover lookups.
+pub(crate) fn earthy_bed(x: i32, z: i32) -> Block {
+    let n = crate::ground_generation::value_noise_01(x + 211, z + 37, 6);
+    if n < 0.35 {
+        GRAVEL
+    } else if n < 0.6 {
+        if coord_hash(x, z).is_multiple_of(3) {
+            COARSE_DIRT
+        } else {
+            DIRT
+        }
+    } else if n < 0.82 {
+        CLAY
+    } else {
+        SAND
+    }
+}
+
+/// Whether beach land cover lies within a few blocks.
+fn near_beach(editor: &WorldEditor, x: i32, z: i32) -> bool {
+    const REACH: i32 = 4;
+    (-REACH..=REACH).step_by(2).any(|dx| {
+        (-REACH..=REACH)
+            .step_by(2)
+            .any(|dz| editor.cover_class(x + dx, z + dz) == LC_BEACH)
+    })
 }
 
 /// Strip plants left floating on a freshly carved water surface, leaving piers
@@ -937,6 +976,55 @@ mod tests {
             assert!(editor.check_for_block_absolute(10, y, 10, Some(&[STONE_BRICKS]), None));
         }
         assert!(editor.check_for_block_absolute(11, 5, 10, Some(&[WATER]), None));
+    }
+
+    #[test]
+    fn shallows_are_sandy_only_along_a_beach() {
+        use crate::block_definitions::STONE_BRICKS;
+        use crate::coordinate_system::geographic::LLBBox;
+        use crate::land_cover::LC_GRASSLAND;
+        // A beach along the west edge, grass everywhere else.
+        let grid: Vec<Vec<u8>> = (0..64)
+            .map(|_| {
+                (0..64)
+                    .map(|x| if x < 4 { LC_BEACH } else { LC_GRASSLAND })
+                    .collect()
+            })
+            .collect();
+        let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor =
+            WorldEditor::new(std::path::PathBuf::from("/dev/null/unused"), &bbox, llbbox);
+        let lc = crate::land_cover::LandCoverData {
+            grid,
+            water_distance: vec![vec![0u8; 64]; 64],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            width: 64,
+            height: 64,
+            cells_per_meter: 1.0,
+        };
+        let ground = crate::ground::test_support::ground_with_land_cover_and_elevation(lc, 64, 64);
+        editor.set_ground(std::sync::Arc::new(ground));
+
+        for z in 0..64 {
+            assert_eq!(
+                shallow_bed(&editor, 5, z).0,
+                SAND,
+                "beach shallows at z={z}"
+            );
+        }
+        let mut sand = 0;
+        let mut kinds = std::collections::HashSet::new();
+        for x in 20..64 {
+            for z in 0..64 {
+                let (bed, under) = shallow_bed(&editor, x, z);
+                assert_ne!(under, STONE_BRICKS);
+                sand += usize::from(bed == SAND);
+                kinds.insert(bed);
+            }
+        }
+        assert!(kinds.len() >= 3, "bed is one material: {kinds:?}");
+        assert!(sand * 4 < 44 * 64, "{sand} sand cells off the beach");
     }
 
     #[test]
