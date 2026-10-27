@@ -11,7 +11,9 @@ use crate::decals::region::SignRegion;
 use crate::decals::{pictograms, DecalKey, DecalRegistry, ShieldStyle, TextStyle, TrafficSign};
 use crate::element_processing::building_facade::FacadeAnchor;
 use crate::element_processing::buildings::is_underground_building;
-use crate::element_processing::highways::{collect_carriageway_coords, highway_block_range};
+use crate::element_processing::highways::{
+    collect_carriageway_coords, highway_block_range, is_carriageway, surface_highway_type,
+};
 use crate::element_processing::{get_nearest_non_road_block, get_nearest_road_block};
 use crate::floodfill_cache::{BuildingFootprintBitmap, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -49,6 +51,8 @@ pub struct SignageContext {
     pub level: SignageLevel,
     pub region: SignRegion,
     pub intersections: IntersectionIndex,
+    /// Node id -> which way its stop, give-way or crossing sign faces.
+    pub node_headings: HashMap<u64, NodeSignHeading>,
     pub scale: f64,
     /// Vehicular road surfaces; posts stand beside these (sidewalks are fine).
     pub carriageway: RoadMaskBitmap,
@@ -63,9 +67,11 @@ type PlacementReport = BTreeMap<&'static str, (usize, BTreeSet<(i32, i32, i32)>)
 const REPORT_SAMPLES: usize = 4;
 
 impl SignageContext {
-    /// Frees the carriageway mask, a bit per world column that only element placement reads.
+    /// Frees what only element placement reads: the carriageway mask, a bit per world
+    /// column, and the node sign headings.
     pub fn release_placement_masks(&mut self) {
         self.carriageway = RoadMaskBitmap::new_empty();
+        self.node_headings = HashMap::new();
     }
 
     fn has(&self, key: &DecalKey) -> bool {
@@ -257,10 +263,13 @@ fn shield_style(highway: &str, reference: &str, region: SignRegion) -> ShieldSty
             }
         }
         SignRegion::UkIreland => {
+            // Primary routes are trunk roads in Britain and N roads in Ireland.
             if reference.starts_with('M') {
                 ShieldStyle::Blue
-            } else {
+            } else if highway.starts_with("trunk") || reference.starts_with('N') {
                 ShieldStyle::Green
+            } else {
+                ShieldStyle::WhitePlate
             }
         }
         SignRegion::Germanic => {
@@ -396,13 +405,7 @@ pub fn railway_node_signs(tags: &HashMap<String, String>, region: SignRegion) ->
     let name = if board {
         name_sign(tags, TextStyle::StationBoard, |_| 3)
     } else if railway == "tram_stop" {
-        name_sign(tags, TextStyle::StopName, |n| {
-            if n.chars().count() <= 10 {
-                1
-            } else {
-                2
-            }
-        })
+        name_sign(tags, TextStyle::StopName, |_| 1)
     } else {
         None
     };
@@ -602,6 +605,204 @@ pub fn build_intersection_index(elements: &[ProcessedElement], scale: f64) -> In
     index
 }
 
+/// Which way a stop, give-way or crossing sign is read from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NodeSignHeading {
+    /// Unit direction of the traffic the sign is for.
+    pub dir: (f64, f64),
+    /// Crossing signs face both ways along the road.
+    pub both_ways: bool,
+}
+
+/// Driveways and parking aisles join a street without making a junction its signs are for.
+fn is_minor_service(way: &ProcessedWay) -> bool {
+    matches!(
+        way.tags.get("service").map(String::as_str),
+        Some("driveway" | "parking_aisle" | "drive-through")
+    )
+}
+
+/// The roads the carriageway mask is built from, with their junctions and way ends.
+struct RoadNet<'a> {
+    roads: Vec<&'a ProcessedWay>,
+    /// Node id -> road ends meeting there (one per way ending, two per way running
+    /// through), counting all roads and leaving out minor service roads.
+    ends: HashMap<u64, (u8, u8)>,
+    /// Node id -> roads that start or end there.
+    tips: HashMap<u64, Vec<usize>>,
+}
+
+/// A walk gives up after this many blocks without finding a junction.
+const MAX_JUNCTION_WALK: f64 = 400.0;
+
+impl<'a> RoadNet<'a> {
+    fn new(elements: &'a [ProcessedElement]) -> Self {
+        let roads: Vec<&ProcessedWay> = elements
+            .iter()
+            .filter_map(|e| match e {
+                ProcessedElement::Way(w)
+                    if w.nodes.len() >= 2
+                        && surface_highway_type(w).is_some_and(is_carriageway) =>
+                {
+                    Some(w)
+                }
+                _ => None,
+            })
+            .collect();
+        let mut ends: HashMap<u64, (u8, u8)> = HashMap::new();
+        let mut tips: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (r, way) in roads.iter().enumerate() {
+            let last = way.nodes.len() - 1;
+            let minor = is_minor_service(way);
+            for (i, n) in way.nodes.iter().enumerate() {
+                let tip = i == 0 || i == last;
+                let add = if tip { 1 } else { 2 };
+                let e = ends.entry(n.id).or_default();
+                e.0 = e.0.saturating_add(add);
+                if !minor {
+                    e.1 = e.1.saturating_add(add);
+                }
+                if tip {
+                    tips.entry(n.id).or_default().push(r);
+                }
+            }
+        }
+        Self { roads, ends, tips }
+    }
+
+    /// A junction for traffic on a road. On a minor service road the street it joins counts.
+    fn is_junction(&self, id: u64, minor: bool) -> bool {
+        let (all, major) = self.ends.get(&id).copied().unwrap_or_default();
+        (if minor { all } else { major }) >= 3
+    }
+
+    /// Distance from node `i` of road `r` to the nearest junction, walking forward or back in
+    /// way order and on into the next way where a road is only split in two.
+    fn distance_to_junction(&self, r: usize, i: usize, forward: bool) -> Option<f64> {
+        let minor = is_minor_service(self.roads[r]);
+        let (mut r, mut j, mut forward) = (r, i, forward);
+        let mut d = 0.0;
+        for _ in 0..8 {
+            let nodes = &self.roads[r].nodes;
+            loop {
+                let next = if forward { j + 1 } else { j.wrapping_sub(1) };
+                if next >= nodes.len() {
+                    break;
+                }
+                d += ((nodes[next].x - nodes[j].x) as f64)
+                    .hypot((nodes[next].z - nodes[j].z) as f64);
+                j = next;
+                if self.is_junction(nodes[j].id, minor) {
+                    return Some(d);
+                }
+            }
+            if d > MAX_JUNCTION_WALK {
+                return None;
+            }
+            // At the way's end: carry on into the one road that continues it.
+            let tip = nodes[j].id;
+            let mut onward = self
+                .tips
+                .get(&tip)?
+                .iter()
+                .copied()
+                .filter(|&o| o != r && (minor || !is_minor_service(self.roads[o])));
+            let o = onward.next()?;
+            if onward.next().is_some() {
+                return None;
+            }
+            let next_nodes = &self.roads[o].nodes;
+            r = o;
+            (j, forward) = if next_nodes[0].id == tip {
+                (0, true)
+            } else {
+                (next_nodes.len() - 1, false)
+            };
+        }
+        None
+    }
+}
+
+/// Heading for every stop, give-way and crossing node on a road. Stop and give-way signs are
+/// for the traffic `direction` names, else the traffic a one-way road carries, else the
+/// traffic driving to the nearest junction along the road. A node that is itself a junction
+/// gets no heading.
+pub fn build_node_headings(
+    elements: &[ProcessedElement],
+    level: SignageLevel,
+) -> HashMap<u64, NodeSignHeading> {
+    // Node id -> (one direction only, `direction=forward`).
+    let mut signs: HashMap<u64, (bool, Option<bool>)> = HashMap::new();
+    for element in elements {
+        let ProcessedElement::Node(node) = element else {
+            continue;
+        };
+        let Some(key) = highway_node_sign(&node.tags, level) else {
+            continue;
+        };
+        let one_way = matches!(
+            key,
+            DecalKey::Traffic(TrafficSign::Stop | TrafficSign::GiveWay)
+        );
+        let forward = match node.tags.get("direction").map(String::as_str) {
+            Some("forward") => Some(true),
+            Some("backward") => Some(false),
+            _ => None,
+        };
+        signs.insert(node.id, (one_way, forward));
+    }
+    let mut out = HashMap::new();
+    if signs.is_empty() {
+        return out;
+    }
+    let net = RoadNet::new(elements);
+    for (r, way) in net.roads.iter().enumerate() {
+        let minor = is_minor_service(way);
+        // Traffic flow of a one-way road, in way order.
+        let flow = match way.tags.get("oneway").map(String::as_str) {
+            Some("yes" | "true" | "1") => Some(true),
+            Some("-1") => Some(false),
+            _ if way.tags.get("junction").map(String::as_str) == Some("roundabout") => Some(true),
+            _ => None,
+        };
+        for (i, node) in way.nodes.iter().enumerate() {
+            let Some(&(one_way, forward)) = signs.get(&node.id) else {
+                continue;
+            };
+            if out.contains_key(&node.id) || net.is_junction(node.id, minor) {
+                continue;
+            }
+            let Some(dir) = way_direction_at(&way.nodes, i) else {
+                continue;
+            };
+            let ahead = if !one_way {
+                true
+            } else if let Some(f) = forward.or(flow) {
+                f
+            } else {
+                match (
+                    net.distance_to_junction(r, i, true),
+                    net.distance_to_junction(r, i, false),
+                ) {
+                    (Some(a), Some(b)) => a <= b,
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                    (None, None) => continue,
+                }
+            };
+            let dir = if ahead { dir } else { (-dir.0, -dir.1) };
+            out.insert(
+                node.id,
+                NodeSignHeading {
+                    dir,
+                    both_ways: !one_way,
+                },
+            );
+        }
+    }
+    out
+}
+
 /// Every decal key an element may place; the pre-pass unions these into the registry.
 fn keys_for_element(
     element: &ProcessedElement,
@@ -718,6 +919,7 @@ pub fn build_context(
     let lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
     let region = SignRegion::detect(lat, lon);
     let intersections = build_intersection_index(elements, args.scale);
+    let node_headings = build_node_headings(elements, level);
 
     let mut keys: BTreeSet<DecalKey> = BTreeSet::new();
     for element in elements {
@@ -739,6 +941,7 @@ pub fn build_context(
         level,
         region,
         intersections,
+        node_headings,
         scale: args.scale,
         carriageway,
         report: Mutex::new(PlacementReport::new()),
@@ -1152,7 +1355,7 @@ pub fn generate_node_signage(
     if tags.contains_key("highway")
         || tags.get("railway").map(String::as_str) == Some("level_crossing")
     {
-        generate_highway_node_signage(editor, node, road_mask);
+        generate_highway_node_signage(editor, node, footprints, road_mask);
     }
     if tags.contains_key("railway") {
         generate_railway_node_signage(editor, node, road_mask);
@@ -1459,13 +1662,8 @@ fn place_roadside_sign(
         dx = -dx;
         dz = -dz;
     }
-    // Kerb side: clockwise for right-hand traffic, the other way for left-hand.
-    let (px, pz) = if ctx.region.drives_on_left() {
-        (dz, -dx)
-    } else {
-        (-dz, dx)
-    };
     // Kerb side of the direction of travel: first free cell past the carriageway edge.
+    let (px, pz) = kerb_side(ctx.region, (dx, dz));
     let Some((sx, sz, ground)) = (0..5)
         .map(|k| {
             let offset = (half_width + 2 + k) as f64;
@@ -1475,14 +1673,7 @@ fn place_roadside_sign(
             )
         })
         .find_map(|(sx, sz)| {
-            if ctx.carriageway.contains(sx, sz)
-                || footprints.contains(sx, sz)
-                || editor.is_lc_water(sx, sz)
-            {
-                return None;
-            }
-            let ground = editor.get_absolute_y(sx, 0, sz);
-            free_for_post(editor, sx, ground, sz, POST_SHAFT + 1).then_some((sx, sz, ground))
+            post_ground(editor, ctx, footprints, sx, sz, POST_SHAFT + 1).map(|g| (sx, sz, g))
         })
     else {
         return;
@@ -1539,14 +1730,7 @@ fn place_street_name_post(
         })
         .map(|(dx, dz)| (node.x + dx, node.z + dz))
         .find_map(|(px, pz)| {
-            if ctx.carriageway.contains(px, pz)
-                || footprints.contains(px, pz)
-                || editor.is_lc_water(px, pz)
-            {
-                return None;
-            }
-            let ground = editor.get_absolute_y(px, 0, pz);
-            free_for_post(editor, px, ground, pz, POST_SHAFT + 2).then_some((px, pz, ground))
+            post_ground(editor, ctx, footprints, px, pz, POST_SHAFT + 2).map(|g| (px, pz, g))
         })
     else {
         return;
@@ -1588,6 +1772,7 @@ fn place_street_name_post(
 pub fn generate_highway_node_signage(
     editor: &mut WorldEditor,
     node: &ProcessedNode,
+    footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
 ) {
     let Some(ctx) = editor.signage() else {
@@ -1597,14 +1782,19 @@ pub fn generate_highway_node_signage(
         return;
     };
     let (x, z) = (node.x, node.z);
-    // The node sits on the carriageway; the post goes to the nearest kerb.
-    let (px, pz) = if ctx.carriageway.contains(x, z) {
-        match get_nearest_non_road_block(x, z, 10, &ctx.carriageway) {
-            Some(p) => p,
-            None => return,
+    let heading = ctx.node_headings.get(&node.id).copied();
+    // With a known heading the post stands on the kerb that traffic keeps to.
+    let kerb = heading.and_then(|h| kerb_beside(editor, &ctx, x, z, h.dir, footprints));
+    let (px, pz) = match kerb {
+        Some(p) => p,
+        // The node sits on the carriageway; the post goes to the nearest kerb.
+        None if ctx.carriageway.contains(x, z) => {
+            match get_nearest_non_road_block(x, z, 10, &ctx.carriageway) {
+                Some(p) => p,
+                None => return,
+            }
         }
-    } else {
-        (x, z)
+        None => (x, z),
     };
     let ground = editor.get_absolute_y(px, 0, pz);
     if editor.is_lc_water(px, pz) {
@@ -1613,17 +1803,80 @@ pub fn generate_highway_node_signage(
     let Some(head) = traffic_sign_post(editor, px, ground, pz) else {
         return;
     };
-    let facing = if (px, pz) != (x, z) {
-        facing_for_dir((x - px) as f64, (z - pz) as f64)
-    } else {
-        match get_nearest_road_block(x, z, 8, road_mask) {
+    let facings = match heading {
+        // Facing back down the road, toward the drivers it is meant for.
+        Some(h) => {
+            let f = facing_for_dir(-h.dir.0, -h.dir.1);
+            if h.both_ways {
+                vec![f, opposite(f)]
+            } else {
+                vec![f]
+            }
+        }
+        None if (px, pz) != (x, z) => vec![facing_for_dir((x - px) as f64, (z - pz) as f64)],
+        None => vec![match get_nearest_road_block(x, z, 8, road_mask) {
             Some((rx, rz)) => facing_for_dir((rx - x) as f64, (rz - z) as f64),
             None => 3,
-        }
+        }],
     };
-    if editor.place_decal(px, head, pz, facing, &key) {
+    let mut placed = false;
+    for facing in facings {
+        placed |= editor.place_decal(px, head, pz, facing, &key);
+    }
+    if placed {
         ctx.note("stop/give-way/crossing signs", px, head, pz);
     }
+}
+
+/// First free cell past the carriageway edge on the kerb side of travel along `dir`.
+fn kerb_beside(
+    editor: &WorldEditor,
+    ctx: &SignageContext,
+    x: i32,
+    z: i32,
+    dir: (f64, f64),
+    footprints: &BuildingFootprintBitmap,
+) -> Option<(i32, i32)> {
+    let (sx, sz) = kerb_side(ctx.region, dir);
+    let cell = |k: i32| {
+        (
+            x + (sx * k as f64).round() as i32,
+            z + (sz * k as f64).round() as i32,
+        )
+    };
+    let edge = (1..=12).find(|&k| {
+        let (cx, cz) = cell(k);
+        !ctx.carriageway.contains(cx, cz)
+    })?;
+    (edge..edge + 4)
+        .map(cell)
+        .find(|&(cx, cz)| post_ground(editor, ctx, footprints, cx, cz, POST_SHAFT + 1).is_some())
+}
+
+/// Unit vector to the kerb that traffic travelling along `dir` keeps to.
+fn kerb_side(region: SignRegion, (dx, dz): (f64, f64)) -> (f64, f64) {
+    if region.drives_on_left() {
+        (dz, -dx)
+    } else {
+        (-dz, dx)
+    }
+}
+
+/// Ground height at (x, z) if a post `height` blocks tall can stand there: off the
+/// carriageway, outside buildings and water, in free cells.
+fn post_ground(
+    editor: &WorldEditor,
+    ctx: &SignageContext,
+    footprints: &BuildingFootprintBitmap,
+    x: i32,
+    z: i32,
+    height: i32,
+) -> Option<i32> {
+    if ctx.carriageway.contains(x, z) || footprints.contains(x, z) || editor.is_lc_water(x, z) {
+        return None;
+    }
+    let ground = editor.get_absolute_y(x, 0, z);
+    free_for_post(editor, x, ground, z, height).then_some(ground)
 }
 
 /// Station name gantry, metro entrance sign or tram stop post for a railway node.
@@ -2063,6 +2316,7 @@ mod tests {
             level: SignageLevel::Basic,
             region: SignRegion::Germanic,
             intersections: IntersectionIndex::new(),
+            node_headings: HashMap::new(),
             scale: 1.0,
             carriageway: crate::floodfill_cache::CoordinateBitmap::new_empty(),
             report: Mutex::new(PlacementReport::new()),
@@ -2219,6 +2473,294 @@ mod tests {
         let before = keys.len();
         drop_keys_over_budget(&mut keys);
         assert_eq!(keys.len(), before);
+    }
+
+    fn sign_node(id: u64, x: i32, z: i32, pairs: &[(&str, &str)]) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: tags(pairs),
+            x,
+            z,
+        }
+    }
+
+    fn road(id: u64, highway: &str, nodes: Vec<ProcessedNode>) -> ProcessedElement {
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes,
+            tags: tags(&[("highway", highway)]),
+        })
+    }
+
+    /// A minor road running south into a T junction with a main road along x, with a stop
+    /// node short of the junction and a zebra crossing on the main road.
+    fn t_junction(stop_tags: &[(&str, &str)]) -> Vec<ProcessedElement> {
+        let stop = sign_node(2, 0, -8, stop_tags);
+        let zebra = sign_node(12, 20, 0, &[("highway", "crossing"), ("crossing", "zebra")]);
+        vec![
+            ProcessedElement::Node(stop.clone()),
+            ProcessedElement::Node(zebra.clone()),
+            road(
+                1,
+                "residential",
+                vec![sign_node(1, 0, -40, &[]), stop, sign_node(3, 0, 0, &[])],
+            ),
+            road(
+                2,
+                "primary",
+                vec![
+                    sign_node(10, -40, 0, &[]),
+                    sign_node(3, 0, 0, &[]),
+                    zebra,
+                    sign_node(11, 40, 0, &[]),
+                ],
+            ),
+        ]
+    }
+
+    #[test]
+    fn stop_signs_face_traffic_heading_into_the_junction() {
+        let headings = build_node_headings(&t_junction(&[("highway", "stop")]), SignageLevel::Full);
+        let stop = headings[&2];
+        assert!(!stop.both_ways);
+        assert!(
+            stop.dir.1 > 0.9,
+            "toward the junction to the south: {stop:?}"
+        );
+
+        let crossing = headings[&12];
+        assert!(crossing.both_ways);
+        assert!(crossing.dir.0.abs() > 0.9, "{crossing:?}");
+
+        // An explicit direction wins over the nearest junction.
+        let tagged = build_node_headings(
+            &t_junction(&[("highway", "stop"), ("direction", "backward")]),
+            SignageLevel::Full,
+        );
+        assert!(tagged[&2].dir.1 < -0.9);
+    }
+
+    #[test]
+    fn stop_on_the_junction_node_has_no_heading() {
+        let mut elements = t_junction(&[]);
+        elements.push(ProcessedElement::Node(sign_node(
+            3,
+            0,
+            0,
+            &[("highway", "stop")],
+        )));
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(!headings.contains_key(&3));
+
+        // A crossing there would take whichever road came first, so it gets none either.
+        let mut elements = t_junction(&[]);
+        elements.push(ProcessedElement::Node(sign_node(
+            3,
+            0,
+            0,
+            &[("highway", "crossing"), ("crossing", "zebra")],
+        )));
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(!headings.contains_key(&3));
+    }
+
+    fn tagged_road(id: u64, pairs: &[(&str, &str)], nodes: Vec<ProcessedNode>) -> ProcessedElement {
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes,
+            tags: tags(pairs),
+        })
+    }
+
+    /// A primary road along x through (0, z), as the cross street of a junction.
+    fn cross_street(id: u64, junction: u64, z: i32) -> ProcessedElement {
+        road(
+            id,
+            "primary",
+            vec![
+                sign_node(id * 100, -40, z, &[]),
+                sign_node(junction, 0, z, &[]),
+                sign_node(id * 100 + 1, 40, z, &[]),
+            ],
+        )
+    }
+
+    #[test]
+    fn junction_past_a_way_split_is_found() {
+        // The stop's own way ends at a split 10 ahead; the junction is 5 past it, nearer than
+        // the one 30 behind.
+        let stop = sign_node(2, 0, -10, &[("highway", "stop")]);
+        let elements = vec![
+            ProcessedElement::Node(stop.clone()),
+            road(
+                1,
+                "residential",
+                vec![sign_node(3, 0, -40, &[]), stop, sign_node(4, 0, 0, &[])],
+            ),
+            road(
+                5,
+                "residential",
+                vec![sign_node(4, 0, 0, &[]), sign_node(6, 0, 5, &[])],
+            ),
+            cross_street(7, 3, -40),
+            cross_street(8, 6, 5),
+        ];
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
+    }
+
+    #[test]
+    fn driveway_is_not_a_junction() {
+        // A driveway joins 3 behind the stop; the junction it is for is 6 ahead.
+        let stop = sign_node(2, 0, -6, &[("highway", "stop")]);
+        let elements = vec![
+            ProcessedElement::Node(stop.clone()),
+            road(
+                1,
+                "residential",
+                vec![
+                    sign_node(10, 0, -40, &[]),
+                    sign_node(11, 0, -9, &[]),
+                    stop,
+                    sign_node(3, 0, 0, &[]),
+                ],
+            ),
+            tagged_road(
+                4,
+                &[("highway", "service"), ("service", "driveway")],
+                vec![sign_node(12, 10, -9, &[]), sign_node(11, 0, -9, &[])],
+            ),
+            cross_street(5, 3, 0),
+        ];
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
+    }
+
+    #[test]
+    fn stop_on_a_parking_aisle_faces_the_exit() {
+        let stop = sign_node(2, 20, -5, &[("highway", "stop")]);
+        let elements = vec![
+            ProcessedElement::Node(stop.clone()),
+            tagged_road(
+                1,
+                &[("highway", "service"), ("service", "parking_aisle")],
+                vec![sign_node(10, 20, -40, &[]), stop, sign_node(3, 20, 0, &[])],
+            ),
+            road(
+                5,
+                "primary",
+                vec![
+                    sign_node(20, -40, 0, &[]),
+                    sign_node(3, 20, 0, &[]),
+                    sign_node(21, 40, 0, &[]),
+                ],
+            ),
+        ];
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
+    }
+
+    #[test]
+    fn one_way_road_sets_the_heading() {
+        // The nearest junction is behind, but traffic can only drive forward.
+        let stop = sign_node(2, 0, -35, &[("highway", "give_way")]);
+        let elements = vec![
+            ProcessedElement::Node(stop.clone()),
+            tagged_road(
+                1,
+                &[("highway", "residential"), ("oneway", "yes")],
+                vec![sign_node(3, 0, -40, &[]), stop, sign_node(4, 0, 40, &[])],
+            ),
+            cross_street(5, 3, -40),
+            cross_street(6, 4, 40),
+        ];
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
+    }
+
+    #[test]
+    fn uk_shields_are_green_only_on_primary_routes() {
+        let uk = SignRegion::UkIreland;
+        assert_eq!(shield_style("motorway", "M25", uk), ShieldStyle::Blue);
+        assert_eq!(shield_style("trunk", "A40", uk), ShieldStyle::Green);
+        assert_eq!(shield_style("primary", "N7", uk), ShieldStyle::Green);
+        assert_eq!(shield_style("primary", "A501", uk), ShieldStyle::WhitePlate);
+        assert_eq!(
+            shield_style("secondary", "B1234", uk),
+            ShieldStyle::WhitePlate
+        );
+    }
+
+    #[test]
+    fn way_split_is_not_a_junction() {
+        // The nearer way end only continues the road to a dead end; the junction is the
+        // farther one.
+        let stop = sign_node(2, 0, -10, &[("highway", "give_way")]);
+        let elements = vec![
+            ProcessedElement::Node(stop.clone()),
+            road(
+                1,
+                "residential",
+                vec![sign_node(3, 0, -40, &[]), stop, sign_node(4, 0, 0, &[])],
+            ),
+            road(
+                2,
+                "residential",
+                vec![sign_node(4, 0, 0, &[]), sign_node(5, 0, 40, &[])],
+            ),
+            road(
+                3,
+                "primary",
+                vec![
+                    sign_node(6, -40, -40, &[]),
+                    sign_node(3, 0, -40, &[]),
+                    sign_node(7, 40, -40, &[]),
+                ],
+            ),
+        ];
+        let headings = build_node_headings(&elements, SignageLevel::Full);
+        assert!(headings[&2].dir.1 < -0.9, "{:?}", headings[&2]);
+    }
+
+    #[test]
+    fn stop_sign_stands_on_the_right_kerb_facing_oncoming_traffic() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        let key = DecalKey::Traffic(TrafficSign::Stop);
+        let mut ctx = test_ctx(vec![key.clone()]);
+        // A road along z, x = 28..=36, with a stop for southbound traffic at (32, 20).
+        let mut carriageway = crate::floodfill_cache::CoordinateBitmap::new(&xzbbox);
+        for z in 0..64 {
+            for x in 28..=36 {
+                carriageway.set(x, z);
+            }
+        }
+        ctx.carriageway = carriageway;
+        ctx.node_headings.insert(
+            7,
+            NodeSignHeading {
+                dir: (0.0, 1.0),
+                both_ways: false,
+            },
+        );
+        let ctx = std::sync::Arc::new(ctx);
+        editor.set_map_decals(true);
+        editor.set_signage(std::sync::Arc::clone(&ctx));
+
+        let node = sign_node(7, 32, 20, &[("highway", "stop")]);
+        let empty = crate::floodfill_cache::CoordinateBitmap::new_empty();
+        generate_highway_node_signage(&mut editor, &node, &empty, &empty);
+
+        let frames: Vec<(i32, i32, i32)> = editor
+            .item_frames()
+            .iter()
+            .map(|f| (f.x, f.y, f.z))
+            .collect();
+        assert_eq!(frames.len(), 1, "{frames:?}");
+        let (x, _, z) = frames[0];
+        // Southbound traffic keeps right, which is west; the sign faces north at it.
+        assert!(x < 28, "west kerb: {frames:?}");
+        assert_eq!(z, 19, "frame on the north face: {frames:?}");
     }
 
     #[test]

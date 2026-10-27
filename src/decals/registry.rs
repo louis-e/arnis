@@ -47,12 +47,14 @@ pub enum ShieldStyle {
     Blue,
     /// Yellow plate, black text (German Bundesstrasse, Dutch N-roads style).
     Yellow,
-    /// Green plate, white text (UK primary routes, some European E-roads).
+    /// Green plate, yellow number (UK and Irish primary routes).
     Green,
     /// US interstate look: red-white-blue shield.
     Interstate,
     /// White shield with black text (US highways).
     White,
+    /// White plate, black text (UK and Irish roads off the primary network).
+    WhitePlate,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

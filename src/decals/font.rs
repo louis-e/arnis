@@ -1,5 +1,5 @@
-//! Bitmap font rendering for signage. The atlases are DejaVu Sans Bold rasterized by
-//! `assets/decorations/tools/gen_font.py`; see that script for the index format.
+//! Bitmap font rendering for signage. The atlases are DejaVu Sans Bold at five sizes;
+//! `Font::parse` reads the index format.
 
 use super::draw::{mix, Canvas};
 use crate::map_item_palette::TRANSPARENT;
