@@ -676,6 +676,16 @@ impl Ground {
         self.canopy_cell(origin, span).map(|(fraction, _)| fraction)
     }
 
+    /// Whether `canopy_cell` would answer, stopping at the first measured column.
+    pub fn canopy_measured(&self, origin: XZPoint, span: i32) -> bool {
+        (0..span).any(|dz| {
+            (0..span).any(|dx| {
+                self.canopy_height_m(XZPoint::new(origin.x + dx, origin.z + dz))
+                    .is_some()
+            })
+        })
+    }
+
     /// The canopy share of a `span` square at `origin` and its tallest crown in
     /// metres, or `None` where nothing in it was measured.
     pub fn canopy_cell(&self, origin: XZPoint, span: i32) -> Option<(f64, u8)> {
@@ -1755,9 +1765,18 @@ mod tests {
         );
         // A cell straddling the two averages only over what was measured.
         assert_eq!(ground.canopy_fraction(XZPoint::new(0, 2), 2), Some(1.0));
+        // The early-out probe agrees with the full scan.
+        for (x, z, span) in [(0, 0, 2), (2, 0, 2), (0, 3, 1), (0, 0, 0)] {
+            let o = XZPoint::new(x, z);
+            assert_eq!(
+                ground.canopy_measured(o, span),
+                ground.canopy_cell(o, span).is_some()
+            );
+        }
         // Without a canopy grid there is nothing to say.
         ground.canopy = None;
         assert_eq!(ground.canopy_fraction(XZPoint::new(0, 0), 2), None);
+        assert!(!ground.canopy_measured(XZPoint::new(0, 0), 2));
     }
 
     // Flat mode (no elevation) still maps land-cover lookups via the stored world dims, with edge clamping.

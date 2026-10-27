@@ -188,12 +188,12 @@ fn canopy_verdict(
         x.div_euclid(spacing) * spacing - origin_x,
         z.div_euclid(spacing) * spacing - origin_z,
     );
+    if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
+        return (ground.canopy_measured(cell, spacing), false);
+    }
     let Some((fraction, top)) = ground.canopy_cell(cell, spacing) else {
         return (false, false);
     };
-    if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
-        return (true, false);
-    }
     let p = match tree_pack {
         None => crate::canopy::flat_slot_probability(
             fraction,
