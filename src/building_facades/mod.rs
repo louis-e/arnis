@@ -67,6 +67,7 @@ pub mod manifest;
 use std::sync::{Arc, Mutex};
 
 use fnv::{FnvHashMap, FnvHashSet};
+use rayon::prelude::*;
 
 use crate::bresenham::bresenham_line;
 use crate::element_processing::buildings::BuildingCategory;
@@ -923,7 +924,11 @@ fn place_candidate(
         let mut crop = |p0: i32, p1: i32, b0: i32, b1: i32| {
             let metres = piece_metres(&lay, stretch, scale, (p0, p1), (b0, b1));
             let (x0, x1, y0, y1) = metres;
-            let piece = fit.covers(x0, x1, y0, y1).then_some(metres);
+            // At the floor resolution, so it still crops at whatever px the pack ends at.
+            let piece = fit
+                .at(self::px_per_m(MIN_PX_PER_BLOCK, scale))
+                .covers(x0, x1, y0, y1)
+                .then_some(metres);
             if dump() {
                 let covered: Vec<String> = footprint[p0 as usize..p1 as usize]
                     .iter()
@@ -1208,20 +1213,23 @@ fn crop_hung() {
     let Some(set) = set else {
         return;
     };
-    for p in hung {
-        let (x0, x1, y0, y1) = p.metres;
-        let Some(tex) = set
-            .image(p.entry)
-            .and_then(|(src, px_per_m)| p.fit.at(px_per_m).region(&src, x0, x1, y0, y1))
-        else {
-            continue;
-        };
-        displays::add_panel(displays::Panel {
-            name: p.name,
-            w: p.w,
-            h: p.h,
-            tex,
-        });
+    let panels: Vec<displays::Panel> = hung
+        .into_par_iter()
+        .filter_map(|p| {
+            let (x0, x1, y0, y1) = p.metres;
+            let tex = set
+                .image(p.entry)
+                .and_then(|(src, px_per_m)| p.fit.at(px_per_m).region(&src, x0, x1, y0, y1))?;
+            Some(displays::Panel {
+                name: p.name,
+                w: p.w,
+                h: p.h,
+                tex,
+            })
+        })
+        .collect();
+    for panel in panels {
+        displays::add_panel(panel);
     }
 }
 
