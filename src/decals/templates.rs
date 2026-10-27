@@ -109,6 +109,14 @@ fn fit_or_abbreviate(
     None
 }
 
+/// Fewest letters of a cut word on either line, so neither is an orphan.
+const MIN_CARRIED: usize = 3;
+
+/// True if a line may end right before `chars[i]`.
+fn breaks_before(chars: &[char], i: usize) -> bool {
+    chars[i].is_whitespace() || matches!(chars[i - 1], '-' | '/')
+}
+
 /// Fills two lines and truncates only the second one with an ellipsis.
 fn fit_truncated_two_lines(
     text: &str,
@@ -130,8 +138,6 @@ fn fit_truncated_two_lines(
             continue;
         }
 
-        // Fill the first line, preferring the last complete word that fits. An unusually
-        // long first word is split at the last fitting character instead.
         let mut first_end = 0;
         for end in 1..chars.len() {
             let candidate: String = chars[..end].iter().collect();
@@ -143,22 +149,26 @@ fn fit_truncated_two_lines(
         if first_end == 0 {
             continue;
         }
-        // A line that ends right before a space keeps its last word.
-        let split = if chars[first_end].is_whitespace() {
-            first_end
-        } else {
-            chars[..first_end]
-                .iter()
-                .rposition(|c| c.is_whitespace())
-                .filter(|&i| i > 0)
-                .unwrap_or(first_end)
-        };
-        let line1: String = chars[..split]
-            .iter()
-            .collect::<String>()
-            .trim_end()
-            .to_string();
-        let mut rest_start = split;
+        // Break at the last space, '-' or '/' that fits, else cut the word with a hyphen.
+        let (line1, mut rest_start) =
+            if let Some(i) = (1..=first_end).rev().find(|&i| breaks_before(&chars, i)) {
+                let line1: String = chars[..i].iter().collect();
+                (line1.trim_end().to_string(), i)
+            } else {
+                let word_end = chars[first_end..]
+                    .iter()
+                    .position(|&c| c.is_whitespace() || matches!(c, '-' | '/'))
+                    .map_or(chars.len(), |p| first_end + p);
+                let last_cut = first_end.min(word_end.saturating_sub(MIN_CARRIED));
+                let cut = (MIN_CARRIED..=last_cut).rev().find(|&i| {
+                    let line1: String = chars[..i].iter().collect();
+                    font.width(&(line1 + "-"), 1) <= max_w
+                });
+                let Some(cut) = cut else {
+                    continue;
+                };
+                (chars[..cut].iter().collect::<String>() + "-", cut)
+            };
         while rest_start < chars.len() && chars[rest_start].is_whitespace() {
             rest_start += 1;
         }
@@ -611,6 +621,35 @@ mod tests {
         .unwrap();
         assert_eq!(layout.lines[0], "Alte Reichenbacher");
         assert!(layout.lines[1].ends_with('…'));
+    }
+
+    #[test]
+    fn long_words_break_at_hyphens_and_slashes() {
+        let blade = |name| fit_truncated_two_lines(name, 128 - 20, 44 - 8, FontSize::S28).unwrap();
+        assert_eq!(
+            blade("Aaron-Bernstein-Platz").lines,
+            ["Aaron-", "Bernstein-Platz"]
+        );
+        assert_eq!(
+            blade("Georgenstraße/Am Kupfergraben").lines[0],
+            "Georgenstraße/"
+        );
+    }
+
+    #[test]
+    fn a_word_cut_mid_way_carries_no_orphan() {
+        let blade = |name| fit_truncated_two_lines(name, 128 - 20, 44 - 8, FontSize::S28);
+        assert_eq!(
+            blade("Bethaniendamm").unwrap().lines,
+            ["Bethaniend-", "amm"]
+        );
+        assert_eq!(
+            blade("Friedrichsbrücke").unwrap().lines,
+            ["Friedrichsbrü-", "cke"]
+        );
+        // Too short to cut without one; left to the one-line ellipsis.
+        let max_w = Font::get(FontSize::S12).width("Mitt", 1);
+        assert!(fit_truncated_two_lines("Mitte", max_w, 32, FontSize::S12).is_none());
     }
 
     #[test]
