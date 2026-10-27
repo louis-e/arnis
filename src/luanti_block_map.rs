@@ -520,7 +520,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         } // WARPED_TRAPDOOR
         212 => "mcl_trees:stripped_warped",
         213 => "mcl_trees:bark_stripped_warped",
-        214 => "mcl_stairs:slab_stone_double",
+        214 => "mcl_stairs:slab_stone",
         215 => "mcl_stairs:slab_deepslate_cobbled",
         216 => "mcl_colorblocks:hardened_clay_silver",
         217 => "mcl_stairs:slab_oak",
@@ -924,7 +924,9 @@ mod tests {
 
     #[test]
     fn slabs_export_their_half() {
-        use crate::block_definitions::{POLISHED_GRANITE_SLAB, QUARTZ_SLAB_TOP, STONE_BRICK_SLAB};
+        use crate::block_definitions::{
+            POLISHED_GRANITE_SLAB, QUARTZ_SLAB_TOP, SMOOTH_STONE_SLAB, STONE_BRICK_SLAB,
+        };
         let typed = |t: &str| {
             Value::Compound(HashMap::from([(
                 "type".to_string(),
@@ -947,6 +949,11 @@ mod tests {
         assert_eq!(
             name(STONE_BRICK_SLAB, Some(&typed("bottom"))),
             "mcl_stairs:slab_stonebrick"
+        );
+        assert_eq!(name(SMOOTH_STONE_SLAB, None), "mcl_stairs:slab_stone");
+        assert_eq!(
+            name(SMOOTH_STONE_SLAB, Some(&typed("top"))),
+            "mcl_stairs:slab_stone_top"
         );
         // A slab id that is the top half by default stays on top.
         assert_eq!(
