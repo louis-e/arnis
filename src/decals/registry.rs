@@ -53,6 +53,8 @@ pub enum ShieldStyle {
     Interstate,
     /// White shield with black text (US highways).
     White,
+    /// White plate, black text (UK and Irish roads off the primary network).
+    WhitePlate,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

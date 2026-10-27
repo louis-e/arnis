@@ -501,10 +501,11 @@ pub fn route_shield(canvas: &mut Canvas, style: ShieldStyle, text: &str) {
     let (cx, cy) = (64, 64);
     let fit = |max_w: i32, max_h: i32| fit_text(text, max_w, max_h, FontSize::S44, false);
     match style {
-        ShieldStyle::Blue | ShieldStyle::Yellow | ShieldStyle::Green => {
+        ShieldStyle::Blue | ShieldStyle::Yellow | ShieldStyle::Green | ShieldStyle::WhitePlate => {
             let (plate, fg, border) = match style {
                 ShieldStyle::Blue => (BLUE, WHITE, WHITE),
                 ShieldStyle::Yellow => (YELLOW, BLACK, BLACK),
+                ShieldStyle::WhitePlate => (WHITE, BLACK, BLACK),
                 // UK primary routes print the number in yellow on green.
                 _ => (SIGN_GREEN, YELLOW, WHITE),
             };
@@ -697,6 +698,7 @@ mod tests {
             ShieldStyle::Green,
             ShieldStyle::Interstate,
             ShieldStyle::White,
+            ShieldStyle::WhitePlate,
         ] {
             let mut c = Canvas::new(1, 1);
             route_shield(&mut c, style, "A 9");
