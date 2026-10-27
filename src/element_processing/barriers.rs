@@ -114,16 +114,17 @@ pub fn generate_barriers(
     // height is measured from the ground, not from where it starts.
     // Both scale with the world, like the structure it is attached to.
     let scale = editor.scale();
-    let lift: i32 = element
-        .tags()
-        .get("min_height")
-        .and_then(|h| h.trim_end_matches('m').trim().parse::<f64>().ok())
-        .map_or(0, |h| (h * scale).round().max(0.0) as i32);
+    // Past 1000 m a value is junk, and `inf` or `1e10` would overflow the sums below.
+    let metres = |key: &str| {
+        element
+            .tags()
+            .get(key)
+            .and_then(|h| h.trim_end_matches('m').trim().parse::<f64>().ok())
+            .filter(|h| (0.0..=1000.0).contains(h))
+    };
+    let lift: i32 = metres("min_height").map_or(0, |h| (h * scale).round() as i32);
     let height_scale = if lift > 0 { scale } else { 1.0 };
-    let wall_height: i32 = element
-        .tags()
-        .get("height")
-        .and_then(|height: &String| height.parse::<f64>().ok())
+    let wall_height: i32 = metres("height")
         .map(|height: f64| (height * height_scale).round() as i32 - lift)
         .unwrap_or(style.height)
         .max(1);
@@ -1259,5 +1260,24 @@ mod tests {
         assert_eq!(height(&[("barrier", "fence"), ("height", "1")]), 1);
         assert_eq!(height(&[("barrier", "retaining_wall")]), 1);
         assert_eq!(height(&[("barrier", "kerb")]), 0);
+    }
+
+    #[test]
+    fn absurd_heights_fall_back_to_the_barrier_default() {
+        for junk in ["inf", "1e10", "NaN", "-1e10"] {
+            assert_eq!(height(&[("barrier", "wall"), ("min_height", junk)]), 4);
+            assert_eq!(height(&[("barrier", "wall"), ("height", junk)]), 4);
+        }
+        let floating = [
+            ("barrier", "wall"),
+            ("min_height", "3"),
+            ("height", "-1e10"),
+        ];
+        let blocks = draw(&floating, |editor| {
+            (1..=10)
+                .filter(|&y| editor.block_exists_absolute(15, y, 5))
+                .count()
+        });
+        assert_eq!(blocks, 4);
     }
 }
