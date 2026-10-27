@@ -437,8 +437,8 @@ fn landuse_area(
 
     // Large construction sites get a centre crane plus scattered excavators, and
     // every site its fence and props, which keep clear of both.
-    let floor_area = without_holes(&floor_area, holes);
     if landuse_tag == "construction" {
+        let floor_area = without_holes(&floor_area, holes);
         crate::structures::crane::maybe_place_crane(
             editor,
             floor_area.as_slice(),
@@ -450,6 +450,7 @@ fn landuse_area(
 
     // Farmland fields rarely get a tractor.
     if landuse_tag == "farmland" {
+        let floor_area = without_holes(&floor_area, holes);
         crate::structures::tractor::maybe_place_tractor(editor, floor_area.as_slice());
     }
 }
