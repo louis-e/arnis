@@ -70,7 +70,11 @@ fn step_speed(kmh: f64, scale: f64) -> i32 {
 
 /// The posted limit, or what roads of the class usually allow.
 fn limit_kmh(highway: &str, tags: &HashMap<String, String>) -> f64 {
-    let posted = tags.get("maxspeed").and_then(|m| parse_maxspeed(m));
+    // Junk like `inf` or `-5 mph` falls back to the class rather than overflow the speeds.
+    let posted = tags
+        .get("maxspeed")
+        .and_then(|m| parse_maxspeed(m))
+        .filter(|k| (1.0..=300.0).contains(k));
     posted.unwrap_or(match highway {
         "motorway" => 110.0,
         "trunk" => 80.0,
@@ -1909,6 +1913,10 @@ mod tests {
         );
         let net = CarNetwork::build(&[primary], 1.0, false, false, &world(), flat);
         assert_eq!(net.segments[0].speed, step_speed(50.0 * LIMIT_SHARE, 1.0));
+        for junk in ["inf", "NaN", "100000", "-5 mph", "zone0"] {
+            let tags = HashMap::from([("maxspeed".to_string(), junk.to_string())]);
+            assert_eq!(limit_kmh("primary", &tags), 50.0, "{junk}");
+        }
     }
 
     #[test]
