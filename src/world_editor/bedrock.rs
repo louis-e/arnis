@@ -15,6 +15,7 @@ use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
+use crate::world_utils::{check_disk_space, estimated_world_bytes, WorldSizeOptions};
 
 use bedrockrs_level::level::db_interface::key_level::KeyTypeTag;
 use bedrockrs_level::level::db_interface::rusty::mcpe_options;
@@ -458,17 +459,21 @@ impl BedrockWriter {
         Ok(())
     }
 
-    /// Assembles the world in the private staging folder, or beside the archive if that fails.
+    /// Assembles the world in the private staging folder, or beside the archive if that fails
+    /// or the cache drive is short of room.
     fn stage_world(
         &self,
         world: &WorldToModify,
         xzbbox: &XZBBox,
         llbbox: &LLBBox,
     ) -> Result<Staging, BedrockSaveError> {
-        let candidates: [PrepareStaging; 2] = [Self::private_staging, Self::staging_beside_archive];
+        let candidates: [(PrepareStaging, bool); 2] = [
+            (Self::private_staging, self.private_staging_fits(xzbbox)),
+            (Self::staging_beside_archive, true),
+        ];
         // The first failure is reported: the fallback's own trouble rarely explains it.
         let mut failure = None;
-        for prepare in candidates {
+        for (prepare, _) in candidates.into_iter().filter(|&(_, usable)| usable) {
             let staging = match prepare(self) {
                 Ok(staging) => staging,
                 Err(e) => {
@@ -510,6 +515,24 @@ impl BedrockWriter {
 
         emit_gui_progress_update(97.0, "Saving Bedrock world...");
         self.write_metadata(dir, world, xzbbox, llbbox)
+    }
+
+    /// Whether the cache drive takes the largest world this area can make, headroom kept.
+    /// The run's own disk check measured only the output drive.
+    fn private_staging_fits(&self, xzbbox: &XZBBox) -> bool {
+        let Some(root) = private_staging_root() else {
+            return true;
+        };
+        let km2 = xzbbox.bounding_rect().total_blocks() as f64 / 1e6;
+        let largest = WorldSizeOptions {
+            interior: true,
+            caves: true,
+            fillground: true,
+            tall: self.extend_build_height,
+            ..Default::default()
+        };
+        let bound = estimated_world_bytes(km2, super::WorldFormat::BedrockMcWorld, largest);
+        check_disk_space(&root, bound).is_ok()
     }
 
     /// A fresh folder in the local cache, away from a Desktop that OneDrive syncs.
@@ -1966,6 +1989,22 @@ mod tests {
             .unwrap();
         assert!(writer.mcworld_path.is_file());
         assert!(foreign.join("notes.txt").is_file());
+    }
+
+    #[test]
+    fn a_world_too_large_for_the_cache_drive_is_staged_beside_the_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A volume that reports no free space can't be compared against.
+        if !fs2::available_space(std::env::temp_dir()).is_ok_and(|free| free > 0) {
+            return;
+        }
+        let writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        let xzbbox = XZBBox::rect_from_xz_lengths(1e8, 1e8).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let staging = writer
+            .stage_world(&WorldToModify::default(), &xzbbox, &llbbox)
+            .unwrap();
+        assert_eq!(staging.dir, writer.beside_archive_staging_dir());
     }
 
     #[test]
