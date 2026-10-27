@@ -899,6 +899,7 @@ mod sealed_surface_tests {
             grid: vec![vec![LC_BUILT_UP, LC_WATER]; 2],
             water_distance: vec![vec![0, 1]; 2],
             water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
             width: 2,
             height: 2,
             cells_per_meter: 1.0,

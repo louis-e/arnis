@@ -70,7 +70,9 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     {
         return None;
     }
-    let fills_ground = if tags.contains_key("landuse") {
+    let fills_ground = if swimming_pools::is_swimming_pool(tags) {
+        true
+    } else if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
     } else if let Some(natural) = tags.get("natural") {
         // natural=* + amenity=fountain falls through to the fountain handler.
@@ -91,7 +93,7 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
 fn relation_ground_fill_area(rel: &ProcessedRelation) -> Option<f64> {
     let tags = &rel.tags;
     match RelationArea::of(tags) {
-        Some(RelationArea::Natural | RelationArea::Park) => {}
+        Some(RelationArea::Natural | RelationArea::Park | RelationArea::Pool) => {}
         Some(RelationArea::Landuse) if landuse_paints_ground(tags) => {}
         _ => return None,
     }
@@ -401,6 +403,14 @@ fn process_element(
                     args.scale,
                     args.timeout.as_ref(),
                 );
+            } else if swimming_pools::is_swimming_pool(&way.tags) {
+                let ctx = swimming_pools::PoolContext {
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    timeout: args.timeout.as_ref(),
+                };
+                swimming_pools::generate_swimming_pool(editor, way, &ctx);
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(
                     editor,
@@ -641,6 +651,15 @@ fn process_element(
                     building_footprints,
                     bridge_surface,
                 );
+            }
+            Some(RelationArea::Pool) => {
+                let ctx = swimming_pools::PoolContext {
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    timeout: args.timeout.as_ref(),
+                };
+                swimming_pools::generate_swimming_pool_from_relation(editor, rel, &ctx);
             }
             Some(RelationArea::ManMade) => {
                 man_made::generate_man_made(

@@ -15,15 +15,15 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
-    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS,
-    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
-    MOSS_BLOCK, MUD, OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE,
-    SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
-    WHITE_CONCRETE, YELLOW_CONCRETE,
+    AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
+    CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS, GRASS_BLOCK, GRAVEL,
+    GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD,
+    OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE,
+    STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::swimming_pools;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
@@ -602,13 +602,15 @@ pub fn generate_ground_region(
                         }
 
                         if place_esa_water {
-                            // Pre-paint; carve_lc_water_pass later overwrites with depth.
+                            // Pre-paint. carve_lc_water_pass later overwrites LC_WATER
+                            // cells with depth; the blended fringe keeps this bed.
                             editor.set_block_if_absent_absolute(WATER, x, water_y, z);
+                            let (bed, under) = crate::water_depth::shallow_bed(editor, x, z);
                             if water_y - 1 > min_y() {
-                                editor.set_block_if_absent_absolute(SAND, x, water_y - 1, z);
+                                editor.set_block_if_absent_absolute(bed, x, water_y - 1, z);
                             }
                             if water_y - 2 > min_y() {
-                                editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
+                                editor.set_block_if_absent_absolute(under, x, water_y - 2, z);
                             }
                         } else {
                             let cover_here = if has_land_cover {
@@ -789,58 +791,8 @@ pub fn generate_ground_region(
                                 (GRASS_BLOCK, DIRT)
                             };
 
-                            // Shoreline blending: land blocks near water get sand
-                            // surface for a natural beach/shore transition.
-                            // Uses water_blend gradient for ESA water (scales with
-                            // grid resolution) plus neighbor check for OSM water.
-                            // Skip on steep terrain — canyon walls should stay rock.
-                            // Nothing to blend into off Earth: no water, no beaches.
-                            let (surface_block, under_block) = if planetary_body.is_none()
-                                && surface_block != WATER
-                                && slope <= 3
-                            {
-                                // Sand only at the immediate 1-cell ring around LC_WATER
-                                // (plus near_placed_water below for OSM-rendered water).
-                                let near_esa_water = has_land_cover
-                                    && !is_esa_water
-                                    && [
-                                        (-1i32, 0i32),
-                                        (1, 0),
-                                        (0, -1),
-                                        (0, 1),
-                                        (-1, -1),
-                                        (-1, 1),
-                                        (1, -1),
-                                        (1, 1),
-                                    ]
-                                    .iter()
-                                    .any(|(dx, dz)| {
-                                        ground.cover_class(XZPoint::new(
-                                            x + dx - xzbbox.min_x(),
-                                            z + dz - xzbbox.min_z(),
-                                        )) == land_cover::LC_WATER
-                                    });
-
-                                // Also check placed water blocks (OSM rivers, etc.)
-                                let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
-                                    .iter()
-                                    .any(|(dx, dz)| {
-                                        editor.check_for_block_absolute(
-                                            x + dx,
-                                            ground_y,
-                                            z + dz,
-                                            Some(&[WATER]),
-                                            None,
-                                        )
-                                    });
-                                if near_esa_water || near_placed_water {
-                                    (SAND, SANDSTONE)
-                                } else {
-                                    (surface_block, under_block)
-                                }
-                            } else {
-                                (surface_block, under_block)
-                            };
+                            // Banks keep their land cover. Beaches come from LC_BEACH
+                            // and mapped sand, not from a sand ring around all water.
 
                             // Full snow cover takes over the surface, and so does any snow
                             // on ice, which the game won't hold as a layer. The under-block
@@ -884,6 +836,8 @@ pub fn generate_ground_region(
                                         BRICK,
                                         OAK_PLANKS,
                                         BLACK_CONCRETE,
+                                        swimming_pools::COPING,
+                                        swimming_pools::LINING,
                                     ]),
                                 );
                             } else if talus_block.is_some_and(|(top, _)| top == surface_block) {
@@ -986,8 +940,8 @@ pub fn generate_ground_region(
                                 }
                                 did_underfill = true;
                             } else {
-                                // Under OSM water: find bottom of water column,
-                                // place sand/gravel/clay floor + sandstone below.
+                                // Under OSM water: find bottom of water column and
+                                // lay a bed there.
                                 let mut water_bottom = ground_y;
                                 while water_bottom - 1 > min_y()
                                     && editor.check_for_block_absolute(
@@ -1001,17 +955,15 @@ pub fn generate_ground_region(
                                     water_bottom -= 1;
                                 }
                                 let floor_y = water_bottom - 1;
-                                if floor_y > min_y() {
-                                    let h = land_cover::coord_hash(x, z);
-                                    let floor_block = match h % 5 {
-                                        0 => GRAVEL,
-                                        1 => CLAY,
-                                        _ => SAND,
-                                    };
-                                    editor.set_block_if_absent_absolute(floor_block, x, floor_y, z);
+                                // Carved water already has its bed.
+                                if floor_y > min_y() && !editor.block_exists_absolute(x, floor_y, z)
+                                {
+                                    let (bed, under) =
+                                        crate::water_depth::shallow_bed(editor, x, z);
+                                    editor.set_block_absolute(bed, x, floor_y, z, None, None);
                                     if floor_y - 1 > min_y() {
                                         editor.set_block_if_absent_absolute(
-                                            SANDSTONE,
+                                            under,
                                             x,
                                             floor_y - 1,
                                             z,

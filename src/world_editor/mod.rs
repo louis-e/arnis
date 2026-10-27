@@ -625,6 +625,14 @@ impl<'a> WorldEditor<'a> {
             .map_or(0, |g| g.cover_class(self.ground_point(x, z)))
     }
 
+    /// Whether beach land cover lies within `reach` blocks of (x, z).
+    #[inline]
+    pub fn near_beach(&self, x: i32, z: i32, reach: f64) -> bool {
+        self.ground
+            .as_ref()
+            .is_some_and(|g| g.beach_within(self.ground_point(x, z), reach))
+    }
+
     /// RESOLVE ecoregion at (x, z), if the area has one there.
     #[inline]
     pub fn ecoregion(&self, x: i32, z: i32) -> Option<crate::ecoregion::Ecoregion> {

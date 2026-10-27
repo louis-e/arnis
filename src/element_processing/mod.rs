@@ -38,6 +38,7 @@ pub mod street_furniture;
 pub(crate) mod structure_kit;
 pub mod subprocessor;
 mod surfaces;
+pub mod swimming_pools;
 pub mod tourisms;
 pub mod traffic_lights;
 pub mod train_bodies;
@@ -61,6 +62,7 @@ pub enum RelationArea {
     Landuse,
     Park,
     ManMade,
+    Pool,
 }
 
 impl RelationArea {
@@ -71,6 +73,8 @@ impl RelationArea {
             || tags.get("type").map(String::as_str) == Some("building")
         {
             Some(Self::Building)
+        } else if swimming_pools::is_swimming_pool(tags) {
+            Some(Self::Pool)
         } else if tags.contains_key("water") || matches!(natural, Some("water" | "bay")) {
             Some(Self::Water)
         } else if natural.is_some() {
@@ -91,7 +95,7 @@ impl RelationArea {
     /// groynes are areas.
     pub fn fills_members(self, tags: &HashMap<String, String>) -> bool {
         match self {
-            Self::Natural | Self::Park => true,
+            Self::Natural | Self::Park | Self::Pool => true,
             Self::Landuse => landuse_paints_ground(tags),
             Self::ManMade => matches!(
                 tags.get("man_made").map(String::as_str),

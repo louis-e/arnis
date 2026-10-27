@@ -56,7 +56,8 @@ fn leisure_area(
             "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 GREEN_STAINED_HARDENED_CLAY
             }
-            "swimming_pool" | "swimming_area" => WATER, // Swimming area: Area in a larger body of water for swimming
+            // Area in a larger body of water. Pools have their own basin in swimming_pools.rs.
+            "swimming_area" => WATER,
             "marina" => WATER, // A sort of parking lot for small watercraft
             "bathing_place" => SMOOTH_SANDSTONE, // Could be sand or concrete
             "outdoor_seating" => SMOOTH_STONE, //Usually stone or stone bricks
