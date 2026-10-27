@@ -785,7 +785,7 @@ pub fn apply_body_defaults(args: &mut Args) {
 }
 
 /// A blueprint shows where buildings stand, not what they look like, so whatever
-/// dresses a building or stands in for one is off.
+/// dresses a building or stands in for one is off, and so is street furniture.
 fn apply_mode_defaults(args: &mut Args) {
     if args.mode != GenerationMode::Blueprint {
         return;
@@ -794,6 +794,9 @@ fn apply_mode_defaults(args: &mut Args) {
     args.interior = false;
     args.building_facades = false;
     args.mapillary_facades = Some(false);
+    args.signage = SignageLevel::None;
+    // Signal nodes are left out, so cars would stop at lights that were never built.
+    args.traffic_lights = false;
 }
 
 /// Clap's `--world-time` default, so `apply_body_defaults` can tell left-alone
@@ -1598,6 +1601,27 @@ mod tests {
         apply_body_defaults(&mut args);
         assert!(!args.use_3d && !args.interior && !args.building_facades);
         assert_eq!(args.mapillary_facades, Some(false));
+    }
+
+    #[test]
+    fn a_blueprint_has_no_street_furniture() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", "out", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            args
+        };
+        let args = parse(&["--traffic-lights", "--signage", "full"]);
+        assert!(args.traffic_lights && args.signage.full());
+        let args = parse(&[
+            "--mode",
+            "blueprint",
+            "--traffic-lights",
+            "--signage",
+            "full",
+        ]);
+        assert!(!args.traffic_lights && !args.signage.enabled());
     }
 
     #[test]
