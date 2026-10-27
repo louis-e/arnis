@@ -111,7 +111,12 @@ fn hinted(name: &str) -> Option<Ride> {
         "galopper",
     ]) {
         Some(Ride::Carousel)
-    } else if has(&["tower", "turm", "tårn", "torre", "tour "]) {
+    } else if has(&["tower", "tårn", "la tour "])
+        // Not a Sturm or a Torrent; "le tour" is a trip, not a tower.
+        || tokens
+            .iter()
+            .any(|t| *t == "torre" || (t.ends_with("turm") && !t.ends_with("sturm")))
+    {
         Some(Ride::DropTower)
     } else {
         None
@@ -1304,6 +1309,22 @@ mod tests {
         assert_eq!(hinted("Viking Swing"), Some(Ride::PirateShip));
         assert_eq!(hinted("London Eye"), Some(Ride::BigWheel));
         assert_eq!(hinted("Breakdance Meyer"), None);
+        for name in [
+            "Wirbelsturm",
+            "El Torrente",
+            "Le Tour des Jardins",
+            "Big Bird's Tour Bus",
+        ] {
+            assert_eq!(hinted(name), None, "{name}");
+        }
+        for name in [
+            "Freifallturm",
+            "Kristallturm",
+            "La Tour des Moussaillons",
+            "Tårnet",
+        ] {
+            assert_eq!(hinted(name), Some(Ride::DropTower), "{name}");
+        }
     }
 
     #[test]
