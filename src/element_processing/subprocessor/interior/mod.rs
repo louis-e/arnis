@@ -502,6 +502,7 @@ mod tests {
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
+            housing_relation_parts: &Default::default(),
             interior_uses: &index,
         };
         let args = interior_args();
@@ -1013,6 +1014,7 @@ mod tests {
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
+            housing_relation_parts: &Default::default(),
             interior_uses: InteriorUseIndex::empty(),
         };
         generate_buildings(

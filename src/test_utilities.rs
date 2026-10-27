@@ -27,7 +27,7 @@ const ARNIS_SAMPLE: &str = r#"{"elements": [
 pub fn generate_default_example() -> (XZBBox, Vec<ProcessedElement>) {
     let raw_data: osm_parser::OsmData =
         serde_json::from_str(ARNIS_SAMPLE).expect("Invalid sample data");
-    let (mut parsed_elements, xzbbox, _outline_suppression, _part_groups) =
+    let (mut parsed_elements, xzbbox, _outline_suppression, _part_groups, _housing_parts) =
         osm_parser::parse_osm_data(
             raw_data,
             get_llbbox_arnis(),

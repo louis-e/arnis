@@ -10,8 +10,8 @@ use crate::ground_generation;
 use crate::map_preview;
 use crate::map_renderer::PreviewAccumulator;
 use crate::osm_parser::{
-    OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole, ProcessedNode,
-    ProcessedRelation, ProcessedWay,
+    HousingRelationParts, OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole,
+    ProcessedNode, ProcessedRelation, ProcessedWay,
 };
 use crate::progress::{
     emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
@@ -274,6 +274,7 @@ fn process_element(
     tunnel_portals: &highways::TunnelPortalMap,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
     part_groups: &PartGroups,
+    housing_relation_parts: &HousingRelationParts,
     group_members: &FnvHashMap<u64, Vec<u64>>,
     still_surfaces: &water_areas::StillWaterSurfaces,
     interior_uses: &InteriorUseIndex,
@@ -347,6 +348,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    housing_relation_parts,
                     interior_uses,
                 };
                 let anchor =
@@ -592,6 +594,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
+                    housing_relation_parts,
                     interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
@@ -763,6 +766,7 @@ pub fn generate_world_with_options(
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
     part_groups: PartGroups,
+    housing_parts: HousingRelationParts,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
@@ -1555,6 +1559,7 @@ pub fn generate_world_with_options(
                     &tunnel_portals,
                     &mut tile_tunnel_cells,
                     &part_groups,
+                    &housing_parts,
                     &group_members,
                     &still_surfaces,
                     &interior_uses,
@@ -1978,6 +1983,7 @@ pub fn generate_world_with_options(
                 &tunnel_portals,
                 &mut tunnel_cells,
                 &part_groups,
+                &housing_parts,
                 &group_members,
                 &still_surfaces,
                 &interior_uses,

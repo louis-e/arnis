@@ -597,6 +597,9 @@ pub type OutlineSuppression = HashSet<(&'static str, u64)>;
 // building:part way id -> shared style seed (containing outline id, or salted relation id)
 pub type PartGroups = HashMap<u64, u64>;
 
+// building:part relation ids whose building is housing
+pub type HousingRelationParts = HashSet<u64>;
+
 // keeps relation-derived seeds out of the way-id namespace
 const RELATION_SEED_BIT: u64 = 1 << 63;
 
@@ -643,7 +646,7 @@ pub fn seed_without_residential_mark(seed: u64) -> u64 {
     seed & !RESIDENTIAL_GROUP_BIT
 }
 
-fn seed_with_residential_mark(seed: u64, residential: bool) -> u64 {
+pub(crate) fn seed_with_residential_mark(seed: u64, residential: bool) -> u64 {
     if residential {
         seed | RESIDENTIAL_GROUP_BIT
     } else {
@@ -1055,6 +1058,7 @@ pub fn parse_osm_data(
     XZBBox,
     OutlineSuppression,
     PartGroups,
+    HousingRelationParts,
 ) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
@@ -1082,8 +1086,14 @@ pub fn parse_osm_data(
     }
 
     let mut part_groups = PartGroups::new();
-    let mut outline_suppression =
-        compute_outline_suppression(&data.relations, &data.ways, &data.nodes, &mut part_groups);
+    let mut housing_parts = HousingRelationParts::new();
+    let mut outline_suppression = compute_outline_suppression(
+        &data.relations,
+        &data.ways,
+        &data.nodes,
+        &mut part_groups,
+        &mut housing_parts,
+    );
     // Ways owned by a type=building relation are handled above; the spatial pass must
     // not re-judge them against unrelated parts that merely fall inside their footprint.
     let relation_ways: HashSet<u64> = data
@@ -1119,6 +1129,7 @@ pub fn parse_osm_data(
         &data.ways,
         &data.nodes,
         &mut part_groups,
+        &mut housing_parts,
     ));
     // A ride drawn whole replaces any 3D parts mapped inside it, and is never replaced by them.
     suppress_ride_parts(&data.ways, &data.nodes, &mut outline_suppression);
@@ -1403,7 +1414,13 @@ pub fn parse_osm_data(
     drop(nodes_map);
     drop(ways_map);
 
-    (processed_elements, xzbbox, outline_suppression, part_groups)
+    (
+        processed_elements,
+        xzbbox,
+        outline_suppression,
+        part_groups,
+        housing_parts,
+    )
 }
 
 // Parts replace the outline only when they cover at least this much of it.
@@ -1544,6 +1561,7 @@ fn compute_outline_suppression(
     ways: &[OsmElement],
     nodes: &[OsmElement],
     part_group: &mut PartGroups,
+    housing_parts: &mut HousingRelationParts,
 ) -> OutlineSuppression {
     let is_outline = |r: &str| r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer");
 
@@ -1657,7 +1675,12 @@ fn compute_outline_suppression(
             }
             has_part = true;
             match m.r#type.as_str() {
-                "relation" => has_relation_part = true,
+                "relation" => {
+                    has_relation_part = true;
+                    if housing {
+                        housing_parts.insert(m.r#ref);
+                    }
+                }
                 "way" => {
                     if way_ground.get(&m.r#ref).copied().unwrap_or(true) {
                         part_area += way_area(m.r#ref).unwrap_or(0.0);
@@ -2071,7 +2094,13 @@ fn compute_spatial_relation_part_suppression(
     ways: &[OsmElement],
     nodes: &[OsmElement],
 ) -> OutlineSuppression {
-    spatial_relation_part_suppression(relations, ways, nodes, &mut PartGroups::new())
+    spatial_relation_part_suppression(
+        relations,
+        ways,
+        nodes,
+        &mut PartGroups::new(),
+        &mut HousingRelationParts::new(),
+    )
 }
 
 fn spatial_relation_part_suppression(
@@ -2079,6 +2108,7 @@ fn spatial_relation_part_suppression(
     ways: &[OsmElement],
     nodes: &[OsmElement],
     part_group: &mut PartGroups,
+    housing_parts: &mut HousingRelationParts,
 ) -> OutlineSuppression {
     let is_part = |tags: &HashMap<String, String>| {
         tags.get("building:part")
@@ -2183,8 +2213,22 @@ fn spatial_relation_part_suppression(
         ground: bool,
         /// Set for a building:part way, which joins its outline's group.
         way: Option<u64>,
+        /// Set for a building:part relation no type=building relation lists.
+        relation: Option<u64>,
     }
 
+    // The membership pass already judged the part relations a type=building relation lists.
+    let listed_parts: HashSet<u64> = relations
+        .iter()
+        .filter(|r| {
+            r.tags
+                .as_ref()
+                .is_some_and(|t| t.get("type").is_some_and(|t| t == "building"))
+        })
+        .flat_map(|r| &r.members)
+        .filter(|m| m.r#type == "relation" && m.role.trim().eq_ignore_ascii_case("part"))
+        .map(|m| m.r#ref)
+        .collect();
     // Classify each relation and assemble its footprint. building:part=no marks the OUTLINE
     // (not a part, e.g. the Colosseum outline); an outline candidate carries `building` and is
     // not itself a part.
@@ -2240,6 +2284,7 @@ fn spatial_relation_part_suppression(
                 centroid: (sla / cnt as f64, slo / cnt as f64),
                 ground: part_covers_ground(tags),
                 way: None,
+                relation: (!listed_parts.contains(&rel.id)).then_some(rel.id),
             });
         }
     }
@@ -2260,6 +2305,7 @@ fn spatial_relation_part_suppression(
             centroid: (sla / ring.len() as f64, slo / ring.len() as f64),
             ground: part_covers_ground(tags),
             way: Some(w.id),
+            relation: None,
         });
     }
     if outlines.is_empty() || parts.is_empty() {
@@ -2329,6 +2375,12 @@ fn spatial_relation_part_suppression(
         // only part ways are grouped; a group set by an earlier pass stays.
         if let (Some(pid), Some(gi)) = (p.way, best) {
             part_group.entry(pid).or_insert(outlines[gi].seed);
+        }
+        // A part relation still takes the housing storey height, as the part ways do.
+        if let (Some(rid), Some(gi)) = (p.relation, best) {
+            if residential_group_from_seed(outlines[gi].seed) {
+                housing_parts.insert(rid);
+            }
         }
     }
 
@@ -2743,8 +2795,13 @@ mod outline_suppression_tests {
         ]);
 
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
-        let suppressed =
-            compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut PartGroups::new());
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut PartGroups::new(),
+            &mut HousingRelationParts::new(),
+        );
 
         assert!(!suppressed.contains(&("way", 100)));
     }
@@ -2760,8 +2817,13 @@ mod outline_suppression_tests {
         ]);
 
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
-        let suppressed =
-            compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut PartGroups::new());
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut PartGroups::new(),
+            &mut HousingRelationParts::new(),
+        );
 
         assert!(suppressed.contains(&("way", 100)));
     }
@@ -2786,8 +2848,13 @@ mod outline_suppression_tests {
         ]);
 
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
-        let suppressed =
-            compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut PartGroups::new());
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut PartGroups::new(),
+            &mut HousingRelationParts::new(),
+        );
 
         assert!(!suppressed.contains(&("way", 100)));
     }
@@ -2801,10 +2868,51 @@ mod outline_suppression_tests {
             member("relation", 300, "part"),
         ]);
 
-        let suppressed =
-            compute_outline_suppression(&[rel], &[outline], &outline_nodes, &mut PartGroups::new());
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline],
+            &outline_nodes,
+            &mut PartGroups::new(),
+            &mut HousingRelationParts::new(),
+        );
 
         assert!(suppressed.contains(&("way", 100)));
+    }
+
+    // The part relations of a block of flats take its storey height; those of an office
+    // block do not.
+    #[test]
+    fn relation_parts_of_flats_are_marked_housing() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let members = || {
+            vec![
+                member("way", 100, "outline"),
+                member("relation", 300, "part"),
+            ]
+        };
+        let mut housing = HousingRelationParts::new();
+        compute_outline_suppression(
+            &[with_tag(
+                building_relation(members()),
+                "building",
+                "apartments",
+            )],
+            std::slice::from_ref(&outline),
+            &outline_nodes,
+            &mut PartGroups::new(),
+            &mut housing,
+        );
+        assert_eq!(housing, HashSet::from([300]));
+
+        let mut housing = HousingRelationParts::new();
+        compute_outline_suppression(
+            &[with_tag(building_relation(members()), "building", "office")],
+            &[outline],
+            &outline_nodes,
+            &mut PartGroups::new(),
+            &mut housing,
+        );
+        assert!(housing.is_empty());
     }
 
     // No parts at all: nothing is ever suppressed.
@@ -2813,8 +2921,13 @@ mod outline_suppression_tests {
         let (outline, outline_nodes) = square_way(100, 1000, 1.0);
         let rel = building_relation(vec![member("way", 100, "outline")]);
 
-        let suppressed =
-            compute_outline_suppression(&[rel], &[outline], &outline_nodes, &mut PartGroups::new());
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline],
+            &outline_nodes,
+            &mut PartGroups::new(),
+            &mut HousingRelationParts::new(),
+        );
 
         assert!(suppressed.is_empty());
     }
@@ -3156,7 +3269,13 @@ mod outline_suppression_tests {
         ]);
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
         let mut groups = PartGroups::new();
-        compute_outline_suppression(&[rel], &[outline, part], &nodes, &mut groups);
+        compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
         assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
     }
 
@@ -3256,12 +3375,65 @@ mod outline_suppression_tests {
         ways.push(tagged(part_way, "building:part", "yes"));
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
         let mut groups = PartGroups::new();
-        let s = spatial_relation_part_suppression(&[outline], &ways, &nodes, &mut groups);
+        let s = spatial_relation_part_suppression(
+            &[outline],
+            &ways,
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
         assert!(s.contains(&("relation", 1)));
         let seed = groups[&200];
         assert_eq!(group_key(seed), RELATION_SEED_BIT | 1);
         assert_eq!(year_from_seed(seed), Some(1910));
         assert!(residential_group_from_seed(seed));
+    }
+
+    // A part relation standing in a multipolygon block of flats takes its storey height,
+    // unless a type=building relation that is not housing lists it.
+    #[test]
+    fn part_relations_of_a_relation_block_of_flats_are_marked_housing() {
+        let (outline_ways, outline_nodes) =
+            split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (part_way, part_nodes) = square_way(200, 2000, 0.0016);
+        let mut ways = outline_ways;
+        ways.push(part_way);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let mut relations = vec![
+            relation_el(
+                1,
+                &[("building", "apartments")],
+                outer_members(&[100, 101, 102, 103]),
+            ),
+            relation_el(2, &[("building:part", "yes")], outer_members(&[200])),
+        ];
+        let mut housing = HousingRelationParts::new();
+        spatial_relation_part_suppression(
+            &relations,
+            &ways,
+            &nodes,
+            &mut PartGroups::new(),
+            &mut housing,
+        );
+        assert_eq!(housing, HashSet::from([2]));
+
+        relations.push(relation_el(
+            3,
+            &[("type", "building"), ("building", "office")],
+            vec![
+                member("relation", 1, "outline"),
+                member("relation", 2, "part"),
+            ],
+        ));
+        let mut housing = HousingRelationParts::new();
+        spatial_relation_part_suppression(
+            &relations,
+            &ways,
+            &nodes,
+            &mut PartGroups::new(),
+            &mut housing,
+        );
+        assert!(housing.is_empty());
     }
 
     // A part way standing in the block's courtyard, or underground, is not the block: it
@@ -3289,6 +3461,7 @@ mod outline_suppression_tests {
             &ways,
             &nodes,
             &mut groups,
+            &mut HousingRelationParts::new(),
         );
         assert!(s.is_empty());
         assert!(groups.is_empty());
@@ -3308,7 +3481,13 @@ mod outline_suppression_tests {
         let mut ways = outline_ways;
         ways.push(cellar);
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(cellar_nodes).collect();
-        let s = spatial_relation_part_suppression(&[outline], &ways, &nodes, &mut groups);
+        let s = spatial_relation_part_suppression(
+            &[outline],
+            &ways,
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
         assert!(s.is_empty());
     }
 
@@ -3475,7 +3654,7 @@ mod osm_xml_tests {
     #[test]
     fn a_split_area_relation_arrives_as_one_closed_ring() {
         let (data, bounds) = parse(SPLIT_BEACH);
-        let (elements, _, _, _) = parse_osm_data(
+        let (elements, _, _, _, _) = parse_osm_data(
             data,
             bounds.unwrap(),
             false,
@@ -3509,7 +3688,7 @@ mod osm_xml_tests {
             r#"<tag k="man_made" v="pier"/>"#,
         );
         let (data, bounds) = parse(&xml);
-        let (elements, _, _, _) = parse_osm_data(
+        let (elements, _, _, _, _) = parse_osm_data(
             data,
             bounds.unwrap(),
             false,
@@ -3698,7 +3877,7 @@ mod osm_xml_tests {
             clip_pad: 64,
             ..crate::projection::ProjectionSpec::local(1.0)
         };
-        let (elements, xzbbox, _, _) = parse_osm_data(data, bounds.unwrap(), false, &spec);
+        let (elements, xzbbox, _, _, _) = parse_osm_data(data, bounds.unwrap(), false, &spec);
         let ring = &relation(&elements, 30).members[0].way.nodes;
         let max_x = ring.iter().map(|n| n.x).max().unwrap();
         assert_eq!(

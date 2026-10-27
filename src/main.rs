@@ -634,7 +634,7 @@ fn run_cli() {
     let args = args;
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
+    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups, housing_parts) =
         osm_parser::parse_osm_data(
             raw_data,
             effective_bbox,
@@ -848,6 +848,7 @@ fn run_cli() {
         generation_options,
         outline_suppression,
         part_groups,
+        housing_parts,
     ) {
         Ok(_) => {
             if args.bedrock {

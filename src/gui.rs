@@ -1956,6 +1956,7 @@ fn gui_start_generation(
                     generation_options.clone(),
                     osm_parser::OutlineSuppression::new(),
                     osm_parser::PartGroups::new(),
+                    osm_parser::HousingRelationParts::new(),
                 ) {
                     emit_gui_error(&e);
                     return Err(e);
@@ -2046,13 +2047,18 @@ fn gui_start_generation(
             // Run world generation
             match fetch_result {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups) =
-                        osm_parser::parse_osm_data(
-                            raw_data,
-                            bbox,
-                            args.debug,
-                            &crate::projection::ProjectionSpec::from_args(&args),
-                        );
+                    let (
+                        mut parsed_elements,
+                        mut xzbbox,
+                        outline_suppression,
+                        part_groups,
+                        housing_parts,
+                    ) = osm_parser::parse_osm_data(
+                        raw_data,
+                        bbox,
+                        args.debug,
+                        &crate::projection::ProjectionSpec::from_args(&args),
+                    );
 
                     let overture::OvertureData {
                         elements: overture_elements,
@@ -2114,6 +2120,7 @@ fn gui_start_generation(
                         generation_options.clone(),
                         outline_suppression,
                         part_groups,
+                        housing_parts,
                     ) {
                         eprintln!("World generation failed: {e}");
                         send_log(LogLevel::Error, &format!("World generation failed: {e}"));
