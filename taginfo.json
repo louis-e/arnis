@@ -1,7 +1,7 @@
 {
     "data_format": 1,
     "data_url": "https://raw.githubusercontent.com/louis-e/arnis/main/taginfo.json",
-    "data_updated": "20261024T152102Z",
+    "data_updated": "20261027T092640Z",
     "project": {
         "name": "Arnis",
         "description": "Generate real life cities in Minecraft. Creates complex and accurate Minecraft Java Edition, Bedrock Edition and Luanti worlds that reflect real-world geography, topography, and architecture.",
@@ -646,6 +646,10 @@
             "description": "Places a traffic light on a pole, hung over the road on an arm when the node is on the road, and paints a stop line on the junction approach."
         },
         {
+            "key": "traffic_signals:direction",
+            "description": "When traffic lights are enabled, a signal tagged forward or backward only gets heads for traffic going that way along the road, and moving cars only stop at it in that direction."
+        },
+        {
             "key": "highway",
             "value": "stop",
             "description": "Paints a solid stop line across the junction approach and puts up a stop sign when signage is enabled."
@@ -1052,6 +1056,10 @@
             "description": "Adds an overhead contact wire with cantilever masts over railway=rail track."
         },
         {
+            "key": "usage",
+            "description": "Gives electrified=yes railway=rail track an overhead contact wire only on main and branch lines. Moving trains do not run on industrial, military or test track."
+        },
+        {
             "key": "railway",
             "value": "level_crossing",
             "description": "Puts up a level crossing warning sign when signage is enabled."
@@ -1075,6 +1083,11 @@
             "key": "railway",
             "value": "tram_stop",
             "description": "Puts up a tram stop post with a tram pictogram and the stop name when signage is enabled."
+        },
+        {
+            "key": "public_transport",
+            "value": "station",
+            "description": "Lists the station among the discoveries when it also has a railway, train=yes or subway=yes tag. Moving trains stop on the tracks near a station node with a railway or train=yes tag."
         },
         {
             "key": "service",
