@@ -1,6 +1,6 @@
 //! Pre-generated LODs for the Distant Horizons mod (Java only), written straight into
-//! `<save>/data/DistantHorizons.sqlite` so DH needn't rebuild them from the regions.
-//! Tables follow DH's `sqlScripts/`, rows its `FullDataSourceV2DTO`.
+//! the database DH keeps in the overworld's data folder so it needn't rebuild them from
+//! the regions. Tables follow DH's `sqlScripts/`, rows its `FullDataSourceV2DTO`.
 
 mod encode;
 mod lod;
@@ -119,6 +119,9 @@ struct State {
 /// staging file that [`Self::finish`] moves into place, so DH never sees a partial one.
 pub struct DhWriter {
     path: PathBuf,
+    /// The overworld's data folder from 26.1 on, which the 26.1 upgrade only fills with
+    /// vanilla files; DH there reads this one.
+    dimensions_path: PathBuf,
     staging: PathBuf,
     created_ms: i64,
     state: Mutex<State>,
@@ -129,9 +132,13 @@ impl DhWriter {
         let dir = world_dir.join("data");
         fs::create_dir_all(&dir)?;
         let path = dir.join(DB_NAME);
+        let dimensions_path = world_dir
+            .join("dimensions/minecraft/overworld/data")
+            .join(DB_NAME);
         let staging = dir.join(format!("{DB_NAME}.arnis-tmp"));
         // A regenerated world must not keep LODs of the terrain it replaced.
         remove_database(&path)?;
+        remove_database(&dimensions_path)?;
         remove_database(&staging)?;
 
         let conn = Connection::open(&staging)?;
@@ -154,6 +161,7 @@ impl DhWriter {
             .map_or(0, |d| d.as_millis() as i64);
         Ok(Self {
             path,
+            dimensions_path,
             staging,
             created_ms,
             state: Mutex::new(State {
@@ -224,8 +232,9 @@ impl DhWriter {
         state.error.get_or_insert(error);
     }
 
-    /// Commits, switches to the WAL journal DH uses, and moves the file into place.
-    pub fn finish(&self) -> Result<(u64, u64), BoxError> {
+    /// Commits, switches to the WAL journal DH uses, and moves the file into place for
+    /// both folder layouts. Only a failure on the first fails the cache.
+    pub fn finish(&self) -> Result<Summary, BoxError> {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let conn = state
             .conn
@@ -244,8 +253,28 @@ impl DhWriter {
             return Err(e);
         }
         fs::rename(&self.staging, &self.path)?;
-        Ok((state.sections, state.bytes))
+        Ok(Summary {
+            sections: state.sections,
+            bytes: state.bytes,
+            dimensions_error: place_twin(&self.path, &self.dimensions_path).err(),
+        })
     }
+}
+
+pub struct Summary {
+    pub sections: u64,
+    pub bytes: u64,
+    /// Why the copy for Minecraft 26.1+ is missing, if it is.
+    pub dimensions_error: Option<std::io::Error>,
+}
+
+/// A hard link costs no space and is what Minecraft's own 26.1 upgrade uses; a copy is
+/// the fallback where the file system has none.
+fn place_twin(path: &Path, twin: &Path) -> std::io::Result<()> {
+    if let Some(dir) = twin.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::hard_link(path, twin).or_else(|_| fs::copy(path, twin).map(|_| ()))
 }
 
 /// A run that fails before [`DhWriter::finish`] leaves no staging file behind.
@@ -307,10 +336,30 @@ mod tests {
             )
             .unwrap();
         writer.put_section(0, -3, 7, &row, false);
-        assert_eq!(writer.finish().unwrap().0, 1);
+        let summary = writer.finish().unwrap();
+        assert_eq!(summary.sections, 1);
+        assert!(summary.dimensions_error.is_none());
 
         let data = dir.path().join("data");
         assert!(data.join(DB_NAME).is_file());
+        let twin = dir
+            .path()
+            .join("dimensions/minecraft/overworld/data")
+            .join(DB_NAME);
+        assert_eq!(
+            fs::read(&twin).unwrap(),
+            fs::read(data.join(DB_NAME)).unwrap()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let ino = |p: &Path| fs::metadata(p).unwrap().ino();
+            assert_eq!(
+                ino(&twin),
+                ino(&data.join(DB_NAME)),
+                "hard-linked, not copied"
+            );
+        }
         for leftover in [
             format!("{DB_NAME}.arnis-tmp"),
             format!("{DB_NAME}-wal"),
@@ -389,10 +438,14 @@ mod tests {
         fs::create_dir_all(&data).unwrap();
         fs::write(data.join(DB_NAME), b"stale").unwrap();
         fs::write(data.join(format!("{DB_NAME}-wal")), b"stale").unwrap();
+        let twin_dir = dir.path().join("dimensions/minecraft/overworld/data");
+        fs::create_dir_all(&twin_dir).unwrap();
+        fs::write(twin_dir.join(DB_NAME), b"stale").unwrap();
 
         let writer = DhWriter::create(dir.path()).unwrap();
         assert!(!data.join(DB_NAME).exists());
         assert!(!data.join(format!("{DB_NAME}-wal")).exists());
+        assert!(!twin_dir.join(DB_NAME).exists());
         writer.finish().unwrap();
         let conn = Connection::open(data.join(DB_NAME)).unwrap();
         let rows: i64 = conn

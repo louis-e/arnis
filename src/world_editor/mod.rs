@@ -2644,11 +2644,21 @@ impl<'a> WorldEditor<'a> {
             return;
         };
         match dh.finish() {
-            Ok((sections, bytes)) => println!(
-                "  Distant Horizons LOD: {} sections, {:.1} MB",
-                sections,
-                bytes as f64 / (1024.0 * 1024.0)
-            ),
+            Ok(summary) => {
+                println!(
+                    "  Distant Horizons LOD: {} sections, {:.1} MB",
+                    summary.sections,
+                    summary.bytes as f64 / (1024.0 * 1024.0)
+                );
+                if let Some(e) = summary.dimensions_error {
+                    let msg = format!(
+                        "The Distant Horizons LOD cache was not placed for Minecraft 26.1+: {e}"
+                    );
+                    eprintln!("{msg}");
+                    #[cfg(feature = "gui")]
+                    send_log(LogLevel::Warning, &msg);
+                }
+            }
             Err(e) => {
                 let msg = format!("Failed to write the Distant Horizons LOD cache: {e}");
                 eprintln!("{msg}");
