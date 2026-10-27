@@ -1300,6 +1300,9 @@ function initSettings() {
     });
   });
 
+  // Blueprint greys out the traffic lights.
+  document.getElementById("generation-mode-select").addEventListener("change", () => refreshGameplayRows());
+
   // A reloaded map comes back on Earth; restore whatever was picked.
   const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
@@ -1817,15 +1820,18 @@ function refreshWorldTypeRow(format) {
 
 // The extras are a Java data pack, and each One World area would write its own over
 // the last one's. Off Earth there are no roads or places, and gravity only differs there.
+// Blueprint builds no signal heads, so there are no lights to run.
 function refreshGameplayRows(format) {
   // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
   const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldEnabled();
   const earth = selectedCelestialBody === 'earth';
+  const mode = document.getElementById('generation-mode-select');
+  const blueprint = !!mode && mode.value === 'blueprint';
   setSettingsRowAvailable('pause-menu-toggle', pack);
   setSettingsRowAvailable('zombie-outbreak-toggle', pack);
   setSettingsRowAvailable('disasters-toggle', pack);
   setSettingsRowAvailable('discoveries-toggle', pack && earth);
-  setSettingsRowAvailable('traffic-lights-toggle', pack && earth);
+  setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
   setSettingsRowAvailable('moving-cars-toggle', pack && earth);
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
 }
