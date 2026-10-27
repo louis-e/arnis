@@ -826,6 +826,7 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
+    use crate::element_processing::highways::HighwayConnectivityMap;
 
     #[test]
     fn wetland_mosaic_deterministic_and_nondegenerate() {
@@ -881,7 +882,8 @@ mod tests {
         let xzbbox = Box::leak(Box::new(XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap()));
         let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let args = Args::parse_from([
             "arnis",
@@ -916,7 +918,8 @@ mod tests {
         let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
         let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, place);
         let outlines = BridgeOutlineIndex::build(&[]);
-        let structures = BridgeStructureMap::build(&[], &editor, &outlines, 1.0);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
         let args = Args::parse_from([
             "arnis",

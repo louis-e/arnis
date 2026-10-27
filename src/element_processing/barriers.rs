@@ -815,6 +815,7 @@ mod tests {
     use crate::element_processing::bridge_styles::BridgeOutlineIndex;
     use crate::element_processing::bridges::BridgeStructureMap;
     use crate::element_processing::building_test_support::{rect_way, tag_map, test_editor};
+    use crate::element_processing::highways::build_highway_connectivity_map;
     use crate::element_processing::highways::collect_road_surface_coords;
     use crate::osm_parser::ProcessedWay;
     use std::collections::HashMap;
@@ -881,7 +882,13 @@ mod tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(size, size).unwrap();
         let mut editor = test_editor(&xzbbox);
         let outlines = BridgeOutlineIndex::build(elements);
-        let structures = BridgeStructureMap::build(elements, &editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            elements,
+            &editor,
+            &build_highway_connectivity_map(elements),
+            &outlines,
+            1.0,
+        );
         let surface = BridgeSurfaceMap::build(elements, &structures, 1.0);
         let roads = Arc::new(collect_road_surface_coords(elements, &editor, &xzbbox, 1.0));
         let clearance = RoadClearance::build(elements, &editor, 1.0, roads);
@@ -929,7 +936,13 @@ mod tests {
             beside.clone(),
         ];
         let outlines = BridgeOutlineIndex::build(&elements);
-        let structures = BridgeStructureMap::build(&elements, &editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            &elements,
+            &editor,
+            &build_highway_connectivity_map(&elements),
+            &outlines,
+            1.0,
+        );
         let surface = BridgeSurfaceMap::build(&elements, &structures, 1.0);
         let roads = Arc::new(collect_road_surface_coords(
             &elements, &editor, &xzbbox, 1.0,

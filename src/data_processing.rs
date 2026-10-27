@@ -1144,8 +1144,13 @@ pub fn generate_world_with_options(
 
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
-    let bridge_structures =
-        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines, args.scale);
+    let bridge_structures = bridges::BridgeStructureMap::build(
+        &elements,
+        &editor,
+        &highway_connectivity,
+        &bridge_outlines,
+        args.scale,
+    );
     let bridge_surface =
         bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
 

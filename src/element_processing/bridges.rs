@@ -4,7 +4,9 @@ use crate::element_processing::bridge_styles::{
     default_pylons, resolve_bridge_style_with_outline, BridgeOutlineIndex, BridgeStyle,
 };
 use crate::element_processing::bridge_towers::{self, CableSpan, DEFAULT_SIDE_SPAN};
-use crate::element_processing::highways::highway_block_range;
+use crate::element_processing::highways::{
+    highway_block_range, junction_level, road_profile, HighwayConnectivityMap,
+};
 use crate::element_processing::railways;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -89,30 +91,51 @@ impl BridgeMemberInfo {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct BridgeRampInfo {
-    // True if way.nodes[0] is the bridge-side end; false if way.nodes[len-1] is.
-    pub bridge_side_at_start: bool,
-    pub deck_y: i32,
-    pub ground_y: i32,
+    // Surface Y per centerline cell, indexed like the renderer's cumulative bresenham walk.
+    ys: Vec<i32>,
 }
 
 impl BridgeRampInfo {
-    pub fn y_at(&self, tds: usize, total_bresenham: usize) -> i32 {
-        if total_bresenham == 0 {
-            return self.deck_y;
-        }
-        let last_idx = total_bresenham - 1;
-        let denom = last_idx.max(1) as f32;
-        let (start_y, end_y) = if self.bridge_side_at_start {
-            (self.deck_y, self.ground_y)
-        } else {
-            (self.ground_y, self.deck_y)
-        };
-        let t = (tds as f32 / denom).min(1.0);
-        let span = (end_y - start_y) as f32;
-        (start_y as f32 + span * t).round() as i32
+    /// Surface Y at centerline cell `tds`; cells past the end keep the last value.
+    pub fn y_at(&self, tds: usize) -> i32 {
+        self.ys
+            .get(tds)
+            .or(self.ys.last())
+            .copied()
+            .unwrap_or_default()
     }
+
+    /// Surface Y per centerline cell.
+    pub fn ys(&self) -> &[i32] {
+        &self.ys
+    }
+}
+
+/// Cells a ramp runs at most per block it falls, so a long embankment way meets the ground.
+const RAMP_RUN_PER_BLOCK: f32 = 8.0;
+
+/// A ramp's surface: a straight grade from `deck_y` at the bridge end down to where `ground`
+/// leaves the ramp's far end, never below `ground`.
+fn ramp_profile(ground: &[i32], deck_y: i32, bridge_side_at_start: bool) -> Vec<i32> {
+    let n = ground.len();
+    let foot = if bridge_side_at_start {
+        ground[n - 1]
+    } else {
+        ground[0]
+    };
+    let last = n.saturating_sub(1).max(1) as f32;
+    let fall = ((deck_y - foot) as f32 / last).max(1.0 / RAMP_RUN_PER_BLOCK);
+    ground
+        .iter()
+        .enumerate()
+        .map(|(i, &g)| {
+            let from_deck = if bridge_side_at_start { i } else { n - 1 - i };
+            let grade = (deck_y as f32 - fall * from_deck as f32).round() as i32;
+            grade.max(g)
+        })
+        .collect()
 }
 
 /// How a rail bridge way is carried.
@@ -154,6 +177,7 @@ impl BridgeStructureMap {
     pub fn build(
         elements: &[ProcessedElement],
         editor: &WorldEditor,
+        connectivity: &HighwayConnectivityMap,
         outlines: &BridgeOutlineIndex,
         scale: f64,
     ) -> Self {
@@ -387,7 +411,7 @@ impl BridgeStructureMap {
                 .iter()
                 .map(|&i| way_cells(bridge_ways[i]))
                 .collect();
-            let terrain: Vec<Vec<i32>> = cells
+            let mut terrain: Vec<Vec<i32>> = cells
                 .iter()
                 .map(|cs| {
                     cs.iter()
@@ -514,7 +538,7 @@ impl BridgeStructureMap {
 
             // Tagged ramps carry the deck down; their start Y is filled in once known.
             let mut external_ramp_ends: HashSet<(i32, i32)> = HashSet::new();
-            let mut pending_ramps: Vec<(u64, bool, i32, (i32, i32))> = Vec::new();
+            let mut pending_ramps: Vec<(&ProcessedWay, bool, (i32, i32))> = Vec::new();
             for &idx in group_indices {
                 let (s, e) = ends(idx);
                 for xz in [s, e] {
@@ -544,8 +568,7 @@ impl BridgeStructureMap {
                         if node_members.contains_key(&(far_node.x, far_node.z)) {
                             continue;
                         }
-                        let ground_y = editor.get_ground_level(far_node.x, far_node.z);
-                        pending_ramps.push((candidate.id, bridge_side_at_start, ground_y, xz));
+                        pending_ramps.push((candidate, bridge_side_at_start, xz));
                         claimed_ramp_ways.insert(candidate.id);
                         external_ramp_ends.insert(xz);
                     }
@@ -558,6 +581,16 @@ impl BridgeStructureMap {
                     && !external_ramp_ends.contains(&xz)
                     && !joins_other_bridge(xz)
             };
+            // A road landing on the deck reaches that node at its junction level.
+            for (m, &idx) in group_indices.iter().enumerate() {
+                let (s, e) = ends(idx);
+                let last = cells[m].len() - 1;
+                for (xz, i) in [(s, 0), (e, last)] {
+                    if anchors_end(xz) && connectivity.is_shared(xz.0, xz.1) {
+                        terrain[m][i] = junction_level(editor, xz.0, xz.1);
+                    }
+                }
+            }
 
             // Profile axis: the two member ends furthest apart.
             let end_points: Vec<(i32, i32)> = group_indices
@@ -822,7 +855,7 @@ impl BridgeStructureMap {
                 }
             }
 
-            for (candidate_id, bridge_side_at_start, ground_y, xz) in pending_ramps {
+            for (candidate, bridge_side_at_start, xz) in pending_ramps {
                 let deck_y = group_indices
                     .iter()
                     .enumerate()
@@ -837,12 +870,28 @@ impl BridgeStructureMap {
                         }
                     })
                     .unwrap_or(level_deck);
+                // The ground the ramp would follow at grade, so its foot meets the next road.
+                let ground = road_profile(
+                    editor,
+                    candidate,
+                    highway_block_range(
+                        candidate
+                            .tags
+                            .get("highway")
+                            .map(String::as_str)
+                            .unwrap_or(""),
+                        &candidate.tags,
+                        scale,
+                    ),
+                    connectivity,
+                );
+                if ground.is_empty() {
+                    continue;
+                }
                 ramps.insert(
-                    candidate_id,
+                    candidate.id,
                     BridgeRampInfo {
-                        bridge_side_at_start,
-                        deck_y,
-                        ground_y,
+                        ys: ramp_profile(&ground, deck_y, bridge_side_at_start),
                     },
                 );
             }
@@ -1410,7 +1459,7 @@ impl BridgeSurfaceMap {
             if member.is_some_and(|m| m.covered_by_wider) {
                 continue;
             }
-            let ramp = structures.lookup_ramp(way.id).copied();
+            let ramp = structures.lookup_ramp(way.id);
             if member.is_none() && ramp.is_none() {
                 continue;
             }
@@ -1422,11 +1471,10 @@ impl BridgeSurfaceMap {
                 .unwrap_or_else(|| highway_block_range(highway_type, &way.tags, scale));
 
             let path = way_cells(way);
-            let total_bresenham = path.len();
             for (tds, &(cx, cz)) in path.iter().enumerate() {
                 let cell_y = match (member, ramp) {
                     (Some(info), _) => info.y_at(tds),
-                    (None, Some(info)) => info.y_at(tds, total_bresenham),
+                    (None, Some(info)) => info.y_at(tds),
                     (None, None) => continue,
                 };
                 for dx in -block_range..=block_range {
@@ -2089,6 +2137,7 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
+    use crate::element_processing::highways::build_highway_connectivity_map;
     use crate::osm_parser::ProcessedNode;
     use crate::world_editor::WorldEditor;
     use std::collections::HashMap as StdMap;
@@ -2139,7 +2188,13 @@ mod tests {
         ))];
         let outlines = BridgeOutlineIndex::build(&ways);
 
-        let structures = BridgeStructureMap::build(&ways, &editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            &ways,
+            &editor,
+            &build_highway_connectivity_map(&ways),
+            &outlines,
+            1.0,
+        );
         let member = structures.lookup_member(1).expect("member exists");
 
         assert!(
@@ -2158,7 +2213,13 @@ mod tests {
             ProcessedElement::Way(straight_bridge_way(2, "footway", 0, 52, 95, 52)),
         ];
         let outlines = BridgeOutlineIndex::build(&ways);
-        let structures = BridgeStructureMap::build(&ways, &editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            &ways,
+            &editor,
+            &build_highway_connectivity_map(&ways),
+            &outlines,
+            1.0,
+        );
         assert!(structures.lookup_member(1).unwrap().module_idx.is_some());
         let footway = structures.lookup_member(2).unwrap();
         assert!(!footway.covered_by_wider);
@@ -2174,7 +2235,13 @@ mod tests {
         ))];
         let outlines = BridgeOutlineIndex::build(&ways);
 
-        let structures = BridgeStructureMap::build(&ways, &editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            &ways,
+            &editor,
+            &build_highway_connectivity_map(&ways),
+            &outlines,
+            1.0,
+        );
         let member = structures.lookup_member(2).expect("member exists");
 
         assert!(member.module_idx.is_some());
@@ -2215,7 +2282,13 @@ mod tests {
         let elements: Vec<ProcessedElement> =
             ways.iter().cloned().map(ProcessedElement::Way).collect();
         let outlines = BridgeOutlineIndex::build(&elements);
-        let structures = BridgeStructureMap::build(&elements, &editor, &outlines, 1.0);
+        let structures = BridgeStructureMap::build(
+            &elements,
+            &editor,
+            &build_highway_connectivity_map(&elements),
+            &outlines,
+            1.0,
+        );
         let surface = BridgeSurfaceMap::build(&elements, &structures, 1.0);
         (structures, surface)
     }
@@ -2379,7 +2452,7 @@ mod tests {
     }
 
     #[test]
-    fn approach_ramp_keeps_its_own_pillars() {
+    fn approach_ramp_slopes_from_the_deck_to_the_road_beyond() {
         let bridge = way_with(
             1,
             &[
@@ -2394,10 +2467,65 @@ mod tests {
             &[("highway", "residential"), ("embankment", "yes")],
             &[(10, 40), (40, 40)],
         );
-        let (structures, surface) = structures_over(&[bridge, ramp], |_| 0.0);
-        let ramp_y = structures.lookup_ramp(2).expect("tagged ramp").y_at(20, 31);
-        assert!(ramp_y > 2, "the ramp is raised there");
-        assert!(!surface.support_blocked(30, 40, ramp_y));
+        let road = way_with(3, &[("highway", "residential")], &[(0, 40), (10, 40)]);
+        let (structures, _) = structures_over(&[bridge, ramp, road], |_| 0.0);
+        let deck = ys(&structures, 1)[0];
+        let ramp = structures.lookup_ramp(2).expect("tagged ramp").ys();
+        assert!(deck > 2, "the bridge is raised");
+        assert_eq!(ramp.last(), Some(&deck), "the ramp meets the deck");
+        assert_eq!(ramp.first(), Some(&0), "and the road beyond at grade");
+        assert!(
+            ramp.windows(2).all(|w| (0..=1).contains(&(w[1] - w[0]))),
+            "{ramp:?}"
+        );
+    }
+
+    #[test]
+    fn ramp_profile_rides_over_ground_above_its_grade() {
+        let mut ground = vec![0; 31];
+        ground[10..14].fill(5);
+        let ys = ramp_profile(&ground, 6, false);
+        assert_eq!((ys[0], ys[30]), (0, 6));
+        assert_eq!(ys[20], 4, "a straight grade elsewhere");
+        for (i, (y, g)) in ys.iter().zip(&ground).enumerate() {
+            assert!(y >= g, "buried at {i}: {ys:?}");
+        }
+    }
+
+    #[test]
+    fn a_long_embankment_way_meets_the_ground_and_follows_it() {
+        let ground = vec![0; 200];
+        let ys = ramp_profile(&ground, 6, true);
+        assert_eq!(ys[0], 6);
+        let landed = ys.iter().position(|&y| y == 0).expect("the ramp lands");
+        assert!(
+            landed <= 6 * RAMP_RUN_PER_BLOCK as usize,
+            "landed at {landed}"
+        );
+        assert!(ys[landed..].iter().all(|&y| y == 0));
+    }
+
+    #[test]
+    fn a_road_reaches_an_anchored_bridge_end_at_its_junction_level() {
+        // The deck starts at the lip of a drop, where the cell and the ground around it differ.
+        let bridge = way_with(1, ROAD_BRIDGE, &[(40, 40), (70, 40)]);
+        let road = way_with(2, &[("highway", "residential")], &[(10, 40), (40, 40)]);
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let row: Vec<f32> = (0..100).map(|x| if x < 40 { 20.0 } else { 10.0 }).collect();
+        let ground = crate::ground::Ground::new_elevation_test(vec![row; 100], 100, 100);
+        editor.set_ground(Arc::new(ground));
+        let elements = [
+            ProcessedElement::Way(bridge),
+            ProcessedElement::Way(road.clone()),
+        ];
+        let connectivity = build_highway_connectivity_map(&elements);
+        let outlines = BridgeOutlineIndex::build(&elements);
+        let structures =
+            BridgeStructureMap::build(&elements, &editor, &connectivity, &outlines, 1.0);
+        let block_range = highway_block_range("residential", &road.tags, 1.0);
+        let road_ys = road_profile(&editor, &road, block_range, &connectivity);
+        assert_eq!(Some(&ys(&structures, 1)[0]), road_ys.last());
     }
 
     #[test]
