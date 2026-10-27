@@ -755,6 +755,8 @@ pub fn apply_body_defaults(args: &mut Args) {
     // Snow and ruins dress Earth weather and Earth towns.
     args.winter = false;
     args.post_apocalyptic = false;
+    // The superflat template is a grass plain with villages.
+    args.world_type = WorldType::Void;
     args.scale = args.body.world_scale();
     args.mode = GenerationMode::TerrainOnly;
     args.overture = false;
@@ -1657,6 +1659,22 @@ mod tests {
         let mut args = parse(&["--winter", "--post-apocalyptic", "--body", "moon"]);
         apply_body_defaults(&mut args);
         assert!(!args.winter && !args.post_apocalyptic);
+    }
+
+    #[test]
+    fn the_grass_plain_stays_on_earth() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", "out", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            args
+        };
+        assert_eq!(parse(&["--world-type", "flat"]).world_type, WorldType::Flat);
+        for body in ["moon", "mars"] {
+            let args = parse(&["--world-type", "flat", "--body", body]);
+            assert_eq!(args.world_type, WorldType::Void);
+        }
     }
 
     /// `--help` must not print the Mapillary token.
