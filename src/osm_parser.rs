@@ -5,6 +5,7 @@ use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -1087,52 +1088,13 @@ pub fn parse_osm_data(
 
     let mut part_groups = PartGroups::new();
     let mut housing_parts = HousingRelationParts::new();
-    let mut outline_suppression = compute_outline_suppression(
+    let outline_suppression = suppress_outlines(
         &data.relations,
         &data.ways,
         &data.nodes,
         &mut part_groups,
         &mut housing_parts,
     );
-    // Ways owned by a type=building relation are handled above; the spatial pass must
-    // not re-judge them against unrelated parts that merely fall inside their footprint.
-    let relation_ways: HashSet<u64> = data
-        .relations
-        .iter()
-        .filter(|r| {
-            r.tags
-                .as_ref()
-                .and_then(|t| t.get("type"))
-                .map(|t| t == "building")
-                .unwrap_or(false)
-        })
-        .flat_map(|r| {
-            r.members
-                .iter()
-                .filter(|m| m.r#type == "way")
-                .map(|m| m.r#ref)
-        })
-        .collect();
-    // also catch S3DB outlines mapped without a relation
-    outline_suppression.extend(compute_spatial_part_suppression(
-        &data.ways,
-        &data.nodes,
-        &relation_ways,
-        &mut part_groups,
-    ));
-    // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
-    // separate building:part relations) are invisible to both passes above: the membership
-    // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
-    // Judge them spatially so a relation outline covered by part relations is dropped.
-    outline_suppression.extend(spatial_relation_part_suppression(
-        &data.relations,
-        &data.ways,
-        &data.nodes,
-        &mut part_groups,
-        &mut housing_parts,
-    ));
-    // A ride drawn whole replaces any 3D parts mapped inside it, and is never replaced by them.
-    suppress_ride_parts(&data.ways, &data.nodes, &mut outline_suppression);
     inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
@@ -1423,6 +1385,81 @@ pub fn parse_osm_data(
     )
 }
 
+/// The outlines in raw `data` that generation replaces with their parts.
+pub(crate) fn outlines_replaced_by_parts(data: &OsmData) -> OutlineSuppression {
+    let (mut nodes, mut ways, mut relations) = (Vec::new(), Vec::new(), Vec::new());
+    for e in data.elements() {
+        match e.r#type.as_str() {
+            "node" => nodes.push(e),
+            "way" => ways.push(e),
+            "relation" => relations.push(e),
+            _ => {}
+        }
+    }
+    suppress_outlines(
+        &relations,
+        &ways,
+        &nodes,
+        &mut PartGroups::new(),
+        &mut HousingRelationParts::new(),
+    )
+}
+
+/// Outlines that generation replaces with their parts, grouping the parts as it goes.
+fn suppress_outlines<E: Borrow<OsmElement>>(
+    relations: &[E],
+    ways: &[E],
+    nodes: &[E],
+    part_groups: &mut PartGroups,
+    housing_parts: &mut HousingRelationParts,
+) -> OutlineSuppression {
+    let mut suppressed =
+        compute_outline_suppression(relations, ways, nodes, part_groups, housing_parts);
+    // Ways owned by a type=building relation are handled above; the spatial pass must
+    // not re-judge them against unrelated parts that merely fall inside their footprint.
+    let relation_ways: HashSet<u64> = elements(relations)
+        .filter(|r| {
+            r.tags
+                .as_ref()
+                .and_then(|t| t.get("type"))
+                .map(|t| t == "building")
+                .unwrap_or(false)
+        })
+        .flat_map(|r| {
+            r.members
+                .iter()
+                .filter(|m| m.r#type == "way")
+                .map(|m| m.r#ref)
+        })
+        .collect();
+    // also catch S3DB outlines mapped without a relation
+    suppressed.extend(compute_spatial_part_suppression(
+        ways,
+        nodes,
+        &relation_ways,
+        part_groups,
+    ));
+    // S3DB outlines expressed as multipolygon RELATIONS (e.g. an amphitheatre whose tiers are
+    // separate building:part relations) are invisible to both passes above: the membership
+    // pass only links parts that are relation MEMBERS, and the way pass only scans closed ways.
+    // Judge them spatially so a relation outline covered by part relations is dropped.
+    suppressed.extend(spatial_relation_part_suppression(
+        relations,
+        ways,
+        nodes,
+        part_groups,
+        housing_parts,
+    ));
+    // A ride drawn whole replaces any 3D parts mapped inside it, and is never replaced by them.
+    suppress_ride_parts(ways, nodes, &mut suppressed);
+    suppressed
+}
+
+// The passes read raw elements both owned (parse_osm_data) and borrowed (the height check).
+fn elements<E: Borrow<OsmElement>>(slice: &[E]) -> impl Iterator<Item = &OsmElement> {
+    slice.iter().map(Borrow::borrow)
+}
+
 // Parts replace the outline only when they cover at least this much of it.
 const MIN_PART_COVERAGE: f64 = 0.5;
 
@@ -1556,17 +1593,17 @@ fn inherit_masonry_facade_tags(
     }
 }
 
-fn compute_outline_suppression(
-    relations: &[OsmElement],
-    ways: &[OsmElement],
-    nodes: &[OsmElement],
+fn compute_outline_suppression<E: Borrow<OsmElement>>(
+    relations: &[E],
+    ways: &[E],
+    nodes: &[E],
     part_group: &mut PartGroups,
     housing_parts: &mut HousingRelationParts,
 ) -> OutlineSuppression {
     let is_outline = |r: &str| r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer");
 
     let mut needed_ways: HashSet<u64> = HashSet::new();
-    for rel in relations {
+    for rel in elements(relations) {
         let Some(tags) = &rel.tags else { continue };
         if tags.get("type").map(|t| t.as_str()) != Some("building") {
             continue;
@@ -1589,7 +1626,7 @@ fn compute_outline_suppression(
     let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
     let mut housing_ways: HashSet<u64> = HashSet::new();
-    for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
+    for w in elements(ways).filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
         }
@@ -1608,8 +1645,7 @@ fn compute_outline_suppression(
     for ns in way_nodes.values() {
         needed_nodes.extend(ns.iter().copied());
     }
-    let node_ll: HashMap<u64, (f64, f64)> = nodes
-        .iter()
+    let node_ll: HashMap<u64, (f64, f64)> = elements(nodes)
         .filter(|n| needed_nodes.contains(&n.id))
         .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
         .collect();
@@ -1635,7 +1671,7 @@ fn compute_outline_suppression(
     };
 
     let mut suppressed: OutlineSuppression = HashSet::new();
-    for rel in relations {
+    for rel in elements(relations) {
         let Some(tags) = &rel.tags else { continue };
         if tags.get("type").map(|t| t.as_str()) != Some("building") {
             continue;
@@ -1746,14 +1782,13 @@ fn ring_area(r: &[(f64, f64)]) -> f64 {
 
 /// Suppresses building:part ways whose centre lies inside a ride `attractions` draws
 /// whole, and keeps the ride's own outline.
-fn suppress_ride_parts(
-    ways: &[OsmElement],
-    nodes: &[OsmElement],
+fn suppress_ride_parts<E: Borrow<OsmElement>>(
+    ways: &[E],
+    nodes: &[E],
     suppressed: &mut OutlineSuppression,
 ) {
     use crate::element_processing::attractions;
-    let rides: Vec<&OsmElement> = ways
-        .iter()
+    let rides: Vec<&OsmElement> = elements(ways)
         .filter(|w| w.tags.as_ref().is_some_and(attractions::replaces_parts))
         .collect();
     if rides.is_empty() {
@@ -1767,8 +1802,7 @@ fn suppress_ride_parts(
             .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
             && !attractions::claims(tags)
     };
-    let parts: Vec<&OsmElement> = ways
-        .iter()
+    let parts: Vec<&OsmElement> = elements(ways)
         .filter(|w| w.tags.as_ref().is_some_and(is_part))
         .collect();
     if parts.is_empty() {
@@ -1780,8 +1814,7 @@ fn suppress_ride_parts(
         .chain(&parts)
         .flat_map(|w| w.nodes.iter().flatten().copied())
         .collect();
-    let coords: FnvHashMap<u64, (f64, f64)> = nodes
-        .iter()
+    let coords: FnvHashMap<u64, (f64, f64)> = elements(nodes)
         .filter(|n| wanted.contains(&n.id))
         .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
         .collect();
@@ -1895,9 +1928,9 @@ pub(crate) fn stitch_rings(
 
 /// Suppresses relation-less S3DB outlines: a building polygon that spatially contains building:part polygons.
 /// Ways in `relation_ways` belong to a type=building relation and are judged by the relation pass instead.
-fn compute_spatial_part_suppression(
-    ways: &[OsmElement],
-    nodes: &[OsmElement],
+fn compute_spatial_part_suppression<E: Borrow<OsmElement>>(
+    ways: &[E],
+    nodes: &[E],
     relation_ways: &HashSet<u64>,
     part_group: &mut PartGroups,
 ) -> OutlineSuppression {
@@ -1915,7 +1948,7 @@ fn compute_spatial_part_suppression(
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
     let mut housing_outlines: HashSet<u64> = HashSet::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
-    for w in ways {
+    for w in elements(ways) {
         if relation_ways.contains(&w.id) {
             continue;
         }
@@ -1948,8 +1981,7 @@ fn compute_spatial_part_suppression(
         return HashSet::new();
     }
 
-    let node_ll: HashMap<u64, (f64, f64)> = nodes
-        .iter()
+    let node_ll: HashMap<u64, (f64, f64)> = elements(nodes)
         .filter(|n| needed_nodes.contains(&n.id))
         .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
         .collect();
@@ -2103,10 +2135,10 @@ fn compute_spatial_relation_part_suppression(
     )
 }
 
-fn spatial_relation_part_suppression(
-    relations: &[OsmElement],
-    ways: &[OsmElement],
-    nodes: &[OsmElement],
+fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
+    relations: &[E],
+    ways: &[E],
+    nodes: &[E],
     part_group: &mut PartGroups,
     housing_parts: &mut HousingRelationParts,
 ) -> OutlineSuppression {
@@ -2133,7 +2165,7 @@ fn spatial_relation_part_suppression(
     // Resolve only the geometry we need: the outer member ways of every building /
     // building:part relation, plus the nodes those ways reference.
     let mut needed_ways: HashSet<u64> = HashSet::new();
-    for rel in relations {
+    for rel in elements(relations) {
         let Some(tags) = &rel.tags else { continue };
         if !is_renderable(tags) || !(tags.contains_key("building") || is_part(tags)) {
             continue;
@@ -2150,8 +2182,7 @@ fn spatial_relation_part_suppression(
     }
     // Closed building:part ways above ground: the wings of a courtyard block are drawn as
     // often as part ways as as part relations.
-    let part_ways: Vec<&OsmElement> = ways
-        .iter()
+    let part_ways: Vec<&OsmElement> = elements(ways)
         .filter(|w| {
             w.tags.as_ref().is_some_and(|t| {
                 is_part(t) && !crate::element_processing::buildings::is_underground_building(t)
@@ -2164,7 +2195,7 @@ fn spatial_relation_part_suppression(
 
     let mut way_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
     let mut needed_nodes: HashSet<u64> = HashSet::new();
-    for w in ways.iter().filter(|w| needed_ways.contains(&w.id)) {
+    for w in elements(ways).filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
             needed_nodes.extend(ns.iter().copied());
@@ -2175,8 +2206,7 @@ fn spatial_relation_part_suppression(
             needed_nodes.extend(ns.iter().copied());
         }
     }
-    let node_ll: HashMap<u64, (f64, f64)> = nodes
-        .iter()
+    let node_ll: HashMap<u64, (f64, f64)> = elements(nodes)
         .filter(|n| needed_nodes.contains(&n.id))
         .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
         .collect();
@@ -2218,8 +2248,7 @@ fn spatial_relation_part_suppression(
     }
 
     // The membership pass already judged the part relations a type=building relation lists.
-    let listed_parts: HashSet<u64> = relations
-        .iter()
+    let listed_parts: HashSet<u64> = elements(relations)
         .filter(|r| {
             r.tags
                 .as_ref()
@@ -2234,7 +2263,7 @@ fn spatial_relation_part_suppression(
     // not itself a part.
     let mut outlines: Vec<RelOutline> = Vec::new();
     let mut parts: Vec<RelPart> = Vec::new();
-    for rel in relations {
+    for rel in elements(relations) {
         let Some(tags) = &rel.tags else { continue };
         if !is_renderable(tags) {
             continue;

@@ -240,7 +240,7 @@ struct Roof {
 /// the roof its footprint allows; a relation by its member ways. A mast, antenna or chimney
 /// on such a building stands on its roof. With `overture`, only the OSM buildings it gives a
 /// height count. Buildings whose walls stay under 13 blocks are not read, and a mast on one
-/// counts from the ground.
+/// counts from the ground. An outline its parts replace counts only by its parts.
 pub fn tall_structures_in(
     data: &crate::osm_parser::OsmData,
     scale: f64,
@@ -253,6 +253,7 @@ pub fn tall_structures_in(
     let mut outlines: Vec<Outline> = Vec::new();
     let mut relations: Vec<(usize, &[crate::osm_parser::OsmMember])> = Vec::new();
     let mut masts: Vec<Mast> = Vec::new();
+    let mut replaced: Option<crate::osm_parser::OutlineSuppression> = None;
     for e in data.elements() {
         let Some(tags) = e.tags.as_ref() else {
             continue;
@@ -291,6 +292,13 @@ pub fn tall_structures_in(
                 && mapped_top_m(tags, hint, WIDEST_FOOTPRINT_M, WIDEST_FOOTPRINT_M)
                     .is_some_and(|m| may_pass_vanilla(m, scale)));
         if !reaches {
+            continue;
+        }
+        // Only worked out once a tall outline turns up.
+        if replaced
+            .get_or_insert_with(|| crate::osm_parser::outlines_replaced_by_parts(data))
+            .contains(&(kind, e.id))
+        {
             continue;
         }
         if kind == "relation" {
@@ -636,6 +644,30 @@ mod tests {
         ] {
             assert!(hints(none).is_empty(), "{none:?}");
         }
+    }
+
+    // The IHZ: a 25-storey outline is built as its 93.5 m flat parts, so only they count.
+    #[test]
+    fn an_outline_replaced_by_its_parts_counts_by_its_parts() {
+        let tops = |part_key: &str| {
+            let json = r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 40.0, "lon": -74.0},
+                {"type": "node", "id": 2, "lat": 40.0, "lon": -73.999},
+                {"type": "node", "id": 3, "lat": 40.001, "lon": -73.999},
+                {"type": "node", "id": 4, "lat": 40.001, "lon": -74.0},
+                {"type": "way", "id": 10, "nodes": [1, 2, 3, 4, 1], "tags": {"building": "office", "building:levels": "25"}},
+                {"type": "way", "id": 11, "nodes": [1, 2, 3, 4, 1], "tags": {"KEY": "yes", "height": "93.5", "roof:shape": "flat"}}
+            ]}"#;
+            let data: crate::osm_parser::OsmData =
+                serde_json::from_str(&json.replace("KEY", part_key)).unwrap();
+            tall_structures_in(&data, 1.0, None)
+                .into_iter()
+                .map(|m| m.height_m)
+                .reduce(f64::max)
+        };
+        assert_eq!(tops("building:part"), Some(93.5));
+        // Two buildings on one footprint: the outline stands as itself.
+        assert!(tops("building").is_some_and(|m| m > 100.0));
     }
 
     #[test]
