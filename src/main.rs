@@ -826,11 +826,13 @@ fn run_cli() {
         }
     }
 
+    // Generation places the map item at it; an extended One World moves it only to a marker.
+    let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
-        spawn_point,
+        spawn_point: if extending { spawn_point } else { java_spawn },
         luanti_game,
         ground_level: args.ground_level,
         facades: facade_job,
@@ -857,7 +859,6 @@ fn run_cli() {
             }
 
             // For Java Edition, write the spawn point into level.dat
-            let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
             if world_format == world_editor::WorldFormat::JavaAnvil && !extending {
                 if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (java_spawn, spawn_y_for_java) {
                     if let Err(e) = world_utils::set_spawn_in_level_dat(
