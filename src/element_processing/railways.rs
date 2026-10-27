@@ -413,7 +413,7 @@ fn pin_end(pins: &mut [Option<i32>], e: usize, end: &TrackEnd, level: i32) {
     }
 }
 
-/// Holds both cells across One World's area edge at the inside one's level, as the next area does.
+/// Holds both cells across One World's area edge at the lower cell's level, as the next area does.
 fn pin_area_edge(
     pins: &mut [Option<i32>],
     rail_joins: &RailJoins,
@@ -421,7 +421,11 @@ fn pin_area_edge(
     level: impl Fn(usize) -> i32,
 ) {
     for [inside, outside] in rail_joins.edge_crossings(cells) {
-        let y = level(inside);
+        let y = level(if cells[inside] < cells[outside] {
+            inside
+        } else {
+            outside
+        });
         for i in [inside, outside] {
             pins[i].get_or_insert(y);
         }
@@ -1512,7 +1516,10 @@ fn generate_rail_tunnel_shell(
             }
         }
     }
-    pin_area_edge(&mut pins, rail_joins, &cells, |i| deep[i].max(lowest));
+    // Not `deep`: its portal ramps hang on where this area clipped the way.
+    pin_area_edge(&mut pins, rail_joins, &cells, |i| {
+        (ground[i] - depth).max(lowest)
+    });
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -1973,15 +1980,17 @@ mod tests {
     fn one_world_areas_either_side_of_an_edge_lay_one_joined_track() {
         // A diagonal up a slope, from one area into the next at x = 100.
         let mut laid = Vec::new();
+        // The edge cells (99, 99) and (100, 99) round to 8 and 9; both areas read past their own.
+        let heights = (0..200)
+            .map(|z| (0..200).map(|x| (x + z + 14) as f32 / 25.0).collect())
+            .collect();
+        let ground =
+            std::sync::Arc::new(crate::ground::Ground::new_elevation_test(heights, 200, 200));
         for (x0, x1) in [(0, 99), (100, 199)] {
             let area = XZBBox::rect_from_min_max(x0, 0, x1, 199).unwrap();
             let mut editor = test_editor(&area);
-            let heights = (0..200)
-                .map(|z| (x0..=x1).map(|x| (x + z) as f32 / 25.0).collect())
-                .collect();
-            editor.set_ground(std::sync::Arc::new(
-                crate::ground::Ground::new_elevation_test(heights, 100, 200),
-            ));
+            editor.set_ground(std::sync::Arc::clone(&ground));
+            editor.set_ground_origin(0, 0);
             // Each clipped 64 blocks past its own area.
             let mut way = straight_rail(&[("railway", "rail")]);
             let (from, to) = ((x0 - 64).max(0), (x1 + 64).min(199));
