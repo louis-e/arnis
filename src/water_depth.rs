@@ -537,15 +537,27 @@ const MAX_TREE_BLOCKS: usize = 4096;
 /// would leave the canopy hanging in the air over the water. Blocks are set to
 /// air as they are visited, so a revisit sees air and stops; no visited set.
 pub(crate) fn clear_tree_from(editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+    clear_tree_within(editor, x, y, z, |_, _| true);
+}
+
+/// `clear_tree_from`, visiting only the columns `keep` allows.
+pub(crate) fn clear_tree_within(
+    editor: &mut WorldEditor,
+    x: i32,
+    y: i32,
+    z: i32,
+    keep: impl Fn(i32, i32) -> bool,
+) {
     let mut stack = vec![(x, y, z)];
     let mut cleared = 0usize;
     while let Some((cx, cy, cz)) = stack.pop() {
         if cleared >= MAX_TREE_BLOCKS {
             break;
         }
-        if !editor
-            .get_block_absolute(cx, cy, cz)
-            .is_some_and(is_tree_part)
+        if !keep(cx, cz)
+            || !editor
+                .get_block_absolute(cx, cy, cz)
+                .is_some_and(is_tree_part)
         {
             continue;
         }
@@ -925,6 +937,27 @@ mod tests {
             assert!(editor.check_for_block_absolute(10, y, 10, Some(&[STONE_BRICKS]), None));
         }
         assert!(editor.check_for_block_absolute(11, 5, 10, Some(&[WATER]), None));
+    }
+
+    #[test]
+    fn a_bounded_tree_clear_stops_at_its_columns() {
+        use crate::block_definitions::{OAK_LEAVES, OAK_LOG};
+        use crate::coordinate_system::geographic::LLBBox;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 63, 15).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor =
+            WorldEditor::new(std::path::PathBuf::from("/dev/null/unused"), &bbox, llbbox);
+        // A hedge of touching crowns along x.
+        editor.set_block_absolute(OAK_LOG, 0, 1, 5, None, None);
+        for x in 0..64 {
+            editor.set_block_absolute(OAK_LEAVES, x, 2, 5, None, None);
+        }
+        clear_tree_within(&mut editor, 0, 1, 5, |x, _| x <= 20);
+        assert_eq!(editor.get_block_absolute(0, 1, 5), None);
+        assert_eq!(editor.get_block_absolute(20, 2, 5), None);
+        assert_eq!(editor.get_block_absolute(21, 2, 5), Some(OAK_LEAVES));
+        clear_tree_from(&mut editor, 21, 2, 5);
+        assert_eq!(editor.get_block_absolute(63, 2, 5), None);
     }
 
     #[test]
