@@ -30,12 +30,14 @@ const SALT_WARP_Z: u32 = 0x4E41_545A;
 
 /// Replaces built-up land and cropland with natural cover. `heights` is the elevation grid
 /// in blocks, aligned with the land cover; cells returned to water are sunk onto it.
-/// `origin` is the absolute cell the grid starts at.
+/// `origin` is the absolute cell the grid starts at. `reclaim` returns bridge-like strips
+/// to the water, for a world that draws no roads on them.
 pub fn naturalize(
     lc: &mut LandCoverData,
     heights: Option<&mut [Vec<f32>]>,
     climate: Climate,
     origin: (i32, i32),
+    reclaim: bool,
 ) {
     let (width, height) = (lc.width, lc.height);
     if width == 0 || height == 0 {
@@ -55,7 +57,7 @@ pub fn naturalize(
     }
 
     let heights = heights.filter(|h| h.len() >= height && h.iter().all(|r| r.len() >= width));
-    if reclaim_water(lc, heights) {
+    if reclaim && reclaim_water(lc, heights) {
         lc.water_distance = compute_water_distance(&lc.grid, width, height);
         lc.invalidate_water_blend_grid();
     }
@@ -360,7 +362,7 @@ mod tests {
     #[test]
     fn fields_become_grassland() {
         let mut lc = lc_from_rows(&["ccgg", "cctt"], 1.0);
-        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0), true);
         assert_eq!(count(&lc, LC_CROPLAND), 0);
         assert_eq!(count(&lc, LC_GRASSLAND), 6);
         assert_eq!(count(&lc, LC_TREE_COVER), 2);
@@ -383,7 +385,7 @@ mod tests {
             .collect();
         let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
         let mut lc = lc_from_rows(&rows, 1.0);
-        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0), true);
         assert_eq!(count(&lc, LC_BUILT_UP), 0);
         assert_eq!(count(&lc, LC_TREE_COVER), 60 * 60);
     }
@@ -391,10 +393,10 @@ mod tests {
     #[test]
     fn town_with_nothing_wild_around_turns_to_grassland() {
         let mut lc = lc_from_rows(&["bbbb", "bbbb"], 1.0);
-        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0), true);
         assert_eq!(count(&lc, LC_GRASSLAND), 8);
         let mut lc = lc_from_rows(&["bbbb", "bbbb"], 1.0);
-        naturalize(&mut lc, None, Climate::HotDesert, (0, 0));
+        naturalize(&mut lc, None, Climate::HotDesert, (0, 0), true);
         assert_eq!(count(&lc, LC_BARE), 8);
     }
 
@@ -414,10 +416,10 @@ mod tests {
             .collect();
         let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
         let mut temperate = lc_from_rows(&rows, 1.0);
-        naturalize(&mut temperate, None, Climate::Temperate, (0, 0));
+        naturalize(&mut temperate, None, Climate::Temperate, (0, 0), true);
         assert_eq!(count(&temperate, LC_BARE), 100 * 50);
         let mut desert = lc_from_rows(&rows, 1.0);
-        naturalize(&mut desert, None, Climate::HotDesert, (0, 0));
+        naturalize(&mut desert, None, Climate::HotDesert, (0, 0), true);
         assert!(count(&desert, LC_BARE) > 150 * 50);
         assert!(count(&desert, LC_TREE_COVER) > 150 * 50);
         assert_eq!(count(&desert, LC_BUILT_UP), 0);
@@ -435,7 +437,13 @@ mod tests {
             let rows: Vec<String> = (0..h).map(|_| (x0..x0 + w).map(class).collect()).collect();
             let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
             let mut lc = lc_from_rows(&rows, 1.0);
-            naturalize(&mut lc, None, Climate::Temperate, (x0 as i32, z0 as i32));
+            naturalize(
+                &mut lc,
+                None,
+                Climate::Temperate,
+                (x0 as i32, z0 as i32),
+                true,
+            );
             lc
         };
         let whole = area(0, 0, 300, 260);
@@ -467,7 +475,13 @@ mod tests {
         for row in &mut heights[10..20] {
             row[13..17].fill(12.0);
         }
-        naturalize(&mut lc, Some(&mut heights), Climate::Temperate, (0, 0));
+        naturalize(
+            &mut lc,
+            Some(&mut heights),
+            Climate::Temperate,
+            (0, 0),
+            true,
+        );
         for (z, row) in heights.iter().enumerate().take(20).skip(10) {
             for (x, &h) in row.iter().enumerate().take(17).skip(13) {
                 assert_eq!(lc.grid[z][x], LC_WATER, "deck cell ({x}, {z})");
@@ -489,7 +503,7 @@ mod tests {
             (15..23, _) => 'b',
             _ => 'w',
         });
-        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0), true);
         for z in 10..20 {
             for x in 15..23 {
                 assert_eq!(lc.grid[z][x], LC_WATER, "gap cell ({x}, {z})");
@@ -508,15 +522,40 @@ mod tests {
         for row in &mut heights {
             row[13..17].fill(40.0);
         }
-        naturalize(&mut lc, Some(&mut heights), Climate::Temperate, (0, 0));
+        naturalize(
+            &mut lc,
+            Some(&mut heights),
+            Climate::Temperate,
+            (0, 0),
+            true,
+        );
         assert_eq!(lc.grid[15][14], LC_GRASSLAND);
         assert_eq!(heights[15][14], 40.0);
 
         // The same strip at the water's level is a causeway, and goes.
         let mut lc = coarse(30, 30, dam);
         let mut heights = vec![vec![10.0f32; 30]; 30];
-        naturalize(&mut lc, Some(&mut heights), Climate::Temperate, (0, 0));
+        naturalize(
+            &mut lc,
+            Some(&mut heights),
+            Climate::Temperate,
+            (0, 0),
+            true,
+        );
         assert_eq!(lc.grid[15][14], LC_WATER);
+
+        // A blueprint still draws the road along it, so it stays land.
+        let mut lc = coarse(30, 30, dam);
+        let mut heights = vec![vec![10.0f32; 30]; 30];
+        naturalize(
+            &mut lc,
+            Some(&mut heights),
+            Climate::Temperate,
+            (0, 0),
+            false,
+        );
+        assert_eq!(lc.grid[15][14], LC_GRASSLAND);
+        assert_eq!(heights[15][14], 10.0);
     }
 
     #[test]
@@ -526,7 +565,7 @@ mod tests {
             0..5 | 25.. => 'w',
             _ => 'b',
         });
-        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0), true);
         assert_eq!(count(&lc, LC_WATER), 10 * 30);
         assert_eq!(count(&lc, LC_GRASSLAND), 20 * 30);
     }

@@ -775,13 +775,14 @@ impl Ground {
     /// built-up land and fields to nature where the mode asks, then marks the beaches.
     pub fn finish_land_cover(&mut self, mode: GenerationMode) {
         if mode.natural_land_cover() {
-            self.naturalize_land_cover();
+            // A blueprint still draws roads and outlines on narrow land by the water.
+            self.naturalize_land_cover(mode.skip_objects());
         }
         self.mark_beaches();
     }
 
     /// Returns built-up land and fields to natural cover, for terrain-only worlds.
-    fn naturalize_land_cover(&mut self) {
+    fn naturalize_land_cover(&mut self, reclaim: bool) {
         let (climate, origin) = (self.climate, self.origin);
         let Ground {
             land_cover,
@@ -792,7 +793,7 @@ impl Ground {
             return;
         };
         let heights = elevation_data.as_mut().map(|d| d.heights.as_mut_slice());
-        crate::land_cover::naturalize::naturalize(lc, heights, climate, origin);
+        crate::land_cover::naturalize::naturalize(lc, heights, climate, origin, reclaim);
     }
 
     /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
