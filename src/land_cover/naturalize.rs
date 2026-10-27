@@ -30,7 +30,13 @@ const SALT_WARP_Z: u32 = 0x4E41_545A;
 
 /// Replaces built-up land and cropland with natural cover. `heights` is the elevation grid
 /// in blocks, aligned with the land cover; cells returned to water are sunk onto it.
-pub fn naturalize(lc: &mut LandCoverData, heights: Option<&mut [Vec<f32>]>, climate: Climate) {
+/// `origin` is the absolute cell the grid starts at.
+pub fn naturalize(
+    lc: &mut LandCoverData,
+    heights: Option<&mut [Vec<f32>]>,
+    climate: Climate,
+    origin: (i32, i32),
+) {
     let (width, height) = (lc.width, lc.height);
     if width == 0 || height == 0 {
         return;
@@ -53,7 +59,7 @@ pub fn naturalize(lc: &mut LandCoverData, heights: Option<&mut [Vec<f32>]>, clim
         lc.water_distance = compute_water_distance(&lc.grid, width, height);
         lc.invalidate_water_blend_grid();
     }
-    fill_with_nearest_wild(lc, climate);
+    fill_with_nearest_wild(lc, climate, origin);
 }
 
 /// Cover that grows back on its own. Bare ground counts only where it is the land's
@@ -174,19 +180,24 @@ fn reachable(cell: f32, level: f32) -> bool {
 }
 
 /// Gives every remaining built-up cell the wild class nearest to it, found on a lattice of
-/// ESA pixels and read through a smooth warp so the borders between classes bend.
-fn fill_with_nearest_wild(lc: &mut LandCoverData, climate: Climate) {
+/// ESA pixels and read through a smooth warp so the borders between classes bend. Both
+/// are laid on absolute cells from `origin`, so neighbouring areas draw the same borders.
+fn fill_with_nearest_wild(lc: &mut LandCoverData, climate: Climate, origin: (i32, i32)) {
     let (width, height) = (lc.width, lc.height);
     let cpm = lc.cells_per_meter.max(1e-6);
     let step = ((LATTICE_M * cpm).round() as usize).max(1);
-    let (lw, lh) = (width.div_ceil(step), height.div_ceil(step));
+    // How far into its lattice cell the grid starts.
+    let px = origin.0.rem_euclid(step as i32) as usize;
+    let pz = origin.1.rem_euclid(step as i32) as usize;
+    let (lw, lh) = ((width + px).div_ceil(step), (height + pz).div_ceil(step));
 
     let mut label = vec![0u8; lw * lh];
     let mut dist = vec![u16::MAX; lw * lh];
     for lz in 0..lh {
-        let z = (lz * step + step / 2).min(height - 1);
+        let z = (lz * step + step / 2).saturating_sub(pz).min(height - 1);
         for lx in 0..lw {
-            let c = lc.grid[z][(lx * step + step / 2).min(width - 1)];
+            let x = (lx * step + step / 2).saturating_sub(px).min(width - 1);
+            let c = lc.grid[z][x];
             if is_wild(c, climate) {
                 label[lz * lw + lx] = c;
                 dist[lz * lw + lx] = 0;
@@ -210,11 +221,15 @@ fn fill_with_nearest_wild(lc: &mut LandCoverData, climate: Climate) {
             if *c != LC_BUILT_UP {
                 continue;
             }
-            let (xi, zi) = (x as i32, z as i32);
+            let (xi, zi) = (origin.0 + x as i32, origin.1 + z as i32);
             let wx = (value_noise_salted(xi, zi, wavelength, SALT_WARP_X) - 0.5) * 2.0 * warp;
             let wz = (value_noise_salted(xi, zi, wavelength, SALT_WARP_Z) - 0.5) * 2.0 * warp;
-            let lx = ((x as f64 + wx) / step as f64).floor().clamp(0.0, max_lx) as usize;
-            let lz = ((z as f64 + wz) / step as f64).floor().clamp(0.0, max_lz) as usize;
+            let lx = (((x + px) as f64 + wx) / step as f64)
+                .floor()
+                .clamp(0.0, max_lx) as usize;
+            let lz = (((z + pz) as f64 + wz) / step as f64)
+                .floor()
+                .clamp(0.0, max_lz) as usize;
             *c = match label[lz * lw + lx] {
                 0 => fallback,
                 l => l,
@@ -345,7 +360,7 @@ mod tests {
     #[test]
     fn fields_become_grassland() {
         let mut lc = lc_from_rows(&["ccgg", "cctt"], 1.0);
-        naturalize(&mut lc, None, Climate::Temperate);
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
         assert_eq!(count(&lc, LC_CROPLAND), 0);
         assert_eq!(count(&lc, LC_GRASSLAND), 6);
         assert_eq!(count(&lc, LC_TREE_COVER), 2);
@@ -368,7 +383,7 @@ mod tests {
             .collect();
         let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
         let mut lc = lc_from_rows(&rows, 1.0);
-        naturalize(&mut lc, None, Climate::Temperate);
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
         assert_eq!(count(&lc, LC_BUILT_UP), 0);
         assert_eq!(count(&lc, LC_TREE_COVER), 60 * 60);
     }
@@ -376,10 +391,10 @@ mod tests {
     #[test]
     fn town_with_nothing_wild_around_turns_to_grassland() {
         let mut lc = lc_from_rows(&["bbbb", "bbbb"], 1.0);
-        naturalize(&mut lc, None, Climate::Temperate);
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
         assert_eq!(count(&lc, LC_GRASSLAND), 8);
         let mut lc = lc_from_rows(&["bbbb", "bbbb"], 1.0);
-        naturalize(&mut lc, None, Climate::HotDesert);
+        naturalize(&mut lc, None, Climate::HotDesert, (0, 0));
         assert_eq!(count(&lc, LC_BARE), 8);
     }
 
@@ -399,13 +414,37 @@ mod tests {
             .collect();
         let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
         let mut temperate = lc_from_rows(&rows, 1.0);
-        naturalize(&mut temperate, None, Climate::Temperate);
+        naturalize(&mut temperate, None, Climate::Temperate, (0, 0));
         assert_eq!(count(&temperate, LC_BARE), 100 * 50);
         let mut desert = lc_from_rows(&rows, 1.0);
-        naturalize(&mut desert, None, Climate::HotDesert);
+        naturalize(&mut desert, None, Climate::HotDesert, (0, 0));
         assert!(count(&desert, LC_BARE) > 150 * 50);
         assert!(count(&desert, LC_TREE_COVER) > 150 * 50);
         assert_eq!(count(&desert, LC_BUILT_UP), 0);
+    }
+
+    #[test]
+    fn overlapping_areas_draw_the_same_borders() {
+        // Forest west of a town and grass east of it; the second area starts off the lattice.
+        let class = |x: usize| match x {
+            0..100 => 't',
+            100..200 => 'b',
+            _ => 'g',
+        };
+        let area = |x0: usize, z0: usize, w: usize, h: usize| {
+            let rows: Vec<String> = (0..h).map(|_| (x0..x0 + w).map(class).collect()).collect();
+            let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+            let mut lc = lc_from_rows(&rows, 1.0);
+            naturalize(&mut lc, None, Climate::Temperate, (x0 as i32, z0 as i32));
+            lc
+        };
+        let whole = area(0, 0, 300, 260);
+        let part = area(37, 23, 226, 200);
+        for z in 0..200 {
+            assert_eq!(part.grid[z][..], whole.grid[z + 23][37..263], "row {z}");
+        }
+        assert!(count(&whole, LC_TREE_COVER) > 100 * 260);
+        assert!(count(&whole, LC_GRASSLAND) > 100 * 260);
     }
 
     /// Builds a grid from a per-cell class at 0.2 cells per metre, where
@@ -428,7 +467,7 @@ mod tests {
         for row in &mut heights[10..20] {
             row[13..17].fill(12.0);
         }
-        naturalize(&mut lc, Some(&mut heights), Climate::Temperate);
+        naturalize(&mut lc, Some(&mut heights), Climate::Temperate, (0, 0));
         for (z, row) in heights.iter().enumerate().take(20).skip(10) {
             for (x, &h) in row.iter().enumerate().take(17).skip(13) {
                 assert_eq!(lc.grid[z][x], LC_WATER, "deck cell ({x}, {z})");
@@ -450,7 +489,7 @@ mod tests {
             (15..23, _) => 'b',
             _ => 'w',
         });
-        naturalize(&mut lc, None, Climate::Temperate);
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
         for z in 10..20 {
             for x in 15..23 {
                 assert_eq!(lc.grid[z][x], LC_WATER, "gap cell ({x}, {z})");
@@ -469,14 +508,14 @@ mod tests {
         for row in &mut heights {
             row[13..17].fill(40.0);
         }
-        naturalize(&mut lc, Some(&mut heights), Climate::Temperate);
+        naturalize(&mut lc, Some(&mut heights), Climate::Temperate, (0, 0));
         assert_eq!(lc.grid[15][14], LC_GRASSLAND);
         assert_eq!(heights[15][14], 40.0);
 
         // The same strip at the water's level is a causeway, and goes.
         let mut lc = coarse(30, 30, dam);
         let mut heights = vec![vec![10.0f32; 30]; 30];
-        naturalize(&mut lc, Some(&mut heights), Climate::Temperate);
+        naturalize(&mut lc, Some(&mut heights), Climate::Temperate, (0, 0));
         assert_eq!(lc.grid[15][14], LC_WATER);
     }
 
@@ -487,7 +526,7 @@ mod tests {
             0..5 | 25.. => 'w',
             _ => 'b',
         });
-        naturalize(&mut lc, None, Climate::Temperate);
+        naturalize(&mut lc, None, Climate::Temperate, (0, 0));
         assert_eq!(count(&lc, LC_WATER), 10 * 30);
         assert_eq!(count(&lc, LC_GRASSLAND), 20 * 30);
     }

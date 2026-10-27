@@ -62,6 +62,9 @@ pub struct Ground {
     ecoregions: Option<Arc<EcoMap>>,
     /// A winter run: every biome becomes its snowy counterpart.
     winter: bool,
+    /// Absolute block of the grids' first cell, so passes that draw patterns line up
+    /// across One World seams. (0, 0) in a local run.
+    origin: (i32, i32),
 }
 
 /// Layout of a run's ground grids. A projected run takes its size from the
@@ -117,12 +120,21 @@ impl GroundFrame {
         }
     }
 
+    /// Absolute block of the area's north-west corner, where its grids start.
+    fn origin(&self, bbox: &LLBBox) -> (i32, i32) {
+        self.mercator.as_ref().map_or((0, 0), |proj| {
+            (
+                crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false),
+                crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false),
+            )
+        })
+    }
+
     /// Ecoregions over the area, at the geography the land cover is laid out on.
     fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
         let map = match &self.mercator {
             Some(proj) => {
-                let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false);
-                let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false);
+                let (x0, z0) = self.origin(bbox);
                 EcoMap::build(world_w, world_h, (x0, z0), |gx, gz| {
                     (
                         proj.lat_for_z(f64::from(z0) + gz),
@@ -264,6 +276,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -320,6 +333,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
+            origin: frame.origin(bbox),
         }
     }
 
@@ -344,6 +358,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -368,6 +383,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -419,6 +435,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -557,6 +574,7 @@ impl Ground {
                             .then(|| frame.ecoregions(&requested_bbox, (final_w, final_h)))
                             .flatten(),
                         winter: false,
+                        origin: frame.origin(&requested_bbox),
                     }
                 }
                 Err(e) => {
@@ -592,6 +610,7 @@ impl Ground {
                             .then(|| frame.ecoregions(&requested_bbox, plan.final_dims))
                             .flatten(),
                         winter: false,
+                        origin: frame.origin(&requested_bbox),
                     }
                 }
             }
@@ -763,7 +782,7 @@ impl Ground {
 
     /// Returns built-up land and fields to natural cover, for terrain-only worlds.
     fn naturalize_land_cover(&mut self) {
-        let climate = self.climate;
+        let (climate, origin) = (self.climate, self.origin);
         let Ground {
             land_cover,
             elevation_data,
@@ -773,7 +792,7 @@ impl Ground {
             return;
         };
         let heights = elevation_data.as_mut().map(|d| d.heights.as_mut_slice());
-        crate::land_cover::naturalize::naturalize(lc, heights, climate);
+        crate::land_cover::naturalize::naturalize(lc, heights, climate, origin);
     }
 
     /// Marks bare ground at the water's edge as beach. Run after every pass that moves water.
@@ -1748,6 +1767,7 @@ mod tests {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 
@@ -2174,6 +2194,7 @@ pub(crate) mod test_support {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            origin: (0, 0),
         }
     }
 }
