@@ -3444,6 +3444,10 @@ async function startGeneration() {
 
     // Validate ground_level
     ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
+    // A world the CLI made may sit on another level, and the backend refuses any but its own.
+    if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
+      ground_level = oneWorldInfo.ground_level;
+    }
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
