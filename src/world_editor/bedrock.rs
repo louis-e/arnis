@@ -393,6 +393,7 @@ pub struct BedrockWriter {
     game_mode: crate::args::GameMode,
     world_time: i64,
     start_with_map: bool,
+    size_options: WorldSizeOptions,
 }
 
 impl BedrockWriter {
@@ -429,12 +430,19 @@ impl BedrockWriter {
             game_mode,
             world_time,
             start_with_map,
+            size_options: WorldSizeOptions::default(),
         }
     }
 
     /// Where the ground grid starts, which the biomes and the spawn height read it from.
     pub fn with_ground_origin(mut self, origin: (i32, i32)) -> Self {
         self.ground_origin = Some(origin);
+        self
+    }
+
+    /// The run's options, which size the world for the staging check.
+    pub fn with_size_options(mut self, options: WorldSizeOptions) -> Self {
+        self.size_options = options;
         self
     }
 
@@ -517,21 +525,17 @@ impl BedrockWriter {
         self.write_metadata(dir, world, xzbbox, llbbox)
     }
 
-    /// Whether the cache drive takes the largest world this area can make, headroom kept.
-    /// The run's own disk check measured only the output drive.
+    /// Whether the cache drive, which the run's own disk check never measured, takes this world.
     fn private_staging_fits(&self, xzbbox: &XZBBox) -> bool {
         let Some(root) = private_staging_root() else {
             return true;
         };
         let km2 = xzbbox.bounding_rect().total_blocks() as f64 / 1e6;
-        let largest = WorldSizeOptions {
-            interior: true,
-            caves: true,
-            fillground: true,
+        let options = WorldSizeOptions {
             tall: self.extend_build_height,
-            ..Default::default()
+            ..self.size_options
         };
-        let bound = estimated_world_bytes(km2, super::WorldFormat::BedrockMcWorld, largest);
+        let bound = estimated_world_bytes(km2, super::WorldFormat::BedrockMcWorld, options);
         check_disk_space(&root, bound).is_ok()
     }
 

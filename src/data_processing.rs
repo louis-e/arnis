@@ -827,6 +827,7 @@ pub fn generate_world_with_options(
     editor.set_place_schematics(args.use_3d);
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
+    editor.set_size_options(crate::world_utils::WorldSizeOptions::of(args));
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     if let Some(run) = one_world {
