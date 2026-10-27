@@ -1316,7 +1316,7 @@ enum Picture {
 /// still to be cropped, whose name depends on the resolution it is asked at.
 enum PictureOf<'a> {
     Pixels(u64),
-    Geometry(&'a dyn Fn(u32) -> u64),
+    Geometry(&'a (dyn Fn(u32) -> u64 + Sync)),
 }
 
 impl PictureOf<'_> {
@@ -1357,7 +1357,7 @@ fn extents<'a>(panels: &[Panel], hashes: &[u64]) -> Vec<Extent<'a>> {
 pub(crate) struct Pending {
     pub w: f64,
     pub h: f64,
-    pub picture: Box<dyn Fn(u32) -> u64>,
+    pub picture: Box<dyn Fn(u32) -> u64 + Send + Sync>,
 }
 
 /// `atlas_area` from the panels alone, for tests that are about the budget and
@@ -1381,10 +1381,13 @@ fn fit_px_of(panels: &[Panel], requested_px: u32) -> u32 {
 /// it needed the whole budget and pushed `fit_px` down a step or two for
 /// nothing, which is where the panels lost their sharpness.
 fn atlas_cost(extents: &[Extent], px: u32) -> (u64, usize) {
-    let mut seen: FnvHashSet<(Picture, Sprite)> = FnvHashSet::default();
-    extents
-        .iter()
+    // In parallel: naming a piece not cropped yet walks its gather tables.
+    let keys: Vec<(Picture, Sprite)> = extents
+        .par_iter()
         .map(|e| (e.picture.at(px), Sprite::of(e.w, e.h, px)))
+        .collect();
+    let mut seen: FnvHashSet<(Picture, Sprite)> = FnvHashSet::default();
+    keys.into_iter()
         .filter(|key| seen.insert(*key))
         .fold((0, 0), |(area, n), (_, sprite)| {
             (area + sprite.area(), n + 1)

@@ -979,7 +979,7 @@ fn picture_at(
     fit: Fit,
     scale: f64,
     (x0, x1, y0, y1): (f64, f64, f64, f64),
-) -> Box<dyn Fn(u32) -> u64> {
+) -> Box<dyn Fn(u32) -> u64 + Send + Sync> {
     Box::new(move |px: u32| {
         use std::hash::Hasher;
         let mut h = fnv::FnvHasher::default();
