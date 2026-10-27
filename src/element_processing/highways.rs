@@ -3388,6 +3388,10 @@ pub(crate) fn surface_highway_type(way: &ProcessedWay) -> Option<&str> {
     if way.tags.get("aeroway").is_some_and(|v| v == "jet_bridge") {
         return None;
     }
+    // A pier path is drawn as the deck, and the water under it is not road.
+    if way.tags.get("man_made").is_some_and(|v| v == "pier") {
+        return None;
+    }
     // Negative levels are indoor mapping.
     if way
         .tags
@@ -5328,6 +5332,23 @@ mod tests {
         let editor = tunnel_editor(&xzbbox, crate::ground::Ground::new_flat(0));
         let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0);
         assert!(!mask.contains(50, 50), "tunnel is not a surface road");
+    }
+
+    #[test]
+    fn pier_paths_leave_the_water_under_them_alone() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let elems = vec![
+            line_way(
+                1,
+                &[(10, 20), (50, 20)],
+                &[("highway", "footway"), ("man_made", "pier")],
+            ),
+            line_way(2, &[(10, 40), (50, 40)], &[("highway", "footway")]),
+        ];
+        let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0);
+        assert!(!mask.contains(30, 20), "a pier is a deck, not a road");
+        assert!(mask.contains(30, 40));
     }
 
     fn line_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedElement {
