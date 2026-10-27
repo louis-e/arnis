@@ -1071,8 +1071,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             let llpoint =
                 LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
 
-            // Validate that spawn point is within the bounding box. Only enforceable when the
-            // bbox is known up front; a file-derived bbox isn't available until the file is parsed.
+            // Validate that spawn point is within the bounding box. A file-derived bbox is
+            // checked in run_cli once the file is parsed.
             if let Some(bbox) = args.bbox {
                 if !bbox.contains(&llpoint) {
                     return Err(

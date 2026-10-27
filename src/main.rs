@@ -325,6 +325,18 @@ fn run_cli() {
             (None, bbox)
         }
     };
+    // validate_args checks the spawn only against an explicit --bbox.
+    if let (None, Some(lat), Some(lng)) = (args.bbox, args.spawn_lat, args.spawn_lng) {
+        let inside = coordinate_system::geographic::LLPoint::new(lat, lng)
+            .is_ok_and(|p| effective_bbox.contains(&p));
+        if !inside {
+            eprintln!(
+                "{} Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box.",
+                "Error:".red().bold()
+            );
+            std::process::exit(1);
+        }
+    }
 
     // One World: snaps the bbox to the world's chunk grid and holds its lock.
     let mut one_world_paths: Option<PathBuf> = None;
