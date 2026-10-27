@@ -444,7 +444,7 @@ fn beyond(
 
 /// Whether a way lays the rail on cell `i` of `n`: an end cell only if it owns the joint.
 fn lays_cell(ends: &[TrackEnd; 2], n: usize, i: usize) -> bool {
-    !((i == 0 && !ends[0].owns) || (i + 1 == n && !ends[1].owns))
+    (i != 0 || ends[0].owns) && (i + 1 != n || ends[1].owns)
 }
 
 /// The deck a rail bridge's track lies on at one of its cells.
