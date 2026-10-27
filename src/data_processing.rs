@@ -811,11 +811,12 @@ pub fn generate_world_with_options(
             args.disable_height_limit,
         )
     };
-    // Voxy renders from stored per-voxel light, so an unlit LOD cache would be a
-    // black horizon. The toggle implies baked lighting rather than silently
+    // Voxy and DH render from stored light, so an unlit LOD cache would be a
+    // black horizon. The toggles imply baked lighting rather than silently
     // producing that.
     let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
-    editor.set_bake_lighting(args.bake_lighting || wants_voxy);
+    let wants_dh = args.dh_lod && world_format == WorldFormat::JavaAnvil;
+    editor.set_bake_lighting(args.bake_lighting || wants_voxy || wants_dh);
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world);
@@ -999,6 +1000,12 @@ pub fn generate_world_with_options(
                 "Skipping the Voxy LOD cache: could not read the world seed from level.dat."
             ),
             Err(e) => eprintln!("Skipping the Voxy LOD cache: {e}"),
+        }
+    }
+    if wants_dh {
+        match crate::distant_horizons::DhWriter::create(&output_path) {
+            Ok(writer) => editor.set_dh(Arc::new(writer)),
+            Err(e) => eprintln!("Skipping the Distant Horizons LOD cache: {e}"),
         }
     }
 

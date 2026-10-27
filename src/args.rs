@@ -244,6 +244,12 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub voxy_lod: bool,
 
+    /// Pre-generate the Distant Horizons mod's LOD database so the world renders
+    /// to the horizon on first join, instead of DH building it chunk by chunk.
+    /// Java only; implies --bake-lighting.
+    #[arg(long, default_value_t = false)]
+    pub dh_lod: bool,
+
     /// Render a top-down PNG map preview of the generated world (Java and Bedrock)
     #[arg(long, default_value_t = false)]
     pub map_preview: bool,
@@ -1383,6 +1389,7 @@ mod tests {
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
         assert!(!args.voxy_lod);
+        assert!(!args.dh_lod);
         assert!(!args.map_preview);
         assert_eq!(args.signage, SignageLevel::Basic);
         let cmd = [

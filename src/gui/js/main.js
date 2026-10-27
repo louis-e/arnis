@@ -51,7 +51,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Before the store restores values, so the cards follow the restored ones.
   initSettingsLayout();
   initDialogs();
-  initVoxyLightingCoupling();
+  initLodLightingCoupling();
   initCavesFillCoupling();
   initDisastersCoupling();
   refreshHeightLimitRow();
@@ -1664,20 +1664,24 @@ function setChecked(el, value) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// Voxy renders distant terrain from the per-voxel light stored in its LOD
-// cache, so pre-generating one without baked lighting would give a black
-// horizon. Keep the two toggles consistent in the UI rather than quietly
+// Voxy and Distant Horizons render distant terrain from the light stored in
+// their LOD caches, so pre-generating one without baked lighting would give a
+// black horizon. Keep the toggles consistent in the UI rather than quietly
 // overriding the user's choice at generation time.
-function initVoxyLightingCoupling() {
-  const voxy = document.getElementById('voxy-lod-toggle');
+function initLodLightingCoupling() {
   const bake = document.getElementById('bake-lighting-toggle');
-  if (!voxy || !bake) return;
+  const lods = ['voxy-lod-toggle', 'dh-lod-toggle']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  if (!bake) return;
 
-  voxy.addEventListener('change', () => {
-    if (voxy.checked) setChecked(bake, true);
-  });
+  for (const lod of lods) {
+    lod.addEventListener('change', () => {
+      if (lod.checked) setChecked(bake, true);
+    });
+  }
   bake.addEventListener('change', () => {
-    if (!bake.checked) setChecked(voxy, false);
+    if (!bake.checked) lods.forEach((lod) => setChecked(lod, false));
   });
 }
 
@@ -3078,11 +3082,12 @@ function restoreNaturalRows() {
   setSettingsRowAvailable('height-multiplier-slider', true);
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
   setSettingsRowAvailable('voxy-lod-toggle', true);
+  setSettingsRowAvailable('dh-lod-toggle', true);
   setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
 }
 
-// Rotation stays 0, the Voxy cache off and the build height extended while
+// Rotation stays 0, the LOD caches off and the build height extended while
 // the mode is on; scale, build height and elevation source follow the world
 // once it exists.
 function applyOneWorldPins(info) {
@@ -3091,6 +3096,7 @@ function applyOneWorldPins(info) {
   if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
   setSettingsRowAvailable('rotation-angle-input', false);
   setSettingsRowAvailable('voxy-lod-toggle', false);
+  setSettingsRowAvailable('dh-lod-toggle', false);
   postToMap({ type: 'setRotationLocked', locked: true });
 
   const exists = !!(info && info.exists);
@@ -3101,6 +3107,7 @@ function applyOneWorldPins(info) {
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
   setSettingsRowAvailable('voxy-lod-toggle', false);
+  setSettingsRowAvailable('dh-lod-toggle', false);
   setSettingsRowAvailable('disable-height-limit-toggle', false);
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false);
@@ -3441,6 +3448,7 @@ async function startGeneration() {
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
+    var dh_lod = document.getElementById("dh-lod-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
     if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
@@ -3502,6 +3510,7 @@ async function startGeneration() {
         awsOnlyElevation: aws_only_elevation,
         bakeLightingEnabled: bake_lighting,
         voxyLodEnabled: voxy_lod,
+        dhLodEnabled: dh_lod,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

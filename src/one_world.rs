@@ -504,11 +504,15 @@ fn resolve(
     });
     args.projection = crate::projection::ProjectionKind::WebMercator;
     args.bbox = Some(llbbox);
-    // Voxy rebuilds the LOD database from the regions of one run, and both
-    // facade sources replace the world's resource pack on every run.
+    // Voxy and DH rebuild their LOD databases from the regions of one run, and
+    // both facade sources replace the world's resource pack on every run.
     if args.voxy_lod {
         println!("Note: the Voxy LOD cache is off in One World mode.");
         args.voxy_lod = false;
+    }
+    if args.dh_lod {
+        println!("Note: the Distant Horizons LOD cache is off in One World mode.");
+        args.dh_lod = false;
     }
     if args.mapillary_facade_mode.places_displays() && args.mapillary_facades_wanted() {
         println!("Note: One World builds Mapillary facades as blocks; photo panels are off.");
