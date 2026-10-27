@@ -349,6 +349,7 @@ mod tests {
             grid,
             water_distance,
             water_blend_cache: OnceCell::new(),
+            beach_tiles: OnceCell::new(),
             width,
             height,
             cells_per_meter,

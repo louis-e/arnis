@@ -94,6 +94,7 @@ pub fn mark_beaches(lc: &mut LandCoverData) {
     let reach = (BEACH_REACH_M * lc.cells_per_meter)
         .round()
         .clamp(1.0, 255.0) as u32;
+    lc.beach_tiles = OnceCell::new();
     let grid = &mut lc.grid;
 
     let mut frontier: Vec<(u32, u32)> = Vec::new();
@@ -152,6 +153,8 @@ pub struct LandCoverData {
     pub water_distance: Vec<Vec<u8>>,
     /// Lazily computed smoothed water mask, so the blur runs once instead of after every mutation.
     pub water_blend_cache: OnceCell<WaterBlendMask>,
+    /// Lazily computed tiles holding beach, so most beach lookups end in one bit.
+    pub beach_tiles: OnceCell<BeachTiles>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -193,9 +196,70 @@ impl LandCoverData {
         })
     }
 
-    /// Call after any mutation to `grid` so the mask is recomputed on next use.
+    /// Call after any mutation to `grid` so the masks are recomputed on next use.
     pub(crate) fn invalidate_water_blend_grid(&mut self) {
         self.water_blend_cache = OnceCell::new();
+        self.beach_tiles = OnceCell::new();
+    }
+
+    /// Whether any beach cell lies within `reach` cells (a square) of cell (x, z).
+    pub(crate) fn beach_within(&self, x: usize, z: usize, reach: usize) -> bool {
+        let (w, h) = (self.width, self.height);
+        if w == 0 || h == 0 {
+            return false;
+        }
+        let tiles = self
+            .beach_tiles
+            .get_or_init(|| BeachTiles::build(&self.grid, w));
+        if !tiles.any {
+            return false;
+        }
+        let (x0, x1) = (x.saturating_sub(reach), (x + reach).min(w - 1));
+        let (z0, z1) = (z.saturating_sub(reach), (z + reach).min(h - 1));
+        let tiled = (z0 >> BEACH_TILE_SHIFT..=z1 >> BEACH_TILE_SHIFT).any(|tz| {
+            (x0 >> BEACH_TILE_SHIFT..=x1 >> BEACH_TILE_SHIFT).any(|tx| tiles.get(tx, tz))
+        });
+        tiled && (z0..=z1).any(|z| self.grid[z][x0..=x1].contains(&LC_BEACH))
+    }
+}
+
+const BEACH_TILE_SHIFT: usize = 4;
+
+/// One bit per 16x16 cells, set where any of them is beach.
+#[derive(Clone)]
+pub struct BeachTiles {
+    bits: Vec<u64>,
+    tiles_w: usize,
+    any: bool,
+}
+
+impl BeachTiles {
+    fn build(grid: &[Vec<u8>], width: usize) -> Self {
+        let tiles_w = width.div_ceil(1 << BEACH_TILE_SHIFT);
+        let tiles_h = grid.len().div_ceil(1 << BEACH_TILE_SHIFT);
+        let mut tiles = BeachTiles {
+            bits: vec![0; (tiles_w * tiles_h).div_ceil(64)],
+            tiles_w,
+            any: false,
+        };
+        for (z, row) in grid.iter().enumerate() {
+            if !row.contains(&LC_BEACH) {
+                continue;
+            }
+            for (tx, chunk) in row.chunks(1 << BEACH_TILE_SHIFT).enumerate() {
+                if chunk.contains(&LC_BEACH) {
+                    let i = (z >> BEACH_TILE_SHIFT) * tiles_w + tx;
+                    tiles.bits[i / 64] |= 1 << (i % 64);
+                    tiles.any = true;
+                }
+            }
+        }
+        tiles
+    }
+
+    fn get(&self, tx: usize, tz: usize) -> bool {
+        let i = tz * self.tiles_w + tx;
+        self.bits[i / 64] >> (i % 64) & 1 == 1
     }
 }
 
@@ -423,6 +487,7 @@ pub fn fetch_land_cover_data(
         grid,
         water_distance,
         water_blend_cache: OnceCell::new(),
+        beach_tiles: OnceCell::new(),
         width: grid_width,
         height: grid_height,
         cells_per_meter,
@@ -1680,6 +1745,7 @@ mod smoothing_scale_tests {
             water_distance: compute_water_distance(&grid, width, height),
             grid,
             water_blend_cache: OnceCell::new(),
+            beach_tiles: OnceCell::new(),
             width,
             height,
             cells_per_meter,

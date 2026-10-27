@@ -23,6 +23,7 @@ use crate::block_definitions::{
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::swimming_pools;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
@@ -601,16 +602,15 @@ pub fn generate_ground_region(
                         }
 
                         if place_esa_water {
-                            // Pre-paint; carve_lc_water_pass later overwrites with depth,
-                            // except along the world's edge, where this bed stays. That
-                            // edge skips the beach check, which is costly per water cell.
+                            // Pre-paint. carve_lc_water_pass later overwrites LC_WATER
+                            // cells with depth; the blended fringe keeps this bed.
                             editor.set_block_if_absent_absolute(WATER, x, water_y, z);
+                            let (bed, under) = crate::water_depth::shallow_bed(editor, x, z);
                             if water_y - 1 > min_y() {
-                                let bed = crate::water_depth::earthy_bed(x, z);
                                 editor.set_block_if_absent_absolute(bed, x, water_y - 1, z);
                             }
                             if water_y - 2 > min_y() {
-                                editor.set_block_if_absent_absolute(DIRT, x, water_y - 2, z);
+                                editor.set_block_if_absent_absolute(under, x, water_y - 2, z);
                             }
                         } else {
                             let cover_here = if has_land_cover {
@@ -836,6 +836,8 @@ pub fn generate_ground_region(
                                         BRICK,
                                         OAK_PLANKS,
                                         BLACK_CONCRETE,
+                                        swimming_pools::COPING,
+                                        swimming_pools::LINING,
                                     ]),
                                 );
                             } else if talus_block.is_some_and(|(top, _)| top == surface_block) {

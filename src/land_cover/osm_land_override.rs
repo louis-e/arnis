@@ -15,7 +15,9 @@ use crate::element_processing::swimming_pools::is_swimming_pool;
 use crate::element_processing::waterways::{
     is_channel_waterway, is_underground_waterway, waterway_width, MAX_WATERWAY_WIDTH,
 };
-use crate::land_cover::{compute_water_distance, nearest_land_class, LandCoverData, LC_WATER};
+use crate::land_cover::{
+    compute_water_distance, nearest_land_class, LandCoverData, LC_BUILT_UP, LC_WATER,
+};
 use crate::osm_parser::{
     ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
 };
@@ -25,6 +27,10 @@ use crate::osm_parser::{
 const SHORE_BAND_M: f64 = 15.0;
 const MIN_BAND_CELLS: i32 = 1;
 const MAX_BAND_CELLS: i32 = 64;
+/// How far past a pool's outline ESA water goes back to land: the coping and a block more.
+const POOL_MARGIN_BLOCKS: f64 = 2.0;
+/// A pool window past this many cells is a broken outline, not a pool.
+const MAX_POOL_WINDOW_CELLS: usize = 1 << 20;
 
 pub fn apply_osm_land_override(
     land_cover: &mut LandCoverData,
@@ -53,6 +59,8 @@ pub fn apply_osm_land_override(
         sz: (height as f64 - 1.0) / (world_height as f64 - 1.0),
         width,
         height,
+        ox: 0.0,
+        oz: 0.0,
     };
     let band = band_cells(land_cover.cells_per_meter);
 
@@ -66,6 +74,8 @@ pub fn apply_osm_land_override(
     let mut over_water = vec![0u64; n.div_ceil(64)];
     let mut any_area = false;
     let mut any_land = false;
+    // Pools, handled each on its own window below.
+    let mut pools: Vec<Vec<Vec<ProcessedNode>>> = Vec::new();
 
     for elem in elements {
         match elem {
@@ -97,17 +107,25 @@ pub fn apply_osm_land_override(
                 } else if let Some(half) = land_line_half_width(way, scale) {
                     stamp_line(&mut land, &way.nodes, half, &map, xzbbox);
                     any_land = true;
-                } else if (is_building(&way.tags) || is_swimming_pool(&way.tags))
-                    && is_ring_closed(&way.nodes)
-                {
-                    // A pool is a basin built on land, which ESA often reads as water.
+                } else if is_building(&way.tags) && is_ring_closed(&way.nodes) {
                     if let Some(ring) = clip_water_ring_to_bbox(&way.nodes, xzbbox) {
                         fill_rings(&mut land, &[ring], &map);
                         any_land = true;
                     }
+                } else if is_swimming_pool(&way.tags) && is_ring_closed(&way.nodes) {
+                    if let Some(ring) = clip_water_ring_to_bbox(&way.nodes, xzbbox) {
+                        pools.push(vec![ring]);
+                    }
                 }
             }
             ProcessedElement::Relation(rel) => {
+                if is_swimming_pool(&rel.tags) {
+                    let rings = relation_rings(rel, xzbbox);
+                    if !rings.is_empty() {
+                        pools.push(rings);
+                    }
+                    continue;
+                }
                 let target = if is_water_area_relation(rel) {
                     any_area = true;
                     &mut water_area
@@ -125,47 +143,53 @@ pub fn apply_osm_land_override(
             _ => {}
         }
     }
-    if !any_area && !any_land {
+    if !any_area && !any_land && pools.is_empty() {
         return;
     }
 
-    // A road stamped across a pier is not evidence of land under it.
-    for (l, o) in land.iter_mut().zip(over_water.iter()) {
-        *l &= !o;
-    }
-    drop(over_water);
-
-    // Water within `band` steps of ESA land: the rim the classification may have got wrong.
-    let rim = dilate(n, width, height, band, |idx| !is_water(idx), is_water);
-    // Water reachable from a mapped water area without leaving the water: the same body,
-    // past the outline OSM drew for it. Walking over land instead would let a mapped lake
-    // condemn a separate body across an isthmus.
-    let past_outline = if any_area {
-        dilate(
-            n,
-            width,
-            height,
-            band,
-            |idx| get_bit(&water_area, idx),
-            is_water,
-        )
-    } else {
-        vec![0u64; n.div_ceil(64)]
-    };
-
-    let radius = band + 2;
     let mut changes: Vec<(u32, u32, u8)> = Vec::new();
-    for idx in 0..n {
-        if !get_bit(&rim, idx) || get_bit(&water_area, idx) || get_bit(&water_line, idx) {
-            continue;
+    if any_area || any_land {
+        // A road stamped across a pier is not evidence of land under it.
+        for (l, o) in land.iter_mut().zip(over_water.iter()) {
+            *l &= !o;
         }
-        if !(get_bit(&past_outline, idx) || get_bit(&land, idx)) {
-            continue;
+        drop(over_water);
+
+        // Water within `band` steps of ESA land: the rim the classification may have got wrong.
+        let rim = dilate(n, width, height, band, |idx| !is_water(idx), is_water);
+        // Water reachable from a mapped water area without leaving the water: the same body,
+        // past the outline OSM drew for it. Walking over land instead would let a mapped lake
+        // condemn a separate body across an isthmus.
+        let past_outline = if any_area {
+            dilate(
+                n,
+                width,
+                height,
+                band,
+                |idx| get_bit(&water_area, idx),
+                is_water,
+            )
+        } else {
+            vec![0u64; n.div_ceil(64)]
+        };
+
+        let radius = band + 2;
+        for idx in 0..n {
+            if !get_bit(&rim, idx) || get_bit(&water_area, idx) || get_bit(&water_line, idx) {
+                continue;
+            }
+            if !(get_bit(&past_outline, idx) || get_bit(&land, idx)) {
+                continue;
+            }
+            let (x, z) = (idx % width, idx / width);
+            if let Some(c) = nearest_land_class(grid, width, height, x, z, radius) {
+                changes.push((x as u32, z as u32, c));
+            }
         }
-        let (x, z) = (idx % width, idx / width);
-        if let Some(c) = nearest_land_class(grid, width, height, x, z, radius) {
-            changes.push((x as u32, z as u32, c));
-        }
+    }
+    let keep = |idx: usize| get_bit(&water_area, idx) || get_bit(&water_line, idx);
+    for rings in &pools {
+        pool_changes(grid, rings, &map, keep, &mut changes);
     }
     if changes.is_empty() {
         return;
@@ -174,7 +198,7 @@ pub fn apply_osm_land_override(
         land_cover.grid[z as usize][x as usize] = c;
     }
     eprintln!(
-        "OSM land override: {} shore cells reclassified from ESA water to land",
+        "OSM land override: {} cells reclassified from ESA water to land",
         changes.len()
     );
     land_cover.water_distance = compute_water_distance(&land_cover.grid, width, height);
@@ -261,14 +285,87 @@ struct GridMap {
     sz: f64,
     width: usize,
     height: usize,
+    /// Grid cell at the map's own (0, 0), for a window into the grid.
+    ox: f64,
+    oz: f64,
 }
 
 impl GridMap {
     fn gx(&self, x: i32) -> f64 {
-        (x - self.min_x) as f64 * self.sx
+        (x - self.min_x) as f64 * self.sx - self.ox
     }
     fn gz(&self, z: i32) -> f64 {
-        (z - self.min_z) as f64 * self.sz
+        (z - self.min_z) as f64 * self.sz - self.oz
+    }
+}
+
+/// Turns ESA water under a pool and its coping back to land. ESA often reads a pool as a
+/// pond, and the lake carve would then flood the basin. No shore band applies here: a
+/// pool complex can be water far from any land.
+fn pool_changes(
+    grid: &[Vec<u8>],
+    rings: &[Vec<ProcessedNode>],
+    map: &GridMap,
+    keep: impl Fn(usize) -> bool,
+    out: &mut Vec<(u32, u32, u8)>,
+) {
+    let (width, height) = (map.width, map.height);
+    // Plus one for the last outline row, which the even-odd fill leaves out.
+    let margin = ((POOL_MARGIN_BLOCKS * map.sx.max(map.sz)).ceil() as i64).max(1) + 1;
+    let (mut lo_x, mut hi_x, mut lo_z, mut hi_z) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for node in rings.iter().flatten() {
+        lo_x = lo_x.min(map.gx(node.x));
+        hi_x = hi_x.max(map.gx(node.x));
+        lo_z = lo_z.min(map.gz(node.z));
+        hi_z = hi_z.max(map.gz(node.z));
+    }
+    if lo_x > hi_x {
+        return;
+    }
+    let x0 = (lo_x.floor() as i64 - margin).max(0) as usize;
+    let z0 = (lo_z.floor() as i64 - margin).max(0) as usize;
+    let x1 = ((hi_x.ceil() as i64 + margin).min(width as i64 - 1)).max(0) as usize;
+    let z1 = ((hi_z.ceil() as i64 + margin).min(height as i64 - 1)).max(0) as usize;
+    if x0 > x1 || z0 > z1 {
+        return;
+    }
+    let (lw, lh) = (x1 - x0 + 1, z1 - z0 + 1);
+    if lw * lh > MAX_POOL_WINDOW_CELLS {
+        return;
+    }
+    let window = GridMap {
+        width: lw,
+        height: lh,
+        ox: x0 as f64,
+        oz: z0 as f64,
+        ..*map
+    };
+    let mut inside = vec![0u64; (lw * lh).div_ceil(64)];
+    fill_rings(&mut inside, rings, &window);
+
+    // A square of `margin` around the pool, one axis at a time.
+    let m = margin as usize;
+    let mut rows = vec![false; lw * lh];
+    for lz in 0..lh {
+        for lx in 0..lw {
+            rows[lz * lw + lx] = (lx.saturating_sub(m)..=(lx + m).min(lw - 1))
+                .any(|x| get_bit(&inside, lz * lw + x));
+        }
+    }
+    let radius = (lw.max(lh) / 2 + m + 2).min(64) as i32;
+    for lz in 0..lh {
+        for lx in 0..lw {
+            if !(lz.saturating_sub(m)..=(lz + m).min(lh - 1)).any(|z| rows[z * lw + lx]) {
+                continue;
+            }
+            let (x, z) = (x0 + lx, z0 + lz);
+            if grid[z][x] != LC_WATER || keep(z * width + x) {
+                continue;
+            }
+            let class =
+                nearest_land_class(grid, width, height, x, z, radius).unwrap_or(LC_BUILT_UP);
+            out.push((x as u32, z as u32, class));
+        }
     }
 }
 
@@ -388,9 +485,6 @@ fn has_explicit_water_tag(tags: &HashMap<String, String>) -> bool {
 
 fn is_water_area_way(way: &ProcessedWay) -> bool {
     let tags = &way.tags;
-    if is_swimming_pool(tags) {
-        return false;
-    }
     matches!(tags.get("natural").map(String::as_str), Some("water"))
         || has_explicit_water_tag(tags)
         || matches!(tags.get("landuse").map(String::as_str), Some("reservoir"))
@@ -509,6 +603,7 @@ mod tests {
             grid,
             water_distance,
             water_blend_cache: OnceCell::new(),
+            beach_tiles: OnceCell::new(),
             width: 60,
             height: 60,
             cells_per_meter: 1.0,
@@ -609,9 +704,9 @@ mod tests {
 
     #[test]
     fn esa_water_on_a_pool_goes_back_to_land() {
-        // ESA reads a large pool as a small pond; even tagged as water, the pool is land.
+        // ESA reads a pool as a small pond, a little wider than the pool.
         let (mut lc, bbox) = grid_from(|x, z| {
-            if (20..30).contains(&x) && (20..26).contains(&z) {
+            if (18..32).contains(&x) && (18..28).contains(&z) {
                 LC_WATER
             } else {
                 LC_GRASSLAND
@@ -624,11 +719,74 @@ mod tests {
             node(4, 20, 25),
             node(1, 20, 20),
         ];
-        let tags = [("leisure", "swimming_pool"), ("natural", "water")];
-        run(&mut lc, &bbox, &[way(5, ring, &tags)]);
-        for x in 20..30 {
+        run(
+            &mut lc,
+            &bbox,
+            &[way(5, ring, &[("leisure", "swimming_pool")])],
+        );
+        for x in 18..32 {
             assert_eq!(lc.grid[22][x], LC_GRASSLAND, "x={x} still water");
         }
+        for z in 18..28 {
+            assert_eq!(
+                lc.grid[z][19], LC_GRASSLAND,
+                "coping cell z={z} still water"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pool_complex_far_from_land_goes_back_to_land_whole() {
+        // One ESA blob 50 cells wide, farther than the shore band from any land.
+        let (mut lc, bbox) = grid_from(|x, z| {
+            if (5..55).contains(&x) && (5..55).contains(&z) {
+                LC_WATER
+            } else {
+                LC_GRASSLAND
+            }
+        });
+        let ring = vec![
+            node(1, 8, 8),
+            node(2, 51, 8),
+            node(3, 51, 51),
+            node(4, 8, 51),
+            node(1, 8, 8),
+        ];
+        run(
+            &mut lc,
+            &bbox,
+            &[way(6, ring, &[("leisure", "swimming_pool")])],
+        );
+        assert_ne!(lc.grid[30][30], LC_WATER, "the middle stayed water");
+        assert_ne!(lc.grid[30][7], LC_WATER, "the coping stayed water");
+    }
+
+    #[test]
+    fn a_pool_inside_a_mapped_lake_leaves_the_lake_alone() {
+        let (mut lc, bbox) = coast();
+        let lake = vec![
+            node(1, 30, -5),
+            node(2, 80, -5),
+            node(3, 80, 65),
+            node(4, 30, 65),
+            node(1, 30, -5),
+        ];
+        let pool = vec![
+            node(5, 40, 20),
+            node(6, 50, 20),
+            node(7, 50, 30),
+            node(8, 40, 30),
+            node(5, 40, 20),
+        ];
+        run(
+            &mut lc,
+            &bbox,
+            &[
+                way(7, lake, &[("natural", "water")]),
+                way(8, pool, &[("leisure", "swimming_pool")]),
+            ],
+        );
+        assert_eq!(lc.grid[25][45], LC_WATER);
     }
 
     #[test]

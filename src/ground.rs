@@ -891,6 +891,22 @@ impl Ground {
         }
     }
 
+    /// Whether beach land cover lies within `reach` blocks of the given coordinates.
+    pub fn beach_within(&self, coord: XZPoint, reach: f64) -> bool {
+        let Some(ref lc) = self.land_cover else {
+            return false;
+        };
+        if lc.width == 0 || lc.height == 0 {
+            return false;
+        }
+        let (world_w, world_h) = self.world_dims();
+        let sx = (lc.width - 1) as f64 / (world_w - 1).max(1) as f64;
+        let sz = (lc.height - 1) as f64 / (world_h - 1).max(1) as f64;
+        let x = ((coord.x as f64 * sx).round().max(0.0) as usize).min(lc.width - 1);
+        let z = ((coord.z as f64 * sz).round().max(0.0) as usize).min(lc.height - 1);
+        lc.beach_within(x, z, (reach * sx.max(sz)).ceil().max(0.0) as usize)
+    }
+
     /// Returns the water distance-to-shore value at the given coordinates.
     /// 0 = non-water, 1 = shore, 2+ = progressively deeper water.
     #[inline(always)]
@@ -1825,6 +1841,7 @@ mod tests {
             grid: vec![vec![LC_WATER, 10], vec![10, 10]],
             water_distance: vec![vec![1, 0], vec![0, 0]],
             water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
             width: 2,
             height: 2,
             cells_per_meter: 1.0,

@@ -533,6 +533,7 @@ mod tests {
             grid: (0..h).map(|_| row(LC_WATER, 10)).collect(),
             water_distance: (0..h).map(|_| row(1, 0)).collect(),
             water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
             width: w,
             height: h,
             cells_per_meter: 1.0,

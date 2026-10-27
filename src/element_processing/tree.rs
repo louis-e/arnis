@@ -490,11 +490,8 @@ fn wanted_height_m(
 }
 
 /// Sand beach at (x, z) or a promenade's width away.
-fn near_beach(editor: &WorldEditor, x: i32, z: i32) -> bool {
-    let r = ((12.0 * editor.scale()).round() as i32).clamp(2, 12);
-    [(0, 0), (r, 0), (-r, 0), (0, r), (0, -r)]
-        .iter()
-        .any(|&(dx, dz)| editor.cover_class(x + dx, z + dz) == crate::land_cover::LC_BEACH)
+fn beside_beach(editor: &WorldEditor, x: i32, z: i32) -> bool {
+    editor.near_beach(x, z, (12.0 * editor.scale()).round().clamp(2.0, 12.0))
 }
 
 /// Map a chosen `TreeType` to a habitat hint that steers region community selection.
@@ -758,7 +755,7 @@ impl Tree {
                         conifer: m.conifer,
                         want_height: wanted_height_m(editor, x, z, Some(m)).map(blocks),
                         eco,
-                        beach: eco.is_some() && near_beach(editor, x, z),
+                        beach: eco.is_some() && beside_beach(editor, x, z),
                     };
                     region.pick_mapped(x, z, hint, elev_y, req)
                 }
@@ -775,7 +772,7 @@ impl Tree {
                         want_height: wanted_height_m(editor, hx, hz, None).map(blocks),
                         density_decided,
                         eco,
-                        beach: eco.is_some() && near_beach(editor, hx, hz),
+                        beach: eco.is_some() && beside_beach(editor, hx, hz),
                         tagged: from_tags,
                         wet_ground: matches!(
                             editor.cover_class(hx, hz),

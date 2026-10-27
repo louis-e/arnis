@@ -97,6 +97,13 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     {
         tags.remove("natural");
     }
+    // A pool is a basin, not a lake, to everything that reads the tags.
+    if crate::element_processing::swimming_pools::is_swimming_pool(&tags) {
+        if tags.get("natural").is_some_and(|n| n == "water") {
+            tags.remove("natural");
+        }
+        tags.remove("water");
+    }
     tags
 }
 
@@ -4186,6 +4193,18 @@ mod lifecycle_tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn a_pool_tagged_as_water_is_only_a_pool() {
+        let kept = filter_tags(tags(&[
+            ("leisure", "swimming_pool"),
+            ("natural", "water"),
+            ("water", "pool"),
+        ]));
+        assert_eq!(kept, tags(&[("leisure", "swimming_pool")]));
+        let lake = filter_tags(tags(&[("natural", "water"), ("water", "lake")]));
+        assert_eq!(lake.len(), 2, "a lake lost its tags");
     }
 
     #[test]

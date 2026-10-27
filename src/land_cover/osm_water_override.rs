@@ -6,7 +6,6 @@ use std::collections::{HashMap, VecDeque};
 use crate::bresenham::bresenham_line;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
-use crate::element_processing::swimming_pools::is_swimming_pool;
 use crate::floodfill_cache::hole_groups;
 use crate::land_cover::{compute_water_distance, LandCoverData, LC_WATER};
 use crate::osm_parser::{
@@ -223,7 +222,7 @@ pub fn apply_osm_water_override(
 }
 
 fn is_water_polygon_way(way: &ProcessedWay) -> bool {
-    if way.nodes.len() < 3 || is_swimming_pool(&way.tags) {
+    if way.nodes.len() < 3 {
         return false;
     }
     has_water_polygon_tags(&way.tags)

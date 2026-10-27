@@ -8,7 +8,7 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
-use crate::land_cover::{coord_hash, LC_BEACH, LC_WATER};
+use crate::land_cover::{coord_hash, LC_WATER};
 use crate::world_editor::{min_y, WorldEditor};
 
 /// Flat shoal width in chamfer-DT units; slope only starts past it.
@@ -498,15 +498,14 @@ pub fn carve_water_column(
 /// along a beach; elsewhere patches of gravel, earth and clay, or the shallows read as a
 /// sand stripe along every bank.
 pub(crate) fn shallow_bed(editor: &WorldEditor, x: i32, z: i32) -> (Block, Block) {
-    if near_beach(editor, x, z) {
+    if editor.near_beach(x, z, (4.0 * editor.scale()).max(1.0)) {
         (SAND, SANDSTONE)
     } else {
         (earthy_bed(x, z), DIRT)
     }
 }
 
-/// `shallow_bed` away from any beach, without the land cover lookups.
-pub(crate) fn earthy_bed(x: i32, z: i32) -> Block {
+fn earthy_bed(x: i32, z: i32) -> Block {
     let n = crate::ground_generation::value_noise_01(x + 211, z + 37, 6);
     if n < 0.35 {
         GRAVEL
@@ -521,16 +520,6 @@ pub(crate) fn earthy_bed(x: i32, z: i32) -> Block {
     } else {
         SAND
     }
-}
-
-/// Whether beach land cover lies within a few blocks.
-fn near_beach(editor: &WorldEditor, x: i32, z: i32) -> bool {
-    const REACH: i32 = 4;
-    (-REACH..=REACH).step_by(2).any(|dx| {
-        (-REACH..=REACH)
-            .step_by(2)
-            .any(|dz| editor.cover_class(x + dx, z + dz) == LC_BEACH)
-    })
 }
 
 /// Strip plants left floating on a freshly carved water surface, leaving piers
@@ -982,12 +971,18 @@ mod tests {
     fn shallows_are_sandy_only_along_a_beach() {
         use crate::block_definitions::STONE_BRICKS;
         use crate::coordinate_system::geographic::LLBBox;
-        use crate::land_cover::LC_GRASSLAND;
-        // A beach along the west edge, grass everywhere else.
+        use crate::land_cover::{LC_BEACH, LC_GRASSLAND};
+        // A beach along the west edge and one beach cell at (40, 40), grass elsewhere.
         let grid: Vec<Vec<u8>> = (0..64)
-            .map(|_| {
+            .map(|z| {
                 (0..64)
-                    .map(|x| if x < 4 { LC_BEACH } else { LC_GRASSLAND })
+                    .map(|x| {
+                        if x < 4 || (x, z) == (40, 40) {
+                            LC_BEACH
+                        } else {
+                            LC_GRASSLAND
+                        }
+                    })
                     .collect()
             })
             .collect();
@@ -999,6 +994,7 @@ mod tests {
             grid,
             water_distance: vec![vec![0u8; 64]; 64],
             water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
             width: 64,
             height: 64,
             cells_per_meter: 1.0,
@@ -1025,6 +1021,13 @@ mod tests {
         }
         assert!(kinds.len() >= 3, "bed is one material: {kinds:?}");
         assert!(sand * 4 < 44 * 64, "{sand} sand cells off the beach");
+
+        // The whole square counts, across the 16-cell tiles of the beach mask.
+        assert!(editor.near_beach(7, 30, 4.0));
+        assert!(!editor.near_beach(8, 30, 4.0));
+        assert!(editor.near_beach(44, 36, 4.0), "diagonal corner");
+        assert!(!editor.near_beach(45, 36, 4.0));
+        assert!(!editor.near_beach(30, 30, 4.0));
     }
 
     #[test]
@@ -1074,6 +1077,7 @@ mod water_field_traversal_tests {
             grid,
             water_distance: vec![vec![0u8; w]; h],
             water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
             width: w,
             height: h,
             cells_per_meter: 1.0,
