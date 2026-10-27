@@ -1774,7 +1774,7 @@ fn suppress_ride_parts(
 }
 
 // Ray-cast point-in-polygon test on a lat/lon ring.
-fn point_in_ring(lat: f64, lon: f64, r: &[(f64, f64)]) -> bool {
+pub(crate) fn point_in_ring(lat: f64, lon: f64, r: &[(f64, f64)]) -> bool {
     let n = r.len();
     if n < 3 {
         return false;
@@ -1797,7 +1797,7 @@ fn point_in_ring(lat: f64, lon: f64, r: &[(f64, f64)]) -> bool {
 /// several member ways (e.g. an ellipse mapped as 4 arcs), so segments must be joined before
 /// their area/containment can be measured. Segments that never close into a ring, or whose
 /// nodes lack coordinates, are dropped (degenerate geometry is skipped, never panics).
-fn stitch_rings(
+pub(crate) fn stitch_rings(
     segments: Vec<Vec<u64>>,
     node_ll: &HashMap<u64, (f64, f64)>,
 ) -> Vec<Vec<(f64, f64)>> {

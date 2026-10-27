@@ -1591,22 +1591,29 @@ fn extend_world_bounds(args: &Args) {
 }
 
 /// Without a relief to fit: whether every tall structure stays under vanilla's ceiling.
+/// Takes the hints, so it is only for a run whose elevation fetch did not take them.
 fn flat_fits_vanilla(args: &Args, bbox: &LLBBox, peaks: &crate::elevation::PeakSource) -> bool {
-    let hints = peaks.take();
-    let tops: Vec<(f64, f64)> = hints
-        .tall_models
-        .iter()
-        .chain(&hints.tall_structures)
-        .filter(|m| crate::elevation::peaks::inside(bbox, m.lat, m.lon))
-        .map(|m| (0.0, m.height_m))
-        .collect();
-    match crate::elevation::postprocess::vanilla_overflow(
-        &[],
-        &tops,
-        1.0,
-        args.scale,
-        args.ground_level,
-    ) {
+    let why = crate::elevation::vanilla_misses(
+        &peaks.take(),
+        || peaks.take_overture(),
+        |structures| {
+            structures
+                .iter()
+                .filter(|m| crate::elevation::peaks::inside(bbox, m.lat, m.lon))
+                .map(|m| (0.0, m.height_m))
+                .collect()
+        },
+        |tops| {
+            crate::elevation::postprocess::vanilla_overflow(
+                &[],
+                tops,
+                1.0,
+                args.scale,
+                args.ground_level,
+            )
+        },
+    );
+    match why {
         Some(why) => {
             eprintln!("Extended build height: {why}");
             false
@@ -1626,28 +1633,38 @@ pub fn settle_build_height(
     disk_dir: &std::path::Path,
     new_java_world: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    // A base outside vanilla's range is a height of its own choosing, not one to compress.
-    let compressible = ground_level_range(args, false).contains(&args.ground_level);
-    let instead = if compressible {
-        " Use --vanilla-height to compress the terrain instead."
-    } else {
-        ""
+    let auto = auto_height(args) && ground.extended_ceiling;
+    // Whether the terrain itself outgrew vanilla's column, rather than a building on it.
+    let vanilla = ground_level_range(args, false);
+    let terrain_taller = ground.base_level() < *vanilla.start()
+        || crate::world_editor::common::terrain_top_y() > *vanilla.end();
+    // Only a height the area picked could be kept vanilla instead: the forcing flag or a base
+    // outside vanilla's range chose theirs.
+    let compressible = auto && vanilla.contains(&args.ground_level);
+    let instead = match (compressible, terrain_taller) {
+        (false, _) => "",
+        (true, true) => " Use --vanilla-height to compress the terrain instead.",
+        (true, false) => {
+            " Use --vanilla-height to keep the vanilla height, which cuts taller buildings off at Y 319."
+        }
     };
-    if auto_height(args) && ground.extended_ceiling {
+    if auto {
         args.disable_height_limit = true;
-        crate::world_utils::check_disk_for_extended_height(args, bbox, format, disk_dir).map_err(
-            |e| {
-                let keep = if compressible {
-                    "; keep the vanilla height to compress the terrain instead"
-                } else {
-                    ""
-                };
-                format!(
-                    "{e} The area needs the extended build height, which makes the world \
-                     larger{keep}."
-                )
-            },
-        )?;
+        // Caves and filled ground grow with the terrain; under a tower alone they reach only
+        // 64 blocks deeper, which the disk headroom covers.
+        if terrain_taller {
+            crate::world_utils::check_disk_for_extended_height(args, bbox, format, disk_dir)
+                .map_err(|e| {
+                    let keep = if compressible {
+                        "; keep the vanilla height to compress the terrain instead"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "{e} The area needs the extended build height, which makes the world                          larger{keep}."
+                    )
+                })?;
+        }
         if args.bedrock {
             println!(
                 "Note: the world carries a behavior pack that extends the build height \
@@ -1656,7 +1673,7 @@ pub fn settle_build_height(
         }
         crate::progress::emit_gui_progress_update(
             crate::progress::MESSAGE_ONLY,
-            "Extended build height: this area is taller than vanilla Minecraft allows",
+            "Extended build height: this area needs more room than vanilla Minecraft has",
         );
     }
     let Some(dir) = new_java_world else {
@@ -2016,13 +2033,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let bbox = LLBBox::new(48.0, 11.0, 48.001, 11.001).unwrap();
         let java = crate::world_editor::WorldFormat::JavaAnvil;
-        let pack = |world: &std::path::Path| {
-            world
-                .join("datapacks")
-                .join(crate::world_utils::TALL_DATAPACK_NAME)
-                .join("pack.mcmeta")
-                .is_file()
-        };
+        let pack = crate::world_utils::has_tall_datapack;
         let settle = |extra: &[&str], tall: bool| {
             let world =
                 std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());

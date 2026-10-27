@@ -6007,53 +6007,168 @@ fn takes_commercial_rhythm(
         && !tags.contains_key("building:part")
 }
 
-/// Top of a building or part from its tags alone, in metres above its ground: the `height`
-/// tag, which includes the roof, or the storeys at the cycle the generator builds them at
-/// plus the roof on top. None when neither is mapped.
-pub(crate) fn mapped_height_m(tags: &HashMap<String, String>) -> Option<f64> {
-    if let Some(height) = parse_building_height_tag(tags) {
-        return Some(height);
-    }
-    let levels = tags
-        .get("building:levels")?
-        .trim()
-        .parse::<f64>()
-        .ok()
-        .filter(|l| l.is_finite() && *l >= 1.0)?;
+/// What the generator sizes a building from where OSM maps neither `height` nor
+/// `building:levels`, as Overture's hints fill them in.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct HeightHint {
+    pub height_m: Option<f64>,
+    pub levels: Option<f64>,
+}
+
+/// Pitched shapes whose rise `mapped_height_roof_rise` takes out of a mapped `height`.
+const ROOFS_UNDER_HEIGHT: &[RoofType] = &[
+    RoofType::Gabled,
+    RoofType::Hipped,
+    RoofType::HalfHipped,
+    RoofType::Gambrel,
+    RoofType::Pyramidal,
+    RoofType::Mansard,
+];
+
+/// The roof the generator puts above a building's walls or mapped height.
+enum RoofAbove {
+    None,
+    /// A mapped roof:height.
+    Mapped(f64),
+    /// One the generator sizes itself, of this shape or of its own choosing.
+    Free(Option<RoofType>),
+}
+
+/// The walls (or the full mapped `height`) of a building or part and the roof above them.
+fn mapped_parts(tags: &HashMap<String, String>, hint: HeightHint) -> Option<(f64, RoofAbove)> {
+    let own = tags.contains_key("height") || tags.contains_key("building:levels");
+    let shape = tags.get("roof:shape").map(|s| parse_roof_type(s));
+    let roof_height = tags
+        .get("roof:height")
+        .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+        .filter(|m| m.is_finite() && *m > 0.0);
     let building_type = tags
         .get("building")
         .or_else(|| tags.get("building:part"))
         .map(String::as_str)
         .unwrap_or("yes");
+    let height = if own {
+        parse_building_height_tag(tags)
+    } else {
+        hint.height_m
+            .filter(|h| h.is_finite() && *h <= MAX_PLAUSIBLE_HEIGHT_M)
+    };
+    if let Some(height) = height {
+        // A mapped shape with a roof:height comes off the walls, and so does an inferred
+        // pitch; anything else is built on top of the full height. Of the inferred roofs
+        // only a big hall's mono-pitch is.
+        let hall = matches!(building_type, "industrial" | "warehouse" | "hangar");
+        let above = match (shape, roof_height) {
+            (Some(RoofType::Flat), _) | (Some(_), Some(_)) => RoofAbove::None,
+            (None, Some(rise)) => RoofAbove::Mapped(rise),
+            (Some(roof), None)
+                if ROOFS_UNDER_HEIGHT.contains(&roof) && !tags.contains_key("roof:angle") =>
+            {
+                RoofAbove::None
+            }
+            (None, None) if !hall && !tags.contains_key("roof:angle") => RoofAbove::None,
+            (roof, None) => RoofAbove::Free(roof),
+        };
+        return Some((height, above));
+    }
+    let levels = if own {
+        tags.get("building:levels")?.trim().parse::<f64>().ok()
+    } else {
+        hint.levels
+    }
+    .filter(|l| l.is_finite() && *l >= 1.0)?;
     let mut cycle = floor_cycle_for(building_type, tags, false);
     // More than seven storeys is what `calculate_building_height` calls tall.
     if takes_commercial_rhythm(levels > 7.0, building_type, cycle, tags) {
         cycle = 4;
     }
     let walls = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
-    // A mapped roof:height, or at most the steepest rise the generator infers when a roof
-    // shape or roof storeys ask for a roof.
-    let roof = match tags
-        .get("roof:height")
-        .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
-        .filter(|m| m.is_finite() && *m > 0.0)
-    {
-        Some(m) => m,
-        None => {
-            let shaped = tags.get("roof:shape").is_some_and(|s| s != "flat");
-            let storeys = tags
-                .get("roof:levels")
-                .and_then(|v| v.trim().parse::<f64>().ok())
-                .is_some_and(|l| l >= 1.0);
-            if shaped || storeys {
-                f64::from(max_inferred_rise(true, 1.0))
-            } else {
-                0.0
-            }
-        }
+    if walls > MAX_PLAUSIBLE_HEIGHT_M {
+        return None;
+    }
+    // Storeys leave the roof out, so whatever the generator puts there stands on top.
+    let above = match (shape, roof_height) {
+        (Some(RoofType::Flat), _) => RoofAbove::None,
+        (_, Some(rise)) => RoofAbove::Mapped(rise),
+        (roof, None) => RoofAbove::Free(roof),
     };
-    let height = walls + roof;
-    (height <= MAX_PLAUSIBLE_HEIGHT_M).then_some(height)
+    Some((walls, above))
+}
+
+/// Top of a building or part in metres above the highest ground under it, for a footprint
+/// `w_m` by `l_m`: its `height`, or its storeys at the cycle the generator builds them at,
+/// plus the most roof the generator can put above that. `hint` stands in where the tags map
+/// neither. None without a height or storeys.
+pub(crate) fn mapped_top_m(
+    tags: &HashMap<String, String>,
+    hint: HeightHint,
+    w_m: f64,
+    l_m: f64,
+) -> Option<f64> {
+    let (walls, above) = mapped_parts(tags, hint)?;
+    Some(
+        walls
+            + match above {
+                RoofAbove::None => 0.0,
+                RoofAbove::Mapped(rise) => rise,
+                RoofAbove::Free(roof) => free_roof_rise_m(tags, roof, w_m, l_m, walls),
+            },
+    )
+}
+
+/// `mapped_top_m` without a roof the generator sizes itself, and whether that roof grows with
+/// the footprint (domes, cones, onions and mapped pitches) instead of staying a few metres.
+pub(crate) fn mapped_walls_m(
+    tags: &HashMap<String, String>,
+    hint: HeightHint,
+) -> Option<(f64, bool)> {
+    let (walls, above) = mapped_parts(tags, hint)?;
+    Some(match above {
+        RoofAbove::None => (walls, false),
+        RoofAbove::Mapped(rise) => (walls + rise, false),
+        RoofAbove::Free(roof) => (
+            walls,
+            matches!(
+                roof,
+                Some(RoofType::Dome | RoofType::Cone | RoofType::Onion)
+            ) || tags.contains_key("roof:angle"),
+        ),
+    })
+}
+
+/// Most a roof the generator shapes itself rises over a footprint `w_m` by `l_m` on walls
+/// `walls_m` high: domes, cones and onions by their width, a mapped roof:angle along the run
+/// its shape climbs, anything else by the steepest inferred rise the walls allow.
+fn free_roof_rise_m(
+    tags: &HashMap<String, String>,
+    roof: Option<RoofType>,
+    w_m: f64,
+    l_m: f64,
+    walls_m: f64,
+) -> f64 {
+    let half = w_m.min(l_m) / 2.0;
+    match roof {
+        Some(RoofType::Dome) => return (0.8 * half).max(1.0),
+        Some(RoofType::Cone) => return (1.2 * half).max(2.0).min(2.0 * walls_m),
+        Some(RoofType::Onion) => return (1.8 * half).max(6.0).min(2.0 * walls_m),
+        _ => {}
+    }
+    let angle = tags
+        .get("roof:angle")
+        .and_then(|v| v.trim_end_matches('\u{b0}').trim().parse::<f64>().ok())
+        .filter(|d| *d > 0.0 && *d < 90.0);
+    match angle {
+        Some(deg) => {
+            let run = match roof {
+                Some(RoofType::Skillion) => w_m.hypot(l_m),
+                Some(RoofType::Hipped | RoofType::Mansard | RoofType::Pyramidal) => half,
+                _ => w_m.max(l_m) / 2.0,
+            };
+            deg.to_radians().tan() * run
+        }
+        // A steep gable may take 0.9 of the walls, up to the steepest inferred rise.
+        None => f64::from(max_inferred_rise(true, 1.0)).min(0.9 * walls_m),
+    }
 }
 
 /// Rise of the pitched roof the generator will put on a building whose mapped
@@ -18149,9 +18264,12 @@ mod height_tests {
         assert_eq!(h, 828);
     }
 
-    // The build height check reads a building's top from its tags alone.
+    // The build height check reads a building's top from its tags and footprint.
     #[test]
-    fn mapped_height_matches_the_generated_walls() {
+    fn mapped_walls_match_the_generated_walls() {
+        let top = |pairs: &[(&str, &str)]| {
+            mapped_walls_m(&way_with_tags(pairs).tags, HeightHint::default()).map(|(m, _)| m)
+        };
         for tags in [
             &[("building", "office"), ("building:levels", "100")][..],
             &[("building", "apartments"), ("building:levels", "60")][..],
@@ -18174,52 +18292,87 @@ mod height_tests {
             if takes_commercial_rhythm(tall, btype, cycle, &way.tags) {
                 h = calculate_building_height(&way, btype, 0, 1.0, None, 4, 100, 1).0;
             }
-            assert_eq!(
-                mapped_height_m(&way.tags).map(|m| m as i32),
-                Some(h),
-                "{tags:?}"
-            );
+            assert_eq!(top(tags).map(|m| m as i32), Some(h), "{tags:?}");
         }
-        assert_eq!(
-            mapped_height_m(&way_with_tags(&[("building", "yes")]).tags),
-            None
-        );
-        assert_eq!(
-            mapped_height_m(&way_with_tags(&[("building", "yes"), ("height", "1640")]).tags),
-            None
-        );
-
+        assert_eq!(top(&[("building", "yes")]), None);
+        assert_eq!(top(&[("building", "yes"), ("height", "1640")]), None);
         // An untagged tower of 100 storeys stands on 4-block storeys, not 3.
-        let top = |pairs: &[(&str, &str)]| mapped_height_m(&way_with_tags(pairs).tags);
         assert_eq!(
             top(&[("building", "yes"), ("building:levels", "100")]),
             Some(402.0)
         );
+    }
 
-        // Storeys leave the roof out, so it goes on top: mapped, or the steepest inferred rise.
+    #[test]
+    fn mapped_top_counts_the_roof_built_above_the_walls() {
+        let top = |pairs: &[(&str, &str)]| {
+            mapped_top_m(
+                &way_with_tags(pairs).tags,
+                HeightHint::default(),
+                20.0,
+                40.0,
+            )
+        };
+        let steepest = f64::from(max_inferred_rise(true, 1.0));
+        // Storeys leave the roof out, so it goes on top: mapped, sized, or at most the
+        // steepest the generator infers even where nothing asks for one.
         let office: &[(&str, &str)] = &[("building", "office"), ("building:levels", "75")];
-        assert_eq!(top(office), Some(302.0));
+        assert_eq!(top(office), Some(302.0 + steepest));
+        let with = |extra: &[(&str, &str)]| top(&[office, extra].concat());
+        assert_eq!(with(&[("roof:height", "20")]), Some(322.0));
+        assert_eq!(with(&[("roof:shape", "pyramidal")]), Some(302.0 + steepest));
+        assert_eq!(with(&[("roof:levels", "2")]), Some(302.0 + steepest));
+        assert_eq!(with(&[("roof:shape", "flat")]), Some(302.0));
+        // A dome spans the shorter side: 0.8 of its half.
+        assert_eq!(with(&[("roof:shape", "dome")]), Some(310.0));
+
+        // A mapped height includes a roof the walls make room for, not one built on top.
+        let tower: &[(&str, &str)] = &[("building", "yes"), ("height", "300")];
+        let with = |extra: &[(&str, &str)]| top(&[tower, extra].concat());
+        assert_eq!(with(&[]), Some(300.0));
         assert_eq!(
-            top(&[office, &[("roof:height", "20")]].concat()),
-            Some(322.0)
-        );
-        let pyramid = [office, &[("roof:shape", "pyramidal")]].concat();
-        assert_eq!(
-            top(&pyramid),
-            Some(302.0 + f64::from(max_inferred_rise(true, 1.0)))
-        );
-        assert_eq!(
-            top(&[office, &[("roof:shape", "flat")]].concat()),
-            Some(302.0)
-        );
-        // A mapped height already includes the roof.
-        assert_eq!(
-            top(&[
-                ("building", "yes"),
-                ("height", "300"),
-                ("roof:height", "20")
-            ]),
+            with(&[("roof:shape", "gabled"), ("roof:height", "20")]),
             Some(300.0)
+        );
+        assert_eq!(with(&[("roof:shape", "pyramidal")]), Some(300.0));
+        assert_eq!(with(&[("roof:height", "20")]), Some(320.0));
+        assert_eq!(with(&[("roof:shape", "dome")]), Some(308.0));
+        assert_eq!(with(&[("roof:shape", "onion")]), Some(318.0));
+        // A pitch at 45 degrees over the 10 m half of the short side.
+        let hipped = with(&[("roof:shape", "hipped"), ("roof:angle", "45")]).unwrap();
+        assert!((hipped - 310.0).abs() < 1e-9, "{hipped}");
+
+        // Overture's values stand in only where OSM maps neither.
+        let hint = HeightHint {
+            height_m: None,
+            levels: Some(100.0),
+        };
+        let hinted =
+            |pairs: &[(&str, &str)]| mapped_top_m(&way_with_tags(pairs).tags, hint, 20.0, 40.0);
+        assert_eq!(hinted(&[("building", "yes")]), Some(402.0 + steepest));
+        // A low house's inferred roof stays under the share of its walls the generator allows.
+        assert_eq!(
+            hinted(&[("building", "yes"), ("building:levels", "2")]),
+            Some(8.0 + 0.9 * 8.0)
+        );
+
+        // A big hall with a mapped height may still get a mono-pitch on top.
+        assert_eq!(
+            top(&[("building", "warehouse"), ("height", "30")]),
+            Some(30.0 + steepest)
+        );
+        // The pre-check reads walls alone, and knows which roofs grow with the footprint.
+        let walls = |pairs: &[(&str, &str)]| {
+            mapped_walls_m(&way_with_tags(pairs).tags, HeightHint::default())
+        };
+        assert_eq!(walls(office), Some((302.0, false)));
+        assert_eq!(
+            walls(&[office, &[("roof:shape", "dome")]].concat()),
+            Some((302.0, true))
+        );
+        assert_eq!(
+            walls(&[office, &[("roof:height", "20")]].concat()),
+            Some((322.0, false))
         );
     }
 

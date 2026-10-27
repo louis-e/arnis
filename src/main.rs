@@ -555,14 +555,9 @@ fn run_cli() {
             })
         };
         bench.report("osm_fetch", t.elapsed());
-        // The terrain thread waits on this before fitting its height range, and so on
-        // Overture too when its building heights help decide the build height.
-        let with_overture = crate::elevation::TerrainHints::wants_overture(&args);
-        if !with_overture {
-            let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(
-                &raw_data, &args, None,
-            ));
-        }
+        // The terrain thread waits on this before fitting its height range. Overture's
+        // building heights follow once it is in, for the thread to wait on only if needed.
+        let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(&raw_data, &args));
 
         // A panicked worker already reported itself through the panic hook, so
         // degrade instead of taking the whole run down with it.
@@ -574,13 +569,15 @@ fn run_cli() {
             (overture::OvertureData::default(), std::time::Duration::ZERO)
         });
         bench.report("overture_fetch", overture_dur);
-        if with_overture {
-            let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(
+        if crate::elevation::TerrainHints::wants_overture(&args) {
+            let _ = peak_tx.send(crate::elevation::TerrainHints::from_overture(
                 &raw_data,
                 &args,
-                Some(&overture_data),
+                &overture_data,
             ));
         }
+        // Nothing more follows, so a terrain thread still waiting is let go before the join.
+        drop(peak_tx);
         let (ground, ground_dur) = ground_handle.join().unwrap_or_else(|_| {
             eprintln!("{} Terrain fetch failed.", "Error:".red().bold());
             exit_failed();
@@ -606,6 +603,10 @@ fn run_cli() {
             new_java_world,
         ) {
             eprintln!("{} {}", "Error:".red().bold(), e);
+            // The world made for this run holds nothing yet. A One World is released below.
+            if let (Some(dir), None) = (new_java_world, &args.one_world_run) {
+                let _ = fs::remove_dir_all(dir);
+            }
             exit_failed();
         }
     }

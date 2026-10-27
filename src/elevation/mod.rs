@@ -73,11 +73,14 @@ impl HeightBand {
 }
 
 /// `band`, or `taller` when the area does not fit `band` at full height. `band` is then the
-/// vanilla one, and the tall structures count as well as the models.
+/// vanilla one, and the tall structures count as well as the models. Overture's structures
+/// come from `overture`, which waits for them, and only when everything else fits.
+#[allow(clippy::too_many_arguments)]
 fn pick_band(
     heights: &[Vec<f64>],
     bbox: &LLBBox,
     hints: &TerrainHints,
+    overture: impl FnOnce() -> Vec<TallModel>,
     scale: f64,
     height_multiplier: f64,
     band: HeightBand,
@@ -86,20 +89,46 @@ fn pick_band(
     let Some(taller) = taller else {
         return band;
     };
-    let mut tops = peaks::model_cells(heights, bbox, &hints.tall_models);
-    tops.extend(peaks::model_cells(heights, bbox, &hints.tall_structures));
-    match postprocess::vanilla_overflow(
-        heights,
-        &tops,
-        scale * height_multiplier,
-        scale,
-        band.ground_level,
-    ) {
+    let why = vanilla_misses(
+        hints,
+        overture,
+        |structures| peaks::model_cells(heights, bbox, structures),
+        |tops| {
+            postprocess::vanilla_overflow(
+                heights,
+                tops,
+                scale * height_multiplier,
+                scale,
+                band.ground_level,
+            )
+        },
+    );
+    match why {
         Some(why) => {
             eprintln!("Extended build height: {why}");
             taller
         }
         None => band,
+    }
+}
+
+/// Why the vanilla height cannot hold an area: `overflow` on the models and structures OSM
+/// gave, turned into (ground metres, height metres) by `tops`, and only while those fit and
+/// Overture's follow, on those as well.
+pub(crate) fn vanilla_misses(
+    hints: &TerrainHints,
+    overture: impl FnOnce() -> Vec<TallModel>,
+    tops: impl Fn(&[TallModel]) -> Vec<(f64, f64)>,
+    overflow: impl Fn(&[(f64, f64)]) -> Option<String>,
+) -> Option<String> {
+    let mut all = tops(&hints.tall_models);
+    all.extend(tops(&hints.tall_structures));
+    match overflow(&all) {
+        None if hints.overture_follows => {
+            all.extend(tops(&overture()));
+            overflow(&all)
+        }
+        why => why,
     }
 }
 
@@ -336,17 +365,20 @@ pub fn fetch_elevation_data(
     bench.mark("elev_landcover_repair");
     // After the repairs, which would smooth a restored needle back down, and
     // before the fit, so the summit counts towards the height range.
-    let hints = peaks.take();
+    let mut hints = peaks.take();
     peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell);
     let band = pick_band(
         &height_grid,
         bbox,
         &hints,
+        || peaks.take_overture(),
         scale,
         height_multiplier,
         band,
         taller,
     );
+    // Only the band needed them, and a city's worth would sit through the fit.
+    hints.tall_structures = Vec::new();
     let HeightBand {
         ground_level,
         min_ground_level,
@@ -550,11 +582,49 @@ mod band_tests {
             grid,
             &bbox(),
             hints,
+            Vec::new,
             1.0,
             1.0,
             band(false),
             taller.then(|| band(true)),
         )
+    }
+
+    #[test]
+    fn overture_is_waited_for_only_while_vanilla_still_fits() {
+        let hills = vec![vec![500.0, 600.0], vec![550.0, 650.0]];
+        let alps = vec![vec![500.0, 1500.0], vec![900.0, 2500.0]];
+        let follows = TerrainHints {
+            overture_follows: true,
+            ..Default::default()
+        };
+        let with = |grid: &[Vec<f64>], overture: Vec<TallModel>| {
+            pick_band(
+                grid,
+                &bbox(),
+                &follows,
+                move || overture,
+                1.0,
+                1.0,
+                band(false),
+                Some(band(true)),
+            )
+        };
+        assert_eq!(with(&hills, vec![tower(46.005, 541.0)]), band(true));
+        assert_eq!(with(&hills, vec![tower(46.005, 200.0)]), band(false));
+        // The relief decides on its own, so Overture is never asked.
+        let never = || -> Vec<TallModel> { panic!("waited for Overture") };
+        let picked = pick_band(
+            &alps,
+            &bbox(),
+            &follows,
+            never,
+            1.0,
+            1.0,
+            band(false),
+            Some(band(true)),
+        );
+        assert_eq!(picked, band(true));
     }
 
     #[test]

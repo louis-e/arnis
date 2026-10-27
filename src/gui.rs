@@ -1974,13 +1974,19 @@ fn gui_start_generation(
                     &args.osm_tiles_url,
                     !args.no_tile_archive,
                 );
-                // The terrain thread waits on this before fitting its height range, and so
-                // on Overture too when its building heights help decide the build height.
-                let with_overture = crate::elevation::TerrainHints::wants_overture(&args);
-                if let (Ok(raw), false) = (fetch_result.as_ref(), with_overture) {
-                    let _ =
-                        peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args, None));
-                }
+                // The terrain thread waits on this before fitting its height range. Overture's
+                // building heights follow once it is in, for the thread to wait on only if
+                // needed. Without OSM there is nothing to follow, so the sender goes now.
+                let peak_tx = match fetch_result.as_ref() {
+                    Ok(raw) => {
+                        let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args));
+                        Some(peak_tx)
+                    }
+                    Err(_) => {
+                        drop(peak_tx);
+                        None
+                    }
+                };
                 // A panicked worker already reported itself through the panic hook.
                 // Overture is supplementary, so drop it and keep going; terrain is
                 // not, so hand the failure back instead of taking the app down.
@@ -1988,12 +1994,14 @@ fn gui_start_generation(
                     eprintln!("Overture fetch failed, continuing without Overture buildings.");
                     overture::OvertureData::default()
                 });
-                if let (Ok(raw), true) = (fetch_result.as_ref(), with_overture) {
-                    let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(
-                        raw,
-                        &args,
-                        Some(&overture_data),
-                    ));
+                if let (Some(tx), Ok(raw)) = (&peak_tx, fetch_result.as_ref()) {
+                    if crate::elevation::TerrainHints::wants_overture(&args) {
+                        let _ = tx.send(crate::elevation::TerrainHints::from_overture(
+                            raw,
+                            &args,
+                            &overture_data,
+                        ));
+                    }
                 }
                 drop(peak_tx);
                 (fetch_result, overture_data, ground_handle.join().ok())

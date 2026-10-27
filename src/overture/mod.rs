@@ -308,20 +308,22 @@ impl OvertureHints {
         enriched
     }
 
-    /// The raw OSM `tags` of a `kind` ("way" or "relation") element as `apply` will leave
-    /// them, or None when it leaves them alone.
-    pub(crate) fn filled(
+    /// What `apply` will write onto a raw OSM `kind` ("way" or "relation") building with
+    /// these `tags`, or None when it leaves it alone.
+    pub(crate) fn hint_for(
         &self,
         kind: &'static str,
         id: u64,
         tags: &HashMap<String, String>,
-    ) -> Option<HashMap<String, String>> {
-        let hint = self.hints.get(&OsmRef { kind, id })?;
+    ) -> Option<crate::element_processing::buildings::HeightHint> {
         if !takes_hint(tags) {
             return None;
         }
-        let mut tags = tags.clone();
-        fill_tags(hint, &mut tags).then_some(tags)
+        let hint = self.hints.get(&OsmRef { kind, id })?;
+        Some(crate::element_processing::buildings::HeightHint {
+            height_m: hint.height_m,
+            levels: hint.num_floors.map(f64::from),
+        })
     }
 }
 
@@ -1073,8 +1075,16 @@ fn fetch_overture_buildings_inner(
                 }
             }
             way.nodes = clipped;
-            if let Some(height_m) = crate::element_processing::buildings::mapped_height_m(&way.tags)
-                .filter(|&h| crate::elevation::peaks::may_pass_vanilla(h, projection.scale))
+            let (w_m, l_m) = crate::elevation::peaks::extent_m(
+                building.exterior_ring.iter().map(|&(lon, lat)| (lat, lon)),
+            );
+            if let Some(height_m) = crate::element_processing::buildings::mapped_top_m(
+                &way.tags,
+                Default::default(),
+                w_m,
+                l_m,
+            )
+            .filter(|&h| crate::elevation::peaks::may_pass_vanilla(h, projection.scale))
             {
                 tall_structures.extend(
                     building
