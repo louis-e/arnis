@@ -193,19 +193,21 @@ mod tests {
         let Ok(path) = std::env::var("ARNIS_DECAL_PREVIEW") else {
             return;
         };
+        let blade =
+            |style: BladeStyle, name: &str| DecalKey::text(TextStyle::StreetName(style), name, 1);
         let keys = vec![
-            DecalKey::text(TextStyle::StreetName(BladeStyle::Blue), "Hauptstraße", 1),
-            DecalKey::text(
-                TextStyle::StreetName(BladeStyle::Green),
-                "W Washington Blvd",
-                1,
-            ),
-            DecalKey::text(TextStyle::StreetName(BladeStyle::White), "Baker Street", 1),
+            blade(BladeStyle::Blue, "Hauptstraße"),
+            blade(BladeStyle::Blue, "Ringstr."),
+            blade(BladeStyle::Green, "W Washington Blvd"),
+            blade(BladeStyle::Green, "Main St"),
+            blade(BladeStyle::White, "Baker Street"),
             DecalKey::text(TextStyle::HouseNumber, "12a", 1),
             DecalKey::text(TextStyle::Fascia, "Bäckerei Müller", 2),
             DecalKey::text(TextStyle::Fascia, "Café Extrablatt", 2),
+            DecalKey::text(TextStyle::Fascia, "Rewe", 2),
             DecalKey::text(TextStyle::StationBoard, "Berlin Hauptbahnhof", 3),
-            DecalKey::text(TextStyle::StopName, "Rathaus Steglitz", 2),
+            DecalKey::text(TextStyle::StopName, "Rathaus Steglitz", 1),
+            DecalKey::text(TextStyle::StopName, "Alexanderplatz", 1),
             DecalKey::Traffic(TrafficSign::Stop),
             DecalKey::Traffic(TrafficSign::GiveWay),
             DecalKey::Traffic(TrafficSign::NoEntry),

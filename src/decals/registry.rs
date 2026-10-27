@@ -47,7 +47,7 @@ pub enum ShieldStyle {
     Blue,
     /// Yellow plate, black text (German Bundesstrasse, Dutch N-roads style).
     Yellow,
-    /// Green plate, white text (UK primary routes, some European E-roads).
+    /// Green plate, yellow number (UK and Irish primary routes).
     Green,
     /// US interstate look: red-white-blue shield.
     Interstate,

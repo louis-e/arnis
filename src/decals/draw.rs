@@ -27,7 +27,8 @@ pub mod colors {
     pub const GOLD: u8 = map_color_id(30, 2);
     pub const GREEN: u8 = map_color_id(7, 1);
     pub const LIGHT_GREEN: u8 = map_color_id(19, 2);
-    pub const SIGN_GREEN: u8 = map_color_id(27, 1);
+    /// Darkest emerald, (0, 114, 30); the plain green base reads as olive on a sign.
+    pub const SIGN_GREEN: u8 = map_color_id(33, 3);
     pub const BLUE: u8 = map_color_id(25, 2);
     pub const DARK_BLUE: u8 = map_color_id(25, 0);
     pub const LIGHT_BLUE: u8 = map_color_id(17, 2);

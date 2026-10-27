@@ -143,11 +143,16 @@ fn fit_truncated_two_lines(
         if first_end == 0 {
             continue;
         }
-        let split = chars[..first_end]
-            .iter()
-            .rposition(|c| c.is_whitespace())
-            .filter(|&i| i > 0)
-            .unwrap_or(first_end);
+        // A line that ends right before a space keeps its last word.
+        let split = if chars[first_end].is_whitespace() {
+            first_end
+        } else {
+            chars[..first_end]
+                .iter()
+                .rposition(|c| c.is_whitespace())
+                .filter(|&i| i > 0)
+                .unwrap_or(first_end)
+        };
         let line1: String = chars[..split]
             .iter()
             .collect::<String>()
@@ -218,7 +223,8 @@ pub fn text_sign(canvas: &mut Canvas, style: TextStyle, text: &str) {
                 (DARK_GRAY, GOLD, GOLD),
             ];
             let (plate, fg, border) = schemes[(str_hash(text) % 6) as usize];
-            let (y0, h) = (30, 68);
+            // Tall enough for two lines at 28 px.
+            let (y0, h) = (24, 80);
             canvas.rounded_rect(4, y0, w - 8, h, 6, plate);
             canvas.stroke_rounded_rect(4, y0, w - 8, h, 6, 2, border);
             if let Some(layout) = fit_or_abbreviate(text, w - 24, h - 12, FontSize::S44, true) {
@@ -389,19 +395,25 @@ pub fn traffic_sign(canvas: &mut Canvas, sign: TrafficSign) {
             canvas.fill_rect(30, 28, 68, 14, RED);
         }
         TrafficSign::LevelCrossing => {
-            // Saint Andrew's cross: two white boards with red tips.
+            // Saint Andrew's cross: white boards edged in red. Both reds go down first so
+            // the white centres join where the boards cross.
+            let board = |half_len: f32, half_w: f32, flip: f32| -> Vec<(f32, f32)> {
+                let (s, c) = (0.62f32.sin() * flip, 0.62f32.cos());
+                [
+                    (-half_len, -half_w),
+                    (half_len, -half_w),
+                    (half_len, half_w),
+                    (-half_len, half_w),
+                ]
+                .iter()
+                .map(|(x, y)| (64.0 + x * c - y * s, 64.0 + x * s + y * c))
+                .collect()
+            };
             for flip in [1.0f32, -1.0] {
-                let pts: Vec<(f32, f32)> = [(-56.0, -8.0), (56.0, -8.0), (56.0, 8.0), (-56.0, 8.0)]
-                    .iter()
-                    .map(|(x, y)| {
-                        let (s, c) = (0.62f32.sin() * flip, 0.62f32.cos());
-                        (64.0 + x * c - y * s, 64.0 + x * s + y * c)
-                    })
-                    .collect();
-                canvas.polygon(&pts, WHITE);
+                canvas.polygon(&board(58.0, 11.0, flip), RED);
             }
-            for (x, y) in [(14, 33), (114, 33), (14, 95), (114, 95)] {
-                canvas.disc(x, y, 7, RED);
+            for flip in [1.0f32, -1.0] {
+                canvas.polygon(&board(53.0, 6.0, flip), WHITE);
             }
         }
         TrafficSign::HighVoltage => {
@@ -446,14 +458,16 @@ pub fn traffic_sign(canvas: &mut Canvas, sign: TrafficSign) {
 pub fn speed_limit(canvas: &mut Canvas, value: u16, mph: bool, style: SpeedStyle) {
     let text = value.to_string();
     if style != SpeedStyle::Disc {
-        canvas.rounded_rect(24, 6, 80, 116, 3, WHITE);
-        canvas.stroke_rounded_rect(24, 6, 80, 116, 3, 3, BLACK);
+        // 4:5 like the real plates, wide enough for the legend at 18 px.
+        canvas.rounded_rect(18, 6, 92, 116, 3, WHITE);
+        canvas.stroke_rounded_rect(18, 6, 92, 116, 3, 3, BLACK);
         let small = Font::get(FontSize::S12);
         if style == SpeedStyle::CaPlate {
             small.draw_centered(canvas, 64, 22, "MAXIMUM", BLACK, 1);
         } else {
-            small.draw_centered(canvas, 64, 14, "SPEED", BLACK, 1);
-            small.draw_centered(canvas, 64, 30, "LIMIT", BLACK, 1);
+            let legend = Font::get(FontSize::S18);
+            legend.draw_centered(canvas, 64, 12, "SPEED", BLACK, 1);
+            legend.draw_centered(canvas, 64, 34, "LIMIT", BLACK, 1);
         }
         let size = if text.len() > 2 {
             FontSize::S28
@@ -491,7 +505,8 @@ pub fn route_shield(canvas: &mut Canvas, style: ShieldStyle, text: &str) {
             let (plate, fg, border) = match style {
                 ShieldStyle::Blue => (BLUE, WHITE, WHITE),
                 ShieldStyle::Yellow => (YELLOW, BLACK, BLACK),
-                _ => (SIGN_GREEN, WHITE, WHITE),
+                // UK primary routes print the number in yellow on green.
+                _ => (SIGN_GREEN, YELLOW, WHITE),
             };
             let (w, h) = (110, 64);
             canvas.rounded_rect(cx - w / 2, cy - h / 2, w, h, 6, plate);
@@ -579,6 +594,22 @@ mod tests {
         assert_eq!(abbreviate("Hauptstraße").as_deref(), Some("Hauptstr."));
         assert_eq!(abbreviate("Main Street").as_deref(), Some("Main St"));
         assert_eq!(abbreviate("Rue de Rivoli"), None);
+    }
+
+    #[test]
+    fn truncated_first_line_keeps_a_word_that_ends_at_the_edge() {
+        // The first line is exactly as wide as "Alte Reichenbacher", so the space after it
+        // no longer fits; the word must stay on the line.
+        let max_w = Font::get(FontSize::S12).width("Alte Reichenbacher", 1);
+        let layout = fit_truncated_two_lines(
+            "Alte Reichenbacher Straße Nordwestlicher Abschnitt",
+            max_w,
+            32,
+            FontSize::S12,
+        )
+        .unwrap();
+        assert_eq!(layout.lines[0], "Alte Reichenbacher");
+        assert!(layout.lines[1].ends_with('…'));
     }
 
     #[test]
