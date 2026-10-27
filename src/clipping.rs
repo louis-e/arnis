@@ -27,6 +27,17 @@ pub fn is_invented_node_id(id: u64) -> bool {
     id >= INVENTED_NODE_BASE
 }
 
+/// Gives a clipped open way's ends that moved off `ends` an invented id. The
+/// polyline clip lends a cut end the id of the node up to 50 blocks beyond it.
+pub fn mark_cut_ends(nodes: &mut [ProcessedNode], ends: [(i32, i32); 2], way_id: u64) {
+    let last = nodes.len().saturating_sub(1);
+    for (i, end) in [(0, ends[0]), (last, ends[1])] {
+        if let Some(n) = nodes.get_mut(i).filter(|n| (n.x, n.z) != end) {
+            n.id = invented_node_id(way_id, i as u64);
+        }
+    }
+}
+
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
 /// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
 /// `clip_way_to_bbox` for an owned way: one lying wholly inside comes back as is, uncopied.
@@ -703,6 +714,17 @@ mod tests {
             .iter()
             .filter(|n| n.id != 4)
             .all(|n| n.tags.is_empty()));
+    }
+
+    #[test]
+    fn a_cut_end_does_not_answer_to_the_node_beyond_it() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 30, 30).unwrap();
+        let line = vec![node(1, 10, 10), node(2, 40, 10)];
+        let mut clipped = clip_way_to_bbox(&line, &bbox);
+        assert_eq!(clipped[1].id, 2, "the clip lends the cut end node 2's id");
+        mark_cut_ends(&mut clipped, [(10, 10), (40, 10)], 7);
+        assert_eq!(clipped[0].id, 1);
+        assert!(is_invented_node_id(clipped[1].id));
     }
 
     #[test]

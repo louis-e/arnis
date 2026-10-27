@@ -1,4 +1,4 @@
-use crate::clipping::{clip_way_to_bbox, clip_way_to_bbox_owned};
+use crate::clipping::{clip_way_to_bbox, clip_way_to_bbox_owned, mark_cut_ends};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::progress::emit_gui_progress_update;
@@ -1200,8 +1200,16 @@ pub fn parse_osm_data(
         // Clip the way to bbox to reduce node count dramatically
         let tags = filter_tags(element.tags.unwrap_or_default());
 
+        // A lift the area cuts must not end in the station beyond the cut.
+        let lift_ends = match (nodes.first(), nodes.last()) {
+            (Some(a), Some(b)) if a.id != b.id && tags.contains_key("aerialway") => {
+                Some([(a.x, a.z), (b.x, b.z)])
+            }
+            _ => None,
+        };
+
         // Store unclipped way for relation assembly (clipping happens after ring merging)
-        let (tags, clipped_nodes) = if relation_way_ids.contains(&element.id) {
+        let (tags, mut clipped_nodes) = if relation_way_ids.contains(&element.id) {
             let way = Arc::new(ProcessedWay {
                 id: element.id,
                 tags,
@@ -1212,6 +1220,9 @@ pub fn parse_osm_data(
         } else {
             (tags, clip_way_to_bbox_owned(nodes, &clip_bbox))
         };
+        if let Some(ends) = lift_ends {
+            mark_cut_ends(&mut clipped_nodes, ends, element.id);
+        }
 
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() || !touches_world(&clipped_nodes) {
