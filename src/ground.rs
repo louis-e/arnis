@@ -194,6 +194,12 @@ impl GroundFrame {
                 };
             }
         }
+        if pad > 0 {
+            println!(
+                "Note: this area is too wide for the seam margin, so terrain near its edges may \
+                 not match the neighbouring areas exactly."
+            );
+        }
         let (_, _, gw, gh) = compute_grid_dims_for_world(world_w, world_h);
         FetchPlan {
             bbox: *bbox,
