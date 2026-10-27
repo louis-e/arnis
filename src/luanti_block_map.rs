@@ -1000,7 +1000,10 @@ mod tests {
     #[test]
     fn vines_hang_on_their_wall() {
         // North, east, south, west, with the Z flip like the multiface blocks.
-        assert_eq!(VINES.map(|v| to_mineclonia_node(v, None).param2), [4, 2, 5, 3]);
+        assert_eq!(
+            VINES.map(|v| to_mineclonia_node(v, None).param2),
+            [4, 2, 5, 3]
+        );
     }
 
     #[test]

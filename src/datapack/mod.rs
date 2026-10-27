@@ -1108,7 +1108,10 @@ mod tests {
             }
             let (from, rest) = layer(path);
             let copy = format!("ov121/{rest}");
-            assert!(from < 121 && files.iter().any(|(p, _)| *p == copy), "{path}");
+            assert!(
+                from < 121 && files.iter().any(|(p, _)| *p == copy),
+                "{path}"
+            );
         }
     }
 
