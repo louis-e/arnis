@@ -858,7 +858,7 @@ fn run_cli() {
 
             // For Java Edition, write the spawn point into level.dat
             let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
-            if !args.bedrock && !extending {
+            if world_format == world_editor::WorldFormat::JavaAnvil && !extending {
                 if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (java_spawn, spawn_y_for_java) {
                     if let Err(e) = world_utils::set_spawn_in_level_dat(
                         &generation_path,
