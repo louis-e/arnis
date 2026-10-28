@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "Cancel",
   "one_world_confirm_ok": "Generate",
   "settings_section_gameplay": "Gameplay",
-  "settings_section_gameplay_desc": "Extras that run from a data pack inside the world. Java only, not in One World mode. All off unless you turn them on.",
+  "settings_section_gameplay_desc": "Extras that run from a data pack inside the world. Java only (Moving Vehicles also runs on Bedrock), not in One World mode. All off unless you turn them on.",
   "settings_nav_gameplay": "Menu, discoveries, zombies",
   "pause_menu": "Arnis Pause Menu",
   "pause_menu_desc": "Travel, discoveries and credits from the pause menu.",

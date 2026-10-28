@@ -24,6 +24,11 @@ static BLOCK_COLORS: Lazy<FnvHashMap<&'static str, Rgb<u8>>> = Lazy::new(get_blo
 /// Per-block-id color; None = transparent (top-block search looks below).
 static COLOR_LUT: Lazy<Vec<Option<Rgb<u8>>>> = Lazy::new(build_color_lut);
 
+/// The average colour of a block, named without `minecraft:`.
+pub(crate) fn block_colour(name: &str) -> Option<[u8; 3]> {
+    BLOCK_COLORS.get(name).map(|c| c.0)
+}
+
 fn build_color_lut() -> Vec<Option<Rgb<u8>>> {
     (0..COLOR_LUT_LIMIT)
         .map(|id| {

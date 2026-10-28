@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "取消",
   "one_world_confirm_ok": "生成",
   "settings_section_gameplay": "玩法",
-  "settings_section_gameplay_desc": "通过世界内的数据包运行的额外功能。仅限 Java 版，单一世界模式下不可用。默认全部关闭。",
+  "settings_section_gameplay_desc": "通过世界内的数据包运行的额外功能。仅限 Java 版（行驶的交通工具也支持基岩版），单一世界模式下不可用。默认全部关闭。",
   "settings_nav_gameplay": "菜单、发现、僵尸",
   "pause_menu": "Arnis 暂停菜单",
   "pause_menu_desc": "在暂停菜单中传送、查看发现和致谢。",

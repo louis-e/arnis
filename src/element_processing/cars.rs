@@ -8,6 +8,7 @@
 //! Speeds are in thousandths of a block per step, a step being the two ticks between
 //! moves, so 1000 is 36 km/h on a 1:1 world.
 
+use crate::bedrock_addon::{self, Body, Fleet, Lamp, Shape};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
@@ -20,6 +21,7 @@ use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
+use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -62,6 +64,22 @@ const CROSSING_REACH: f64 = 40.0;
 const LIMIT_SHARE: f64 = 0.92;
 /// 2.5 m/s², a calm start from the lights.
 const ACCEL_MPS2: f64 = 2.5;
+/// Where a driver looks for the car ahead, in metres at 1:1: how far ahead, how far round
+/// that spot, and how close it then is (3 stop a couple of metres behind it, 2 and 1 ease
+/// off). The Java pack and the Bedrock script both drive by these and the rules below.
+const LOOK: [(f64, f64, u8); 4] = [(3.0, 1.7, 3), (6.0, 1.7, 3), (10.0, 2.0, 2), (14.5, 2.5, 1)];
+/// Cars heading within this many degrees of one are in its lane or turning into it.
+const SAME_WAY_DEG: f64 = 67.5;
+/// Where crossing traffic right in front is looked for: how far ahead and how far round.
+const CROSSING_AT: (f64, f64) = (3.0, 1.7);
+/// A player this close to either of two spots ahead stops the car: the spots, and how close.
+const PLAYER_AT: (f64, f64, f64) = (3.0, 6.0, 2.0);
+/// Steps a car gives way at a junction before it goes anyway, and up to 31 more by its number.
+const GIVE_WAY_STEPS: i32 = 30;
+/// A driver's pace, in thousandths of the lane speed, both ends included.
+const PACE: (i32, i32) = (880, 1120);
+/// How often each kind of car turns up.
+const KINDS: [(Kind, u32); 3] = [(Kind::Sedan, 60), (Kind::Hatchback, 26), (Kind::Van, 14)];
 
 /// Thousandths of a block per two-tick step at `kmh` on a world of `scale` blocks per metre.
 fn step_speed(kmh: f64, scale: f64) -> i32 {
@@ -677,21 +695,23 @@ impl CarNetwork {
         self.cars.len()
     }
 
+    /// How much faster a car gets each step, in thousandths of a block a step.
+    fn accel(&self) -> i32 {
+        // Per step, so a tenth of a second of it.
+        ((ACCEL_MPS2 * 0.1 * 0.1 * self.scale * 1000.0).round() as i32).max(1)
+    }
+
     /// The pack function that loads the lanes into storage, a batch of lanes per line, and
     /// the constants that depend on the world's scale.
     pub fn storage_function(&self) -> String {
         let mut out = format!(
             "scoreboard players set #accel arnis {}\ndata modify storage arnis:cars seg set value []\n",
-            // Per step, so a tenth of a second of it.
-            ((ACCEL_MPS2 * 0.1 * 0.1 * self.scale * 1000.0).round() as i32).max(1)
+            self.accel()
         );
-        // Colour lists a respawned car draws from, each colour as often as its weight.
-        let list = |colours: &[(&str, u32)]| {
-            colours
+        let list = |colours: &[(&'static str, u32)]| {
+            respawn_colours(colours)
                 .iter()
-                .flat_map(|(c, w)| {
-                    std::iter::repeat_n(format!("\"{c}\""), (*w as usize).div_ceil(4))
-                })
+                .map(|c| format!("\"{c}\""))
                 .collect::<Vec<_>>()
                 .join(",")
         };
@@ -765,10 +785,13 @@ impl CarNetwork {
                 dispatch,
                 "execute if score #h arnis.car matches {b} run function arnis:cars/look/h{b}"
             );
-            // Cars heading within 67.5 degrees of this one are in its lane or turning into it.
             let centre = b as f64 * 45.0 - 180.0;
             let wrap = |a: f64| (a + 180.0).rem_euclid(360.0) - 180.0;
-            let range = format!("{:.1}..{:.1}", wrap(centre - 67.5), wrap(centre + 67.5));
+            let range = format!(
+                "{:.1}..{:.1}",
+                wrap(centre - SAME_WAY_DEG),
+                wrap(centre + SAME_WAY_DEG)
+            );
             let ahead = |at: f64, r: f64| {
                 format!(
                     "execute rotated as @s positioned ^ ^ ^{} if entity @e[type=marker,tag=arnis.car,distance=..{},y_rotation={range}]",
@@ -776,17 +799,21 @@ impl CarNetwork {
                     d(r)
                 )
             };
-            let body = format!(
-                "# How close the car ahead is: 3 stop a couple of metres behind it, 2 and 1 ease off.\n\
-                 {} run return run scoreboard players set #ahead arnis.car 3\n\
-                 {} run return run scoreboard players set #ahead arnis.car 3\n\
-                 {} run return run scoreboard players set #ahead arnis.car 2\n\
-                 {} run scoreboard players set #ahead arnis.car 1\n",
-                ahead(3.0, 1.7),
-                ahead(6.0, 1.7),
-                ahead(10.0, 2.0),
-                ahead(14.5, 2.5),
+            let mut body = String::from(
+                "# How close the car ahead is: 3 stop a couple of metres behind it, 2 and 1 ease off.\n",
             );
+            for (n, &(at, r, close)) in LOOK.iter().enumerate() {
+                let then = if n + 1 < LOOK.len() {
+                    "return run "
+                } else {
+                    ""
+                };
+                let _ = writeln!(
+                    body,
+                    "{} run {then}scoreboard players set #ahead arnis.car {close}",
+                    ahead(at, r)
+                );
+            }
             out.push((
                 format!("data/arnis/function/cars/look/h{b}.mcfunction"),
                 body,
@@ -803,20 +830,21 @@ impl CarNetwork {
              # is down to its number. Cars standing at a red line are no one's business.\n\
              scoreboard players set #yield arnis.car 0\n\
              execute if score #jam arnis.car matches 1 run scoreboard players set #yield arnis.car 1\n\
-             execute if score #t arnis.car matches 1.. rotated as @s positioned ^ ^ ^{near} if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.held,distance=..{r}] run scoreboard players set #yield arnis.car 1\n\
+             execute if score #t arnis.car matches 1.. rotated as @s positioned ^ ^ ^{crossing} if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.held,distance=..{r}] run scoreboard players set #yield arnis.car 1\n\
              execute if score #yield arnis.car matches 0 run scoreboard players set #w arnis.car 0\n\
              execute if score #yield arnis.car matches 1 run scoreboard players add #w arnis.car 1\n\
              scoreboard players operation #lim arnis.car = #id arnis.car\n\
              scoreboard players operation #lim arnis.car %= #32 arnis\n\
-             scoreboard players add #lim arnis.car 30\n\
+             scoreboard players add #lim arnis.car {GIVE_WAY_STEPS}\n\
              execute if score #yield arnis.car matches 1 if score #w arnis.car <= #lim arnis.car run scoreboard players set #t arnis.car 0\n\
              # Never through a player.\n\
              execute rotated as @s positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
              execute rotated as @s positioned ^ ^ ^{far} if entity @a[gamemode=!spectator,distance=..{pr}] run scoreboard players set #t arnis.car 0\n",
-            near = d(3.0),
-            far = d(6.0),
-            r = d(1.7),
-            pr = d(2.0),
+            crossing = d(CROSSING_AT.0),
+            r = d(CROSSING_AT.1),
+            near = d(PLAYER_AT.0),
+            far = d(PLAYER_AT.1),
+            pr = d(PLAYER_AT.2),
         );
         out.push((
             "data/arnis/function/cars/clear.mcfunction".to_string(),
@@ -881,6 +909,124 @@ impl CarNetwork {
         out
     }
 
+    /// What the Bedrock script drives the cars by: every lane, the cars placed at the start
+    /// and the scale constants. A lane's points are in tenths of a block each from the
+    /// last, its turns are (lane, entry, crossing) and its caps (point, cap), all flat lists.
+    /// The placed cars name their body by its place in `bodies`.
+    pub fn bedrock_data(&self) -> serde_json::Value {
+        let tenths = |v: f64| (v * 10.0).round() as i64;
+        let lanes: Vec<serde_json::Value> = self
+            .segments
+            .iter()
+            .map(|seg| {
+                let mut p = Vec::with_capacity(seg.points.len() * 3);
+                let mut last = (0, 0, 0);
+                for q in &seg.points {
+                    let at = (tenths(q.x), tenths(q.y), tenths(q.z));
+                    p.extend([at.0 - last.0, at.1 - last.1, at.2 - last.2]);
+                    last = at;
+                }
+                let next = seg
+                    .next
+                    .iter()
+                    .flat_map(|t| [t.lane, t.entry, usize::from(t.crossing)]);
+                let mut lane = json!({
+                    "p": bedrock_addon::list(p),
+                    "n": bedrock_addon::list(next),
+                    "v": seg.speed,
+                });
+                let caps: Vec<i32> = seg
+                    .points
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(k, q)| q.cap.map(|c| [k as i32, c]))
+                    .flatten()
+                    .collect();
+                if !caps.is_empty() {
+                    lane["m"] = json!(bedrock_addon::list(caps));
+                }
+                // A lane no car starts on is skipped by the respawn too.
+                if !seg.carries_cars() {
+                    lane["o"] = json!(1);
+                }
+                lane
+            })
+            .collect();
+        let bodies = all_bodies();
+        let hundredths = |v: f64| (v * 100.0).round() / 100.0;
+        let start: Vec<serde_json::Value> = self
+            .cars
+            .iter()
+            .map(|car| {
+                let body = bodies
+                    .iter()
+                    .position(|&(kind, colour)| kind == car.kind && colour == car.colour)
+                    .expect("every car is one of the bodies");
+                json!([
+                    car.segment,
+                    car.target,
+                    hundredths(car.pos.0),
+                    hundredths(car.pos.1),
+                    hundredths(car.pos.2),
+                    body,
+                    car.pace,
+                ])
+            })
+            .collect();
+        let names = |colours: &[(&'static str, u32)]| -> Vec<&'static str> {
+            respawn_colours(colours)
+                .into_iter()
+                .map(colour_name)
+                .collect()
+        };
+        json!({
+            "size": self.size,
+            "accel": self.accel(),
+            "lanes": lanes,
+            "start": start,
+            "bodies": bodies.iter().map(|&(k, c)| body_name(k, c)).collect::<Vec<_>>(),
+            "colours": KINDS
+                .iter()
+                .map(|&(kind, _)| (kind.name().to_string(), json!(names(kind.colours()))))
+                .collect::<serde_json::Map<_, _>>(),
+            "rules": {
+                "look": LOOK.map(|(at, r, close)| json!([at, r, close])),
+                "same_way": SAME_WAY_DEG,
+                "crossing": [CROSSING_AT.0, CROSSING_AT.1],
+                "player": [PLAYER_AT.0, PLAYER_AT.1, PLAYER_AT.2],
+                "give_way": GIVE_WAY_STEPS,
+                "pace": [PACE.0, PACE.1],
+                "kinds": KINDS.map(|(kind, weight)| json!([kind.name(), weight])),
+            },
+        })
+    }
+
+    /// Every body a car can have on Bedrock, at the size the cars are built at.
+    pub fn bedrock_bodies(&self) -> Vec<Body> {
+        let k = self.size as f32;
+        all_bodies()
+            .into_iter()
+            .map(|(kind, colour)| Body {
+                name: body_name(kind, colour),
+                fleet: Fleet::Car,
+                shapes: parts(kind, colour)
+                    .into_iter()
+                    .map(|p| Shape {
+                        block: p.block,
+                        size: p.size.map(|v| v * k),
+                        corner: p.corner.map(|v| v * k),
+                        tilt: 0.0,
+                        lamp: match p.light {
+                            Light::None => Lamp::Off,
+                            Light::Head => Lamp::On,
+                            Light::Tail => Lamp::Brake,
+                        },
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
     /// Places the cars whose lanes come from this way.
     pub fn place_way(&self, editor: &mut WorldEditor, way: u64) {
         for &c in self.by_way.get(&way).into_iter().flatten() {
@@ -940,6 +1086,53 @@ impl CarNetwork {
             }
         }
     }
+}
+
+/// The colour list a respawned car draws from, each colour as often as its weight.
+fn respawn_colours(colours: &[(&'static str, u32)]) -> Vec<&'static str> {
+    colours
+        .iter()
+        .flat_map(|(c, w)| std::iter::repeat_n(*c, (*w as usize).div_ceil(4)))
+        .collect()
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Sedan => "sedan",
+            Kind::Hatchback => "hatchback",
+            Kind::Van => "van",
+        }
+    }
+
+    /// The colours this kind comes in, weighted.
+    fn colours(self) -> &'static [(&'static str, u32)] {
+        if self == Kind::Van {
+            &VAN_COLOURS
+        } else {
+            &CAR_COLOURS
+        }
+    }
+}
+
+/// Every kind of car in each of its colours.
+fn all_bodies() -> Vec<(Kind, &'static str)> {
+    KINDS
+        .iter()
+        .flat_map(|&(kind, _)| kind.colours().iter().map(move |(c, _)| (kind, *c)))
+        .collect()
+}
+
+/// `red` for red concrete.
+fn colour_name(block: &str) -> &str {
+    block
+        .trim_start_matches("minecraft:")
+        .trim_end_matches("_concrete")
+}
+
+/// The Bedrock entity name of a car body, as the script also puts it together.
+fn body_name(kind: Kind, colour: &str) -> String {
+    format!("car_{}_{}", kind.name(), colour_name(colour))
 }
 
 /// Splits a stretch until no waypoint is more than `MAX_SPAN` from the next and the
@@ -1598,15 +1791,8 @@ fn place_cars(segments: &[Segment], scale: f64) -> Vec<Car> {
                 0.0
             };
             let roll = hash(i as u64, j as u64);
-            let kind = pick(
-                &[(Kind::Sedan, 60), (Kind::Hatchback, 26), (Kind::Van, 14)],
-                roll,
-            );
-            let colours: &[(&str, u32)] = if kind == Kind::Van {
-                &VAN_COLOURS
-            } else {
-                &CAR_COLOURS
-            };
+            let kind = pick(&KINDS, roll);
+            let colours = kind.colours();
             cars.push(Car {
                 segment: i,
                 target,
@@ -1618,7 +1804,7 @@ fn place_cars(segments: &[Segment], scale: f64) -> Vec<Car> {
                 kind,
                 colour: pick(colours, roll >> 16),
                 // From 12 % under the lane speed to 12 % over it.
-                pace: 880 + ((roll >> 40) % 241) as i32,
+                pace: PACE.0 + ((roll >> 40) % (PACE.1 - PACE.0 + 1) as u64) as i32,
             });
         }
     }
@@ -2553,6 +2739,113 @@ mod tests {
             .partition(|s| s.points[1].x < s.points[0].x);
         assert!(out[0].next.is_empty());
         assert_eq!(back[0].next.len(), 1);
+    }
+
+    #[test]
+    fn bedrock_data_holds_every_lane_point_and_names_a_body_for_every_car() {
+        let net = CarNetwork::build(&awkward_roads(), 1.0, false, false, &world(), flat);
+        let data = net.bedrock_data();
+        let lanes = data["lanes"].as_array().unwrap();
+        assert_eq!(lanes.len(), net.segments.len());
+        let numbers = |v: &serde_json::Value| -> Vec<i64> {
+            let text = v.as_str().unwrap_or("");
+            if text.is_empty() {
+                return Vec::new();
+            }
+            text.split(',').map(|n| n.parse().unwrap()).collect()
+        };
+        for (lane, seg) in lanes.iter().zip(&net.segments) {
+            let p = numbers(&lane["p"]);
+            assert_eq!(p.len(), seg.points.len() * 3);
+            let mut at = [0i64; 3];
+            for (k, q) in seg.points.iter().enumerate() {
+                for a in 0..3 {
+                    at[a] += p[k * 3 + a];
+                }
+                let back = (
+                    at[0] as f64 / 10.0,
+                    at[1] as f64 / 10.0,
+                    at[2] as f64 / 10.0,
+                );
+                assert!((back.0 - q.x).abs() < 0.051 && (back.1 - q.y).abs() < 0.051);
+                assert!((back.2 - q.z).abs() < 0.051);
+            }
+            assert_eq!(lane["v"], seg.speed);
+            let turns = numbers(&lane["n"]);
+            assert_eq!(turns.len(), seg.next.len() * 3);
+            for (t, turn) in turns.chunks(3).zip(&seg.next) {
+                assert_eq!(
+                    t,
+                    [turn.lane as i64, turn.entry as i64, turn.crossing as i64]
+                );
+            }
+            assert_eq!(lane["o"].is_null(), seg.carries_cars());
+            let caps: Vec<i64> = seg
+                .points
+                .iter()
+                .enumerate()
+                .filter_map(|(k, q)| q.cap.map(|c| [k as i64, c as i64]))
+                .flatten()
+                .collect();
+            assert_eq!(numbers(&lane["m"]), caps);
+        }
+        let bodies: Vec<&str> = data["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b.as_str().unwrap())
+            .collect();
+        let start = data["start"].as_array().unwrap();
+        assert_eq!(start.len(), net.car_count());
+        for (car, entry) in net.cars.iter().zip(start) {
+            let body = bodies[entry[5].as_u64().unwrap() as usize];
+            assert_eq!(body, body_name(car.kind, car.colour));
+            assert_eq!(entry[0], car.segment);
+            assert_eq!(entry[1], car.target);
+        }
+        // A respawned car's name is put together from these, so each has to be a body.
+        let rules = &data["rules"];
+        let kinds = rules["kinds"].as_array().unwrap();
+        assert_eq!(kinds.len(), KINDS.len());
+        for kind in kinds {
+            let kind = kind[0].as_str().unwrap();
+            for colour in data["colours"][kind].as_array().unwrap() {
+                let name = format!("car_{kind}_{}", colour.as_str().unwrap());
+                assert!(bodies.contains(&name.as_str()), "{name}");
+            }
+        }
+        assert_eq!(rules["look"].as_array().unwrap().len(), LOOK.len());
+        assert_eq!(rules["pace"], json!([PACE.0, PACE.1]));
+        assert_eq!(data["accel"], net.accel());
+    }
+
+    #[test]
+    fn every_bedrock_car_body_has_one_brake_light_and_known_colours() {
+        let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat);
+        let bodies = net.bedrock_bodies();
+        assert_eq!(bodies.len(), all_bodies().len());
+        let names: FnvHashSet<&str> = bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names.len(), bodies.len(), "names are unique");
+        for body in &bodies {
+            assert_eq!(
+                body.shapes.iter().filter(|s| s.lamp == Lamp::Brake).count(),
+                1,
+                "{}",
+                body.name
+            );
+            for s in &body.shapes {
+                assert!(crate::bedrock_addon::palette_has(s.block), "{}", s.block);
+                assert!(s.size.iter().all(|&v| v > 0.0));
+            }
+        }
+        // Built at the size the world's cars are.
+        let sedan = bodies.iter().find(|b| b.name == "car_sedan_white").unwrap();
+        let long = sedan
+            .shapes
+            .iter()
+            .map(|s| s.size[2])
+            .fold(0.0f32, f32::max);
+        assert!((long - 4.6 * 2.0).abs() < 1e-4, "{long}");
     }
 
     #[test]

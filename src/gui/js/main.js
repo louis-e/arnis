@@ -1823,11 +1823,14 @@ function refreshWorldTypeRow(format) {
 }
 
 // The extras are a Java data pack, and each One World area would write its own over
-// the last one's. Off Earth there are no roads or places, and gravity only differs there.
-// Blueprint builds no signal heads, so there are no lights to run.
+// the last one's. Vehicles also run on Bedrock, from an add-on of their own. Off Earth
+// there are no roads or places, and gravity only differs there. Blueprint builds no
+// signal heads, so there are no lights to run.
 function refreshGameplayRows(format) {
   // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
-  const pack = (format || selectedWorldFormat) === 'java' && !isOneWorldEnabled();
+  const current = format || selectedWorldFormat;
+  const pack = current === 'java' && !isOneWorldEnabled();
+  const vehicles = pack || current === 'bedrock';
   const earth = selectedCelestialBody === 'earth';
   const mode = document.getElementById('generation-mode-select');
   const blueprint = !!mode && mode.value === 'blueprint';
@@ -1836,7 +1839,7 @@ function refreshGameplayRows(format) {
   setSettingsRowAvailable('disasters-toggle', pack);
   setSettingsRowAvailable('discoveries-toggle', pack && earth);
   setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
-  setSettingsRowAvailable('moving-cars-toggle', pack && earth);
+  setSettingsRowAvailable('moving-cars-toggle', vehicles && earth);
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
 }
 

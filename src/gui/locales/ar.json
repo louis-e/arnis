@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "إلغاء",
   "one_world_confirm_ok": "إنشاء",
   "settings_section_gameplay": "أسلوب اللعب",
-  "settings_section_gameplay_desc": "إضافات تعمل من حزمة بيانات داخل العالم. لإصدار Java فقط، وغير متاحة في وضع عالم واحد. كلها متوقفة ما لم تفعّلها.",
+  "settings_section_gameplay_desc": "إضافات تعمل من حزمة بيانات داخل العالم. لإصدار Java فقط (تعمل المركبات المتحركة على Bedrock أيضًا)، وغير متاحة في وضع عالم واحد. كلها متوقفة ما لم تفعّلها.",
   "settings_nav_gameplay": "القائمة، الاكتشافات، الزومبي",
   "pause_menu": "قائمة الإيقاف المؤقت من Arnis",
   "pause_menu_desc": "التنقل والاكتشافات والشكر من قائمة الإيقاف المؤقت.",

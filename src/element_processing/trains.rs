@@ -9,12 +9,14 @@
 //! Distances are in blocks here and in thousandths of a block in the pack; a step is the
 //! two ticks between moves.
 
+use crate::bedrock_addon::{self, Fleet, Lamp};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::datapack::macro_coord;
 use crate::element_processing::train_bodies::{self, Coach, Livery};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use fnv::FnvHashMap;
+use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -238,6 +240,24 @@ struct Service {
     trains: Vec<(usize, Livery)>,
 }
 
+impl Service {
+    /// How far along its route a train is still in the area, and the lap it wraps by, both
+    /// in thousandths of a block.
+    fn reach(&self, route: &Route) -> (i64, i64) {
+        let len_mm = (route.len() * 1000.0).round() as i64;
+        match route.shape {
+            Shape::Loop => (len_mm - 1, len_mm),
+            Shape::Through => (len_mm, self.period),
+            Shape::Shuttle => (len_mm, 0),
+        }
+    }
+
+    /// How far behind the front carriage centre the middle of the train is, in blocks.
+    fn middle(&self) -> f64 {
+        self.offsets.last().copied().unwrap_or(0.0) / 2.0
+    }
+}
+
 pub struct TrainNetwork {
     size: f64,
     routes: Vec<Route>,
@@ -356,13 +376,8 @@ impl TrainNetwork {
                     .collect::<Vec<_>>()
                     .join(",")
             );
-            let len_mm = (route.len() * 1000.0).round() as i64;
-            let (visible, period) = match route.shape {
-                Shape::Loop => (len_mm - 1, len_mm),
-                Shape::Through => (len_mm, service.period),
-                Shape::Shuttle => (len_mm, 0),
-            };
-            let middle = service.offsets.last().copied().unwrap_or(0.0) / 2.0;
+            let (visible, period) = service.reach(route);
+            let middle = service.middle();
             for (k, &(phase, livery)) in service.trains.iter().enumerate() {
                 let name = format!("{r}_{k}");
                 let mut text = format!(
@@ -425,6 +440,104 @@ impl TrainNetwork {
             }
         }
         out
+    }
+
+    /// What the Bedrock script runs the trains by, the same routes and timetables the pack
+    /// gets: each route's points in hundredths of a block (heights in thousandths, headings
+    /// in tenths of a degree) each from the last, and per service its timetable as run
+    /// lengths, both flat lists, its reach and its trains, each carriage as (id, body,
+    /// offset). Also the carriage bodies, which the carriages name by their place in the list.
+    pub fn bedrock_data(
+        &self,
+        rail_y: impl Fn(u64, i32, i32) -> Option<i32>,
+    ) -> (serde_json::Value, Vec<bedrock_addon::Body>) {
+        let mut routes = Vec::new();
+        let mut services = Vec::new();
+        let mut bodies: Vec<bedrock_addon::Body> = Vec::new();
+        let mut body_of: FnvHashMap<String, usize> = FnvHashMap::default();
+        let mut carriage = 0usize;
+        let size = self.size as f32;
+        for service in &self.services {
+            let route = &self.routes[service.route];
+            let Some(ys) = heights(route, &rail_y) else {
+                continue;
+            };
+            let mut p = Vec::with_capacity(route.points.len() * 4);
+            let mut last = [0i64; 4];
+            for (i, &(x, z)) in route.points.iter().enumerate() {
+                // On the rail, which is a sixteenth of a block deep.
+                let at = [
+                    (x * 100.0).round() as i64,
+                    ((ys[i] + 0.0625) * 1000.0).round() as i64,
+                    (z * 100.0).round() as i64,
+                    (heading(route, i) * 10.0).round() as i64,
+                ];
+                p.extend((0..4).map(|k| at[k] - last[k]));
+                last = at;
+            }
+            let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+            for &(x, z) in &route.points {
+                lo = (lo.0.min(x), lo.1.min(z));
+                hi = (hi.0.max(x), hi.1.max(z));
+            }
+            routes.push(json!({
+                "p": bedrock_addon::list(p),
+                "loop": route.shape == Shape::Loop,
+                "box": [lo.0.floor(), lo.1.floor(), hi.0.ceil(), hi.1.ceil()],
+            }));
+            let (visible, period) = service.reach(route);
+            let trains: Vec<serde_json::Value> = service
+                .trains
+                .iter()
+                .map(|&(phase, livery)| {
+                    let cars: Vec<[i64; 3]> = service
+                        .coaches
+                        .iter()
+                        .zip(&service.offsets)
+                        .enumerate()
+                        .map(|(c, (&coach, &offset))| {
+                            let name = format!("train_{}", train_bodies::key(coach, livery));
+                            let body = *body_of.entry(name.clone()).or_insert_with(|| {
+                                bodies.push(bedrock_addon::Body {
+                                    name,
+                                    fleet: Fleet::Train,
+                                    shapes: train_bodies::parts(coach, livery)
+                                        .into_iter()
+                                        .map(|p| bedrock_addon::Shape {
+                                            block: p.block,
+                                            size: p.size.map(|v| v * size),
+                                            corner: p.corner.map(|v| v * size),
+                                            tilt: p.tilt,
+                                            lamp: if p.glow { Lamp::On } else { Lamp::Off },
+                                        })
+                                        .collect(),
+                                });
+                                bodies.len() - 1
+                            });
+                            [
+                                (carriage + c) as i64,
+                                body as i64,
+                                (offset * 1000.0).round() as i64,
+                            ]
+                        })
+                        .collect();
+                    carriage += service.coaches.len();
+                    json!({ "phase": phase, "cars": cars })
+                })
+                .collect();
+            services.push(json!({
+                "route": routes.len() - 1,
+                "steps": bedrock_addon::list(run_lengths(&service.timetable)),
+                "count": service.timetable.len(),
+                "visible": visible,
+                "period": period,
+                "middle": (service.middle() * 1000.0).round() as i64,
+                "trains": trains,
+            }));
+        }
+        let names: Vec<&str> = bodies.iter().map(|b| b.name.as_str()).collect();
+        let data = json!({ "routes": routes, "services": services, "bodies": names });
+        (data, bodies)
     }
 }
 
@@ -501,20 +614,43 @@ fn heights(route: &Route, rail_y: &impl Fn(u64, i32, i32) -> Option<i32>) -> Opt
     )
 }
 
+/// The yaw the route runs at from point `i`.
+fn heading(route: &Route, i: usize) -> f64 {
+    let n = route.points.len();
+    let (a, b) = if route.shape == Shape::Loop {
+        (route.points[i], route.points[(i + 1) % n])
+    } else if i + 1 < n {
+        (route.points[i], route.points[i + 1])
+    } else {
+        (route.points[i.saturating_sub(1)], route.points[i])
+    };
+    (-(b.0 - a.0)).atan2(b.1 - a.1).to_degrees()
+}
+
+/// A timetable as its first value and then (step, repeats) pairs: a train covers the same
+/// distance every step for long stretches, cruising or standing.
+fn run_lengths(values: &[i32]) -> Vec<i64> {
+    let Some(&first) = values.first() else {
+        return Vec::new();
+    };
+    let mut out = vec![first as i64];
+    let mut k = 1;
+    while k < values.len() {
+        let step = values[k] as i64 - values[k - 1] as i64;
+        let mut n = 1;
+        while k + n < values.len() && values[k + n] as i64 - values[k + n - 1] as i64 == step {
+            n += 1;
+        }
+        out.extend([step, n as i64]);
+        k += n;
+    }
+    out
+}
+
 /// Writes a route's points into storage as `r<r>`, a list of `{x,y,z,h}` with the heading
 /// a yaw, in lines of a few hundred.
 fn write_points(out: &mut String, r: usize, route: &Route, ys: &[f64]) {
     let n = route.points.len();
-    let heading = |i: usize| {
-        let (a, b) = if route.shape == Shape::Loop {
-            (route.points[i], route.points[(i + 1) % n])
-        } else if i + 1 < n {
-            (route.points[i], route.points[i + 1])
-        } else {
-            (route.points[i.saturating_sub(1)], route.points[i])
-        };
-        (-(b.0 - a.0)).atan2(b.1 - a.1).to_degrees()
-    };
     let point = |i: usize| {
         let (x, z) = route.points[i];
         // On the rail, which is a sixteenth of a block deep.
@@ -523,7 +659,7 @@ fn write_points(out: &mut String, r: usize, route: &Route, ys: &[f64]) {
             macro_coord(x),
             ys[i] + 0.0625,
             macro_coord(z),
-            heading(i)
+            heading(route, i)
         )
     };
     let _ = writeln!(out, "data modify storage arnis:trains r{r} set value []");
@@ -1910,6 +2046,90 @@ mod tests {
         let elements = vec![track(1, line(100, (500, 500), (520, 500), 2), "rail")];
         let net = net(&elements);
         assert_eq!(net.train_count(), 0);
+    }
+
+    #[test]
+    fn run_lengths_give_back_the_timetable() {
+        let tt = [5, 5, 5, 8, 11, 14, 14, -2, -2, -2, 0];
+        let runs = run_lengths(&tt);
+        let mut back = vec![runs[0]];
+        for pair in runs[1..].chunks(2) {
+            for _ in 0..pair[1] {
+                back.push(back.last().unwrap() + pair[0]);
+            }
+        }
+        assert_eq!(back, tt.iter().map(|&v| v as i64).collect::<Vec<_>>());
+        assert!(run_lengths(&[]).is_empty());
+        assert_eq!(run_lengths(&[7]), vec![7]);
+    }
+
+    #[test]
+    fn bedrock_runs_the_trains_the_pack_runs() {
+        let elements = vec![
+            track(1, line(100, (0, 1000), (2000, 1000), 20), "light_rail"),
+            track(2, ring(300, (1000, 400), 200.0, 40), "tram"),
+        ];
+        let net = net(&elements);
+        let (data, bodies) = net.bedrock_data(|_, _, _| Some(-61));
+        let services = data["services"].as_array().unwrap();
+        let trains: usize = services
+            .iter()
+            .map(|s| s["trains"].as_array().unwrap().len())
+            .sum();
+        assert_eq!(trains, net.train_count());
+        let numbers = |v: &serde_json::Value| -> Vec<i64> {
+            v.as_str()
+                .unwrap()
+                .split(',')
+                .map(|n| n.parse().unwrap())
+                .collect()
+        };
+        let mut ids = Vec::new();
+        for (service, ours) in services.iter().zip(&net.services) {
+            assert_eq!(numbers(&service["steps"]), run_lengths(&ours.timetable));
+            assert_eq!(service["count"], ours.timetable.len());
+            let route = &data["routes"][service["route"].as_u64().unwrap() as usize];
+            let p = numbers(&route["p"]);
+            // Rails at -61 put trains at -60.9375.
+            assert_eq!(p[1], -60938);
+            assert_eq!(p.len(), net.routes[ours.route].points.len() * 4);
+            // The script skips a route no one is near by this box, so all of it is inside.
+            let b: Vec<f64> = route["box"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            for &(x, z) in &net.routes[ours.route].points {
+                assert!(x >= b[0] && z >= b[1] && x <= b[2] && z <= b[3]);
+            }
+            for train in service["trains"].as_array().unwrap() {
+                for car in train["cars"].as_array().unwrap() {
+                    ids.push(car[0].as_u64().unwrap());
+                    assert!((car[1].as_u64().unwrap() as usize) < bodies.len());
+                }
+            }
+        }
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "every carriage has an id of its own");
+        let names = data["bodies"].as_array().unwrap();
+        assert_eq!(names.len(), bodies.len());
+        for (name, body) in names.iter().zip(&bodies) {
+            assert_eq!(name.as_str().unwrap(), body.name);
+            assert!(body.name.starts_with("train_"));
+            assert!(body
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'));
+            for s in &body.shapes {
+                assert!(crate::bedrock_addon::palette_has(s.block), "{}", s.block);
+            }
+        }
+        // No rails laid, nothing to run.
+        let (none, _) = net.bedrock_data(|_, _, _| None);
+        assert!(none["services"].as_array().unwrap().is_empty());
     }
 
     #[test]

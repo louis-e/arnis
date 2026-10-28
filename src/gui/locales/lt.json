@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "Atšaukti",
   "one_world_confirm_ok": "Generuoti",
   "settings_section_gameplay": "Žaidimas",
-  "settings_section_gameplay_desc": "Priedai, veikiantys iš duomenų paketo pasaulyje. Tik Java, neveikia Vieno pasaulio režimu. Visi išjungti, kol jų neįjungsite.",
+  "settings_section_gameplay_desc": "Priedai, veikiantys iš duomenų paketo pasaulyje. Tik Java (Važiuojančios transporto priemonės veikia ir Bedrock versijoje), neveikia Vieno pasaulio režimu. Visi išjungti, kol jų neįjungsite.",
   "settings_nav_gameplay": "Meniu, atradimai, zombiai",
   "pause_menu": "Arnis pauzės meniu",
   "pause_menu_desc": "Kelionės, atradimai ir padėkos pauzės meniu.",

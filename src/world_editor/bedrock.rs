@@ -28,6 +28,7 @@ use rusty_leveldb::env::{Env, FileLock, Logger, RandomAccess};
 use rusty_leveldb::{Options, PosixDiskEnv, DB};
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap as StdHashMap;
 use std::fs::{self, File};
 use std::io::{Cursor, Write as IoWrite};
@@ -394,6 +395,7 @@ pub struct BedrockWriter {
     world_time: i64,
     start_with_map: bool,
     size_options: WorldSizeOptions,
+    addon: Option<crate::bedrock_addon::Addon>,
 }
 
 impl BedrockWriter {
@@ -431,7 +433,14 @@ impl BedrockWriter {
             world_time,
             start_with_map,
             size_options: WorldSizeOptions::default(),
+            addon: None,
         }
+    }
+
+    /// Packs to ship inside the world, as the moving vehicles.
+    pub fn with_addon(mut self, addon: Option<crate::bedrock_addon::Addon>) -> Self {
+        self.addon = addon;
+        self
     }
 
     /// Where the ground grid starts, which the biomes and the spawn height read it from.
@@ -1200,6 +1209,7 @@ impl BedrockWriter {
         writer.start_file("world_icon.jpeg", options)?;
         writer.write_all(WORLD_ICON)?;
 
+        let mut behavior_packs: Vec<&str> = Vec::new();
         if self.extend_build_height {
             const BP_MANIFEST: &[u8] =
                 include_bytes!("../../assets/minecraft/bp_tall/manifest.json");
@@ -1220,11 +1230,57 @@ impl BedrockWriter {
                 options,
             )?;
             writer.write_all(BP_OVERWORLD)?;
+            behavior_packs.push(BP_HEADER_UUID);
+        }
 
-            writer.start_file("world_behavior_packs.json", options)?;
-            let world_bp_json =
-                format!(r#"[{{"pack_id":"{}","version":[1,0,0]}}]"#, BP_HEADER_UUID);
-            writer.write_all(world_bp_json.as_bytes())?;
+        let mut resource_packs: Vec<&str> = Vec::new();
+        if let Some(addon) = &self.addon {
+            // Folders get entries of their own, as the tall pack's do.
+            let mut folders: BTreeSet<String> = BTreeSet::new();
+            for (root, pack) in [
+                ("behavior_packs", &addon.behavior),
+                ("resource_packs", &addon.resources),
+            ] {
+                for (path, _) in &pack.files {
+                    let full = format!("{root}/{}/{path}", pack.folder);
+                    let mut end = 0;
+                    while let Some(slash) = full[end..].find('/') {
+                        end += slash + 1;
+                        folders.insert(full[..end].to_string());
+                    }
+                }
+            }
+            if self.extend_build_height {
+                folders.remove("behavior_packs/");
+            }
+            for folder in &folders {
+                writer.add_directory(folder.as_str(), options)?;
+            }
+            for (root, pack) in [
+                ("behavior_packs", &addon.behavior),
+                ("resource_packs", &addon.resources),
+            ] {
+                for (path, bytes) in &pack.files {
+                    writer.start_file(format!("{root}/{}/{path}", pack.folder), options)?;
+                    writer.write_all(bytes)?;
+                }
+            }
+            behavior_packs.push(&addon.behavior.id);
+            resource_packs.push(&addon.resources.id);
+        }
+        for (file, ids) in [
+            ("world_behavior_packs.json", &behavior_packs),
+            ("world_resource_packs.json", &resource_packs),
+        ] {
+            if ids.is_empty() {
+                continue;
+            }
+            let list: Vec<String> = ids
+                .iter()
+                .map(|id| format!(r#"{{"pack_id":"{id}","version":[1,0,0]}}"#))
+                .collect();
+            writer.start_file(file, options)?;
+            writer.write_all(format!("[{}]", list.join(",")).as_bytes())?;
         }
 
         // Add db directory and its contents
@@ -2294,6 +2350,82 @@ mod tests {
             header_uuid, listed_uuid,
             "BP header UUID must match world_behavior_packs.json pack_id"
         );
+    }
+
+    #[test]
+    fn writes_the_vehicle_packs_beside_the_tall_pack_and_lists_both() {
+        use crate::bedrock_addon::{Addon, Pack};
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_dir = temp_dir.path().join("bedrock_world_vehicles");
+        let world = WorldToModify::default();
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let pack = |id: &str, files: &[&str]| Pack {
+            id: id.to_string(),
+            folder: "arnis_vehicles",
+            files: files
+                .iter()
+                .map(|f| (f.to_string(), b"{}".to_vec()))
+                .collect(),
+        };
+        let addon = Addon {
+            behavior: pack("bp-id", &["manifest.json", "scripts/main.js"]),
+            resources: pack("rp-id", &["manifest.json", "models/entity/car.geo.json"]),
+        };
+
+        BedrockWriter::new(
+            output_dir.clone(),
+            "vehicle-world".to_string(),
+            None,
+            None,
+            true,
+            "local".to_string(),
+            1.0,
+            crate::args::GameMode::Creative,
+            6000,
+            false,
+        )
+        .with_addon(Some(addon))
+        .write_world(&world, &xzbbox, &llbbox)
+        .expect("write_world");
+
+        let file = fs::File::open(output_dir.with_extension("mcworld")).expect("archive");
+        let mut archive = ZipArchive::new(file).expect("zip readable");
+        let entries: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        let mut unique = entries.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), entries.len(), "no entry twice: {entries:?}");
+        for path in [
+            "behavior_packs/arnis_vehicles/",
+            "behavior_packs/arnis_vehicles/scripts/",
+            "behavior_packs/arnis_vehicles/scripts/main.js",
+            "resource_packs/",
+            "resource_packs/arnis_vehicles/models/entity/car.geo.json",
+            "behavior_packs/arnis_tall/manifest.json",
+        ] {
+            assert!(
+                entries.iter().any(|e| e == path),
+                "missing {path}: {entries:?}"
+            );
+        }
+        let mut read = |name: &str| -> Value {
+            let mut f = archive.by_name(name).expect(name);
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut f, &mut buf).unwrap();
+            serde_json::from_slice(&buf).unwrap()
+        };
+        let behavior = read("world_behavior_packs.json");
+        let ids: Vec<&str> = behavior
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["pack_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["a7f3b2e0-8c4d-4e92-9b1a-3d7f5c8e4a61", "bp-id"]);
+        assert_eq!(read("world_resource_packs.json")[0]["pack_id"], "rp-id");
     }
 
     /// Every compound of a record that holds several back to back.

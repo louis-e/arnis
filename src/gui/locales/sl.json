@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "Prekliči",
   "one_world_confirm_ok": "Ustvari",
   "settings_section_gameplay": "Igranje",
-  "settings_section_gameplay_desc": "Dodatki, ki delujejo iz podatkovnega paketa v svetu. Samo Java, ne v načinu En svet. Vsi izklopljeni, dokler jih ne vklopiš.",
+  "settings_section_gameplay_desc": "Dodatki, ki delujejo iz podatkovnega paketa v svetu. Samo Java (Vozeča vozila delujejo tudi na Bedrocku), ne v načinu En svet. Vsi izklopljeni, dokler jih ne vklopiš.",
   "settings_nav_gameplay": "Meni, odkritja, zombiji",
   "pause_menu": "Arnis meni za premor",
   "pause_menu_desc": "Potovanje, odkritja in zahvale v meniju za premor.",

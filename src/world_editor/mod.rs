@@ -277,6 +277,8 @@ pub struct WorldEditor<'a> {
     world_time: i64,
     /// Bedrock only: give the player a starting map that reveals the world as they explore.
     start_with_map: bool,
+    /// Bedrock only: the packs that run the moving vehicles.
+    bedrock_addon: Option<crate::bedrock_addon::Addon>,
     /// Bedrock only: what the run adds to the world's size, which sizes its staging folder.
     size_options: crate::world_utils::WorldSizeOptions,
     /// Place bundled map image decals as map item frames. Java only.
@@ -344,6 +346,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            bedrock_addon: None,
             size_options: Default::default(),
             map_decals: false,
             signage: None,
@@ -407,6 +410,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            bedrock_addon: None,
             size_options: Default::default(),
             map_decals: false,
             signage: None,
@@ -470,6 +474,7 @@ impl<'a> WorldEditor<'a> {
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
             start_with_map: false,
+            bedrock_addon: None,
             size_options: Default::default(),
             map_decals: false,
             signage: None,
@@ -756,6 +761,11 @@ impl<'a> WorldEditor<'a> {
     /// Bedrock only: enable the starting map that reveals the world as the player explores.
     pub fn set_start_with_map(&mut self, enabled: bool) {
         self.start_with_map = enabled;
+    }
+
+    /// Bedrock only: the packs that run the moving vehicles, written into the world on save.
+    pub fn set_bedrock_addon(&mut self, addon: crate::bedrock_addon::Addon) {
+        self.bedrock_addon = Some(addon);
     }
 
     /// Bedrock only: the options the staging folder is sized for.
@@ -2715,6 +2725,7 @@ impl<'a> WorldEditor<'a> {
         )
         .with_ground_origin((self.ground_origin_x, self.ground_origin_z))
         .with_size_options(self.size_options)
+        .with_addon(self.bedrock_addon.take())
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
 
