@@ -14,6 +14,7 @@ mod resources;
 
 use crate::args::Args;
 use crate::celestial::CelestialBody;
+use crate::world_editor::WorldFormat;
 use discoveries::{CriteriaSchema, Place};
 use serde_json::{json, Value};
 use std::fs;
@@ -466,6 +467,19 @@ impl Extras {
             disasters: args.disasters,
             cars: args.moving_vehicles,
             trains: false,
+        }
+    }
+
+    /// Those a world of `format` runs: Bedrock has an add-on for the vehicles alone, and
+    /// Luanti none at all.
+    pub fn for_format(self, format: WorldFormat) -> Self {
+        match format {
+            WorldFormat::JavaAnvil => self,
+            WorldFormat::BedrockMcWorld => Self {
+                cars: self.cars,
+                ..Self::default()
+            },
+            WorldFormat::LuantiWorld => Self::default(),
         }
     }
 
@@ -1148,6 +1162,16 @@ mod tests {
         let text = gravity_apply(1.62 / 9.81);
         assert!(text.contains("minecraft:gravity modifier add arnis:body_gravity -0.8349"));
         assert!(text.contains("safe_fall_distance modifier add arnis:body_gravity 5.0556"));
+    }
+
+    #[test]
+    fn bedrock_keeps_only_the_vehicles_and_luanti_nothing() {
+        let bedrock = all().for_format(WorldFormat::BedrockMcWorld);
+        assert!(bedrock.cars);
+        assert!(!bedrock.traffic_lights && !bedrock.disasters && !bedrock.pause_menu);
+        assert!(!bedrock.trains && !bedrock.wants_places());
+        assert!(!all().for_format(WorldFormat::LuantiWorld).any());
+        assert!(all().for_format(WorldFormat::JavaAnvil).disasters);
     }
 
     #[test]

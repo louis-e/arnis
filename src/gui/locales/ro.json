@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "Anulează",
   "one_world_confirm_ok": "Generează",
   "settings_section_gameplay": "Gameplay",
-  "settings_section_gameplay_desc": "Extra-uri care rulează dintr-un pachet de date în lume. Doar Java, nu în modul O singură lume. Toate sunt dezactivate până le activezi.",
+  "settings_section_gameplay_desc": "Extra-uri care rulează dintr-un pachet de date în lume. Doar Java (Vehicule în mișcare merg și pe Bedrock), nu în modul O singură lume. Toate sunt dezactivate până le activezi.",
   "settings_nav_gameplay": "Meniu, descoperiri, zombi",
   "pause_menu": "Meniu de pauză Arnis",
   "pause_menu_desc": "Călătorii, descoperiri și credite din meniul de pauză.",

@@ -393,7 +393,8 @@ pub struct Args {
 
     /// Cars that drive the streets at the speed limit, queue behind each other, turn at
     /// junctions and, with --traffic-lights, stop at red; and trains, S-Bahns, metros and
-    /// trams that run the mapped tracks and stop at their stations. Java 1.21.4+.
+    /// trams that run the mapped tracks and stop at their stations. Java 1.21.4+ or
+    /// Bedrock 1.21.120+; Bedrock has no traffic lights to stop at.
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
 }
@@ -842,7 +843,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.moving_vehicles, "--moving-vehicles"),
     ];
     if args.bedrock || args.luanti {
-        if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
+        // Bedrock runs the vehicles from an add-on of its own.
+        let java_only = |flag: &str| args.luanti || flag != "--moving-vehicles";
+        if let Some((_, flag)) = extras.iter().find(|(on, flag)| *on && java_only(flag)) {
             return Err(format!(
                 "{flag} runs from a Java Edition data pack and is not available for Bedrock or Luanti worlds."
             ));
@@ -1127,7 +1130,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gameplay_extras_are_java_only_and_gravity_needs_another_body() {
+    fn gameplay_extras_are_java_only_but_vehicles_and_gravity_needs_another_body() {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
         let parse = |extra: &[&str]| {
@@ -1140,6 +1143,17 @@ mod tests {
         assert!(validate_args(&parse(&["--traffic-lights", "--zombie-outbreak"])).is_ok());
         let bedrock = validate_args(&parse(&["--bedrock", "--discoveries"])).unwrap_err();
         assert!(bedrock.contains("--discoveries"), "{bedrock}");
+        // Vehicles come with an add-on of their own on Bedrock, but not on Luanti.
+        assert!(validate_args(&parse(&["--bedrock", "--moving-vehicles"])).is_ok());
+        let luanti = validate_args(&parse(&["--luanti", "--moving-vehicles"])).unwrap_err();
+        assert!(luanti.contains("--moving-vehicles"), "{luanti}");
+        let lights = validate_args(&parse(&[
+            "--bedrock",
+            "--moving-vehicles",
+            "--traffic-lights",
+        ]))
+        .unwrap_err();
+        assert!(lights.contains("--traffic-lights"), "{lights}");
         assert!(validate_args(&parse(&["--body-gravity"])).is_err());
         assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
         let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();

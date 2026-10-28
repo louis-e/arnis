@@ -229,7 +229,7 @@
   "one_world_confirm_cancel": "Cancelar",
   "one_world_confirm_ok": "Generar",
   "settings_section_gameplay": "Jugabilidad",
-  "settings_section_gameplay_desc": "Extras que funcionan desde un paquete de datos dentro del mundo. Solo Java, no disponibles en el modo Un solo mundo. Todos desactivados salvo que los actives.",
+  "settings_section_gameplay_desc": "Extras que funcionan desde un paquete de datos dentro del mundo. Solo Java (Vehículos en movimiento también en Bedrock), no disponibles en el modo Un solo mundo. Todos desactivados salvo que los actives.",
   "settings_nav_gameplay": "Menú, descubrimientos, zombis",
   "pause_menu": "Menú de pausa de Arnis",
   "pause_menu_desc": "Viajes, descubrimientos y créditos desde el menú de pausa.",
