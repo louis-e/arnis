@@ -36,6 +36,30 @@ pub fn generate_landuse(
     );
 }
 
+/// A ripe field plant from the farming mod; rice floods its cell into a paddy.
+fn place_modded_crop(
+    editor: &mut WorldEditor,
+    crop: crate::mods::farmers_delight::Crop,
+    x: i32,
+    z: i32,
+    h: u64,
+) {
+    let ground = editor.get_absolute_y(x, 0, z);
+    if let Some(panicles) = crop.panicles() {
+        editor.set_block_with_properties_absolute(
+            crop.plant(h),
+            x,
+            ground,
+            z,
+            Some(&[FARMLAND]),
+            None,
+        );
+        editor.set_block_with_properties_absolute(panicles, x, ground + 1, z, None, None);
+    } else {
+        editor.set_block_with_properties_absolute(crop.plant(h), x, ground + 1, z, None, None);
+    }
+}
+
 /// A landuse area less the cells of `holes`.
 #[allow(clippy::too_many_arguments)]
 fn landuse_area(
@@ -58,10 +82,22 @@ fn landuse_area(
 
     // Use deterministic RNG seeded by element ID for consistent results across region boundaries
     let mut rng = element_rng(element.id);
+    // A crop the farming mod grows, from the field's own tags.
+    let modded_crop = editor
+        .mods()
+        .has(crate::mods::ModPack::FarmersDelight)
+        .then(|| element.tags.get("crop").or(element.tags.get("produce")))
+        .flatten()
+        .and_then(|v| crate::mods::farmers_delight::Crop::from_tag(v));
+
+    // Allotment plots grow the farming mod's vegetables in beds.
+    let allotment_beds =
+        landuse_tag == "allotments" && editor.mods().has(crate::mods::ModPack::FarmersDelight);
 
     let block_type = match landuse_tag.as_str() {
         "greenfield" | "meadow" | "grass" | "orchard" | "forest" => GRASS_BLOCK,
         "farmland" => FARMLAND,
+        "allotments" if allotment_beds => FARMLAND,
         "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
@@ -302,6 +338,19 @@ fn landuse_area(
                     }
                 }
             }
+            "allotments"
+                if allotment_beds && editor.check_for_block(x, 0, z, Some(&[FARMLAND])) =>
+            {
+                use crate::mods::farmers_delight::Crop;
+                // A path between every few rows of beds, one vegetable per plot.
+                if z.rem_euclid(4) == 0 {
+                    editor.set_block(DIRT_PATH, x, 0, z, Some(&[FARMLAND]), None);
+                } else {
+                    let plot = crate::land_cover::coord_hash(x.div_euclid(5), z.div_euclid(4));
+                    let crop = [Crop::Tomato, Crop::Cabbage, Crop::Onion][(plot % 3) as usize];
+                    place_modded_crop(editor, crop, x, z, rng.random());
+                }
+            }
             "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
                 if rng.random_range(0..76) == 0 {
                     let special_choice: i32 = rng.random_range(1..=10);
@@ -313,8 +362,12 @@ fn landuse_area(
                 } else {
                     // Set crops only if the block below is farmland
                     if editor.check_for_block(x, 0, z, Some(&[FARMLAND])) {
-                        let crop_choice = [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
-                        editor.set_block(crop_choice, x, 1, z, None, None);
+                        if let Some(crop) = modded_crop {
+                            place_modded_crop(editor, crop, x, z, rng.random());
+                        } else {
+                            let crop_choice = [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
+                            editor.set_block(crop_choice, x, 1, z, None, None);
+                        }
                     }
                 }
             }

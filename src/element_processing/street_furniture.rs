@@ -152,6 +152,15 @@ fn post(editor: &mut WorldEditor, block: Block, x: i32, z: i32, top: i32) {
     }
 }
 
+/// A seat to sit on with Create, one colour per bench, or the plain slab.
+fn bench(editor: &WorldEditor, slab: Block, x: i32, z: i32) -> BlockWithProperties {
+    if editor.mods().has(crate::mods::ModPack::Create) {
+        crate::mods::create::seat(crate::land_cover::coord_hash(x, z))
+    } else {
+        BlockWithProperties::simple(slab)
+    }
+}
+
 /// Five wide, two deep: glass back and sides, a bench, a flat roof.
 fn transit_shelter(
     editor: &mut WorldEditor,
@@ -174,7 +183,8 @@ fn transit_shelter(
     }
     for a in -1..=1 {
         let (bx, bz) = cell(a, 0);
-        editor.set_block_absolute(OAK_SLAB_TOP, bx, base + 1, bz, None, None);
+        let bench = bench(editor, OAK_SLAB_TOP, x, z);
+        editor.set_block_with_properties_absolute(bench, bx, base + 1, bz, None, None);
     }
     for a in -2..=2 {
         for d in 0..=1 {
@@ -239,8 +249,12 @@ pub fn picnic_table(editor: &mut WorldEditor, x: i32, z: i32, base: i32, along_x
             } else {
                 (x + side, z + a)
             };
-            let block = if side == 0 { OAK_SLAB_TOP } else { OAK_SLAB };
-            editor.set_block_absolute(block, cx, base + 1, cz, None, None);
+            let block = if side == 0 {
+                BlockWithProperties::simple(OAK_SLAB_TOP)
+            } else {
+                bench(editor, OAK_SLAB, x, z)
+            };
+            editor.set_block_with_properties_absolute(block, cx, base + 1, cz, None, None);
         }
     }
 }
@@ -258,7 +272,8 @@ fn lean_to(editor: &mut WorldEditor, x: i32, z: i32, base: i32, along_x: bool, t
     }
     for a in -1..=1 {
         let (bx, bz) = cell(a, 1);
-        editor.set_block_absolute(SPRUCE_SLAB, bx, base + 1, bz, None, None);
+        let bench = bench(editor, SPRUCE_SLAB, x, z);
+        editor.set_block_with_properties_absolute(bench, bx, base + 1, bz, None, None);
     }
     for a in -2..=2 {
         for d in -1..=2 {

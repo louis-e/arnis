@@ -1,6 +1,6 @@
 //! Schools, kindergartens, libraries, practices, hospitals, hotels, museums and stations.
 
-use super::canvas::{bed, mix, pick, seat, top_slab, Canvas, Frame};
+use super::canvas::{bed, mix, pick, top_slab, Canvas, Frame};
 use super::commerce::eatery;
 use super::uses::Eatery;
 use super::{book_shelf, chest, entry_u, plant, table_set, FloorCtx};
@@ -37,7 +37,7 @@ fn corridor_benches(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     let side = if b.long_x() { (0, 1) } else { (1, 0) };
     for ((x, z), n) in c.wall_cells(zone) {
         if n == side && mix(x, z, ctx.seed).is_multiple_of(5) {
-            c.put_with(x, 1, z, seat(ctx.wood.stairs, n));
+            c.put_with(x, 1, z, ctx.wood.seat(n));
         }
     }
 }
@@ -59,9 +59,16 @@ fn classroom(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     }
     // Teacher.
     let (dx, dz) = f.world(mid, 2);
-    c.put_with(dx, 1, dz, top_slab(ctx.wood.slab));
+    // A globe on one teacher's desk in four.
+    if c.put_with(dx, 1, dz, ctx.wood.desk(f.dir(1, 0).0 != 0))
+        && supplementaries(c)
+        && mix(dx, dz, ctx.seed ^ 0x6106).is_multiple_of(4)
+    {
+        let y = c.floor_y + 2;
+        crate::mods::supplementaries::globe(c.editor, dx, y, dz, f.back());
+    }
     let (sx, sz) = f.world(mid, 1);
-    c.put_with(sx, 1, sz, seat(ctx.wood.stairs, f.back()));
+    c.put_with(sx, 1, sz, ctx.wood.seat(f.back()));
     let (lx, lz) = f.world(mid + 2, 2);
     c.put_with(lx, 1, lz, super::canvas::facing_block(LECTERN, f.back()));
     // Pupils: desk rows with chairs behind them, an aisle every third column.
@@ -74,8 +81,8 @@ fn classroom(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
             let (x, z) = f.world(u, v);
             let (cx, cz) = f.world(u, v + 1);
             if c.is_free(x, z) && c.is_free(cx, cz) {
-                c.put_with(x, 1, z, top_slab(ctx.wood.slab));
-                c.put_with(cx, 1, cz, seat(ctx.wood.stairs, f.front()));
+                c.put_with(x, 1, z, ctx.wood.desk(f.dir(1, 0).0 != 0));
+                c.put_with(cx, 1, cz, ctx.wood.seat(f.front()));
             }
         }
         v += 2;
@@ -142,6 +149,10 @@ pub(super) fn kindergarten(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     }
 }
 
+fn supplementaries(c: &Canvas) -> bool {
+    c.editor.mods().has(crate::mods::ModPack::Supplementaries)
+}
+
 pub(super) fn library(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     let Some(f) = c.frame(zone) else {
         return;
@@ -175,7 +186,13 @@ pub(super) fn library(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
                 && v % 3 == 0
                 && table_set(c, &f, u, v, ctx.wood, &[(-1, 0), (1, 0)])
             {
-                c.put(x, 2, z, LANTERN);
+                // A globe on the odd reading table; a big reading room is not a globe shop.
+                if supplementaries(c) && mix(x, z, ctx.seed ^ 0x6105).is_multiple_of(8) {
+                    let y = c.floor_y + 2;
+                    crate::mods::supplementaries::globe(c.editor, x, y, z, f.front());
+                } else {
+                    c.put(x, 2, z, LANTERN);
+                }
             }
         } else if (v - stacks_from) % 3 == 0 && (u - ue).abs() > 1 && u % 7 != 0 {
             c.put(x, 1, z, BOOKSHELF);
@@ -221,7 +238,7 @@ fn reception(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     for ((x, z), n) in c.wall_cells(zone) {
         let (u, v) = f.local(x, z);
         if v >= 1 && (u - ue).abs() > 3 && !mix(x, z, ctx.seed).is_multiple_of(3) {
-            c.put_with(x, 1, z, seat(ctx.wood.stairs, n));
+            c.put_with(x, 1, z, ctx.wood.seat(n));
         }
     }
     plant(c, &f, 0, 1, ctx.seed);
@@ -251,7 +268,7 @@ fn exam_room(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         if placed {
             if k == 1 {
                 let (sx, sz) = (x + n.0, z + n.1);
-                c.put_with(sx, 1, sz, seat(ctx.wood.stairs, (-n.0, -n.1)));
+                c.put_with(sx, 1, sz, ctx.wood.seat((-n.0, -n.1)));
             }
             k += 1;
         }
@@ -337,10 +354,14 @@ fn lobby(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         let (u, v) = f.local(x, z);
         if depth.get(x, z) >= 3 && (u - ue).rem_euclid(6) == 3 && v % 5 == 3 && v > 3 {
             // A low table with a sofa either side.
-            if c.put_with(x, 1, z, top_slab(ctx.wood.slab)) {
+            let low = ctx
+                .wood
+                .low_table()
+                .unwrap_or_else(|| top_slab(ctx.wood.slab));
+            if c.put_with(x, 1, z, low) {
                 for du in [-1, 1] {
                     let (sx, sz) = f.world(u + du, v);
-                    c.put_with(sx, 1, sz, seat(ctx.wood.stairs, f.dir(-du, 0)));
+                    c.put_with(sx, 1, sz, ctx.wood.sofa(f.dir(-du, 0), mix(x, z, ctx.seed)));
                 }
             }
         }
@@ -369,9 +390,14 @@ fn hotel_room(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     for du in [0, -1, 1, -2, 2] {
         if bed(c, f.world(mid + du, back - 1), f.back(), WHITE_BED) {
             slept = true;
+            let b = f.back();
             for side in [-1, 1] {
                 let (nx, nz) = f.world(mid + du + side, back);
-                if c.put(nx, 1, nz, ctx.wood.planks) {
+                let stand = match ctx.wood.macaws {
+                    Some(w) => crate::mods::macaws::drawer(w, (-b.0, -b.1), ctx.wood.planks),
+                    None => BlockWithProperties::simple(ctx.wood.planks),
+                };
+                if c.put_with(nx, 1, nz, stand) {
                     c.put(nx, 2, nz, LANTERN);
                 }
             }
@@ -379,14 +405,25 @@ fn hotel_room(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         }
     }
     let mut desk = false;
+    let mut wardrobe = ctx.wood.macaws.is_none();
     for ((x, z), n) in c.wall_cells(zone) {
         let v = f.local(x, z).1;
         if v == 0 {
             continue;
         }
+        if !wardrobe && v == 1 {
+            if let Some(w) = ctx.wood.macaws {
+                use crate::mods::macaws::wardrobe as robe;
+                if c.put_with(x, 1, z, robe(w, n, false, ctx.wood.planks)) {
+                    c.put_with(x, 2, z, robe(w, n, true, ctx.wood.planks));
+                    wardrobe = true;
+                    continue;
+                }
+            }
+        }
         if !desk && v >= 1 && v < back - 1 && n != f.front() {
-            if c.put_with(x, 1, z, top_slab(ctx.wood.slab)) {
-                c.put_with(x + n.0, 1, z + n.1, seat(ctx.wood.stairs, (-n.0, -n.1)));
+            if c.put_with(x, 1, z, ctx.wood.desk(n.0 == 0)) {
+                c.put_with(x + n.0, 1, z + n.1, ctx.wood.seat((-n.0, -n.1)));
                 desk = true;
             }
         } else if v == 1 {
@@ -465,6 +502,14 @@ pub(super) fn station(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         let (x, z) = f.world(f.width / 2 + du, f.depth - 1);
         c.mount(x, board_y, z, f.front(), BLACK_CONCRETE);
     }
+    // The station clock beside it.
+    if supplementaries(c) {
+        let (x, z) = f.world(f.width / 2 + 3, f.depth - 1);
+        if c.mount(x, board_y, z, f.front(), BLACK_CONCRETE) {
+            let y = c.floor_y + board_y;
+            crate::mods::supplementaries::clock(c.editor, x, y, z, f.front());
+        }
+    }
     // Back to back benches across the hall.
     let depth = c.depth(zone);
     let ue = entry_u(c, zone, &f);
@@ -476,12 +521,16 @@ pub(super) fn station(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         if !(1..=3).contains(&(u - ue).rem_euclid(5)) || v < 4 {
             continue;
         }
+        let create = c.editor.mods().has(crate::mods::ModPack::Create);
         match v % 5 {
+            1 | 2 if create => {
+                c.put_with(x, 1, z, crate::mods::create::seat(ctx.seed));
+            }
             1 => {
-                c.put_with(x, 1, z, seat(ctx.wood.stairs, f.front()));
+                c.put_with(x, 1, z, ctx.wood.seat(f.front()));
             }
             2 => {
-                c.put_with(x, 1, z, seat(ctx.wood.stairs, f.back()));
+                c.put_with(x, 1, z, ctx.wood.seat(f.back()));
             }
             _ => {}
         }

@@ -31,6 +31,11 @@ pub fn generate_historic(editor: &mut WorldEditor, node: &ProcessedNode) {
             "memorial" => generate_memorial(editor, node),
             "monument" => generate_monument(editor, node),
             "wayside_cross" => generate_wayside_cross(editor, node),
+            "cannon" if editor.mods().has(crate::mods::ModPack::Supplementaries) => {
+                let y = editor.get_absolute_y(node.x, 1, node.z);
+                let aim = [(0, -1), (1, 0), (0, 1), (-1, 0)][(node.id % 4) as usize];
+                crate::mods::supplementaries::cannon(editor, node.x, y, node.z, aim);
+            }
             _ => {}
         }
     }

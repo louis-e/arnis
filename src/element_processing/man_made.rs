@@ -978,6 +978,71 @@ pub fn is_tank_structure(way: &ProcessedWay) -> bool {
 }
 
 /// Generate man_made structures for node elements
+/// A tower mill whose sails turn once a player assembles the Create bearing at its cap.
+fn generate_windmill(editor: &mut WorldEditor, node: &ProcessedNode) {
+    const HEIGHT: i32 = 11;
+    let (x, z) = (node.x, node.z);
+    let base = editor.get_absolute_y(x, 0, z);
+    for dy in 1..=HEIGHT {
+        let r: i32 = if dy <= HEIGHT / 2 { 2 } else { 1 };
+        for dx in -r..=r {
+            for dz in -r..=r {
+                // Rounded corners on the wide part.
+                if r == 2 && dx.abs() == 2 && dz.abs() == 2 {
+                    continue;
+                }
+                let shell = dx.abs() == r || dz.abs() == r;
+                let block = if shell { STONE_BRICKS } else { AIR };
+                editor.set_block_absolute(block, x + dx, base + dy, z + dz, None, Some(&[]));
+            }
+        }
+    }
+    for dx in -1..=1 {
+        for dz in -1..=1 {
+            editor.set_block_absolute(
+                DARK_OAK_PLANKS,
+                x + dx,
+                base + HEIGHT + 1,
+                z + dz,
+                None,
+                Some(&[]),
+            );
+        }
+    }
+    editor.set_block_absolute(DARK_OAK_PLANKS, x, base + HEIGHT + 2, z, None, Some(&[]));
+    let out = [(0, 1), (1, 0), (0, -1), (-1, 0)][(node.id % 4) as usize];
+    let hub = (x + 2 * out.0, base + HEIGHT - 1, z + 2 * out.1);
+    crate::mods::create::windmill(editor, hub.0, hub.1, hub.2, out, 6);
+}
+
+/// A white pole with a cloth flag near its top, flying away from the nearest road.
+fn generate_flagpole(editor: &mut WorldEditor, node: &ProcessedNode) {
+    const HEIGHT: i32 = 9;
+    let (x, z) = (node.x, node.z);
+    let base = editor.get_absolute_y(x, 0, z);
+    for dy in 1..=HEIGHT {
+        editor.set_block_absolute(IRON_BARS, x, base + dy, z, None, None);
+    }
+    let colour = match node
+        .tags
+        .get("flag:colour")
+        .or(node.tags.get("colour"))
+        .map(String::as_str)
+    {
+        Some(c @ ("red" | "blue" | "green" | "yellow" | "black" | "white" | "orange")) => c,
+        _ => ["red", "blue", "white", "green", "yellow"][(node.id % 5) as usize],
+    };
+    let out = [(1, 0), (0, 1), (-1, 0), (0, -1)][((node.id >> 3) % 4) as usize];
+    crate::mods::supplementaries::flag(
+        editor,
+        x + out.0,
+        base + HEIGHT - 1,
+        z + out.1,
+        out,
+        colour,
+    );
+}
+
 pub fn generate_man_made_nodes(
     editor: &mut WorldEditor,
     node: &ProcessedNode,
@@ -995,6 +1060,12 @@ pub fn generate_man_made_nodes(
                 generate_tank_structure(editor, &element, args);
             }
             "lighthouse" => crate::structures::lighthouse::place(editor, node.x, node.z),
+            "windmill" if editor.mods().has(crate::mods::ModPack::Create) => {
+                generate_windmill(editor, node);
+            }
+            "flagpole" if editor.mods().has(crate::mods::ModPack::Supplementaries) => {
+                generate_flagpole(editor, node);
+            }
             "dolphin" => waterfront::generate_dolphin(editor, node),
             "crane" => crate::structures::crane::place_mapped(
                 editor,

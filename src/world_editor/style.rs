@@ -102,7 +102,7 @@ fn kind(block: Block) -> Kind {
             })
             .collect()
     });
-    table[usize::from(block.id())]
+    table[usize::from(block.vanilla().id())]
 }
 
 const SMALL_PLANTS: [&str; 32] = [
@@ -282,7 +282,7 @@ fn flammable(block: Block) -> bool {
             })
             .collect()
     });
-    table[usize::from(block.id())]
+    table[usize::from(block.vanilla().id())]
 }
 
 /// What the styles read about the terrain under a region.

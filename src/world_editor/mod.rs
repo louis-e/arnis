@@ -49,6 +49,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// Chunk key for the cells `mark_post_process` collects; the Java writer turns them into
+/// the chunk's `PostProcessing` lists.
+pub(crate) const POST_PROCESS_KEY: &str = "arnis_post_process";
+
 #[cfg(feature = "gui")]
 use crate::progress::emit_gui_error;
 #[cfg(feature = "gui")]
@@ -271,6 +275,8 @@ pub struct WorldEditor<'a> {
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
     /// Driven by the same toggle as external 3D models (`args.use_3d`).
     place_schematics: bool,
+    /// Mod packs whose blocks and entities replace vanilla stand-ins. Java only.
+    mods: crate::mods::ModSet,
     /// Map preview accumulator, fed as regions are saved/flushed.
     preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
     game_mode: crate::args::GameMode,
@@ -340,6 +346,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             void_world: false,
             place_schematics: true,
+            mods: crate::mods::ModSet::default(),
             preview: None,
             voxy: None,
             dh: None,
@@ -404,6 +411,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             void_world: false,
             place_schematics: true,
+            mods: crate::mods::ModSet::default(),
             preview: None,
             voxy: None,
             dh: None,
@@ -468,6 +476,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             void_world: false,
             place_schematics: true,
+            mods: crate::mods::ModSet::default(),
             preview: None,
             voxy: None,
             dh: None,
@@ -1199,6 +1208,20 @@ impl<'a> WorldEditor<'a> {
         self.place_schematics
     }
 
+    pub fn set_mods(&mut self, mods: crate::mods::ModSet) {
+        self.mods = mods;
+    }
+
+    /// Mod packs in use; always empty outside Java.
+    #[inline]
+    pub fn mods(&self) -> crate::mods::ModSet {
+        if self.format == WorldFormat::JavaAnvil {
+            self.mods
+        } else {
+            crate::mods::ModSet::default()
+        }
+    }
+
     /// Returns the current world format
     #[allow(dead_code)]
     pub fn format(&self) -> WorldFormat {
@@ -1639,6 +1662,49 @@ impl<'a> WorldEditor<'a> {
             }
             Entry::Vacant(entry) => {
                 entry.insert(Value::List(vec![Value::Compound(tick)]));
+            }
+        }
+    }
+
+    /// A block with its block entity, over whatever stood there. `be` carries the id and
+    /// the position.
+    pub fn set_block_entity_absolute(
+        &mut self,
+        block: BlockWithProperties,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        be: HashMap<String, Value>,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) || self.is_region_flushed(x, z) {
+            return;
+        }
+        self.insert_block_entity(x, z, be);
+        self.set_block_with_properties_absolute(block, x, absolute_y, z, None, Some(&[]));
+    }
+
+    /// Asks the game to settle a block's connections with its neighbours (window panes,
+    /// table tops, roof corners) when its chunk first ticks. Java only.
+    pub fn mark_post_process(&mut self, x: i32, absolute_y: i32, z: i32) {
+        if self.format != WorldFormat::JavaAnvil
+            || !self.xzbbox.contains(&XZPoint::new(x, z))
+            || self.is_region_flushed(x, z)
+        {
+            return;
+        }
+        let chunk = self
+            .world
+            .get_or_create_region(x >> 9, z >> 9)
+            .get_or_create_chunk((x >> 4) & 31, (z >> 4) & 31);
+        let cell = Value::IntArray(IntArray::new(vec![x, absolute_y, z]));
+        match chunk.other.entry(POST_PROCESS_KEY.to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(cell);
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![cell]));
             }
         }
     }
@@ -2337,6 +2403,11 @@ impl<'a> WorldEditor<'a> {
         // draws its own undergrowth, so the halo keeps none.
         if !self.owns(x, z) && crate::ground_decoration::is_undergrowth(block_with_props.block) {
             return;
+        }
+        // Modded pieces join their neighbours (tables, panes, roof corners) once the game
+        // settles them, as Arnis does not know every mod's connection rules.
+        if block_with_props.block.is_modded() {
+            self.mark_post_process(x, absolute_y, z);
         }
 
         // None/None is the dominant pattern; skip the redundant get_block() read.

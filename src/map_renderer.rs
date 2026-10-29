@@ -49,6 +49,7 @@ fn build_color_lut() -> Vec<Option<Rgb<u8>>> {
 
 #[inline]
 fn lut_color(block: Block) -> Option<Rgb<u8>> {
+    let block = block.vanilla();
     if let Some(color) = COLOR_LUT.get(block.id() as usize) {
         return *color;
     }

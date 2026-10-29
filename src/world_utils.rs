@@ -1151,6 +1151,28 @@ pub fn start_in_survival(world: &Path) -> Result<(), String> {
     write_gzip_nbt(&path, &root)
 }
 
+/// Marks `level.dat` as saved by Minecraft `name` (data version `id`), so that version opens
+/// the world without warning that it comes from a newer one.
+pub fn stamp_level_version(world: &Path, id: i32, name: &str) -> Result<(), String> {
+    let path = world.join("level.dat");
+    let mut root = read_gzip_nbt(&path)?;
+    let Value::Compound(ref mut r) = root else {
+        return Err("level.dat root is not a compound".to_string());
+    };
+    let Some(Value::Compound(data)) = r.get_mut("Data") else {
+        return Err("level.dat missing Data compound".to_string());
+    };
+    data.insert("DataVersion".to_string(), Value::Int(id));
+    if let Some(Value::Compound(version)) = data.get_mut("Version") {
+        version.insert("Id".to_string(), Value::Int(id));
+        version.insert("Name".to_string(), Value::String(name.to_string()));
+    }
+    if let Some(Value::Compound(player)) = data.get_mut("Player") {
+        player.insert("DataVersion".to_string(), Value::Int(id));
+    }
+    write_gzip_nbt(&path, &root)
+}
+
 /// `Data.LevelName` of a world's `level.dat`.
 pub(crate) fn level_name(world: &Path) -> Option<String> {
     let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
@@ -1392,6 +1414,25 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stamped_world_reads_as_the_older_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        stamp_level_version(&world, 3955, "1.21.1").unwrap();
+        assert_eq!(level_data_version(&world), Some(3955));
+        let Value::Compound(root) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
+            panic!("level.dat root");
+        };
+        let Some(Value::Compound(data)) = root.get("Data") else {
+            panic!("Data");
+        };
+        let Some(Value::Compound(version)) = data.get("Version") else {
+            panic!("Version");
+        };
+        assert_eq!(version.get("Name"), Some(&Value::String("1.21.1".into())));
+        assert_eq!(version.get("Id"), Some(&Value::Int(3955)));
+    }
 
     /// Disk at the peak of real runs, Oct 2026: 9 km² boxes at scale 1 unless the area says.
     #[test]

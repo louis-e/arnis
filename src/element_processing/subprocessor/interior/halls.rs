@@ -316,11 +316,24 @@ pub(super) fn factory(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         let (x, z) = f.world(mid, v);
         c.put(x, 1, z, rail);
     }
+    let create = c.editor.mods().has(crate::mods::ModPack::Create);
     // Machines either side of it.
     for v in (3..d - 3).step_by(4) {
         for side in [-2, 2] {
             let (x, z) = f.world(mid + side, v);
             let toward_belt = f.dir(-side.signum(), 0);
+            if create {
+                let h = mix(x, z, ctx.seed);
+                if c.put_with(x, 1, z, crate::mods::create::machine(h)) {
+                    if h.is_multiple_of(3) {
+                        let y = c.floor_y + 2;
+                        crate::mods::create::depot(c.editor, x, y, z);
+                    } else if c.headroom() >= 3 {
+                        c.put_with(x, 2, z, crate::mods::create::machine(h >> 8));
+                    }
+                }
+                continue;
+            }
             match mix(x, z, ctx.seed) % 5 {
                 0 => {
                     c.put_with(x, 1, z, facing_block(BLAST_FURNACE, toward_belt));
@@ -340,10 +353,30 @@ pub(super) fn factory(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
             }
         }
     }
+    // Girders across the hall under the ceiling, every few bays.
+    if create && c.headroom() >= 4 {
+        let along_x = f.dir(1, 0).0 != 0;
+        let top = c.headroom();
+        for v in (2..d - 1).step_by(5) {
+            for u in 0..w {
+                let (x, z) = f.world(u, v);
+                if c.walkable(x, z) {
+                    c.put_with(x, top, z, crate::mods::create::girder(along_x));
+                }
+            }
+        }
+    }
     // Workbenches along the walls.
     for ((x, z), n) in c.wall_cells(zone) {
         let h = mix(x, z, ctx.seed ^ 0xFA);
         if f.local(x, z).1 < 2 || h.is_multiple_of(2) {
+            continue;
+        }
+        if create && (h >> 8).is_multiple_of(6) {
+            if c.put(x, 1, z, CRAFTING_TABLE) {
+                let y = c.floor_y + 2;
+                crate::mods::create::toolbox(c.editor, x, y, z, n, h >> 16);
+            }
             continue;
         }
         match (h >> 8) % 6 {

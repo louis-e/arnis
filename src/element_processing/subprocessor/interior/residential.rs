@@ -286,6 +286,29 @@ fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Blo
     }
 }
 
+/// The modded piece for a plan cell, or None to build the plan's own block.
+fn modded_piece(
+    c: &Canvas,
+    ctx: &FloorCtx,
+    cell: char,
+    at: &dyn Fn(i32, i32) -> char,
+) -> Option<BlockWithProperties> {
+    const DIRS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+    let toward = |want: char| DIRS.into_iter().find(|&(dx, dz)| at(dx, dz) == want);
+    // Away from the nearest wall, or south when none touches the cell.
+    let off_wall = toward('W').map_or((0, 1), |(dx, dz)| (-dx, -dz));
+    let delight = c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
+    match cell {
+        'S' if ctx.wood.macaws.is_some() => Some(ctx.wood.seat(toward('U').unwrap_or(off_wall))),
+        'L' => ctx
+            .wood
+            .macaws
+            .map(|w| crate::mods::macaws::sink(w, off_wall, WATER_CAULDRON)),
+        'F' if delight => Some(crate::mods::farmers_delight::stove(off_wall)),
+        _ => None,
+    }
+}
+
 /// Tiles the house plan over one unit, shifted per storey.
 pub(super) fn tile_floor(c: &mut Canvas, zone: u16, ctx: &FloorCtx, abandoned: bool) {
     let (layer1, layer2) = match (abandoned, ctx.floor == 0) {
@@ -327,6 +350,20 @@ pub(super) fn tile_floor(c: &mut Canvas, zone: u16, ctx: &FloorCtx, abandoned: b
             }
         }
 
+        // With the furniture mods the plan's stair seats, fence-and-plate tables, cauldron
+        // sinks and furnaces turn into the real pieces.
+        let at = |dx: i32, dz: i32| {
+            layer1[(pzu as i32 + dz).rem_euclid(ph) as usize]
+                [(pxu as i32 + dx).rem_euclid(pw) as usize]
+        };
+        if let Some(block) = modded_piece(c, ctx, cell1, &at) {
+            c.put_with(x, 1, z, block);
+            continue;
+        }
+        if cell2 == 'P' && cell1 == 'U' && ctx.wood.macaws.is_some() {
+            c.put_with(x, 1, z, ctx.wood.table());
+            continue;
+        }
         if let Some(block) = get_interior_block(cell1, false, wall) {
             c.put(x, 1, z, block);
             // Beds have no baked model; each half needs its own block entity to render.

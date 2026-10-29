@@ -10927,8 +10927,13 @@ fn generate_window_life(
             if curtains && room_behind {
                 if let Some((colour, draw)) = window_curtain(config, wc, storey) {
                     if curtain_covers(draw, k, width, top_row) {
-                        editor.set_block_absolute(
-                            colour,
+                        let curtain = if editor.mods().has(crate::mods::ModPack::MacawsWindows) {
+                            crate::mods::macaws::curtain(colour, (nx, nz))
+                        } else {
+                            BlockWithProperties::simple(colour)
+                        };
+                        editor.set_block_with_properties_absolute(
+                            curtain,
                             behind.0,
                             h + abs,
                             behind.1,
@@ -10958,12 +10963,79 @@ fn generate_window_life(
             }
             let flowering =
                 coord_rng(bx, bz.wrapping_add(h * 13), config.element_id ^ 0xF10B).random_bool(0.6);
+            if editor.mods().has(crate::mods::ModPack::Supplementaries) {
+                let seed =
+                    coord_rng(bx, bz.wrapping_add(h * 13), config.element_id ^ 0xF10B).random();
+                crate::mods::supplementaries::flower_box(
+                    editor,
+                    lx,
+                    h + 1 + abs,
+                    lz,
+                    (nx, nz),
+                    seed,
+                );
+                continue;
+            }
             let plant = if flowering {
                 FLOWERING_AZALEA_LEAVES
             } else {
                 AZALEA_LEAVES
             };
             editor.set_block_absolute(plant, lx, h + 1 + abs, lz, Some(&[AIR]), None);
+        }
+    }
+}
+
+/// With Macaw's Windows, the glass of punched windows becomes framed windows of the wall's
+/// own material, which the game joins into one window per opening.
+fn generate_modded_windows(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    facade: &FacadePlan,
+) {
+    if !editor.mods().has(crate::mods::ModPack::MacawsWindows)
+        || config.condition != BuildingCondition::Normal
+        || !config.punched_windows()
+        // Stained church glass and tinted office glass keep their colour.
+        || config.category == BuildingCategory::Religious
+        || !matches!(
+            config.window_block,
+            GLASS | GLASS_PANE | WHITE_STAINED_GLASS | LIGHT_GRAY_STAINED_GLASS | GRAY_STAINED_GLASS
+        )
+    {
+        return;
+    }
+    let Some(material) = crate::mods::macaws::window_material(config.wall_block) else {
+        return;
+    };
+    let abs = config.abs_terrain_offset;
+    let top_h = config.start_y_offset + config.building_height;
+    let gft = config.ground_floor_top();
+    let glass = [config.window_block];
+    for wc in facade_columns(&element.nodes, config).iter() {
+        if !wc.slot().is_window() {
+            continue;
+        }
+        let col = wc.facade(facade);
+        let (nx, nz) = wc.normal;
+        let window = crate::mods::macaws::framed_window(material, nx == 0, config.window_block);
+        for (cx, cz) in [(wc.x, wc.z), (wc.x - nx, wc.z - nz)] {
+            for h in (config.start_y_offset + 1)..=top_h {
+                if h <= gft && config.shopfront_column(col) {
+                    continue;
+                }
+                if editor.get_block_absolute(cx, h + abs, cz) == Some(config.window_block) {
+                    editor.set_block_with_properties_absolute(
+                        window.clone(),
+                        cx,
+                        h + abs,
+                        cz,
+                        Some(&glass),
+                        None,
+                    );
+                }
+            }
         }
     }
 }
@@ -11129,6 +11201,13 @@ fn generate_storefront_awnings(
     ];
     let awning = AWNING_OPTIONS[rng.random_range(0..AWNING_OPTIONS.len())];
     let awning_y = config.ground_floor_top() - 1 + config.abs_terrain_offset;
+    // Striped fabric with the roof mod, one colour per shop.
+    let fabric = editor
+        .mods()
+        .has(crate::mods::ModPack::MacawsRoofs)
+        .then(|| {
+            ["red", "green", "blue", "black", "orange", "yellow", "brown"][rng.random_range(0..7)]
+        });
 
     for &wc in facade_columns(&element.nodes, config).iter() {
         if front_blocked(&wc, config, building_passages, facade, None)
@@ -11137,8 +11216,21 @@ fn generate_storefront_awnings(
         {
             continue;
         }
+        let canopy = match fabric {
+            Some(colour) => crate::mods::state(
+                &format!("mcwroofs:{colour}_striped_awning"),
+                awning,
+                &[
+                    ("facing", facing_for_normal(-wc.normal.0, -wc.normal.1)),
+                    ("shape", "straight"),
+                ],
+            ),
+            None => {
+                make_closed_trapdoor(awning, facing_for_normal(wc.normal.0, wc.normal.1), "top")
+            }
+        };
         editor.set_block_with_properties_absolute(
-            make_closed_trapdoor(awning, facing_for_normal(wc.normal.0, wc.normal.1), "top"),
+            canopy,
             wc.x + wc.normal.0,
             awning_y,
             wc.z + wc.normal.1,
@@ -12827,6 +12919,7 @@ pub fn generate_buildings(
         &facade,
         part_probe,
     );
+    generate_modded_windows(editor, element, &config, &facade);
 
     // Add corner quoins (accent-block columns at building corners)
     if !is_part {
@@ -14728,6 +14821,7 @@ fn place_roof_blocks_with_stairs(
 ) {
     // Use empty blacklist to allow overwriting wall/ceiling blocks
     let replace_any: &[Block] = &[];
+    let tiles = editor.mods().has(crate::mods::ModPack::MacawsRoofs);
 
     for &(x, z) in floor_area {
         let roof_height = roof_heights[&(x, z)];
@@ -14743,7 +14837,14 @@ fn place_roof_blocks_with_stairs(
                 let has_lower =
                     has_lower_neighbor(x, z, roof_height, roof_heights) || on_polygon_edge;
                 if has_lower && !steep_drop(x, z, roof_height, roof_heights) {
-                    let stair_block = stair_direction_fn(x, z, roof_height);
+                    let mut stair_block = stair_direction_fn(x, z, roof_height);
+                    if tiles {
+                        if let Some(tile) =
+                            crate::mods::macaws::roof_tile(config.roof_block, &stair_block)
+                        {
+                            stair_block = tile;
+                        }
+                    }
                     editor.set_block_with_properties_absolute(
                         stair_block,
                         x,
@@ -17156,6 +17257,17 @@ fn generate_cone_roof(
         );
     }
     fill_roof_shell(editor, floor_area, &surface, config, replace_any);
+    // A wind vane turns on the tip of a tall spire.
+    if peak_height >= 4 && editor.mods().has(crate::mods::ModPack::Supplementaries) {
+        if let Some((&(x, z), &top)) = surface.iter().max_by_key(|&(&(x, z), &h)| (h, -x, -z)) {
+            crate::mods::supplementaries::wind_vane(
+                editor,
+                x,
+                top + 1 + config.abs_terrain_offset,
+                z,
+            );
+        }
+    }
 }
 
 /// Onion roof: bulbous Russian-Orthodox / Bavarian profile.

@@ -294,6 +294,9 @@ fn conv_chain(block: Block, props: Option<&Value>) -> LuantiNode {
 /// Directional blocks (stairs, trapdoors, etc.) use the optional `props`
 /// (Minecraft NBT block properties) to compute the correct `param2` value.
 pub fn to_luanti_node(block: Block, game: LuantiGame, props: Option<&Value>) -> LuantiNode {
+    if block.is_modded() {
+        return to_luanti_node(block.vanilla(), game, None);
+    }
     match game {
         LuantiGame::Mineclonia => to_mineclonia_node(block, props),
     }
@@ -1036,6 +1039,10 @@ mod tests {
         let mut unmapped = Vec::new();
         for id in 0..=u16::MAX {
             let block = Block::from_raw_id(id);
+            // Other tests may have named modded blocks meanwhile.
+            if block.is_modded() {
+                continue;
+            }
             let Some(name) = block.try_name() else {
                 continue;
             };

@@ -53,6 +53,17 @@ const SETTINGS = [
   { id: 'zombie-outbreak-toggle', kind: 'checkbox', store: OWN },
   { id: 'disasters-toggle', kind: 'checkbox', store: OWN },
   { id: 'body-gravity-toggle', kind: 'checkbox', store: OWN },
+  // Mods
+  { id: 'mod-create-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-macaws-furniture-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-macaws-roofs-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-macaws-windows-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-macaws-lights-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-supplementaries-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-farmers-delight-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-automobility-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-naturalist-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-elevators-toggle', kind: 'checkbox', store: OWN },
   // The facade controls. Registered here like every other segmented control,
   // so the panel's Revert and Reset to defaults reach them: the store reads the
   // active segment and restores one by clicking it, which is also what keeps

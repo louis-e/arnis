@@ -902,14 +902,33 @@ pub(crate) fn light_opacity(name: &str) -> u8 {
     }
 }
 
+// Opacity and emission of a palette entry. A modded block lights like its vanilla
+// stand-ins: as clear as the clearest, as bright as the brightest.
+fn palette_light(name: &str, props: Option<&Value>) -> (u8, u8) {
+    let fallbacks = if name.starts_with("minecraft:") {
+        Vec::new()
+    } else {
+        crate::block_definitions::modded_fallbacks(name)
+    };
+    if fallbacks.is_empty() {
+        return (light_opacity(name), block_light_emission(name, props));
+    }
+    fallbacks.iter().fold((15, 0), |(opacity, emission), b| {
+        let name = format!("minecraft:{}", b.name());
+        (
+            opacity.min(light_opacity(&name)),
+            emission.max(block_light_emission(&name, props)),
+        )
+    })
+}
+
 // Per-cell light opacity and emission for a section (YZX order, 4096 cells).
 fn decode_section_light_props(section: &Section) -> (Vec<u8>, Vec<u8>) {
     let palette = &section.block_states.palette;
-    let pal_opacity: Vec<u8> = palette.iter().map(|p| light_opacity(&p.name)).collect();
-    let pal_emission: Vec<u8> = palette
+    let (pal_opacity, pal_emission): (Vec<u8>, Vec<u8>) = palette
         .iter()
-        .map(|p| block_light_emission(&p.name, p.properties.as_ref()))
-        .collect();
+        .map(|p| palette_light(&p.name, p.properties.as_ref()))
+        .unzip();
 
     let mut opacity = vec![0u8; 4096];
     let mut emission = vec![0u8; 4096];
@@ -1311,8 +1330,7 @@ fn create_chunk_nbt_with_lighting(
     // Compute heightmaps from block data, against the dimension rather than the content.
     let heightmaps = compute_heightmaps(&chunk.sections, world_min_section, world_height);
 
-    // PostProcessing: one empty list per section
-    let post_processing: Vec<Value> = (0..sections.len()).map(|_| Value::List(vec![])).collect();
+    let post_processing = post_processing_lists(chunk, world_min_section, world_max_section);
 
     // Build root-level chunk NBT (modern format — no Level wrapper)
     let mut root = HashMap::from([
@@ -1340,6 +1358,9 @@ fn create_chunk_nbt_with_lighting(
     // This overwrites the empty defaults above when actual data exists.
     // Dedup entity lists by coordinate; tile halos process boundary buildings twice.
     for (key, value) in &chunk.other {
+        if key == crate::world_editor::POST_PROCESS_KEY {
+            continue;
+        }
         if key == "block_entities" || key == "entities" {
             if let Value::List(list) = value {
                 root.insert(key.clone(), Value::List(dedup_compound_list(list)));
@@ -1350,6 +1371,43 @@ fn create_chunk_nbt_with_lighting(
     }
 
     root
+}
+
+/// One list of packed cells per dimension section, for the cells marked to settle their
+/// shape against their neighbours once the chunk ticks.
+fn post_processing_lists(chunk: &Chunk, min_section: i8, max_section: i8) -> Vec<Value> {
+    let mut lists: Vec<Vec<i16>> = Vec::new();
+    // One bit per cell of each section, so repeat marks cost nothing.
+    let mut seen: Vec<[u64; 64]> = Vec::new();
+    if let Some(Value::List(cells)) = chunk.other.get(crate::world_editor::POST_PROCESS_KEY) {
+        for cell in cells {
+            let Value::IntArray(xyz) = cell else {
+                continue;
+            };
+            let [x, y, z] = xyz[..] else {
+                continue;
+            };
+            let section = (y >> 4) - min_section as i32;
+            if section < 0 || y >> 4 > max_section as i32 {
+                continue;
+            }
+            let section = section as usize;
+            if lists.len() <= section {
+                lists.resize_with(section + 1, Vec::new);
+                seen.resize(section + 1, [0; 64]);
+            }
+            let packed = ((x & 15) | ((z & 15) << 4) | ((y & 15) << 8)) as usize;
+            let (word, bit) = (packed / 64, 1u64 << (packed % 64));
+            if seen[section][word] & bit == 0 {
+                seen[section][word] |= bit;
+                lists[section].push(packed as i16);
+            }
+        }
+    }
+    lists
+        .into_iter()
+        .map(|cells| Value::List(cells.into_iter().map(Value::Short).collect()))
+        .collect()
 }
 
 /// Returns the chunk's `other` map with block entities whose block does not own their type dropped.

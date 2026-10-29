@@ -1292,6 +1292,14 @@ pub fn collect_tunnel_footprint(
 
 fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
     editor.register_lamp(x, z);
+    if editor.mods().has(crate::mods::ModPack::MacawsLights) {
+        const HEIGHT: i32 = 5;
+        for i in 0..HEIGHT {
+            let segment = crate::mods::macaws::street_lamp(i, HEIGHT, None);
+            editor.set_block_with_properties_absolute(segment, x, base + 1 + i, z, None, None);
+        }
+        return;
+    }
     editor.set_block_absolute(SMOOTH_STONE, x, base + 1, z, None, None);
     for dy in 2..=4 {
         editor.set_block_absolute(STONE_BRICK_WALL, x, base + dy, z, None, None);
@@ -1317,6 +1325,27 @@ pub fn drop_lamps_in_water(editor: &mut WorldEditor) {
             ed.check_for_block_absolute(x, y, z, Some(blocks), None)
         };
         let ground = editor.get_ground_level(x, z);
+        let modded = |ed: &WorldEditor, y: i32| {
+            ed.get_block_absolute(x, y, z)
+                .filter(|b| b.is_modded() && b.namespace() == "mcwlights")
+        };
+        if let Some(top) = (ground + 1..=ground + 12)
+            .rev()
+            .find(|&y| modded(editor, y).is_some())
+        {
+            let mut foot = top;
+            while modded(editor, foot - 1).is_some() {
+                foot -= 1;
+            }
+            if is(editor, foot - 1, &[WATER]) {
+                for y in foot..=top {
+                    if let Some(b) = modded(editor, y) {
+                        editor.set_block_absolute(AIR, x, y, z, Some(&[b]), None);
+                    }
+                }
+            }
+            continue;
+        }
         let Some(head) = (ground + 2..=ground + 12)
             .find(|&y| is(editor, y, &[REDSTONE_LAMP]) && is(editor, y - 1, &[STONE_BRICK_WALL]))
         else {

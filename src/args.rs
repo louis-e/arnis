@@ -397,6 +397,12 @@ pub struct Args {
     /// Bedrock 1.21.120+; Bedrock has no traffic lights to stop at.
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
+
+    /// Build with blocks and entities from Java mods, comma separated. The world then opens
+    /// in Minecraft 1.21.1 with NeoForge and those mods installed. Java only; turns the data
+    /// pack extras off, as they need 1.21.4+.
+    #[arg(long, value_delimiter = ',', value_enum)]
+    pub mods: Vec<crate::mods::ModPack>,
 }
 
 /// Accepts the panel resolutions the atlas budget logic can halve cleanly.
@@ -746,6 +752,10 @@ pub fn apply_feature_needs(args: &mut Args) {
     if args.disasters {
         args.ground_level = args.ground_level.max(DISASTER_GROUND_LEVEL);
     }
+    // 1.21.1 cannot read the tall-world pack; an explicit --disable-height-limit is refused.
+    if !args.mods.is_empty() && !args.disable_height_limit {
+        args.vanilla_height = true;
+    }
 }
 
 /// Validates CLI arguments after parsing.
@@ -855,6 +865,30 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.one_world {
         if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
             return Err(format!("{flag} is not available with --one-world yet."));
+        }
+    }
+    if !args.mods.is_empty() {
+        if args.bedrock || args.luanti {
+            return Err("--mods builds for Minecraft Java with NeoForge; Bedrock and Luanti cannot load Java mods.".to_string());
+        }
+        if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
+            return Err(format!(
+                "{flag} needs Minecraft 1.21.4 or newer, but --mods worlds open in {}.",
+                crate::mods::TARGET_VERSION
+            ));
+        }
+        if args.one_world {
+            return Err(format!(
+                "--one-world uses the extended build height, which Minecraft {} cannot read, so it is not available with --mods.",
+                crate::mods::TARGET_VERSION
+            ));
+        }
+        // The tall-world pack's overlay metadata is too new for 1.21.1 to read.
+        if args.disable_height_limit {
+            return Err(format!(
+                "--disable-height-limit needs Minecraft 1.21.4 or newer, but --mods worlds open in {}.",
+                crate::mods::TARGET_VERSION
+            ));
         }
     }
     if args.body_gravity && args.body.is_earth() {
@@ -1158,6 +1192,32 @@ mod tests {
         assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
         let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();
         assert!(one_world.contains("--pause-menu"), "{one_world}");
+    }
+
+    #[test]
+    fn mods_keep_the_vanilla_height_that_1_21_1_reads() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            apply_feature_needs(&mut args);
+            args
+        };
+        let modded = parse(&["--mods", "create,macaws-furniture"]);
+        assert!(modded.vanilla_height && !crate::ground::auto_height(&modded));
+        assert!(validate_args(&modded).is_ok());
+        assert!(!parse(&[]).vanilla_height);
+        for refused in [
+            &["--mods", "create", "--disable-height-limit"][..],
+            &["--mods", "create", "--one-world"][..],
+            &["--mods", "create", "--traffic-lights"][..],
+            &["--mods", "create", "--bedrock"][..],
+        ] {
+            assert!(validate_args(&parse(refused)).is_err(), "{refused:?}");
+        }
     }
 
     #[test]

@@ -213,6 +213,9 @@ fn build_map_dat(
     data.insert("trackingPosition".to_string(), Value::Byte(tracking as i8));
     data.insert("unlimitedTracking".to_string(), Value::Byte(0));
     data.insert("locked".to_string(), Value::Byte(1));
+    // 1.21.1 reads both lists unconditionally and warns when either is missing.
+    data.insert("banners".to_string(), Value::List(Vec::new()));
+    data.insert("frames".to_string(), Value::List(Vec::new()));
     data.insert("xCenter".to_string(), Value::Int(x_center));
     data.insert("zCenter".to_string(), Value::Int(z_center));
     data.insert(

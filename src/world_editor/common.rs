@@ -788,7 +788,11 @@ fn pack_palette_indices(indices: &[u16; SECTION_BLOCKS], bits_per_block: usize) 
 
 fn make_palette_item(block: Block, stored_props: Option<&Arc<Value>>) -> PaletteItem {
     PaletteItem {
-        name: format!("{}:{}", block.namespace(), block.name()),
+        name: format!(
+            "{}:{}",
+            block.namespace(),
+            crate::mods::legacy_name(block.name())
+        ),
         properties: stored_props
             .map(|p| (**p).clone())
             .or_else(|| block.properties()),
@@ -1873,7 +1877,10 @@ impl WorldToModify {
     /// Per-chunk lists a tile carries into the merged world. Fluid ticks ride along so cave
     /// water and lava placed in a tile still flow once its chunk meets another tile's data.
     fn merges_as_list(key: &str) -> bool {
-        matches!(key, "block_entities" | "entities" | "fluid_ticks")
+        matches!(
+            key,
+            "block_entities" | "entities" | "fluid_ticks" | super::POST_PROCESS_KEY
+        )
     }
 
     /// Appends `other_list` into `self_list`, skipping entries already present at a coordinate.
@@ -2337,6 +2344,10 @@ fn distinct_test_blocks(n: usize) -> Vec<Block> {
     let mut blocks = Vec::with_capacity(n);
     for id in 0..=u16::MAX {
         let block = Block::from_raw_id(id);
+        // Other tests may have named modded blocks meanwhile.
+        if block.is_modded() {
+            continue;
+        }
         if block.try_name().is_some() {
             blocks.push(block);
             if blocks.len() == n {

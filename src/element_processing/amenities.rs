@@ -117,6 +117,30 @@ pub fn generate_amenities(
                     street_furniture::generate_bicycle_parking_area(editor, element, &floor_area);
                 }
             }
+            "clock" if editor.mods().has(crate::mods::ModPack::Supplementaries) => {
+                // A two-faced clock on a post; wall clocks need a wall Arnis cannot place them on.
+                if let (Some(pt), false) = (
+                    first_node,
+                    element
+                        .tags()
+                        .get("support")
+                        .is_some_and(|s| s.starts_with("wall")),
+                ) {
+                    let base = editor.get_absolute_y(pt.x, 0, pt.z);
+                    for dy in 1..=3 {
+                        editor.set_block_absolute(IRON_BARS, pt.x, base + dy, pt.z, None, None);
+                    }
+                    let road = get_nearest_road_block(pt.x, pt.z, 6, road_mask);
+                    let front = match road {
+                        Some((rx, rz)) if (rx - pt.x).abs() >= (rz - pt.z).abs() => {
+                            ((rx - pt.x).signum(), 0)
+                        }
+                        Some((_, rz)) => (0, (rz - pt.z).signum()),
+                        None => (0, 1),
+                    };
+                    crate::mods::supplementaries::street_clock(editor, pt.x, base + 4, pt.z, front);
+                }
+            }
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
@@ -146,6 +170,21 @@ pub fn generate_amenities(
 
                     let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
                     let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
+                    // Create's seats, which players can sit on.
+                    if editor.mods().has(crate::mods::ModPack::Create) {
+                        let seat = crate::mods::create::seat(element.id());
+                        for d in -1..=1 {
+                            editor.set_block_with_properties_absolute(
+                                seat.clone(),
+                                pt.x + d * dx,
+                                abs_y,
+                                pt.z + d * dz,
+                                None,
+                                Some(&bench_blacklist),
+                            );
+                        }
+                        return;
+                    }
                     //place bench
                     let stair_a = top_stair(create_stair_with_properties(
                         OAK_STAIRS,

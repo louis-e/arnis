@@ -226,6 +226,9 @@ pub fn to_bedrock_block_with_properties(
     block: Block,
     java_properties: Option<&Value>,
 ) -> BedrockBlock {
+    if block.is_modded() {
+        return to_bedrock_block_with_properties(block.vanilla(), None);
+    }
     let fallback = block.properties();
     let map = match java_properties.or(fallback.as_ref()) {
         Some(Value::Compound(map)) => Some(map),
@@ -845,6 +848,10 @@ mod tests {
         let mut failures = Vec::new();
         for id in 0..=u16::MAX {
             let block = Block::from_raw_id(id);
+            // Other tests may have named modded blocks meanwhile.
+            if block.is_modded() {
+                continue;
+            }
             if block.try_name().is_none() {
                 continue;
             }

@@ -44,6 +44,7 @@ mod map_transformation;
 mod mapillary;
 mod mode_filter;
 mod models_3d;
+mod mods;
 mod net;
 mod one_world;
 mod ore_generation;
@@ -482,6 +483,9 @@ fn run_cli() {
                 std::process::exit(1);
             }
         };
+        if !args.mods.is_empty() {
+            mods::stamp_new_world(&world_path);
+        }
         println!(
             "Created new world at: {}",
             world_path.display().to_string().bright_white().bold()

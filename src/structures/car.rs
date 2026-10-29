@@ -95,6 +95,11 @@ fn park(
     if !editor.place_schematics() || h % 100 >= OCCUPANCY_PERCENT {
         return;
     }
+    if editor.mods().has(crate::mods::ModPack::Automobility) {
+        let rot = (rot_base + if (h >> 16) & 1 == 0 { 0 } else { 2 }) & 3;
+        crate::mods::wildlife::park_automobile(editor, cx, base_y, cz, rot, h >> 24);
+        return;
+    }
     let pool: Vec<&(StructureSchematic, u8)> = cars()
         .iter()
         .filter(|(car, _)| car_height(car) <= max_height)

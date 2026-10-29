@@ -104,7 +104,29 @@ impl Block {
 
     #[inline(always)]
     pub fn namespace(&self) -> &str {
+        if self.is_modded() {
+            return modded_entry(self.id).map_or("minecraft", |e| e.namespace);
+        }
         "minecraft"
+    }
+
+    /// A block from a mod, by its full `namespace:name`. `fallback` stands in for it
+    /// wherever the mod cannot be: Bedrock, Luanti and the map colours.
+    pub fn modded(full_name: &str, fallback: Block) -> Block {
+        intern_modded(full_name, fallback)
+    }
+
+    #[inline(always)]
+    pub fn is_modded(&self) -> bool {
+        self.id >= MODDED_BASE
+    }
+
+    /// The vanilla block for this one: itself, or a modded block's fallback.
+    pub fn vanilla(&self) -> Block {
+        if self.is_modded() {
+            return modded_entry(self.id).map_or(AIR, |e| e.fallback);
+        }
+        *self
     }
 
     pub fn name(&self) -> &str {
@@ -113,6 +135,9 @@ impl Block {
 
     /// Non-panicking variant of `name` (None for unassigned ids).
     pub fn try_name(&self) -> Option<&str> {
+        if self.is_modded() {
+            return modded_entry(self.id).map(|e| e.name);
+        }
         Some(match self.id {
             0 => "mangrove_log",
             1 => "air",
@@ -1156,6 +1181,71 @@ pub fn intern_props(value: Value) -> Arc<Value> {
     let state = Arc::new(value);
     shard.states.insert(key, Arc::downgrade(&state));
     state
+}
+
+/// Modded blocks take ids from here up, handed out as they are first named.
+const MODDED_BASE: u16 = 0x8000;
+
+#[derive(Clone, Copy)]
+struct ModdedEntry {
+    namespace: &'static str,
+    name: &'static str,
+    fallback: Block,
+}
+
+#[derive(Default)]
+struct ModdedTable {
+    entries: Vec<ModdedEntry>,
+    // One id per name and fallback, so `vanilla()` is the fallback each caller gave.
+    by_name: HashMap<&'static str, Vec<(Block, u16)>>,
+}
+
+static MODDED_BLOCKS: Lazy<std::sync::RwLock<ModdedTable>> = Lazy::new(Default::default);
+
+fn modded_entry(id: u16) -> Option<ModdedEntry> {
+    let table = MODDED_BLOCKS.read().unwrap_or_else(|p| p.into_inner());
+    table.entries.get((id - MODDED_BASE) as usize).copied()
+}
+
+/// Every vanilla fallback a modded `namespace:name` has been given, for code that only
+/// sees the name.
+pub(crate) fn modded_fallbacks(full_name: &str) -> Vec<Block> {
+    let table = MODDED_BLOCKS.read().unwrap_or_else(|p| p.into_inner());
+    table.by_name.get(full_name).map_or_else(Vec::new, |ids| {
+        ids.iter().map(|&(fallback, _)| fallback).collect()
+    })
+}
+
+// Names are leaked once each; a run names a few hundred at most.
+fn intern_modded(full_name: &str, fallback: Block) -> Block {
+    let fallback = fallback.vanilla();
+    let find = |table: &ModdedTable| {
+        table
+            .by_name
+            .get(full_name)
+            .and_then(|ids| ids.iter().find(|(f, _)| *f == fallback))
+            .map(|&(_, id)| Block::new(id))
+    };
+    if let Some(block) = find(&MODDED_BLOCKS.read().unwrap_or_else(|p| p.into_inner())) {
+        return block;
+    }
+    let mut table = MODDED_BLOCKS.write().unwrap_or_else(|p| p.into_inner());
+    if let Some(block) = find(&table) {
+        return block;
+    }
+    let full: &'static str = match table.by_name.get_key_value(full_name) {
+        Some((&full, _)) => full,
+        None => Box::leak(full_name.to_string().into_boxed_str()),
+    };
+    let (namespace, name) = full.split_once(':').unwrap_or(("minecraft", full));
+    let id = MODDED_BASE + table.entries.len() as u16;
+    table.entries.push(ModdedEntry {
+        namespace,
+        name,
+        fallback,
+    });
+    table.by_name.entry(full).or_default().push((fallback, id));
+    Block::new(id)
 }
 
 /// One slice of the `intern_props` table.
@@ -2440,6 +2530,10 @@ mod material_tests {
         // derivations, so walk the whole assigned id space rather than a sample.
         for id in 0..=u16::MAX {
             let material = Block::from_raw_id(id);
+            // Other tests may have named modded blocks meanwhile.
+            if material.is_modded() {
+                continue;
+            }
             if material.try_name().is_none() {
                 continue;
             }

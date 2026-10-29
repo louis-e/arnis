@@ -4,7 +4,7 @@ use super::canvas::{
     facing_block, grindstone, hanging_lantern, mix, pick, seat, top_slab, Canvas, Frame,
 };
 use super::uses::{Eatery, Goods};
-use super::{book_shelf, chest, entry_u, plant, table_set, FloorCtx};
+use super::{book_shelf, chest, entry_u, kitchen_unit, plant, table_set, FloorCtx, Kitchen};
 use crate::block_definitions::*;
 use crate::element_processing::subprocessor::buildings_loot::LootTheme;
 
@@ -138,6 +138,32 @@ pub(super) fn shop(c: &mut Canvas, zone: u16, goods: Goods, ctx: &FloorCtx) {
     }
     let stock = stock(goods);
     let tall = c.headroom() >= 3;
+    // Produce sells from crates with the farming mod.
+    let crates = matches!(goods, Goods::Grocery | Goods::General)
+        && c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
+    // Pies at a bakery and hams at a butcher with the farming mod.
+    let food = matches!(goods, Goods::Bakery | Goods::Butcher)
+        && c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
+    let ware = |front: (i32, i32), h: u64| {
+        if food {
+            Some(crate::mods::farmers_delight::shop_ware(
+                goods == Goods::Butcher,
+                front,
+                h,
+            ))
+        } else if wares.is_empty() {
+            None
+        } else {
+            Some(BlockWithProperties::simple(pick(wares, h)))
+        }
+    };
+    let shelf = |h: u64| {
+        if crates {
+            crate::mods::farmers_delight::crate_of(h)
+        } else {
+            BlockWithProperties::simple(pick(stock, h))
+        }
+    };
 
     // Shelving along the walls; low enough under windows to leave them clear.
     for ((x, z), n) in c.wall_cells(zone) {
@@ -153,7 +179,7 @@ pub(super) fn shop(c: &mut Canvas, zone: u16, goods: Goods, ctx: &FloorCtx) {
             Some(pick(stock, h))
         };
         let placed = match low {
-            Some(b) => c.put(x, 1, z, b),
+            Some(_) => c.put_with(x, 1, z, shelf(h)),
             None => c.put_with(x, 1, z, book_shelf(n, h)),
         };
         if !placed {
@@ -161,11 +187,11 @@ pub(super) fn shop(c: &mut Canvas, zone: u16, goods: Goods, ctx: &FloorCtx) {
         }
         if tall && !c.window_behind(x, z, n) {
             match low {
-                Some(_) => c.put(x, 2, z, pick(stock, h >> 16)),
+                Some(_) => c.put_with(x, 2, z, shelf(h >> 16)),
                 None => c.put_with(x, 2, z, book_shelf(n, h >> 16)),
             };
-        } else if !wares.is_empty() && h.is_multiple_of(3) {
-            c.put(x, 2, z, pick(wares, h >> 24));
+        } else if let Some(w) = ware(n, h >> 24).filter(|_| h.is_multiple_of(3)) {
+            c.put_with(x, 2, z, w);
         }
     }
 
@@ -188,9 +214,9 @@ pub(super) fn shop(c: &mut Canvas, zone: u16, goods: Goods, ctx: &FloorCtx) {
             }
             continue;
         }
-        c.put(x, 1, z, pick(stock, h));
-        if !wares.is_empty() && h.is_multiple_of(2) {
-            c.put(x, 2, z, pick(wares, h >> 8));
+        c.put_with(x, 1, z, shelf(h));
+        if let Some(w) = ware(f.front(), h >> 8).filter(|_| h.is_multiple_of(2)) {
+            c.put_with(x, 2, z, w);
         }
     }
     // Spare stock in chests at the back.
@@ -265,6 +291,24 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     let ue = entry_u(c, zone, &f);
     let tall = c.headroom() >= 3;
 
+    // Trolleys lined up inside the entrance, with the vehicle mod.
+    if c.editor.mods().has(crate::mods::ModPack::Automobility) {
+        let into = f.back();
+        let rot = match into {
+            (0, 1) => 0,
+            (-1, 0) => 1,
+            (0, -1) => 2,
+            _ => 3,
+        };
+        for k in 2..=4 {
+            let (x, z) = f.world(ue - k, 1);
+            if c.is_free(x, z) {
+                let y = c.floor_y + 1;
+                crate::mods::wildlife::place_trolley(c.editor, x, y, z, rot);
+                c.keep(x, z);
+            }
+        }
+    }
     // Checkout lanes beside the entry: counter, cashier, walkway.
     for side in [1, -1] {
         for lane in 0..3 {
@@ -280,7 +324,7 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
                 }
             }
             let (sx, sz) = f.world(u + side, 3);
-            c.put_with(sx, 1, sz, seat(ctx.wood.stairs, f.dir(-side, 0)));
+            c.put_with(sx, 1, sz, ctx.wood.seat(f.dir(-side, 0)));
         }
     }
 
@@ -313,7 +357,11 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         let lane = (u - ue).rem_euclid(4);
         let h = mix(x, z, ctx.seed ^ 0xA15E);
         if v == 7 && lane == 2 {
-            c.put(x, 1, z, pick(&[HAY_BALE, MELON, PUMPKIN, COMPOSTER], h));
+            if c.editor.mods().has(crate::mods::ModPack::FarmersDelight) {
+                c.put_with(x, 1, z, crate::mods::farmers_delight::crate_of(h));
+            } else {
+                c.put(x, 1, z, pick(&[HAY_BALE, MELON, PUMPKIN, COMPOSTER], h));
+            }
         } else if v >= 9 && (lane == 2 || lane == 3) && v % 10 != 0 {
             c.put(
                 x,
@@ -375,7 +423,7 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
         for u in mid - half..=mid + half {
             let (sx, sz) = f.world(u, service_v - 1);
             if u % 2 == 0 {
-                c.put_with(sx, 1, sz, seat(ctx.wood.stairs, f.back()));
+                c.put_with(sx, 1, sz, ctx.wood.stool(f.back()));
             }
         }
         for ((x, z), _) in c.wall_cells(zone) {
@@ -431,19 +479,26 @@ pub(super) fn eatery(c: &mut Canvas, zone: u16, kind: Eatery, ctx: &FloorCtx) {
 fn furnish_kitchen(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     c.focus(zone);
     for ((x, z), n) in c.wall_cells(zone) {
-        let block = match mix(x, z, ctx.seed ^ 0x4C17) % 5 {
-            0 => facing_block(SMOKER, n),
-            1 => facing_block(FURNACE, n),
-            2 => BlockWithProperties::simple(WATER_CAULDRON),
-            3 => BlockWithProperties::simple(CRAFTING_TABLE),
-            _ => BlockWithProperties::simple(BARREL),
+        let unit = match mix(x, z, ctx.seed ^ 0x4C17) % 5 {
+            0 => Kitchen::Stove,
+            1 => Kitchen::Oven,
+            2 => Kitchen::Sink,
+            3 => Kitchen::Worktop,
+            _ => Kitchen::Store,
         };
-        c.put_with(x, 1, z, block);
+        kitchen_unit(c, x, z, n, unit, ctx);
     }
     let depth = c.depth(zone);
+    let delight = c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
     for (x, z) in c.cells(zone) {
-        if depth.get(x, z) >= 3 && mix(x, z, ctx.seed).is_multiple_of(2) {
-            c.put_with(x, 1, z, top_slab(SMOOTH_STONE_SLAB));
+        let h = mix(x, z, ctx.seed);
+        if depth.get(x, z) >= 3
+            && h.is_multiple_of(2)
+            && c.put_with(x, 1, z, ctx.wood.counter((0, 1), SMOOTH_STONE_SLAB))
+            && delight
+            && h.is_multiple_of(3)
+        {
+            c.put_with(x, 2, z, crate::mods::farmers_delight::cutting_board((0, 1)));
         }
     }
     for (x, z) in c.cells(zone) {
@@ -483,14 +538,14 @@ pub(super) fn office(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         }
         match (u - ue).rem_euclid(6) {
             2 | 3 => {
-                c.put_with(x, 1, z, top_slab(ctx.wood.slab));
+                c.put_with(x, 1, z, ctx.wood.desk(f.dir(1, 0).0 != 0));
                 c.put(x, 2, z, GRAY_STAINED_GLASS_PANE);
             }
             1 => {
-                c.put_with(x, 1, z, seat(ctx.wood.stairs, f.dir(1, 0)));
+                c.put_with(x, 1, z, ctx.wood.seat(f.dir(1, 0)));
             }
             4 => {
-                c.put_with(x, 1, z, seat(ctx.wood.stairs, f.dir(-1, 0)));
+                c.put_with(x, 1, z, ctx.wood.seat(f.dir(-1, 0)));
             }
             _ => {}
         }
@@ -553,13 +608,13 @@ pub(super) fn bank(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     }
     for u in tellers {
         let (x, z) = f.world(u, row + 1);
-        c.put_with(x, 1, z, seat(ctx.wood.stairs, f.front()));
+        c.put_with(x, 1, z, ctx.wood.seat(f.front()));
     }
     // Waiting chairs along the side walls in front of the counter.
     for ((x, z), n) in c.wall_cells(zone) {
         let v = f.local(x, z).1;
         if v >= 1 && v < row - 1 && n != f.back() {
-            c.put_with(x, 1, z, seat(ctx.wood.stairs, n));
+            c.put_with(x, 1, z, ctx.wood.seat(n));
         } else if v > row + 2 {
             // The vault: chests and cabinets along the back.
             if mix(x, z, ctx.seed).is_multiple_of(3) {
@@ -580,7 +635,16 @@ pub(super) fn workshop(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         if f.local(x, z).1 < 2 {
             continue;
         }
-        match mix(x, z, ctx.seed ^ 0x3077) % 7 {
+        let h = mix(x, z, ctx.seed ^ 0x3077);
+        if h.is_multiple_of(7) && c.editor.mods().has(crate::mods::ModPack::Create) {
+            // A workbench with a toolbox on it.
+            if c.put(x, 1, z, CRAFTING_TABLE) {
+                let y = c.floor_y + 2;
+                crate::mods::create::toolbox(c.editor, x, y, z, n, h >> 8);
+            }
+            continue;
+        }
+        match h % 7 {
             0 => c.put(x, 1, z, CRAFTING_TABLE),
             1 => c.put(x, 1, z, SMITHING_TABLE),
             2 => c.put(x, 1, z, ANVIL),

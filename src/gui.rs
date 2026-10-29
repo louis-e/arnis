@@ -1434,6 +1434,7 @@ fn gui_start_generation(
     zombie_outbreak: bool,
     disasters: bool,
     moving_vehicles: bool,
+    mods: Vec<String>,
     body_gravity: bool,
     one_world: bool,
     one_world_name: String,
@@ -1730,11 +1731,50 @@ fn gui_start_generation(
                 zombie_outbreak,
                 disasters,
                 moving_vehicles,
+                // Java only; an id from an older or newer GUI is dropped, not refused.
+                mods: if world_format == WorldFormat::JavaAnvil {
+                    mods.iter()
+                        .filter_map(|m| crate::mods::ModPack::from_id(m))
+                        .collect()
+                } else {
+                    Vec::new()
+                },
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
             crate::args::apply_feature_needs(&mut args);
+            if !args.mods.is_empty() {
+                // Modded worlds open in 1.21.1, which reads neither the tall-world pack nor a
+                // world saved by a newer version.
+                let newer = existing_java
+                    && crate::world_utils::level_data_version(&world_path)
+                        .is_some_and(|v| v > crate::world_editor::java::DATA_VERSION);
+                let unreadable = if one_world {
+                    Some("a One World")
+                } else if existing_tall {
+                    Some("this world's extended build height")
+                } else if newer {
+                    Some("this world, saved by a newer version")
+                } else {
+                    None
+                };
+                if let Some(what) = unreadable {
+                    let e = format!(
+                        "Mods build for Minecraft {}, which cannot open {what}. Choose a new world or turn the mods off.",
+                        crate::mods::TARGET_VERSION
+                    );
+                    eprintln!("{e}");
+                    emit_gui_error(&e);
+                    emit_gui_progress_update(progress::MESSAGE_ONLY, &format!("Error! {e}"));
+                    return Err(e);
+                }
+                args.disable_height_limit = false;
+                args.vanilla_height = true;
+                if is_new_world {
+                    crate::mods::stamp_new_world(&world_path);
+                }
+            }
 
             let mut one_world_extending = false;
             if one_world {

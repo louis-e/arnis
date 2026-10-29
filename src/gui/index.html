@@ -225,6 +225,14 @@
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
+          <button type="button" class="settings-nav-item" data-target="settings-section-mods">
+            <svg class="icon" aria-hidden="true"><use href="#i-blocks"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_mods">Mods</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_mods">Create, furniture, vehicles</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
           <button type="button" class="settings-nav-item" data-target="settings-section-map">
             <svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg>
             <span class="settings-nav-text">
@@ -904,6 +912,169 @@
                   </label>
                   <div class="settings-control">
                     <input type="checkbox" class="switch" id="body-gravity-toggle" name="body-gravity-toggle">
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" id="settings-section-mods">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-blocks"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_mods">Mods</h3>
+                  <p data-localize="settings_section_mods_desc">Build with blocks, vehicles and animals from Java mods. The world then opens in Minecraft 1.21.1 with NeoForge and the ticked mods installed. Java only; the Gameplay extras and the raised build height are off while any mod is ticked.</p>
+                </div>
+              </header>
+
+              <div class="setting-grid">
+                <div class="settings-row setting-tile">
+                  <label for="mod-create-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-pickaxe"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Create</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Create 6.0.10.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_create_desc">Seats to sit on, factory machinery and girders, toolboxes, windmills to assemble.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-create-toggle" name="mod-create-toggle" data-mod="create">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-macaws-furniture-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-house"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Macaw's Furniture</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Furniture 3.4.1.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_macaws_furniture_desc">Chairs, tables, desks, sofas, wardrobes and fitted kitchens.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-furniture-toggle" name="mod-macaws-furniture-toggle" data-mod="macaws-furniture">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-macaws-roofs-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-building"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Macaw's Roofs</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Roofs 2.3.2.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_macaws_roofs_desc">Roof tiles in the roof&#39;s own material, striped awnings over shops.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-roofs-toggle" name="mod-macaws-roofs-toggle" data-mod="macaws-roofs">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-macaws-windows-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-frame"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Macaw's Windows</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Windows 2.4.2.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_macaws_windows_desc">Framed windows that match the walls, fabric curtains behind them.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-windows-toggle" name="mod-macaws-windows-toggle" data-mod="macaws-windows">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-macaws-lights-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-lightbulb"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Macaw's Lights and Lamps</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Lights and Lamps 1.1.5.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_macaws_lights_desc">Street lamps, ceiling lights and chandeliers.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-lights-toggle" name="mod-macaws-lights-toggle" data-mod="macaws-lights">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-supplementaries-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-signpost"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Supplementaries</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Supplementaries 4.0.2 and Moonlight Lib 3.7.2.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_supplementaries_desc">Flower boxes, flags on flagpoles, street clocks, wind vanes, globes and cannons.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-supplementaries-toggle" name="mod-supplementaries-toggle" data-mod="supplementaries">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-farmers-delight-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Farmer's Delight</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Farmer's Delight 1.3.4.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_farmers_delight_desc">Stoves and pots, meals, pies and hams, grocers&#39; crates, crop fields and allotment beds.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-farmers-delight-toggle" name="mod-farmers-delight-toggle" data-mod="farmers-delight">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-automobility-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-car"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Automobility</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Automobility 0.5.0.h. The cars are its beta for 1.21.1.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_automobility_desc">Drivable cars on parking spaces, tractors on farmland, trolleys in supermarkets.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-automobility-toggle" name="mod-automobility-toggle" data-mod="automobility">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-naturalist-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-trees"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Naturalist</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Naturalist 2.0.7.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_naturalist_desc">Zoo animals in their enclosures, deer, boars, birds and ducks in the wild.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-naturalist-toggle" name="mod-naturalist-toggle" data-mod="naturalist">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-elevators-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-arrow-up"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>ElevatorMod</span>
+                        <span class="tooltip-icon" data-tooltip="Needs ElevatorMod 1.11.4.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_elevators_desc">Lift pads instead of ladders: jump to ride up, sneak to ride down.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-elevators-toggle" name="mod-elevators-toggle" data-mod="elevators">
                   </div>
                 </div>
               </div>

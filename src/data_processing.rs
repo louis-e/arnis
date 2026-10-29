@@ -519,6 +519,15 @@ fn process_element(
             } else if way.tags.contains_key("place") {
                 landuse::generate_place(editor, way, args, flood_fill_cache);
             }
+            // After the way's own trees and fences, so animals find room to stand.
+            if editor.mods().has(crate::mods::ModPack::Naturalist) {
+                crate::mods::wildlife::populate_way(
+                    editor,
+                    way,
+                    flood_fill_cache,
+                    args.timeout.as_ref(),
+                );
+            }
         }
         ProcessedElement::Node(node) => {
             if signage {
@@ -845,6 +854,8 @@ pub fn generate_world_with_options(
         crate::world_utils::remove_untouched_template_region(&output_path);
     }
     editor.set_place_schematics(args.use_3d);
+    editor.set_mods(crate::mods::ModSet::from_packs(&args.mods));
+    crate::mods::set_legacy_target(!args.mods.is_empty());
     editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_start_with_map(args.map_item);
     editor.set_size_options(crate::world_utils::WorldSizeOptions::of(args));
@@ -1528,6 +1539,7 @@ pub fn generate_world_with_options(
             // Ground generation runs on tile editors, so they need the real scale.
             tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
             tile_editor.set_place_schematics(args.use_3d);
+            tile_editor.set_mods(crate::mods::ModSet::from_packs(&args.mods));
             tile_editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
             if let Some(ref tp) = tree_pack {
                 tile_editor.set_tree_pack(Arc::clone(tp));
@@ -2279,6 +2291,13 @@ pub fn generate_world_with_options(
         return Err(e.to_string());
     }
     bench.mark("save");
+    if world_format == WorldFormat::JavaAnvil && !args.mods.is_empty() {
+        let note = crate::mods::install_note(crate::mods::ModSet::from_packs(&args.mods));
+        println!("{note}");
+        if let Err(e) = std::fs::write(output_path.join("MODS.txt"), format!("{note}\n")) {
+            eprintln!("Could not write MODS.txt: {e}");
+        }
+    }
 
     if args.benchmark {
         let (built, slow) = crate::world_editor::section_counters();

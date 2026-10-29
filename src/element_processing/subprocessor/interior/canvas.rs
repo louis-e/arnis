@@ -36,7 +36,7 @@ fn is_light(b: Block) -> bool {
     matches!(
         b,
         GLOWSTONE | SEA_LANTERN | SHROOMLIGHT | LANTERN | SOUL_LANTERN | END_ROD
-    )
+    ) || (b.is_modded() && b.namespace() == "mcwlights")
 }
 
 /// The four neighbours, in a fixed order so every tie breaks the same way.
@@ -535,6 +535,17 @@ impl<'e, 'w> Canvas<'e, 'w> {
 
     /// A wall-mounted block above a free cell, kept only where a wall stands behind it.
     pub fn mount(&mut self, x: i32, dy: i32, z: i32, inward: (i32, i32), block: Block) -> bool {
+        self.mount_with(x, dy, z, inward, BlockWithProperties::simple(block))
+    }
+
+    pub fn mount_with(
+        &mut self,
+        x: i32,
+        dy: i32,
+        z: i32,
+        inward: (i32, i32),
+        block: BlockWithProperties,
+    ) -> bool {
         let behind = (x - inward.0, z - inward.1);
         let backed = !matches!(
             self.cell(behind.0, behind.1),
@@ -543,7 +554,7 @@ impl<'e, 'w> Canvas<'e, 'w> {
             .editor
             .get_block_absolute(behind.0, self.floor_y + dy, behind.1)
             .is_some();
-        backed && self.put(x, dy, z, block)
+        backed && self.put_with(x, dy, z, block)
     }
 
     /// True when the wall behind an edge cell has a window at eye height.
@@ -552,7 +563,9 @@ impl<'e, 'w> Canvas<'e, 'w> {
         self.editor
             .get_block_absolute(bx, self.floor_y + 2, bz)
             .is_some_and(|b| {
-                let name = b.name();
+                // A framed modded window stands in for the glass it replaced.
+                let glass = b.vanilla();
+                let name = glass.name();
                 name.contains("glass") || name.contains("pane")
             })
     }
@@ -561,6 +574,7 @@ impl<'e, 'w> Canvas<'e, 'w> {
     /// Each cell decides from its own neighbourhood, so tiles agree.
     pub fn light_up(&mut self, slab: Block, slab_above: bool) {
         let headroom = self.headroom();
+        let macaws_lights = self.editor.mods().has(crate::mods::ModPack::MacawsLights);
         // Low rooms sink lights into a slab, under the roof into their own floor.
         let sunk = if slab_above {
             self.top + 1
@@ -603,8 +617,13 @@ impl<'e, 'w> Canvas<'e, 'w> {
                         None,
                     );
                 }
+                let lamp = if macaws_lights {
+                    crate::mods::macaws::chandelier(x, z)
+                } else {
+                    hanging_lantern()
+                };
                 self.editor.set_block_with_properties_absolute(
-                    hanging_lantern(),
+                    lamp,
                     x,
                     self.floor_y + CHANDELIER_DROP,
                     z,
@@ -628,7 +647,16 @@ impl<'e, 'w> Canvas<'e, 'w> {
             if near {
                 continue;
             }
-            if headroom >= 3 {
+            if headroom >= 3 && macaws_lights {
+                self.editor.set_block_with_properties_absolute(
+                    crate::mods::macaws::ceiling_light(self.partition),
+                    x,
+                    self.top,
+                    z,
+                    None,
+                    None,
+                );
+            } else if headroom >= 3 {
                 self.editor
                     .set_block_absolute(GLOWSTONE, x, self.top, z, None, None);
             } else {
@@ -1192,6 +1220,78 @@ pub(super) struct Wood {
     pub stairs: Block,
     pub slab: Block,
     pub fence: Block,
+    /// Macaw's furniture of this wood stands in for the stair seats and slab tables.
+    pub macaws: Option<&'static str>,
+}
+
+impl Wood {
+    pub fn with_mods(mut self, mods: crate::mods::ModSet) -> Self {
+        if mods.has(crate::mods::ModPack::MacawsFurniture) {
+            self.macaws = crate::mods::macaws::wood_name(self.planks);
+        }
+        self
+    }
+
+    /// A chair, the sitter looking along `look`.
+    pub fn seat(&self, look: (i32, i32)) -> BlockWithProperties {
+        match self.macaws {
+            Some(w) => crate::mods::macaws::chair(w, look, self.stairs),
+            None => seat(self.stairs, look),
+        }
+    }
+
+    /// A table top at standing height.
+    pub fn table(&self) -> BlockWithProperties {
+        match self.macaws {
+            Some(w) => crate::mods::macaws::table(w, self.slab),
+            None => top_slab(self.slab),
+        }
+    }
+
+    /// A desk in a row along x or z.
+    pub fn desk(&self, along_x: bool) -> BlockWithProperties {
+        match self.macaws {
+            Some(w) => crate::mods::macaws::desk(w, along_x, false, self.slab),
+            None => top_slab(self.slab),
+        }
+    }
+
+    /// A bar stool, or a stair seat without the mod.
+    pub fn stool(&self, look: (i32, i32)) -> BlockWithProperties {
+        match self.macaws {
+            // Round stools have no front.
+            Some(w) => {
+                crate::mods::state(&format!("mcwfurnitures:{w}_stool_chair"), self.stairs, &[])
+            }
+            None => seat(self.stairs, look),
+        }
+    }
+
+    /// A sofa seat in one of a few muted colours, or a stair seat without the mod.
+    pub fn sofa(&self, look: (i32, i32), h: u64) -> BlockWithProperties {
+        match self.macaws {
+            Some(_) => crate::mods::macaws::couch(
+                pick(&["gray", "brown", "light_gray", "green", "blue", "red"], h),
+                look,
+                self.stairs,
+            ),
+            None => seat(self.stairs, look),
+        }
+    }
+
+    /// A low table in front of a sofa or between armchairs.
+    pub fn low_table(&self) -> Option<BlockWithProperties> {
+        self.macaws
+            .map(|w| crate::mods::macaws::coffee_table(w, self.slab))
+    }
+
+    /// Kitchen worktop with doors along `front`; `smooth` is the vanilla top.
+    pub fn counter(&self, front: (i32, i32), smooth: Block) -> BlockWithProperties {
+        match self.macaws {
+            Some(w) => crate::mods::macaws::counter(w, front, smooth),
+            None => top_slab(smooth),
+        }
+    }
 }
 
 const WOODS: [Wood; 3] = [
@@ -1200,18 +1300,21 @@ const WOODS: [Wood; 3] = [
         stairs: OAK_STAIRS,
         slab: OAK_SLAB,
         fence: OAK_FENCE,
+        macaws: None,
     },
     Wood {
         planks: SPRUCE_PLANKS,
         stairs: SPRUCE_STAIRS,
         slab: SPRUCE_SLAB,
         fence: SPRUCE_FENCE,
+        macaws: None,
     },
     Wood {
         planks: DARK_OAK_PLANKS,
         stairs: DARK_OAK_STAIRS,
         slab: DARK_OAK_SLAB,
         fence: DARK_OAK_FENCE,
+        macaws: None,
     },
 ];
 

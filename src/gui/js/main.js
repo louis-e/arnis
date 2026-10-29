@@ -1302,6 +1302,10 @@ function initSettings() {
 
   // Blueprint greys out the traffic lights.
   document.getElementById("generation-mode-select").addEventListener("change", () => refreshGameplayRows());
+  document.querySelectorAll('.mod-toggle').forEach((el) => el.addEventListener('change', () => {
+    refreshGameplayRows();
+    refreshHeightLimitRow();
+  }));
 
   // A reloaded map comes back on Earth; restore whatever was picked.
   const bodyMapFrame = getMapFrame();
@@ -1790,7 +1794,8 @@ function getEffectiveWorldFormat() {
 // behavior pack; Luanti ships neither, and off Earth the relief already fits
 // vanilla height, so the backend forces the flag off there.
 function heightLimitAvailable(format) {
-  return selectedCelestialBody === 'earth' && format !== 'luanti';
+  // A modded world opens in 1.21.1, which cannot read the tall-world pack.
+  return selectedCelestialBody === 'earth' && format !== 'luanti' && selectedMods().length === 0;
 }
 
 function refreshHeightLimitRow(format) {
@@ -1829,7 +1834,9 @@ function refreshWorldTypeRow(format) {
 function refreshGameplayRows(format) {
   // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
   const current = format || selectedWorldFormat;
-  const pack = current === 'java' && !isOneWorldEnabled();
+  refreshModRows(current);
+  // A modded world opens in 1.21.1, older than every extra needs.
+  const pack = current === 'java' && !isOneWorldEnabled() && selectedMods().length === 0;
   const vehicles = pack || current === 'bedrock';
   const earth = selectedCelestialBody === 'earth';
   const mode = document.getElementById('generation-mode-select');
@@ -1841,6 +1848,19 @@ function refreshGameplayRows(format) {
   setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
   setSettingsRowAvailable('moving-cars-toggle', vehicles && earth);
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
+}
+
+// Java mods load only in Java worlds.
+function refreshModRows(format) {
+  const java = (format || selectedWorldFormat) === 'java';
+  document.querySelectorAll('.mod-toggle').forEach((el) => setSettingsRowAvailable(el.id, java));
+}
+
+// The ticked mod ids, for the backend's --mods.
+function selectedMods() {
+  return Array.from(document.querySelectorAll('.mod-toggle'))
+    .filter((el) => el.checked && !el.disabled)
+    .map((el) => el.dataset.mod);
 }
 
 // Disabled means unavailable for this format or body, so a stale tick is never sent.
@@ -3537,6 +3557,7 @@ async function startGeneration() {
         zombieOutbreak: gameplayToggle('zombie-outbreak-toggle'),
         disasters: gameplayToggle('disasters-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),
+        mods: selectedMods(),
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : ""
     });

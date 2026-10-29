@@ -47,6 +47,10 @@ pub fn maybe_place_tractor(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
     }
     let rot = ((h >> 8) & 3) as u8;
     let base_y = editor.get_absolute_y(ax, 1, az);
+    if editor.mods().has(crate::mods::ModPack::Automobility) {
+        crate::mods::wildlife::park_tractor(editor, ax, base_y, az, rot, h >> 12);
+        return;
+    }
     place_structure(editor, schem, ax, az, base_y, rot, None);
 }
 

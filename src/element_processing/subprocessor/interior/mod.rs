@@ -17,7 +17,7 @@ use crate::element_processing::buildings::{cached_prop_block, BUILDING_PASSAGE_H
 use crate::element_processing::subprocessor::buildings_loot::{themed_chest_loot, LootTheme};
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::world_editor::WorldEditor;
-use canvas::{bed, facing, mix, pick, seat, top_slab, wood_for, Canvas, Frame, Wood, DIRS};
+use canvas::{bed, facing, mix, pick, wood_for, Canvas, Frame, Wood, DIRS};
 use std::collections::HashSet;
 use uses::Use;
 
@@ -119,7 +119,7 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
             floor: i,
             floors,
             seed: req.seed ^ (i as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15),
-            wood: wood_for(req.seed),
+            wood: wood_for(req.seed).with_mods(editor.mods()),
             salt: (min_x as u32).wrapping_mul(0x9E37_79B1) ^ (min_z as u32),
             origin: (min_x + 2, min_z + 2),
             far: (max_x - 2, max_z - 2),
@@ -174,6 +174,24 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
                 c.focus(0);
                 c.light_up(req.floor_block, req.floor_levels.get(i + 1).is_some());
             }
+        }
+        // With the elevator mod, a lift pad in each floor instead: jump to ride up, sneak to
+        // ride down.
+        if let (Some((cell, _)), true, true) = (
+            shaft,
+            shaft_open,
+            editor.mods().has(crate::mods::ModPack::Elevators),
+        ) {
+            let pad = crate::mods::state("elevatorid:elevator_gray", POLISHED_ANDESITE, &[]);
+            editor.set_block_with_properties_absolute(
+                pad,
+                cell.0,
+                floor_y,
+                cell.1,
+                None,
+                Some(&[]),
+            );
+            continue;
         }
         // A ladder up through the ceiling to the next storey.
         if let (Some((cell, n)), Some(&next), true) =
@@ -252,19 +270,18 @@ fn cottage(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
         }
     }
     if ctx.floor == 0 {
-        let kitchen = [FURNACE, CRAFTING_TABLE, WATER_CAULDRON, BARREL];
+        let kitchen = [
+            Kitchen::Stove,
+            Kitchen::Worktop,
+            Kitchen::Sink,
+            Kitchen::Store,
+        ];
         let mut k = 0;
         for &((x, z), n) in walls.iter().rev() {
             if k >= kitchen.len() {
                 break;
             }
-            let block = kitchen[k];
-            let placed = if block == FURNACE {
-                c.put_with(x, 1, z, canvas::facing_block(FURNACE, n))
-            } else {
-                c.put(x, 1, z, block)
-            };
-            if placed {
+            if kitchen_unit(c, x, z, n, kitchen[k], ctx) {
                 k += 1;
             }
         }
@@ -344,6 +361,69 @@ fn entry_u(c: &Canvas, zone: u16, f: &Frame) -> i32 {
         .unwrap_or(f.width / 2)
 }
 
+/// What stands along a kitchen wall.
+#[derive(Clone, Copy)]
+enum Kitchen {
+    Stove,
+    Oven,
+    Sink,
+    Worktop,
+    Store,
+}
+
+/// One kitchen unit against a wall, its front along `n`, with what stands on it.
+fn kitchen_unit(
+    c: &mut Canvas,
+    x: i32,
+    z: i32,
+    n: (i32, i32),
+    unit: Kitchen,
+    ctx: &FloorCtx,
+) -> bool {
+    use crate::mods::{farmers_delight as fd, macaws};
+    let delight = c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
+    let simple = BlockWithProperties::simple;
+    let block = match (unit, ctx.wood.macaws) {
+        (Kitchen::Stove, _) if delight => fd::stove(n),
+        (Kitchen::Stove, _) => canvas::facing_block(SMOKER, n),
+        (Kitchen::Oven, _) => canvas::facing_block(FURNACE, n),
+        (Kitchen::Sink, Some(w)) => macaws::sink(w, n, WATER_CAULDRON),
+        (Kitchen::Sink, None) => simple(WATER_CAULDRON),
+        (Kitchen::Worktop, Some(w)) => macaws::counter(w, n, CRAFTING_TABLE),
+        (Kitchen::Worktop, None) => simple(CRAFTING_TABLE),
+        (Kitchen::Store, Some(w)) => macaws::drawer_counter(w, n, BARREL),
+        (Kitchen::Store, None) if delight => {
+            macaws::wood_name(ctx.wood.planks).map_or_else(|| simple(BARREL), |w| fd::cabinet(w, n))
+        }
+        (Kitchen::Store, None) => simple(BARREL),
+    };
+    if !c.put_with(x, 1, z, block) {
+        return false;
+    }
+    let h = mix(x, z, ctx.seed ^ 0x5AC1);
+    if delight {
+        match unit {
+            Kitchen::Stove if h.is_multiple_of(2) => {
+                c.put_with(x, 2, z, fd::cooking_pot(n));
+            }
+            Kitchen::Stove => {
+                c.put_with(x, 2, z, fd::skillet(n));
+            }
+            Kitchen::Worktop if h.is_multiple_of(3) => {
+                c.put_with(x, 2, z, fd::cutting_board(n));
+            }
+            _ => {}
+        }
+    }
+    // Wall cupboards under the ceiling, where a wall carries them.
+    if let Some(w) = ctx.wood.macaws {
+        if c.headroom() >= 3 && !matches!(unit, Kitchen::Stove) {
+            c.mount_with(x, 3, z, n, macaws::cabinet(w, n, BARREL));
+        }
+    }
+    true
+}
+
 /// A table at (`u`, `v`) with chairs at the offsets, placed only if a chair fits.
 fn table_set(c: &mut Canvas, f: &Frame, u: i32, v: i32, wood: Wood, chairs: &[(i32, i32)]) -> bool {
     let (x, z) = f.world(u, v);
@@ -358,9 +438,20 @@ fn table_set(c: &mut Canvas, f: &Frame, u: i32, v: i32, wood: Wood, chairs: &[(i
     if seats.is_empty() {
         return false;
     }
-    c.put_with(x, 1, z, top_slab(wood.slab));
+    c.put_with(x, 1, z, wood.table());
+    if c.editor.mods().has(crate::mods::ModPack::FarmersDelight) {
+        let h = mix(x, z, 0xFEA5);
+        if h.is_multiple_of(3) {
+            c.put_with(
+                x,
+                2,
+                z,
+                crate::mods::farmers_delight::feast(f.front(), h >> 4),
+            );
+        }
+    }
     for ((sx, sz), look) in seats {
-        c.put_with(sx, 1, sz, seat(wood.stairs, look));
+        c.put_with(sx, 1, sz, wood.seat(look));
     }
     true
 }
