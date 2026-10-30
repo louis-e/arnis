@@ -148,7 +148,8 @@ pub struct DecalRegistry {
 }
 
 impl DecalRegistry {
-    /// The first two ids belong to the world preview map and the branding map.
+    /// In a new world, the first two ids belong to the world preview map and the branding map.
+    #[cfg(test)]
     pub const FIRST_ID: i32 = crate::map_item::FIRST_MAP_ID + 2;
 
     /// Assigns ids to `keys` in their sorted order.
