@@ -775,7 +775,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("wet_sponge", Rgb([171, 181, 70])),
         ("moss_block", Rgb([89, 109, 45])),
         ("moss_carpet", Rgb([89, 109, 45])),
-        ("azalea", Rgb([106, 133, 56])),
         ("sculk", Rgb([12, 28, 36])),
         ("honeycomb_block", Rgb([229, 148, 29])),
         ("slime_block", Rgb([111, 192, 91])),

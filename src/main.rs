@@ -35,7 +35,6 @@ mod ground_decoration;
 mod ground_generation;
 mod land_cover;
 mod landmarks;
-mod lowland;
 mod luanti_block_map;
 mod map_item;
 mod map_item_palette;
@@ -57,7 +56,6 @@ mod preview_3d;
 mod progress;
 mod projection;
 mod retrieve_data;
-mod road_bearings;
 mod structures;
 #[cfg(feature = "gui")]
 mod telemetry;

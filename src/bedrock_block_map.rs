@@ -161,6 +161,8 @@ const MUSHROOM_STEM_BITS: [u8; 64] = [
 /// Bedrock ids that differ from the Java ones.
 fn renamed(java_name: &str) -> &str {
     match java_name {
+        "beetroots" => "beetroot",
+        "rooted_dirt" => "dirt_with_roots",
         "bricks" => "brick_block",
         "cobweb" => "web",
         "dead_bush" => "deadbush",
@@ -429,9 +431,14 @@ fn convert(name: &str, p: &Props) -> BedrockBlock {
             )
         }
         "cactus" | "fire" | "sugar_cane" => with(vec![("age", Int(p.int("age", 0)))]),
-        "wheat" | "carrots" | "potatoes" | "beetroots" | "sweet_berry_bush" => {
+        "wheat" | "carrots" | "potatoes" | "sweet_berry_bush" => {
             with(vec![("growth", Int(p.int("age", 0)))])
         }
+        // Java ages 0-3 over Bedrock's 0-7 growth, ripe at 7.
+        "beetroots" => with(vec![(
+            "growth",
+            Int([0, 2, 4, 7][p.int("age", 3).clamp(0, 3) as usize]),
+        )]),
         "red_mushroom_block" | "brown_mushroom_block" | "mushroom_stem" => {
             let faces = ["down", "east", "north", "south", "up", "west"]
                 .iter()

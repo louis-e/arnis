@@ -159,16 +159,10 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
 
-    /// Farmland style: classic (uniform crops, the pre-3.1 surface), smallholding
-    /// (many small plots, full crop variety), patchwork (balanced mixed farmland),
-    /// prairie (large industrial fields) or pasture (grass and wildflowers with a few
-    /// crop plots). Anything but classic lays farmland out as separate parcels, each
-    /// growing one crop, separated by dirt tracks.
-    ///
-    /// Parcels are not free: on farmland-heavy areas they cost roughly 15% more
-    /// generation time and about 1.5x the peak memory of `classic`. Pick `classic` if
-    /// you want the cheapest run or the pre-3.1 look.
-    #[arg(long, value_enum, default_value_t = crate::element_processing::field_texture::FieldPreset::Patchwork)]
+    /// Farmland style: classic (one sheet of mixed crops), smallholding (narrow strips),
+    /// patchwork (mixed fields of medium width) or prairie (wide, wheat-led fields).
+    /// Anything but classic gives each field one crop, split inside its OSM outline.
+    #[arg(long, value_enum, default_value_t)]
     pub fields: crate::element_processing::field_texture::FieldPreset,
 
     /// Largest schematic tree to place: small (<=6 blocks), medium (<=12),

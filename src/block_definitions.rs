@@ -610,6 +610,15 @@ impl Block {
             522 => "packed_mud",
             523 => "rooted_dirt",
             524 => "beetroots",
+            // Younger crop stages, so a field's growth needs no per-block properties.
+            525 => "wheat",
+            526 => "wheat",
+            527 => "potatoes",
+            528 => "potatoes",
+            529 => "carrots",
+            530 => "carrots",
+            531 => "beetroots",
+            532 => "beetroots",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -671,9 +680,24 @@ impl Block {
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),
-            524 => Some(Value::Compound({
+            525 | 527 | 529 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("5".to_string()));
+                map
+            })),
+            524 | 526 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("3".to_string()));
+                map
+            })),
+            528 | 530 | 531 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("2".to_string()));
+                map
+            })),
+            532 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("1".to_string()));
                 map
             })),
             116 => Some(Value::Compound({
@@ -1740,18 +1764,14 @@ pub const RED_SANDSTONE: Block = Block::new(521);
 pub const PACKED_MUD: Block = Block::new(522);
 pub const ROOTED_DIRT: Block = Block::new(523);
 pub const BEETROOTS: Block = Block::new(524);
-
-/// Flower species a flower parcel draws from.
-pub static FIELD_FLOWERS: [Block; 8] = [
-    RED_FLOWER,
-    YELLOW_FLOWER,
-    ALLIUM,
-    CORNFLOWER,
-    LILY_OF_THE_VALLEY,
-    ORANGE_TULIP,
-    PINK_TULIP,
-    OXEYE_DAISY,
-];
+pub const WHEAT_HALF: Block = Block::new(525);
+pub const WHEAT_YOUNG: Block = Block::new(526);
+pub const POTATOES_HALF: Block = Block::new(527);
+pub const POTATOES_YOUNG: Block = Block::new(528);
+pub const CARROTS_HALF: Block = Block::new(529);
+pub const CARROTS_YOUNG: Block = Block::new(530);
+pub const BEETROOTS_HALF: Block = Block::new(531);
+pub const BEETROOTS_YOUNG: Block = Block::new(532);
 /// A vine clinging to the wall on its north, east, south or west side.
 pub const VINES: [Block; 4] = [
     Block::new(499),

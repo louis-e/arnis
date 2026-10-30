@@ -893,6 +893,15 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         522 => "mcl_mud:packed_mud",
         523 => "mcl_lush_caves:rooted_dirt",
         524 => "mcl_farming:beetroot",
+        // Younger crop stages export ripe, like the ripe ids above.
+        525 => "mcl_farming:wheat_7",
+        526 => "mcl_farming:wheat_7",
+        527 => "mcl_farming:potato_4",
+        528 => "mcl_farming:potato_4",
+        529 => "mcl_farming:carrot_7",
+        530 => "mcl_farming:carrot_7",
+        531 => "mcl_farming:beetroot",
+        532 => "mcl_farming:beetroot",
         _ => "mcl_core:stone",
     };
     LuantiNode {

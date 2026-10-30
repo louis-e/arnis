@@ -15,15 +15,16 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
-    CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS, GRASS_BLOCK, GRAVEL,
-    GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD,
-    OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, RED_SAND, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK,
-    STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE,
-    YELLOW_CONCRETE,
+    Block, AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, COARSE_DIRT, COBBLESTONE,
+    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS,
+    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
+    MOSS_BLOCK, MUD, OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, RED_SAND, SAND, SANDSTONE,
+    SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
+    WHITE_CONCRETE, YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::field_texture::{Cover, CroplandGrid, Plot};
 use crate::element_processing::swimming_pools;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
@@ -323,6 +324,7 @@ pub fn generate_ground_region(
 
     // Snow line and the band over which snow thickens into full cover.
     let snow_line = terrain_surface::SnowLine::new(ground, center_lat, args.rotation);
+    let cropland = CroplandGrid::new(args.fields, args.scale);
     // Share of forest-floor grass that grows as ferns, by the habitat the forest is in.
     // Undergrowth thins out with dryness: sparse in deserts, thinner on steppe,
     // full in savanna, temperate and boreal country.
@@ -668,6 +670,8 @@ pub fn generate_ground_region(
                             let talus_block =
                                 terrain_surface::talus_palette(x, z, talus, cover_here, rock);
 
+                            // The field plot this column's cropland surface came from.
+                            let mut cropland_plot: Option<(Plot, Block)> = None;
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if let Some(body) = planetary_body {
                                 // No land cover off Earth, so this replaces the
@@ -727,7 +731,15 @@ pub fn generate_ground_region(
                                             }
                                         }
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
-                                        land_cover::LC_CROPLAND => (FARMLAND, DIRT),
+                                        land_cover::LC_CROPLAND => match &cropland {
+                                            Some(grid) => {
+                                                let plot = grid.plot_at(x, z);
+                                                let top = plot.surface(x, z);
+                                                cropland_plot = Some((plot, top));
+                                                (top, DIRT)
+                                            }
+                                            None => (FARMLAND, DIRT),
+                                        },
                                         land_cover::LC_BUILT_UP => {
                                             let h = land_cover::coord_hash(x, z) % 100;
                                             if h < 72 {
@@ -861,6 +873,12 @@ pub fn generate_ground_region(
                                     None,
                                 );
                             } else {
+                                // Plants only follow a plot surface this pass actually laid.
+                                if cropland_plot.is_some_and(|(_, top)| top != surface_block)
+                                    || editor.block_exists_absolute(x, ground_y, z)
+                                {
+                                    cropland_plot = None;
+                                }
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
                             }
 
@@ -1179,6 +1197,40 @@ pub fn generate_ground_region(
                                                 None,
                                                 None,
                                             );
+                                        }
+                                    }
+                                    land_cover::LC_CROPLAND if cropland.is_some() => {
+                                        if let Some((plot, top)) = cropland_plot {
+                                            match plot.cover(top, x, z) {
+                                                Some(Cover::Single(block)) => editor
+                                                    .set_block_absolute(
+                                                        block,
+                                                        x,
+                                                        ground_y + 1,
+                                                        z,
+                                                        None,
+                                                        None,
+                                                    ),
+                                                Some(Cover::Tall(lower, upper)) => {
+                                                    editor.set_block_absolute(
+                                                        lower,
+                                                        x,
+                                                        ground_y + 1,
+                                                        z,
+                                                        None,
+                                                        None,
+                                                    );
+                                                    editor.set_block_absolute(
+                                                        upper,
+                                                        x,
+                                                        ground_y + 2,
+                                                        z,
+                                                        None,
+                                                        None,
+                                                    );
+                                                }
+                                                None => {}
+                                            }
                                         }
                                     }
                                     land_cover::LC_CROPLAND
