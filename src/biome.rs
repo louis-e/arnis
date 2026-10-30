@@ -212,6 +212,7 @@ fn game_temperature(name: &str) -> Option<f32> {
         "minecraft:taiga" => 0.25,
         "minecraft:old_growth_pine_taiga" => 0.3,
         "minecraft:meadow" => 0.5,
+        "minecraft:birch_forest" => 0.6,
         "minecraft:forest" => 0.7,
         "minecraft:plains" => 0.8,
         "minecraft:stony_peaks" => 1.0,
@@ -232,7 +233,7 @@ fn snow_safe(name: &'static str, y: i32, trees: bool) -> &'static str {
     while game_snow_y(pick).is_some_and(|s| top >= s) {
         pick = match pick {
             "minecraft:taiga" => "minecraft:old_growth_pine_taiga",
-            "minecraft:old_growth_pine_taiga" => "minecraft:forest",
+            "minecraft:old_growth_pine_taiga" | "minecraft:birch_forest" => "minecraft:forest",
             "minecraft:meadow" => "minecraft:plains",
             "minecraft:stony_shore" => "minecraft:stony_peaks",
             _ => break,
@@ -277,7 +278,14 @@ pub fn chunk_biome_names(
                     let world_x = chunk_x * 16 + xi * 4 + 2;
                     let world_z = chunk_z * 16 + zi * 4 + 2;
                     let coord = XZPoint::new(world_x - ground_origin.0, world_z - ground_origin.1);
-                    let cell = classify_input(g, coord, snow_y, sea_max_y);
+                    // Read where the ground reads red earth, so badlands sit on it.
+                    let eco_at = if climate.is_dry() {
+                        let (sx, sz) = crate::terrain_surface::fray(world_x, world_z);
+                        XZPoint::new(sx - ground_origin.0, sz - ground_origin.1)
+                    } else {
+                        coord
+                    };
+                    let cell = classify_input(g, coord, eco_at, snow_y, sea_max_y);
                     let name = cell_biome(&cell, climate, center_lat_deg);
                     names[(zi * 4 + xi) as usize] =
                         if g.winter() { winter_biome(name) } else { name };
@@ -292,7 +300,13 @@ pub fn chunk_biome_names(
 /// Reach in blocks within which bare ground counts as shore.
 const SHORE_REACH: i32 = 8;
 
-fn classify_input(g: &Ground, coord: XZPoint, snow_y: i32, sea_max_y: Option<i32>) -> Cell {
+fn classify_input(
+    g: &Ground,
+    coord: XZPoint,
+    eco_at: XZPoint,
+    snow_y: i32,
+    sea_max_y: Option<i32>,
+) -> Cell {
     let lc = g.cover_class(coord);
     let y = g.level(coord);
     let water_at =
@@ -322,7 +336,7 @@ fn classify_input(g: &Ground, coord: XZPoint, snow_y: i32, sea_max_y: Option<i32
         }),
         slope: g.slope(coord),
         y,
-        eco: g.ecoregion(coord),
+        eco: g.ecoregion(eco_at),
     }
 }
 
@@ -647,6 +661,14 @@ mod tests {
         assert_eq!(taiga(100), "minecraft:forest");
         // Nothing stays green this high, so the warmest of the kind is kept.
         assert_eq!(taiga(900), "minecraft:forest");
+        assert_eq!(
+            snow_safe("minecraft:birch_forest", 300, false),
+            "minecraft:birch_forest"
+        );
+        assert_eq!(
+            snow_safe("minecraft:birch_forest", 320, false),
+            "minecraft:forest"
+        );
         // The alpine band keeps its meadows: snow showers belong up there.
         assert_eq!(high(LC_GRASSLAND, -400.0, 2, 300), "minecraft:meadow");
         let shore = Cell {

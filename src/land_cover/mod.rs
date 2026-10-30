@@ -174,12 +174,13 @@ impl InlandWater {
 
     #[inline]
     pub fn get(&self, x: usize, z: usize) -> bool {
+        if x >= self.width || z >= self.height {
+            return false;
+        }
         let i = z * self.width + x;
-        x < self.width
-            && self
-                .bits
-                .get(i / 64)
-                .is_some_and(|w| (w >> (i % 64)) & 1 == 1)
+        self.bits
+            .get(i / 64)
+            .is_some_and(|w| (w >> (i % 64)) & 1 == 1)
     }
 }
 
@@ -1828,5 +1829,21 @@ mod smoothing_scale_tests {
         let mut lc = lc_from_rows(&["bbbb", "gggg"], 1.0);
         mark_beaches(&mut lc);
         assert!(lc.grid[0].iter().all(|&c| c == LC_BARE));
+    }
+}
+
+#[cfg(test)]
+mod inland_water_tests {
+    use super::*;
+
+    #[test]
+    fn reads_outside_the_grid_are_unmarked() {
+        let mut m = InlandWater::new(4, 3);
+        assert!(!m.get(1, 1));
+        m.set(1, 1);
+        m.set(9, 9);
+        assert!(m.get(1, 1));
+        assert!(!m.get(1, 3) && !m.get(4, 0));
+        assert!(!m.get(usize::MAX, 0) && !m.get(0, usize::MAX));
     }
 }

@@ -403,7 +403,7 @@ fn natural_area(
                             editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                         }
                         "shoal" if rng.random_bool(0.05) => {
-                            editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
+                            editor.set_block(WATER, x, 0, z, Some(&[SAND, RED_SAND, GRAVEL]), None);
                         }
                         "wetland" => {
                             let wetland_type = element

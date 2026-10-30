@@ -465,10 +465,6 @@ pub fn generate_ground_region(
                     };
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
-                    let rock = terrain_surface::Rock::at(climate, x, z, |sx, sz| {
-                        ground.ecoregion(XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z()))
-                    });
-
                     // Slope once per column (used for surface selection and depth), from
                     // unrounded heights so a contour doesn't flicker between tiers.
                     let (slope_f, gradient) = if terrain_enabled {
@@ -504,9 +500,7 @@ pub fn generate_ground_region(
                             ));
                     let mut did_underfill = false;
 
-                    // Mapped stone keeps its column where no snow falls. Under snow, or as
-                    // bare ground's own rock, it takes the snow and scree around it, so a
-                    // mapped rock area doesn't snow only on its andesite and gravel.
+                    // Mapped stone under snow or on bare ground snows and screes like the ground.
                     let has_existing_stone =
                         editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None)
                             && snow_line.depth(x, z, ground_y) < terrain_surface::SNOW_MIN_DEPTH
@@ -633,6 +627,10 @@ pub fn generate_ground_region(
                             } else {
                                 0
                             };
+                            let rock = terrain_surface::Rock::at(climate, x, z, |sx, sz| {
+                                let p = XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z());
+                                ground.ecoregion(p)
+                            });
                             // Snow by altitude and terrain shape. An ESA snow/ice cell near
                             // the snow line or in a cold climate is a glacier, which keeps
                             // patches of old snow even below the line.

@@ -80,8 +80,7 @@ impl Rock {
         if !climate.is_dry() {
             return Rock::Grey;
         }
-        let shift = |salt| ((value_noise_salted(x, z, 32, salt) - 0.5) * 80.0) as i32;
-        let (sx, sz) = (x + shift(SALT_FRAY), z + shift(SALT_FRAY.rotate_left(11)));
+        let (sx, sz) = fray(x, z);
         if crate::biome::red_earth(climate, eco(sx, sz)) {
             Rock::Red
         } else {
@@ -119,6 +118,12 @@ impl Rock {
             Rock::Red => (RED_SAND, RED_SANDSTONE),
         }
     }
+}
+
+/// Where red earth is read for world block (x, z): up to 40 blocks off, by smooth noise.
+pub(crate) fn fray(x: i32, z: i32) -> (i32, i32) {
+    let shift = |salt| ((value_noise_salted(x, z, 32, salt) - 0.5) * 80.0) as i32;
+    (x + shift(SALT_FRAY), z + shift(SALT_FRAY.rotate_left(11)))
 }
 
 /// Darkest ramp step a cliff top may take, so ledges don't read black from above.
