@@ -67,6 +67,21 @@ type PlacementReport = BTreeMap<&'static str, (usize, BTreeSet<(i32, i32, i32)>)
 const REPORT_SAMPLES: usize = 4;
 
 impl SignageContext {
+    /// A context whose registry holds exactly `keys`, so placement can run in tests.
+    #[cfg(test)]
+    pub(crate) fn with_keys(keys: Vec<DecalKey>) -> Self {
+        SignageContext {
+            registry: DecalRegistry::from_keys(keys.into_iter().collect()),
+            level: SignageLevel::Basic,
+            region: SignRegion::Germanic,
+            intersections: IntersectionIndex::new(),
+            node_headings: HashMap::new(),
+            scale: 1.0,
+            carriageway: RoadMaskBitmap::new_empty(),
+            report: Mutex::new(PlacementReport::new()),
+        }
+    }
+
     /// Frees what only element placement reads: the carriageway mask, a bit per world
     /// column, and the node sign headings.
     pub fn release_placement_masks(&mut self) {
@@ -463,7 +478,11 @@ pub fn plaque_key(tags: &HashMap<String, String>) -> Option<DecalKey> {
 }
 
 /// Which pictogram, if any, sits on a piece of street furniture that renders as blocks.
+/// A machine with a front of its own (`machine_front`) takes none.
 pub fn furniture_pictogram(tags: &HashMap<String, String>) -> Option<DecalKey> {
+    if machine_front(tags).is_some() {
+        return None;
+    }
     let icon = match tags.get("amenity").map(String::as_str) {
         Some("recycling")
             if tags.get("recycling_type").map(String::as_str) == Some("container") =>
@@ -471,8 +490,6 @@ pub fn furniture_pictogram(tags: &HashMap<String, String>) -> Option<DecalKey> {
             "recycling"
         }
         Some("waste_basket") | Some("waste_disposal") => "recycling",
-        Some("vending_machine") => "vending_machine",
-        Some("atm") => "atm",
         _ => match tags.get("emergency").map(String::as_str) {
             Some("fire_hydrant")
                 if !matches!(
@@ -486,6 +503,32 @@ pub fn furniture_pictogram(tags: &HashMap<String, String>) -> Option<DecalKey> {
         },
     };
     Some(DecalKey::Pictogram(icon))
+}
+
+/// Front of a street machine: an ATM, a ticket machine, a souvenir coin press or a vending
+/// machine for drinks or for anything else, each a cabinet two blocks tall, or a dispenser
+/// too small for one (dog bags, condoms, gum, stamps, newspapers), a box on a post.
+pub fn machine_front(tags: &HashMap<String, String>) -> Option<DecalKey> {
+    let name = match tags.get("amenity").map(String::as_str)? {
+        "atm" => "atm",
+        "vending_machine" => {
+            // A machine selling several goods lists them; the first is its main one.
+            let goods = tags.get("vending").map(String::as_str).unwrap_or("");
+            match goods.split(';').next().unwrap_or("").trim() {
+                "excrement_bags" => "dog_bags",
+                "condoms" | "chewing_gum" | "stamps" | "newspapers" => "dispenser",
+                "elongated_coin" => "coin_press",
+                "public_transport_tickets" | "parking_tickets" | "admission_tickets" | "fuel" => {
+                    "ticket_machine"
+                }
+                "drinks" | "water" | "coffee" | "milk" | "hot_drinks" | "soft_drinks"
+                | "beverages" | "juice" | "beer" | "wine" => "vending_drinks",
+                _ => "vending_snacks",
+            }
+        }
+        _ => return None,
+    };
+    Some(DecalKey::Machine(name))
 }
 
 fn way_direction_at(nodes: &[ProcessedNode], i: usize) -> Option<(f64, f64)> {
@@ -814,6 +857,9 @@ fn keys_for_element(
     match element {
         ProcessedElement::Node(node) => {
             if let Some(k) = furniture_pictogram(tags) {
+                keys.insert(k);
+            }
+            if let Some(k) = machine_front(tags) {
                 keys.insert(k);
             }
             if let Some(NameSign::Decal(k)) = poi_name_sign(tags, level) {
@@ -2309,18 +2355,8 @@ mod tests {
         assert!(cross.dir.1.abs() > 0.9);
     }
 
-    /// Builds a context whose registry holds exactly `keys`, so panel placement can run.
     fn test_ctx(keys: Vec<DecalKey>) -> SignageContext {
-        SignageContext {
-            registry: DecalRegistry::from_keys(keys.into_iter().collect()),
-            level: SignageLevel::Basic,
-            region: SignRegion::Germanic,
-            intersections: IntersectionIndex::new(),
-            node_headings: HashMap::new(),
-            scale: 1.0,
-            carriageway: crate::floodfill_cache::CoordinateBitmap::new_empty(),
-            report: Mutex::new(PlacementReport::new()),
-        }
+        SignageContext::with_keys(keys)
     }
 
     /// Absolute Y of every frame showing one of `key`'s tiles, and their positions.
@@ -2793,6 +2829,38 @@ mod tests {
             furniture_pictogram(&tags(&[("amenity", "waste_basket")])),
             Some(DecalKey::Pictogram("recycling"))
         );
+        // Cabinet machines show their front, not the pictogram.
+        for (t, front) in [
+            (vec![("amenity", "atm")], "atm"),
+            (
+                vec![
+                    ("amenity", "vending_machine"),
+                    ("vending", "public_transport_tickets"),
+                ],
+                "ticket_machine",
+            ),
+            (
+                vec![("amenity", "vending_machine"), ("vending", "drinks;sweets")],
+                "vending_drinks",
+            ),
+            (vec![("amenity", "vending_machine")], "vending_snacks"),
+        ] {
+            let t = tags(&t);
+            assert_eq!(machine_front(&t), Some(DecalKey::Machine(front)), "{t:?}");
+            assert_eq!(furniture_pictogram(&t), None, "{t:?}");
+        }
+        // Every vending machine has a front of its own, a dispenser's a small one.
+        let bags = tags(&[
+            ("amenity", "vending_machine"),
+            ("vending", "excrement_bags"),
+        ]);
+        assert_eq!(machine_front(&bags), Some(DecalKey::Machine("dog_bags")));
+        assert_eq!(furniture_pictogram(&bags), None);
+        let coins = tags(&[
+            ("amenity", "vending_machine"),
+            ("vending", "elongated_coin"),
+        ]);
+        assert_eq!(machine_front(&coins), Some(DecalKey::Machine("coin_press")));
         let board = ProcessedNode {
             id: 1,
             tags: tags(&[("tourism", "information"), ("information", "map")]),

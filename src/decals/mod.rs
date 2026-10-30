@@ -3,6 +3,7 @@
 
 pub mod draw;
 pub mod font;
+pub mod machines;
 pub mod pictograms;
 pub mod posters;
 pub mod region;

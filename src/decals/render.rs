@@ -1,6 +1,7 @@
 //! Turns a `DecalKey` into a canvas of map color ids.
 
 use super::draw::{colors, Canvas, TILE};
+use super::machines;
 use super::pictograms;
 use super::posters;
 use super::registry::DecalKey;
@@ -58,17 +59,34 @@ pub fn render(key: &DecalKey, preview: Option<&PreviewRaster>) -> Canvas {
         DecalKey::RouteShield { style, text } => templates::route_shield(&mut canvas, *style, text),
         DecalKey::Poster(v) => blit_poster(&mut canvas, posters::billboard(*v), "billboard"),
         DecalKey::ColumnPoster(v) => blit_poster(&mut canvas, posters::column(*v), "column"),
+        // The front is the whole face of the cabinet, so no frame round it.
+        DecalKey::Machine(name) => blit_art(&mut canvas, machines::asset(name), "machine"),
         DecalKey::LocalMap { x, z } => local_map(&mut canvas, *x, *z, preview),
     }
     canvas
 }
 
-/// Paints a poster over the canvas, resizing off-size art. A bad asset leaves a plate.
+/// Paints a poster over the canvas in a dark frame, resizing off-size art. A bad asset
+/// leaves a plate.
 fn blit_poster(canvas: &mut Canvas, png: Option<&'static [u8]>, kind: &str) {
+    blit_art(canvas, png, kind);
+    canvas.stroke_rect(
+        0,
+        0,
+        canvas.w as i32,
+        canvas.h as i32,
+        3,
+        colors::NEAR_BLACK,
+    );
+}
+
+/// Paints bundled art over the whole canvas, resizing off-size art. A bad asset leaves a
+/// plate.
+fn blit_art(canvas: &mut Canvas, png: Option<&'static [u8]>, kind: &str) {
     let decoded = png
-        .ok_or_else(|| format!("no bundled {kind} poster"))
+        .ok_or_else(|| format!("no bundled {kind} art"))
         .and_then(|bytes| {
-            image::load_from_memory(bytes).map_err(|e| format!("decode {kind} poster: {e}"))
+            image::load_from_memory(bytes).map_err(|e| format!("decode {kind} art: {e}"))
         });
     match decoded {
         Ok(img) => {
@@ -89,14 +107,6 @@ fn blit_poster(canvas: &mut Canvas, png: Option<&'static [u8]>, kind: &str) {
             canvas.fill(colors::LIGHT_GRAY);
         }
     }
-    canvas.stroke_rect(
-        0,
-        0,
-        canvas.w as i32,
-        canvas.h as i32,
-        3,
-        colors::NEAR_BLACK,
-    );
 }
 
 /// "You are here" board: the preview raster around (x, z), a marker and a north arrow.
@@ -264,6 +274,8 @@ mod tests {
             DecalKey::Poster(4),
             DecalKey::ColumnPoster(0),
             DecalKey::ColumnPoster(3),
+            DecalKey::Machine("atm"),
+            DecalKey::Machine("vending_drinks"),
             DecalKey::Pictogram("cafe"),
             DecalKey::LocalMap { x: 0, z: 0 },
         ];
