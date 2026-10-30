@@ -5,7 +5,7 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
-use crate::element_processing::field_texture::{Cover, FieldLayout, Plot};
+use crate::element_processing::field_texture::{place_cover, FieldLayout, Plot};
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{
     in_hole, without_holes, BuildingFootprintBitmap, FloodFillCache, Holes, InnerRings,
@@ -311,9 +311,9 @@ fn landuse_area(
                     }
                 }
             }
-            "farmland" if plot.is_some() => {
-                if let (Some(p), false) = (&plot, is_protected) {
-                    plant_plot(editor, p, actual_block, x, z);
+            "farmland" if field_layout.is_some() => {
+                if let Some(p) = plot.filter(|_| !is_protected) {
+                    plant_plot(editor, &p, actual_block, x, z);
                 }
             }
             "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
@@ -474,13 +474,9 @@ fn plant_plot(editor: &mut WorldEditor, plot: &Plot, surface: Block, x: i32, z: 
     if !editor.check_for_block(x, 0, z, Some(&[surface])) {
         return;
     }
-    match plot.cover(surface, x, z) {
-        Some(Cover::Single(block)) => editor.set_block(block, x, 1, z, None, None),
-        Some(Cover::Tall(lower, upper)) => {
-            editor.set_block(lower, x, 1, z, None, None);
-            editor.set_block(upper, x, 2, z, None, None);
-        }
-        None => {}
+    if let Some(cover) = plot.cover(surface, x, z) {
+        let ground_y = editor.get_absolute_y(x, 0, z);
+        place_cover(editor, cover, x, ground_y, z);
     }
 }
 

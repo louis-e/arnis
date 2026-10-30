@@ -24,7 +24,7 @@ use crate::block_definitions::{
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
-use crate::element_processing::field_texture::{Cover, CroplandGrid, Plot};
+use crate::element_processing::field_texture::{place_cover, CroplandGrid, Plot};
 use crate::element_processing::swimming_pools;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
@@ -732,8 +732,7 @@ pub fn generate_ground_region(
                                         }
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_CROPLAND => match &cropland {
-                                            // A mapped feature that already holds the column
-                                            // keeps it, so no plot is worked out there.
+                                            // No plot under a column a mapped feature holds.
                                             Some(grid)
                                                 if !editor
                                                     .block_exists_absolute(x, ground_y, z) =>
@@ -1204,35 +1203,8 @@ pub fn generate_ground_region(
                                     }
                                     land_cover::LC_CROPLAND if cropland.is_some() => {
                                         if let Some((plot, top)) = cropland_plot {
-                                            match plot.cover(top, x, z) {
-                                                Some(Cover::Single(block)) => editor
-                                                    .set_block_absolute(
-                                                        block,
-                                                        x,
-                                                        ground_y + 1,
-                                                        z,
-                                                        None,
-                                                        None,
-                                                    ),
-                                                Some(Cover::Tall(lower, upper)) => {
-                                                    editor.set_block_absolute(
-                                                        lower,
-                                                        x,
-                                                        ground_y + 1,
-                                                        z,
-                                                        None,
-                                                        None,
-                                                    );
-                                                    editor.set_block_absolute(
-                                                        upper,
-                                                        x,
-                                                        ground_y + 2,
-                                                        z,
-                                                        None,
-                                                        None,
-                                                    );
-                                                }
-                                                None => {}
+                                            if let Some(cover) = plot.cover(top, x, z) {
+                                                place_cover(editor, cover, x, ground_y, z);
                                             }
                                         }
                                     }

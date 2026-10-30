@@ -1,13 +1,11 @@
-//! Farmland layout: every field grows one crop.
-//!
-//! An OSM farmland outline is split into strips along its own long axis, so plots never
-//! cross the mapped boundary. Land-cover cropland has no outline and gets a world-anchored
-//! grid of strip blocks instead. Sizes are metres, scaled by `--scale`.
+//! Farmland plots: one crop per field, laid out inside its OSM outline; sizes in metres.
 
 use crate::block_definitions::*;
+use crate::clipping::is_invented_node_id;
 use crate::ground_generation::value_noise_01;
 use crate::land_cover::coord_hash;
 use crate::osm_parser::ProcessedNode;
+use crate::world_editor::WorldEditor;
 use std::cell::Cell;
 
 /// Farmland style, matching the GUI's segmented control.
@@ -150,13 +148,27 @@ pub enum Cover {
     Tall(Block, Block),
 }
 
+/// Plants `cover` on the cell above `ground_y`; a tall plant only where both halves fit.
+pub fn place_cover(editor: &mut WorldEditor, cover: Cover, x: i32, ground_y: i32, z: i32) {
+    match cover {
+        Cover::Single(block) => editor.set_block_absolute(block, x, ground_y + 1, z, None, None),
+        Cover::Tall(lower, upper) => {
+            if !editor.block_exists_absolute(x, ground_y + 1, z)
+                && !editor.block_exists_absolute(x, ground_y + 2, z)
+            {
+                editor.set_block_absolute(lower, x, ground_y + 1, z, None, None);
+                editor.set_block_absolute(upper, x, ground_y + 2, z, None, None);
+            }
+        }
+    }
+}
+
 impl Plot {
     fn on_row(&self, x: i32, z: i32) -> bool {
         (if self.rows_along_x { z } else { x }).rem_euclid(2) == 0
     }
 
-    /// Ground block of this plot at a cell. Untilled plots avoid plain dirt and bare
-    /// farmland, which would turn back to grass or dirt once the world is played.
+    // Untilled plots avoid dirt and bare farmland, which revert once the world is played.
     pub fn surface(&self, x: i32, z: i32) -> Block {
         let n = value_noise_01(x, z, TEXTURE_NOISE);
         match self.crop {
@@ -195,7 +207,7 @@ impl Plot {
         }
     }
 
-    /// Plant for a cell whose ground is `surface`, the block `surface()` gave for it.
+    /// Plant for a cell whose ground is the block `surface()` gave for it.
     pub fn cover(&self, surface: Block, x: i32, z: i32) -> Option<Cover> {
         let roll = coord_hash(x ^ 0x0C20_9A11, z) % 100;
         let single = |b| Some(Cover::Single(b));
@@ -259,8 +271,7 @@ impl Plot {
     }
 }
 
-/// Plots inside one OSM farmland outline: strips along its long axis, cut across where
-/// the outline is longer than a plot may be.
+/// Strips along an OSM field outline's long axis, cut across where it runs long.
 pub struct FieldLayout {
     params: Params,
     id: u64,
@@ -284,8 +295,12 @@ impl FieldLayout {
         let params = preset.params()?;
         let scale = sane_scale(scale);
         // Edge directions folded by 4x, so parallel and perpendicular edges vote together.
+        // Edges the clipper made along the generation bounds get no vote.
         let (mut c, mut s) = (0.0f64, 0.0f64);
         for w in nodes.windows(2) {
+            if is_invented_node_id(w[0].id) && is_invented_node_id(w[1].id) {
+                continue;
+            }
             let (dx, dz) = ((w[1].x - w[0].x) as f64, (w[1].z - w[0].z) as f64);
             let len = dx.hypot(dz);
             if len >= 1.0 {
@@ -363,8 +378,7 @@ impl FieldLayout {
     }
 }
 
-/// Plots for land-cover cropland, which has no outline: world-anchored square blocks, each
-/// holding parallel strips that run along x or z.
+/// World-anchored blocks of parallel strips, for land-cover cropland without an outline.
 pub struct CroplandGrid {
     params: Params,
     scale: f64,
@@ -507,6 +521,36 @@ mod tests {
         let (a, b) = (cuts(-180), cuts(-180 + layout.strip.ceil() as i32));
         assert!(!a.is_empty() && !b.is_empty());
         assert_ne!(a, b, "strips share their cuts");
+    }
+
+    #[test]
+    fn a_clipped_edge_does_not_turn_the_strips() {
+        // A 900 x 400 field at 20 degrees, cut by the generation bounds along x = 0.
+        let node = |id, x, z| ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        let cut = 1u64 << 62;
+        let nodes = [
+            node(1, -354, -342),
+            node(cut, 0, -213),
+            node(cut + 1, 0, 213),
+            node(2, -491, 34),
+            node(1, -354, -342),
+        ];
+        let layout = FieldLayout::new(FieldPreset::Patchwork, 1.0, 5, &nodes).unwrap();
+        let along = layout
+            .along
+            .1
+            .atan2(layout.along.0)
+            .to_degrees()
+            .rem_euclid(90.0);
+        assert!(
+            (along - 20.0).abs() < 1.0,
+            "strips turned to {along} degrees"
+        );
     }
 
     #[test]
