@@ -11,6 +11,7 @@ use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::{coord_hash, LC_WATER};
 use crate::world_editor::{min_y, WorldEditor};
+use fnv::FnvHashMap;
 
 /// Flat shoal width in chamfer-DT units; slope only starts past it.
 const SHOAL_DT_UNITS: u16 = 9;
@@ -101,6 +102,17 @@ impl BigWaterField {
     }
 
     #[inline]
+    /// Whether the square of cells within `r` of (x, z) reaches into the water sub-rect.
+    pub fn reaches(&self, x: i32, z: i32, r: i32) -> bool {
+        let (x0, z0) = (i64::from(self.min_x), i64::from(self.min_z));
+        let (x, z, r) = (i64::from(x), i64::from(z), i64::from(r));
+        self.width > 0
+            && x + r >= x0
+            && z + r >= z0
+            && x - r < x0 + self.width as i64
+            && z - r < z0 + self.height as i64
+    }
+
     fn local_idx(&self, x: i32, z: i32) -> Option<usize> {
         let lx = i64::from(x) - i64::from(self.min_x);
         let lz = i64::from(z) - i64::from(self.min_z);
@@ -392,9 +404,10 @@ pub struct BoreCrossing {
     pub lowest_m: f64,
 }
 
-/// A `BoreCrossing` for each land-cover water cell (column, row) a tunnel runs under, from
-/// the pre-repair mask like `estimate_max_carve_depth`, and as safe: the depth is the most
-/// any body of about the crossed one's size digs that far from its shore.
+/// A `BoreCrossing` for each land-cover water cell (column, row) a tunnel runs under. The
+/// carve sizes its bodies on the block field, where two the grid keeps apart may join, so
+/// the depth is the most a body of any size digs that far from its shore; it is set by the
+/// distance far more than by the size. The heights come from `height_m`, NaN where none.
 pub fn bore_crossings(
     lc_grid: &[Vec<u8>],
     world_width: usize,
@@ -404,11 +417,11 @@ pub fn bore_crossings(
 ) -> Vec<BoreCrossing> {
     let gh = lc_grid.len();
     let gw = lc_grid.first().map_or(0, Vec::len);
-    let is_water = |x: usize, z: usize| lc_grid[z][x] == LC_WATER;
+    let is_water = |x: usize, z: usize| lc_grid[z].get(x) == Some(&LC_WATER);
     let cells: Vec<(usize, usize)> = cells
         .iter()
         .copied()
-        .filter(|&(x, z)| x < gw && z < gh && is_water(x, z))
+        .filter(|&(x, z)| z < gh && x < gw && is_water(x, z))
         .collect();
     if cells.is_empty() {
         return Vec::new();
@@ -421,38 +434,46 @@ pub fn bore_crossings(
     let hr = world_height.saturating_sub(1).max(1) as f64 / gh.saturating_sub(1).max(1) as f64;
     let ratio = wr.max(hr).max(1.0);
 
-    // The crossed bodies: their widest point, which sets their depth tier, and their lowest.
-    let mut body = vec![u32::MAX; gw * gh];
-    let mut bodies: Vec<(u8, f64)> = Vec::new();
+    // The lowest ground of each crossed body, walked once per body from its first crossing.
+    let at: FnvHashMap<usize, usize> = cells
+        .iter()
+        .enumerate()
+        .map(|(k, &(x, z))| (z * gw + x, k))
+        .collect();
+    let mut lowest = vec![f64::INFINITY; cells.len()];
+    let mut seen = vec![0u64; (gw * gh).div_ceil(64)];
     for &(x, z) in &cells {
         let start = z * gw + x;
-        if body[start] != u32::MAX {
+        if bit_get(&seen, start) {
             continue;
         }
-        let id = bodies.len() as u32;
-        let (mut widest, mut lowest) = (0u8, f64::INFINITY);
-        body[start] = id;
+        bit_set(&mut seen, start);
+        let (mut members, mut low) = (Vec::new(), f64::INFINITY);
         let mut frontier = vec![start];
         while let Some(i) = frontier.pop() {
-            widest = widest.max(dt[i]);
+            if let Some(&k) = at.get(&i) {
+                members.push(k);
+            }
             let h = height_m(i % gw, i / gw);
             if h.is_finite() {
-                lowest = lowest.min(h);
+                low = low.min(h);
             }
             for_each_neighbor(i, gw, gh, |n| {
-                if dt[n] != 0 && body[n] == u32::MAX {
-                    body[n] = id;
+                if dt[n] != 0 && !bit_get(&seen, n) {
+                    bit_set(&mut seen, n);
                     frontier.push(n);
                 }
             });
         }
-        bodies.push((widest, lowest));
+        for k in members {
+            lowest[k] = low;
+        }
     }
 
     cells
         .iter()
-        .map(|&(x, z)| {
-            let (widest, lowest_m) = bodies[body[z * gw + x] as usize];
+        .zip(lowest)
+        .map(|(&(x, z), lowest_m)| {
             // The farthest from the shore the crossing reaches, a cell either way, and
             // the contour wobble on top.
             let near = (z.saturating_sub(1)..=(z + 1).min(gh - 1))
@@ -461,14 +482,10 @@ pub fn bore_crossings(
                 .max()
                 .unwrap_or(0);
             let dt_eff = f64::from(near) * ratio + 2.0;
-            // The block field measures the body a cell finer or coarser than this grid,
-            // which can tip it into the next tier.
-            let span = f64::from(widest) * ratio;
-            let (lo, hi) = ((span - 3.0 * ratio).max(0.0), span + 3.0 * ratio + 2.0);
-            let depth = [lo, hi, 21.0, 45.0, 75.0]
+            // One body size from each depth tier.
+            let depth = [0u16, 21, 45, 75]
                 .into_iter()
-                .filter(|&c| (lo..=hi).contains(&c))
-                .map(|c| depth_from_dt(dt_eff, c.min(f64::from(u16::MAX)) as u16))
+                .map(|size| depth_from_dt(dt_eff, size))
                 .max()
                 .unwrap_or(0);
             BoreCrossing { depth, lowest_m }
@@ -518,7 +535,7 @@ pub fn lc_carved_bed(
 }
 
 /// What a tunnel shell is built of: brick walls and roof, and the rail tunnel's floor.
-const BORE_SHELL: &[Block] = &[
+pub(crate) const BORE_SHELL: &[Block] = &[
     STONE_BRICKS,
     CRACKED_STONE_BRICKS,
     MOSSY_STONE_BRICKS,
@@ -1006,12 +1023,13 @@ mod tests {
         assert_eq!(crossings.len(), 2);
         let (canal, lake) = (crossings[0], crossings[1]);
         assert!(canal.depth <= 2, "{canal:?}");
-        // The middle of the lake is the deepest point of the area.
-        assert_eq!(
-            lake.depth,
-            estimate_max_carve_depth(&grid, w, h),
+        // The middle of the lake is the deepest point of the area, and no shallower here
+        // than the carve floor counts with.
+        assert!(
+            lake.depth >= estimate_max_carve_depth(&grid, w, h),
             "{lake:?}"
         );
+        assert!(lake.depth <= MAX_WATER_DEPTH);
         assert!(lake.depth > canal.depth);
         assert_eq!(canal.lowest_m, 12.0);
         assert!((lake.lowest_m - 3.2).abs() < 1e-9, "{lake:?}");

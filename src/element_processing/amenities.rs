@@ -102,11 +102,7 @@ pub fn generate_amenities(
             }
             "vending_machine" | "atm" => {
                 if let Some(pt) = first_node {
-                    let front = signage::machine_front(element.tags());
-                    let name = match front {
-                        Some(DecalKey::Machine(name)) => name,
-                        _ => "",
-                    };
+                    let name = signage::machine_front(element.tags()).unwrap_or("");
                     // The cabinet in the colour its front is drawn in; a small dispenser
                     // is a box at eye height on a post.
                     let cabinet = match name {
@@ -125,8 +121,8 @@ pub fn generate_amenities(
                     editor.set_block(low, pt.x, 1, pt.z, None, None);
                     editor.set_block(cabinet, pt.x, 2, pt.z, None, None);
                     let abs_y = editor.get_absolute_y(pt.x, 2, pt.z);
-                    if let Some(key) = front {
-                        place_machine_front(editor, &key, pt.x, abs_y, pt.z);
+                    if !name.is_empty() {
+                        place_machine_front(editor, &DecalKey::Machine(name), pt.x, abs_y, pt.z);
                     }
                 }
             }

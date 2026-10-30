@@ -3608,6 +3608,22 @@ mod tests {
         assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
     }
 
+    /// The water carve finds a bore's roof by what it is built of, so it has to know
+    /// every block of the shell.
+    #[test]
+    fn the_water_carve_knows_every_road_shell_block() {
+        use crate::water_depth::BORE_SHELL;
+        for x in -30..30 {
+            for y in -10..10 {
+                for z in -30..30 {
+                    assert!(BORE_SHELL.contains(&tunnel_shell_block(x, y, z)));
+                }
+            }
+        }
+        // The foundation, road row and interior placeholder.
+        assert!(BORE_SHELL.contains(&STONE_BRICKS));
+    }
+
     #[test]
     fn runway_dash_alternates_on_and_off() {
         // At scale 1: 10 blocks on, 6 off, repeating every 16.

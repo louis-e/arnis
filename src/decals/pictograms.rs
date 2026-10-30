@@ -22,7 +22,6 @@ macro_rules! pictograms {
 }
 
 pictograms!(
-    "atm",
     "bus_stop",
     "hydrant",
     "information",
@@ -33,7 +32,6 @@ pictograms!(
     "recycling",
     "train",
     "tram",
-    "vending_machine",
 );
 
 /// Category for a `shop=*` value.

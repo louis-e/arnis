@@ -605,7 +605,10 @@ impl<'a> WorldEditor<'a> {
 
     /// The lowest `carved_bed` within `r` of (x, z): the bed a bore that wide has to clear.
     pub fn lowest_carved_bed(&self, x: i32, z: i32, r: i32) -> Option<i32> {
-        self.water_field.as_ref()?;
+        // Most of a tunnel runs nowhere near the water.
+        if !self.water_field.as_ref()?.reaches(x, z, r) {
+            return None;
+        }
         (-r..=r)
             .flat_map(|dx| (-r..=r).filter_map(move |dz| self.carved_bed(x + dx, z + dz)))
             .min()

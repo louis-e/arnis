@@ -508,7 +508,7 @@ pub fn furniture_pictogram(tags: &HashMap<String, String>) -> Option<DecalKey> {
 /// Front of a street machine: an ATM, a ticket machine, a souvenir coin press or a vending
 /// machine for drinks or for anything else, each a cabinet two blocks tall, or a dispenser
 /// too small for one (dog bags, condoms, gum, stamps, newspapers), a box on a post.
-pub fn machine_front(tags: &HashMap<String, String>) -> Option<DecalKey> {
+pub fn machine_front(tags: &HashMap<String, String>) -> Option<&'static str> {
     let name = match tags.get("amenity").map(String::as_str)? {
         "atm" => "atm",
         "vending_machine" => {
@@ -528,7 +528,7 @@ pub fn machine_front(tags: &HashMap<String, String>) -> Option<DecalKey> {
         }
         _ => return None,
     };
-    Some(DecalKey::Machine(name))
+    Some(name)
 }
 
 fn way_direction_at(nodes: &[ProcessedNode], i: usize) -> Option<(f64, f64)> {
@@ -859,8 +859,8 @@ fn keys_for_element(
             if let Some(k) = furniture_pictogram(tags) {
                 keys.insert(k);
             }
-            if let Some(k) = machine_front(tags) {
-                keys.insert(k);
+            if let Some(name) = machine_front(tags) {
+                keys.insert(DecalKey::Machine(name));
             }
             if let Some(NameSign::Decal(k)) = poi_name_sign(tags, level) {
                 keys.insert(k);
@@ -2846,7 +2846,7 @@ mod tests {
             (vec![("amenity", "vending_machine")], "vending_snacks"),
         ] {
             let t = tags(&t);
-            assert_eq!(machine_front(&t), Some(DecalKey::Machine(front)), "{t:?}");
+            assert_eq!(machine_front(&t), Some(front), "{t:?}");
             assert_eq!(furniture_pictogram(&t), None, "{t:?}");
         }
         // Every vending machine has a front of its own, a dispenser's a small one.
@@ -2854,13 +2854,13 @@ mod tests {
             ("amenity", "vending_machine"),
             ("vending", "excrement_bags"),
         ]);
-        assert_eq!(machine_front(&bags), Some(DecalKey::Machine("dog_bags")));
+        assert_eq!(machine_front(&bags), Some("dog_bags"));
         assert_eq!(furniture_pictogram(&bags), None);
         let coins = tags(&[
             ("amenity", "vending_machine"),
             ("vending", "elongated_coin"),
         ]);
-        assert_eq!(machine_front(&coins), Some(DecalKey::Machine("coin_press")));
+        assert_eq!(machine_front(&coins), Some("coin_press"));
         let board = ProcessedNode {
             id: 1,
             tags: tags(&[("tourism", "information"), ("information", "map")]),

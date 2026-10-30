@@ -142,19 +142,8 @@ pub(crate) fn connected_iron_bars(
     connected_fence(IRON_BARS, north, south, east, west)
 }
 
-/// Iron bars, a glass pane or a fence joined to the given sides.
-pub(crate) fn connected_rail(
-    block: Block,
-    north: bool,
-    south: bool,
-    east: bool,
-    west: bool,
-) -> BlockWithProperties {
-    connected_fence(block, north, south, east, west)
-}
-
-/// A fence or bars joined to the given sides.
-fn connected_fence(
+/// A fence, iron bars or a glass pane joined to the given sides.
+pub(crate) fn connected_fence(
     block: Block,
     north: bool,
     south: bool,

@@ -10421,7 +10421,7 @@ impl BalconySite<'_> {
                 let c = (x + dx, z + dz);
                 rim.contains(&c) || wall.contains(&c)
             };
-            let block = crate::element_processing::connected_blocks::connected_rail(
+            let block = crate::element_processing::connected_blocks::connected_fence(
                 rail,
                 joins(0, -1),
                 joins(0, 1),
@@ -10728,7 +10728,7 @@ fn generate_french_railings(
                             .is_some_and(|b| b != AIR && !b.name().contains("glass"))
                 })
         };
-        let bar = crate::element_processing::connected_blocks::connected_rail(
+        let bar = crate::element_processing::connected_blocks::connected_fence(
             IRON_BARS,
             joins(0, -1),
             joins(0, 1),

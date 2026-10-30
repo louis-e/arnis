@@ -1721,6 +1721,22 @@ mod tests {
     use crate::osm_parser::ProcessedNode;
     use std::path::PathBuf;
 
+    /// The water carve finds a bore's roof by what it is built of, so it has to know
+    /// every block of the shell.
+    #[test]
+    fn the_water_carve_knows_every_rail_shell_block() {
+        use crate::water_depth::BORE_SHELL;
+        for x in -30..30 {
+            for y in -10..10 {
+                for z in -30..30 {
+                    assert!(BORE_SHELL.contains(&rail_tunnel_shell_block(x, y, z)));
+                }
+            }
+        }
+        // The floor, the interior placeholder.
+        assert!(BORE_SHELL.contains(&POLISHED_DEEPSLATE) && BORE_SHELL.contains(&STONE_BRICKS));
+    }
+
     fn test_editor(xzbbox: &XZBBox) -> WorldEditor<'_> {
         let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
         WorldEditor::new(PathBuf::from("/dev/null/unused"), xzbbox, llbbox)

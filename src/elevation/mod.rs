@@ -486,8 +486,13 @@ pub fn fetch_elevation_data(
     // was given may leave no room for one.
     let crossings = land_cover.as_deref().map_or_else(Vec::new, |lc| {
         let cells = peaks::bore_water_cells(lc, bbox, &hints.bores);
+        // The repair skips a land cover of another size than the heights; so do these.
         crate::water_depth::bore_crossings(&lc.grid, world_width, world_height, &cells, |x, y| {
-            height_grid[y][x]
+            height_grid
+                .get(y)
+                .and_then(|row| row.get(x))
+                .copied()
+                .unwrap_or(f64::NAN)
         })
     });
     let (band, taller) = if crossings.is_empty() {
