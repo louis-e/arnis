@@ -2245,6 +2245,7 @@ pub(crate) mod test_support {
             water_distance: vec![vec![0u8; width]; height],
             water_blend_cache: once_cell::sync::OnceCell::new(),
             beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
             width,
             height,
             cells_per_meter: 1.0,
