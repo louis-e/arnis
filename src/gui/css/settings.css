@@ -425,10 +425,12 @@ label[for].setting-label {
   min-width: 0;
 }
 
+/* One row: a long name wraps inside its own box and keeps the tooltip and revert
+   buttons beside it, rather than pushing them onto a line of their own. */
 .setting-heading {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   font-size: 14px;
   font-weight: 600;
