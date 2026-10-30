@@ -3187,6 +3187,10 @@ struct BuildingConfig {
     zoning: Option<TowerZoning>,
     /// Balcony layout on street facades.
     balcony_band: BalconyBand,
+    /// What the balconies are built of.
+    balcony_kit: BalconyKit,
+    /// The upper windows without a balcony get a French railing in their opening.
+    french_windows: bool,
     /// Banded stone ground floor on masonry-era urban buildings.
     rustication: bool,
     /// Darker plinth block for the bottom wall rows, None to skip.
@@ -4143,31 +4147,64 @@ enum BalconyBand {
     EveryBay,
     /// Balconies on every other bay, stacked vertically.
     Alternating,
+    /// The Paris front: a balcony the length of the street front on the second
+    /// storey and on the top one, French railings in the windows between.
+    Filant,
 }
 
+/// Whether a building is the old fabric of a European town, which carries the odd
+/// balcony and never a stack of them on every bay.
+fn old_european(era: ArchEra, region: BuildingRegion) -> bool {
+    region == BuildingRegion::Europe
+        && !matches!(era, ArchEra::PostWarPanel | ArchEra::Contemporary)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn pick_balcony_band(
     category: BuildingCategory,
     era: ArchEra,
     region: BuildingRegion,
+    materials: MaterialRegion,
     building_height: i32,
     floor_cycle: i32,
+    tall: bool,
     has_street: bool,
     group_seed: u64,
 ) -> BalconyBand {
-    // Pre-war European street fronts carry the odd balcony, never a stack
-    // of them on every bay.
-    let old_europe = region == BuildingRegion::Europe
-        && !matches!(era, ArchEra::PostWarPanel | ArchEra::Contemporary);
+    let roll = element_rng(group_seed ^ 0xBA1C_0417_0000_0009).random_range(0u32..100);
     if !matches!(
         category,
         BuildingCategory::Residential | BuildingCategory::House
     ) || building_height < 3 * floor_cycle
         || !has_street
-        || old_europe
     {
         return BalconyBand::Scattered;
     }
-    let roll = element_rng(group_seed ^ 0xBA1C_0417_0000_0009).random_range(0u32..100);
+    // A residential tower stacks its balconies up the street front, where
+    // singles scattered over a dozen storeys would read as noise.
+    if tall {
+        return if roll < 50 {
+            BalconyBand::EveryBay
+        } else {
+            BalconyBand::Alternating
+        };
+    }
+    if old_european(era, region) {
+        // Five storeys and more of Paris or a town built after it.
+        let filant = match materials {
+            MaterialRegion::France => 60,
+            MaterialRegion::Mediterranean | MaterialRegion::Central => 10,
+            _ => 0,
+        };
+        return if category == BuildingCategory::Residential
+            && building_height >= 5 * floor_cycle
+            && roll < filant
+        {
+            BalconyBand::Filant
+        } else {
+            BalconyBand::Scattered
+        };
+    }
     if roll < 30 {
         BalconyBand::Scattered
     } else if roll < 60 {
@@ -4175,6 +4212,126 @@ fn pick_balcony_band(
     } else {
         BalconyBand::Alternating
     }
+}
+
+/// What a building's balconies are built of. One kit for the whole building, the
+/// way a real one has one balcony design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BalconyKit {
+    /// A slab floor railed by open trapdoors standing at its edge: timber on
+    /// houses and older blocks, pale metal on a modern one.
+    Panels(Block),
+    /// A shallow stone floor on consoles, railed with wrought iron: the street
+    /// front of the old European town.
+    Wrought,
+    /// A light floor railed with glass: the contemporary block.
+    Glass,
+    /// A solid parapet before a slab floor: the post-war block. Glazed in up to
+    /// the storey above, as the tenants of so many Soviet blocks did.
+    Parapet { block: Block, glazed: bool },
+}
+
+impl BalconyKit {
+    /// Cells the balcony reaches out from the wall, its railing included.
+    fn depth(self) -> i32 {
+        match self {
+            BalconyKit::Wrought => 2,
+            _ => 3,
+        }
+    }
+}
+
+/// What a building's balconies are built of, and whether the upper windows that
+/// have none get a French railing, from the building's era and the building
+/// tradition of its area.
+fn pick_balcony_kit(
+    category: BuildingCategory,
+    era: ArchEra,
+    region: BuildingRegion,
+    materials: MaterialRegion,
+    band: BalconyBand,
+    group_seed: u64,
+) -> (BalconyKit, bool) {
+    use MaterialRegion as M;
+    let mut rng = element_rng(group_seed ^ 0xBA1C_0417_0000_0021);
+    let roll = rng.random_range(0u32..100);
+    let timber = match materials {
+        M::Nordic | M::Central | M::CentralEast | M::Canada => SPRUCE_TRAPDOOR,
+        M::BritishIsles | M::BrickNorth => DARK_OAK_TRAPDOOR,
+        _ => SHUTTER_TRAPDOOR_OPTIONS[rng.random_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())],
+    };
+    const PARAPETS: [Block; 4] = [
+        WHITE_CONCRETE,
+        LIGHT_GRAY_CONCRETE,
+        SMOOTH_STONE,
+        SMOOTH_QUARTZ,
+    ];
+    let parapet = PARAPETS[rng.random_range(0..PARAPETS.len())];
+    let soviet = matches!(materials, M::EastEurope | M::CentralAsia);
+    // Glazed boxes stack, so only a band that stacks its balconies gets them.
+    let stacked = matches!(band, BalconyBand::EveryBay | BalconyBand::Alternating);
+    let kit = if category == BuildingCategory::House {
+        if era == ArchEra::Contemporary && roll < 50 {
+            BalconyKit::Glass
+        } else {
+            BalconyKit::Panels(timber)
+        }
+    } else {
+        match era {
+            ArchEra::PostWarPanel | ArchEra::Contemporary if soviet => BalconyKit::Parapet {
+                block: parapet,
+                glazed: stacked && roll < 60,
+            },
+            ArchEra::PostWarPanel if roll < 55 => BalconyKit::Parapet {
+                block: parapet,
+                glazed: false,
+            },
+            ArchEra::PostWarPanel => BalconyKit::Panels(IRON_TRAPDOOR),
+            ArchEra::Contemporary if roll < 55 => BalconyKit::Glass,
+            ArchEra::Contemporary if roll < 85 => BalconyKit::Panels(IRON_TRAPDOOR),
+            ArchEra::Contemporary => BalconyKit::Parapet {
+                block: parapet,
+                glazed: false,
+            },
+            _ if soviet => BalconyKit::Parapet {
+                block: parapet,
+                glazed: stacked && roll < 40,
+            },
+            _ if old_european(era, region) || band == BalconyBand::Filant => {
+                if roll < 70 {
+                    BalconyKit::Wrought
+                } else {
+                    BalconyKit::Panels(timber)
+                }
+            }
+            _ => match materials {
+                M::MiddleEast | M::SouthAsia | M::SubSaharanAfrica | M::EastAsia | M::Korea => {
+                    if roll < 60 {
+                        BalconyKit::Parapet {
+                            block: parapet,
+                            glazed: false,
+                        }
+                    } else {
+                        BalconyKit::Wrought
+                    }
+                }
+                _ if roll < 50 => BalconyKit::Wrought,
+                _ => BalconyKit::Panels(timber),
+            },
+        }
+    };
+    // French railings in the windows of the old fronts that carry them.
+    let french = band == BalconyBand::Filant
+        || (category == BuildingCategory::Residential
+            && old_european(era, region)
+            && rng.random_range(0u32..100)
+                < match materials {
+                    M::France => 55,
+                    M::Mediterranean => 25,
+                    M::Central | M::CentralEast => 10,
+                    _ => 0,
+                });
+    (kit, french)
 }
 
 /// Per-building window type: how wide the windows and piers are, and how the
@@ -10042,16 +10199,327 @@ fn glazed_at(h: i32, config: &BuildingConfig, col: ColumnFacade) -> bool {
         && (block == config.window_block || block == GLASS || block == config.display_glass())
 }
 
-/// Balconies on residential facades: centred on the windows of a regular
-/// band up the street front, or scattered.
+/// Run and outward normal of each wall column of a ring; None where two runs meet.
+type WallRuns = FnvHashMap<(i32, i32), Option<(usize, (i32, i32))>>;
+
+/// What the balconies of one building need to know about its walls, and the
+/// cells its balconies already stand on, so no two of them meet.
+struct BalconySite<'a> {
+    config: &'a BuildingConfig,
+    facade: &'a FacadePlan,
+    passages: &'a CoordinateBitmap,
+    /// Every building's cells, this one's included.
+    footprints: Option<&'a CoordinateBitmap>,
+    wall: WallRuns,
+    /// Cells a balcony stands on, by floor row.
+    taken: FnvHashSet<(i32, i32, i32)>,
+}
+
+impl BalconySite<'_> {
+    /// Whether a balcony `depth` cells deep fits before the wall columns `cols`
+    /// at floor row `h`: one straight run of wall clear of passages, party walls
+    /// and photographs, with nothing it reaches out over taken by a building,
+    /// this one's other wings included, or by another of its balconies.
+    fn fits(&self, cols: &[(i32, i32)], normal: (i32, i32), h: i32, depth: i32) -> bool {
+        let Some(&Some((run, _))) = self.wall.get(&cols[0]) else {
+            return false;
+        };
+        normal != (0, 0)
+            && cols.iter().all(|&(x, z)| {
+                self.wall.get(&(x, z)) == Some(&Some((run, normal)))
+                    && !self.facade.is_party(x, z)
+                    && !self.passages.contains(x, z)
+                    && !self.config.is_flat_column(x, z)
+                    && (1..=depth).all(|d| {
+                        let (ox, oz) = (x + normal.0 * d, z + normal.1 * d);
+                        !self.taken.contains(&(ox, h, oz))
+                            && !self.wall.contains_key(&(ox, oz))
+                            && self.footprints.is_none_or(|f| !f.contains(ox, oz))
+                    })
+            })
+    }
+
+    /// Builds a balcony before the wall columns `cols`, in order along the wall,
+    /// whose first and last carry its side rails, at floor row `h`. `furnish`
+    /// seeds what stands on it.
+    fn build(
+        &mut self,
+        editor: &mut WorldEditor,
+        cols: &[(i32, i32)],
+        normal: (i32, i32),
+        h: i32,
+        furnish: u64,
+    ) {
+        let config = self.config;
+        let kit = config.balcony_kit;
+        let depth = kit.depth();
+        let (nx, nz) = normal;
+        let last = cols.len() - 1;
+        let y = h + config.abs_terrain_offset;
+        let cell = |i: usize, d: i32| (cols[i].0 + nx * d, cols[i].1 + nz * d);
+        let rim = |i: usize, d: i32| i == 0 || i == last || d == depth;
+        for i in 0..=last {
+            for d in 1..=depth {
+                let (x, z) = cell(i, d);
+                self.taken.insert((x, h, z));
+            }
+        }
+
+        // The floor takes the place of the sill under the window and of the
+        // hood over the one below, which are the same stone.
+        let trim = trim_slab(config.trim_block);
+        let floor_over = [AIR, trim, trim_stair(config.trim_block)];
+        let floor = make_top_slab(match kit {
+            BalconyKit::Panels(_) | BalconyKit::Wrought => trim,
+            BalconyKit::Glass => SMOOTH_QUARTZ_SLAB,
+            BalconyKit::Parapet { .. } => SMOOTH_STONE_SLAB,
+        });
+        // Trapdoor panels stand in the rim cells on the floor's edge; every
+        // other railing stands on the floor's own rim.
+        let panels = matches!(kit, BalconyKit::Panels(_));
+        for i in 0..=last {
+            for d in 1..=depth {
+                if panels && rim(i, d) {
+                    continue;
+                }
+                let (x, z) = cell(i, d);
+                editor.set_block_with_properties_absolute(
+                    floor.clone(),
+                    x,
+                    y,
+                    z,
+                    Some(&floor_over),
+                    None,
+                );
+            }
+        }
+
+        match kit {
+            BalconyKit::Panels(trapdoor) => {
+                // An open trapdoor hangs on the side opposite its facing, so
+                // each faces away from the floor it rails.
+                let away = |i: usize, d: i32| {
+                    if d == depth {
+                        (nx, nz)
+                    } else {
+                        let inner = if i == 0 { cols[1] } else { cols[last - 1] };
+                        (cols[i].0 - inner.0, cols[i].1 - inner.1)
+                    }
+                };
+                for i in 0..=last {
+                    for d in 1..=depth {
+                        // The corners of the rim stay open, the panels meet there.
+                        if !rim(i, d) || (d == depth && (i == 0 || i == last)) {
+                            continue;
+                        }
+                        let (fx, fz) = away(i, d);
+                        let (x, z) = cell(i, d);
+                        editor.set_block_with_properties_absolute(
+                            make_open_trapdoor(trapdoor, facing_for_normal(fx, fz)),
+                            x,
+                            y + 1,
+                            z,
+                            Some(&[AIR]),
+                            None,
+                        );
+                    }
+                }
+            }
+            BalconyKit::Wrought | BalconyKit::Glass => {
+                let rail = if kit == BalconyKit::Wrought {
+                    IRON_BARS
+                } else {
+                    GLASS_PANE
+                };
+                self.rail(editor, cols, normal, y + 1, rail);
+                if kit == BalconyKit::Wrought {
+                    // Stone consoles under the ends, where the wall below is solid.
+                    let stair =
+                        make_upside_down_stair(config.trim_block, facing_for_normal(nx, nz));
+                    for i in [0, last] {
+                        let (wx, wz) = cols[i];
+                        let solid = editor
+                            .get_block_absolute(wx, y - 1, wz)
+                            .is_some_and(|b| b != AIR && !b.name().contains("glass"));
+                        if solid {
+                            let (x, z) = cell(i, 1);
+                            editor.set_block_with_properties_absolute(
+                                stair.clone(),
+                                x,
+                                y - 1,
+                                z,
+                                Some(&[AIR]),
+                                None,
+                            );
+                        }
+                    }
+                }
+            }
+            BalconyKit::Parapet { block, glazed } => {
+                for i in 0..=last {
+                    for d in 1..=depth {
+                        if rim(i, d) {
+                            let (x, z) = cell(i, d);
+                            editor.set_block_absolute(block, x, y + 1, z, Some(&[AIR]), None);
+                        }
+                    }
+                }
+                if glazed {
+                    // Glass up to the storey above, under a slab roof that is
+                    // the floor of the balcony stacked over this one, and on
+                    // the top storey no higher than the wall.
+                    let roof = (y + config.floor_cycle).min(
+                        config.start_y_offset + config.building_height + config.abs_terrain_offset,
+                    );
+                    for gy in (y + 2)..roof {
+                        self.rail(editor, cols, normal, gy, GLASS_PANE);
+                    }
+                    for i in 0..=last {
+                        for d in 1..=depth {
+                            let (x, z) = cell(i, d);
+                            editor.set_block_with_properties_absolute(
+                                floor.clone(),
+                                x,
+                                roof,
+                                z,
+                                Some(&floor_over),
+                                None,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        self.furnish(editor, cols, normal, y, furnish);
+    }
+
+    /// Bars or panes along the rim of a balcony at absolute row `y`, joined to
+    /// each other and, at the back of the side rails, to the wall.
+    fn rail(
+        &self,
+        editor: &mut WorldEditor,
+        cols: &[(i32, i32)],
+        normal: (i32, i32),
+        y: i32,
+        rail: Block,
+    ) {
+        let depth = self.config.balcony_kit.depth();
+        let last = cols.len() - 1;
+        let (nx, nz) = normal;
+        let cell = |i: usize, d: i32| (cols[i].0 + nx * d, cols[i].1 + nz * d);
+        let mut rim: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+        for i in 0..=last {
+            for d in 1..=depth {
+                if i == 0 || i == last || d == depth {
+                    rim.insert(cell(i, d));
+                }
+            }
+        }
+        let wall: FnvHashSet<(i32, i32)> = [cols[0], cols[last]].into_iter().collect();
+        for &(x, z) in &rim {
+            let joins = |dx: i32, dz: i32| {
+                let c = (x + dx, z + dz);
+                rim.contains(&c) || wall.contains(&c)
+            };
+            let block = crate::element_processing::connected_blocks::connected_rail(
+                rail,
+                joins(0, -1),
+                joins(0, 1),
+                joins(1, 0),
+                joins(-1, 0),
+            );
+            editor.set_block_with_properties_absolute(block, x, y, z, Some(&[AIR]), None);
+        }
+    }
+
+    /// The odd chair, table, plant or storage barrel on a balcony floor at
+    /// absolute row `y`, on the cells inside its railing.
+    fn furnish(
+        &self,
+        editor: &mut WorldEditor,
+        cols: &[(i32, i32)],
+        normal: (i32, i32),
+        y: i32,
+        seed: u64,
+    ) {
+        let depth = self.config.balcony_kit.depth();
+        let last = cols.len() - 1;
+        let (nx, nz) = normal;
+        let cell = |i: usize, d: i32| (cols[i].0 + nx * d, cols[i].1 + nz * d);
+        let mut rng = element_rng(seed);
+        let roll = rng.random_range(0u32..100);
+        // One end of the floor, against the wall.
+        let end = if rng.random_bool(0.5) { 1 } else { last - 1 };
+        let (ex, ez) = cell(end, 1);
+        let put = |editor: &mut WorldEditor, block: Block, (x, z): (i32, i32), dy: i32| {
+            editor.set_block_absolute(block, x, y + dy, z, Some(&[AIR]), None);
+        };
+        // Sat with the wall at its back, looking out.
+        let chair = |editor: &mut WorldEditor, (x, z): (i32, i32), facing: (i32, i32)| {
+            let facing = match facing_for_normal(facing.0, facing.1) {
+                "north" => StairFacing::North,
+                "south" => StairFacing::South,
+                "east" => StairFacing::East,
+                _ => StairFacing::West,
+            };
+            editor.set_block_with_properties_absolute(
+                create_stair_with_properties(OAK_STAIRS, facing, StairShape::Straight),
+                x,
+                y + 1,
+                z,
+                Some(&[AIR]),
+                None,
+            );
+        };
+        if roll < 20 {
+            // A planter with a shrub in it.
+            put(editor, CAULDRON, (ex, ez), 1);
+            put(editor, OAK_LEAVES, (ex, ez), 2);
+        } else if roll < 38 {
+            chair(editor, (ex, ez), (-nx, -nz));
+        } else if roll < 48 && depth >= 3 && last >= 4 {
+            // Two chairs either side of a small table, out at the railing.
+            let mid = last / 2;
+            put(editor, OAK_FENCE, cell(mid, depth - 1), 1);
+            put(editor, OAK_PRESSURE_PLATE, cell(mid, depth - 1), 2);
+            for i in [mid - 1, mid + 1] {
+                let (x, z) = cell(i, depth - 1);
+                let inward = (cols[mid].0 - cols[i].0, cols[mid].1 - cols[i].1);
+                chair(editor, (x, z), (-inward.0, -inward.1));
+            }
+        } else if roll < 62 {
+            // Pots along the railing, a few on a long one.
+            let chance = (3.0 / (last - 1) as f64).min(0.6);
+            for i in 1..last {
+                if rng.random_bool(chance) {
+                    let pot = POTTED_PLANT_OPTIONS[rng.random_range(0..POTTED_PLANT_OPTIONS.len())];
+                    put(editor, pot, cell(i, depth - 1), 1);
+                }
+            }
+        } else if roll < 70 {
+            put(editor, BARREL, (ex, ez), 1);
+        }
+    }
+}
+
+/// Balconies on residential facades: centred on the windows of a regular band
+/// up the street front, scattered, or run the length of a Paris front on two of
+/// its storeys; and a French railing in each upper window without one, on the
+/// old fronts that have them.
 fn generate_balconies(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
     facade: &FacadePlan,
+    footprints: Option<&CoordinateBitmap>,
 ) {
-    if config.is_tall_building
+    // A tower only takes a band of them up its street front.
+    let banded = matches!(
+        config.balcony_band,
+        BalconyBand::EveryBay | BalconyBand::Alternating
+    );
+    if (config.is_tall_building && !banded)
         || !matches!(
             config.category,
             BuildingCategory::Residential | BuildingCategory::House
@@ -10061,17 +10529,89 @@ fn generate_balconies(
     {
         return;
     }
-    let mut rng = element_rng(element.id);
-    let trapdoor_base =
-        SHUTTER_TRAPDOOR_OPTIONS[rng.random_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
-    let balcony_floor = make_top_slab(SMOOTH_STONE_SLAB);
     let top_h = config.start_y_offset + config.building_height;
-
+    // Never on the ground floor; elevated parts keep their base row.
+    let first_h = config.start_y_offset + config.grammar_anchor() + config.floor_cycle;
     let columns = facade_columns(&element.nodes, config);
-    let mut seg_cells: Vec<FnvHashSet<(i32, i32)>> =
-        vec![FnvHashSet::default(); element.nodes.len().saturating_sub(1)];
+    let mut wall = WallRuns::default();
     for wc in columns.iter() {
-        seg_cells[wc.seg].insert((wc.x, wc.z));
+        let here = Some((wc.run, wc.normal));
+        wall.entry((wc.x, wc.z))
+            .and_modify(|w| {
+                if *w != here {
+                    *w = None;
+                }
+            })
+            .or_insert(here);
+    }
+    let mut site = BalconySite {
+        config,
+        facade,
+        passages: building_passages,
+        footprints,
+        wall,
+        taken: FnvHashSet::default(),
+    };
+    let depth = config.balcony_kit.depth();
+    let seed = |x: i32, z: i32, h: i32| {
+        let floor_idx = h / config.floor_cycle;
+        coord_rng(
+            x.wrapping_add(floor_idx * 11),
+            z.wrapping_add(floor_idx * 17),
+            element.id,
+        )
+        .random::<u64>()
+    };
+
+    // A Paris front: one balcony the length of each straight street run, from
+    // the pier before its first window to the pier after its last, on the
+    // second storey and the top one.
+    if config.balcony_band == BalconyBand::Filant {
+        let top_storey = storey_of(config, top_h - 1);
+        let mut runs: FnvHashMap<usize, Vec<WallColumn>> = FnvHashMap::default();
+        for wc in columns.iter() {
+            if facade.is_street(wc.x, wc.z) {
+                runs.entry(wc.run).or_default().push(*wc);
+            }
+        }
+        let mut run_ids: Vec<usize> = runs.keys().copied().collect();
+        run_ids.sort_unstable();
+        for run in run_ids {
+            let mut cols = runs.remove(&run).unwrap_or_default();
+            cols.sort_by_key(|c| c.pos);
+            cols.dedup_by_key(|c| c.pos);
+            let windows: Vec<usize> = (0..cols.len())
+                .filter(|&i| cols[i].slot().is_window())
+                .collect();
+            let (Some(&a), Some(&b)) = (windows.first(), windows.last()) else {
+                continue;
+            };
+            let (a, b) = (a.saturating_sub(1), (b + 1).min(cols.len() - 1));
+            let span: Vec<(i32, i32)> = cols[a..=b].iter().map(|c| (c.x, c.z)).collect();
+            let normal = cols[a].normal;
+            let tangent = (-normal.1, normal.0);
+            // One straight row of columns, a block apart.
+            let straight = span.len() >= 5
+                && span.windows(2).all(|p| {
+                    let step = (p[1].0 - p[0].0, p[1].1 - p[0].1);
+                    step == tangent || step == (-tangent.0, -tangent.1)
+                });
+            if !straight {
+                continue;
+            }
+            let col = cols[windows[0]].facade(facade);
+            for h in first_h..top_h {
+                if config.floor_row(h) != 0 || !glazed_at(h + 1, config, col) {
+                    continue;
+                }
+                let storey = storey_of(config, h);
+                if (storey == 2 || (storey == top_storey && top_storey > 3))
+                    && site.fits(&span, normal, h, depth)
+                {
+                    site.build(editor, &span, normal, h, seed(span[0].0, span[0].1, h));
+                }
+            }
+        }
     }
 
     for wc in columns.iter() {
@@ -10079,24 +10619,19 @@ fn generate_balconies(
             continue;
         };
         // One balcony per window, hung from its middle column.
-        if k != (width - 1) / 2 || front_blocked(wc, config, building_passages, facade, None) {
+        if config.balcony_band == BalconyBand::Filant
+            || k != (width - 1) / 2
+            || front_blocked(wc, config, building_passages, facade, None)
+        {
             continue;
         }
         let (bx, bz) = (wc.x, wc.z);
-        let (out_nx, out_nz) = wc.normal;
-        let (tan_x, tan_z) = (-out_nz, out_nx);
-        // A balcony spans five columns of this wall: all of them must be
-        // on it, so it never wraps a corner, stands before a party wall or
-        // hangs over a passage.
-        let fits = (-2i32..=2).all(|t| {
-            let c = (bx + tan_x * t, bz + tan_z * t);
-            seg_cells[wc.seg].contains(&c)
-                && !facade.is_party(c.0, c.1)
-                && !building_passages.contains(c.0, c.1)
-        });
-        if !fits {
-            continue;
-        }
+        let normal = wc.normal;
+        let (tan_x, tan_z) = (-normal.1, normal.0);
+        // Five columns of this wall run: the window's and its piers.
+        let span: Vec<(i32, i32)> = (-2i32..=2)
+            .map(|t| (bx + tan_x * t, bz + tan_z * t))
+            .collect();
         let is_rear = facade
             .segments
             .get(wc.seg)
@@ -10106,13 +10641,12 @@ fn generate_balconies(
         let period = width + config.bays.pier;
         let step = (5 + period - 1) / period;
         let band_step = match config.balcony_band {
-            BalconyBand::Scattered => None,
+            BalconyBand::Scattered | BalconyBand::Filant => None,
             BalconyBand::EveryBay => Some(step),
             BalconyBand::Alternating => Some(2 * step),
         };
         let col = wc.facade(facade);
-        // Never on the ground floor; elevated parts keep their base row.
-        for h in (config.start_y_offset + config.grammar_anchor() + config.floor_cycle)..top_h {
+        for h in first_h..top_h {
             if config.floor_row(h) != 0 || !glazed_at(h + 1, config, col) {
                 continue;
             }
@@ -10129,99 +10663,79 @@ fn generate_balconies(
                     roll < if is_rear { 3 } else { 8 }
                 }
             };
-            if !wants {
-                continue;
-            }
-            let abs_y = h + config.abs_terrain_offset;
-            let floor_idx = h / config.floor_cycle;
-            // A 3-wide by 2-deep platform with open-trapdoor railing around
-            // the outer edge and occasional furniture.
-            //
-            // Top-down layout (outward = up):
-            //  depth 3:  [Tf] [Tf] [Tf]  front fence
-            //  depth 2:  [ f] [ f] [ f]  floor
-            //  depth 1:  [ f] [ f] [ f]  floor
-            //            wall wall wall
-            // Side fences at t=±2, depths 1-2.
-            let front_facing = facing_for_normal(out_nx, out_nz);
-            let left_facing = facing_for_normal(-tan_x, -tan_z);
-            let right_facing = facing_for_normal(tan_x, tan_z);
-            let front_fence = make_open_trapdoor(trapdoor_base, front_facing);
-            let left_fence = make_open_trapdoor(trapdoor_base, left_facing);
-            let right_fence = make_open_trapdoor(trapdoor_base, right_facing);
-
-            for t in -1i32..=1 {
-                for depth in 1i32..=2 {
-                    editor.set_block_with_properties_absolute(
-                        balcony_floor.clone(),
-                        bx + tan_x * t + out_nx * depth,
-                        abs_y,
-                        bz + tan_z * t + out_nz * depth,
-                        Some(&[AIR]),
-                        None,
-                    );
-                }
-                editor.set_block_with_properties_absolute(
-                    front_fence.clone(),
-                    bx + tan_x * t + out_nx * 3,
-                    abs_y + 1,
-                    bz + tan_z * t + out_nz * 3,
-                    Some(&[AIR]),
-                    None,
-                );
-            }
-            for depth in 1i32..=2 {
-                editor.set_block_with_properties_absolute(
-                    left_fence.clone(),
-                    bx - tan_x * 2 + out_nx * depth,
-                    abs_y + 1,
-                    bz - tan_z * 2 + out_nz * depth,
-                    Some(&[AIR]),
-                    None,
-                );
-                editor.set_block_with_properties_absolute(
-                    right_fence.clone(),
-                    bx + tan_x * 2 + out_nx * depth,
-                    abs_y + 1,
-                    bz + tan_z * 2 + out_nz * depth,
-                    Some(&[AIR]),
-                    None,
-                );
-            }
-
-            // Occasional furniture on the balcony floor
-            let mut furn_rng = coord_rng(
-                bx.wrapping_add(floor_idx * 11),
-                bz.wrapping_add(floor_idx * 17),
-                element.id,
-            );
-            let furniture_roll = furn_rng.random_range(0u32..100);
-            let side = if furn_rng.random_bool(0.5) { -1i32 } else { 1 };
-            let (fx, fz) = (bx + tan_x * side + out_nx, bz + tan_z * side + out_nz);
-            if furniture_roll < 30 {
-                // Cauldron "planter" with a leaf block on top
-                editor.set_block_absolute(CAULDRON, fx, abs_y + 1, fz, Some(&[AIR]), None);
-                editor.set_block_absolute(OAK_LEAVES, fx, abs_y + 2, fz, Some(&[AIR]), None);
-            } else if furniture_roll < 55 {
-                // Stair "chair" facing outward
-                let stair_facing = match facing_for_normal(-out_nx, -out_nz) {
-                    "north" => StairFacing::North,
-                    "south" => StairFacing::South,
-                    "east" => StairFacing::East,
-                    _ => StairFacing::West,
-                };
-                let chair =
-                    create_stair_with_properties(OAK_STAIRS, stair_facing, StairShape::Straight);
-                editor.set_block_with_properties_absolute(
-                    chair,
-                    fx,
-                    abs_y + 1,
-                    fz,
-                    Some(&[AIR]),
-                    None,
-                );
+            if wants && site.fits(&span, normal, h, depth) {
+                site.build(editor, &span, normal, h, seed(bx, bz, h));
             }
         }
+    }
+
+    if config.french_windows {
+        generate_french_railings(editor, config, &columns, building_passages, facade, &site);
+    }
+}
+
+/// French railings: wrought iron across the lowest row of every upper window
+/// with no balcony before it, in the opening when the glass is set back, else
+/// on the sill.
+fn generate_french_railings(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    columns: &[WallColumn],
+    building_passages: &CoordinateBitmap,
+    facade: &FacadePlan,
+    site: &BalconySite,
+) {
+    let top_h = config.start_y_offset + config.building_height;
+    let first_h = config.start_y_offset + config.grammar_anchor() + config.floor_cycle;
+    let abs = config.abs_terrain_offset;
+    let empty = |editor: &WorldEditor, x: i32, y: i32, z: i32| {
+        editor.get_block_absolute(x, y, z).is_none_or(|b| b == AIR)
+    };
+    // Every bar first, so each can be joined to the next. In an opening it
+    // carries its wall's normal, to find the jambs beside it.
+    let mut bars: FnvHashMap<(i32, i32, i32), Option<(i32, i32)>> = FnvHashMap::default();
+    for wc in columns {
+        if !wc.slot().is_window() || front_blocked(wc, config, building_passages, facade, None) {
+            continue;
+        }
+        let (nx, nz) = wc.normal;
+        let col = wc.facade(facade);
+        for h in first_h..top_h {
+            if config.floor_row(h) != 0
+                || !glazed_at(h + 1, config, col)
+                || site.taken.contains(&(wc.x + nx, h, wc.z + nz))
+            {
+                continue;
+            }
+            let y = h + 1 + abs;
+            if empty(editor, wc.x, y, wc.z) {
+                bars.insert((wc.x, y, wc.z), Some(wc.normal));
+            } else if empty(editor, wc.x + nx, y, wc.z + nz) {
+                bars.insert((wc.x + nx, y, wc.z + nz), None);
+            }
+        }
+    }
+    let mut cells: Vec<_> = bars.iter().map(|(&c, &o)| (c, o)).collect();
+    cells.sort_unstable();
+    for ((x, y, z), opening) in cells {
+        // To the bars beside it, and in an opening to the jambs either side.
+        let joins = |dx: i32, dz: i32| {
+            bars.contains_key(&(x + dx, y, z + dz))
+                || opening.is_some_and(|(nx, nz)| {
+                    dx * nx + dz * nz == 0
+                        && editor
+                            .get_block_absolute(x + dx, y, z + dz)
+                            .is_some_and(|b| b != AIR && !b.name().contains("glass"))
+                })
+        };
+        let bar = crate::element_processing::connected_blocks::connected_rail(
+            IRON_BARS,
+            joins(0, -1),
+            joins(0, 1),
+            joins(1, 0),
+            joins(-1, 0),
+        );
+        editor.set_block_with_properties_absolute(bar, x, y, z, Some(&[AIR]), None);
     }
 }
 
@@ -12389,6 +12903,26 @@ pub fn generate_buildings(
             _ => false,
         };
 
+    let balcony_band = pick_balcony_band(
+        category,
+        era,
+        roof_ctx.region,
+        roof_ctx.materials,
+        effective_building_height,
+        floor_cycle,
+        is_tall_building,
+        facade.has_any_street,
+        group_seed,
+    );
+    let (balcony_kit, french_windows) = pick_balcony_kit(
+        category,
+        era,
+        roof_ctx.region,
+        roof_ctx.materials,
+        balcony_band,
+        group_seed,
+    );
+
     // Create config struct for cleaner function calls
     let config = BuildingConfig {
         is_ground_level: min_level_offset == 0,
@@ -12450,15 +12984,9 @@ pub fn generate_buildings(
         },
         // Planned below, once the podium massing has settled the wall height.
         zoning: None,
-        balcony_band: pick_balcony_band(
-            category,
-            era,
-            roof_ctx.region,
-            effective_building_height,
-            floor_cycle,
-            facade.has_any_street,
-            group_seed,
-        ),
+        balcony_band,
+        balcony_kit,
+        french_windows,
         rustication: matches!(
             category,
             BuildingCategory::House
@@ -12796,7 +13324,14 @@ pub fn generate_buildings(
         part_probe,
     );
     if !is_part {
-        generate_balconies(editor, element, &config, effective_passages, &facade);
+        generate_balconies(
+            editor,
+            element,
+            &config,
+            effective_passages,
+            &facade,
+            Some(ctx.building_footprints),
+        );
     }
     generate_window_life(
         editor,
@@ -19248,6 +19783,8 @@ mod style_tests {
             spandrel_block: SMOOTH_STONE,
             zoning: None,
             balcony_band: BalconyBand::Scattered,
+            balcony_kit: BalconyKit::Panels(OAK_TRAPDOOR),
+            french_windows: false,
             rustication: false,
             base_course_block: None,
             ground: GroundFloor::Plain,
@@ -19261,6 +19798,78 @@ mod style_tests {
             facade_shell: Arc::default(),
             preset_shell: Arc::default(),
         }
+    }
+
+    /// A straight wall along x at z = 20 facing north, from x = 0 to 40, turning
+    /// a corner at x = 40.
+    fn balcony_site<'a>(
+        config: &'a BuildingConfig,
+        facade: &'a FacadePlan,
+        passages: &'a CoordinateBitmap,
+        footprints: &'a CoordinateBitmap,
+    ) -> BalconySite<'a> {
+        let mut wall: WallRuns = (0..40).map(|x| ((x, 20), Some((0, (0, -1))))).collect();
+        wall.insert((40, 20), None);
+        BalconySite {
+            config,
+            facade,
+            passages,
+            footprints: Some(footprints),
+            wall,
+            taken: FnvHashSet::default(),
+        }
+    }
+
+    fn span(centre: i32) -> Vec<(i32, i32)> {
+        (centre - 2..=centre + 2).map(|x| (x, 20)).collect()
+    }
+
+    /// Two balconies of one storey never share a cell, none reaches into a
+    /// building or round a corner, and the floor runs over the sill.
+    #[test]
+    fn balconies_keep_clear_of_each_other_and_of_buildings() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::element_processing::building_test_support::{bitmap_with_rect, test_editor};
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let mut config = test_config(20, false, false);
+        config.category = BuildingCategory::Residential;
+        config.balcony_kit = BalconyKit::Glass;
+        let facade = FacadePlan::empty();
+        let passages = CoordinateBitmap::new_empty();
+        // A neighbour two cells out from the wall's east end.
+        let footprints = bitmap_with_rect(&xz, 30, 0, 36, 18);
+        let mut site = balcony_site(&config, &facade, &passages, &footprints);
+        let mut editor = test_editor(&xz);
+        // The window's sill, a block out under it.
+        editor.set_block_absolute(SMOOTH_STONE_SLAB, 10, 8, 19, None, None);
+
+        assert!(site.fits(&span(10), (0, -1), 8, 3));
+        site.build(&mut editor, &span(10), (0, -1), 8, 1);
+        // Three columns over is the next window of a tight rhythm: it would
+        // stand its railing on this balcony's floor.
+        assert!(!site.fits(&span(13), (0, -1), 8, 3));
+        // Five over shares nothing, and neither does the storey above.
+        assert!(site.fits(&span(15), (0, -1), 8, 3));
+        assert!(site.fits(&span(13), (0, -1), 12, 3));
+        // Not into the neighbour, not round the corner.
+        assert!(!site.fits(&span(29), (0, -1), 8, 3));
+        assert!(!site.fits(&span(39), (0, -1), 8, 1));
+        // The floor took the sill's place.
+        assert_eq!(
+            editor.get_block_absolute(10, 8, 19),
+            Some(SMOOTH_QUARTZ_SLAB)
+        );
+        // Glass on the rim, joined to the wall at the back of each side.
+        assert_eq!(editor.get_block_absolute(8, 9, 19), Some(GLASS_PANE));
+        assert_eq!(editor.get_block_absolute(10, 9, 17), Some(GLASS_PANE));
+        let joined = |x: i32, z: i32, side: &str| {
+            matches!(
+                editor.block_properties_absolute(x, 9, z),
+                Some(Value::Compound(p)) if p.get(side) == Some(&Value::String("true".into()))
+            )
+        };
+        assert!(joined(8, 19, "south"), "side rail not joined to the wall");
+        assert!(joined(10, 17, "east") && joined(10, 17, "west"));
     }
 
     /// Every glass tower turns its corner on something solid, whether the glass
@@ -22689,6 +23298,111 @@ mod facade_integration_tests {
             assert!(air_conditioners(&dwelling_world(berlin(), id, walk_up)).is_empty());
             assert!(air_conditioners(&dwelling_world(nyc(), id, office)).is_empty());
             assert!(air_conditioners(&dwelling_world(nyc(), id, modern)).is_empty());
+        }
+    }
+
+    fn paris() -> crate::coordinate_system::geographic::LLBBox {
+        crate::coordinate_system::geographic::LLBBox::new(48.85, 2.34, 48.86, 2.35).unwrap()
+    }
+
+    fn moscow() -> crate::coordinate_system::geographic::LLBBox {
+        crate::coordinate_system::geographic::LLBBox::new(55.75, 37.60, 55.76, 37.61).unwrap()
+    }
+
+    /// Blocks two and three cells out from the street front of `dwelling_world`
+    /// over its ground floor: nothing but balconies reaches that far.
+    fn balcony_blocks(world: &HashMap<(i32, i32, i32), Block>) -> usize {
+        world
+            .keys()
+            .filter(|&&(x, y, z)| (10..=45).contains(&x) && (17..=18).contains(&z) && y > 8)
+            .count()
+    }
+
+    #[test]
+    fn a_balcony_never_reaches_into_the_building_next_door() {
+        use crate::element_processing::building_test_support::test_editor_at;
+        let xz = XZBBox::rect_from_xz_lengths(70.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 15, 69, 18);
+        let alone = bitmap_with_rect(&xz, 10, 20, 45, 36);
+        // The neighbour stands two cells off the east wall at x = 45.
+        let mut crowded = bitmap_with_rect(&xz, 10, 20, 45, 36);
+        for x in 48..=60 {
+            for z in 20..=36 {
+                crowded.set(x, z);
+            }
+        }
+        let old: &[(&str, &str)] = &[
+            ("building", "apartments"),
+            ("building:levels", "5"),
+            ("start_date", "1895"),
+            ("roof:shape", "flat"),
+        ];
+        let third_cell = |footprints: &CoordinateBitmap, id: u64| {
+            let way = rect_way(id, 10, 20, 45, 36, old);
+            let mut editor = test_editor_at(&xz, berlin());
+            run_building(&mut editor, &way, &road, footprints);
+            (20..=36)
+                .flat_map(|z| (1..40).map(move |y| (y, z)))
+                .filter(|&(y, z)| editor.get_block_absolute(48, y, z).is_some())
+                .count()
+        };
+        let mut reached = 0;
+        for id in 700..740u64 {
+            reached += third_cell(&alone, id);
+            assert_eq!(
+                third_cell(&crowded, id),
+                0,
+                "building {id} reached next door"
+            );
+        }
+        assert!(reached > 0, "no balcony reaches three cells out on its own");
+    }
+
+    #[test]
+    fn residential_towers_carry_a_band_of_balconies() {
+        let tower: &[(&str, &str)] = &[
+            ("building", "apartments"),
+            ("building:levels", "9"),
+            ("start_date", "1972"),
+            ("roof:shape", "flat"),
+        ];
+        let banded = (600..606u64)
+            .filter(|&id| balcony_blocks(&dwelling_world(moscow(), id, tower)) > 0)
+            .count();
+        assert!(banded > 0, "no balcony on six panel towers");
+        let office: &[(&str, &str)] = &[("building", "office"), ("building:levels", "9")];
+        for id in 600..606u64 {
+            assert_eq!(balcony_blocks(&dwelling_world(moscow(), id, office)), 0);
+        }
+    }
+
+    #[test]
+    fn old_paris_fronts_put_french_railings_in_their_windows() {
+        let old: &[(&str, &str)] = &[
+            ("building", "apartments"),
+            ("building:levels", "6"),
+            ("start_date", "1870"),
+            ("roof:shape", "flat"),
+        ];
+        let railed = (800..808u64)
+            .filter(|&id| {
+                // Iron bars in the wall plane of the street front, over the ground floor.
+                dwelling_world(paris(), id, old)
+                    .iter()
+                    .any(|(&(_, y, z), &b)| z == 20 && y > 8 && b == IRON_BARS)
+            })
+            .count();
+        assert!(railed > 0, "no French railing on eight old Paris fronts");
+        let new: &[(&str, &str)] = &[
+            ("building", "apartments"),
+            ("building:levels", "6"),
+            ("start_date", "1990"),
+            ("roof:shape", "flat"),
+        ];
+        for id in 800..808u64 {
+            assert!(!dwelling_world(paris(), id, new)
+                .iter()
+                .any(|(&(_, y, z), &b)| z == 20 && y > 8 && b == IRON_BARS));
         }
     }
 
