@@ -211,7 +211,8 @@ mod tests {
         assert_eq!(Climate::from_class(30), Climate::IceCap);
         assert_eq!(Climate::from_class(15), Climate::Temperate); // Cfb
         assert_eq!(Climate::from_class(0), Climate::Temperate); // ocean
-                                                                // Monsoon summers are wet (Seoul, Dwa); only summer-dry Ds* counts as dry.
+
+        // Monsoon summers are wet (Seoul, Dwa); only summer-dry Ds* counts as dry.
         assert_eq!(Climate::from_class(21), Climate::Temperate);
         assert_eq!(Climate::from_class(18), Climate::DryContinental);
     }
