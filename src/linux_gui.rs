@@ -3,7 +3,8 @@
 //! so the failure never reaches Rust as an error. The GUI therefore runs in a child
 //! process, and a child that dies that way while the window comes up is started again
 //! with the next renderer that has worked for users: zink (#799, #833) and the GPU's own
-//! driver (#1247). The one that worked is remembered, so later starts don't crash first.
+//! driver (#1247), then zink on the GPU as #1318 set it. The one that worked is remembered,
+//! so later starts don't crash first.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 use std::os::unix::process::ExitStatusExt;
@@ -47,16 +48,24 @@ pub enum Renderer {
     Zink,
     /// The GPU's own driver, with no software rendering forced.
     Gpu,
+    /// Zink with software rendering switched off, so it runs on the GPU's Vulkan driver.
+    ZinkGpu,
 }
 
 impl Renderer {
-    const ORDER: [Renderer; 3] = [Renderer::Software, Renderer::Zink, Renderer::Gpu];
+    const ORDER: [Renderer; 4] = [
+        Renderer::Software,
+        Renderer::Zink,
+        Renderer::Gpu,
+        Renderer::ZinkGpu,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Renderer::Software => "software",
             Renderer::Zink => "zink",
             Renderer::Gpu => "gpu",
+            Renderer::ZinkGpu => "zink-gpu",
         }
     }
 
@@ -66,8 +75,17 @@ impl Renderer {
 
     fn configure(self, cmd: &mut Command) {
         cmd.env(RENDERER_ENV, self.name());
-        if self == Renderer::Zink {
-            cmd.env("MESA_LOADER_DRIVER_OVERRIDE", "zink");
+        match self {
+            Renderer::Software | Renderer::Gpu => {}
+            Renderer::Zink => {
+                cmd.env("MESA_LOADER_DRIVER_OVERRIDE", "zink");
+            }
+            // Set here, so `gui::run_gui` leaves them as they are.
+            Renderer::ZinkGpu => {
+                cmd.env("MESA_LOADER_DRIVER_OVERRIDE", "zink")
+                    .env("LIBGL_ALWAYS_SOFTWARE", "0")
+                    .env("GALLIUM_DRIVER", "zink");
+            }
         }
     }
 }
@@ -178,7 +196,8 @@ enum Outcome {
 }
 
 /// Runs `cmd` until it exits, its output going straight to this process's. `started` runs
-/// once the child has outlived `startup`, or exits cleanly before it.
+/// once the child has outlived `startup`, or exits cleanly before it. Errs only when the
+/// child could not be started at all; once it runs, this process must not open a window too.
 fn run_child(
     mut cmd: Command,
     startup: Duration,
@@ -189,8 +208,16 @@ fn run_child(
         .map_err(|e| format!("could not start the GUI process: {e}"))?;
     let begun = Instant::now();
     let mut started = Some(started);
+    let lost = |e: std::io::Error| {
+        eprintln!("Warning: lost track of the GUI process: {e}");
+        Ok(Outcome::Exited(1))
+    };
     loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+        let status = match child.try_wait() {
+            Ok(status) => status,
+            Err(e) => return lost(e),
+        };
+        if let Some(status) = status {
             let early = begun.elapsed() < startup;
             if early && failed_to_start(status) {
                 return Ok(Outcome::Failed);
@@ -206,8 +233,10 @@ fn run_child(
             if let Some(started) = started.take() {
                 started();
             }
-            let status = child.wait().map_err(|e| e.to_string())?;
-            return Ok(Outcome::Exited(exit_code(status)));
+            return match child.wait() {
+                Ok(status) => Ok(Outcome::Exited(exit_code(status))),
+                Err(e) => lost(e),
+            };
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -288,9 +317,12 @@ mod tests {
     #[test]
     fn the_remembered_renderer_goes_first() {
         use Renderer::*;
-        assert_eq!(attempt_order(None), vec![Software, Zink, Gpu]);
-        assert_eq!(attempt_order(Some(Gpu)), vec![Gpu, Software, Zink]);
-        assert_eq!(attempt_order(Some(Zink)), vec![Zink, Software, Gpu]);
+        assert_eq!(attempt_order(None), vec![Software, Zink, Gpu, ZinkGpu]);
+        assert_eq!(attempt_order(Some(Gpu)), vec![Gpu, Software, Zink, ZinkGpu]);
+        assert_eq!(
+            attempt_order(Some(ZinkGpu)),
+            vec![ZinkGpu, Software, Zink, Gpu]
+        );
     }
 
     #[test]
@@ -302,6 +334,7 @@ mod tests {
         remember(&path, Renderer::Software);
         assert!(!path.exists());
         assert_eq!(Renderer::from_name("gpu\n"), Some(Renderer::Gpu));
+        assert_eq!(Renderer::from_name("zink-gpu"), Some(Renderer::ZinkGpu));
         assert_eq!(Renderer::from_name("vulkan"), None);
     }
 }
