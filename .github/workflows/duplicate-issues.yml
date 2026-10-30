@@ -29,13 +29,14 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_non_write_users: "*"
           # Tools locked to the two wrapper scripts (read-only lookups + the comment poster) so a hijacked prompt can't run arbitrary commands or post outside this issue.
-          claude_args: "--model sonnet --allowedTools Bash(./.github/scripts/dedupe-gh.sh:*),Bash(./.github/scripts/comment-on-issue.sh:*)"
+          # Pinned rather than the "sonnet" alias so a model upgrade is a deliberate change, not a silent one.
+          claude_args: "--model claude-sonnet-5-5 --allowedTools Bash(./.github/scripts/dedupe-gh.sh:*),Bash(./.github/scripts/comment-on-issue.sh:*)"
           prompt: |
             A new GitHub issue was opened in ${{ github.repository }}: issue number ${{ github.event.issue.number || inputs.issue_number }}.
             Produce, in ONE comment, up to 3 genuine duplicates and/or a short grounded resolution note. Post nothing if you have neither.
 
-            Use ONLY these scripts (no raw gh, no other tools, no file edits):
-            - `./.github/scripts/dedupe-gh.sh issue view <n> --comments` — view an issue and its comments
+            Use ONLY these scripts (no raw gh, no other tools, no file edits). Run each as one plain command: no pipes, `;`, `&&`, redirects or `2>&1` — anything else is blocked.
+            - `./.github/scripts/dedupe-gh.sh issue view <n> --json title,body,author,comments,state` — view an issue and its comments (don't use `--comments`: without a terminal it prints only the comments, so a new issue shows up empty)
             - `./.github/scripts/dedupe-gh.sh search issues "<q>" --repo ${{ github.repository }}` — search issues
             - `./.github/scripts/dedupe-gh.sh pr list/pr view <n>/search prs "<q>"/release list/release view <tag>` — find fixes and releases
             - `./.github/scripts/comment-on-issue.sh [--resolution "<text>"] [--duplicates <n1> [n2] [n3]]` — post the comment
