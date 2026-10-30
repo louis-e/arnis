@@ -43,15 +43,17 @@ fn leisure_area(
     holes: Option<&Holes>,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
+        // A reserve is a boundary around whatever grows there, which the land cover draws.
+        if leisure_type == "nature_reserve" {
+            return;
+        }
         let mut previous_node: Option<(i32, i32)> = None;
         let mut corner_count: i32 = 0;
         let mut current_leisure: Vec<(i32, i32)> = vec![];
 
         // Determine block type based on leisure type
         let mut block_type: Block = match leisure_type.as_str() {
-            "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course" => {
-                GRASS_BLOCK
-            }
+            "park" | "garden" | "disc_golf_course" | "golf_course" => GRASS_BLOCK,
             "schoolyard" => BLACK_CONCRETE,
             "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 GREEN_STAINED_HARDENED_CLAY
@@ -135,7 +137,7 @@ fn leisure_area(
                 // read as grass here and only the mask tells them apart. Halo cells
                 // are left to the tile that owns them, whose own random sequence
                 // decides what grows there.
-                if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
+                if matches!(leisure_type.as_str(), "park" | "garden")
                     && editor.owns(x, z)
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                     && !editor.surface_is_sealed(x, z)
@@ -145,15 +147,12 @@ fn leisure_area(
 
                     match random_choice {
                         0..30 => {
-                            // Plants
-                            let setting = if leisure_type == "nature_reserve" {
-                                crate::ground_decoration::FlowerSetting::Meadow
-                            } else {
-                                crate::ground_decoration::FlowerSetting::Garden
-                            };
                             if random_choice < 22 {
                                 crate::ground_decoration::place_scattered_flower(
-                                    editor, x, z, setting,
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Garden,
                                 );
                             } else {
                                 editor.set_block(FERN, x, 1, z, None, None);

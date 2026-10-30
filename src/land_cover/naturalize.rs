@@ -350,6 +350,7 @@ mod tests {
             water_distance,
             water_blend_cache: OnceCell::new(),
             beach_tiles: OnceCell::new(),
+            inland_water: Default::default(),
             width,
             height,
             cells_per_meter,

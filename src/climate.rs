@@ -3,10 +3,9 @@
 use crate::block_definitions::*;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::geo_grid::TiledGrid;
-use crate::ground_generation::patch_noise;
+use crate::ground_generation::{ground_noise, patch_noise, value_noise_salted};
 use crate::land_cover::{
-    coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
-    LC_TREE_COVER,
+    LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE, LC_TREE_COVER,
 };
 use std::sync::{LazyLock, OnceLock};
 
@@ -50,6 +49,18 @@ pub enum Climate {
 }
 
 impl Climate {
+    /// Deserts, steppes and dry-summer continental climates.
+    pub fn is_dry(self) -> bool {
+        matches!(
+            self,
+            Climate::HotDesert
+                | Climate::ColdDesert
+                | Climate::HotSteppe
+                | Climate::ColdSteppe
+                | Climate::DryContinental
+        )
+    }
+
     fn from_class(c: u8) -> Climate {
         match c {
             3 => Climate::TropicalSavanna,                  // Aw
@@ -57,11 +68,11 @@ impl Climate {
             5 => Climate::ColdDesert,                       // BWk
             6 => Climate::HotSteppe,                        // BSh
             7 => Climate::ColdSteppe,                       // BSk
-            17 | 18 | 21 | 22 => Climate::DryContinental,   // Dsa/Dsb, Dwa/Dwb
+            17 | 18 => Climate::DryContinental,             // Dsa/Dsb
             19 | 20 | 23 | 24 | 27 | 28 => Climate::Boreal, // Dsc/Dsd, Dwc/Dwd, Dfc/Dfd
             29 => Climate::Tundra,                          // ET
             30 => Climate::IceCap,                          // EF
-            _ => Climate::Temperate,                        // Af/Am, C*, Dfa/Dfb, 0
+            _ => Climate::Temperate,                        // Af/Am, C*, Dfa/Dfb, Dwa/Dwb, 0
         }
     }
 
@@ -73,14 +84,8 @@ impl Climate {
     }
 
     /// Surface palette (surface, under) for veg/bare cover, or None to keep the baseline.
-    pub fn surface_palette(self, cover: u8, x: i32, z: i32) -> Option<(Block, Block)> {
-        // DryContinental (Grand Canyon) keeps baseline blocks; only its biome is adapted.
-        if matches!(
-            self,
-            Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental
-        ) {
-            return None;
-        }
+    /// `red` asks for red earth, which only dry climates take.
+    pub fn surface_palette(self, cover: u8, x: i32, z: i32, red: bool) -> Option<(Block, Block)> {
         let veg = matches!(
             cover,
             LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_CROPLAND | LC_MOSS
@@ -89,16 +94,36 @@ impl Climate {
         if !veg && !bare {
             return None;
         }
-        // Shares along one smooth field, so each material forms patches and the
+        // Shares along one irregular field, so each material forms patches and the
         // listed order is also the order they grade into one another.
-        let n = patch_noise(x, z, 9, 0x00C1_1A7E);
+        let n = ground_noise(x, z, 9, 0x00C1_1A7E);
         let pick = |bands: &[(f64, (Block, Block))]| {
-            bands
+            let (surface, under) = bands
                 .iter()
                 .find(|(upto, _)| n < *upto)
-                .map_or(bands[bands.len() - 1].1, |(_, p)| *p)
+                .map_or(bands[bands.len() - 1].1, |(_, p)| *p);
+            (speckle(surface, x, z), under)
         };
+        if red && cover != LC_SNOW_ICE {
+            return Some(if bare {
+                pick(&[
+                    (0.55, (RED_SAND, RED_SANDSTONE)),
+                    (0.75, (TERRACOTTA, RED_SANDSTONE)),
+                    (0.87, (COARSE_DIRT, DIRT)),
+                    (1.0, (RED_SANDSTONE, RED_SANDSTONE)),
+                ])
+            } else {
+                pick(&[
+                    (0.5, (RED_SAND, RED_SANDSTONE)),
+                    (0.8, (COARSE_DIRT, DIRT)),
+                    (0.9, (GRASS_BLOCK, DIRT)),
+                    (1.0, (TERRACOTTA, RED_SANDSTONE)),
+                ])
+            });
+        }
         let pal = match self {
+            // DryContinental (Grand Canyon) keeps baseline blocks; only its biome is adapted.
+            Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental => return None,
             Climate::IceCap => {
                 if patch_noise(x, z, 20, 0x001C_ECA9) < 0.17 {
                     (PACKED_ICE, PACKED_ICE)
@@ -108,12 +133,10 @@ impl Climate {
             }
             Climate::HotDesert => {
                 // Sandstone crops out in patches; per-block sandstone read as speckle.
-                if patch_noise(x, z, 12, 0x00DE_5E27) < 0.06 {
+                if ground_noise(x, z, 12, 0x00DE_5E27) < 0.06 {
                     (SANDSTONE, SANDSTONE)
-                } else if coord_hash(x, z).is_multiple_of(40) {
-                    (SMOOTH_SANDSTONE, SANDSTONE)
                 } else {
-                    (SAND, SANDSTONE)
+                    (speckle(SAND, x, z), SANDSTONE)
                 }
             }
             Climate::HotSteppe if bare => {
@@ -154,9 +177,26 @@ impl Climate {
                 (0.6, (MOSS_BLOCK, DIRT)),
                 (1.0, (GRASS_BLOCK, DIRT)),
             ]),
-            Climate::Temperate | Climate::TropicalSavanna | Climate::DryContinental => return None,
         };
         Some(pal)
+    }
+}
+
+/// Small clumps of a similar block inside a patch, so it is not one flat texture.
+pub(crate) fn speckle(block: Block, x: i32, z: i32) -> Block {
+    // Raw value noise: its tails below 0.21 and above 0.85 hold about a tenth each.
+    let n = value_noise_salted(x, z, 2, 0x5EC1_7A3B);
+    match block {
+        GRAVEL if n < 0.21 => ANDESITE,
+        GRAVEL if n > 0.86 => COBBLESTONE,
+        STONE if n < 0.23 => ANDESITE,
+        STONE if n > 0.85 => TUFF,
+        COARSE_DIRT if n < 0.21 => DIRT,
+        SAND if n > 0.89 => SMOOTH_SANDSTONE,
+        RED_SAND if n < 0.17 => TERRACOTTA,
+        RED_SAND if n > 0.87 => RED_SANDSTONE,
+        TERRACOTTA if n > 0.84 => ORANGE_TERRACOTTA,
+        _ => block,
     }
 }
 
@@ -171,19 +211,40 @@ mod tests {
         assert_eq!(Climate::from_class(30), Climate::IceCap);
         assert_eq!(Climate::from_class(15), Climate::Temperate); // Cfb
         assert_eq!(Climate::from_class(0), Climate::Temperate); // ocean
+
+        // Monsoon summers are wet (Seoul, Dwa); only summer-dry Ds* counts as dry.
+        assert_eq!(Climate::from_class(21), Climate::Temperate);
+        assert_eq!(Climate::from_class(18), Climate::DryContinental);
     }
 
     #[test]
     fn temperate_never_overrides() {
-        assert!(Climate::Temperate.surface_palette(LC_BARE, 1, 2).is_none());
+        assert!(Climate::Temperate
+            .surface_palette(LC_BARE, 1, 2, false)
+            .is_none());
     }
 
     #[test]
     fn desert_overrides_to_sand() {
         let (s, _) = Climate::HotDesert
-            .surface_palette(LC_GRASSLAND, 7, 7)
+            .surface_palette(LC_GRASSLAND, 7, 7, false)
             .unwrap();
         assert!(matches!(s, SAND | SANDSTONE | SMOOTH_SANDSTONE));
+    }
+
+    #[test]
+    fn red_earth_is_red_sand_country() {
+        let mut red = 0;
+        for x in 0..40 {
+            for z in 0..40 {
+                let (s, _) = Climate::ColdDesert
+                    .surface_palette(LC_BARE, x * 7, z * 7, true)
+                    .unwrap();
+                assert!(!matches!(s, GRAVEL | STONE | SAND), "{s:?}");
+                red += usize::from(matches!(s, RED_SAND | RED_SANDSTONE | TERRACOTTA));
+            }
+        }
+        assert!(red > 1100, "{red} of 1600 red");
     }
 
     #[test]

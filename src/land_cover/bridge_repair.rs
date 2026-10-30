@@ -11,7 +11,9 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::bridges::is_bridge_way;
 use crate::element_processing::highways::highway_block_range;
-use crate::land_cover::{compute_water_distance, LandCoverData, LC_BUILT_UP, LC_WATER};
+use crate::land_cover::{
+    compute_water_distance, InlandWater, LandCoverData, LC_BUILT_UP, LC_WATER,
+};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 
 const MAX_BFS_RINGS: usize = 64;
@@ -204,6 +206,7 @@ pub fn apply_bridge_land_cover_repair(
     let mut water_changed = false;
     let mut mutated = 0usize;
     let mut to_water = 0usize;
+    let mut new_water: Vec<usize> = Vec::new();
     for &b_idx in &bridge_indices {
         let Some(&new_class) = assigned.get(&b_idx) else {
             continue;
@@ -219,6 +222,7 @@ pub fn apply_bridge_land_cover_repair(
         mutated += 1;
         if new_class == LC_WATER {
             to_water += 1;
+            new_water.push(bi);
             // Sink the cell onto the surface it now belongs to (never raise).
             if let Some(&level) = water_level.get(&b_idx) {
                 let h = &mut heights[z][x];
@@ -240,6 +244,33 @@ pub fn apply_bridge_land_cover_repair(
     if water_changed {
         land_cover.water_distance = compute_water_distance(&land_cover.grid, width, height);
         land_cover.invalidate_water_blend_grid();
+    }
+    // The inland mark was spread before this; water under a bridge takes it from its banks' water.
+    join_inland(&mut land_cover.inland_water, new_water, width);
+}
+
+/// Marks each of `cells` (flat grid indices) inland once it touches marked water.
+fn join_inland(inland: &mut InlandWater, mut cells: Vec<usize>, width: usize) {
+    loop {
+        let before = cells.len();
+        cells.retain(|&i| {
+            let (x, z) = (i % width, i / width);
+            let marked = [
+                (x.wrapping_sub(1), z),
+                (x + 1, z),
+                (x, z.wrapping_sub(1)),
+                (x, z + 1),
+            ]
+            .iter()
+            .any(|&(nx, nz)| inland.get(nx, nz));
+            if marked {
+                inland.set(x, z);
+            }
+            !marked
+        });
+        if cells.len() == before {
+            break;
+        }
     }
 }
 
@@ -317,4 +348,19 @@ fn stamp_square(
 #[inline(always)]
 fn get_bit(mask: &[u64], idx: usize) -> bool {
     (mask[idx >> 6] >> (idx & 63)) & 1 != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn water_under_a_bridge_joins_the_inland_mark() {
+        let mut inland = InlandWater::new(8, 8);
+        inland.set(0, 2);
+        // A two-cell bridge shadow next to the river, and one cut off from it.
+        join_inland(&mut inland, vec![2 * 8 + 2, 2 * 8 + 1, 6 * 8 + 6], 8);
+        assert!(inland.get(1, 2) && inland.get(2, 2));
+        assert!(!inland.get(6, 6));
+    }
 }
